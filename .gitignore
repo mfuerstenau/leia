@@ -37,6 +37,7 @@ desktop.ini
 # --- Local environment ---
 .env
 .env.*
+.jdks/
 
 # --- Claude Code (local-only settings; skills under .claude/ are shared) ---
 .claude/settings.local.json

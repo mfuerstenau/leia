@@ -11,7 +11,8 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 - [ ] `README.md`: what leia is, build and run instructions
 
 ### Java build (Gradle 9, Java 25)
-- [ ] Gradle wrapper (9.x) and `settings.gradle.kts` with `leia-core`, `leia-protocol`, `leia-server`
+- [x] Gradle wrapper 9.8.0, foojay resolver, daemon JVM pinned to Temurin 25 (`gradle/gradle-daemon-jvm.properties`)
+- [ ] `settings.gradle.kts` includes `leia-core`, `leia-protocol`, `leia-server`
 - [ ] Version catalog `gradle/libs.versions.toml`: Lucene 10.x, `lucene-backward-codecs`, Dagger 2.60, Jackson, JUnit 5, AssertJ
 - [ ] Java 25 toolchain for all modules (convention plugin in `build-logic/` or the root build)
 - [ ] Spotless with Palantir Java Format; `spotlessCheck` wired into `check`
