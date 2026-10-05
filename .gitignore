@@ -40,3 +40,5 @@ desktop.ini
 
 # --- Claude Code (local-only settings; skills under .claude/ are shared) ---
 .claude/settings.local.json
+
+leia.md
