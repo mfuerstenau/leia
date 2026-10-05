@@ -1,0 +1,42 @@
+# --- Gradle / Java ---
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+*.class
+*.log
+hs_err_pid*
+replay_pid*
+
+# --- Rust ---
+target/
+**/*.rs.bk
+*.pdb
+
+# --- Distribution output ---
+dist/
+
+# --- IDEs ---
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+.vscode/
+.classpath
+.project
+.settings/
+.factorypath
+*.swp
+*~
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Local environment ---
+.env
+.env.*
+
+# --- Claude Code (local-only settings; skills under .claude/ are shared) ---
+.claude/settings.local.json
