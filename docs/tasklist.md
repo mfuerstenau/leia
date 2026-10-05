@@ -36,9 +36,9 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 - [x] "Every DTO has a fixture" check (per method, plus no orphan fixtures; ADR 0003)
 
 ### Server skeleton
-- [ ] Stdio loop: read line → dispatch → write line; exit on stdin EOF
-- [ ] All logging to stderr (configure `java.util.logging`/SLF4J accordingly) and nothing else on stdout
-- [ ] Method registry wired via Dagger (one handler per method)
+- [x] Stdio loop: read line → dispatch → write line; exit on stdin EOF (`RpcServer`, `Dispatcher`)
+- [x] All logging to stderr (`java.util.logging`, level via `-Dleia.log.level`), and `System.out` redirected to stderr so only the protocol writer reaches stdout
+- [x] Method registry wired via Dagger (one `MethodHandler` per method, `@IntoSet` in `HandlerModule`; `Dispatcher` fails fast if a method in `Methods` has no handler)
 
 ### TUI skeleton
 - [ ] JVM discovery: `-j, --java <PATH>` (`java` executable or JDK/JRE dir) → `$JAVA_HOME/bin/java` → `java` on `PATH`
@@ -48,8 +48,8 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 
 ## M1 — First implementation
 
-- [ ] **`version`** RPC: server name/version/build plus the running Java version (`Runtime.version()`, vendor)
-  - DTOs (`VersionParams`, `VersionResult`, `JavaRuntime`) and fixtures exist; the server handler is missing
+- [x] **`version`** RPC: server name/version/build plus the running Java version (`Runtime.version()`, vendor)
+  - `VersionHandler` landed with the server skeleton, which needs one real handler
 - [ ] **`--version`** in the TUI: prints the leia name, version and build, plus the Java version reported by the server (starts the server briefly, no TUI)
 - [ ] **Open an index (read-only)**: `openIndex {path}` RPC
   - `leia-core`: open `FSDirectory` + `DirectoryReader` read-only, never an `IndexWriter`

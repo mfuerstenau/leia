@@ -68,6 +68,32 @@ class ProtocolJsonTest {
     }
 
     @Test
+    void rejectsStringAsNumber() {
+        assertRejected("{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"method\":\"version\",\"params\":{}}");
+    }
+
+    @Test
+    void rejectsFractionAsInteger() {
+        assertRejected("{\"jsonrpc\":\"2.0\",\"id\":1.5,\"method\":\"version\",\"params\":{}}");
+        assertRejected("{\"jsonrpc\":\"2.0\",\"id\":1.0,\"method\":\"version\",\"params\":{}}");
+    }
+
+    @Test
+    void rejectsNumberOrBooleanAsString() {
+        assertRejected("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":7,\"params\":{}}");
+        assertRejected("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":7.5,\"params\":{}}");
+        assertRejected("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":true,\"params\":{}}");
+    }
+
+    @Test
+    void rejectsStringAsOptionalNumber() {
+        assertThatThrownBy(() -> MAPPER.readValue(
+                        "{\"jsonrpc\":\"2.0\",\"id\":\"1\",\"error\":{\"code\":-32603,\"message\":\"m\"}}",
+                        VERSION_RESPONSE))
+                .isInstanceOf(JacksonException.class);
+    }
+
+    @Test
     void rejectsTrailingTokens() {
         assertRejected("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"version\",\"params\":{}} {}");
     }

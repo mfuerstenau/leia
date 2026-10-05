@@ -70,6 +70,8 @@ cargo build --release
 
 Run the formatters and linters before calling work done.
 
+To talk to the server by hand: `jq -c . protocol/fixtures/version.request.json | java -Dleia.log.level=FINE -jar leia-server/build/libs/leia-server.jar`. At `FINE`, every request and response is also logged to stderr.
+
 ## TUI CLI contract
 
 - `leia [OPTIONS] [INDEX_PATH]`

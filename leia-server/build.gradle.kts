@@ -13,6 +13,14 @@ dependencies {
     testImplementation(libs.lucene.core)
 }
 
+// The server tests replay the shared request fixtures (see leia-protocol/build.gradle.kts).
+val protocolDir = layout.settingsDirectory.dir("protocol")
+
+tasks.test {
+    inputs.dir(protocolDir).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("protocol")
+    systemProperty("leia.protocol.dir", projectDir.toPath().relativize(protocolDir.asFile.toPath()).toString())
+}
+
 application {
     mainClass = "io.github.mfuerstenau.leia.server.LeiaServer"
 }

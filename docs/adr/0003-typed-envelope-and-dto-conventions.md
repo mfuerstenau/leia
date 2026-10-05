@@ -25,6 +25,7 @@ Two facts about the libraries shape the answer:
 4. **Optional means `Optional`.** A field is optional exactly when it is `Optional*` in Java and `Option<T>` in Rust. All other fields are required and must not be `null`.
    - Java enforces this with `ProtocolAnnotationIntrospector`, which marks every non-`Optional` creator parameter as required, plus `FAIL_ON_NULL_CREATOR_PROPERTIES`.
    - `ProtocolJson` also explicitly enables `FAIL_ON_UNKNOWN_PROPERTIES`, `FAIL_ON_NULL_FOR_PRIMITIVES` and `FAIL_ON_TRAILING_TOKENS`, and writes properties in declaration order.
+   - Scalars are not coerced, matching serde: `ALLOW_COERCION_OF_SCALARS` and `ACCEPT_FLOAT_AS_INT` are disabled, and integer, float and boolean input fails for textual types. Without this, Jackson accepts `"2"` and `2.5` as a `long` and `7` as a `String`.
    - In Rust, serde gives the same semantics with `deny_unknown_fields` on every struct.
 
    Without the required check, a field added only to the Java DTO would deserialize as `null` from an unchanged fixture, the round trip would still pass, and the drift would show up only at runtime.
