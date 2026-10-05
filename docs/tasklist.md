@@ -41,10 +41,10 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 - [x] Method registry wired via Dagger (one `MethodHandler` per method, `@IntoSet` in `HandlerModule`; `Dispatcher` fails fast if a method in `Methods` has no handler)
 
 ### TUI skeleton
-- [ ] JVM discovery: `-j, --java <PATH>` (`java` executable or JDK/JRE dir) → `$JAVA_HOME/bin/java` → `java` on `PATH`
-- [ ] Locate `leia-server.jar` next to the executable
-- [ ] Spawn the server, typed RPC client, discard or capture server stderr so it can't draw over the TUI
-- [ ] Clean terminal restore on exit and on panic
+- [x] JVM discovery: `-j, --java <PATH>` (`java` executable or JDK/JRE dir) → `$JAVA_HOME/bin/java` → `java` on `PATH` (`java.rs`)
+- [x] Locate `leia-server.jar` next to the executable, symlinks resolved; `LEIA_SERVER_JAR` overrides it for development (`server.rs`)
+- [x] Spawn the server, typed RPC client (`client.rs`), server stderr captured in a ring buffer so it can't draw over the TUI and shows up in startup errors
+- [x] Clean terminal restore on exit and on panic (`ratatui::run`); the server is shut down on quit, on panic (`Drop`) and when the TUI is killed (stdin EOF)
 
 ## M1 — First implementation
 
