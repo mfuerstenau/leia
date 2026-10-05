@@ -1,0 +1,26 @@
+[versions]
+lucene = "10.5.2"
+dagger = "2.60.1"
+jackson = "3.2.3"
+junit = "6.1.3"
+assertj = "3.27.7"
+palantirJavaFormat = "2.102.0"
+spotless = "8.10.3"
+shadow = "9.6.1"
+
+[libraries]
+lucene-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene" }
+lucene-backward-codecs = { module = "org.apache.lucene:lucene-backward-codecs", version.ref = "lucene" }
+dagger = { module = "com.google.dagger:dagger", version.ref = "dagger" }
+dagger-compiler = { module = "com.google.dagger:dagger-compiler", version.ref = "dagger" }
+jackson-bom = { module = "tools.jackson:jackson-bom", version.ref = "jackson" }
+jackson-databind = { module = "tools.jackson.core:jackson-databind" }
+junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
+junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
+junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
+assertj-core = { module = "org.assertj:assertj-core", version.ref = "assertj" }
+# Gradle plugins used as libraries by build-logic
+spotless-gradle-plugin = { module = "com.diffplug.spotless:spotless-plugin-gradle", version.ref = "spotless" }
+
+[plugins]
+shadow = { id = "com.gradleup.shadow", version.ref = "shadow" }

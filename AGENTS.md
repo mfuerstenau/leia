@@ -44,7 +44,7 @@ Dependency direction: `leia-server → leia-protocol`, `leia-server → leia-cor
 
 ## Tech stack
 
-**Java:** Java 25 via a Gradle toolchain · Gradle 9 (Kotlin DSL, version catalog in `gradle/libs.versions.toml`) · Lucene 10 (+ backward-codecs) · Dagger 2.60 (annotation processor, no reflection DI) · Jackson · Spotless with Palantir Java Format.
+**Java:** Java 25 via a Gradle toolchain · Gradle 9 (Kotlin DSL, version catalog in `gradle/libs.versions.toml`) · Lucene 10 (+ backward-codecs) · Dagger 2.60 (annotation processor, no reflection DI) · Jackson 3 (`tools.jackson.*`) · JUnit 6 + AssertJ · Spotless with Palantir Java Format · Shadow for the fat jar. Base package and group: `io.github.mfuerstenau.leia` (`.core`, `.protocol`, `.server`). Shared build config lives in the `build-logic/` convention plugins (`leia.java-conventions`, `leia.java-library-conventions`); see ADR 0002.
 
 **Rust:** standard tooling — stable toolchain, edition 2024, `rustfmt`, `clippy` (warnings are errors in CI), `cargo test`. Crates: ratatui, serde/serde_json, anyhow, clap. Release builds for Linux, macOS and Windows.
 
@@ -52,7 +52,7 @@ Dependency direction: `leia-server → leia-protocol`, `leia-server → leia-cor
 
 The Gradle wrapper only needs some Java 17+ runtime to start, for example `JAVA_HOME=$PWD/.jdks/jdk-21.0.12.1+1-jre` (a local, git-ignored Temurin JRE). The build daemon itself runs on Temurin 25. Gradle downloads that JDK automatically via foojay into `~/.gradle/jdks`, as pinned in `gradle/gradle-daemon-jvm.properties`. To change it, run `./gradlew updateDaemonJvm --jvm-version=<N> --jvm-vendor=adoptium`.
 
-Planned, to be kept in sync once the build exists:
+Keep these in sync with the build. The Gradle commands work today; the Cargo commands are planned until `tui/` exists:
 
 ```sh
 ./gradlew build              # compile, test, spotlessCheck

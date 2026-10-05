@@ -8,17 +8,18 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 - [x] `.gitignore` (Gradle/Java, Rust, dist, IDEs, OS)
 - [x] `AGENTS.md` + `CLAUDE.md` (imports `AGENTS.md`)
 - [x] ADR 0001: JSON-RPC over stdio with mirrored, fixture-checked DTOs
+- [x] ADR 0002: Java build conventions
 - [ ] `README.md`: what leia is, build and run instructions
 
 ### Java build (Gradle 9, Java 25)
 - [x] Gradle wrapper 9.8.0, foojay resolver, daemon JVM pinned to Temurin 25 (`gradle/gradle-daemon-jvm.properties`)
-- [ ] `settings.gradle.kts` includes `leia-core`, `leia-protocol`, `leia-server`
-- [ ] Version catalog `gradle/libs.versions.toml`: Lucene 10.x, `lucene-backward-codecs`, Dagger 2.60, Jackson, JUnit 5, AssertJ
-- [ ] Java 25 toolchain for all modules (convention plugin in `build-logic/` or the root build)
-- [ ] Spotless with Palantir Java Format; `spotlessCheck` wired into `check`
-- [ ] Dagger 2.60 annotation processing in `leia-server`
-- [ ] Fat jar for `leia-server` → `leia-server.jar`, including `lucene-backward-codecs` and the merged `META-INF/services` (codec SPI)
-- [ ] Version/build info available at runtime: version from Gradle, build = git short hash + timestamp, written into the jar manifest or a resource
+- [x] `settings.gradle.kts` includes `leia-core`, `leia-protocol`, `leia-server`
+- [x] Version catalog `gradle/libs.versions.toml`: Lucene 10.5, `lucene-backward-codecs`, Dagger 2.60.1, Jackson 3, JUnit 6, AssertJ
+- [x] Java 25 toolchain for all modules (convention plugins in `build-logic/`, ADR 0002)
+- [x] Spotless with Palantir Java Format; `spotlessCheck` wired into `check`
+- [x] Dagger 2.60 annotation processing in `leia-server`
+- [x] Fat jar for `leia-server` → `leia-server.jar`, including `lucene-backward-codecs` and the merged `META-INF/services` (codec SPI)
+- [x] Version/build info available at runtime: version from `gradle.properties`, build = git short hash + commit timestamp, in the `build-info.properties` resource (`BuildInfo`)
 
 ### Rust build
 - [ ] Crate `tui/` (binary `leia`): edition 2024, `rust-toolchain.toml` (stable, rustfmt, clippy)
