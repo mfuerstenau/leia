@@ -1,0 +1,16 @@
+[package]
+name = "leia"
+version = "0.1.0"
+edition = "2024"
+description = "Read-only Lucene index inspector (terminal UI)"
+publish = false
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+ratatui = "0.30.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+
+[profile.release]
+strip = true

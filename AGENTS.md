@@ -52,7 +52,7 @@ Dependency direction: `leia-server → leia-protocol`, `leia-server → leia-cor
 
 The Gradle wrapper only needs some Java 17+ runtime to start, for example `JAVA_HOME=$PWD/.jdks/jdk-21.0.12.1+1-jre` (a local, git-ignored Temurin JRE). The build daemon itself runs on Temurin 25. Gradle downloads that JDK automatically via foojay into `~/.gradle/jdks`, as pinned in `gradle/gradle-daemon-jvm.properties`. To change it, run `./gradlew updateDaemonJvm --jvm-version=<N> --jvm-vendor=adoptium`.
 
-Keep these in sync with the build. The Gradle commands work today; the Cargo commands are planned until `tui/` exists:
+Keep these in sync with the build:
 
 ```sh
 ./gradlew build              # compile, test, spotlessCheck

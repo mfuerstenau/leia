@@ -22,9 +22,9 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 - [x] Version/build info available at runtime: version from `gradle.properties`, build = git short hash + commit timestamp, in the `build-info.properties` resource (`BuildInfo`)
 
 ### Rust build
-- [ ] Crate `tui/` (binary `leia`): edition 2024, `rust-toolchain.toml` (stable, rustfmt, clippy)
-- [ ] Dependencies: ratatui, serde/serde_json, anyhow, clap (derive)
-- [ ] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` pass on an empty skeleton
+- [x] Crate `tui/` (binary `leia`): edition 2024, `rust-toolchain.toml` (stable, rustfmt, clippy)
+- [x] Dependencies: ratatui, serde/serde_json, anyhow, clap (derive)
+- [x] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` pass on an empty skeleton
 - [ ] Release builds for Linux, macOS and Windows (approach: see Open questions)
 
 ### Protocol foundation (ADR 0001)
