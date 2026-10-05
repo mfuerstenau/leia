@@ -21,8 +21,9 @@ leia (Rust TUI)  ──spawns──▶  <java> -jar leia-server.jar
 | `leia-core/` | Java library with the Lucene functionality. No JSON-RPC, Jackson or I/O-transport code. |
 | `leia-protocol/` | Java DTOs (records) for every JSON-RPC method's params/result, and Jackson configuration. |
 | `leia-server/` | JSON-RPC server over stdin/stdout, with Dagger wiring. Maps core results to protocol DTOs. Builds the **fat jar** `leia-server.jar`. |
-| `tui/` | Rust crate `leia`: ratatui frontend that spawns the server and holds the protocol DTOs as serde structs in `tui/src/protocol/`. |
-| `protocol/fixtures/` | Golden JSON files shared by both sides: the wire contract. |
+| `tui/` | Rust crate `leia` (library + binary): ratatui frontend that spawns the server and holds the protocol DTOs as serde structs in `tui/src/protocol/`. |
+| `protocol/fixtures/` | Golden JSON files shared by both sides: the wire contract (naming: `protocol/fixtures/README.md`). |
+| `protocol/error-codes.json` | The error-code catalogue that both `ErrorCode` enums are checked against. |
 | `docs/` | `adr/`, `tasklist.md`, `SESSION-SUMMARIES.md`. |
 
 Dependency direction: `leia-server → leia-protocol`, `leia-server → leia-core`. `leia-core` and `leia-protocol` do not depend on each other.
@@ -37,8 +38,9 @@ Dependency direction: `leia-server → leia-protocol`, `leia-server → leia-cor
    - the Rust DTO
    - `protocol/fixtures/<method>.request.json` and `<method>.response.json` (plus error fixtures where relevant)
    - the round-trip tests on both sides
+   - the method registries: `Methods` (Java), and `METHOD_NAMES` plus the dispatch in `tui/src/protocol/fixture_tests.rs` (Rust)
 
-   Both test suites deserialize each fixture, re-serialize it and compare it to the fixture as JSON, so drift fails the build. See `docs/adr/0001-json-rpc-over-stdio-with-mirrored-dtos.md`.
+   Both test suites deserialize each fixture, re-serialize it and compare it to the fixture as JSON, so drift fails the build. Optional fields are `Optional*` in Java and `Option<T>` in Rust. Every other field is required. See ADR 0001 and ADR 0003.
 5. **Lucene 9 and 10 indexes must open.** Keep `lucene-backward-codecs` on the server classpath and keep a test that opens a Lucene 9 index.
 6. **Keep core Lucene-only.** UI concepts belong in the TUI, and wire concepts belong in protocol/server.
 

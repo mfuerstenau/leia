@@ -1,18 +1,13 @@
-//! leia: a read-only Lucene index inspector.
-//!
-//! The terminal UI spawns `leia-server.jar` and talks JSON-RPC 2.0 to it over stdio.
-
-mod cli;
+//! The `leia` binary: parses the command line and runs the terminal UI.
 
 use anyhow::Result;
 use clap::Parser;
+use leia::cli::Cli;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use ratatui::layout::{Constraint, Layout};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Paragraph};
 use ratatui::{DefaultTerminal, Frame};
-
-use crate::cli::Cli;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();

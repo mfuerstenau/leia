@@ -9,6 +9,7 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 - [x] `AGENTS.md` + `CLAUDE.md` (imports `AGENTS.md`)
 - [x] ADR 0001: JSON-RPC over stdio with mirrored, fixture-checked DTOs
 - [x] ADR 0002: Java build conventions
+- [x] ADR 0003: typed JSON-RPC envelope and DTO conventions
 - [ ] `README.md`: what leia is, build and run instructions
 
 ### Java build (Gradle 9, Java 25)
@@ -28,11 +29,11 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 - [ ] Release builds for Linux, macOS and Windows (approach: see Open questions)
 
 ### Protocol foundation (ADR 0001)
-- [ ] Typed JSON-RPC 2.0 envelope (request, response, error) in `leia-protocol` and `tui/src/protocol/`
-- [ ] Error code catalogue (`-32000` downward), mirrored on both sides
-- [ ] Fixture round-trip test harness in Java (JUnit, parameterized over `protocol/fixtures/`)
-- [ ] Fixture round-trip test harness in Rust (`cargo test`, same directory)
-- [ ] "Every DTO has a fixture" check
+- [x] Typed JSON-RPC 2.0 envelope (request, response, error) in `leia-protocol` and `tui/src/protocol/`
+- [x] Error code catalogue (`-32000` downward), mirrored on both sides and checked against `protocol/error-codes.json`
+- [x] Fixture round-trip test harness in Java (JUnit, parameterized over `protocol/fixtures/`)
+- [x] Fixture round-trip test harness in Rust (`cargo test`, same directory)
+- [x] "Every DTO has a fixture" check (per method, plus no orphan fixtures; ADR 0003)
 
 ### Server skeleton
 - [ ] Stdio loop: read line → dispatch → write line; exit on stdin EOF
@@ -48,6 +49,7 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 ## M1 — First implementation
 
 - [ ] **`version`** RPC: server name/version/build plus the running Java version (`Runtime.version()`, vendor)
+  - DTOs (`VersionParams`, `VersionResult`, `JavaRuntime`) and fixtures exist; the server handler is missing
 - [ ] **`--version`** in the TUI: prints the leia name, version and build, plus the Java version reported by the server (starts the server briefly, no TUI)
 - [ ] **Open an index (read-only)**: `openIndex {path}` RPC
   - `leia-core`: open `FSDirectory` + `DirectoryReader` read-only, never an `IndexWriter`
