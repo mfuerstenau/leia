@@ -43,6 +43,11 @@ impl Overview {
         }
     }
 
+    /// The directory of the index.
+    pub fn path(&self) -> &str {
+        &self.stats.path
+    }
+
     /// Moves the field selection. Returns whether the key was used.
     pub fn handle_key(&mut self, key: KeyCode) -> bool {
         match key {

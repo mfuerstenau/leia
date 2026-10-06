@@ -1,6 +1,7 @@
 package io.github.mfuerstenau.leia.server;
 
 import dagger.Component;
+import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import jakarta.inject.Singleton;
 
 /** Root of the server's object graph. */
@@ -9,4 +10,6 @@ import jakarta.inject.Singleton;
 interface ServerComponent {
 
     RpcServer server();
+
+    CurrentIndex currentIndex();
 }

@@ -1,5 +1,7 @@
 package io.github.mfuerstenau.leia.protocol;
 
+import io.github.mfuerstenau.leia.protocol.index.CloseIndexParams;
+import io.github.mfuerstenau.leia.protocol.index.CloseIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
@@ -29,7 +31,14 @@ public final class Methods {
     public static final RpcMethod<GetIndexStatsParams, GetIndexStatsResult> GET_INDEX_STATS =
             new RpcMethod<>("getIndexStats", GetIndexStatsParams.class, GetIndexStatsResult.class);
 
-    public static final List<RpcMethod<?, ?>> ALL = List.of(VERSION, OPEN_INDEX, GET_INDEX_STATS);
+    /**
+     * Closes the open index, if any. Closing when no index is open is not an error; the result
+     * then has no path.
+     */
+    public static final RpcMethod<CloseIndexParams, CloseIndexResult> CLOSE_INDEX =
+            new RpcMethod<>("closeIndex", CloseIndexParams.class, CloseIndexResult.class);
+
+    public static final List<RpcMethod<?, ?>> ALL = List.of(VERSION, OPEN_INDEX, GET_INDEX_STATS, CLOSE_INDEX);
 
     private Methods() {}
 

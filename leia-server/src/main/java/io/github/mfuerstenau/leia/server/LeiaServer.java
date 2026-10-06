@@ -13,8 +13,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * Entry point of {@code leia-server.jar}: serves JSON-RPC on stdin/stdout until stdin is closed.
- * Logs go to stderr.
+ * Entry point of {@code leia-server.jar}: serves JSON-RPC on stdin/stdout until stdin is closed,
+ * then closes the open index. Logs go to stderr.
  */
 public final class LeiaServer {
 
@@ -29,10 +29,18 @@ public final class LeiaServer {
         ServerLogging.configure();
 
         BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));
+        ServerComponent component = DaggerServerComponent.create();
+        boolean clientLost = false;
         try {
-            DaggerServerComponent.create().server().serve(in, out);
+            component.server().serve(in, out);
         } catch (IOException e) {
             Logger.getLogger(LeiaServer.class.getName()).log(Level.SEVERE, "Connection to the client lost", e);
+            clientLost = true;
+        } finally {
+            // A client that quits without closeIndex leaves the index open.
+            component.currentIndex().close();
+        }
+        if (clientLost) {
             System.exit(1);
         }
     }

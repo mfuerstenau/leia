@@ -10,7 +10,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use super::index::{GetIndexStats, OpenIndex};
+use super::index::{CloseIndex, GetIndexStats, OpenIndex};
 use super::version::Version;
 use super::{ErrorCode, METHOD_NAMES, Request, Response, RpcMethod};
 
@@ -135,6 +135,7 @@ fn check(fixture: &Fixture, json: &str) -> Result<(), String> {
         Version::NAME => check_method::<Version>(fixture, json),
         OpenIndex::NAME => check_method::<OpenIndex>(fixture, json),
         GetIndexStats::NAME => check_method::<GetIndexStats>(fixture, json),
+        CloseIndex::NAME => check_method::<CloseIndex>(fixture, json),
         other => Err(format!("no method {other:?} in METHOD_NAMES")),
     }
 }

@@ -10,7 +10,8 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 - [x] ADR 0001: JSON-RPC over stdio with mirrored, fixture-checked DTOs
 - [x] ADR 0002: Java build conventions
 - [x] ADR 0003: typed JSON-RPC envelope and DTO conventions
-- [ ] `README.md`: what leia is, build and run instructions
+- [x] ADR 0004: release platforms (Linux, Windows) and distribution (folders, no bundled Java)
+- [x] `README.md`: what leia is, build and run instructions
 
 ### Java build (Gradle 9, Java 25)
 - [x] Gradle wrapper 9.8.0, foojay resolver, daemon JVM pinned to Temurin 25 (`gradle/gradle-daemon-jvm.properties`)
@@ -26,7 +27,8 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 - [x] Crate `tui/` (binary `leia`): edition 2024, `rust-toolchain.toml` (stable, rustfmt, clippy)
 - [x] Dependencies: ratatui, serde/serde_json, anyhow, clap (derive)
 - [x] `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` pass on an empty skeleton
-- [ ] Release builds for Linux, macOS and Windows (approach: see Open questions)
+- [x] Release builds for Linux and Windows (ADR 0004: no macOS, no bundled Java, unpacked folders)
+  - [x] Linux and Windows (x86_64): `build-dist.sh` builds `dist/leia-<version>-<os>-x86_64/` (executable + `leia-server.jar`); Windows is cross-built with `cargo-zigbuild`
 
 ### Protocol foundation (ADR 0001)
 - [x] Typed JSON-RPC 2.0 envelope (request, response, error) in `leia-protocol` and `tui/src/protocol/`
@@ -60,16 +62,23 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
   - Errors: index not found, not an index, unsupported format, corrupt index (checksum, missing file), and the new `INDEX_NOT_READABLE` (-32005) for permission/I/O errors
   - The server keeps one open index (`CurrentIndex`); a new `openIndex` replaces it only once the new index has opened
   - TUI: the index path from the CLI is opened before the UI starts; a failure is printed and exits 1
-- [ ] **Open-index prompt** in the TUI (open or switch an index without restarting; show open errors in the UI instead of exiting)
+- [x] **Open-index prompt** in the TUI (open or switch an index without restarting; show open errors in the UI instead of exiting)
+  - `o` opens a path prompt (popup) prefilled with the open index's path; line editing with Ctrl+A/E/U/K/W, `Tab` completes directories, `~` expands to the home directory
+  - RPC errors are shown in the prompt, which keeps the path; the previous index stays open. A transport error (server gone) still ends leia
+  - the command line's path goes through the same flow, so a bad path no longer exits with 1
+  - `App` (`app.rs`) maps keys to actions; `main.rs` makes the calls and reports back
 - [x] **Index statistics**: `getIndexStats` RPC + overview screen (subset of `luke-features.md` §4.1)
   - path, directory implementation, created/commit/oldest-segment Lucene version, #docs, maxDoc, #deleted
   - segment count (fully merged?), commit point (`segments_N`, generation, version), commit user data
   - field list ordered by field number: index options, norms, payloads, term vectors, doc values type, point and vector dimensions, and the per-segment postings stats summed (docCount, sumDocFreq, sumTotalTermFreq)
   - only what the reader loaded on open (`ReadOnlyIndex.stats()`), no term iteration; unique term counts and the total #terms are the lazy "field/term-count table" in the backlog
   - TUI: overview screen with a summary and a scrollable field table; columns that don't fit are dropped from the right
-- [ ] **Close index / quit**: `closeIndex` RPC; quitting the TUI closes the index and terminates the server (stdin EOF, then kill after a timeout)
+- [x] **Close index / quit**: `closeIndex` RPC; quitting the TUI closes the index and terminates the server (stdin EOF, then kill after a timeout)
+  - `closeIndex {}` → `{path?}`: idempotent, no error when no index is open
+  - `c` in the TUI closes the index; quitting calls `closeIndex` before shutting the server down
+  - the server also closes the open index when its stdin ends
 - [x] Test indexes: Lucene 10 indexes are written in the tests; Lucene 9.12 and 8.11 indexes are generated at build time by `LegacyIndexWriter` running on the old jars (`./gradlew :leia-core:lucene9TestIndex`, output in `leia-core/build/test-indexes/`), so no binary indexes are checked in
-- [ ] Protocol fixtures for `version`, `openIndex`, `getIndexStats`, `closeIndex` and their error cases (`version`, `openIndex` and `getIndexStats` done)
+- [x] Protocol fixtures for `version`, `openIndex`, `getIndexStats`, `closeIndex` and their error cases (`closeIndex` has no error case)
 
 ## Backlog — future capabilities
 
@@ -88,5 +97,4 @@ From the read-only checklist in `luke-features.md` §7. Ordered roughly by value
 
 ## Open questions
 
-- **macOS release builds:** cross-compile from Linux (`cargo-zigbuild` needs a macOS SDK) or build natively in CI (GitHub Actions macOS runner)?
-- **Distribution:** ship the TUI binary + `leia-server.jar` per OS like `../json-rpc-sample/dist`, optionally with a bundled JRE (jlink)?
+None right now. Settled: release platforms and distribution (ADR 0004).

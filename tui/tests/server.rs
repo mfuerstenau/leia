@@ -12,7 +12,8 @@ use leia::client::CallError;
 use leia::java::find_java;
 use leia::protocol::ErrorCode;
 use leia::protocol::index::{
-    DocValuesType, GetIndexStats, GetIndexStatsParams, IndexOptions, OpenIndex, OpenIndexParams,
+    CloseIndex, CloseIndexParams, DocValuesType, GetIndexStats, GetIndexStatsParams, IndexOptions,
+    OpenIndex, OpenIndexParams,
 };
 use leia::protocol::version::{Version, VersionParams};
 use leia::server::{SERVER_JAR_ENV, SHUTDOWN_TIMEOUT, Server, find_server_jar};
@@ -176,6 +177,29 @@ fn index_stats_need_an_open_index() {
         .call::<GetIndexStats>(GetIndexStatsParams {})
         .unwrap_err();
 
+    assert!(
+        matches!(&error, CallError::Rpc(e) if e.code == ErrorCode::NoIndexOpen),
+        "{error:?}"
+    );
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn closes_the_open_index() {
+    let mut server = start();
+    let path = lucene9_index();
+    server
+        .call::<OpenIndex>(OpenIndexParams { path: path.clone() })
+        .unwrap();
+
+    let closed = server.call::<CloseIndex>(CloseIndexParams {}).unwrap();
+    let again = server.call::<CloseIndex>(CloseIndexParams {}).unwrap();
+
+    assert_eq!(closed.path, Some(path));
+    assert_eq!(again.path, None);
+    let error = server
+        .call::<GetIndexStats>(GetIndexStatsParams {})
+        .unwrap_err();
     assert!(
         matches!(&error, CallError::Rpc(e) if e.code == ErrorCode::NoIndexOpen),
         "{error:?}"

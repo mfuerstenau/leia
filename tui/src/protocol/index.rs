@@ -45,6 +45,29 @@ pub struct OpenIndexResult {
     pub min_segment_lucene_version: Option<String>,
 }
 
+/// `closeIndex`: closes the open index, if any. Closing when no index is open is not an error;
+/// the result then has no path.
+pub enum CloseIndex {}
+
+impl RpcMethod for CloseIndex {
+    const NAME: &'static str = "closeIndex";
+    type Params = CloseIndexParams;
+    type Result = CloseIndexResult;
+}
+
+/// Params of `closeIndex`: none, it closes the open index.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloseIndexParams {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CloseIndexResult {
+    /// The directory of the index that was closed; `None` if no index was open.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
 /// `getIndexStats`: statistics of the open index that are cheap to compute: the commit and every
 /// field, without iterating over terms. Fails with `NO_INDEX_OPEN` if no index is open.
 pub enum GetIndexStats {}
@@ -180,5 +203,15 @@ mod tests {
     fn rejects_unknown_or_numeric_enum_value() {
         assert!(serde_json::from_str::<IndexOptions>(r#""POSITIONS""#).is_err());
         assert!(serde_json::from_str::<IndexOptions>("1").is_err());
+    }
+
+    #[test]
+    fn close_result_without_index_is_empty() {
+        let none = CloseIndexResult { path: None };
+        assert_eq!(serde_json::to_string(&none).unwrap(), "{}");
+        assert_eq!(
+            serde_json::from_str::<CloseIndexResult>("{}").unwrap(),
+            none
+        );
     }
 }

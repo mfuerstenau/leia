@@ -33,6 +33,17 @@ public final class CurrentIndex {
         previous.ifPresent(CurrentIndex::closeQuietly);
     }
 
+    /** Closes the open index, if any, and returns it. */
+    public Optional<ReadOnlyIndex> close() {
+        Optional<ReadOnlyIndex> previous = index;
+        index = Optional.empty();
+        previous.ifPresent(closed -> {
+            closeQuietly(closed);
+            LOG.info(() -> "Closed " + closed.summary().path());
+        });
+        return previous;
+    }
+
     /**
      * Closing a read-only index releases memory maps and file handles only; nothing is written, so a
      * failure loses no data and is just logged.
