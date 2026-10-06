@@ -13,6 +13,7 @@ use leia::cli::Cli;
 use leia::client::CallError;
 use leia::clipboard::osc52;
 use leia::java::find_java;
+use leia::protocol::commits::{GetCommit, GetCommitParams, GetCommits, GetCommitsParams};
 use leia::protocol::document::{
     GetDocument, GetDocumentParams, GetStoredValue, GetStoredValueParams, GetTermVector,
     GetTermVectorParams,
@@ -241,6 +242,16 @@ fn perform(
             match answered(server.call::<GetPositions>(params))? {
                 Ok(result) => app.positions_loaded(doc_id, &field, &term, result.positions),
                 Err(error) => app.positions_failed(doc_id, &field, &term, error),
+            }
+        }
+        Action::LoadCommits => match answered(server.call::<GetCommits>(GetCommitsParams {}))? {
+            Ok(result) => return Ok(app.commits_loaded(result.commits)),
+            Err(error) => app.commits_failed(error),
+        },
+        Action::LoadCommit(generation) => {
+            match answered(server.call::<GetCommit>(GetCommitParams { generation }))? {
+                Ok(result) => app.commit_loaded(generation, result),
+                Err(error) => app.commit_failed(generation, error),
             }
         }
     }

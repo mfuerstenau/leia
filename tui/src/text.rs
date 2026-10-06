@@ -31,6 +31,15 @@ pub fn first_chars(text: &str, max: usize) -> String {
     }
 }
 
+/// `n` and the noun, in the plural unless `n` is 1: `1 segment`, `3 segments`.
+pub fn count(n: usize, noun: &str) -> String {
+    if n == 1 {
+        format!("1 {noun}")
+    } else {
+        format!("{n} {noun}s")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

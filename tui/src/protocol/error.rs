@@ -34,10 +34,12 @@ pub enum ErrorCode {
     TermNotFound,
     /// The document has no stored value with that index in the field.
     ValueNotFound,
+    /// The index directory has no commit of that generation.
+    CommitNotFound,
 }
 
 impl ErrorCode {
-    pub const ALL: [ErrorCode; 16] = [
+    pub const ALL: [ErrorCode; 17] = [
         ErrorCode::ParseError,
         ErrorCode::InvalidRequest,
         ErrorCode::MethodNotFound,
@@ -54,6 +56,7 @@ impl ErrorCode {
         ErrorCode::DocNotFound,
         ErrorCode::TermNotFound,
         ErrorCode::ValueNotFound,
+        ErrorCode::CommitNotFound,
     ];
 
     pub const fn code(self) -> i32 {
@@ -74,6 +77,7 @@ impl ErrorCode {
             ErrorCode::DocNotFound => -32008,
             ErrorCode::TermNotFound => -32009,
             ErrorCode::ValueNotFound => -32010,
+            ErrorCode::CommitNotFound => -32011,
         }
     }
 
@@ -96,6 +100,7 @@ impl ErrorCode {
             ErrorCode::DocNotFound => "DOC_NOT_FOUND",
             ErrorCode::TermNotFound => "TERM_NOT_FOUND",
             ErrorCode::ValueNotFound => "VALUE_NOT_FOUND",
+            ErrorCode::CommitNotFound => "COMMIT_NOT_FOUND",
         }
     }
 }

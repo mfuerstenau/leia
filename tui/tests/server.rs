@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use leia::client::CallError;
 use leia::java::find_java;
 use leia::protocol::ErrorCode;
+use leia::protocol::commits::{GetCommit, GetCommitParams, GetCommits, GetCommitsParams};
 use leia::protocol::document::{
     BytesValue, DocumentField, GetDocument, GetDocumentParams, GetDocumentResult, GetStoredValue,
     GetStoredValueParams, GetTermVector, GetTermVectorParams, StoredType, StoredValue,
@@ -474,6 +475,72 @@ fn browses_the_terms_and_postings_of_a_lucene9_index() {
         .unwrap_err();
     assert!(
         matches!(&missing, CallError::Rpc(e) if e.code == ErrorCode::TermNotFound),
+        "{missing:?}"
+    );
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn reads_the_commit_of_a_lucene9_index() {
+    let mut server = start();
+    server
+        .call::<OpenIndex>(OpenIndexParams {
+            path: lucene9_index(),
+        })
+        .unwrap();
+
+    let commits = server
+        .call::<GetCommits>(GetCommitsParams {})
+        .unwrap()
+        .commits;
+    // The default deletion policy kept only the last commit.
+    assert_eq!(commits.len(), 1, "{commits:?}");
+    let commit = &commits[0];
+    assert_eq!(
+        (
+            commit.generation,
+            commit.segments_file.as_str(),
+            commit.current
+        ),
+        (2, "segments_2", true)
+    );
+    assert!(commit.lucene_version.starts_with("9."), "{commit:?}");
+    assert_eq!(
+        commit.user_data.get("writer").map(String::as_str),
+        Some("leia LegacyIndexWriter")
+    );
+
+    let details = server
+        .call::<GetCommit>(GetCommitParams { generation: 2 })
+        .unwrap();
+    assert_eq!(details.commit, *commit);
+    let max_doc: i32 = details.segments.iter().map(|segment| segment.max_doc).sum();
+    let deleted: i32 = details
+        .segments
+        .iter()
+        .map(|segment| segment.del_count)
+        .sum();
+    assert_eq!((max_doc, deleted), (3, 1));
+    assert!(
+        details
+            .segments
+            .iter()
+            .all(|segment| segment.codec.starts_with("Lucene9")),
+        "{details:?}"
+    );
+    assert!(
+        details
+            .files
+            .iter()
+            .any(|file| file.name == "segments_2" && file.segment.is_none() && file.size.is_some()),
+        "{details:?}"
+    );
+
+    let missing = server
+        .call::<GetCommit>(GetCommitParams { generation: 1 })
+        .unwrap_err();
+    assert!(
+        matches!(&missing, CallError::Rpc(e) if e.code == ErrorCode::CommitNotFound),
         "{missing:?}"
     );
 }

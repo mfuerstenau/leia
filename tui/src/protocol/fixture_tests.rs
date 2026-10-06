@@ -10,6 +10,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
+use super::commits::{GetCommit, GetCommits};
 use super::document::{GetDocument, GetStoredValue, GetTermVector};
 use super::index::{CloseIndex, GetIndexStats, OpenIndex};
 use super::job::CancelJob;
@@ -148,6 +149,8 @@ fn check(fixture: &Fixture, json: &str) -> Result<(), String> {
         GetTerms::NAME => check_method::<GetTerms>(fixture, json),
         GetPostings::NAME => check_method::<GetPostings>(fixture, json),
         GetPositions::NAME => check_method::<GetPositions>(fixture, json),
+        GetCommits::NAME => check_method::<GetCommits>(fixture, json),
+        GetCommit::NAME => check_method::<GetCommit>(fixture, json),
         other => Err(format!("no method {other:?} in METHOD_NAMES")),
     }
 }

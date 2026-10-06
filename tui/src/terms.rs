@@ -626,7 +626,7 @@ impl Terms {
 }
 
 /// The selection after a navigation key in a list of `len` rows; `None` for any other key.
-fn moved(selected: usize, len: usize, key: KeyCode) -> Option<usize> {
+pub(crate) fn moved(selected: usize, len: usize, key: KeyCode) -> Option<usize> {
     let last = len.saturating_sub(1);
     let row = match key {
         KeyCode::Down | KeyCode::Char('j') => selected + 1,
@@ -651,7 +651,7 @@ fn tail_row(more: bool, error: Option<&str>) -> Option<Row<'static>> {
 }
 
 /// The width of a right-aligned number column: the widest number, or the 4 of its title.
-fn number_width(numbers: impl Iterator<Item = i64>) -> u16 {
+pub(crate) fn number_width(numbers: impl Iterator<Item = i64>) -> u16 {
     numbers
         .map(|number| number.to_string().len())
         .max()

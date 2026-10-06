@@ -7,6 +7,7 @@ pub mod build_info;
 pub mod cli;
 pub mod client;
 pub mod clipboard;
+pub mod commits;
 pub mod documents;
 pub mod java;
 pub mod overview;

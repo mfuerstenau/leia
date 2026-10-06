@@ -1,7 +1,8 @@
 //! The application state: what is on screen and what a key does. It makes no calls itself:
 //! [`App::handle_key`] returns an [`Action`], the caller makes the RPC calls and reports back with
 //! [`App::opened`], [`App::open_failed`], [`App::closed`], and the `scan_*`, `document_*`,
-//! `stored_value_*`, `term_vector_*`, `terms_*`, `postings_*` or `positions_*` methods.
+//! `stored_value_*`, `term_vector_*`, `terms_*`, `postings_*`, `positions_*`, `commits_*` or
+//! `commit_*` methods.
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -14,9 +15,11 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Paragraph, Tabs};
 
 use crate::build_info::{LEIA, java_line, server_line};
+use crate::commits::{self, Commits};
 use crate::documents::{self, Documents};
 use crate::overview::{DEFAULT_TOP_TERMS, FieldScan, Overview, step_top_terms};
 use crate::prompt::{PathPrompt, PromptEvent, expand_home};
+use crate::protocol::commits::{Commit, GetCommitResult};
 use crate::protocol::document::{
     BytesValue, GetDocumentResult, StoredValue, TermPosition, TermVectorTerm,
 };
@@ -84,14 +87,21 @@ pub enum Action {
         field: String,
         term: BytesValue,
     },
+    /// Fetch the commits of the index directory, and report back with [`App::commits_loaded`]
+    /// or [`App::commits_failed`].
+    LoadCommits,
+    /// Fetch a commit whole, and report back with [`App::commit_loaded`] or
+    /// [`App::commit_failed`].
+    LoadCommit(i64),
 }
 
-/// The screens of an open index; `1`, `2` and `3` switch between them.
+/// The screens of an open index; `1` to `4` switch between them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Screen {
     Overview,
     Documents,
     Terms,
+    Commits,
 }
 
 /// The scan that runs in the server. There is at most one; the others wait in the queue.
@@ -109,6 +119,7 @@ pub struct App {
     overview: Option<Overview>,
     documents: Option<Documents>,
     terms: Option<Terms>,
+    commits: Option<Commits>,
     /// The screen shown while an index is open; kept when another index is opened.
     screen: Screen,
     prompt: Option<PathPrompt>,
@@ -127,6 +138,7 @@ impl App {
             overview: None,
             documents: None,
             terms: None,
+            commits: None,
             screen: Screen::Overview,
             prompt: None,
             scan: None,
@@ -151,6 +163,7 @@ impl App {
     pub fn opened(&mut self, stats: GetIndexStatsResult) -> Option<Action> {
         self.documents = Some(Documents::new(stats.fields.clone(), stats.max_doc));
         self.terms = Some(Terms::new(stats.fields.clone()));
+        self.commits = Some(Commits::new());
         self.overview = Some(Overview::new(stats, self.top_n));
         self.prompt = None;
         self.forget_scans();
@@ -169,6 +182,7 @@ impl App {
         self.overview = None;
         self.documents = None;
         self.terms = None;
+        self.commits = None;
         self.forget_scans();
     }
 
@@ -184,6 +198,7 @@ impl App {
                 let request = self.terms.as_mut()?.initial_request();
                 self.terms_request(request)
             }
+            Screen::Commits => commits_action(self.commits.as_ref()?.initial_request()),
         }
     }
 
@@ -346,6 +361,29 @@ impl App {
         }
     }
 
+    /// Shows the commits. Returns the selected commit to fetch whole.
+    pub fn commits_loaded(&mut self, commits: Vec<Commit>) -> Option<Action> {
+        commits_action(self.commits.as_mut()?.commits_loaded(commits))
+    }
+
+    pub fn commits_failed(&mut self, error: String) {
+        if let Some(commits) = &mut self.commits {
+            commits.commits_failed(error);
+        }
+    }
+
+    pub fn commit_loaded(&mut self, generation: i64, result: GetCommitResult) {
+        if let Some(commits) = &mut self.commits {
+            commits.commit_loaded(generation, result);
+        }
+    }
+
+    pub fn commit_failed(&mut self, generation: i64, error: String) {
+        if let Some(commits) = &mut self.commits {
+            commits.commit_failed(generation, error);
+        }
+    }
+
     fn forget_scans(&mut self) {
         self.scan = None;
         self.queue.clear();
@@ -503,6 +541,10 @@ impl App {
                 self.screen = Screen::Terms;
                 self.initial_request()
             }
+            KeyCode::Char('4') if self.commits.is_some() => {
+                self.screen = Screen::Commits;
+                self.initial_request()
+            }
             KeyCode::Char('o') => {
                 // Starts from the open index, so a sibling is a Ctrl+W away.
                 let path = self.overview.as_ref().map_or("", Overview::path);
@@ -517,6 +559,9 @@ impl App {
             code if self.screen == Screen::Terms => {
                 let request = self.terms.as_mut()?.handle_key(code);
                 self.terms_request(request)
+            }
+            code if self.screen == Screen::Commits => {
+                commits_action(self.commits.as_mut()?.handle_key(code))
             }
             KeyCode::Enter => {
                 if let Some((field, term)) = self.overview.as_ref()?.selected_top_term() {
@@ -564,9 +609,17 @@ impl App {
             &mut self.overview,
             &mut self.documents,
             &mut self.terms,
+            &mut self.commits,
             self.screen,
         ) {
-            (Some(_), Some(documents), _, Screen::Documents) => {
+            (Some(_), _, _, Some(commits), Screen::Commits) => {
+                commits.render(frame, body);
+                Line::from(format!(
+                    " {cancel}q quit   o open   c close   1-4 screen   r read again   ⏎ segments   \
+                     Tab panel   ↑↓"
+                ))
+            }
+            (Some(_), Some(documents), _, _, Screen::Documents) => {
                 documents.render(frame, body);
                 let steps = if documents.has_hit() {
                     "[ ] term docs   "
@@ -576,42 +629,42 @@ impl App {
                 match documents.viewer() {
                     Some(viewer) => Line::from(viewer.keys()),
                     None => Line::from(format!(
-                        " {cancel}q quit   o open   c close   1-3 screen   ←/→ doc   {steps}i go to   \
+                        " {cancel}q quit   o open   c close   1-4 screen   ←/→ doc   {steps}i go to   \
                          ⏎ term vector   v view   x numbers   e empty fields   Tab panel   ↑↓"
                     )),
                 }
             }
-            (Some(_), _, Some(terms), Screen::Terms) => {
+            (Some(_), _, Some(terms), _, Screen::Terms) => {
                 terms.render(frame, body);
                 if terms.prompting() {
                     Line::from(" type to seek   ⏎/Esc done")
                 } else {
                     Line::from(format!(
-                        " {cancel}q quit   o open   c close   1-3 screen   / seek   \
+                        " {cancel}q quit   o open   c close   1-4 screen   / seek   \
                          ⏎ open doc   ←/→ column   ↑↓"
                     ))
                 }
             }
-            (Some(overview), _, _, _) => {
+            (Some(overview), _, _, _, _) => {
                 overview.render(frame, body);
                 if self.scan.is_some() {
                     Line::from(
-                        " Esc cancel scan   q quit   o open   c close   1-3 screen   s/S sort   \
+                        " Esc cancel scan   q quit   o open   c close   1-4 screen   s/S sort   \
                          Tab panel   ↑↓",
                     )
                 } else if overview.selected_top_term().is_some() {
                     Line::from(
-                        " q quit   o open   c close   1-3 screen   ⏎ term's docs   \
+                        " q quit   o open   c close   1-4 screen   ⏎ term's docs   \
                          +/- top N   s/S sort   Tab panel   ↑↓",
                     )
                 } else {
                     Line::from(
-                        " q quit   o open   c close   1-3 screen   ⏎ terms   a all terms   \
+                        " q quit   o open   c close   1-4 screen   ⏎ terms   a all terms   \
                          +/- top N   s/S sort   Tab panel   ↑↓",
                     )
                 }
             }
-            (None, _, _, _) => {
+            (None, _, _, _, _) => {
                 let lines = vec![
                     Line::from("No index open. Press o to open one."),
                     Line::from(""),
@@ -631,9 +684,10 @@ impl App {
                 Screen::Overview => 0,
                 Screen::Documents => 1,
                 Screen::Terms => 2,
+                Screen::Commits => 3,
             };
             frame.render_widget(
-                Tabs::new(["1 Overview", "2 Documents", "3 Terms"])
+                Tabs::new(["1 Overview", "2 Documents", "3 Terms", "4 Commits"])
                     .select(selected)
                     .highlight_style(Style::new().add_modifier(Modifier::REVERSED)),
                 tabs,
@@ -648,6 +702,13 @@ impl App {
         if let Some(prompt) = &self.prompt {
             prompt.render(frame, body);
         }
+    }
+}
+
+fn commits_action(request: Option<commits::Request>) -> Option<Action> {
+    match request? {
+        commits::Request::Commits => Some(Action::LoadCommits),
+        commits::Request::Commit(generation) => Some(Action::LoadCommit(generation)),
     }
 }
 
@@ -1337,5 +1398,64 @@ mod tests {
         };
         app.terms_loaded("id", false, page);
         assert!(render(&mut app).contains("id from 2 (/ seeks)"));
+    }
+
+    fn commit(generation: i64, current: bool) -> Commit {
+        Commit {
+            generation,
+            segments_file: format!("segments_{generation}"),
+            current,
+            version: 1,
+            segment_count: 0,
+            max_doc: 0,
+            del_count: 0,
+            lucene_version: "10.5.2".to_owned(),
+            user_data: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn switches_to_the_commits_and_fetches_them() {
+        let mut app = app_with_fields();
+
+        assert_eq!(
+            app.handle_key(key(KeyCode::Char('4'))),
+            Some(Action::LoadCommits)
+        );
+        assert_eq!(
+            app.commits_loaded(vec![commit(2, true), commit(1, false)]),
+            Some(Action::LoadCommit(2))
+        );
+        app.commit_loaded(
+            2,
+            GetCommitResult {
+                commit: commit(2, true),
+                segments: Vec::new(),
+                files: Vec::new(),
+            },
+        );
+        let screen = render(&mut app);
+        assert!(screen.contains("4 Commits"), "{screen}");
+        assert!(screen.contains("No segments."), "{screen}");
+        assert!(screen.contains("r read again"), "{screen}");
+
+        assert_eq!(
+            app.handle_key(key(KeyCode::Down)),
+            Some(Action::LoadCommit(1))
+        );
+        assert_eq!(
+            app.handle_key(key(KeyCode::Char('r'))),
+            Some(Action::LoadCommits)
+        );
+    }
+
+    #[test]
+    fn opening_another_index_on_the_commits_screen_fetches_its_commits() {
+        let mut app = app_with_fields();
+        app.handle_key(key(KeyCode::Char('4')));
+        app.commits_failed("unreadable".to_owned());
+        assert!(render(&mut app).contains("Cannot list the commits: unreadable"));
+
+        assert_eq!(app.opened(stats("/data/other")), Some(Action::LoadCommits));
     }
 }

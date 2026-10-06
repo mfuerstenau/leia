@@ -1006,15 +1006,17 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-/// `512 B`, `1.5 KiB`, `5.0 MiB`.
+/// `512 B`, `1.5 KiB`, `5.0 MiB`, `2.0 GiB`.
 pub fn size(bytes: i64) -> String {
     const KIB: f64 = 1024.0;
     if bytes < 1024 {
         format!("{bytes} B")
     } else if bytes < 1024 * 1024 {
         format!("{:.1} KiB", bytes as f64 / KIB)
-    } else {
+    } else if bytes < 1024 * 1024 * 1024 {
         format!("{:.1} MiB", bytes as f64 / KIB / KIB)
+    } else {
+        format!("{:.1} GiB", bytes as f64 / KIB / KIB / KIB)
     }
 }
 
@@ -1530,6 +1532,7 @@ mod tests {
         assert_eq!(size(1023), "1023 B");
         assert_eq!(size(1536), "1.5 KiB");
         assert_eq!(size(5 * 1024 * 1024), "5.0 MiB");
+        assert_eq!(size(2 * 1024 * 1024 * 1024), "2.0 GiB");
         assert_eq!(cut_size(), "64.0 KiB");
     }
 

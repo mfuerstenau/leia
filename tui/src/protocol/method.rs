@@ -3,6 +3,7 @@
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+use super::commits::{GetCommit, GetCommits};
 use super::document::{GetDocument, GetStoredValue, GetTermVector};
 use super::index::{CloseIndex, GetIndexStats, OpenIndex};
 use super::job::CancelJob;
@@ -31,4 +32,6 @@ pub const METHOD_NAMES: &[&str] = &[
     GetTerms::NAME,
     GetPostings::NAME,
     GetPositions::NAME,
+    GetCommits::NAME,
+    GetCommit::NAME,
 ];

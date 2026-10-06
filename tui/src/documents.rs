@@ -20,7 +20,7 @@ use crate::protocol::document::{
 };
 use crate::protocol::index::{IndexField, IndexOptions};
 use crate::terms::TermHit;
-use crate::text::{bytes_text, escape_control, first_chars};
+use crate::text::{bytes_text, count, escape_control, first_chars};
 use crate::viewer::{self, Delimiters, Viewer, cut_size, size, stored_type};
 
 /// Rows or lines that PageUp and PageDown move.
@@ -1022,14 +1022,6 @@ fn byte4_to_int(byte: u8) -> u32 {
         exponent => (bits | 0x08) << (exponent - 1),
     };
     u32::from(NUM_FREE_VALUES) + decoded
-}
-
-fn count(n: usize, noun: &str) -> String {
-    if n == 1 {
-        format!("1 {noun}")
-    } else {
-        format!("{n} {noun}s")
-    }
 }
 
 fn render_prompt(frame: &mut Frame, area: Rect, prompt: &DocIdPrompt, max_doc: i32) {
