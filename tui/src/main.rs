@@ -12,7 +12,6 @@ use leia::build_info::{LEIA, java_line, server_line};
 use leia::cli::Cli;
 use leia::client::CallError;
 use leia::java::find_java;
-use leia::overview::TOP_TERMS;
 use leia::protocol::index::{
     CloseIndex, CloseIndexParams, GetIndexStats, GetIndexStatsParams, OpenIndex, OpenIndexParams,
 };
@@ -142,11 +141,9 @@ fn perform(
             server.call::<CloseIndex>(CloseIndexParams {})?;
             app.closed();
         }
-        Action::StartScan(field) => {
-            let started = server.call::<StartFieldTermScan>(StartFieldTermScanParams {
-                field,
-                top_n: TOP_TERMS,
-            });
+        Action::StartScan { field, top_n } => {
+            let started =
+                server.call::<StartFieldTermScan>(StartFieldTermScanParams { field, top_n });
             match answered(started)? {
                 Ok(job) => app.scan_started(job.job_id),
                 Err(error) => return Ok(app.scan_failed(error)),

@@ -89,10 +89,12 @@ From the read-only checklist in `luke-features.md` §7. Ordered roughly by value
 - [x] Overview: field/term-count table, top-N terms per field
   - `startFieldTermScan {field, topN}` / `getFieldTermScan {jobId}`: one pass over the merged `TermsEnum` counts the unique terms and keeps the top N by docFreq (ties in term order); binary terms go over the wire as hex. Lazy: a scan runs only on request
   - TUI: "Terms" column, top-terms panel (next to the fields from 130 columns, below them otherwise), `Enter` scans the selected field, `a` all fields one after another, `Esc` cancels, `Tab` switches the panel; the total shows in the fields title once every field is counted
-  - not yet: Luke's "% of total" column, a configurable N (fixed at 50, the server allows up to 1000)
-- [ ] Overview: sort the field table (TUI only, no protocol change)
-  - by number (default), name, or term count, ascending or descending, as in Luke (`luke-features.md` §4.1); fields without a count sort last
-  - one key cycles the sort column and another flips the direction; the header marks the sorted column
+- [x] Overview: "%" column (each field's share of all terms, as in Luke, once every field is counted) and a configurable top N
+  - `+`/`-` step N through 10, 20, 50, 100, 200, 500, 1000 (default 50); kept when another index is opened
+  - a smaller N cuts the shown terms; a larger one marks fields scanned for fewer (`⏎ top N` in the panel title), and `Enter`/`a` scan them again
+- [x] Overview: sort the field table (TUI only, no protocol change)
+  - by number (default), name, or term count (starts descending), as in Luke (`luke-features.md` §4.1); fields without a count sort last in either direction, ties by number
+  - `s` cycles the sort column, `S` flips the direction; the header marks the sorted column with ▲/▼; the selection stays on its field when rows move
 - [ ] Overview → other screens: browse/search docs by a top term (`luke-features.md` §4.1, needs Documents and Search)
 - [ ] Documents: doc by id with flags/norm/value, term vectors, doc values (with decoding), stored values, term browse/seek, postings with positions/offsets/payloads
 - [ ] Search: parse/rewrite, term query, paging (configurable page size), exact/approx total hits, explain, query-parser options, similarity (BM25/TF-IDF), 2-level sort, fields to load, More-Like-This

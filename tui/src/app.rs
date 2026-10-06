@@ -12,7 +12,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Paragraph};
 
 use crate::build_info::{LEIA, java_line, server_line};
-use crate::overview::{FieldScan, Overview};
+use crate::overview::{DEFAULT_TOP_TERMS, FieldScan, Overview, step_top_terms};
 use crate::prompt::{PathPrompt, PromptEvent, expand_home};
 use crate::protocol::index::GetIndexStatsResult;
 use crate::protocol::terms::GetFieldTermScanResult;
@@ -27,9 +27,12 @@ pub enum Action {
     Open(String),
     /// Close the open index.
     Close,
-    /// Start the term scan of this field, and report back with [`App::scan_started`] or
-    /// [`App::scan_failed`].
-    StartScan(String),
+    /// Start the term scan of this field for its top `top_n` terms, and report back with
+    /// [`App::scan_started`] or [`App::scan_failed`].
+    StartScan {
+        field: String,
+        top_n: i32,
+    },
     /// Cancel this scan job, and report back with [`App::scan_cancelled`].
     CancelScan(i64),
 }
@@ -37,6 +40,7 @@ pub enum Action {
 /// The scan that runs in the server. There is at most one; the others wait in the queue.
 struct RunningScan {
     field: String,
+    top_n: i32,
     /// `None` until the server has started the job.
     job_id: Option<i64>,
 }
@@ -50,6 +54,8 @@ pub struct App {
     scan: Option<RunningScan>,
     /// Fields whose scan waits for the running one.
     queue: VecDeque<String>,
+    /// How many top terms a scan asks for; kept when another index is opened.
+    top_n: i32,
 }
 
 impl App {
@@ -61,6 +67,7 @@ impl App {
             prompt: None,
             scan: None,
             queue: VecDeque::new(),
+            top_n: DEFAULT_TOP_TERMS,
         }
     }
 
@@ -77,7 +84,7 @@ impl App {
 
     /// Shows the new index. The server stopped the scans of the previous one.
     pub fn opened(&mut self, stats: GetIndexStatsResult) {
-        self.overview = Some(Overview::new(stats));
+        self.overview = Some(Overview::new(stats, self.top_n));
         self.prompt = None;
         self.forget_scans();
     }
@@ -114,11 +121,12 @@ impl App {
     /// Shows the progress of the running scan, or its outcome. Returns the next scan to start,
     /// once this one is done.
     pub fn scan_progress(&mut self, result: GetFieldTermScanResult) -> Option<Action> {
-        let field = self.scan.as_ref()?.field.clone();
+        let scan = self.scan.as_ref()?;
+        let (field, top_n) = (scan.field.clone(), scan.top_n);
         let overview = self.overview.as_mut()?;
         match result.terms {
             Some(terms) => {
-                overview.set_scan(&field, Some(FieldScan::done(terms)));
+                overview.set_scan(&field, Some(FieldScan::done(terms, top_n)));
                 self.scan = None;
                 self.start_next_scan()
             }
@@ -174,21 +182,28 @@ impl App {
         }
         self.scan = Some(RunningScan {
             field: field.clone(),
+            top_n: self.top_n,
             job_id: None,
         });
-        Some(Action::StartScan(field))
+        Some(Action::StartScan {
+            field,
+            top_n: self.top_n,
+        })
     }
 
-    /// The selected field, if Enter can scan it: it has postings and no scan, or a failed one.
+    /// The selected field, if Enter can scan it.
     fn scannable_selected_field(&self) -> Option<String> {
         let overview = self.overview.as_ref()?;
         let field = overview.selected_field()?;
-        let scannable = field.terms.is_some()
-            && matches!(
-                overview.scan(&field.name),
-                None | Some(FieldScan::Failed(_))
-            );
-        scannable.then(|| field.name.clone())
+        overview.needs_scan(field).then(|| field.name.clone())
+    }
+
+    /// Shows, and from now on scans for, more or fewer top terms.
+    fn step_top_terms(&mut self, up: bool) {
+        self.top_n = step_top_terms(self.top_n, up);
+        if let Some(overview) = &mut self.overview {
+            overview.set_top_n(self.top_n);
+        }
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<Action> {
@@ -223,8 +238,16 @@ impl App {
                 self.request_scans(vec![field])
             }
             KeyCode::Char('a') => {
-                let fields = self.overview.as_ref()?.unscanned_fields();
+                let fields = self.overview.as_ref()?.fields_to_scan();
                 self.request_scans(fields)
+            }
+            KeyCode::Char('+' | '=') => {
+                self.step_top_terms(true);
+                None
+            }
+            KeyCode::Char('-') => {
+                self.step_top_terms(false);
+                None
             }
             KeyCode::Char('o') => {
                 // Starts from the open index, so a sibling is a Ctrl+W away.
@@ -249,10 +272,13 @@ impl App {
             Some(overview) => {
                 overview.render(frame, body);
                 if self.scan.is_some() {
-                    Line::from(" Esc cancel scan   q quit   o open   c close   Tab panel   ↑↓")
+                    Line::from(
+                        " Esc cancel scan   q quit   o open   c close   s/S sort   Tab panel   ↑↓",
+                    )
                 } else {
                     Line::from(
-                        " q quit   o open   c close   ⏎ terms   a all terms   Tab panel   ↑↓",
+                        " q quit   o open   c close   ⏎ terms   a all terms   +/- top N   \
+                         s/S sort   Tab panel   ↑↓",
                     )
                 }
             }
@@ -384,7 +410,10 @@ mod tests {
     }
 
     fn start(field: &str) -> Option<Action> {
-        Some(Action::StartScan(field.to_owned()))
+        Some(Action::StartScan {
+            field: field.to_owned(),
+            top_n: DEFAULT_TOP_TERMS,
+        })
     }
 
     fn key(code: KeyCode) -> KeyEvent {
@@ -596,6 +625,49 @@ mod tests {
 
         assert_eq!(app.handle_key(key(KeyCode::Enter)), None);
         assert_eq!(app.polling(), None);
+    }
+
+    #[test]
+    fn plus_and_minus_change_the_top_n_of_the_next_scans() {
+        let mut app = app_with_fields();
+        app.handle_key(key(KeyCode::Char('-')));
+        assert_eq!(
+            app.handle_key(key(KeyCode::Enter)),
+            Some(Action::StartScan {
+                field: "id".to_owned(),
+                top_n: 20,
+            })
+        );
+        app.scan_started(1);
+        // id has more terms than the 20 it got.
+        app.scan_progress(GetFieldTermScanResult {
+            terms_scanned: 30,
+            terms: Some(FieldTerms {
+                field: "id".to_owned(),
+                unique_terms: 30,
+                top_terms: Vec::new(),
+            }),
+        });
+        assert_eq!(app.handle_key(key(KeyCode::Enter)), None);
+
+        app.handle_key(key(KeyCode::Char('+')));
+        assert!(render(&mut app).contains("id: 30 terms, top 0 (⏎ top 50)"));
+        // A scan for 20 isn't enough any more.
+        assert_eq!(app.handle_key(key(KeyCode::Enter)), start("id"));
+
+        app.handle_key(key(KeyCode::Char('+')));
+        app.opened(stats("/data/other"));
+        app.opened(GetIndexStatsResult {
+            fields: vec![field("id", 0, true)],
+            ..stats("/data/idx")
+        });
+        assert_eq!(
+            app.handle_key(key(KeyCode::Enter)),
+            Some(Action::StartScan {
+                field: "id".to_owned(),
+                top_n: 100,
+            })
+        );
     }
 
     #[test]

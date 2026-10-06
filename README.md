@@ -51,8 +51,11 @@ leia --java /opt/jdk-25 /var/lib/solr/products/data/index
 |---|---|
 | `o` | open an index: type a path, `Tab` completes directories, `~` is your home directory, `Enter` opens and `Esc` cancels |
 | `c` | close the open index |
-| `Enter` | count the terms of the selected field and find its top 50 terms by document frequency |
+| `Enter` | count the terms of the selected field and find its top N terms by document frequency (N is 50 at first) |
 | `a` | do so for every field with postings, one after another |
+| `+` `-` | show more or fewer top terms: 10, 20, 50, 100, 200, 500 or 1000 |
+| `s` | sort the field table by number, name or term count |
+| `S` | flip the sort direction |
 | `Tab` | switch between the field table and the top terms |
 | `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the field table or the top terms |
 | `Esc` | stop the running term scans; with none running, quit |
@@ -60,8 +63,12 @@ leia --java /opt/jdk-25 /var/lib/solr/products/data/index
 
 Counting terms reads every term of the field, which can take a while on a large index. The scan
 runs in the server while leia shows its progress, and `Esc` stops it. Once every field has been
-counted, the field table's title shows the total. Like Lucene's own statistics, the counts include
-deleted documents that no merge has removed yet.
+counted, the field table's title shows the total and the `%` column each field's share of it.
+Like Lucene's own statistics, the counts include deleted documents that no merge has removed yet.
+
+Sorted by term count, the fields without a count come last in either direction. With a larger N,
+the top-terms title shows `⏎ top N` for a field that was scanned for fewer, and `Enter` (or `a`)
+scans it again; a smaller N needs no new scan.
 
 If an index can't be opened, the prompt shows why (not found, not an index, unsupported format,
 corrupt, not readable) and keeps the path, so you can fix it. The index that was open before

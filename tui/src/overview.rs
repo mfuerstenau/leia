@@ -1,6 +1,7 @@
 //! The overview screen: what `getIndexStats` reports about the open index, with a scrollable
 //! table of its fields, and the term counts and top terms of the fields that were scanned.
 
+use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use ratatui::Frame;
@@ -16,8 +17,20 @@ use crate::protocol::terms::{FieldTerms, TopTerm};
 /// Rows that PageUp and PageDown move.
 const PAGE: u16 = 10;
 
-/// How many top terms a scan asks for, as Luke does by default.
-pub const TOP_TERMS: i32 = 50;
+/// How many top terms a scan asks for at first, as in Luke.
+pub const DEFAULT_TOP_TERMS: i32 = 50;
+/// The numbers of top terms that `+` and `-` step through; the server allows up to 1000.
+const TOP_TERMS_STEPS: [i32; 7] = [10, 20, 50, 100, 200, 500, 1000];
+
+/// The next number of top terms up or down from `top_n`, or `top_n` at either end.
+pub fn step_top_terms(top_n: i32, up: bool) -> i32 {
+    let next = if up {
+        TOP_TERMS_STEPS.iter().find(|&&step| step > top_n)
+    } else {
+        TOP_TERMS_STEPS.iter().rev().find(|&&step| step < top_n)
+    };
+    next.copied().unwrap_or(top_n)
+}
 
 /// From this width on, the terms panel is next to the fields instead of below them.
 const SIDE_BY_SIDE_WIDTH: u16 = 130;
@@ -34,6 +47,8 @@ pub enum FieldScan {
     },
     Done {
         terms: FieldTerms,
+        /// The number of top terms the scan asked for.
+        top_n: i32,
         /// The selection in the top terms.
         table: TableState,
     },
@@ -41,11 +56,53 @@ pub enum FieldScan {
 }
 
 impl FieldScan {
-    pub fn done(terms: FieldTerms) -> Self {
+    pub fn done(terms: FieldTerms, top_n: i32) -> Self {
         let selected = (!terms.top_terms.is_empty()).then_some(0);
         FieldScan::Done {
             terms,
+            top_n,
             table: TableState::new().with_selected(selected),
+        }
+    }
+}
+
+/// Whether a scan that asked for `asked` top terms has the top `top_n`: it asked for as many, or
+/// it got every term of the field.
+fn has_top_terms(terms: &FieldTerms, asked: i32, top_n: i32) -> bool {
+    asked >= top_n || terms.top_terms.len() as i64 >= terms.unique_terms
+}
+
+/// What the field table is sorted by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SortKey {
+    Number,
+    Name,
+    /// The unique term count; fields without one come last in either direction.
+    Terms,
+}
+
+impl SortKey {
+    const ALL: [SortKey; 3] = [SortKey::Number, SortKey::Name, SortKey::Terms];
+
+    fn next(self) -> Self {
+        match self {
+            SortKey::Number => SortKey::Name,
+            SortKey::Name => SortKey::Terms,
+            SortKey::Terms => SortKey::Number,
+        }
+    }
+
+    /// The direction a key starts in: the largest term counts first, everything else ascending.
+    fn starts_descending(self) -> bool {
+        self == SortKey::Terms
+    }
+
+    /// The column whose header shows the sort.
+    fn column(self) -> usize {
+        match self {
+            SortKey::Number => NUMBER_COLUMN,
+            SortKey::Name => NAME_COLUMN,
+            SortKey::Terms => TERMS_COLUMN,
         }
     }
 }
@@ -59,47 +116,126 @@ enum Focus {
 
 pub struct Overview {
     stats: GetIndexStatsResult,
-    /// The text of every field's cells, formatted again when a scan changes.
+    /// The fields in table order, as indexes into `stats.fields`.
+    order: Vec<usize>,
+    /// The text of every row's cells in table order, formatted again when a scan or the sort
+    /// changes.
     field_rows: Vec<[String; COLUMNS.len()]>,
     /// The widest cell of each column, header included.
     column_widths: [u16; COLUMNS.len()],
     fields: TableState,
+    sort: SortKey,
+    descending: bool,
     /// Term scans by field name; a field that was never scanned has none.
     scans: HashMap<String, FieldScan>,
+    /// How many top terms to show, and to scan for.
+    top_n: i32,
     focus: Focus,
 }
 
 impl Overview {
-    pub fn new(stats: GetIndexStatsResult) -> Self {
+    pub fn new(stats: GetIndexStatsResult, top_n: i32) -> Self {
         let selected = (!stats.fields.is_empty()).then_some(0);
         let mut overview = Self {
             stats,
+            order: Vec::new(),
             field_rows: Vec::new(),
             column_widths: [0; COLUMNS.len()],
             fields: TableState::new().with_selected(selected),
+            sort: SortKey::Number,
+            descending: false,
             scans: HashMap::new(),
+            top_n,
             focus: Focus::Fields,
         };
         overview.format_rows();
         overview
     }
 
+    /// Sorts the rows and formats their cells. The selection stays on its field.
     fn format_rows(&mut self) {
+        let selected = self.selected_index();
+        self.order = self.sorted_order();
+        if let Some(selected) = selected {
+            self.fields
+                .select(self.order.iter().position(|&index| index == selected));
+        }
+        let total = self.total_terms();
         self.field_rows = self
+            .order
+            .iter()
+            .map(|&index| {
+                let field = &self.stats.fields[index];
+                field_cells(field, self.scans.get(&field.name), total)
+            })
+            .collect();
+        self.column_widths = std::array::from_fn(|column| {
+            let cells = self
+                .field_rows
+                .iter()
+                .map(|row| Line::from(row[column].as_str()).width());
+            // Room for the sort marker, so that the columns don't move when the sort changes.
+            let marker = if SortKey::ALL.iter().any(|key| key.column() == column) {
+                SORT_MARKER_WIDTH
+            } else {
+                0
+            };
+            let header = Line::from(COLUMNS[column].title).width() + marker;
+            cells.chain([header]).max().unwrap_or_default() as u16
+        });
+    }
+
+    fn sorted_order(&self) -> Vec<usize> {
+        let fields = &self.stats.fields;
+        let direction = |ordering: Ordering| {
+            if self.descending {
+                ordering.reverse()
+            } else {
+                ordering
+            }
+        };
+        let mut order: Vec<usize> = (0..fields.len()).collect();
+        order.sort_by(|&a, &b| {
+            let (a, b) = (&fields[a], &fields[b]);
+            let ordering = match self.sort {
+                SortKey::Number => direction(a.number.cmp(&b.number)),
+                SortKey::Name => direction(a.name.cmp(&b.name)),
+                SortKey::Terms => match (self.term_count(a), self.term_count(b)) {
+                    (Some(a), Some(b)) => direction(a.cmp(&b)),
+                    (Some(_), None) => Ordering::Less,
+                    (None, Some(_)) => Ordering::Greater,
+                    (None, None) => Ordering::Equal,
+                },
+            };
+            ordering.then(a.number.cmp(&b.number))
+        });
+        order
+    }
+
+    /// The unique term count of a scanned field.
+    fn term_count(&self, field: &IndexField) -> Option<i64> {
+        match self.scans.get(&field.name) {
+            Some(FieldScan::Done { terms, .. }) => Some(terms.unique_terms),
+            _ => None,
+        }
+    }
+
+    /// The number of terms of all fields, once every field with postings has been scanned.
+    fn total_terms(&self) -> Option<i64> {
+        let mut indexed = self
             .stats
             .fields
             .iter()
-            .map(|field| field_cells(field, self.scans.get(&field.name)))
-            .collect();
-        self.column_widths = std::array::from_fn(|column| {
-            self.field_rows
-                .iter()
-                .map(|row| row[column].as_str())
-                .chain([COLUMNS[column].title])
-                .map(|text| Line::from(text).width())
-                .max()
-                .unwrap_or_default() as u16
-        });
+            .filter(|field| field.terms.is_some())
+            .peekable();
+        indexed.peek()?;
+        indexed.map(|field| self.term_count(field)).sum()
+    }
+
+    /// Changes how many top terms are shown. A scan for fewer can be repeated, a scan for more is
+    /// cut short.
+    pub fn set_top_n(&mut self, top_n: i32) {
+        self.top_n = top_n;
     }
 
     /// The directory of the index.
@@ -109,11 +245,16 @@ impl Overview {
 
     /// The field under the selection.
     pub fn selected_field(&self) -> Option<&IndexField> {
-        let last = self.stats.fields.len().checked_sub(1)?;
+        self.selected_index().map(|index| &self.stats.fields[index])
+    }
+
+    /// The index into `stats.fields` of the field under the selection.
+    fn selected_index(&self) -> Option<usize> {
+        let last = self.order.len().checked_sub(1)?;
         // The table clamps the selection only when it renders.
         self.fields
             .selected()
-            .map(|selected| &self.stats.fields[selected.min(last)])
+            .map(|selected| self.order[selected.min(last)])
     }
 
     pub fn scan(&self, field: &str) -> Option<&FieldScan> {
@@ -129,31 +270,52 @@ impl Overview {
         self.format_rows();
     }
 
-    /// The fields with postings that have no scan yet, or whose scan failed, in field order.
-    pub fn unscanned_fields(&self) -> Vec<String> {
+    /// Whether `field` can be scanned: it has postings, and no scan, a failed one, or one for
+    /// fewer than the top N terms.
+    pub fn needs_scan(&self, field: &IndexField) -> bool {
+        field.terms.is_some()
+            && match self.scans.get(&field.name) {
+                None | Some(FieldScan::Failed(_)) => true,
+                Some(FieldScan::Done { terms, top_n, .. }) => {
+                    !has_top_terms(terms, *top_n, self.top_n)
+                }
+                Some(FieldScan::Queued | FieldScan::Running { .. }) => false,
+            }
+    }
+
+    /// The fields that [need a scan](Self::needs_scan), in field order.
+    pub fn fields_to_scan(&self) -> Vec<String> {
         self.stats
             .fields
             .iter()
-            .filter(|field| field.terms.is_some())
-            .filter(|field| {
-                matches!(
-                    self.scans.get(&field.name),
-                    None | Some(FieldScan::Failed(_))
-                )
-            })
+            .filter(|field| self.needs_scan(field))
             .map(|field| field.name.clone())
             .collect()
     }
 
-    /// Moves the selection in the focused table, or switches the focus with Tab. Returns whether
-    /// the key was used.
+    /// Moves the selection in the focused table, switches the focus with Tab, cycles the sort
+    /// column with `s` and flips its direction with `S`. Returns whether the key was used.
     pub fn handle_key(&mut self, key: KeyCode) -> bool {
-        if key == KeyCode::Tab {
-            self.focus = match self.focus {
-                Focus::Fields => Focus::Terms,
-                Focus::Terms => Focus::Fields,
-            };
-            return true;
+        match key {
+            KeyCode::Tab => {
+                self.focus = match self.focus {
+                    Focus::Fields => Focus::Terms,
+                    Focus::Terms => Focus::Fields,
+                };
+                return true;
+            }
+            KeyCode::Char('s') => {
+                self.sort = self.sort.next();
+                self.descending = self.sort.starts_descending();
+                self.format_rows();
+                return true;
+            }
+            KeyCode::Char('S') => {
+                self.descending = !self.descending;
+                self.format_rows();
+                return true;
+            }
+            _ => {}
         }
         let selected = self.selected_field().map(|field| field.name.clone());
         let table = match (
@@ -201,10 +363,23 @@ impl Overview {
     fn render_fields(&mut self, frame: &mut Frame, area: Rect) {
         // Inside the block's left and right border.
         let shown = shown_columns(&self.column_widths, area.width.saturating_sub(2));
+        let titles: Vec<String> = COLUMNS
+            .iter()
+            .enumerate()
+            .map(|(i, column)| {
+                if i == self.sort.column() {
+                    let marker = if self.descending { '▼' } else { '▲' };
+                    format!("{} {marker}", column.title)
+                } else {
+                    column.title.to_owned()
+                }
+            })
+            .collect();
         let header = Row::new(
             COLUMNS[..shown]
                 .iter()
-                .map(|column| cell(column, column.title)),
+                .zip(&titles)
+                .map(|(column, title)| cell(column, title)),
         )
         .style(Style::new().add_modifier(Modifier::BOLD));
         let rows = self.field_rows.iter().map(|texts| {
@@ -238,22 +413,7 @@ impl Overview {
     /// been scanned.
     fn fields_title(&self) -> String {
         let count = self.stats.fields.len();
-        let mut indexed = self
-            .stats
-            .fields
-            .iter()
-            .filter(|field| field.terms.is_some())
-            .peekable();
-        if indexed.peek().is_none() {
-            return format!(" Fields ({count}) ");
-        }
-        let total: Option<i64> = indexed
-            .map(|field| match self.scans.get(&field.name) {
-                Some(FieldScan::Done { terms, .. }) => Some(terms.unique_terms),
-                _ => None,
-            })
-            .sum();
-        match total {
+        match self.total_terms() {
             Some(total) => format!(" Fields ({count}, {total} terms) "),
             None => format!(" Fields ({count}) "),
         }
@@ -267,16 +427,25 @@ impl Overview {
         };
         let name = field.name.clone();
         let has_postings = field.terms.is_some();
+        let top_n = self.top_n;
         let mut title = format!(" Terms: {name} ");
         let message = match self.scans.get_mut(&name) {
-            Some(FieldScan::Done { terms, table }) => {
+            Some(FieldScan::Done {
+                terms,
+                top_n: asked,
+                table,
+            }) => {
+                let top_terms = &terms.top_terms[..terms.top_terms.len().min(top_n as usize)];
                 title = format!(
                     " {name}: {} terms, top {} ",
                     terms.unique_terms,
-                    terms.top_terms.len()
+                    top_terms.len()
                 );
-                if !terms.top_terms.is_empty() {
-                    let widget = top_terms_table(&terms.top_terms)
+                if !has_top_terms(terms, *asked, top_n) {
+                    title.push_str(&format!("(⏎ top {top_n}) "));
+                }
+                if !top_terms.is_empty() {
+                    let widget = top_terms_table(top_terms)
                         .row_highlight_style(highlight(focused))
                         .block(panel(title, focused));
                     frame.render_stateful_widget(widget, area, table);
@@ -297,9 +466,7 @@ impl Overview {
                 Line::from("Enter tries again."),
             ],
             None if has_postings => vec![
-                Line::from(format!(
-                    "Enter counts the terms and finds the top {TOP_TERMS}."
-                )),
+                Line::from(format!("Enter counts the terms and finds the top {top_n}.")),
                 Line::from("a does so for every field."),
             ],
             None => vec![Line::from("No postings: the field is not indexed.")],
@@ -464,7 +631,7 @@ const fn column(title: &'static str, right_aligned: bool) -> Column {
     }
 }
 
-const COLUMNS: [Column; 11] = [
+const COLUMNS: [Column; 12] = [
     column("#", true),
     column("Name", false),
     column("Postings", false),
@@ -473,12 +640,17 @@ const COLUMNS: [Column; 11] = [
     column("Points", false),
     column("Vector", false),
     column("Terms", true),
+    column("%", true),
     column("Docs", true),
     column("Σ doc freq", true),
     column("Σ term freq", true),
 ];
 
+const NUMBER_COLUMN: usize = 0;
 const NAME_COLUMN: usize = 1;
+const TERMS_COLUMN: usize = 7;
+/// A space and `▲` or `▼` after the title of the sorted column.
+const SORT_MARKER_WIDTH: usize = 2;
 const NAME_MIN_WIDTH: u16 = 16;
 const COLUMN_SPACING: u16 = 2;
 
@@ -511,7 +683,12 @@ fn cell<'a>(column: &Column, text: &'a str) -> Cell<'a> {
     })
 }
 
-fn field_cells(field: &IndexField, scan: Option<&FieldScan>) -> [String; COLUMNS.len()] {
+/// The cells of a field's row. `total_terms` is the number of terms of all fields, once known.
+fn field_cells(
+    field: &IndexField,
+    scan: Option<&FieldScan>,
+    total_terms: Option<i64>,
+) -> [String; COLUMNS.len()] {
     let points = if field.point_dimension_count == 0 {
         "-".to_owned()
     } else {
@@ -538,6 +715,15 @@ fn field_cells(field: &IndexField, scan: Option<&FieldScan>) -> [String; COLUMNS
         Some(FieldScan::Done { terms, .. }) => terms.unique_terms.to_string(),
         Some(FieldScan::Failed(_)) => "failed".to_owned(),
     };
+    // The share of all terms, as Luke shows it.
+    let share = match (scan, total_terms) {
+        _ if field.terms.is_none() => "-".to_owned(),
+        (Some(FieldScan::Done { terms, .. }), Some(total)) if total > 0 => {
+            format!("{:.2}", terms.unique_terms as f64 / total as f64 * 100.0)
+        }
+        (_, Some(_)) => "0.00".to_owned(),
+        (_, None) => "?".to_owned(),
+    };
     [
         field.number.to_string(),
         field.name.clone(),
@@ -547,6 +733,7 @@ fn field_cells(field: &IndexField, scan: Option<&FieldScan>) -> [String; COLUMNS
         points,
         vector,
         terms,
+        share,
         docs,
         sum_doc_freq,
         sum_total_term_freq,
@@ -703,7 +890,7 @@ mod tests {
             point_num_bytes: 4,
             ..field("price", 2)
         };
-        let mut overview = Overview::new(stats(vec![field("id", 0), body, price]));
+        let mut overview = Overview::new(stats(vec![field("id", 0), body, price]), 50);
 
         let screen = render(&mut overview, 120, 20);
 
@@ -729,7 +916,7 @@ mod tests {
 
     #[test]
     fn moves_the_selection_within_the_fields() {
-        let mut overview = Overview::new(stats((0..30).map(|i| field("f", i)).collect()));
+        let mut overview = Overview::new(stats((0..30).map(|i| field("f", i)).collect()), 50);
         render(&mut overview, 120, 30);
         assert_eq!(overview.fields.selected(), Some(0));
 
@@ -761,7 +948,7 @@ mod tests {
 
     #[test]
     fn hides_columns_that_do_not_fit() {
-        let mut overview = Overview::new(stats(vec![field("id", 0)]));
+        let mut overview = Overview::new(stats(vec![field("id", 0)]), 50);
 
         let screen = render(&mut overview, 60, 15);
 
@@ -771,7 +958,7 @@ mod tests {
 
     #[test]
     fn handles_index_without_fields() {
-        let mut overview = Overview::new(stats(Vec::new()));
+        let mut overview = Overview::new(stats(Vec::new()), 50);
 
         let screen = render(&mut overview, 80, 15);
 
@@ -781,18 +968,21 @@ mod tests {
 
     #[test]
     fn shows_term_count_and_top_terms_next_to_the_fields() {
-        let mut overview = Overview::new(stats(vec![indexed("body", 0), field("price", 1)]));
+        let mut overview = Overview::new(stats(vec![indexed("body", 0), field("price", 1)]), 50);
         overview.set_scan(
             "body",
-            Some(FieldScan::done(terms(
-                "body",
-                1234,
-                vec![
-                    top("red", false, 7),
-                    top("ff0041", true, 2),
-                    top("a\nb", false, 1),
-                ],
-            ))),
+            Some(FieldScan::done(
+                terms(
+                    "body",
+                    1234,
+                    vec![
+                        top("red", false, 7),
+                        top("ff0041", true, 2),
+                        top("a\nb", false, 1),
+                    ],
+                ),
+                50,
+            )),
         );
 
         let screen = render(&mut overview, 140, 30);
@@ -812,7 +1002,7 @@ mod tests {
 
     #[test]
     fn puts_the_terms_below_the_fields_when_narrow() {
-        let mut overview = Overview::new(stats(vec![indexed("body", 0)]));
+        let mut overview = Overview::new(stats(vec![indexed("body", 0)]), 50);
 
         let screen = render(&mut overview, 100, 30);
 
@@ -823,14 +1013,17 @@ mod tests {
 
     #[test]
     fn terms_column_shows_the_scan() {
-        let mut overview = Overview::new(stats(
-            ["none", "queued", "running", "failed"]
-                .iter()
-                .zip(0..)
-                .map(|(name, number)| indexed(name, number))
-                .chain([field("price", 4)])
-                .collect(),
-        ));
+        let mut overview = Overview::new(
+            stats(
+                ["none", "queued", "running", "failed"]
+                    .iter()
+                    .zip(0..)
+                    .map(|(name, number)| indexed(name, number))
+                    .chain([field("price", 4)])
+                    .collect(),
+            ),
+            50,
+        );
         overview.set_scan("queued", Some(FieldScan::Queued));
         overview.set_scan(
             "running",
@@ -858,7 +1051,7 @@ mod tests {
 
     #[test]
     fn terms_panel_says_what_to_do() {
-        let mut overview = Overview::new(stats(vec![indexed("body", 0), field("price", 1)]));
+        let mut overview = Overview::new(stats(vec![indexed("body", 0), field("price", 1)]), 50);
         assert!(
             render(&mut overview, 140, 30).contains("Enter counts the terms and finds the top 50.")
         );
@@ -880,14 +1073,17 @@ mod tests {
 
     #[test]
     fn tab_moves_the_focus_to_the_top_terms() {
-        let mut overview = Overview::new(stats(vec![indexed("body", 0), indexed("id", 1)]));
+        let mut overview = Overview::new(stats(vec![indexed("body", 0), indexed("id", 1)]), 50);
         overview.set_scan(
             "body",
-            Some(FieldScan::done(terms(
-                "body",
-                3,
-                vec![top("a", false, 3), top("b", false, 2), top("c", false, 1)],
-            ))),
+            Some(FieldScan::done(
+                terms(
+                    "body",
+                    3,
+                    vec![top("a", false, 3), top("b", false, 2), top("c", false, 1)],
+                ),
+                50,
+            )),
         );
         let terms_selection = |overview: &Overview| match overview.scan("body") {
             Some(FieldScan::Done { table, .. }) => table.selected(),
@@ -909,7 +1105,7 @@ mod tests {
 
     #[test]
     fn selected_field_is_clamped_before_rendering() {
-        let mut overview = Overview::new(stats(vec![indexed("a", 0), indexed("b", 1)]));
+        let mut overview = Overview::new(stats(vec![indexed("a", 0), indexed("b", 1)]), 50);
 
         overview.handle_key(KeyCode::End);
 
@@ -917,22 +1113,153 @@ mod tests {
             overview.selected_field().map(|field| field.name.as_str()),
             Some("b")
         );
-        assert!(Overview::new(stats(Vec::new())).selected_field().is_none());
+        assert!(
+            Overview::new(stats(Vec::new()), 50)
+                .selected_field()
+                .is_none()
+        );
     }
 
     #[test]
-    fn lists_unscanned_fields_with_postings() {
-        let mut overview = Overview::new(stats(vec![
-            indexed("a", 0),
-            field("b", 1),
-            indexed("c", 2),
-            indexed("d", 3),
-            indexed("e", 4),
-        ]));
-        overview.set_scan("c", Some(FieldScan::done(terms("c", 0, Vec::new()))));
+    fn lists_the_fields_to_scan() {
+        let mut overview = Overview::new(
+            stats(vec![
+                indexed("a", 0),
+                field("b", 1),
+                indexed("c", 2),
+                indexed("d", 3),
+                indexed("e", 4),
+            ]),
+            50,
+        );
+        overview.set_scan("c", Some(FieldScan::done(terms("c", 0, Vec::new()), 50)));
         overview.set_scan("d", Some(FieldScan::Failed("boom".to_owned())));
         overview.set_scan("e", Some(FieldScan::Queued));
 
-        assert_eq!(overview.unscanned_fields(), ["a", "d"]);
+        assert_eq!(overview.fields_to_scan(), ["a", "d"]);
+    }
+
+    /// The field names in table order.
+    fn names(overview: &Overview) -> Vec<&str> {
+        overview
+            .order
+            .iter()
+            .map(|&index| overview.stats.fields[index].name.as_str())
+            .collect()
+    }
+
+    fn done(overview: &mut Overview, field: &str, unique_terms: i64) {
+        overview.set_scan(
+            field,
+            Some(FieldScan::done(terms(field, unique_terms, Vec::new()), 50)),
+        );
+    }
+
+    #[test]
+    fn sorts_by_number_name_and_term_count() {
+        let mut overview = Overview::new(
+            stats(vec![
+                indexed("c", 0),
+                indexed("a", 1),
+                field("d", 2),
+                indexed("b", 3),
+                indexed("e", 4),
+            ]),
+            50,
+        );
+        done(&mut overview, "c", 5);
+        done(&mut overview, "a", 9);
+        done(&mut overview, "e", 5);
+        assert_eq!(names(&overview), ["c", "a", "d", "b", "e"]);
+        assert!(render(&mut overview, 140, 30).contains("# ▲"));
+
+        overview.handle_key(KeyCode::Char('S'));
+        assert_eq!(names(&overview), ["e", "b", "d", "a", "c"]);
+
+        overview.handle_key(KeyCode::Char('s'));
+        assert_eq!(names(&overview), ["a", "b", "c", "d", "e"]);
+        assert!(render(&mut overview, 140, 30).contains("Name ▲"));
+
+        // The largest count first; equal counts by number; fields without a count last.
+        overview.handle_key(KeyCode::Char('s'));
+        assert_eq!(names(&overview), ["a", "c", "e", "d", "b"]);
+        assert!(render(&mut overview, 140, 30).contains("Terms ▼"));
+        overview.handle_key(KeyCode::Char('S'));
+        assert_eq!(names(&overview), ["c", "e", "a", "d", "b"]);
+
+        // A new count moves its field.
+        done(&mut overview, "b", 1);
+        assert_eq!(names(&overview), ["b", "c", "e", "a", "d"]);
+
+        overview.handle_key(KeyCode::Char('s'));
+        assert_eq!(names(&overview), ["c", "a", "d", "b", "e"]);
+    }
+
+    #[test]
+    fn the_selection_stays_on_its_field_when_the_rows_move() {
+        let mut overview = Overview::new(stats(vec![indexed("b", 0), indexed("a", 1)]), 50);
+        overview.handle_key(KeyCode::Down);
+        assert_eq!(overview.selected_field().unwrap().name, "a");
+
+        overview.handle_key(KeyCode::Char('s'));
+
+        assert_eq!(overview.fields.selected(), Some(0));
+        assert_eq!(overview.selected_field().unwrap().name, "a");
+    }
+
+    #[test]
+    fn shows_the_share_of_all_terms_once_every_field_is_counted() {
+        let mut overview = Overview::new(
+            stats(vec![
+                indexed("body", 0),
+                indexed("id", 1),
+                field("price", 2),
+            ]),
+            50,
+        );
+        done(&mut overview, "body", 3);
+        let screen = render(&mut overview, 140, 30);
+        assert!(row(&screen, "body").contains("  3  ?  "), "{screen}");
+
+        done(&mut overview, "id", 1);
+        let screen = render(&mut overview, 140, 30);
+        assert!(row(&screen, "body").contains("  3  75.00  "), "{screen}");
+        assert!(row(&screen, "id").contains("  1  25.00  "), "{screen}");
+        assert!(row(&screen, "price").contains("  -      -  "), "{screen}");
+    }
+
+    #[test]
+    fn steps_the_number_of_top_terms() {
+        assert_eq!(step_top_terms(50, true), 100);
+        assert_eq!(step_top_terms(50, false), 20);
+        assert_eq!(step_top_terms(10, false), 10);
+        assert_eq!(step_top_terms(1000, true), 1000);
+    }
+
+    #[test]
+    fn shows_at_most_the_top_n_and_rescans_for_more() {
+        let three = vec![top("a", false, 3), top("b", false, 2), top("c", false, 1)];
+        let mut overview = Overview::new(stats(vec![indexed("body", 0), indexed("id", 1)]), 3);
+        overview.set_scan(
+            "body",
+            Some(FieldScan::done(terms("body", 10, three.clone()), 3)),
+        );
+        // Every term of the field is in.
+        overview.set_scan("id", Some(FieldScan::done(terms("id", 3, three), 3)));
+        assert!(overview.fields_to_scan().is_empty());
+
+        overview.set_top_n(2);
+        let screen = render(&mut overview, 140, 30);
+        assert!(screen.contains("body: 10 terms, top 2 "), "{screen}");
+        assert!(!screen.contains("3     4  c"), "{screen}");
+        assert!(overview.fields_to_scan().is_empty());
+
+        overview.set_top_n(5);
+        let screen = render(&mut overview, 140, 30);
+        assert!(
+            screen.contains("body: 10 terms, top 3 (⏎ top 5)"),
+            "{screen}"
+        );
+        assert_eq!(overview.fields_to_scan(), ["body"]);
     }
 }
