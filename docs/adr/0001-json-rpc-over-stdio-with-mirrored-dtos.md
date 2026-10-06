@@ -48,4 +48,4 @@ Requirements:
 - Every protocol change touches four places at once: Java DTO, Rust DTO, fixtures and tests (see the hard rules in `AGENTS.md`).
 - DTOs are hand-written twice. That's acceptable at the expected protocol size, and drift fails CI instead of failing at runtime.
 - The protocol can be exercised manually by piping a fixture into `java -jar leia-server.jar`.
-- Long-running operations (e.g. check index, top terms on large indexes) will need a cancellation/progress mechanism later. That will be its own ADR, likely using JSON-RPC notifications.
+- Long-running operations (e.g. check index, top terms on large indexes) need a cancellation/progress mechanism. ADR 0005 settles it with polled server jobs instead of notifications.

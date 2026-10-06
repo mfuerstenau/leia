@@ -26,7 +26,11 @@ public enum ErrorCode {
     /** The method needs an open index, and none is open. */
     NO_INDEX_OPEN(-32004),
     /** The index can't be read: no permission, or another I/O error. */
-    INDEX_NOT_READABLE(-32005);
+    INDEX_NOT_READABLE(-32005),
+    /** The open index has no field of that name. */
+    FIELD_NOT_FOUND(-32006),
+    /** No such job: the id is unknown, the job was cancelled, or its outcome was already fetched. */
+    JOB_NOT_FOUND(-32007);
 
     private final int code;
 

@@ -9,7 +9,9 @@
 mod envelope;
 mod error;
 pub mod index;
+pub mod job;
 mod method;
+pub mod terms;
 pub mod version;
 
 pub use envelope::{JsonRpcVersion, Request, Response, RpcError};

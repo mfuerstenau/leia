@@ -7,6 +7,8 @@
 //! ```
 
 use std::env;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use leia::client::CallError;
 use leia::java::find_java;
@@ -14,6 +16,10 @@ use leia::protocol::ErrorCode;
 use leia::protocol::index::{
     CloseIndex, CloseIndexParams, DocValuesType, GetIndexStats, GetIndexStatsParams, IndexOptions,
     OpenIndex, OpenIndexParams,
+};
+use leia::protocol::job::{CancelJob, JobParams};
+use leia::protocol::terms::{
+    FieldTerms, GetFieldTermScan, StartFieldTermScan, StartFieldTermScanParams, TopTerm,
 };
 use leia::protocol::version::{Version, VersionParams};
 use leia::server::{SERVER_JAR_ENV, SHUTDOWN_TIMEOUT, Server, find_server_jar};
@@ -204,4 +210,103 @@ fn closes_the_open_index() {
         matches!(&error, CallError::Rpc(e) if e.code == ErrorCode::NoIndexOpen),
         "{error:?}"
     );
+}
+
+fn top(term: &str, doc_freq: i32) -> TopTerm {
+    TopTerm {
+        term: term.to_owned(),
+        binary: false,
+        doc_freq,
+        total_term_freq: i64::from(doc_freq),
+    }
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn scans_the_terms_of_a_field() {
+    let mut server = start();
+    server
+        .call::<OpenIndex>(OpenIndexParams {
+            path: lucene9_index(),
+        })
+        .unwrap();
+
+    let job = server
+        .call::<StartFieldTermScan>(StartFieldTermScanParams {
+            field: "body".to_owned(),
+            top_n: 3,
+        })
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let terms = loop {
+        let poll = server
+            .call::<GetFieldTermScan>(JobParams { job_id: job.job_id })
+            .unwrap();
+        if let Some(terms) = poll.terms {
+            break terms;
+        }
+        assert!(Instant::now() < deadline, "the scan did not finish");
+        thread::sleep(Duration::from_millis(10));
+    };
+
+    // "document number N" for N = 1..3; the deleted document 2 still counts.
+    assert_eq!(
+        terms,
+        FieldTerms {
+            field: "body".to_owned(),
+            unique_terms: 5,
+            top_terms: vec![top("document", 3), top("number", 3), top("1", 1)],
+        }
+    );
+    let gone = server
+        .call::<GetFieldTermScan>(JobParams { job_id: job.job_id })
+        .unwrap_err();
+    assert!(
+        matches!(&gone, CallError::Rpc(e) if e.code == ErrorCode::JobNotFound),
+        "{gone:?}"
+    );
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn cancels_a_scan_and_rejects_an_unknown_field() {
+    let mut server = start();
+    server
+        .call::<OpenIndex>(OpenIndexParams {
+            path: lucene9_index(),
+        })
+        .unwrap();
+
+    let unknown = server
+        .call::<StartFieldTermScan>(StartFieldTermScanParams {
+            field: "bdy".to_owned(),
+            top_n: 3,
+        })
+        .unwrap_err();
+    assert!(
+        matches!(&unknown, CallError::Rpc(e) if e.code == ErrorCode::FieldNotFound),
+        "{unknown:?}"
+    );
+
+    let job = server
+        .call::<StartFieldTermScan>(StartFieldTermScanParams {
+            field: "id".to_owned(),
+            top_n: 3,
+        })
+        .unwrap();
+    // The scan of three terms may be done already; either way the job is gone afterwards.
+    server
+        .call::<CancelJob>(JobParams { job_id: job.job_id })
+        .unwrap();
+    let gone = server
+        .call::<GetFieldTermScan>(JobParams { job_id: job.job_id })
+        .unwrap_err();
+    assert!(
+        matches!(&gone, CallError::Rpc(e) if e.code == ErrorCode::JobNotFound),
+        "{gone:?}"
+    );
+    let again = server
+        .call::<CancelJob>(JobParams { job_id: job.job_id })
+        .unwrap();
+    assert!(!again.cancelled);
 }

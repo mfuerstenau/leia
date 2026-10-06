@@ -43,6 +43,7 @@ Dependency direction: `leia-server → leia-protocol`, `leia-server → leia-cor
    Both test suites deserialize each fixture, re-serialize it and compare it to the fixture as JSON, so drift fails the build. Optional fields are `Optional*` in Java and `Option<T>` in Rust. Every other field is required. See ADR 0001 and ADR 0003.
 5. **Lucene 9 and 10 indexes must open.** Keep `lucene-backward-codecs` on the server classpath and keep a test that opens a Lucene 9 index.
 6. **Keep core Lucene-only.** UI concepts belong in the TUI, and wire concepts belong in protocol/server.
+7. **Long-running work is a job** (ADR 0005). Anything that can take long (a term scan, check index, …) runs as a server job behind `start<Op>` / `get<Op>`, with `cancelJob` to stop it, and never blocks the request loop. Cancellation is cooperative through `ScanProgress`: never call `Thread.interrupt` on a thread that reads an index (it breaks `NIOFSDirectory`).
 
 ## Tech stack
 

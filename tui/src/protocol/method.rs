@@ -4,6 +4,8 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use super::index::{CloseIndex, GetIndexStats, OpenIndex};
+use super::job::CancelJob;
+use super::terms::{GetFieldTermScan, StartFieldTermScan};
 use super::version::Version;
 
 /// One JSON-RPC method: its name and the DTOs of its params and result.
@@ -19,4 +21,7 @@ pub const METHOD_NAMES: &[&str] = &[
     OpenIndex::NAME,
     GetIndexStats::NAME,
     CloseIndex::NAME,
+    StartFieldTermScan::NAME,
+    GetFieldTermScan::NAME,
+    CancelJob::NAME,
 ];

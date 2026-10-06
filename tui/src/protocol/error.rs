@@ -24,10 +24,14 @@ pub enum ErrorCode {
     NoIndexOpen,
     /// The index can't be read: no permission, or another I/O error.
     IndexNotReadable,
+    /// The open index has no field of that name.
+    FieldNotFound,
+    /// No such job: the id is unknown, the job was cancelled, or its outcome was already fetched.
+    JobNotFound,
 }
 
 impl ErrorCode {
-    pub const ALL: [ErrorCode; 11] = [
+    pub const ALL: [ErrorCode; 13] = [
         ErrorCode::ParseError,
         ErrorCode::InvalidRequest,
         ErrorCode::MethodNotFound,
@@ -39,6 +43,8 @@ impl ErrorCode {
         ErrorCode::CorruptIndex,
         ErrorCode::NoIndexOpen,
         ErrorCode::IndexNotReadable,
+        ErrorCode::FieldNotFound,
+        ErrorCode::JobNotFound,
     ];
 
     pub const fn code(self) -> i32 {
@@ -54,6 +60,8 @@ impl ErrorCode {
             ErrorCode::CorruptIndex => -32003,
             ErrorCode::NoIndexOpen => -32004,
             ErrorCode::IndexNotReadable => -32005,
+            ErrorCode::FieldNotFound => -32006,
+            ErrorCode::JobNotFound => -32007,
         }
     }
 
@@ -71,6 +79,8 @@ impl ErrorCode {
             ErrorCode::CorruptIndex => "CORRUPT_INDEX",
             ErrorCode::NoIndexOpen => "NO_INDEX_OPEN",
             ErrorCode::IndexNotReadable => "INDEX_NOT_READABLE",
+            ErrorCode::FieldNotFound => "FIELD_NOT_FOUND",
+            ErrorCode::JobNotFound => "JOB_NOT_FOUND",
         }
     }
 }

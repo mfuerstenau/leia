@@ -51,8 +51,17 @@ leia --java /opt/jdk-25 /var/lib/solr/products/data/index
 |---|---|
 | `o` | open an index: type a path, `Tab` completes directories, `~` is your home directory, `Enter` opens and `Esc` cancels |
 | `c` | close the open index |
-| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the field table |
-| `q`, `Esc`, `Ctrl+C` | quit |
+| `Enter` | count the terms of the selected field and find its top 50 terms by document frequency |
+| `a` | do so for every field with postings, one after another |
+| `Tab` | switch between the field table and the top terms |
+| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the field table or the top terms |
+| `Esc` | stop the running term scans; with none running, quit |
+| `q`, `Ctrl+C` | quit |
+
+Counting terms reads every term of the field, which can take a while on a large index. The scan
+runs in the server while leia shows its progress, and `Esc` stops it. Once every field has been
+counted, the field table's title shows the total. Like Lucene's own statistics, the counts include
+deleted documents that no merge has removed yet.
 
 If an index can't be opened, the prompt shows why (not found, not an index, unsupported format,
 corrupt, not readable) and keeps the path, so you can fix it. The index that was open before

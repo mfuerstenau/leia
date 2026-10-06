@@ -1,7 +1,8 @@
 //! The application state: what is on screen and what a key does. It makes no calls itself:
 //! [`App::handle_key`] returns an [`Action`], the caller makes the RPC calls and reports back with
-//! [`App::opened`], [`App::open_failed`] or [`App::closed`].
+//! [`App::opened`], [`App::open_failed`], [`App::closed`] or the `scan_*` methods.
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
 
 use ratatui::Frame;
@@ -11,9 +12,10 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Paragraph};
 
 use crate::build_info::{LEIA, java_line, server_line};
-use crate::overview::Overview;
+use crate::overview::{FieldScan, Overview};
 use crate::prompt::{PathPrompt, PromptEvent, expand_home};
 use crate::protocol::index::GetIndexStatsResult;
+use crate::protocol::terms::GetFieldTermScanResult;
 use crate::protocol::version::VersionResult;
 
 /// What the caller has to do after a key.
@@ -25,6 +27,18 @@ pub enum Action {
     Open(String),
     /// Close the open index.
     Close,
+    /// Start the term scan of this field, and report back with [`App::scan_started`] or
+    /// [`App::scan_failed`].
+    StartScan(String),
+    /// Cancel this scan job, and report back with [`App::scan_cancelled`].
+    CancelScan(i64),
+}
+
+/// The scan that runs in the server. There is at most one; the others wait in the queue.
+struct RunningScan {
+    field: String,
+    /// `None` until the server has started the job.
+    job_id: Option<i64>,
 }
 
 pub struct App {
@@ -33,6 +47,9 @@ pub struct App {
     home: Option<PathBuf>,
     overview: Option<Overview>,
     prompt: Option<PathPrompt>,
+    scan: Option<RunningScan>,
+    /// Fields whose scan waits for the running one.
+    queue: VecDeque<String>,
 }
 
 impl App {
@@ -42,6 +59,8 @@ impl App {
             home,
             overview: None,
             prompt: None,
+            scan: None,
+            queue: VecDeque::new(),
         }
     }
 
@@ -56,9 +75,11 @@ impl App {
         self.prompt = Some(prompt);
     }
 
+    /// Shows the new index. The server stopped the scans of the previous one.
     pub fn opened(&mut self, stats: GetIndexStatsResult) {
         self.overview = Some(Overview::new(stats));
         self.prompt = None;
+        self.forget_scans();
     }
 
     /// Shows `error` in the prompt, which keeps the path, so it can be corrected.
@@ -68,8 +89,106 @@ impl App {
             .set_error(error);
     }
 
+    /// The server stopped the scans of the closed index.
     pub fn closed(&mut self) {
         self.overview = None;
+        self.forget_scans();
+    }
+
+    fn forget_scans(&mut self) {
+        self.scan = None;
+        self.queue.clear();
+    }
+
+    /// The job to poll, while a scan runs.
+    pub fn polling(&self) -> Option<i64> {
+        self.scan.as_ref().and_then(|scan| scan.job_id)
+    }
+
+    pub fn scan_started(&mut self, job_id: i64) {
+        if let Some(scan) = &mut self.scan {
+            scan.job_id = Some(job_id);
+        }
+    }
+
+    /// Shows the progress of the running scan, or its outcome. Returns the next scan to start,
+    /// once this one is done.
+    pub fn scan_progress(&mut self, result: GetFieldTermScanResult) -> Option<Action> {
+        let field = self.scan.as_ref()?.field.clone();
+        let overview = self.overview.as_mut()?;
+        match result.terms {
+            Some(terms) => {
+                overview.set_scan(&field, Some(FieldScan::done(terms)));
+                self.scan = None;
+                self.start_next_scan()
+            }
+            None => {
+                overview.set_scan(
+                    &field,
+                    Some(FieldScan::Running {
+                        terms_scanned: result.terms_scanned,
+                    }),
+                );
+                None
+            }
+        }
+    }
+
+    /// Shows why the running scan failed. Returns the next scan to start.
+    pub fn scan_failed(&mut self, error: String) -> Option<Action> {
+        let scan = self.scan.take()?;
+        if let Some(overview) = &mut self.overview {
+            overview.set_scan(&scan.field, Some(FieldScan::Failed(error)));
+        }
+        self.start_next_scan()
+    }
+
+    /// Forgets the cancelled scan and the queued ones.
+    pub fn scan_cancelled(&mut self) {
+        let fields = self.scan.take().map(|scan| scan.field);
+        if let Some(overview) = &mut self.overview {
+            for field in fields.iter().chain(&self.queue) {
+                overview.set_scan(field, None);
+            }
+        }
+        self.queue.clear();
+    }
+
+    /// Queues the scans of `fields`, and returns the scan to start if none runs.
+    fn request_scans(&mut self, fields: Vec<String>) -> Option<Action> {
+        let overview = self.overview.as_mut()?;
+        for field in fields {
+            overview.set_scan(&field, Some(FieldScan::Queued));
+            self.queue.push_back(field);
+        }
+        if self.scan.is_some() {
+            return None;
+        }
+        self.start_next_scan()
+    }
+
+    fn start_next_scan(&mut self) -> Option<Action> {
+        let field = self.queue.pop_front()?;
+        if let Some(overview) = &mut self.overview {
+            overview.set_scan(&field, Some(FieldScan::Running { terms_scanned: 0 }));
+        }
+        self.scan = Some(RunningScan {
+            field: field.clone(),
+            job_id: None,
+        });
+        Some(Action::StartScan(field))
+    }
+
+    /// The selected field, if Enter can scan it: it has postings and no scan, or a failed one.
+    fn scannable_selected_field(&self) -> Option<String> {
+        let overview = self.overview.as_ref()?;
+        let field = overview.selected_field()?;
+        let scannable = field.terms.is_some()
+            && matches!(
+                overview.scan(&field.name),
+                None | Some(FieldScan::Failed(_))
+            );
+        scannable.then(|| field.name.clone())
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<Action> {
@@ -90,7 +209,23 @@ impl App {
             };
         }
         match key.code {
+            // Esc stops the scans first, and quits only when there are none.
+            KeyCode::Esc if self.scan.is_some() => match self.polling() {
+                Some(job_id) => Some(Action::CancelScan(job_id)),
+                None => {
+                    self.scan_cancelled();
+                    None
+                }
+            },
             KeyCode::Char('q') | KeyCode::Esc => Some(Action::Quit),
+            KeyCode::Enter => {
+                let field = self.scannable_selected_field()?;
+                self.request_scans(vec![field])
+            }
+            KeyCode::Char('a') => {
+                let fields = self.overview.as_ref()?.unscanned_fields();
+                self.request_scans(fields)
+            }
             KeyCode::Char('o') => {
                 // Starts from the open index, so a sibling is a Ctrl+W away.
                 let path = self.overview.as_ref().map_or("", Overview::path);
@@ -113,7 +248,13 @@ impl App {
         let keys = match &mut self.overview {
             Some(overview) => {
                 overview.render(frame, body);
-                Line::from(" q quit   o open   c close   ↑↓ PgUp PgDn Home End  fields")
+                if self.scan.is_some() {
+                    Line::from(" Esc cancel scan   q quit   o open   c close   Tab panel   ↑↓")
+                } else {
+                    Line::from(
+                        " q quit   o open   c close   ⏎ terms   a all terms   Tab panel   ↑↓",
+                    )
+                }
             }
             None => {
                 let lines = vec![
@@ -150,6 +291,8 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
+    use crate::protocol::index::{DocValuesType, IndexField, IndexOptions, TermStats};
+    use crate::protocol::terms::FieldTerms;
     use crate::protocol::version::JavaRuntime;
 
     fn version() -> VersionResult {
@@ -182,6 +325,66 @@ mod tests {
             user_data: BTreeMap::new(),
             fields: Vec::new(),
         }
+    }
+
+    fn field(name: &str, number: i32, has_postings: bool) -> IndexField {
+        IndexField {
+            name: name.to_owned(),
+            number,
+            index_options: if has_postings {
+                IndexOptions::Docs
+            } else {
+                IndexOptions::None
+            },
+            has_norms: false,
+            has_payloads: false,
+            has_term_vectors: false,
+            doc_values_type: DocValuesType::None,
+            point_dimension_count: 0,
+            point_num_bytes: 0,
+            vector_dimension: 0,
+            terms: has_postings.then_some(TermStats {
+                doc_count: 1,
+                sum_doc_freq: 1,
+                sum_total_term_freq: 1,
+            }),
+        }
+    }
+
+    /// An index with the fields `id` and `body`, which have postings, and `rank`, which has none.
+    fn app_with_fields() -> App {
+        let mut app = App::new(version(), None);
+        app.opened(GetIndexStatsResult {
+            fields: vec![
+                field("id", 0, true),
+                field("body", 1, true),
+                field("rank", 2, false),
+            ],
+            ..stats("/data/idx")
+        });
+        app
+    }
+
+    fn running(terms_scanned: i64) -> GetFieldTermScanResult {
+        GetFieldTermScanResult {
+            terms_scanned,
+            terms: None,
+        }
+    }
+
+    fn done(field: &str, unique_terms: i64) -> GetFieldTermScanResult {
+        GetFieldTermScanResult {
+            terms_scanned: unique_terms,
+            terms: Some(FieldTerms {
+                field: field.to_owned(),
+                unique_terms,
+                top_terms: Vec::new(),
+            }),
+        }
+    }
+
+    fn start(field: &str) -> Option<Action> {
+        Some(Action::StartScan(field.to_owned()))
     }
 
     fn key(code: KeyCode) -> KeyEvent {
@@ -318,5 +521,93 @@ mod tests {
             app.handle_key(key(KeyCode::Enter)),
             Some(Action::Open("/data/idx".to_owned()))
         );
+    }
+
+    #[test]
+    fn scans_the_selected_field_and_polls_it() {
+        let mut app = app_with_fields();
+
+        assert_eq!(app.handle_key(key(KeyCode::Enter)), start("id"));
+        assert_eq!(app.polling(), None);
+        app.scan_started(7);
+        assert_eq!(app.polling(), Some(7));
+
+        assert_eq!(app.scan_progress(running(1024)), None);
+        let screen = render(&mut app);
+        assert!(screen.contains("1024…"), "{screen}");
+        assert!(screen.contains("Esc cancel scan"), "{screen}");
+        // A running scan is not started again.
+        assert_eq!(app.handle_key(key(KeyCode::Enter)), None);
+
+        assert_eq!(app.scan_progress(done("id", 3)), None);
+        assert_eq!(app.polling(), None);
+        assert!(render(&mut app).contains("id: 3 terms, top 0"));
+    }
+
+    #[test]
+    fn scans_all_fields_one_after_another() {
+        let mut app = app_with_fields();
+
+        assert_eq!(app.handle_key(key(KeyCode::Char('a'))), start("id"));
+        app.scan_started(1);
+        assert!(render(&mut app).contains("queued"));
+
+        assert_eq!(app.scan_progress(done("id", 3)), start("body"));
+        app.scan_started(2);
+        assert_eq!(app.scan_failed("Cannot read".to_owned()), None);
+        assert_eq!(app.polling(), None);
+        assert!(render(&mut app).contains("failed"));
+
+        // A failed field is scanned again; the others are done or have no postings.
+        assert_eq!(app.handle_key(key(KeyCode::Char('a'))), start("body"));
+    }
+
+    #[test]
+    fn a_scan_the_server_refuses_starts_the_next() {
+        let mut app = app_with_fields();
+        assert_eq!(app.handle_key(key(KeyCode::Char('a'))), start("id"));
+
+        assert_eq!(app.scan_failed("No field 'id'".to_owned()), start("body"));
+    }
+
+    #[test]
+    fn esc_cancels_the_scans_before_it_quits() {
+        let mut app = app_with_fields();
+        app.handle_key(key(KeyCode::Char('a')));
+        app.scan_started(3);
+
+        assert_eq!(
+            app.handle_key(key(KeyCode::Esc)),
+            Some(Action::CancelScan(3))
+        );
+        app.scan_cancelled();
+
+        assert_eq!(app.polling(), None);
+        let screen = render(&mut app);
+        assert!(!screen.contains("queued"), "{screen}");
+        assert!(!screen.contains('…'), "{screen}");
+        assert_eq!(app.handle_key(key(KeyCode::Esc)), Some(Action::Quit));
+    }
+
+    #[test]
+    fn enter_ignores_a_field_without_postings() {
+        let mut app = app_with_fields();
+        app.handle_key(key(KeyCode::End));
+
+        assert_eq!(app.handle_key(key(KeyCode::Enter)), None);
+        assert_eq!(app.polling(), None);
+    }
+
+    #[test]
+    fn opening_another_index_forgets_the_scans() {
+        let mut app = app_with_fields();
+        app.handle_key(key(KeyCode::Char('a')));
+        app.scan_started(4);
+
+        app.opened(stats("/data/other"));
+
+        assert_eq!(app.polling(), None);
+        assert_eq!(app.scan_progress(done("id", 1)), None);
+        assert_eq!(app.handle_key(key(KeyCode::Esc)), Some(Action::Quit));
     }
 }

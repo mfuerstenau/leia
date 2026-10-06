@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 4,
+  "method": "startFieldTermScan",
+  "params": {
+    "field": "body",
+    "topN": 50
+  }
+}

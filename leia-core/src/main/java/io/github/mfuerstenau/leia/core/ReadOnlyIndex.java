@@ -1,5 +1,6 @@
 package io.github.mfuerstenau.leia.core;
 
+import io.github.mfuerstenau.leia.core.FieldTerms.TopTerm;
 import io.github.mfuerstenau.leia.core.IndexOpenException.Reason;
 import java.io.Closeable;
 import java.io.EOFException;
@@ -14,6 +15,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.concurrent.CancellationException;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.FieldInfo;
@@ -24,10 +26,13 @@ import org.apache.lucene.index.IndexNotFoundException;
 import org.apache.lucene.index.MultiTerms;
 import org.apache.lucene.index.SegmentInfos;
 import org.apache.lucene.index.Terms;
+import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.store.NoLockFactory;
+import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.IOUtils;
+import org.apache.lucene.util.PriorityQueue;
 
 /**
  * A Lucene index opened for reading only: a {@link DirectoryReader} on the latest commit, never an
@@ -36,15 +41,20 @@ import org.apache.lucene.util.IOUtils;
  */
 public final class ReadOnlyIndex implements Closeable {
 
+    /** How many terms {@link #fieldTerms} scans between two progress reports. */
+    public static final int PROGRESS_INTERVAL = 1024;
+
     private final Directory directory;
     private final DirectoryReader reader;
     private final SegmentInfos commit;
+    private final FieldInfos fieldInfos;
     private final IndexSummary summary;
 
     private ReadOnlyIndex(Directory directory, DirectoryReader reader, SegmentInfos commit, IndexSummary summary) {
         this.directory = directory;
         this.reader = reader;
         this.commit = commit;
+        this.fieldInfos = FieldInfos.getMergedFieldInfos(reader);
         this.summary = summary;
     }
 
@@ -138,7 +148,7 @@ public final class ReadOnlyIndex implements Closeable {
      */
     public IndexStats stats() throws IOException {
         List<FieldStats> fields = new ArrayList<>();
-        for (FieldInfo field : FieldInfos.getMergedFieldInfos(reader)) {
+        for (FieldInfo field : fieldInfos) {
             fields.add(fieldStats(field));
         }
         fields.sort(Comparator.comparingInt(FieldStats::number));
@@ -171,6 +181,81 @@ public final class ReadOnlyIndex implements Closeable {
                 field.getPointNumBytes(),
                 field.getVectorDimension(),
                 termStats);
+    }
+
+    /** Whether any segment of the index has a field called {@code name}. */
+    public boolean hasField(String name) {
+        return fieldInfos.fieldInfo(name) != null;
+    }
+
+    /**
+     * Counts the distinct terms of a field and finds its {@code topN} terms with the highest document
+     * frequency, in one pass over the field's terms. A field without postings has no terms. With
+     * {@code topN} 0 on an index with one segment, the count comes from the segment, without a scan.
+     *
+     * <p>{@code progress} gets the number of terms scanned every {@value #PROGRESS_INTERVAL} terms and
+     * at the end; it can stop the scan by throwing a {@link CancellationException}. The scan runs in
+     * the calling thread and may take long on a large field.
+     *
+     * @throws IllegalArgumentException if the index has no such field, or {@code topN} is negative
+     * @throws IOException if reading the terms fails
+     */
+    public FieldTerms fieldTerms(String field, int topN, ScanProgress progress) throws IOException {
+        if (!hasField(field)) {
+            throw new IllegalArgumentException("No field " + field);
+        }
+        if (topN < 0) {
+            throw new IllegalArgumentException("topN must not be negative: " + topN);
+        }
+        Terms terms = MultiTerms.getTerms(reader, field);
+        if (terms == null) {
+            progress.scanned(0);
+            return new FieldTerms(field, 0, List.of());
+        }
+        long size = terms.size();
+        if (topN == 0 && size >= 0) {
+            progress.scanned(size);
+            return new FieldTerms(field, size, List.of());
+        }
+
+        TopTermsQueue top = new TopTermsQueue(topN);
+        TermsEnum termsEnum = terms.iterator();
+        long scanned = 0;
+        for (BytesRef term = termsEnum.next(); term != null; term = termsEnum.next()) {
+            scanned++;
+            if (topN > 0) {
+                int docFreq = termsEnum.docFreq();
+                // Terms come in order, so a tie with the weakest top term loses: the earlier term stays.
+                if (top.size() < topN || docFreq > top.top().docFreq()) {
+                    top.insertWithOverflow(new TopTerm(BytesRef.deepCopyOf(term), docFreq, termsEnum.totalTermFreq()));
+                }
+            }
+            if (scanned % PROGRESS_INTERVAL == 0) {
+                progress.scanned(scanned);
+            }
+        }
+        progress.scanned(scanned);
+
+        TopTerm[] topTerms = new TopTerm[top.size()];
+        for (int i = topTerms.length - 1; i >= 0; i--) {
+            topTerms[i] = top.pop();
+        }
+        return new FieldTerms(field, scanned, List.of(topTerms));
+    }
+
+    /** The weakest top term on top: the lowest document frequency, then the latest term. */
+    private static final class TopTermsQueue extends PriorityQueue<TopTerm> {
+
+        TopTermsQueue(int size) {
+            super(size);
+        }
+
+        @Override
+        protected boolean lessThan(TopTerm a, TopTerm b) {
+            return a.docFreq() != b.docFreq()
+                    ? a.docFreq() < b.docFreq()
+                    : a.term().compareTo(b.term()) > 0;
+        }
     }
 
     /** The reader on the opened commit. It stays valid until this index is closed. */

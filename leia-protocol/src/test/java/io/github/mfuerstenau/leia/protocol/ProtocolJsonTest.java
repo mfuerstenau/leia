@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
+import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
 import io.github.mfuerstenau.leia.protocol.version.JavaRuntime;
 import io.github.mfuerstenau.leia.protocol.version.VersionParams;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
@@ -155,6 +156,16 @@ class ProtocolJsonTest {
                 .isInstanceOf(JacksonException.class);
         assertThatThrownBy(() -> MAPPER.readValue("[null]", new TypeReference<List<String>>() {}))
                 .isInstanceOf(JacksonException.class);
+    }
+
+    @Test
+    void writesRunningScanWithoutTerms() {
+        GetFieldTermScanResult running = new GetFieldTermScanResult(2048, Optional.empty());
+
+        String json = MAPPER.writeValueAsString(running);
+
+        assertThat(json).isEqualTo("{\"termsScanned\":2048}");
+        assertThat(MAPPER.readValue(json, GetFieldTermScanResult.class)).isEqualTo(running);
     }
 
     private static void assertRejected(String request) {

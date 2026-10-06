@@ -13,6 +13,7 @@ import io.github.mfuerstenau.leia.protocol.Response;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.job.Jobs;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -35,7 +36,7 @@ class OpenIndexHandlerTest {
     @TempDir
     Path tmp;
 
-    private final CurrentIndex currentIndex = new CurrentIndex();
+    private final CurrentIndex currentIndex = new CurrentIndex(new Jobs());
     private final OpenIndexHandler handler = new OpenIndexHandler(currentIndex);
 
     @Test

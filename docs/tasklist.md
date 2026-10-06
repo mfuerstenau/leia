@@ -11,6 +11,7 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 - [x] ADR 0002: Java build conventions
 - [x] ADR 0003: typed JSON-RPC envelope and DTO conventions
 - [x] ADR 0004: release platforms (Linux, Windows) and distribution (folders, no bundled Java)
+- [x] ADR 0005: long-running operations as polled server jobs (`start<Op>` / `get<Op>` / `cancelJob`)
 - [x] `README.md`: what leia is, build and run instructions
 
 ### Java build (Gradle 9, Java 25)
@@ -85,7 +86,14 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 From the read-only checklist in `luke-features.md` §7. Ordered roughly by value. Each area will need its own protocol methods, fixtures and probably an ADR for the cross-cutting parts.
 
 - [ ] Open options: directory implementation choice, recursive multi-index (`MultiReader`), no-reader mode for corrupt indexes, reopen, recent-path history
-- [ ] Overview: field/term-count table (lazy: unique terms per field and the total need a full term scan), top-N terms per field
+- [x] Overview: field/term-count table, top-N terms per field
+  - `startFieldTermScan {field, topN}` / `getFieldTermScan {jobId}`: one pass over the merged `TermsEnum` counts the unique terms and keeps the top N by docFreq (ties in term order); binary terms go over the wire as hex. Lazy: a scan runs only on request
+  - TUI: "Terms" column, top-terms panel (next to the fields from 130 columns, below them otherwise), `Enter` scans the selected field, `a` all fields one after another, `Esc` cancels, `Tab` switches the panel; the total shows in the fields title once every field is counted
+  - not yet: Luke's "% of total" column, a configurable N (fixed at 50, the server allows up to 1000)
+- [ ] Overview: sort the field table (TUI only, no protocol change)
+  - by number (default), name, or term count, ascending or descending, as in Luke (`luke-features.md` §4.1); fields without a count sort last
+  - one key cycles the sort column and another flips the direction; the header marks the sorted column
+- [ ] Overview → other screens: browse/search docs by a top term (`luke-features.md` §4.1, needs Documents and Search)
 - [ ] Documents: doc by id with flags/norm/value, term vectors, doc values (with decoding), stored values, term browse/seek, postings with positions/offsets/payloads
 - [ ] Search: parse/rewrite, term query, paging (configurable page size), exact/approx total hits, explain, query-parser options, similarity (BM25/TF-IDF), 2-level sort, fields to load, More-Like-This
 - [ ] Analysis: custom analyzer builder (char filters/tokenizer/filters + params, config dir, external jars), token attributes, step-by-step
@@ -93,7 +101,7 @@ From the read-only checklist in `luke-features.md` §7. Ordered roughly by value
 - [ ] Tools: check index (streamed output), export terms
 - [ ] Misc: log view with level filter, cross-screen navigation (`luke-features.md` §5), themes, about
 - [ ] Improvements over Luke (§6): KNN vector inspection/search, point values, per-segment doc view, deleted-doc inspection, readable binary values, highlighting, cancellation of long operations
-- [ ] Cross-cutting: progress and cancellation for long-running RPCs (ADR needed)
+- [x] Cross-cutting: progress and cancellation for long-running RPCs (ADR 0005: polled server jobs, `cancelJob`, cooperative cancellation; the term scan is the first job)
 
 ## Open questions
 

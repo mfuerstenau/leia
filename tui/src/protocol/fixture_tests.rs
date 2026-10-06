@@ -11,6 +11,8 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use super::index::{CloseIndex, GetIndexStats, OpenIndex};
+use super::job::CancelJob;
+use super::terms::{GetFieldTermScan, StartFieldTermScan};
 use super::version::Version;
 use super::{ErrorCode, METHOD_NAMES, Request, Response, RpcMethod};
 
@@ -136,6 +138,9 @@ fn check(fixture: &Fixture, json: &str) -> Result<(), String> {
         OpenIndex::NAME => check_method::<OpenIndex>(fixture, json),
         GetIndexStats::NAME => check_method::<GetIndexStats>(fixture, json),
         CloseIndex::NAME => check_method::<CloseIndex>(fixture, json),
+        StartFieldTermScan::NAME => check_method::<StartFieldTermScan>(fixture, json),
+        GetFieldTermScan::NAME => check_method::<GetFieldTermScan>(fixture, json),
+        CancelJob::NAME => check_method::<CancelJob>(fixture, json),
         other => Err(format!("no method {other:?} in METHOD_NAMES")),
     }
 }

@@ -6,6 +6,9 @@ import dagger.multibindings.IntoSet;
 import io.github.mfuerstenau.leia.server.index.CloseIndexHandler;
 import io.github.mfuerstenau.leia.server.index.GetIndexStatsHandler;
 import io.github.mfuerstenau.leia.server.index.OpenIndexHandler;
+import io.github.mfuerstenau.leia.server.job.CancelJobHandler;
+import io.github.mfuerstenau.leia.server.terms.GetFieldTermScanHandler;
+import io.github.mfuerstenau.leia.server.terms.StartFieldTermScanHandler;
 import io.github.mfuerstenau.leia.server.version.VersionHandler;
 
 /** One binding per JSON-RPC method. {@link Dispatcher} checks that every method in {@code Methods} has one. */
@@ -27,4 +30,16 @@ interface HandlerModule {
     @Binds
     @IntoSet
     MethodHandler<?, ?> closeIndex(CloseIndexHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> startFieldTermScan(StartFieldTermScanHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> getFieldTermScan(GetFieldTermScanHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> cancelJob(CancelJobHandler handler);
 }

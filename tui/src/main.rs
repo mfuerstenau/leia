@@ -3,6 +3,7 @@
 use std::env;
 use std::io::{self, Write};
 use std::path::Path;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -11,9 +12,12 @@ use leia::build_info::{LEIA, java_line, server_line};
 use leia::cli::Cli;
 use leia::client::CallError;
 use leia::java::find_java;
+use leia::overview::TOP_TERMS;
 use leia::protocol::index::{
     CloseIndex, CloseIndexParams, GetIndexStats, GetIndexStatsParams, OpenIndex, OpenIndexParams,
 };
+use leia::protocol::job::{CancelJob, JobParams};
+use leia::protocol::terms::{GetFieldTermScan, StartFieldTermScan, StartFieldTermScanParams};
 use leia::protocol::version::{Version, VersionParams, VersionResult};
 use leia::server::{SERVER_JAR_ENV, SHUTDOWN_TIMEOUT, Server, find_server_jar};
 use ratatui::DefaultTerminal;
@@ -84,6 +88,9 @@ fn start_server(cli: &Cli) -> Result<(Server, VersionResult)> {
     Ok((server, version))
 }
 
+/// How often a running job is polled while no key is pressed.
+const POLL_INTERVAL: Duration = Duration::from_millis(100);
+
 fn run(
     terminal: &mut DefaultTerminal,
     server: &mut Server,
@@ -97,27 +104,70 @@ fn run(
     }
     loop {
         terminal.draw(|frame| app.draw(frame))?;
-        // Windows reports both press and release; only handle presses.
-        let Event::Key(key) = event::read()? else {
-            continue;
+        let mut next = match app.polling() {
+            // Waits for a key only as long as the next poll of the job.
+            Some(job_id) if !event::poll(POLL_INTERVAL)? => poll_scan(server, app, job_id)?,
+            _ => match event::read()? {
+                // Windows reports both press and release; only handle presses.
+                Event::Key(key) if key.kind == KeyEventKind::Press => app.handle_key(key),
+                _ => None,
+            },
         };
-        if key.kind != KeyEventKind::Press {
-            continue;
-        }
-        match app.handle_key(key) {
-            None => {}
-            Some(Action::Quit) => return Ok(()),
-            Some(Action::Open(path)) => {
-                // Shows "Opening…" while the server works.
-                terminal.draw(|frame| app.draw(frame))?;
-                open_index(server, app, &path)?;
+        // An action can lead to another one: a finished scan starts the next queued one.
+        while let Some(action) = next {
+            if action == Action::Quit {
+                return Ok(());
             }
-            Some(Action::Close) => {
-                server.call::<CloseIndex>(CloseIndexParams {})?;
-                app.closed();
-            }
+            next = perform(terminal, server, app, action)?;
         }
     }
+}
+
+/// Makes the calls for `action` and reports back to `app`. Returns the action that follows, if
+/// any.
+fn perform(
+    terminal: &mut DefaultTerminal,
+    server: &mut Server,
+    app: &mut App,
+    action: Action,
+) -> Result<Option<Action>> {
+    match action {
+        Action::Quit => {}
+        Action::Open(path) => {
+            // Shows "Opening…" while the server works.
+            terminal.draw(|frame| app.draw(frame))?;
+            open_index(server, app, &path)?;
+        }
+        Action::Close => {
+            server.call::<CloseIndex>(CloseIndexParams {})?;
+            app.closed();
+        }
+        Action::StartScan(field) => {
+            let started = server.call::<StartFieldTermScan>(StartFieldTermScanParams {
+                field,
+                top_n: TOP_TERMS,
+            });
+            match answered(started)? {
+                Ok(job) => app.scan_started(job.job_id),
+                Err(error) => return Ok(app.scan_failed(error)),
+            }
+        }
+        Action::CancelScan(job_id) => {
+            server.call::<CancelJob>(JobParams { job_id })?;
+            app.scan_cancelled();
+        }
+    }
+    Ok(None)
+}
+
+/// Fetches the progress or the outcome of the running scan.
+fn poll_scan(server: &mut Server, app: &mut App, job_id: i64) -> Result<Option<Action>> {
+    Ok(
+        match answered(server.call::<GetFieldTermScan>(JobParams { job_id }))? {
+            Ok(result) => app.scan_progress(result),
+            Err(error) => app.scan_failed(error),
+        },
+    )
 }
 
 /// Opens the index and fetches its statistics for the overview. The server's errors are shown
