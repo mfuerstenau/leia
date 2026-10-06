@@ -3,6 +3,7 @@
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+use super::index::OpenIndex;
 use super::version::Version;
 
 /// One JSON-RPC method: its name and the DTOs of its params and result.
@@ -13,4 +14,4 @@ pub trait RpcMethod {
 }
 
 /// Names of all methods. Each one needs fixtures in `protocol/fixtures/`.
-pub const METHOD_NAMES: &[&str] = &[Version::NAME];
+pub const METHOD_NAMES: &[&str] = &[Version::NAME, OpenIndex::NAME];

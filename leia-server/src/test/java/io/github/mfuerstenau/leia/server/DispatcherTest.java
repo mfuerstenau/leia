@@ -15,6 +15,7 @@ import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -183,8 +184,9 @@ class DispatcherTest {
                 .resolve(name));
     }
 
+    /** A dispatcher whose {@code version} runs {@code body}; the other methods must not be called. */
     private static Dispatcher dispatcherWith(VersionBody body) {
-        return new Dispatcher(Set.of(new MethodHandler<VersionParams, VersionResult>() {
+        MethodHandler<VersionParams, VersionResult> version = new MethodHandler<>() {
             @Override
             public RpcMethod<VersionParams, VersionResult> method() {
                 return Methods.VERSION;
@@ -194,7 +196,27 @@ class DispatcherTest {
             public VersionResult handle(VersionParams params) throws RpcException {
                 return body.handle(params);
             }
-        }));
+        };
+        Set<MethodHandler<?, ?>> handlers = new HashSet<>();
+        handlers.add(version);
+        Methods.ALL.stream()
+                .filter(method -> method != Methods.VERSION)
+                .forEach(method -> handlers.add(unused(method)));
+        return new Dispatcher(handlers);
+    }
+
+    private static <P, R> MethodHandler<P, R> unused(RpcMethod<P, R> method) {
+        return new MethodHandler<>() {
+            @Override
+            public RpcMethod<P, R> method() {
+                return method;
+            }
+
+            @Override
+            public R handle(P params) {
+                throw new AssertionError(method.name() + " must not be called");
+            }
+        };
     }
 
     @FunctionalInterface

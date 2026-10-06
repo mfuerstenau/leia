@@ -50,19 +50,24 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 
 - [x] **`version`** RPC: server name/version/build plus the running Java version (`Runtime.version()`, vendor)
   - `VersionHandler` landed with the server skeleton, which needs one real handler
-- [ ] **`--version`** in the TUI: prints the leia name, version and build, plus the Java version reported by the server (starts the server briefly, no TUI)
-- [ ] **Open an index (read-only)**: `openIndex {path}` RPC
-  - `leia-core`: open `FSDirectory` + `DirectoryReader` read-only, never an `IndexWriter`
-  - Lucene 10 **and Lucene 9** indexes open (backward codecs)
-  - Errors: path not found, not an index, unsupported/too old format, corrupt index
-  - TUI: index path as a CLI argument and/or an open-index prompt
+- [x] **`--version`** in the TUI: prints the leia name, version and build, plus the Java version reported by the server (starts the server briefly, no TUI)
+  - `build.rs` records the git short hash and commit time, as Gradle does for the server; `build_info.rs` formats the lines, shared with the TUI screen
+  - prints leia, leia-server and Java on three lines; leia's line comes first, so it is printed even if the server can't start
+- [x] **One shared version** for the TUI and the server: `gradle.properties` is the source of truth, `tui/Cargo.toml` is kept in step by hand, and a Rust test (`build_info::tests::version_matches_gradle_properties`) fails on drift
+- [x] **Open an index (read-only)**: `openIndex {path}` RPC → path, `segments_N`, numDocs/maxDoc, created/oldest Lucene version
+  - `leia-core` `ReadOnlyIndex`: `FSDirectory` with `NoLockFactory` + `DirectoryReader`, never an `IndexWriter`; a test checks that opening leaves the directory untouched
+  - Lucene 10 **and Lucene 9** indexes open (backward codecs); Lucene 8 is rejected as unsupported
+  - Errors: index not found, not an index, unsupported format, corrupt index (checksum, missing file), and the new `INDEX_NOT_READABLE` (-32005) for permission/I/O errors
+  - The server keeps one open index (`CurrentIndex`); a new `openIndex` replaces it only once the new index has opened
+  - TUI: the index path from the CLI is opened before the UI starts; a failure is printed and exits 1
+- [ ] **Open-index prompt** in the TUI (open or switch an index without restarting; show open errors in the UI instead of exiting)
 - [ ] **Index statistics**: `getIndexStats` RPC + overview screen (subset of `luke-features.md` §4.1)
   - path, directory implementation, index format/version, #docs, maxDoc, #deleted / has deletions
   - #fields, segment count (optimized?), commit point (`segments_N`, generation), commit user data
   - field list with per-field info. Avoid Luke's eager full term scan (see §6), so compute expensive counts lazily or on demand.
 - [ ] **Close index / quit**: `closeIndex` RPC; quitting the TUI closes the index and terminates the server (stdin EOF, then kill after a timeout)
-- [ ] Test fixtures: small generated Lucene 10 and Lucene 9 test indexes (built in tests or checked in under `leia-core/src/test/resources/`)
-- [ ] Protocol fixtures for `version`, `openIndex`, `getIndexStats`, `closeIndex` and their error cases
+- [x] Test indexes: Lucene 10 indexes are written in the tests; Lucene 9.12 and 8.11 indexes are generated at build time by `LegacyIndexWriter` running on the old jars (`./gradlew :leia-core:lucene9TestIndex`, output in `leia-core/build/test-indexes/`), so no binary indexes are checked in
+- [ ] Protocol fixtures for `version`, `openIndex`, `getIndexStats`, `closeIndex` and their error cases (`version` and `openIndex` done)
 
 ## Backlog — future capabilities
 
@@ -83,4 +88,3 @@ From the read-only checklist in `luke-features.md` §7. Ordered roughly by value
 
 - **macOS release builds:** cross-compile from Linux (`cargo-zigbuild` needs a macOS SDK) or build natively in CI (GitHub Actions macOS runner)?
 - **Distribution:** ship the TUI binary + `leia-server.jar` per OS like `../json-rpc-sample/dist`, optionally with a bundled JRE (jlink)?
-- **Versioning:** one shared version for the TUI and the server (they ship together), with the source of truth in Gradle or in a shared `VERSION` file?

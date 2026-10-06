@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "error": {
+    "code": -32002,
+    "message": "Unsupported index format: Format version is not supported (resource BufferedChecksumIndexInput(MemorySegmentIndexInput(path=\"/data/indexes/products/segments_2\"))): Index has segments derived from Lucene version 8.x and is not supported by Lucene 10.5.2. This Lucene version only supports indexes with major version 9 or later (found: 8, minimum supported: 9). To resolve this issue re-index your data using Lucene 9.x or later.. This version of Lucene only supports indexes created with release 9.0 and later by default."
+  }
+}

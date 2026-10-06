@@ -14,18 +14,20 @@ pub enum ErrorCode {
     InternalError,
     /// The path does not exist.
     IndexNotFound,
-    /// The path exists but holds no Lucene index.
+    /// The path is not a directory, or the directory holds no Lucene index.
     NotAnIndex,
     /// The index was written in a format this Lucene version cannot read.
     UnsupportedIndexFormat,
-    /// The index is damaged.
+    /// The index is damaged: a checksum mismatch, a truncated or missing file.
     CorruptIndex,
     /// The method needs an open index, and none is open.
     NoIndexOpen,
+    /// The index can't be read: no permission, or another I/O error.
+    IndexNotReadable,
 }
 
 impl ErrorCode {
-    pub const ALL: [ErrorCode; 10] = [
+    pub const ALL: [ErrorCode; 11] = [
         ErrorCode::ParseError,
         ErrorCode::InvalidRequest,
         ErrorCode::MethodNotFound,
@@ -36,6 +38,7 @@ impl ErrorCode {
         ErrorCode::UnsupportedIndexFormat,
         ErrorCode::CorruptIndex,
         ErrorCode::NoIndexOpen,
+        ErrorCode::IndexNotReadable,
     ];
 
     pub const fn code(self) -> i32 {
@@ -50,6 +53,7 @@ impl ErrorCode {
             ErrorCode::UnsupportedIndexFormat => -32002,
             ErrorCode::CorruptIndex => -32003,
             ErrorCode::NoIndexOpen => -32004,
+            ErrorCode::IndexNotReadable => -32005,
         }
     }
 
@@ -66,6 +70,7 @@ impl ErrorCode {
             ErrorCode::UnsupportedIndexFormat => "UNSUPPORTED_INDEX_FORMAT",
             ErrorCode::CorruptIndex => "CORRUPT_INDEX",
             ErrorCode::NoIndexOpen => "NO_INDEX_OPEN",
+            ErrorCode::IndexNotReadable => "INDEX_NOT_READABLE",
         }
     }
 }

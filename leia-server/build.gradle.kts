@@ -9,8 +9,6 @@ dependencies {
     implementation(project(":leia-protocol"))
     implementation(libs.dagger)
     annotationProcessor(libs.dagger.compiler)
-
-    testImplementation(libs.lucene.core)
 }
 
 // The server tests replay the shared request fixtures (see leia-protocol/build.gradle.kts).
@@ -61,6 +59,11 @@ tasks.shadowJar {
         duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     }
     manifest {
-        attributes("Multi-Release" to "true")
+        attributes(
+            "Multi-Release" to "true",
+            // Lucene 10 calls native code (madvise) through the FFM API; without this, the JVM
+            // prints a restricted-method warning to stderr.
+            "Enable-Native-Access" to "ALL-UNNAMED",
+        )
     }
 }

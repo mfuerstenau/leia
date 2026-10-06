@@ -65,7 +65,8 @@ cd tui
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
-cargo test -- --ignored   # against the real server: needs LEIA_SERVER_JAR and a Java 25 JAVA_HOME
+cargo test -- --ignored   # against the real server: needs LEIA_SERVER_JAR, a Java 25 JAVA_HOME and the
+                          # Lucene 9 test index from ./gradlew build (leia-core/build/test-indexes/)
 cargo build --release
 ```
 

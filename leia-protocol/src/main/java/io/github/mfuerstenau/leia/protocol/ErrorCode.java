@@ -17,14 +17,16 @@ public enum ErrorCode {
 
     /** The path does not exist. */
     INDEX_NOT_FOUND(-32000),
-    /** The path exists but holds no Lucene index. */
+    /** The path is not a directory, or the directory holds no Lucene index. */
     NOT_AN_INDEX(-32001),
     /** The index was written in a format this Lucene version cannot read. */
     UNSUPPORTED_INDEX_FORMAT(-32002),
-    /** The index is damaged. */
+    /** The index is damaged: a checksum mismatch, a truncated or missing file. */
     CORRUPT_INDEX(-32003),
     /** The method needs an open index, and none is open. */
-    NO_INDEX_OPEN(-32004);
+    NO_INDEX_OPEN(-32004),
+    /** The index can't be read: no permission, or another I/O error. */
+    INDEX_NOT_READABLE(-32005);
 
     private final int code;
 

@@ -8,6 +8,7 @@
 
 mod envelope;
 mod error;
+pub mod index;
 mod method;
 pub mod version;
 

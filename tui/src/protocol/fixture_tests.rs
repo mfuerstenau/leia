@@ -10,6 +10,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
+use super::index::OpenIndex;
 use super::version::Version;
 use super::{ErrorCode, METHOD_NAMES, Request, Response, RpcMethod};
 
@@ -132,6 +133,7 @@ fn check(fixture: &Fixture, json: &str) -> Result<(), String> {
         RPC if fixture.kind == Kind::Error => check_response::<()>(fixture, json),
         RPC => Err("rpc fixtures must be errors".to_owned()),
         Version::NAME => check_method::<Version>(fixture, json),
+        OpenIndex::NAME => check_method::<OpenIndex>(fixture, json),
         other => Err(format!("no method {other:?} in METHOD_NAMES")),
     }
 }

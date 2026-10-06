@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "error": {
+    "code": -32005,
+    "message": "Permission denied: /data/indexes/products"
+  }
+}
