@@ -82,6 +82,7 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
   - `c` in the TUI closes the index; quitting calls `closeIndex` before shutting the server down
   - the server also closes the open index when its stdin ends
 - [x] Test indexes: Lucene 10 indexes are written in the tests; Lucene 9.12 and 8.11 indexes are generated at build time by `LegacyIndexWriter` running on the old jars (`./gradlew :leia-core:lucene9TestIndex`, output in `leia-core/build/test-indexes/`), so no binary indexes are checked in
+- [x] Demo index for manual testing: `./gradlew :leia-core:demoIndex` (`DemoIndexWriter`, `docs/demo-index.md`): 500 documents in 3 segments, 13 deleted, every index option, payloads, term vectors, each doc values type, points, KNN vectors, binary terms, every stored type, JSON and delimited values, values over 64 KiB, sparse and empty fields
 - [x] Protocol fixtures for `version`, `openIndex`, `getIndexStats`, `closeIndex` and their error cases (`closeIndex` has no error case)
 
 ## Backlog — future capabilities
@@ -120,8 +121,11 @@ From the read-only checklist in `luke-features.md` §7. Ordered roughly by value
 - [ ] Improvements over Luke (§6): KNN vector inspection/search, point values, per-segment doc view, deleted-doc inspection, readable binary values, highlighting, cancellation of long operations
 - [x] Cross-cutting: progress and cancellation for long-running RPCs (ADR 0005: polled server jobs, `cancelJob`, cooperative cancellation; the term scan is the first job)
 - [x] Value viewer: hex view for values, switchable from the normal view (`h` in the viewer)
-- [ ] Value viewer: pretty-printed JSON
-- [ ] Value viewer: delimited data, line by line, with a definable delimiter; optionally pretty-formats delimited key/value data, with a definable key/value delimiter
+- [x] Value viewer: pretty-printed JSON (`J`; TUI only)
+  - reindents the value as written (key order, number and string text kept), validated with `serde_json` into `IgnoredAny`; keys, strings, numbers and literals in colors; not JSON → the text and the parse error
+  - JSON objects and arrays open in this mode, and so does a cut value that starts with `{` or `[`
+- [x] Value viewer: delimited data, line by line, with a definable delimiter; optionally pretty-formats delimited key/value data, with a definable key/value delimiter (`d`; TUI only)
+  - a form asks for the item and key/value delimiters, with escapes (`\t`, `\n`, `\xHH`, `\u{H…}`, …); items are numbered, or keys aligned (up to 32 columns); the delimiters are kept for the next viewer
 
 ## Open questions
 

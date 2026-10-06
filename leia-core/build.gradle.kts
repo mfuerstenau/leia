@@ -47,3 +47,22 @@ tasks.test {
         systemProperty("leia.test.index.$name", indexPath)
     }
 }
+
+// A demo index for trying leia by hand (docs/demo-index.md): ./gradlew :leia-core:demoIndex writes
+// it to build/test-indexes/demo. Not used by the tests.
+val demoIndex by sourceSets.creating
+
+dependencies {
+    "demoIndexImplementation"(libs.lucene.core)
+}
+
+tasks.register<JavaExec>("demoIndex") {
+    description = "Writes a demo index for trying leia by hand."
+    group = "leia"
+    classpath = demoIndex.runtimeClasspath
+    mainClass = "io.github.mfuerstenau.leia.core.DemoIndexWriter"
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+    val indexDir = testIndexesDir.map { it.dir("demo") }
+    outputs.dir(indexDir).withPropertyName("index")
+    argumentProviders.add(CommandLineArgumentProvider { listOf(indexDir.get().asFile.absolutePath) })
+}

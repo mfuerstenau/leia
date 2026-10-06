@@ -1,0 +1,66 @@
+# Demo index
+
+A Lucene 10 index for trying leia by hand: a small product catalogue with a field for nearly
+everything leia shows. It is generated, not checked in:
+
+```sh
+./gradlew :leia-core:demoIndex        # → leia-core/build/test-indexes/demo
+LEIA_SERVER_JAR=$PWD/leia-server/build/libs/leia-server.jar \
+  cargo run --manifest-path tui/Cargo.toml -- leia-core/build/test-indexes/demo
+```
+
+The content is random with a fixed seed, so every run writes the same index. The writer is
+`leia-core/src/demoIndex/java/…/DemoIndexWriter.java`. The tests don't use this index; they use
+their own indexes and the Lucene 9 and 8 indexes from `LegacyIndexWriter`.
+
+## Index
+
+- 500 documents in 3 segments (documents 0–199, 200–399, 400–499), with no merges.
+- 13 deleted documents: every multiple of 37 (37, 74, …, 481).
+- Commit user data: `writer`, `source`, `docs`.
+
+## Fields
+
+| Field | What it is for |
+|---|---|
+| `id` | `doc-0000` … `doc-0499`: a keyword with docs only and no norms; stored |
+| `title` | text with positions and norms; stored |
+| `body` | text with positions and offsets, and term vectors with positions and offsets; stored. A rare `sku1234` term per sentence gives a long tail of terms (more than one 100-term page) |
+| `keywords` | docs only, with norms |
+| `labels` | docs and freqs, with norms |
+| `tagged` | positions with payloads, and term vectors with payloads; stored. Words have a text payload (`DET`, `NN`, `VB`), numbers a 4-byte int that shows as hex |
+| `category` | keyword + sorted doc values (6 values) |
+| `tags` | multi-valued keyword + sorted set doc values; missing in about 1 in 5 documents |
+| `binary_key` | binary terms that aren't UTF-8 (`0xff…80`): hex on the terms screen; stored binary |
+| `price` | double point + stored double + double doc values (raw double bits: `x` decodes them) |
+| `quantity` | int point + stored int + numeric doc values, some negative |
+| `rating` | float point + stored float + float doc values (float bits) |
+| `timestamp` | long point + stored long + sorted numeric doc values (epoch millis in 2026) |
+| `scores` | sorted numeric doc values, 1–4 values from -100 to 100 |
+| `weight` | sorted numeric doc values as sortable double bits (`x` decodes them) |
+| `location` | lat/lon point + lat/lon doc values |
+| `checksum` | binary doc values, 8 random bytes |
+| `embedding` | float KNN vector, 8 dimensions, cosine |
+| `fingerprint` | byte KNN vector, 16 dimensions, euclidean |
+| `_source` | the document as JSON, stored as UTF-8 bytes like in Elasticsearch: opens as JSON in the viewer |
+| `json` | 9 values: an object (big numbers, `2.50`, escapes, duplicate keys, empty `{}`/`[]`, nesting), an array, a string, a number, 20 levels deep, 200 levels deep, then three that aren't JSON |
+| `csv` | comma-separated, with one empty item |
+| `tsv` | tab-separated: delimiter `\t` |
+| `kv` | `key=value;…`: delimiters `;` and `=`, with an item without `=`, a value with `=`, and a long key |
+| `log` | pipe-separated log line: delimiter `\|` |
+| `unit_separated` | items split by U+001F, keys by U+001E: delimiters `\u{1f}` and `\u{1e}` |
+| `lines` | 3–22 lines: delimiter `\n` numbers them |
+| `mixed` | one value of every stored type (string, int, long, float, double, binary, JSON): step with ←/→ |
+| `note` | sparse: only in documents 3, 13, 23, … |
+| `empty_string` | a stored empty string, in documents 5, 30, 55, … |
+| `odd_text` | only in document 7: tab, bell, NUL, CRLF, emoji, wide characters, a combining accent |
+| `blob` | only in document 42: 100,000 random bytes, over the 64 KiB cut and not UTF-8 |
+| `deleted_only` | only in document 74, which is deleted: in the schema, but no live document has it |
+
+## Documents worth a look
+
+- **0:** only `id`, so every other field is empty (`e` hides them).
+- **7:** `odd_text`.
+- **42:** a 5000-word `body` (its norm encodes a range), a `_source` of about 108 KiB with a
+  3000-entry `history` array (cut, then fetched whole by the viewer), and `blob`.
+- **37, 74, …:** deleted; 74 has `deleted_only`.

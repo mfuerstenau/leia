@@ -1,18 +1,20 @@
 //! The value viewer: the values of one field of a document, one at a time, over the whole
-//! documents screen, as text or as a hex dump. A stored value that `getDocument` cut (ADR 0008)
-//! is fetched whole when it is shown.
+//! documents screen, as text, as a hex dump, as pretty-printed JSON, or split at a delimiter. A
+//! stored value that `getDocument` cut (ADR 0008) is fetched whole when it is shown.
 
 use std::borrow::Cow;
 
 use ratatui::Frame;
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph};
-use unicode_width::UnicodeWidthChar;
+use serde::de::IgnoredAny;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::protocol::document::{BytesValue, MAX_VALUE_LENGTH, StoredType, StoredValue};
+use crate::text::escape_control;
 
 /// Spaces a tab is shown as.
 const TAB: &str = "    ";
@@ -20,6 +22,17 @@ const TAB: &str = "    ";
 const LARGE_COPY: usize = 100 * 1024;
 /// From this inner width on, a hex row has 16 bytes instead of 8.
 const WIDE_HEX_WIDTH: u16 = 78;
+/// Spaces per JSON nesting level.
+const JSON_INDENT: &str = "  ";
+/// Keys up to this display width are aligned in the delimited mode; longer ones are not padded.
+const MAX_KEY_WIDTH: usize = 32;
+
+const JSON_KEY: Style = Style::new().fg(Color::Cyan);
+const JSON_STRING: Style = Style::new().fg(Color::Green);
+const JSON_NUMBER: Style = Style::new().fg(Color::Yellow);
+const JSON_LITERAL: Style = Style::new().fg(Color::Magenta);
+const KEY: Style = Style::new().fg(Color::Cyan);
+const DIM: Style = Style::new().add_modifier(Modifier::DIM);
 
 /// What the viewer asks of the documents screen.
 #[derive(Debug, PartialEq, Eq)]
@@ -34,6 +47,110 @@ pub enum Event {
     /// Put this text on the clipboard.
     Copy(String),
     Close,
+}
+
+/// How the shown value is shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Text,
+    Hex,
+    /// Pretty-printed, as text if it is not JSON.
+    Json,
+    /// One item per line, split at the [`Delimiters`].
+    Delimited,
+}
+
+impl Mode {
+    fn name(self) -> &'static str {
+        match self {
+            Mode::Text => "text",
+            Mode::Hex => "hex",
+            Mode::Json => "json",
+            Mode::Delimited => "delimited",
+        }
+    }
+}
+
+/// The delimiters of the delimited mode, as typed: `\t`, `\n`, `\r`, `\0`, `\\`, `\xHH` and
+/// `\u{H…}` stand for characters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Delimiters {
+    /// Between two items; never empty.
+    pub items: String,
+    /// Between an item's key and its value; empty if items have no keys.
+    pub key_value: String,
+}
+
+impl Default for Delimiters {
+    fn default() -> Self {
+        Self {
+            items: ",".to_owned(),
+            key_value: String::new(),
+        }
+    }
+}
+
+/// [`Delimiters`] with their escapes resolved.
+#[derive(Debug, PartialEq, Eq)]
+struct Split {
+    items: String,
+    key_value: Option<String>,
+}
+
+impl Delimiters {
+    fn split(&self) -> Result<Split, String> {
+        let items = unescape(&self.items).map_err(|e| format!("Items: {e}"))?;
+        if items.is_empty() {
+            return Err("Items: enter a delimiter.".to_owned());
+        }
+        let key_value = unescape(&self.key_value).map_err(|e| format!("Key/value: {e}"))?;
+        Ok(Split {
+            items,
+            key_value: (!key_value.is_empty()).then_some(key_value),
+        })
+    }
+}
+
+/// `typed` with its escapes resolved.
+fn unescape(typed: &str) -> Result<String, String> {
+    let mut out = String::new();
+    let mut chars = typed.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('t') => out.push('\t'),
+            Some('n') => out.push('\n'),
+            Some('r') => out.push('\r'),
+            Some('0') => out.push('\0'),
+            Some('\\') => out.push('\\'),
+            Some('x') => {
+                let hex: String = chars.by_ref().take(2).collect();
+                let byte = u8::from_str_radix(&hex, 16)
+                    .ok()
+                    .filter(|byte| hex.len() == 2 && byte.is_ascii())
+                    .ok_or("\\x takes two hex digits from 00 to 7f.")?;
+                out.push(char::from(byte));
+            }
+            Some('u') => {
+                let rest = chars.as_str();
+                let c = rest
+                    .strip_prefix('{')
+                    .and_then(|rest| rest.split_once('}'))
+                    .and_then(|(hex, _)| u32::from_str_radix(hex, 16).ok())
+                    .and_then(char::from_u32)
+                    .ok_or("\\u takes a character code in hex in braces, such as \\u{1f}.")?;
+                out.push(c);
+                // Skip past the closing brace.
+                chars.by_ref().find(|&c| c == '}');
+            }
+            Some(other) => return Err(format!("unknown escape \\{other}; \\\\ is a backslash.")),
+            None => return Err("a \\ at the end needs a character after it.".to_owned()),
+        }
+    }
+    Ok(out)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -149,6 +266,15 @@ impl Value {
         self.full_length
             .unwrap_or(self.content.bytes().len() as i64)
     }
+
+    /// Whether the value is a JSON object or array, or the beginning of one if it is cut.
+    fn looks_like_json(&self) -> bool {
+        let Content::Text(text) = &self.content else {
+            return false;
+        };
+        text.trim_start().starts_with(['{', '['])
+            && (self.full_length.is_some() || serde_json::from_str::<IgnoredAny>(text).is_ok())
+    }
 }
 
 /// A number's text, with the bytes `encode` makes of it; its text's bytes if it can't.
@@ -181,11 +307,90 @@ fn parse_hex(hex: &str) -> Option<Vec<u8>> {
         .collect()
 }
 
-/// The text of the shown value, wrapped at a width.
+/// A line before it is wrapped: pieces of text with their style.
+type Segments = Vec<(Style, String)>;
+
+/// The shown value in a mode other than hex, before it is wrapped.
+#[derive(Debug)]
+struct Formatted {
+    lines: Vec<Segments>,
+    /// What the mode label at the bottom adds, such as the number of items.
+    detail: Option<String>,
+    /// Why the value is not shown in the mode, such as JSON that does not parse.
+    notice: Option<String>,
+}
+
+impl Formatted {
+    fn text(text: &str, notice: Option<String>) -> Self {
+        let lines = text
+            .split('\n')
+            .map(|line| {
+                vec![(
+                    Style::new(),
+                    line.strip_suffix('\r').unwrap_or(line).to_owned(),
+                )]
+            })
+            .collect();
+        Self {
+            lines,
+            detail: None,
+            notice,
+        }
+    }
+
+    /// The lines as plain text, as they are copied.
+    fn plain(&self) -> String {
+        let lines: Vec<String> = self
+            .lines
+            .iter()
+            .map(|line| line.iter().map(|(_, text)| text.as_str()).collect())
+            .collect();
+        lines.join("\n")
+    }
+}
+
+/// The shown value formatted and wrapped at a width.
 #[derive(Debug)]
 struct Wrapped {
     width: usize,
-    lines: Vec<String>,
+    lines: Vec<Line<'static>>,
+    detail: Option<String>,
+    notice: Option<String>,
+}
+
+/// The form that asks for the delimiters of the delimited mode.
+#[derive(Debug)]
+struct DelimiterForm {
+    items: String,
+    key_value: String,
+    /// Whether the key/value delimiter is being edited, not the items delimiter.
+    on_key_value: bool,
+    error: Option<String>,
+}
+
+impl DelimiterForm {
+    fn new(delimiters: &Delimiters) -> Self {
+        Self {
+            items: delimiters.items.clone(),
+            key_value: delimiters.key_value.clone(),
+            on_key_value: false,
+            error: None,
+        }
+    }
+
+    fn delimiters(&self) -> Delimiters {
+        Delimiters {
+            items: self.items.clone(),
+            key_value: self.key_value.clone(),
+        }
+    }
+}
+
+/// What a key did to the delimiter form.
+enum FormEvent {
+    None,
+    Apply(Delimiters),
+    Cancel,
 }
 
 pub struct Viewer {
@@ -193,32 +398,43 @@ pub struct Viewer {
     field: String,
     values: Vec<Value>,
     current: usize,
-    hex: bool,
+    mode: Mode,
+    delimiters: Delimiters,
+    form: Option<DelimiterForm>,
     /// The first row shown.
     scroll: usize,
     /// The rows that fit, as of the last render; PageUp and PageDown move by that.
     page: usize,
-    /// `None` after the shown value or the mode changed.
+    /// `None` after the shown value, the mode or the delimiters changed.
     wrapped: Option<Wrapped>,
     /// What the last key did, such as copying; cleared by the next key.
     message: Option<String>,
 }
 
 impl Viewer {
-    /// Views `values`, which must not be empty, from the first one on. Returns the viewer and
-    /// the fetch of the first value, if it is cut.
-    pub fn new(doc_id: i32, field: String, values: Vec<Value>) -> (Self, Option<Event>) {
-        // Bytes that are not UTF-8 are easier to read as hex.
-        let hex = matches!(
-            values.first().map(|value| &value.content),
-            Some(Content::Bytes(_))
-        );
+    /// Views `values`, which must not be empty, from the first one on, splitting them at
+    /// `delimiters` in the delimited mode. Returns the viewer and the fetch of the first value, if
+    /// it is cut.
+    pub fn new(
+        doc_id: i32,
+        field: String,
+        values: Vec<Value>,
+        delimiters: Delimiters,
+    ) -> (Self, Option<Event>) {
+        // Bytes that are not UTF-8 are easier to read as hex, and JSON pretty-printed.
+        let mode = match values.first() {
+            Some(value) if matches!(value.content, Content::Bytes(_)) => Mode::Hex,
+            Some(value) if value.looks_like_json() => Mode::Json,
+            _ => Mode::Text,
+        };
         let mut viewer = Self {
             doc_id,
             field,
             values,
             current: 0,
-            hex,
+            mode,
+            delimiters,
+            form: None,
             scroll: 0,
             page: 10,
             wrapped: None,
@@ -272,12 +488,39 @@ impl Viewer {
         }
     }
 
-    pub fn hex(&self) -> bool {
-        self.hex
+    pub fn mode(&self) -> Mode {
+        self.mode
+    }
+
+    /// The delimiters last applied, to open the next viewer with.
+    pub fn delimiters(&self) -> &Delimiters {
+        &self.delimiters
+    }
+
+    /// The keys for the footer.
+    pub fn keys(&self) -> &'static str {
+        if self.form.is_some() {
+            " type a delimiter   Tab/↑↓ other delimiter   ⏎ apply   Esc cancel"
+        } else {
+            " Esc close   ←/→ value   t text   h hex   J json   d delimited   y copy   \
+             ↑↓ PgUp/PgDn Home/End"
+        }
     }
 
     pub fn handle_key(&mut self, key: KeyCode) -> Option<Event> {
         self.message = None;
+        if let Some(form) = &mut self.form {
+            match form_key(form, key) {
+                FormEvent::None => {}
+                FormEvent::Apply(delimiters) => {
+                    self.form = None;
+                    self.delimiters = delimiters;
+                    self.set_mode(Mode::Delimited);
+                }
+                FormEvent::Cancel => self.form = None,
+            }
+            return None;
+        }
         match key {
             KeyCode::Esc | KeyCode::Char('q' | 'v') => return Some(Event::Close),
             KeyCode::Left | KeyCode::Char('p') if self.current > 0 => {
@@ -288,10 +531,10 @@ impl Viewer {
                 self.show(self.current + 1);
                 return self.fetch();
             }
-            KeyCode::Char('h') => {
-                self.hex = !self.hex;
-                self.scroll = 0;
-            }
+            KeyCode::Char('t') => self.set_mode(Mode::Text),
+            KeyCode::Char('h') => self.toggle_mode(Mode::Hex),
+            KeyCode::Char('J') => self.toggle_mode(Mode::Json),
+            KeyCode::Char('d') => self.form = Some(DelimiterForm::new(&self.delimiters)),
             KeyCode::Char('y') => return self.copy(),
             KeyCode::Down | KeyCode::Char('j') => self.scroll = self.scroll.saturating_add(1),
             KeyCode::Up | KeyCode::Char('k') => self.scroll = self.scroll.saturating_sub(1),
@@ -307,23 +550,42 @@ impl Viewer {
         None
     }
 
+    /// Switches to `mode`, or back to text if it is shown already.
+    fn toggle_mode(&mut self, mode: Mode) {
+        self.set_mode(if self.mode == mode { Mode::Text } else { mode });
+    }
+
+    fn set_mode(&mut self, mode: Mode) {
+        self.mode = mode;
+        self.scroll = 0;
+        self.wrapped = None;
+    }
+
     fn show(&mut self, index: usize) {
         self.current = index;
         self.scroll = 0;
         self.wrapped = None;
     }
 
-    /// Copies the shown value as it is shown: the text, or the bytes in hex.
+    /// Copies the shown value as it is shown: the text, the bytes in hex, the pretty-printed
+    /// JSON, or the items one per line.
     fn copy(&mut self) -> Option<Event> {
         let value = &self.values[self.current];
         if value.full_length.is_some() {
             self.message = Some("Not copied: the whole value is not in.".to_owned());
             return None;
         }
-        let text = if self.hex {
-            hex(value.content.bytes())
-        } else {
-            value.content.text().into_owned()
+        let text = match self.mode {
+            Mode::Text => value.content.text().into_owned(),
+            Mode::Hex => hex(value.content.bytes()),
+            Mode::Json | Mode::Delimited => {
+                let formatted = format(&value.content, self.mode, &self.delimiters);
+                if formatted.notice.is_some() {
+                    value.content.text().into_owned()
+                } else {
+                    formatted.plain()
+                }
+            }
         };
         // The terminal may drop a long escape sequence without a word: tmux takes about 1 MiB.
         let caveat = if text.len() > LARGE_COPY {
@@ -334,7 +596,7 @@ impl Viewer {
         self.message = Some(format!(
             "Copied {} as {} (OSC 52){caveat}.",
             size(text.len() as i64),
-            if self.hex { "hex" } else { "text" }
+            self.mode.name()
         ));
         Some(Event::Copy(text))
     }
@@ -357,26 +619,22 @@ impl Viewer {
         self.page = height.saturating_sub(1).max(1);
 
         let bytes_per_row = if inner.width >= WIDE_HEX_WIDTH { 16 } else { 8 };
-        let rows = if self.hex {
+        let rows = if self.mode == Mode::Hex {
             value.content.bytes().len().div_ceil(bytes_per_row).max(1)
         } else {
-            self.wrapped_lines(usize::from(inner.width)).len()
+            self.wrapped(usize::from(inner.width)).lines.len()
         };
         self.scroll = self.scroll.min(rows.saturating_sub(height));
         let shown = self.scroll..rows.min(self.scroll + height);
 
         let value = &self.values[self.current];
-        let lines: Vec<Line> = if self.hex {
-            shown
+        let wrapped = self.wrapped.as_ref().filter(|_| self.mode != Mode::Hex);
+        let lines: Vec<Line> = match wrapped {
+            None => shown
                 .clone()
                 .map(|row| hex_row(value.content.bytes(), row, bytes_per_row))
-                .collect()
-        } else {
-            let wrapped = self.wrapped.as_ref().map_or(&[][..], |w| &w.lines[..]);
-            wrapped[shown.clone()]
-                .iter()
-                .map(|line| Line::from(line.as_str()))
-                .collect()
+                .collect(),
+            Some(wrapped) => wrapped.lines[shown.clone()].to_vec(),
         };
 
         let status = if let Some(message) = &self.message {
@@ -389,12 +647,17 @@ impl Viewer {
                 size(value.content.bytes().len() as i64),
                 size(full)
             )
+        } else if let Some(notice) = wrapped.and_then(|w| w.notice.as_ref()) {
+            notice.clone()
         } else {
             String::new()
         };
+        let mode = match wrapped.and_then(|w| w.detail.as_ref()) {
+            Some(detail) => format!("{} · {detail}", self.mode.name()),
+            None => self.mode.name().to_owned(),
+        };
         let position = format!(
-            " {} · rows {}–{} of {rows} ",
-            if self.hex { "hex" } else { "text" },
+            " {mode} · rows {}–{} of {rows} ",
             shown.start + 1,
             shown.end
         );
@@ -407,49 +670,303 @@ impl Viewer {
             .title_bottom(Line::from(position).right_aligned());
         frame.render_widget(Clear, area);
         frame.render_widget(Paragraph::new(lines).block(block), area);
+        if let Some(form) = &self.form {
+            render_form(frame, area, form);
+        }
     }
 
-    /// The shown value's text wrapped at `width`, wrapped again only when needed.
-    fn wrapped_lines(&mut self, width: usize) -> &[String] {
+    /// The shown value formatted in the mode and wrapped at `width`, formatted again only when
+    /// needed.
+    fn wrapped(&mut self, width: usize) -> &Wrapped {
         if self.wrapped.as_ref().is_none_or(|w| w.width != width) {
-            let lines = wrap(&self.values[self.current].content.text(), width);
-            self.wrapped = Some(Wrapped { width, lines });
+            let formatted = format(
+                &self.values[self.current].content,
+                self.mode,
+                &self.delimiters,
+            );
+            let mut lines = Vec::new();
+            for line in &formatted.lines {
+                wrap(line, width, &mut lines);
+            }
+            self.wrapped = Some(Wrapped {
+                width,
+                lines,
+                detail: formatted.detail,
+                notice: formatted.notice,
+            });
         }
-        self.wrapped.as_ref().map_or(&[], |w| &w.lines)
+        self.wrapped.as_ref().expect("just set")
     }
 }
 
-/// `text` as lines no wider than `width`: line breaks kept, tabs as spaces, other control
-/// characters escaped.
-fn wrap(text: &str, width: usize) -> Vec<String> {
-    let width = width.max(1);
-    let mut lines = Vec::new();
-    for line in text.split('\n') {
-        let line = line.strip_suffix('\r').unwrap_or(line);
-        let mut current = String::new();
-        let mut used = 0;
-        let mut push = |c: char, current: &mut String, used: &mut usize| {
-            let w = c.width().unwrap_or(0);
-            if *used + w > width && *used > 0 {
-                lines.push(std::mem::take(current));
-                *used = 0;
-            }
-            current.push(c);
-            *used += w;
-        };
-        for c in line.chars() {
-            if c == '\t' {
-                TAB.chars().for_each(|c| push(c, &mut current, &mut used));
-            } else if c.is_control() {
-                c.escape_default()
-                    .for_each(|c| push(c, &mut current, &mut used));
-            } else {
-                push(c, &mut current, &mut used);
+/// Edits the delimiter form.
+fn form_key(form: &mut DelimiterForm, key: KeyCode) -> FormEvent {
+    let input = if form.on_key_value {
+        &mut form.key_value
+    } else {
+        &mut form.items
+    };
+    match key {
+        KeyCode::Esc => return FormEvent::Cancel,
+        KeyCode::Enter => {
+            let delimiters = form.delimiters();
+            match delimiters.split() {
+                Ok(_) => return FormEvent::Apply(delimiters),
+                Err(error) => form.error = Some(error),
             }
         }
-        lines.push(current);
+        KeyCode::Tab | KeyCode::BackTab | KeyCode::Up | KeyCode::Down => {
+            form.on_key_value = !form.on_key_value;
+        }
+        KeyCode::Char(c) => {
+            input.push(c);
+            form.error = None;
+        }
+        KeyCode::Backspace => {
+            input.pop();
+            form.error = None;
+        }
+        _ => {}
     }
-    lines
+    FormEvent::None
+}
+
+fn render_form(frame: &mut Frame, area: Rect, form: &DelimiterForm) {
+    let width = area.width.min(56);
+    let height = 5;
+    let popup = Rect {
+        x: area.x + (area.width - width) / 2,
+        y: area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height: height.min(area.height),
+    };
+    let field = |label: &str, input: &str, active: bool| {
+        let cursor = if active { "▏" } else { "" };
+        let label_style = if active {
+            Style::new().add_modifier(Modifier::BOLD)
+        } else {
+            DIM
+        };
+        Line::from(vec![
+            Span::styled(format!("{label:<10} "), label_style),
+            Span::raw(format!("{input}{cursor}")),
+        ])
+    };
+    let message = form
+        .error
+        .clone()
+        .unwrap_or_else(|| "Escapes \\t \\n \\xHH \\u{H…}; no key/value: empty".to_owned());
+    frame.render_widget(Clear, popup);
+    frame.render_widget(
+        Paragraph::new(vec![
+            field("Items", &form.items, !form.on_key_value),
+            field("Key/value", &form.key_value, form.on_key_value),
+            Line::from(Span::styled(message, DIM)),
+        ])
+        .block(Block::bordered().title(" Delimited ")),
+        popup,
+    );
+}
+
+/// `content` in `mode`, which must not be hex.
+fn format(content: &Content, mode: Mode, delimiters: &Delimiters) -> Formatted {
+    let text = content.text();
+    match mode {
+        Mode::Text | Mode::Hex => Formatted::text(&text, None),
+        Mode::Json => match json_lines(&text) {
+            Ok(lines) => Formatted {
+                lines,
+                detail: None,
+                notice: None,
+            },
+            Err(error) => Formatted::text(&text, Some(format!("Not JSON: {error}."))),
+        },
+        Mode::Delimited => match delimiters.split() {
+            Ok(split) => delimited(&text, &split),
+            Err(error) => Formatted::text(&text, Some(error)),
+        },
+    }
+}
+
+/// `text` pretty-printed as it is written: keys stay in their order, numbers and strings keep
+/// their text, and empty objects and arrays stay on one line. An error if it is not JSON.
+fn json_lines(text: &str) -> Result<Vec<Segments>, String> {
+    serde_json::from_str::<IgnoredAny>(text).map_err(|e| e.to_string())?;
+
+    let bytes = text.as_bytes();
+    let is_space = |byte: u8| matches!(byte, b' ' | b'\t' | b'\n' | b'\r');
+    let mut lines = Vec::new();
+    let mut line: Segments = Vec::new();
+    // Whether each open container is an object.
+    let mut open: Vec<bool> = Vec::new();
+    let mut expect_key = false;
+    let new_line = |lines: &mut Vec<Segments>, line: &mut Segments, depth: usize| {
+        lines.push(std::mem::take(line));
+        line.push((Style::new(), JSON_INDENT.repeat(depth)));
+    };
+    let mut i = 0;
+    while i < bytes.len() {
+        let byte = bytes[i];
+        if is_space(byte) {
+            i += 1;
+            continue;
+        }
+        match byte {
+            b'{' | b'[' => {
+                let close = if byte == b'{' { b'}' } else { b']' };
+                let next = (i + 1..bytes.len()).find(|&j| !is_space(bytes[j]));
+                if next.is_some_and(|j| bytes[j] == close) {
+                    line.push((Style::new(), format!("{}{}", byte as char, close as char)));
+                    i = next.unwrap_or(i) + 1;
+                    continue;
+                }
+                line.push((Style::new(), (byte as char).to_string()));
+                open.push(byte == b'{');
+                expect_key = byte == b'{';
+                new_line(&mut lines, &mut line, open.len());
+                i += 1;
+            }
+            b'}' | b']' => {
+                open.pop();
+                new_line(&mut lines, &mut line, open.len());
+                line.push((Style::new(), (byte as char).to_string()));
+                i += 1;
+            }
+            b',' => {
+                line.push((Style::new(), ",".to_owned()));
+                expect_key = open.last() == Some(&true);
+                new_line(&mut lines, &mut line, open.len());
+                i += 1;
+            }
+            b':' => {
+                line.push((Style::new(), ": ".to_owned()));
+                expect_key = false;
+                i += 1;
+            }
+            b'"' => {
+                let mut end = i + 1;
+                while end < bytes.len() && bytes[end] != b'"' {
+                    end += if bytes[end] == b'\\' { 2 } else { 1 };
+                }
+                let end = end.min(bytes.len() - 1);
+                let style = if expect_key { JSON_KEY } else { JSON_STRING };
+                line.push((style, text[i..=end].to_owned()));
+                i = end + 1;
+            }
+            _ => {
+                let end = (i..bytes.len())
+                    .find(|&j| is_space(bytes[j]) || b",:]}".contains(&bytes[j]))
+                    .unwrap_or(bytes.len());
+                let style = if byte == b'-' || byte.is_ascii_digit() {
+                    JSON_NUMBER
+                } else {
+                    JSON_LITERAL
+                };
+                line.push((style, text[i..end].to_owned()));
+                i = end;
+            }
+        }
+    }
+    lines.push(line);
+    Ok(lines)
+}
+
+/// `text` split at the delimiters, one item per line: numbered, or with aligned keys if items
+/// have keys. Control characters in items are escaped, so an item stays on its line.
+fn delimited(text: &str, split: &Split) -> Formatted {
+    let items: Vec<&str> = text.split(split.items.as_str()).collect();
+    let detail = Some(match items.len() {
+        1 => "1 item".to_owned(),
+        n => format!("{n} items"),
+    });
+    let lines = match &split.key_value {
+        None => {
+            let digits = items.len().to_string().len();
+            items
+                .iter()
+                .enumerate()
+                .map(|(i, item)| {
+                    vec![
+                        (DIM, format!("{:>digits$}  ", i + 1)),
+                        (Style::new(), escape_control(item)),
+                    ]
+                })
+                .collect()
+        }
+        Some(key_value) => {
+            let pairs: Vec<(String, Option<String>)> = items
+                .iter()
+                .map(|item| match item.split_once(key_value.as_str()) {
+                    Some((key, value)) => (escape_control(key), Some(escape_control(value))),
+                    None => (escape_control(item), None),
+                })
+                .collect();
+            let key_width = pairs
+                .iter()
+                .filter(|(_, value)| value.is_some())
+                .map(|(key, _)| key.width())
+                .filter(|&width| width <= MAX_KEY_WIDTH)
+                .max()
+                .unwrap_or(0);
+            let separator = format!(" {} ", escape_control(key_value));
+            pairs
+                .into_iter()
+                .map(|(key, value)| match value {
+                    Some(value) => {
+                        let padding = " ".repeat(key_width.saturating_sub(key.width()));
+                        vec![
+                            (KEY, key),
+                            (Style::new(), padding),
+                            (DIM, separator.clone()),
+                            (Style::new(), value),
+                        ]
+                    }
+                    None => vec![(Style::new(), key)],
+                })
+                .collect()
+        }
+    };
+    Formatted {
+        lines,
+        detail,
+        notice: None,
+    }
+}
+
+/// Appends `line` to `out` as lines no wider than `width`: tabs as spaces, control characters
+/// escaped.
+fn wrap(line: &[(Style, String)], width: usize, out: &mut Vec<Line<'static>>) {
+    let width = width.max(1);
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut current = String::new();
+    let mut used = 0;
+    for (style, text) in line {
+        for c in text.chars() {
+            let shown: Cow<str> = if c == '\t' {
+                Cow::Borrowed(TAB)
+            } else if c.is_control() {
+                Cow::Owned(c.escape_default().collect())
+            } else {
+                Cow::Owned(c.to_string())
+            };
+            for c in shown.chars() {
+                let w = c.width().unwrap_or(0);
+                if used + w > width && used > 0 {
+                    if !current.is_empty() {
+                        spans.push(Span::styled(std::mem::take(&mut current), *style));
+                    }
+                    out.push(Line::from(std::mem::take(&mut spans)));
+                    used = 0;
+                }
+                current.push(c);
+                used += w;
+            }
+        }
+        if !current.is_empty() {
+            spans.push(Span::styled(std::mem::take(&mut current), *style));
+        }
+    }
+    out.push(Line::from(spans));
 }
 
 /// One row of the hex dump: the offset, the bytes in hex, and the printable ASCII ones.
@@ -476,13 +993,12 @@ fn hex_row(bytes: &[u8], row: usize, bytes_per_row: usize) -> Line<'static> {
             }
         })
         .collect();
-    let dim = Style::new().add_modifier(Modifier::DIM);
     Line::from(vec![
-        Span::styled(format!("{start:08x}  "), dim),
+        Span::styled(format!("{start:08x}  "), DIM),
         Span::raw(hex),
-        Span::styled(" |", dim),
+        Span::styled(" |", DIM),
         Span::raw(ascii),
-        Span::styled("|", dim),
+        Span::styled("|", DIM),
     ])
 }
 
@@ -545,7 +1061,7 @@ mod tests {
     }
 
     fn viewer(values: Vec<Value>) -> Viewer {
-        let (viewer, fetch) = Viewer::new(4, "body".to_owned(), values);
+        let (viewer, fetch) = Viewer::new(4, "body".to_owned(), values, Delimiters::default());
         assert_eq!(fetch, None);
         viewer
     }
@@ -561,13 +1077,41 @@ mod tests {
         assert!(screen.contains("text · rows 1–2 of 2"), "{screen}");
     }
 
+    /// `text` in the text mode, wrapped at `width`.
+    fn wrap_text(text: &str, width: usize) -> Vec<String> {
+        let mut lines = Vec::new();
+        for line in Formatted::text(text, None).lines {
+            wrap(&line, width, &mut lines);
+        }
+        lines.iter().map(ToString::to_string).collect()
+    }
+
     #[test]
     fn wraps_at_the_width() {
-        assert_eq!(wrap("abcdef", 4), ["abcd", "ef"]);
-        assert_eq!(wrap("", 4), [""]);
-        assert_eq!(wrap("a\n\nb", 4), ["a", "", "b"]);
+        assert_eq!(wrap_text("abcdef", 4), ["abcd", "ef"]);
+        assert_eq!(wrap_text("", 4), [""]);
+        assert_eq!(wrap_text("a\n\nb", 4), ["a", "", "b"]);
         // Wide characters take two columns.
-        assert_eq!(wrap("日本語", 4), ["日本", "語"]);
+        assert_eq!(wrap_text("日本語", 4), ["日本", "語"]);
+    }
+
+    #[test]
+    fn wraps_across_styles() {
+        let line = vec![
+            (KEY, "key".to_owned()),
+            (DIM, " = ".to_owned()),
+            (Style::new(), "value".to_owned()),
+        ];
+        let mut lines = Vec::new();
+        wrap(&line, 5, &mut lines);
+        assert_eq!(
+            lines,
+            [
+                Line::from(vec![Span::styled("key", KEY), Span::styled(" =", DIM)]),
+                Line::from(vec![Span::styled(" ", DIM), Span::raw("valu")]),
+                Line::from(vec![Span::raw("e")]),
+            ]
+        );
     }
 
     #[test]
@@ -606,7 +1150,7 @@ mod tests {
             Value::stored(2, &stored(StoredType::Double, "NaN", false)),
             Value::doc_value_number("sorted numeric", 4612811918334230528, "2.5".to_owned()),
         ]);
-        assert!(viewer.hex());
+        assert_eq!(viewer.mode(), Mode::Hex);
         assert!(render(&mut viewer, 80, 5).contains("ff 00 41"));
 
         viewer.handle_key(KeyCode::Right);
@@ -672,6 +1216,7 @@ mod tests {
                     },
                 ),
             ],
+            Delimiters::default(),
         );
         assert_eq!(fetch, None);
 
@@ -714,7 +1259,12 @@ mod tests {
     fn shows_why_a_cut_value_is_not_whole() {
         let mut cut = text("abc");
         cut.full_length = Some(70_000);
-        let (mut viewer, fetch) = Viewer::new(1, "f".to_owned(), vec![Value::stored(0, &cut)]);
+        let (mut viewer, fetch) = Viewer::new(
+            1,
+            "f".to_owned(),
+            vec![Value::stored(0, &cut)],
+            Delimiters::default(),
+        );
         assert!(matches!(fetch, Some(Event::Fetch { index: 0, .. })));
 
         viewer.failed(1, "f", 0, "gone".to_owned());
@@ -746,6 +1296,232 @@ mod tests {
         for key in [KeyCode::Esc, KeyCode::Char('q'), KeyCode::Char('v')] {
             assert_eq!(viewer.handle_key(key), Some(Event::Close));
         }
+    }
+
+    fn plain(lines: &[Segments]) -> Vec<String> {
+        lines
+            .iter()
+            .map(|line| line.iter().map(|(_, text)| text.as_str()).collect())
+            .collect()
+    }
+
+    #[test]
+    fn pretty_prints_json_as_it_is_written() {
+        let lines = json_lines(r#" {"b":1,"a":[1, 2.50, true,null],"e":{ },"s":"x\"y,}","n":[]} "#)
+            .unwrap();
+        assert_eq!(
+            plain(&lines),
+            [
+                "{",
+                r#"  "b": 1,"#,
+                r#"  "a": ["#,
+                "    1,",
+                "    2.50,",
+                "    true,",
+                "    null",
+                "  ],",
+                r#"  "e": {},"#,
+                r#"  "s": "x\"y,}","#,
+                r#"  "n": []"#,
+                "}",
+            ]
+        );
+        assert_eq!(lines[1][1], (JSON_KEY, r#""b""#.to_owned()));
+        assert_eq!(lines[1][3], (JSON_NUMBER, "1".to_owned()));
+        assert_eq!(lines[5][1], (JSON_LITERAL, "true".to_owned()));
+        assert_eq!(lines[9][3], (JSON_STRING, r#""x\"y,}""#.to_owned()));
+        // Strings in arrays are values, keys of nested objects are keys.
+        let lines = json_lines(r#"[{"k":"v"},"w"]"#).unwrap();
+        assert_eq!(lines[2][1], (JSON_KEY, r#""k""#.to_owned()));
+        assert_eq!(lines[2][3], (JSON_STRING, r#""v""#.to_owned()));
+        assert_eq!(lines[4][1], (JSON_STRING, r#""w""#.to_owned()));
+
+        assert_eq!(plain(&json_lines("-1.5e3").unwrap()), ["-1.5e3"]);
+        assert_eq!(
+            json_lines(r#"{"a":1,}"#),
+            Err("key must be a string at line 1 column 8".to_owned())
+        );
+        assert!(json_lines("{} x").is_err());
+    }
+
+    #[test]
+    fn opens_json_pretty_printed_and_says_when_a_value_is_not_json() {
+        let mut viewer = viewer(vec![
+            Value::stored(0, &text(r#"{"id":7,"tags":["a","b"]}"#)),
+            Value::stored(1, &text("plain")),
+        ]);
+        assert_eq!(viewer.mode(), Mode::Json);
+        let screen = render(&mut viewer, 60, 10);
+        assert!(screen.contains(r#"│  "id": 7,"#), "{screen}");
+        assert!(screen.contains(r#"│    "a","#), "{screen}");
+        assert!(screen.contains("json · rows 1–7 of 7"), "{screen}");
+        assert_eq!(
+            viewer.handle_key(KeyCode::Char('y')),
+            Some(Event::Copy(
+                "{\n  \"id\": 7,\n  \"tags\": [\n    \"a\",\n    \"b\"\n  ]\n}".to_owned()
+            ))
+        );
+
+        viewer.handle_key(KeyCode::Right);
+        let screen = render(&mut viewer, 80, 10);
+        assert!(screen.contains("│plain"), "{screen}");
+        assert!(
+            screen.contains("Not JSON: expected value at line 1 column 1."),
+            "{screen}"
+        );
+        // Copies it as it is shown: as text.
+        assert_eq!(
+            viewer.handle_key(KeyCode::Char('y')),
+            Some(Event::Copy("plain".to_owned()))
+        );
+
+        viewer.handle_key(KeyCode::Left);
+        viewer.handle_key(KeyCode::Char('J'));
+        assert_eq!(viewer.mode(), Mode::Text);
+        assert!(render(&mut viewer, 60, 10).contains(r#"│{"id":7,"tags":["a","b"]}"#));
+        viewer.handle_key(KeyCode::Char('J'));
+        assert_eq!(viewer.mode(), Mode::Json);
+        viewer.handle_key(KeyCode::Char('t'));
+        assert_eq!(viewer.mode(), Mode::Text);
+    }
+
+    #[test]
+    fn opens_a_cut_json_value_as_json() {
+        let mut cut = text(r#"{"id":7,"bo"#);
+        cut.full_length = Some(70_000);
+        let (source, _) = Viewer::new(
+            1,
+            "_source".to_owned(),
+            vec![Value::stored(0, &cut)],
+            Delimiters::default(),
+        );
+        assert_eq!(source.mode(), Mode::Json);
+        // Text that only starts like JSON stays text.
+        let text = viewer(vec![Value::stored(0, &text("[1] and more"))]);
+        assert_eq!(text.mode(), Mode::Text);
+    }
+
+    fn split(items: &str, key_value: Option<&str>) -> Split {
+        Split {
+            items: items.to_owned(),
+            key_value: key_value.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn numbers_delimited_items() {
+        let formatted = delimited("a,b\tc,,d", &split(",", None));
+        assert_eq!(formatted.detail.as_deref(), Some("4 items"));
+        assert_eq!(plain(&formatted.lines), ["1  a", "2  b\\tc", "3  ", "4  d"]);
+
+        let items: Vec<String> = (1..=10).map(|n| n.to_string()).collect();
+        let formatted = delimited(&items.join("\n"), &split("\n", None));
+        assert_eq!(plain(&formatted.lines)[0], " 1  1");
+        assert_eq!(plain(&formatted.lines)[9], "10  10");
+        assert_eq!(
+            delimited("x", &split(",", None)).detail.as_deref(),
+            Some("1 item")
+        );
+    }
+
+    #[test]
+    fn aligns_keys_of_delimited_items() {
+        let long = "k".repeat(MAX_KEY_WIDTH + 1);
+        let text = format!("id=7;name=a=b;junk;{long}=x;tab\t=y");
+        let formatted = delimited(&text, &split(";", Some("=")));
+        assert_eq!(
+            plain(&formatted.lines),
+            [
+                "id    = 7",
+                "name  = a=b",
+                "junk",
+                &format!("{long} = x"),
+                "tab\\t = y",
+            ]
+        );
+        assert_eq!(formatted.lines[0][0], (KEY, "id".to_owned()));
+        assert_eq!(formatted.lines[0][2], (DIM, " = ".to_owned()));
+    }
+
+    #[test]
+    fn resolves_escapes_in_delimiters() {
+        assert_eq!(unescape(r"a\t\n\r\0\\b"), Ok("a\t\n\r\0\\b".to_owned()));
+        assert_eq!(
+            unescape(r"\x1f|\u{1E}\u{e9}x"),
+            Ok("\u{1f}|\u{1e}éx".to_owned())
+        );
+        assert!(unescape(r"\x8").is_err());
+        assert!(unescape(r"\x80").is_err());
+        assert!(unescape(r"\u{110000}").is_err());
+        assert!(unescape(r"\u1f").is_err());
+        assert!(unescape(r"\q").is_err());
+        assert!(unescape("\\").is_err());
+
+        let delimiters = Delimiters {
+            items: r"\x01".to_owned(),
+            key_value: String::new(),
+        };
+        assert_eq!(delimiters.split(), Ok(split("\u{1}", None)));
+        let delimiters = Delimiters {
+            items: String::new(),
+            key_value: "=".to_owned(),
+        };
+        assert_eq!(
+            delimiters.split(),
+            Err("Items: enter a delimiter.".to_owned())
+        );
+    }
+
+    #[test]
+    fn asks_for_the_delimiters_and_splits_at_them() {
+        let mut viewer = viewer(vec![Value::stored(0, &text("a=1|b=22"))]);
+        assert_eq!(viewer.handle_key(KeyCode::Char('d')), None);
+        let screen = render(&mut viewer, 80, 12);
+        assert!(screen.contains("Delimited"), "{screen}");
+        assert!(screen.contains("Items      ,▏"), "{screen}");
+        assert!(
+            viewer
+                .keys()
+                .contains("Tab/↑↓ other delimiter   ⏎ apply   Esc cancel")
+        );
+
+        // The form takes the keys, q included.
+        viewer.handle_key(KeyCode::Backspace);
+        assert_eq!(viewer.handle_key(KeyCode::Enter), None);
+        assert!(render(&mut viewer, 80, 12).contains("Items: enter a delimiter."));
+        viewer.handle_key(KeyCode::Char('|'));
+        viewer.handle_key(KeyCode::Tab);
+        viewer.handle_key(KeyCode::Char('='));
+        assert!(render(&mut viewer, 80, 12).contains("Key/value  =▏"));
+        assert_eq!(viewer.mode(), Mode::Text);
+        viewer.handle_key(KeyCode::Enter);
+        assert_eq!(viewer.mode(), Mode::Delimited);
+        let screen = render(&mut viewer, 80, 12);
+        assert!(screen.contains("│a = 1"), "{screen}");
+        assert!(screen.contains("│b = 22"), "{screen}");
+        assert!(
+            screen.contains("delimited · 2 items · rows 1–2 of 2"),
+            "{screen}"
+        );
+        assert_eq!(
+            viewer.delimiters(),
+            &Delimiters {
+                items: "|".to_owned(),
+                key_value: "=".to_owned(),
+            }
+        );
+        assert_eq!(
+            viewer.handle_key(KeyCode::Char('y')),
+            Some(Event::Copy("a = 1\nb = 22".to_owned()))
+        );
+
+        // Esc leaves the form, not the viewer, and keeps the delimiters.
+        viewer.handle_key(KeyCode::Char('d'));
+        viewer.handle_key(KeyCode::Char('x'));
+        assert_eq!(viewer.handle_key(KeyCode::Esc), None);
+        assert_eq!(viewer.delimiters().items, "|");
+        assert_eq!(viewer.mode(), Mode::Delimited);
+        assert_eq!(viewer.handle_key(KeyCode::Esc), Some(Event::Close));
     }
 
     #[test]

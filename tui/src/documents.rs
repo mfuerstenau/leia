@@ -21,7 +21,7 @@ use crate::protocol::document::{
 use crate::protocol::index::{IndexField, IndexOptions};
 use crate::terms::TermHit;
 use crate::text::{bytes_text, escape_control, first_chars};
-use crate::viewer::{self, Viewer, cut_size, size, stored_type};
+use crate::viewer::{self, Delimiters, Viewer, cut_size, size, stored_type};
 
 /// Rows or lines that PageUp and PageDown move.
 const PAGE: u16 = 10;
@@ -172,6 +172,8 @@ pub struct Documents {
     select_field: Option<String>,
     /// The values of the selected field, viewed over the whole screen.
     viewer: Option<Viewer>,
+    /// The delimiters the viewer last split values at, for the next viewer.
+    delimiters: Delimiters,
 }
 
 impl Documents {
@@ -197,6 +199,7 @@ impl Documents {
             positions: None,
             select_field: None,
             viewer: None,
+            delimiters: Delimiters::default(),
         }
     }
 
@@ -268,7 +271,7 @@ impl Documents {
         self.doc_id = document.doc_id;
         self.document = Some(document);
         self.error = None;
-        self.viewer = None;
+        self.close_viewer();
         self.term_vectors.clear();
         self.details_scroll = 0;
         self.update_rows(selected);
@@ -279,7 +282,7 @@ impl Documents {
         self.doc_id = doc_id;
         self.document = None;
         self.error = Some(error);
-        self.viewer = None;
+        self.close_viewer();
         self.term_vectors.clear();
         self.rows.clear();
         self.details_scroll = 0;
@@ -364,9 +367,16 @@ impl Documents {
         self.prompt.is_some() || self.viewer.is_some()
     }
 
-    /// Whether the viewer is open, and if so whether it shows hex.
-    pub fn viewing(&self) -> Option<bool> {
-        self.viewer.as_ref().map(Viewer::hex)
+    /// The viewer, if it is open.
+    pub fn viewer(&self) -> Option<&Viewer> {
+        self.viewer.as_ref()
+    }
+
+    /// Closes the viewer, keeping its delimiters for the next one.
+    fn close_viewer(&mut self) {
+        if let Some(viewer) = self.viewer.take() {
+            self.delimiters = viewer.delimiters().clone();
+        }
     }
 
     /// Opens the viewer on the selected field's stored values and doc values, if it has any.
@@ -392,7 +402,12 @@ impl Documents {
         if values.is_empty() {
             return None;
         }
-        let (viewer, fetch) = Viewer::new(self.doc_id, field.name.clone(), values);
+        let (viewer, fetch) = Viewer::new(
+            self.doc_id,
+            field.name.clone(),
+            values,
+            self.delimiters.clone(),
+        );
         self.viewer = Some(viewer);
         fetch.and_then(viewer_request)
     }
@@ -405,7 +420,7 @@ impl Documents {
         if let Some(viewer) = &mut self.viewer {
             let event = viewer.handle_key(key)?;
             if event == viewer::Event::Close {
-                self.viewer = None;
+                self.close_viewer();
             }
             return viewer_request(event);
         }
@@ -1385,11 +1400,14 @@ mod tests {
         documents.handle_key(KeyCode::End);
         render(&mut documents, 100, 20);
         assert_eq!(documents.handle_key(KeyCode::Char('v')), None);
-        assert_eq!(documents.viewing(), None);
+        assert_eq!(documents.viewer().map(Viewer::mode), None);
 
         documents.handle_key(KeyCode::Up);
         assert_eq!(documents.handle_key(KeyCode::Char('v')), None);
-        assert_eq!(documents.viewing(), Some(false));
+        assert_eq!(
+            documents.viewer().map(Viewer::mode),
+            Some(viewer::Mode::Text)
+        );
         assert!(documents.prompting());
         let screen = render(&mut documents, 100, 20);
         assert!(
@@ -1406,11 +1424,38 @@ mod tests {
         );
 
         assert_eq!(documents.handle_key(KeyCode::Esc), None);
-        assert_eq!(documents.viewing(), None);
+        assert_eq!(documents.viewer().map(Viewer::mode), None);
         assert_eq!(
             documents.handle_key(KeyCode::Right),
             Some(Request::Document(1))
         );
+    }
+
+    #[test]
+    fn the_next_viewer_splits_at_the_last_delimiters() {
+        let mut documents = documents();
+        documents.loaded(document(0, false));
+        documents.handle_key(KeyCode::Char('v'));
+        documents.handle_key(KeyCode::Char('d'));
+        documents.handle_key(KeyCode::Backspace);
+        documents.handle_key(KeyCode::Char('-'));
+        documents.handle_key(KeyCode::Enter);
+        documents.handle_key(KeyCode::Esc);
+
+        documents.handle_key(KeyCode::Char('v'));
+        documents.handle_key(KeyCode::Char('d'));
+        assert!(render(&mut documents, 100, 20).contains("Items      -▏"));
+        documents.handle_key(KeyCode::Enter);
+        assert!(render(&mut documents, 100, 20).contains("│2  0"));
+
+        // Also when another document closes the viewer.
+        documents.handle_key(KeyCode::Char('d'));
+        documents.handle_key(KeyCode::Char('c'));
+        documents.handle_key(KeyCode::Enter);
+        documents.loaded(document(1, false));
+        documents.handle_key(KeyCode::Char('v'));
+        documents.handle_key(KeyCode::Char('d'));
+        assert!(render(&mut documents, 100, 20).contains("Items      -c▏"));
     }
 
     #[test]
@@ -1439,7 +1484,7 @@ mod tests {
         assert!(render(&mut documents, 100, 20).contains("│second, whole"));
         // Another document closes the viewer.
         documents.loaded(document(3, false));
-        assert_eq!(documents.viewing(), None);
+        assert_eq!(documents.viewer().map(Viewer::mode), None);
     }
 
     #[test]

@@ -18,7 +18,7 @@ because Lucene 10 can't read them.
   point and vector dimensions, and summed postings statistics (doc count, Σ doc freq, Σ term freq),
   plus on request each field's term count and top terms.
 - **Documents:** one document at a time, deleted ones included: norms with the field length they
-  encode, stored values, doc values and term vectors, and a viewer for whole values as text or hex.
+  encode, stored values, doc values and term vectors, and a viewer for whole values as text, hex, pretty-printed JSON or delimited data.
 - **Terms:** the terms of a field with their frequencies, and the documents that contain a term,
   with the positions, offsets and payloads of each occurrence.
 
@@ -121,15 +121,27 @@ field's terms.
 | Key | Action |
 |---|---|
 | `←` `→` / `p` `n` | previous or next value |
-| `h` | switch between text and a hex dump |
-| `y` | copy the value as shown (the text, or the bytes in hex) to the clipboard |
+| `t` | show the text |
+| `h` | switch between the text and a hex dump |
+| `J` | switch between the text and pretty-printed JSON |
+| `d` | split the value at a delimiter, one item per line (asks for the delimiters) |
+| `y` | copy the value as shown (the text, the bytes in hex, the pretty-printed JSON or the items) to the clipboard |
 | `↑` `↓` / `j` `k`, `PgUp` `PgDn` / `Space`, `Home` `End` / `g` `G` | scroll |
 | `Esc` / `q` / `v` | close the viewer |
 
-Bytes that aren't UTF-8 open as hex; numbers show the big-endian bytes of their Java type. Copying
-uses the OSC 52 escape sequence, which works over SSH. The terminal has to allow it: in tmux, set
-`set -g set-clipboard on`. Terminals may drop very large copies without a word; tmux takes about
-1 MiB.
+Bytes that aren't UTF-8 open as hex, and JSON objects and arrays open pretty-printed; numbers show
+the big-endian bytes of their Java type. The JSON mode keeps the value as written: keys in their
+order, numbers and strings with their text. A value that isn't JSON is shown as text, with the
+parse error below it.
+
+The delimited mode asks for two delimiters: the one between items, and optionally one between an
+item's key and its value. Without a key/value delimiter, items are numbered; with one, keys are
+aligned. `\t`, `\n`, `\r`, `\0`, `\\`, `\xHH` (up to `7f`) and `\u{H…}` stand for characters, so
+`\u{1f}` splits at the unit separator. The delimiters are kept for the next value you view.
+
+Copying uses the OSC 52 escape sequence, which works over SSH. The terminal has to allow it: in
+tmux, set `set -g set-clipboard on`. Terminals may drop very large copies without a word; tmux
+takes about 1 MiB.
 
 #### Terms
 
@@ -176,6 +188,10 @@ To run a development build, point leia at the jar:
 ```sh
 LEIA_SERVER_JAR=$PWD/leia-server/build/libs/leia-server.jar cargo run --manifest-path tui/Cargo.toml -- <index>
 ```
+
+For an index to try things on, `./gradlew :leia-core:demoIndex` writes a demo index with a field for
+nearly everything leia shows to `leia-core/build/test-indexes/demo`; see
+[docs/demo-index.md](docs/demo-index.md).
 
 ### Release folders
 

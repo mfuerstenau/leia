@@ -573,11 +573,8 @@ impl App {
                 } else {
                     ""
                 };
-                match documents.viewing() {
-                    Some(hex) => Line::from(format!(
-                        " Esc close   ←/→ value   h {}   y copy   ↑↓ PgUp/PgDn Home/End",
-                        if hex { "text" } else { "hex" }
-                    )),
+                match documents.viewer() {
+                    Some(viewer) => Line::from(viewer.keys()),
                     None => Line::from(format!(
                         " {cancel}q quit   o open   c close   1-3 screen   ←/→ doc   {steps}i go to   \
                          ⏎ term vector   v view   x numbers   e empty fields   Tab panel   ↑↓"
@@ -1086,7 +1083,10 @@ mod tests {
                 index: 0,
             })
         );
-        assert!(render(&mut app).contains("Esc close   ←/→ value   h hex   y copy"));
+        assert!(
+            render(&mut app)
+                .contains("Esc close   ←/→ value   t text   h hex   J json   d delimited   y copy")
+        );
         // The viewer takes q and the screen keys.
         assert_eq!(app.handle_key(key(KeyCode::Char('1'))), None);
         let whole = StoredValue {

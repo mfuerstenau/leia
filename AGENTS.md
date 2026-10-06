@@ -24,7 +24,7 @@ leia (Rust TUI)  ──spawns──▶  <java> -jar leia-server.jar
 | `tui/` | Rust crate `leia` (library + binary): ratatui frontend that spawns the server and holds the protocol DTOs as serde structs in `tui/src/protocol/`. |
 | `protocol/fixtures/` | Golden JSON files shared by both sides: the wire contract (naming: `protocol/fixtures/README.md`). |
 | `protocol/error-codes.json` | The error-code catalogue that both `ErrorCode` enums are checked against. |
-| `docs/` | `adr/`, `tasklist.md`, `SESSION-SUMMARIES.md`. |
+| `docs/` | `adr/`, `tasklist.md`, `SESSION-SUMMARIES.md`, `demo-index.md` (the manual-testing index). |
 
 Dependency direction: `leia-server → leia-protocol`, `leia-server → leia-core`. `leia-core` and `leia-protocol` do not depend on each other.
 
@@ -61,6 +61,7 @@ Keep these in sync with the build:
 ./gradlew build              # compile, test, spotlessCheck
 ./gradlew spotlessApply      # format Java
 ./gradlew :leia-server:shadowJar   # fat jar → leia-server/build/libs/leia-server.jar
+./gradlew :leia-core:demoIndex     # demo index for manual testing → leia-core/build/test-indexes/demo (docs/demo-index.md)
 ./build-dist.sh              # jar + TUI for Linux and Windows → dist/leia-<version>-<os>-x86_64/
                              # (Windows via cargo-zigbuild + zig, from PATH or ~/.local/opt/zig-*)
 
