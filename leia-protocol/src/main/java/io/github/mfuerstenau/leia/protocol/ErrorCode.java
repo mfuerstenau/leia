@@ -34,7 +34,9 @@ public enum ErrorCode {
     /** The open index has no document with that id: it is negative, or not below maxDoc. */
     DOC_NOT_FOUND(-32008),
     /** The field has no such term, or the document does not contain it. */
-    TERM_NOT_FOUND(-32009);
+    TERM_NOT_FOUND(-32009),
+    /** The document has no stored value with that index in the field. */
+    VALUE_NOT_FOUND(-32010);
 
     private final int code;
 

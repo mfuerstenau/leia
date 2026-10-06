@@ -19,6 +19,8 @@ import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.index.GetIndexStatsHandler;
 import jakarta.inject.Inject;
 import java.io.IOException;
+import java.util.OptionalLong;
+import org.apache.lucene.util.BytesRef;
 
 /** {@code getDocument}: what a document of the {@link CurrentIndex} holds, field by field. */
 public final class GetDocumentHandler implements MethodHandler<GetDocumentParams, GetDocumentResult> {
@@ -72,17 +74,38 @@ public final class GetDocumentHandler implements MethodHandler<GetDocumentParams
         return new DocumentField(
                 field.name(),
                 field.norm(),
-                field.stored().stream().map(GetDocumentHandler::storedValue).toList(),
+                field.stored().stream()
+                        .map(value -> storedValue(value, GetDocumentResult.MAX_VALUE_LENGTH))
+                        .toList(),
                 field.docValues().map(GetDocumentHandler::docValues),
                 field.hasTermVector());
     }
 
+    /** The whole {@code value}, as {@code getStoredValue} sends it. */
     static StoredValue storedValue(IndexDocument.StoredValue value) {
+        return storedValue(value, Integer.MAX_VALUE);
+    }
+
+    /**
+     * {@code value} as it goes on the wire, with text and bytes cut to at most {@code maxLength} bytes
+     * (ADR 0008). Text is cut between two characters, so the cut text is still valid UTF-8.
+     */
+    static StoredValue storedValue(IndexDocument.StoredValue value, int maxLength) {
         return switch (value) {
-            case IndexDocument.StoredValue.Text(String text) -> new StoredValue(StoredType.STRING, text, false);
-            case IndexDocument.StoredValue.Binary(var bytes) -> {
+            case IndexDocument.StoredValue.Text(String text) -> text(StoredType.STRING, text, maxLength);
+            case IndexDocument.StoredValue.Binary(BytesRef bytes) -> {
                 ByteStrings.Encoded encoded = ByteStrings.encode(bytes);
-                yield new StoredValue(StoredType.BINARY, encoded.value(), encoded.binary());
+                if (!encoded.binary()) {
+                    yield text(StoredType.BINARY, encoded.value(), maxLength);
+                }
+                // Cutting the bytes first could leave valid UTF-8, which would then go as text.
+                yield bytes.length <= maxLength
+                        ? new StoredValue(StoredType.BINARY, encoded.value(), true)
+                        : new StoredValue(
+                                StoredType.BINARY,
+                                ByteStrings.hex(new BytesRef(bytes.bytes, bytes.offset, maxLength)),
+                                true,
+                                OptionalLong.of(bytes.length));
             }
             case IndexDocument.StoredValue.IntValue(int number) ->
                 new StoredValue(StoredType.INT, Integer.toString(number), false);
@@ -93,6 +116,28 @@ public final class GetDocumentHandler implements MethodHandler<GetDocumentParams
             case IndexDocument.StoredValue.DoubleValue(double number) ->
                 new StoredValue(StoredType.DOUBLE, Double.toString(number), false);
         };
+    }
+
+    /** {@code text}, cut to its first {@code maxLength} bytes of UTF-8 or fewer if it is longer. */
+    private static StoredValue text(StoredType type, String text, int maxLength) {
+        // A UTF-16 char takes at most 3 bytes of UTF-8; a surrogate pair takes 4 for its 2 chars.
+        if ((long) text.length() * 3 <= maxLength) {
+            return new StoredValue(type, text, false);
+        }
+        long length = 0;
+        int end = -1;
+        for (int i = 0; i < text.length(); ) {
+            int codePoint = text.codePointAt(i);
+            int bytes = codePoint < 0x80 ? 1 : codePoint < 0x800 ? 2 : codePoint < 0x10000 ? 3 : 4;
+            if (end < 0 && length + bytes > maxLength) {
+                end = i;
+            }
+            length += bytes;
+            i += Character.charCount(codePoint);
+        }
+        return end < 0
+                ? new StoredValue(type, text, false)
+                : new StoredValue(type, text.substring(0, end), false, OptionalLong.of(length));
     }
 
     private static DocValues docValues(IndexDocument.DocValues values) {

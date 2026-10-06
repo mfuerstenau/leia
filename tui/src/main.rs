@@ -11,9 +11,11 @@ use leia::app::{Action, App};
 use leia::build_info::{LEIA, java_line, server_line};
 use leia::cli::Cli;
 use leia::client::CallError;
+use leia::clipboard::osc52;
 use leia::java::find_java;
 use leia::protocol::document::{
-    GetDocument, GetDocumentParams, GetTermVector, GetTermVectorParams,
+    GetDocument, GetDocumentParams, GetStoredValue, GetStoredValueParams, GetTermVector,
+    GetTermVectorParams,
 };
 use leia::protocol::index::{
     CloseIndex, CloseIndexParams, GetIndexStats, GetIndexStatsParams, OpenIndex, OpenIndexParams,
@@ -166,6 +168,27 @@ fn perform(
                 Ok(document) => return Ok(app.document_loaded(document)),
                 Err(error) => app.document_failed(doc_id, error),
             }
+        }
+        Action::LoadStoredValue {
+            doc_id,
+            field,
+            index,
+        } => {
+            let params = GetStoredValueParams {
+                doc_id,
+                field: field.clone(),
+                index,
+            };
+            match answered(server.call::<GetStoredValue>(params))? {
+                Ok(result) => app.stored_value_loaded(doc_id, &field, index, &result.value),
+                Err(error) => app.stored_value_failed(doc_id, &field, index, error),
+            }
+        }
+        Action::Copy(text) => {
+            // Between two frames, so the sequence can't land inside one.
+            let mut out = io::stdout().lock();
+            out.write_all(osc52(&text).as_bytes())?;
+            out.flush()?;
         }
         Action::LoadTermVector { doc_id, field } => {
             let params = GetTermVectorParams {

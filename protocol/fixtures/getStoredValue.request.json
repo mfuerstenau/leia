@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "id": 9,
+  "method": "getStoredValue",
+  "params": {
+    "docId": 1,
+    "field": "stored",
+    "index": 4
+  }
+}

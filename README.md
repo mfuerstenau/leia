@@ -17,8 +17,8 @@ because Lucene 10 can't read them.
 - **Fields:** every field with its index options, norms, payloads, term vectors, doc values type,
   point and vector dimensions, and summed postings statistics (doc count, Σ doc freq, Σ term freq),
   plus on request each field's term count and top terms.
-- **Documents:** one document at a time, deleted ones included: norms, stored values, doc values
-  and term vectors.
+- **Documents:** one document at a time, deleted ones included: norms with the field length they
+  encode, stored values, doc values and term vectors, and a viewer for whole values as text or hex.
 - **Terms:** the terms of a field with their frequencies, and the documents that contain a term,
   with the positions, offsets and payloads of each occurrence.
 
@@ -90,6 +90,7 @@ scans it again; a smaller N needs no new scan.
 | `i` | go to a document id |
 | `[` `]` | previous or next document of the term opened on the terms screen |
 | `Enter` | load the term vector of the selected field |
+| `v` | view the selected field's values (see below) |
 | `x` | show numeric doc values as long, double bits, sortable double, float bits or sortable float |
 | `e` | hide or show the fields in which the document has nothing |
 | `Tab` | switch between the field table and the details of the selected field |
@@ -101,10 +102,34 @@ selected field's stored values, doc values and, on `Enter`, its term vector with
 offsets and payloads. Deleted documents can be read too, until a merge removes them; they are
 marked `deleted`. Byte strings that aren't UTF-8 are shown as `0x` and their hex.
 
+The norm is shown with the field length it encodes, such as `88 → length 1048–1175`: all of
+Lucene's similarities store the number of terms in one byte (`SmallFloat.intToByte4`), exactly up to
+39 and as a range above. A norm that another similarity wrote may mean something else.
+
+Stored values longer than 64 KiB come cut: the details panel shows their beginning, and the
+viewer fetches them whole.
+
 Flags: `I` indexed, `N` has a norm, `P` payloads, `S` stored, `V` term vector, `D` doc values,
 `T` points, `K` KNN vectors. `N`, `S`, `V` and `D` say what this document has; the others describe
 the field. Whether the document has terms in a field is not shown: finding out means reading the
 field's terms.
+
+#### Viewer
+
+`v` shows the selected field's stored values and doc values one at a time over the whole screen.
+
+| Key | Action |
+|---|---|
+| `←` `→` / `p` `n` | previous or next value |
+| `h` | switch between text and a hex dump |
+| `y` | copy the value as shown (the text, or the bytes in hex) to the clipboard |
+| `↑` `↓` / `j` `k`, `PgUp` `PgDn` / `Space`, `Home` `End` / `g` `G` | scroll |
+| `Esc` / `q` / `v` | close the viewer |
+
+Bytes that aren't UTF-8 open as hex; numbers show the big-endian bytes of their Java type. Copying
+uses the OSC 52 escape sequence, which works over SSH. The terminal has to allow it: in tmux, set
+`set -g set-clipboard on`. Terminals may drop very large copies without a word; tmux takes about
+1 MiB.
 
 #### Terms
 

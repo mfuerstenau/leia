@@ -1,7 +1,7 @@
 //! The application state: what is on screen and what a key does. It makes no calls itself:
 //! [`App::handle_key`] returns an [`Action`], the caller makes the RPC calls and reports back with
 //! [`App::opened`], [`App::open_failed`], [`App::closed`], and the `scan_*`, `document_*`,
-//! `term_vector_*`, `terms_*`, `postings_*` or `positions_*` methods.
+//! `stored_value_*`, `term_vector_*`, `terms_*`, `postings_*` or `positions_*` methods.
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -17,7 +17,9 @@ use crate::build_info::{LEIA, java_line, server_line};
 use crate::documents::{self, Documents};
 use crate::overview::{DEFAULT_TOP_TERMS, FieldScan, Overview, step_top_terms};
 use crate::prompt::{PathPrompt, PromptEvent, expand_home};
-use crate::protocol::document::{BytesValue, GetDocumentResult, TermPosition, TermVectorTerm};
+use crate::protocol::document::{
+    BytesValue, GetDocumentResult, StoredValue, TermPosition, TermVectorTerm,
+};
 use crate::protocol::index::GetIndexStatsResult;
 use crate::protocol::terms::{GetFieldTermScanResult, GetPostingsResult, GetTermsResult};
 use crate::protocol::version::VersionResult;
@@ -43,6 +45,15 @@ pub enum Action {
     /// Fetch this document, and report back with [`App::document_loaded`] or
     /// [`App::document_failed`].
     LoadDocument(i32),
+    /// Fetch a stored value of a document whole, and report back with
+    /// [`App::stored_value_loaded`] or [`App::stored_value_failed`].
+    LoadStoredValue {
+        doc_id: i32,
+        field: String,
+        index: i32,
+    },
+    /// Put this text on the clipboard.
+    Copy(String),
     /// Fetch the term vector of a field of a document, and report back with
     /// [`App::term_vector_loaded`] or [`App::term_vector_failed`].
     LoadTermVector {
@@ -191,6 +202,16 @@ impl App {
                 field,
                 term,
             }),
+            documents::Request::StoredValue {
+                doc_id,
+                field,
+                index,
+            } => Some(Action::LoadStoredValue {
+                doc_id,
+                field,
+                index,
+            }),
+            documents::Request::Copy(text) => Some(Action::Copy(text)),
             documents::Request::StepTerm { forward } => {
                 let request = self.terms.as_mut()?.step(forward);
                 self.terms_request(request)
@@ -236,6 +257,24 @@ impl App {
     pub fn document_failed(&mut self, doc_id: i32, error: String) {
         if let Some(documents) = &mut self.documents {
             documents.failed(doc_id, error);
+        }
+    }
+
+    pub fn stored_value_loaded(
+        &mut self,
+        doc_id: i32,
+        field: &str,
+        index: i32,
+        value: &StoredValue,
+    ) {
+        if let Some(documents) = &mut self.documents {
+            documents.stored_value_loaded(doc_id, field, index, value);
+        }
+    }
+
+    pub fn stored_value_failed(&mut self, doc_id: i32, field: &str, index: i32, error: String) {
+        if let Some(documents) = &mut self.documents {
+            documents.stored_value_failed(doc_id, field, index, error);
         }
     }
 
@@ -534,10 +573,16 @@ impl App {
                 } else {
                     ""
                 };
-                Line::from(format!(
-                    " {cancel}q quit   o open   c close   1-3 screen   ←/→ doc   {steps}i go to   \
-                     ⏎ term vector   x numbers   e empty fields   Tab panel   ↑↓"
-                ))
+                match documents.viewing() {
+                    Some(hex) => Line::from(format!(
+                        " Esc close   ←/→ value   h {}   y copy   ↑↓ PgUp/PgDn Home/End",
+                        if hex { "text" } else { "hex" }
+                    )),
+                    None => Line::from(format!(
+                        " {cancel}q quit   o open   c close   1-3 screen   ←/→ doc   {steps}i go to   \
+                         ⏎ term vector   v view   x numbers   e empty fields   Tab panel   ↑↓"
+                    )),
+                }
             }
             (Some(_), _, Some(terms), Screen::Terms) => {
                 terms.render(frame, body);
@@ -982,6 +1027,7 @@ mod tests {
                     kind: StoredType::String,
                     value: format!("doc-{doc_id}"),
                     binary: false,
+                    full_length: None,
                 }],
                 doc_values: None,
                 has_term_vector: false,
@@ -1022,6 +1068,43 @@ mod tests {
         assert_eq!(app.handle_key(key(KeyCode::Char('1'))), None);
         assert!(render(&mut app).contains("Path       /data/idx"));
         assert_eq!(app.handle_key(key(KeyCode::Char('2'))), None);
+    }
+
+    #[test]
+    fn views_a_value_fetches_it_whole_and_copies_it() {
+        let mut app = app_with_documents();
+        app.handle_key(key(KeyCode::Char('2')));
+        let mut doc = document(0);
+        doc.fields[0].stored[0].full_length = Some(100_000);
+        app.document_loaded(doc);
+
+        assert_eq!(
+            app.handle_key(key(KeyCode::Char('v'))),
+            Some(Action::LoadStoredValue {
+                doc_id: 0,
+                field: "id".to_owned(),
+                index: 0,
+            })
+        );
+        assert!(render(&mut app).contains("Esc close   ←/→ value   h hex   y copy"));
+        // The viewer takes q and the screen keys.
+        assert_eq!(app.handle_key(key(KeyCode::Char('1'))), None);
+        let whole = StoredValue {
+            kind: StoredType::String,
+            value: "doc-0, whole".to_owned(),
+            binary: false,
+            full_length: None,
+        };
+        app.stored_value_loaded(0, "id", 0, &whole);
+        assert!(render(&mut app).contains("doc-0, whole"));
+        assert_eq!(
+            app.handle_key(key(KeyCode::Char('y'))),
+            Some(Action::Copy("doc-0, whole".to_owned()))
+        );
+        assert_eq!(app.handle_key(key(KeyCode::Char('q'))), None);
+        assert!(render(&mut app).contains("v view"));
+        app.stored_value_failed(0, "id", 0, "late".to_owned());
+        assert_eq!(app.handle_key(key(KeyCode::Char('q'))), Some(Action::Quit));
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # ADR 0006 — Documents on the wire
 
-- **Status:** Accepted
+- **Status:** Accepted; decision 6 superseded by ADR 0008
 - **Date:** 2026-10-06
 
 ## Context
@@ -24,7 +24,7 @@ The Documents area (`luke-features.md` §4.2) shows one document at a time: per 
    - **Stored values** carry their type (`STRING`, `BINARY`, `INT`, `LONG`, `FLOAT`, `DOUBLE`) and the value as a string. Numbers are formatted with Java's `toString`, which is exact for `float` and `double`, can express `NaN` and `Infinity`, and is parseable by Rust's `str::parse`.
    - **Numeric doc values** are sent as the raw `long`. The TUI decodes them for display (as a double or float from raw bits, or from a sortable long), because only the user knows the encoding.
    - **Payloads** are always hex. They carry no text convention.
-6. **No size limits yet.** Values are sent whole. A cap, or paging through large values, comes with the stored-value viewer if real indexes need it.
+6. **No size limits yet.** Values are sent whole. A cap, or paging through large values, comes with the stored-value viewer if real indexes need it. *Superseded by ADR 0008: stored values over 64 KiB are cut, and `getStoredValue` fetches one whole.*
 7. **Error code `DOC_NOT_FOUND` (-32008)** for a document id outside `0..maxDoc-1`. A deleted document is not an error.
 
 ## Alternatives considered

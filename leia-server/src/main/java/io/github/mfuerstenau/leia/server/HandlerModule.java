@@ -4,6 +4,7 @@ import dagger.Binds;
 import dagger.Module;
 import dagger.multibindings.IntoSet;
 import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
+import io.github.mfuerstenau.leia.server.document.GetStoredValueHandler;
 import io.github.mfuerstenau.leia.server.document.GetTermVectorHandler;
 import io.github.mfuerstenau.leia.server.index.CloseIndexHandler;
 import io.github.mfuerstenau.leia.server.index.GetIndexStatsHandler;
@@ -51,6 +52,10 @@ interface HandlerModule {
     @Binds
     @IntoSet
     MethodHandler<?, ?> getDocument(GetDocumentHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> getStoredValue(GetStoredValueHandler handler);
 
     @Binds
     @IntoSet

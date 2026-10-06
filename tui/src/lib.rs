@@ -6,6 +6,7 @@ pub mod app;
 pub mod build_info;
 pub mod cli;
 pub mod client;
+pub mod clipboard;
 pub mod documents;
 pub mod java;
 pub mod overview;
@@ -14,6 +15,7 @@ pub mod protocol;
 pub mod server;
 pub mod terms;
 pub mod text;
+pub mod viewer;
 
 #[cfg(test)]
 mod test_support;

@@ -150,6 +150,23 @@ class DocumentTest {
     }
 
     @Test
+    void readsTheStoredValuesOfOneField() throws Exception {
+        Path dir = writeIndex();
+
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
+            assertThat(index.storedValues(0, "stored"))
+                    .isEqualTo(field(index.document(0), "stored").stored())
+                    .hasSize(5);
+            assertThat(index.storedValues(2, "extra")).containsExactly(new StoredValue.Text("only here"));
+            // Deleted, and without stored values in the field.
+            assertThat(index.storedValues(1, "id")).containsExactly(new StoredValue.Text("2"));
+            assertThat(index.storedValues(1, "stored")).isEmpty();
+            assertThatThrownBy(() -> index.storedValues(0, "nope")).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> index.storedValues(4, "id")).isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
     void readsTermVectorWithPositionsOffsetsAndPayloads() throws Exception {
         Path dir = writeIndex();
 

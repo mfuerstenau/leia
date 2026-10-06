@@ -44,7 +44,7 @@ final class DocumentReader {
         Bits liveDocs = leaf.getLiveDocs();
         boolean deleted = liveDocs != null && !liveDocs.get(doc);
 
-        StoredValues stored = new StoredValues();
+        StoredValues stored = new StoredValues(null);
         leaf.storedFields().document(doc, stored);
         Fields termVectors = leaf.termVectors().get(doc);
 
@@ -126,10 +126,23 @@ final class DocumentReader {
         return Optional.of(new DocValues(field.getDocValuesType(), List.of(), List.copyOf(values)));
     }
 
-    /** Collects every stored value, by field name, in the order the values were added. */
+    static List<StoredValue> storedValues(DirectoryReader reader, int docId, String field) throws IOException {
+        SegmentDoc segmentDoc = SegmentDoc.of(reader, docId);
+        StoredValues stored = new StoredValues(field);
+        segmentDoc.leaf().storedFields().document(segmentDoc.doc(), stored);
+        return List.copyOf(stored.values.getOrDefault(field, List.of()));
+    }
+
+    /** Collects the stored values, by field name, in the order the values were added. */
     private static final class StoredValues extends StoredFieldVisitor {
 
         final Map<String, List<StoredValue>> values = new HashMap<>();
+        /** The only field to collect; {@code null} for every field. */
+        private final String only;
+
+        StoredValues(String only) {
+            this.only = only;
+        }
 
         private void add(FieldInfo field, StoredValue value) {
             values.computeIfAbsent(field.getName(), _ -> new ArrayList<>()).add(value);
@@ -137,7 +150,7 @@ final class DocumentReader {
 
         @Override
         public Status needsField(FieldInfo field) {
-            return Status.YES;
+            return only == null || only.equals(field.getName()) ? Status.YES : Status.NO;
         }
 
         @Override

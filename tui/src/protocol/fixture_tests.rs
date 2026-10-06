@@ -10,7 +10,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-use super::document::{GetDocument, GetTermVector};
+use super::document::{GetDocument, GetStoredValue, GetTermVector};
 use super::index::{CloseIndex, GetIndexStats, OpenIndex};
 use super::job::CancelJob;
 use super::terms::{GetFieldTermScan, GetPositions, GetPostings, GetTerms, StartFieldTermScan};
@@ -143,6 +143,7 @@ fn check(fixture: &Fixture, json: &str) -> Result<(), String> {
         GetFieldTermScan::NAME => check_method::<GetFieldTermScan>(fixture, json),
         CancelJob::NAME => check_method::<CancelJob>(fixture, json),
         GetDocument::NAME => check_method::<GetDocument>(fixture, json),
+        GetStoredValue::NAME => check_method::<GetStoredValue>(fixture, json),
         GetTermVector::NAME => check_method::<GetTermVector>(fixture, json),
         GetTerms::NAME => check_method::<GetTerms>(fixture, json),
         GetPostings::NAME => check_method::<GetPostings>(fixture, json),

@@ -32,10 +32,12 @@ pub enum ErrorCode {
     DocNotFound,
     /// The field has no such term, or the document does not contain it.
     TermNotFound,
+    /// The document has no stored value with that index in the field.
+    ValueNotFound,
 }
 
 impl ErrorCode {
-    pub const ALL: [ErrorCode; 15] = [
+    pub const ALL: [ErrorCode; 16] = [
         ErrorCode::ParseError,
         ErrorCode::InvalidRequest,
         ErrorCode::MethodNotFound,
@@ -51,6 +53,7 @@ impl ErrorCode {
         ErrorCode::JobNotFound,
         ErrorCode::DocNotFound,
         ErrorCode::TermNotFound,
+        ErrorCode::ValueNotFound,
     ];
 
     pub const fn code(self) -> i32 {
@@ -70,6 +73,7 @@ impl ErrorCode {
             ErrorCode::JobNotFound => -32007,
             ErrorCode::DocNotFound => -32008,
             ErrorCode::TermNotFound => -32009,
+            ErrorCode::ValueNotFound => -32010,
         }
     }
 
@@ -91,6 +95,7 @@ impl ErrorCode {
             ErrorCode::JobNotFound => "JOB_NOT_FOUND",
             ErrorCode::DocNotFound => "DOC_NOT_FOUND",
             ErrorCode::TermNotFound => "TERM_NOT_FOUND",
+            ErrorCode::ValueNotFound => "VALUE_NOT_FOUND",
         }
     }
 }

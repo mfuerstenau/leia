@@ -6,8 +6,9 @@ use super::index::DocValuesType;
 use super::method::RpcMethod;
 
 /// `getDocument`: what a document of the open index holds in every field: norm, stored values,
-/// doc values, and whether it has a term vector. A deleted document is read too. Fails with
-/// `NO_INDEX_OPEN`, or `DOC_NOT_FOUND` for an id outside 0 to maxDoc - 1.
+/// doc values, and whether it has a term vector. A deleted document is read too. Stored values
+/// longer than [`MAX_VALUE_LENGTH`] bytes are cut (ADR 0008). Fails with `NO_INDEX_OPEN`, or
+/// `DOC_NOT_FOUND` for an id outside 0 to maxDoc - 1.
 pub enum GetDocument {}
 
 impl RpcMethod for GetDocument {
@@ -65,6 +66,43 @@ pub struct StoredValue {
     pub value: String,
     /// Whether `value` holds the bytes of a `Binary` value as hex.
     pub binary: bool,
+    /// Present if `value` is cut (ADR 0008): the length of the whole value in bytes, UTF-8 for
+    /// text. `value` then holds its first [`MAX_VALUE_LENGTH`] bytes or fewer, cut between two
+    /// characters, and `getStoredValue` fetches the whole value.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub full_length: Option<i64>,
+}
+
+/// The longest stored value, in bytes, that `getDocument` sends whole (ADR 0008).
+pub const MAX_VALUE_LENGTH: usize = 64 * 1024;
+
+/// `getStoredValue`: one stored value of a document, whole, however long it is (ADR 0008). Fails
+/// with `NO_INDEX_OPEN`, `DOC_NOT_FOUND`, `FIELD_NOT_FOUND`, or `VALUE_NOT_FOUND` if the document
+/// has no stored value with that index in the field.
+pub enum GetStoredValue {}
+
+impl RpcMethod for GetStoredValue {
+    const NAME: &'static str = "getStoredValue";
+    type Params = GetStoredValueParams;
+    type Result = GetStoredValueResult;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetStoredValueParams {
+    /// The document id, from 0 to maxDoc - 1.
+    pub doc_id: i32,
+    pub field: String,
+    /// Which of the document's stored values in the field, from 0, in the order `getDocument`
+    /// lists them.
+    pub index: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetStoredValueResult {
+    /// The whole stored value, never cut.
+    pub value: StoredValue,
 }
 
 /// The type a value was stored as.
@@ -177,6 +215,7 @@ mod tests {
                 kind: StoredType::String,
                 value: "1".to_owned(),
                 binary: false,
+                full_length: None,
             }],
             doc_values: None,
             has_term_vector: false,
@@ -184,6 +223,14 @@ mod tests {
         let json = r#"{"name":"id","stored":[{"type":"STRING","value":"1","binary":false}],"hasTermVector":false}"#;
         assert_eq!(serde_json::to_string(&field).unwrap(), json);
         assert_eq!(serde_json::from_str::<DocumentField>(json).unwrap(), field);
+    }
+
+    #[test]
+    fn cut_value_has_its_full_length() {
+        let json = r#"{"type":"STRING","value":"ab","binary":false,"fullLength":70000}"#;
+        let value: StoredValue = serde_json::from_str(json).unwrap();
+        assert_eq!(value.full_length, Some(70000));
+        assert_eq!(serde_json::to_string(&value).unwrap(), json);
     }
 
     #[test]

@@ -14,8 +14,9 @@ use leia::client::CallError;
 use leia::java::find_java;
 use leia::protocol::ErrorCode;
 use leia::protocol::document::{
-    BytesValue, DocumentField, GetDocument, GetDocumentParams, GetDocumentResult, GetTermVector,
-    GetTermVectorParams, StoredType, StoredValue, TermPosition,
+    BytesValue, DocumentField, GetDocument, GetDocumentParams, GetDocumentResult, GetStoredValue,
+    GetStoredValueParams, GetTermVector, GetTermVectorParams, StoredType, StoredValue,
+    TermPosition,
 };
 use leia::protocol::index::{
     CloseIndex, CloseIndexParams, DocValuesType, GetIndexStats, GetIndexStatsParams, IndexOptions,
@@ -336,6 +337,7 @@ fn reads_a_deleted_document_of_a_lucene9_index() {
         kind: StoredType::String,
         value: value.to_owned(),
         binary: false,
+        full_length: None,
     };
     assert_eq!(
         document,
@@ -367,6 +369,19 @@ fn reads_a_deleted_document_of_a_lucene9_index() {
         })
         .unwrap();
     assert!(vector.terms.is_empty(), "{vector:?}");
+    let mut value = |index: i32| {
+        server.call::<GetStoredValue>(GetStoredValueParams {
+            doc_id: 1,
+            field: "body".to_owned(),
+            index,
+        })
+    };
+    assert_eq!(value(0).unwrap().value, string("document number 2"));
+    let no_value = value(1).unwrap_err();
+    assert!(
+        matches!(&no_value, CallError::Rpc(e) if e.code == ErrorCode::ValueNotFound),
+        "{no_value:?}"
+    );
 
     let missing = server
         .call::<GetDocument>(GetDocumentParams { doc_id: 3 })

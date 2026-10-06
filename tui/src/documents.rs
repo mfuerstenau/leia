@@ -1,7 +1,8 @@
 //! The documents screen: one document of the open index at a time, field by field, as
 //! `getDocument` reports it (ADR 0006), with a panel for the selected field's values and its
 //! term vector. A document opened from the terms screen also shows where the term occurs in it,
-//! and `[`/`]` step through the term's other documents.
+//! and `[`/`]` step through the term's other documents. `v` opens the selected field's values in
+//! the [`Viewer`].
 
 use std::collections::HashMap;
 
@@ -14,12 +15,13 @@ use ratatui::widgets::{Block, Cell, Clear, Paragraph, Row, Table, TableState, Wr
 
 use crate::overview::{doc_values, highlight, panel, postings};
 use crate::protocol::document::{
-    BytesValue, DocValues, DocumentField, GetDocumentResult, StoredType, StoredValue, TermPosition,
+    BytesValue, DocValues, DocumentField, GetDocumentResult, StoredValue, TermPosition,
     TermVectorTerm,
 };
 use crate::protocol::index::{IndexField, IndexOptions};
 use crate::terms::TermHit;
 use crate::text::{bytes_text, escape_control, first_chars};
+use crate::viewer::{self, Viewer, cut_size, size, stored_type};
 
 /// Rows or lines that PageUp and PageDown move.
 const PAGE: u16 = 10;
@@ -29,6 +31,9 @@ const SIDE_BY_SIDE_WIDTH: u16 = 130;
 const DETAILS_PANEL_WIDTH: u16 = 64;
 /// The value column shows at most this many characters of a value.
 const SUMMARY_CHARS: usize = 200;
+/// The details show at most this many characters of a stored value, and this many lines.
+const DETAIL_VALUE_CHARS: usize = 2000;
+const DETAIL_VALUE_LINES: usize = 20;
 /// The name column is at most this wide.
 const NAME_MAX_WIDTH: u16 = 32;
 const COLUMN_SPACING: u16 = 2;
@@ -51,6 +56,15 @@ pub enum Request {
     },
     /// The previous or next document of the term of the [`TermHit`].
     StepTerm { forward: bool },
+    /// A stored value whole, which `getDocument` cut, reported back with
+    /// [`Documents::stored_value_loaded`] or [`Documents::stored_value_failed`].
+    StoredValue {
+        doc_id: i32,
+        field: String,
+        index: i32,
+    },
+    /// Put this text on the clipboard.
+    Copy(String),
 }
 
 /// How the raw numbers of numeric doc values are shown. The index doesn't record what they
@@ -156,6 +170,8 @@ pub struct Documents {
     positions: Option<Result<Vec<TermPosition>, String>>,
     /// The field to select once the next document is in.
     select_field: Option<String>,
+    /// The values of the selected field, viewed over the whole screen.
+    viewer: Option<Viewer>,
 }
 
 impl Documents {
@@ -180,6 +196,7 @@ impl Documents {
             hit: None,
             positions: None,
             select_field: None,
+            viewer: None,
         }
     }
 
@@ -251,6 +268,7 @@ impl Documents {
         self.doc_id = document.doc_id;
         self.document = Some(document);
         self.error = None;
+        self.viewer = None;
         self.term_vectors.clear();
         self.details_scroll = 0;
         self.update_rows(selected);
@@ -261,6 +279,7 @@ impl Documents {
         self.doc_id = doc_id;
         self.document = None;
         self.error = Some(error);
+        self.viewer = None;
         self.term_vectors.clear();
         self.rows.clear();
         self.details_scroll = 0;
@@ -277,6 +296,24 @@ impl Documents {
         if self.shows(doc_id) {
             self.term_vectors
                 .insert(field.to_owned(), TermVector::Failed(error));
+        }
+    }
+
+    pub fn stored_value_loaded(
+        &mut self,
+        doc_id: i32,
+        field: &str,
+        index: i32,
+        value: &StoredValue,
+    ) {
+        if let Some(viewer) = &mut self.viewer {
+            viewer.loaded(doc_id, field, index, value);
+        }
+    }
+
+    pub fn stored_value_failed(&mut self, doc_id: i32, field: &str, index: i32, error: String) {
+        if let Some(viewer) = &mut self.viewer {
+            viewer.failed(doc_id, field, index, error);
         }
     }
 
@@ -322,16 +359,56 @@ impl Documents {
         Some(&document.fields[self.rows[row]])
     }
 
-    /// Whether the go-to-document prompt takes the keys, Esc included.
+    /// Whether the go-to-document prompt or the viewer takes the keys, Esc included.
     pub fn prompting(&self) -> bool {
-        self.prompt.is_some()
+        self.prompt.is_some() || self.viewer.is_some()
+    }
+
+    /// Whether the viewer is open, and if so whether it shows hex.
+    pub fn viewing(&self) -> Option<bool> {
+        self.viewer.as_ref().map(Viewer::hex)
+    }
+
+    /// Opens the viewer on the selected field's stored values and doc values, if it has any.
+    fn view(&mut self) -> Option<Request> {
+        let field = self.selected_field()?;
+        let mut values: Vec<viewer::Value> = field
+            .stored
+            .iter()
+            .enumerate()
+            .map(|(i, value)| viewer::Value::stored(i, value))
+            .collect();
+        if let Some(dv) = &field.doc_values {
+            let kind = doc_values(dv.kind);
+            values.extend(dv.numbers.iter().map(|&number| {
+                viewer::Value::doc_value_number(kind, number, self.numbers.format(number))
+            }));
+            values.extend(
+                dv.values
+                    .iter()
+                    .map(|value| viewer::Value::doc_value(kind, value)),
+            );
+        }
+        if values.is_empty() {
+            return None;
+        }
+        let (viewer, fetch) = Viewer::new(self.doc_id, field.name.clone(), values);
+        self.viewer = Some(viewer);
+        fetch.and_then(viewer_request)
     }
 
     /// Goes to another document with ←/→, the `i` prompt, or `[`/`]` through the documents of
-    /// the hit's term; loads the selected field's term vector with Enter, cycles the number
-    /// format with `x`, hides empty fields with `e`, switches the focus with Tab, and moves the
-    /// selection or scrolls the details.
+    /// the hit's term; loads the selected field's term vector with Enter, views its values with
+    /// `v`, cycles the number format with `x`, hides empty fields with `e`, switches the focus
+    /// with Tab, and moves the selection or scrolls the details.
     pub fn handle_key(&mut self, key: KeyCode) -> Option<Request> {
+        if let Some(viewer) = &mut self.viewer {
+            let event = viewer.handle_key(key)?;
+            if event == viewer::Event::Close {
+                self.viewer = None;
+            }
+            return viewer_request(event);
+        }
         if let Some(prompt) = &mut self.prompt {
             if key == KeyCode::Esc {
                 self.prompt = None;
@@ -364,6 +441,7 @@ impl Documents {
                     field: field.name.clone(),
                 });
             }
+            KeyCode::Char('v') => return self.view(),
             KeyCode::Char('x') => self.numbers = self.numbers.next(),
             KeyCode::Char('e') => {
                 self.hide_empty = !self.hide_empty;
@@ -446,6 +524,9 @@ impl Documents {
         self.render_details(frame, details_area);
         if let Some(prompt) = &self.prompt {
             render_prompt(frame, area, prompt, self.max_doc);
+        }
+        if let Some(viewer) = &mut self.viewer {
+            viewer.render(frame, area);
         }
     }
 
@@ -584,6 +665,22 @@ impl Documents {
     }
 }
 
+fn viewer_request(event: viewer::Event) -> Option<Request> {
+    match event {
+        viewer::Event::Fetch {
+            doc_id,
+            field,
+            index,
+        } => Some(Request::StoredValue {
+            doc_id,
+            field,
+            index,
+        }),
+        viewer::Event::Copy(text) => Some(Request::Copy(text)),
+        viewer::Event::Close => None,
+    }
+}
+
 /// Whether the document has nothing that `getDocument` reports in the field. It may still have
 /// postings there.
 fn is_empty(field: &DocumentField) -> bool {
@@ -637,17 +734,6 @@ fn stored_text(value: &StoredValue) -> String {
         format!("0x{}", value.value)
     } else {
         value.value.clone()
-    }
-}
-
-fn stored_type(kind: StoredType) -> &'static str {
-    match kind {
-        StoredType::String => "string",
-        StoredType::Binary => "binary",
-        StoredType::Int => "int",
-        StoredType::Long => "long",
-        StoredType::Float => "float",
-        StoredType::Double => "double",
     }
 }
 
@@ -725,7 +811,7 @@ fn detail_lines(
     }
     lines.push(Line::from(vec![
         label("Norm"),
-        Span::raw(field.norm.map_or("-".to_owned(), |norm| norm.to_string())),
+        Span::raw(norm_text(field.norm)),
     ]));
     if let Some((hit, positions)) = hit {
         lines.push(Line::from(""));
@@ -740,19 +826,43 @@ fn detail_lines(
             label("Stored"),
             Span::raw(count(field.stored.len(), "value")),
         ]));
+        let dim = Style::new().add_modifier(Modifier::DIM);
         for value in &field.stored {
-            // Multi-line text keeps its lines, indented under the first.
+            // Multi-line text keeps its lines, indented under the first; a long value shows its
+            // beginning, and the viewer the rest.
             let text = stored_text(value);
-            for (i, line) in text.split('\n').enumerate() {
+            let shown = first_chars(&text, DETAIL_VALUE_CHARS);
+            let mut more = text.chars().nth(DETAIL_VALUE_CHARS).is_some();
+            for (i, line) in shown.split('\n').enumerate() {
+                if i == DETAIL_VALUE_LINES {
+                    more = true;
+                    break;
+                }
                 let prefix = if i == 0 {
                     format!("  {:<8}", stored_type(value.kind))
                 } else {
                     " ".repeat(10)
                 };
                 lines.push(Line::from(vec![
-                    Span::styled(prefix, Style::new().add_modifier(Modifier::DIM)),
+                    Span::styled(prefix, dim),
                     Span::raw(escape_control(line)),
                 ]));
+            }
+            if let Some(full) = value.full_length {
+                lines.push(Line::styled(
+                    format!(
+                        "{}cut at {} of {}, v views it whole",
+                        " ".repeat(10),
+                        cut_size(),
+                        size(full)
+                    ),
+                    dim,
+                ));
+            } else if more {
+                lines.push(Line::styled(
+                    format!("{}… v views it whole", " ".repeat(10)),
+                    dim,
+                ));
             }
         }
     }
@@ -858,6 +968,47 @@ fn position_text(position: &TermPosition) -> String {
     parts.join(" ")
 }
 
+/// The norm, and the field length it stands for if Lucene's similarities wrote it.
+fn norm_text(norm: Option<i64>) -> String {
+    let Some(norm) = norm else {
+        return "-".to_owned();
+    };
+    match norm_length(norm) {
+        Some((low, high)) if low == high => format!("{norm} → length {low}"),
+        Some((low, high)) => format!("{norm} → length {low}–{high}"),
+        None => norm.to_string(),
+    }
+}
+
+/// The field lengths a norm stands for if Lucene's similarities wrote it: they all encode the
+/// number of terms with `SmallFloat.intToByte4`, which is exact below 40 and a range above.
+/// `None` for a norm that is not a byte, which some other similarity wrote.
+pub fn norm_length(norm: i64) -> Option<(u32, u32)> {
+    let byte = i8::try_from(norm).ok()? as u8;
+    let low = byte4_to_int(byte);
+    let high = match byte.checked_add(1) {
+        Some(next) => byte4_to_int(next) - 1,
+        None => low,
+    };
+    Some((low, high))
+}
+
+/// `SmallFloat.byte4ToInt`: values below 24 stand for themselves, the others are a 4-bit float
+/// (`int4ToLong`) on top of 24.
+fn byte4_to_int(byte: u8) -> u32 {
+    const NUM_FREE_VALUES: u8 = 24;
+    if byte < NUM_FREE_VALUES {
+        return u32::from(byte);
+    }
+    let int4 = u32::from(byte - NUM_FREE_VALUES);
+    let bits = int4 & 0x07;
+    let decoded = match int4 >> 3 {
+        0 => bits,
+        exponent => (bits | 0x08) << (exponent - 1),
+    };
+    u32::from(NUM_FREE_VALUES) + decoded
+}
+
 fn count(n: usize, noun: &str) -> String {
     if n == 1 {
         format!("1 {noun}")
@@ -899,7 +1050,7 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
-    use crate::protocol::document::BytesValue;
+    use crate::protocol::document::{BytesValue, StoredType};
     use crate::protocol::index::{DocValuesType, TermStats};
 
     fn schema(name: &str, number: i32) -> IndexField {
@@ -937,6 +1088,7 @@ mod tests {
             kind: StoredType::String,
             value: value.to_owned(),
             binary: false,
+            full_length: None,
         }
     }
 
@@ -1203,6 +1355,110 @@ mod tests {
     }
 
     #[test]
+    fn decodes_norms_to_field_lengths() {
+        // From Lucene's SmallFloat.intToByte4 and byte4ToInt.
+        assert_eq!(norm_length(0), Some((0, 0)));
+        assert_eq!(norm_length(23), Some((23, 23)));
+        assert_eq!(norm_length(39), Some((39, 39)));
+        assert_eq!(norm_length(40), Some((40, 41)));
+        assert_eq!(norm_length(57), Some((96, 103)));
+        assert_eq!(norm_length(88), Some((1048, 1175)));
+        assert_eq!(norm_length(-89), Some((983_064, 1_048_599)));
+        assert_eq!(norm_length(-1), Some((2_013_265_944, 2_013_265_944)));
+        assert_eq!(norm_length(128), None);
+        assert_eq!(norm_text(Some(88)), "88 → length 1048–1175");
+        assert_eq!(norm_text(Some(1000)), "1000");
+        assert_eq!(norm_text(None), "-");
+
+        let mut documents = documents();
+        documents.loaded(document(0, false));
+        documents.handle_key(KeyCode::Down);
+        let screen = render(&mut documents, 140, 30);
+        assert!(screen.contains("Norm        3 → length 3"), "{screen}");
+    }
+
+    #[test]
+    fn views_the_values_of_the_selected_field() {
+        let mut documents = documents();
+        documents.loaded(document(0, false));
+        // extra has no values.
+        documents.handle_key(KeyCode::End);
+        render(&mut documents, 100, 20);
+        assert_eq!(documents.handle_key(KeyCode::Char('v')), None);
+        assert_eq!(documents.viewing(), None);
+
+        documents.handle_key(KeyCode::Up);
+        assert_eq!(documents.handle_key(KeyCode::Char('v')), None);
+        assert_eq!(documents.viewing(), Some(false));
+        assert!(documents.prompting());
+        let screen = render(&mut documents, 100, 20);
+        assert!(
+            screen.contains("rank · 1 of 2 · sorted numeric doc value · 8 B"),
+            "{screen}"
+        );
+        assert!(screen.contains("│-1"), "{screen}");
+        // ← and → step through the values now, not the documents.
+        assert_eq!(documents.handle_key(KeyCode::Right), None);
+        assert!(render(&mut documents, 100, 20).contains("│4612811918334230528"));
+        assert_eq!(
+            documents.handle_key(KeyCode::Char('y')),
+            Some(Request::Copy("4612811918334230528".to_owned()))
+        );
+
+        assert_eq!(documents.handle_key(KeyCode::Esc), None);
+        assert_eq!(documents.viewing(), None);
+        assert_eq!(
+            documents.handle_key(KeyCode::Right),
+            Some(Request::Document(1))
+        );
+    }
+
+    #[test]
+    fn fetches_a_cut_value_for_the_viewer() {
+        let mut documents = documents();
+        let mut doc = document(2, false);
+        doc.fields[1].stored[1].full_length = Some(70_000);
+        documents.loaded(doc);
+        documents.handle_key(KeyCode::Down);
+        let screen = render(&mut documents, 140, 30);
+        assert!(
+            screen.contains("cut at 64.0 KiB of 68.4 KiB, v views it whole"),
+            "{screen}"
+        );
+
+        assert_eq!(documents.handle_key(KeyCode::Char('v')), None);
+        assert_eq!(
+            documents.handle_key(KeyCode::Right),
+            Some(Request::StoredValue {
+                doc_id: 2,
+                field: "body".to_owned(),
+                index: 1,
+            })
+        );
+        documents.stored_value_loaded(2, "body", 1, &string("second, whole"));
+        assert!(render(&mut documents, 100, 20).contains("│second, whole"));
+        // Another document closes the viewer.
+        documents.loaded(document(3, false));
+        assert_eq!(documents.viewing(), None);
+    }
+
+    #[test]
+    fn shows_the_beginning_of_a_long_value() {
+        let mut documents = documents();
+        let lines: Vec<String> = (1..=30).map(|n| format!("line {n}")).collect();
+        let mut doc = document(0, false);
+        doc.fields[0].stored = vec![string(&lines.join("\n"))];
+        documents.loaded(doc);
+        documents.handle_key(KeyCode::Tab);
+        documents.handle_key(KeyCode::PageDown);
+
+        let screen = render(&mut documents, 140, 40);
+        assert!(screen.contains("          line 20"), "{screen}");
+        assert!(!screen.contains("line 21"), "{screen}");
+        assert!(screen.contains("          … v views it whole"), "{screen}");
+    }
+
+    #[test]
     fn shows_binary_values_as_hex() {
         let mut documents = documents();
         let mut doc = document(0, false);
@@ -1210,6 +1466,7 @@ mod tests {
             kind: StoredType::Binary,
             value: "ff00".to_owned(),
             binary: true,
+            full_length: None,
         }];
         doc.fields[2].doc_values = Some(DocValues {
             kind: DocValuesType::SortedSet,

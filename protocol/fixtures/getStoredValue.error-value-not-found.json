@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 9,
+  "error": {
+    "code": -32010,
+    "message": "No stored value 6 in field 'stored' of document 1: it has 6"
+  }
+}

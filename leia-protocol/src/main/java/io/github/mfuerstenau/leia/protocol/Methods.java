@@ -2,6 +2,8 @@ package io.github.mfuerstenau.leia.protocol;
 
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
+import io.github.mfuerstenau.leia.protocol.document.GetStoredValueParams;
+import io.github.mfuerstenau.leia.protocol.document.GetStoredValueResult;
 import io.github.mfuerstenau.leia.protocol.document.GetTermVectorParams;
 import io.github.mfuerstenau.leia.protocol.document.GetTermVectorResult;
 import io.github.mfuerstenau.leia.protocol.index.CloseIndexParams;
@@ -79,11 +81,20 @@ public final class Methods {
 
     /**
      * What a document of the open index holds in every field: norm, stored values, doc values, and
-     * whether it has a term vector (ADR 0006). A deleted document is read too. Fails with {@code
+     * whether it has a term vector (ADR 0006). A deleted document is read too. Stored values longer
+     * than {@link GetDocumentResult#MAX_VALUE_LENGTH} bytes are cut (ADR 0008). Fails with {@code
      * NO_INDEX_OPEN}, or {@code DOC_NOT_FOUND} for an id outside 0 to maxDoc - 1.
      */
     public static final RpcMethod<GetDocumentParams, GetDocumentResult> GET_DOCUMENT =
             new RpcMethod<>("getDocument", GetDocumentParams.class, GetDocumentResult.class);
+
+    /**
+     * One stored value of a document, whole, however long it is (ADR 0008). Fails with {@code
+     * NO_INDEX_OPEN}, {@code DOC_NOT_FOUND}, {@code FIELD_NOT_FOUND}, or {@code VALUE_NOT_FOUND} if
+     * the document has no stored value with that index in the field.
+     */
+    public static final RpcMethod<GetStoredValueParams, GetStoredValueResult> GET_STORED_VALUE =
+            new RpcMethod<>("getStoredValue", GetStoredValueParams.class, GetStoredValueResult.class);
 
     /**
      * The term vector of a document for a field, with positions, offsets and payloads as far as they
@@ -128,6 +139,7 @@ public final class Methods {
             GET_FIELD_TERM_SCAN,
             CANCEL_JOB,
             GET_DOCUMENT,
+            GET_STORED_VALUE,
             GET_TERM_VECTOR,
             GET_TERMS,
             GET_POSTINGS,

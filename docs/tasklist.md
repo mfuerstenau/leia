@@ -14,6 +14,7 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 - [x] ADR 0005: long-running operations as polled server jobs (`start<Op>` / `get<Op>` / `cancelJob`)
 - [x] ADR 0006: documents on the wire (per-segment reads, deleted documents readable, text-or-hex byte strings, raw numeric doc values)
 - [x] ADR 0007: terms and postings on the wire (stateless pages, no jobs, positions on demand, `TERM_NOT_FOUND`)
+- [x] ADR 0008: large stored values (cut at 64 KiB in `getDocument`, `getStoredValue` fetches one whole, `VALUE_NOT_FOUND`)
 - [x] `README.md`: what leia is, build and run instructions
 
 ### Java build (Gradle 9, Java 25)
@@ -107,7 +108,10 @@ From the read-only checklist in `luke-features.md` §7. Ordered roughly by value
 - [x] Documents: term browse/seek per field, postings of the current term with positions/offsets/payloads (Luke's "first/next term", "first/next doc") (ADR 0007)
   - `getTerms {field, from?, limit}`, `getPostings {field, term, fromDoc, limit}` (deleted documents marked) and `getPositions {docId, field, term}`: stateless pages, terms as text or hex both ways; `TERM_NOT_FOUND` (-32009)
   - TUI: terms screen (`3`) with fields | terms | postings columns, pages of 100 fetched at the last row, `/` seeks as you type; `Enter` on a posting opens the document, whose details show the term's positions; `[`/`]` step through the term's documents
-- [ ] Documents: stored value viewer/copy, norm decoding (field length), size limits for huge values (ADR 0006, decision 6)
+- [x] Documents: stored value viewer/copy, norm decoding (field length), size limits for huge values (ADR 0008)
+  - `getDocument` cuts `STRING`/`BINARY` stored values over 64 KiB between two characters and gives their `fullLength`; `getStoredValue {docId, field, index}` sends one whole; `VALUE_NOT_FOUND` (-32010)
+  - TUI: `v` opens the viewer on the selected field's stored values and doc values (←/→ value, `h` text/hex dump, `y` copy via OSC 52, scrolling); a cut value is fetched whole when shown
+  - the details panel shows a value's first 2000 characters or 20 lines; the norm shows the field length it encodes (`SmallFloat.byte4ToInt`, exact below 40, a range above)
 - [ ] Search: parse/rewrite, term query, paging (configurable page size), exact/approx total hits, explain, query-parser options, similarity (BM25/TF-IDF), 2-level sort, fields to load, More-Like-This
 - [ ] Analysis: custom analyzer builder (char filters/tokenizer/filters + params, config dir, external jars), token attributes, step-by-step
 - [ ] Commits: commit list, files, segments, diagnostics/attributes/codec formats
@@ -115,6 +119,9 @@ From the read-only checklist in `luke-features.md` §7. Ordered roughly by value
 - [ ] Misc: log view with level filter, cross-screen navigation (`luke-features.md` §5), themes, about
 - [ ] Improvements over Luke (§6): KNN vector inspection/search, point values, per-segment doc view, deleted-doc inspection, readable binary values, highlighting, cancellation of long operations
 - [x] Cross-cutting: progress and cancellation for long-running RPCs (ADR 0005: polled server jobs, `cancelJob`, cooperative cancellation; the term scan is the first job)
+- [x] Value viewer: hex view for values, switchable from the normal view (`h` in the viewer)
+- [ ] Value viewer: pretty-printed JSON
+- [ ] Value viewer: delimited data, line by line, with a definable delimiter; optionally pretty-formats delimited key/value data, with a definable key/value delimiter
 
 ## Open questions
 

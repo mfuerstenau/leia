@@ -97,6 +97,18 @@
         "hasTermVector": false
       },
       {
+        "name": "source",
+        "stored": [
+          {
+            "type": "STRING",
+            "value": "{\"title\": \"a long document\", \"body\": \"",
+            "binary": false,
+            "fullLength": 5242880
+          }
+        ],
+        "hasTermVector": false
+      },
+      {
         "name": "missing",
         "stored": [],
         "hasTermVector": false

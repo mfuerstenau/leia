@@ -259,6 +259,19 @@ public final class ReadOnlyIndex implements Closeable {
     }
 
     /**
+     * The stored values of a document in a field, in the order they were added. A deleted document is
+     * read too.
+     *
+     * @throws IllegalArgumentException if there is no such document id or field
+     * @throws IOException if reading the document fails
+     */
+    public List<IndexDocument.StoredValue> storedValues(int docId, String field) throws IOException {
+        checkDocId(docId);
+        checkField(field);
+        return DocumentReader.storedValues(reader, docId, field);
+    }
+
+    /**
      * The term vector of a document for a field, in term order. It is empty if the document has
      * none for the field.
      *
