@@ -38,6 +38,11 @@ Two facts about the libraries shape the answer:
    - the `ErrorCode` enum matches `protocol/error-codes.json`, the shared catalogue (name → code)
 7. **Rust crate layout.** The `leia` package has a library target (`src/lib.rs`: `cli`, `protocol`) and the binary (`src/main.rs`). Public library items don't count as dead code, so the protocol types can land before the client uses them.
 
+8. **Enums and containers** (added with `getIndexStats`):
+   - An enum that mirrors a Lucene enum (`IndexOptions`, `DocValuesType`) is a protocol enum with the same constant names, serialized as the name. Rust uses `rename_all = "SCREAMING_SNAKE_CASE"`. Unknown names are rejected on both sides, and so are numbers: Jackson otherwise reads `1` as the constant with ordinal 1, so `ProtocolJson` enables `FAIL_ON_NUMBERS_FOR_ENUMS`. The server maps Lucene's enum with an exhaustive `switch`, so a constant added by a new Lucene version fails the compile. Lucene 10.5's `DOCS_AND_CUSTOM_FREQS` was found this way.
+   - A string-to-string map (commit user data) is a `Map<String, String>` in Java and a `BTreeMap<String, String>` in Rust. Fixture comparison ignores key order.
+   - Map values and list elements must not be `null`, as in serde: `ProtocolJson` sets content nulls to `Nulls.FAIL`. `Optional` components still accept `null`.
+
 ## Alternatives considered
 
 - **Polymorphic params via Jackson's `EXTERNAL_PROPERTY` type id on `method`.** Parses requests in one pass, but serde has no matching construct that works with `deny_unknown_fields` (`flatten` is incompatible with it), and responses carry no method name anyway. Rejected.

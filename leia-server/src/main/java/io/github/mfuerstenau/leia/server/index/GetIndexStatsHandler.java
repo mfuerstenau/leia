@@ -1,0 +1,104 @@
+package io.github.mfuerstenau.leia.server.index;
+
+import io.github.mfuerstenau.leia.core.FieldStats;
+import io.github.mfuerstenau.leia.core.IndexStats;
+import io.github.mfuerstenau.leia.core.IndexSummary;
+import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
+import io.github.mfuerstenau.leia.protocol.ErrorCode;
+import io.github.mfuerstenau.leia.protocol.Methods;
+import io.github.mfuerstenau.leia.protocol.RpcMethod;
+import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
+import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
+import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
+import io.github.mfuerstenau.leia.protocol.index.IndexField;
+import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
+import io.github.mfuerstenau.leia.protocol.index.TermStats;
+import io.github.mfuerstenau.leia.server.MethodHandler;
+import io.github.mfuerstenau.leia.server.RpcException;
+import jakarta.inject.Inject;
+import java.io.IOException;
+import org.apache.lucene.util.Version;
+
+/** {@code getIndexStats}: the cheap statistics of the {@link CurrentIndex}. */
+public final class GetIndexStatsHandler implements MethodHandler<GetIndexStatsParams, GetIndexStatsResult> {
+
+    private final CurrentIndex currentIndex;
+
+    @Inject
+    GetIndexStatsHandler(CurrentIndex currentIndex) {
+        this.currentIndex = currentIndex;
+    }
+
+    @Override
+    public RpcMethod<GetIndexStatsParams, GetIndexStatsResult> method() {
+        return Methods.GET_INDEX_STATS;
+    }
+
+    @Override
+    public GetIndexStatsResult handle(GetIndexStatsParams params) throws RpcException {
+        ReadOnlyIndex index =
+                currentIndex.get().orElseThrow(() -> new RpcException(ErrorCode.NO_INDEX_OPEN, "No index is open"));
+        try {
+            return toResult(index.stats());
+        } catch (IOException e) {
+            throw new RpcException(
+                    ErrorCode.INDEX_NOT_READABLE, "Cannot read the index statistics: " + e.getMessage(), e);
+        }
+    }
+
+    private static GetIndexStatsResult toResult(IndexStats stats) {
+        IndexSummary summary = stats.summary();
+        return new GetIndexStatsResult(
+                summary.path().toString(),
+                stats.directoryImpl(),
+                summary.segmentsFile(),
+                stats.generation(),
+                stats.version(),
+                stats.segmentCount(),
+                summary.numDocs(),
+                summary.maxDoc(),
+                summary.createdVersionMajor(),
+                stats.commitLuceneVersion().toString(),
+                summary.minSegmentLuceneVersion().map(Version::toString),
+                stats.userData(),
+                stats.fields().stream().map(GetIndexStatsHandler::toField).toList());
+    }
+
+    private static IndexField toField(FieldStats field) {
+        return new IndexField(
+                field.name(),
+                field.number(),
+                indexOptions(field.indexOptions()),
+                field.hasNorms(),
+                field.hasPayloads(),
+                field.hasTermVectors(),
+                docValuesType(field.docValuesType()),
+                field.pointDimensionCount(),
+                field.pointNumBytes(),
+                field.vectorDimension(),
+                field.terms()
+                        .map(terms -> new TermStats(terms.docCount(), terms.sumDocFreq(), terms.sumTotalTermFreq())));
+    }
+
+    static IndexOptions indexOptions(org.apache.lucene.index.IndexOptions options) {
+        return switch (options) {
+            case NONE -> IndexOptions.NONE;
+            case DOCS -> IndexOptions.DOCS;
+            case DOCS_AND_FREQS -> IndexOptions.DOCS_AND_FREQS;
+            case DOCS_AND_FREQS_AND_POSITIONS -> IndexOptions.DOCS_AND_FREQS_AND_POSITIONS;
+            case DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS -> IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS;
+            case DOCS_AND_CUSTOM_FREQS -> IndexOptions.DOCS_AND_CUSTOM_FREQS;
+        };
+    }
+
+    static DocValuesType docValuesType(org.apache.lucene.index.DocValuesType type) {
+        return switch (type) {
+            case NONE -> DocValuesType.NONE;
+            case NUMERIC -> DocValuesType.NUMERIC;
+            case BINARY -> DocValuesType.BINARY;
+            case SORTED -> DocValuesType.SORTED;
+            case SORTED_NUMERIC -> DocValuesType.SORTED_NUMERIC;
+            case SORTED_SET -> DocValuesType.SORTED_SET;
+        };
+    }
+}

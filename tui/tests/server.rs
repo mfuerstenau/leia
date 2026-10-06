@@ -11,7 +11,9 @@ use std::env;
 use leia::client::CallError;
 use leia::java::find_java;
 use leia::protocol::ErrorCode;
-use leia::protocol::index::{OpenIndex, OpenIndexParams};
+use leia::protocol::index::{
+    DocValuesType, GetIndexStats, GetIndexStatsParams, IndexOptions, OpenIndex, OpenIndexParams,
+};
 use leia::protocol::version::{Version, VersionParams};
 use leia::server::{SERVER_JAR_ENV, SHUTDOWN_TIMEOUT, Server, find_server_jar};
 
@@ -109,5 +111,73 @@ fn reports_missing_index() {
     assert_eq!(
         error.message,
         "No such file or directory: /nonexistent/index"
+    );
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn reports_lucene9_index_stats() {
+    let mut server = start();
+    let path = lucene9_index();
+    server
+        .call::<OpenIndex>(OpenIndexParams { path: path.clone() })
+        .unwrap();
+
+    let stats = server
+        .call::<GetIndexStats>(GetIndexStatsParams {})
+        .unwrap();
+
+    assert_eq!(stats.path, path);
+    assert_eq!(
+        (stats.segments_file.as_str(), stats.generation),
+        ("segments_2", 2)
+    );
+    assert_eq!(
+        (stats.segment_count, stats.num_docs, stats.max_doc),
+        (1, 2, 3)
+    );
+    assert!(stats.commit_lucene_version.starts_with("9."), "{stats:?}");
+    assert_eq!(
+        stats.user_data.get("writer").map(String::as_str),
+        Some("leia LegacyIndexWriter")
+    );
+    let fields: Vec<_> = stats
+        .fields
+        .iter()
+        .map(|field| {
+            (
+                field.name.as_str(),
+                field.index_options,
+                field.doc_values_type,
+            )
+        })
+        .collect();
+    assert_eq!(
+        fields,
+        [
+            ("id", IndexOptions::Docs, DocValuesType::None),
+            (
+                "body",
+                IndexOptions::DocsAndFreqsAndPositions,
+                DocValuesType::None
+            ),
+        ]
+    );
+    // Postings statistics count the deleted document too.
+    assert_eq!(stats.fields[0].terms.map(|terms| terms.doc_count), Some(3));
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn index_stats_need_an_open_index() {
+    let mut server = start();
+
+    let error = server
+        .call::<GetIndexStats>(GetIndexStatsParams {})
+        .unwrap_err();
+
+    assert!(
+        matches!(&error, CallError::Rpc(e) if e.code == ErrorCode::NoIndexOpen),
+        "{error:?}"
     );
 }

@@ -6,6 +6,7 @@ pub mod build_info;
 pub mod cli;
 pub mod client;
 pub mod java;
+pub mod overview;
 pub mod protocol;
 pub mod server;
 

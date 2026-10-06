@@ -9,13 +9,21 @@ import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Optional;
+import java.util.TreeMap;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.index.DirectoryReader;
+import org.apache.lucene.index.FieldInfo;
+import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.IndexFormatTooNewException;
 import org.apache.lucene.index.IndexFormatTooOldException;
 import org.apache.lucene.index.IndexNotFoundException;
+import org.apache.lucene.index.MultiTerms;
 import org.apache.lucene.index.SegmentInfos;
+import org.apache.lucene.index.Terms;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.store.NoLockFactory;
@@ -30,11 +38,13 @@ public final class ReadOnlyIndex implements Closeable {
 
     private final Directory directory;
     private final DirectoryReader reader;
+    private final SegmentInfos commit;
     private final IndexSummary summary;
 
-    private ReadOnlyIndex(Directory directory, DirectoryReader reader, IndexSummary summary) {
+    private ReadOnlyIndex(Directory directory, DirectoryReader reader, SegmentInfos commit, IndexSummary summary) {
         this.directory = directory;
         this.reader = reader;
+        this.commit = commit;
         this.summary = summary;
     }
 
@@ -57,8 +67,9 @@ public final class ReadOnlyIndex implements Closeable {
         try {
             directory = FSDirectory.open(dir, NoLockFactory.INSTANCE);
             reader = DirectoryReader.open(directory);
-            IndexSummary summary = summarize(dir, directory, reader);
-            return new ReadOnlyIndex(directory, reader, summary);
+            SegmentInfos commit =
+                    SegmentInfos.readCommit(directory, reader.getIndexCommit().getSegmentsFileName());
+            return new ReadOnlyIndex(directory, reader, commit, summarize(dir, reader, commit));
         } catch (IOException e) {
             IOUtils.closeWhileHandlingException(reader, directory);
             throw translate(dir, e);
@@ -68,16 +79,14 @@ public final class ReadOnlyIndex implements Closeable {
         }
     }
 
-    private static IndexSummary summarize(Path dir, Directory directory, DirectoryReader reader) throws IOException {
-        String segmentsFile = reader.getIndexCommit().getSegmentsFileName();
-        SegmentInfos infos = SegmentInfos.readCommit(directory, segmentsFile);
+    private static IndexSummary summarize(Path dir, DirectoryReader reader, SegmentInfos commit) {
         return new IndexSummary(
                 dir,
-                segmentsFile,
+                commit.getSegmentsFileName(),
                 reader.numDocs(),
                 reader.maxDoc(),
-                infos.getIndexCreatedVersionMajor(),
-                Optional.ofNullable(infos.getMinSegmentLuceneVersion()));
+                commit.getIndexCreatedVersionMajor(),
+                Optional.ofNullable(commit.getMinSegmentLuceneVersion()));
     }
 
     /** Maps Lucene's exceptions to a {@link Reason}. The order matters: subclasses come first. */
@@ -119,6 +128,49 @@ public final class ReadOnlyIndex implements Closeable {
 
     public IndexSummary summary() {
         return summary;
+    }
+
+    /**
+     * Statistics that are cheap to compute: the commit, the merged field infos and the per-segment
+     * postings statistics, which the reader loaded on open. Nothing iterates over terms or documents.
+     *
+     * @throws IOException if reading the postings statistics fails
+     */
+    public IndexStats stats() throws IOException {
+        List<FieldStats> fields = new ArrayList<>();
+        for (FieldInfo field : FieldInfos.getMergedFieldInfos(reader)) {
+            fields.add(fieldStats(field));
+        }
+        fields.sort(Comparator.comparingInt(FieldStats::number));
+        return new IndexStats(
+                summary,
+                directory.getClass().getSimpleName(),
+                commit.getGeneration(),
+                reader.getVersion(),
+                commit.size(),
+                commit.getCommitLuceneVersion(),
+                new TreeMap<>(commit.getUserData()),
+                List.copyOf(fields));
+    }
+
+    private FieldStats fieldStats(FieldInfo field) throws IOException {
+        Terms terms = MultiTerms.getTerms(reader, field.getName());
+        Optional<FieldStats.TermStats> termStats = terms == null
+                ? Optional.empty()
+                : Optional.of(new FieldStats.TermStats(
+                        terms.getDocCount(), terms.getSumDocFreq(), terms.getSumTotalTermFreq()));
+        return new FieldStats(
+                field.getName(),
+                field.getFieldNumber(),
+                field.getIndexOptions(),
+                field.hasNorms(),
+                field.hasPayloads(),
+                field.hasTermVectors(),
+                field.getDocValuesType(),
+                field.getPointDimensionCount(),
+                field.getPointNumBytes(),
+                field.getVectorDimension(),
+                termStats);
     }
 
     /** The reader on the opened commit. It stays valid until this index is closed. */

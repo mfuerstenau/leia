@@ -3,12 +3,17 @@ package io.github.mfuerstenau.leia.protocol;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
+import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.version.JavaRuntime;
 import io.github.mfuerstenau.leia.protocol.version.VersionParams;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.JavaType;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -118,6 +123,37 @@ class ProtocolJsonTest {
         assertThatThrownBy(() -> MAPPER.readValue(
                         "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-31999,\"message\":\"m\"}}",
                         VERSION_RESPONSE))
+                .isInstanceOf(JacksonException.class);
+    }
+
+    @Test
+    void writesAndReadsEnumsByName() {
+        assertThat(MAPPER.writeValueAsString(IndexOptions.DOCS_AND_FREQS)).isEqualTo("\"DOCS_AND_FREQS\"");
+        assertThat(MAPPER.readValue("\"DOCS_AND_FREQS\"", IndexOptions.class)).isEqualTo(IndexOptions.DOCS_AND_FREQS);
+    }
+
+    @Test
+    void rejectsUnknownOrNumericEnumValue() {
+        assertThatThrownBy(() -> MAPPER.readValue("\"POSITIONS\"", IndexOptions.class))
+                .isInstanceOf(JacksonException.class);
+        assertThatThrownBy(() -> MAPPER.readValue("1", IndexOptions.class)).isInstanceOf(JacksonException.class);
+    }
+
+    @Test
+    void acceptsNullForOptional() {
+        OpenIndexResult result = MAPPER.readValue("""
+                {"path":"/i","segmentsFile":"segments_1","numDocs":0,"maxDoc":0,"createdVersionMajor":10,
+                 "minSegmentLuceneVersion":null}
+                """, OpenIndexResult.class);
+
+        assertThat(result.minSegmentLuceneVersion()).isEmpty();
+    }
+
+    @Test
+    void rejectsNullMapValueAndListElement() {
+        assertThatThrownBy(() -> MAPPER.readValue("{\"a\":null}", new TypeReference<Map<String, String>>() {}))
+                .isInstanceOf(JacksonException.class);
+        assertThatThrownBy(() -> MAPPER.readValue("[null]", new TypeReference<List<String>>() {}))
                 .isInstanceOf(JacksonException.class);
     }
 

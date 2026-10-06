@@ -1,5 +1,6 @@
 package io.github.mfuerstenau.leia.core;
 
+import static io.github.mfuerstenau.leia.core.TestIndexes.legacyIndex;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assumptions.assumeThat;
@@ -189,15 +190,6 @@ class ReadOnlyIndexTest {
             }
         }
         return dir;
-    }
-
-    /** A test index written by an older Lucene version (see build.gradle.kts). */
-    private static Path legacyIndex(String name) {
-        String dir = System.getProperty("leia.test.index." + name);
-        if (dir == null) {
-            throw new IllegalStateException("System property leia.test.index." + name + " is not set");
-        }
-        return Path.of(dir).toAbsolutePath();
     }
 
     private static Path copy(Path source, Path target) throws IOException {

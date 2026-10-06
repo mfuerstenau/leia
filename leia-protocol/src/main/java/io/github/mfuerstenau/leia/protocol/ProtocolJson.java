@@ -1,11 +1,13 @@
 package io.github.mfuerstenau.leia.protocol;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.Nulls;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JavaType;
 import tools.jackson.databind.MapperFeature;
 import tools.jackson.databind.cfg.CoercionAction;
 import tools.jackson.databind.cfg.CoercionInputShape;
+import tools.jackson.databind.cfg.EnumFeature;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.type.LogicalType;
 
@@ -19,6 +21,8 @@ import tools.jackson.databind.type.LogicalType;
  *       null}.
  *   <li>Scalars are not coerced: a string or a fraction is not accepted as a number, and a number
  *       or a boolean is not accepted as a string.
+ *   <li>Map values and list elements must not be {@code null}.
+ *   <li>Enums other than {@code ErrorCode} are written as their name; a number is not accepted.
  *   <li>Properties are written in declaration order.
  * </ul>
  */
@@ -33,11 +37,15 @@ public final class ProtocolJson {
             // No scalar coercion, as in serde: "2" and 2.5 are not a long, 7 and true are not a String.
             .disable(MapperFeature.ALLOW_COERCION_OF_SCALARS)
             .disable(DeserializationFeature.ACCEPT_FLOAT_AS_INT)
+            // Jackson otherwise reads 1 as the enum constant with ordinal 1.
+            .enable(EnumFeature.FAIL_ON_NUMBERS_FOR_ENUMS)
             .withCoercionConfig(
                     LogicalType.Textual,
                     config -> config.setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)
                             .setCoercion(CoercionInputShape.Float, CoercionAction.Fail)
                             .setCoercion(CoercionInputShape.Boolean, CoercionAction.Fail))
+            // serde rejects null for a String or a struct, also inside a map or a list.
+            .changeDefaultNullHandling(handling -> handling.withContentNulls(Nulls.FAIL))
             .disable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
             .changeDefaultPropertyInclusion(inclusion -> inclusion.withValueInclusion(JsonInclude.Include.NON_ABSENT))
             .build();

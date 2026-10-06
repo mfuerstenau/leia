@@ -9,7 +9,10 @@ use clap::Parser;
 use leia::build_info::{LEIA, java_line, server_line};
 use leia::cli::Cli;
 use leia::java::find_java;
-use leia::protocol::index::{OpenIndex, OpenIndexParams, OpenIndexResult};
+use leia::overview::Overview;
+use leia::protocol::index::{
+    GetIndexStats, GetIndexStatsParams, GetIndexStatsResult, OpenIndex, OpenIndexParams,
+};
 use leia::protocol::version::{Version, VersionParams, VersionResult};
 use leia::server::{SERVER_JAR_ENV, SHUTDOWN_TIMEOUT, Server, find_server_jar};
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
@@ -27,14 +30,14 @@ fn main() -> Result<()> {
     // Start the server before taking over the terminal, so that startup errors are printed
     // normally.
     let (mut server, version) = start_server(&cli)?;
-    let index = match &cli.index_path {
-        Some(path) => Some(open_index(&mut server, path)?),
+    let overview = match &cli.index_path {
+        Some(path) => Some(Overview::new(open_index(&mut server, path)?)),
         None => None,
     };
 
     // ratatui::run restores the terminal on exit and on panic; dropping the server on a panic
     // shuts it down too.
-    let result = ratatui::run(|terminal| run(terminal, &version, index.as_ref()));
+    let result = ratatui::run(|terminal| run(terminal, &version, overview));
     let stopped = server
         .shutdown(SHUTDOWN_TIMEOUT)
         .context("cannot stop leia-server");
@@ -69,7 +72,8 @@ fn start_server(cli: &Cli) -> Result<(Server, VersionResult)> {
     Ok((server, version))
 }
 
-fn open_index(server: &mut Server, path: &Path) -> Result<OpenIndexResult> {
+/// Opens the index and fetches its statistics for the overview.
+fn open_index(server: &mut Server, path: &Path) -> Result<GetIndexStatsResult> {
     // The protocol carries paths as strings (JSON has no other way), so they must be UTF-8.
     let path_str = path
         .to_str()
@@ -78,57 +82,62 @@ fn open_index(server: &mut Server, path: &Path) -> Result<OpenIndexResult> {
         .call::<OpenIndex>(OpenIndexParams {
             path: path_str.to_owned(),
         })
-        .with_context(|| format!("cannot open the index {}", path.display()))
+        .with_context(|| format!("cannot open the index {}", path.display()))?;
+    server
+        .call::<GetIndexStats>(GetIndexStatsParams {})
+        .with_context(|| format!("cannot read the statistics of {}", path.display()))
 }
 
 fn run(
     terminal: &mut DefaultTerminal,
     version: &VersionResult,
-    index: Option<&OpenIndexResult>,
+    mut overview: Option<Overview>,
 ) -> Result<()> {
     loop {
-        terminal.draw(|frame| draw(frame, version, index))?;
+        terminal.draw(|frame| draw(frame, version, overview.as_mut()))?;
         // Windows reports both press and release; only handle presses.
-        if let Event::Key(key) = event::read()?
-            && key.kind == KeyEventKind::Press
-            && matches!(key.code, KeyCode::Char('q') | KeyCode::Esc)
-        {
+        let Event::Key(key) = event::read()? else {
+            continue;
+        };
+        if key.kind != KeyEventKind::Press {
+            continue;
+        }
+        if matches!(key.code, KeyCode::Char('q') | KeyCode::Esc) {
             return Ok(());
+        }
+        if let Some(overview) = overview.as_mut() {
+            overview.handle_key(key.code);
         }
     }
 }
 
-fn draw(frame: &mut Frame, version: &VersionResult, index: Option<&OpenIndexResult>) {
+fn draw(frame: &mut Frame, version: &VersionResult, overview: Option<&mut Overview>) {
     let [body, footer] =
         Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(frame.area());
-    let mut lines = match index {
-        Some(index) => index_lines(index),
-        None => vec![Line::from("No index open")],
-    };
-    lines.extend([
-        Line::from(""),
-        Line::from(LEIA.line()),
-        Line::from(server_line(version)),
-        Line::from(java_line(&version.java)),
-    ]);
-    frame.render_widget(
-        Paragraph::new(lines).block(Block::bordered().title(" leia ")),
-        body,
-    );
-    frame.render_widget(Line::from(" q quit"), footer);
-}
-
-fn index_lines(index: &OpenIndexResult) -> Vec<Line<'static>> {
-    let deleted = index.max_doc - index.num_docs;
-    let mut details = format!(
-        "{}, {} docs ({} deleted), created by Lucene {}",
-        index.segments_file, index.num_docs, deleted, index.created_version_major
-    );
-    if let Some(oldest) = &index.min_segment_lucene_version {
-        details.push_str(&format!(", oldest segment written by {oldest}"));
+    match overview {
+        Some(overview) => {
+            overview.render(frame, body);
+            let keys = Line::from(" q quit   ↑↓ PgUp PgDn Home End  fields");
+            let build = Line::from(format!("{} ", LEIA.line())).right_aligned();
+            // The build only if it fits next to the keys.
+            if keys.width() + 2 + build.width() <= usize::from(footer.width) {
+                frame.render_widget(build, footer);
+            }
+            frame.render_widget(keys, footer);
+        }
+        None => {
+            let lines = vec![
+                Line::from("No index open"),
+                Line::from(""),
+                Line::from(LEIA.line()),
+                Line::from(server_line(version)),
+                Line::from(java_line(&version.java)),
+            ];
+            frame.render_widget(
+                Paragraph::new(lines).block(Block::bordered().title(" leia ")),
+                body,
+            );
+            frame.render_widget(Line::from(" q quit"), footer);
+        }
     }
-    vec![
-        Line::from(format!("Index:  {}", index.path)),
-        Line::from(format!("        {details}")),
-    ]
 }

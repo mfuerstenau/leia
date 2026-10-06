@@ -61,20 +61,22 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
   - The server keeps one open index (`CurrentIndex`); a new `openIndex` replaces it only once the new index has opened
   - TUI: the index path from the CLI is opened before the UI starts; a failure is printed and exits 1
 - [ ] **Open-index prompt** in the TUI (open or switch an index without restarting; show open errors in the UI instead of exiting)
-- [ ] **Index statistics**: `getIndexStats` RPC + overview screen (subset of `luke-features.md` §4.1)
-  - path, directory implementation, index format/version, #docs, maxDoc, #deleted / has deletions
-  - #fields, segment count (optimized?), commit point (`segments_N`, generation), commit user data
-  - field list with per-field info. Avoid Luke's eager full term scan (see §6), so compute expensive counts lazily or on demand.
+- [x] **Index statistics**: `getIndexStats` RPC + overview screen (subset of `luke-features.md` §4.1)
+  - path, directory implementation, created/commit/oldest-segment Lucene version, #docs, maxDoc, #deleted
+  - segment count (fully merged?), commit point (`segments_N`, generation, version), commit user data
+  - field list ordered by field number: index options, norms, payloads, term vectors, doc values type, point and vector dimensions, and the per-segment postings stats summed (docCount, sumDocFreq, sumTotalTermFreq)
+  - only what the reader loaded on open (`ReadOnlyIndex.stats()`), no term iteration; unique term counts and the total #terms are the lazy "field/term-count table" in the backlog
+  - TUI: overview screen with a summary and a scrollable field table; columns that don't fit are dropped from the right
 - [ ] **Close index / quit**: `closeIndex` RPC; quitting the TUI closes the index and terminates the server (stdin EOF, then kill after a timeout)
 - [x] Test indexes: Lucene 10 indexes are written in the tests; Lucene 9.12 and 8.11 indexes are generated at build time by `LegacyIndexWriter` running on the old jars (`./gradlew :leia-core:lucene9TestIndex`, output in `leia-core/build/test-indexes/`), so no binary indexes are checked in
-- [ ] Protocol fixtures for `version`, `openIndex`, `getIndexStats`, `closeIndex` and their error cases (`version` and `openIndex` done)
+- [ ] Protocol fixtures for `version`, `openIndex`, `getIndexStats`, `closeIndex` and their error cases (`version`, `openIndex` and `getIndexStats` done)
 
 ## Backlog — future capabilities
 
 From the read-only checklist in `luke-features.md` §7. Ordered roughly by value. Each area will need its own protocol methods, fixtures and probably an ADR for the cross-cutting parts.
 
 - [ ] Open options: directory implementation choice, recursive multi-index (`MultiReader`), no-reader mode for corrupt indexes, reopen, recent-path history
-- [ ] Overview: field/term-count table (lazy), top-N terms per field
+- [ ] Overview: field/term-count table (lazy: unique terms per field and the total need a full term scan), top-N terms per field
 - [ ] Documents: doc by id with flags/norm/value, term vectors, doc values (with decoding), stored values, term browse/seek, postings with positions/offsets/payloads
 - [ ] Search: parse/rewrite, term query, paging (configurable page size), exact/approx total hits, explain, query-parser options, similarity (BM25/TF-IDF), 2-level sort, fields to load, More-Like-This
 - [ ] Analysis: custom analyzer builder (char filters/tokenizer/filters + params, config dir, external jars), token attributes, step-by-step

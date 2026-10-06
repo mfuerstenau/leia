@@ -1,5 +1,7 @@
 package io.github.mfuerstenau.leia.protocol;
 
+import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
+import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.version.VersionParams;
@@ -20,7 +22,14 @@ public final class Methods {
     public static final RpcMethod<OpenIndexParams, OpenIndexResult> OPEN_INDEX =
             new RpcMethod<>("openIndex", OpenIndexParams.class, OpenIndexResult.class);
 
-    public static final List<RpcMethod<?, ?>> ALL = List.of(VERSION, OPEN_INDEX);
+    /**
+     * Statistics of the open index that are cheap to compute: the commit and every field, without
+     * iterating over terms. Fails with {@code NO_INDEX_OPEN} if no index is open.
+     */
+    public static final RpcMethod<GetIndexStatsParams, GetIndexStatsResult> GET_INDEX_STATS =
+            new RpcMethod<>("getIndexStats", GetIndexStatsParams.class, GetIndexStatsResult.class);
+
+    public static final List<RpcMethod<?, ?>> ALL = List.of(VERSION, OPEN_INDEX, GET_INDEX_STATS);
 
     private Methods() {}
 
