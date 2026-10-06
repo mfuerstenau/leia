@@ -13,6 +13,7 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 - [x] ADR 0004: release platforms (Linux, Windows) and distribution (folders, no bundled Java)
 - [x] ADR 0005: long-running operations as polled server jobs (`start<Op>` / `get<Op>` / `cancelJob`)
 - [x] ADR 0006: documents on the wire (per-segment reads, deleted documents readable, text-or-hex byte strings, raw numeric doc values)
+- [x] ADR 0007: terms and postings on the wire (stateless pages, no jobs, positions on demand, `TERM_NOT_FOUND`)
 - [x] `README.md`: what leia is, build and run instructions
 
 ### Java build (Gradle 9, Java 25)
@@ -97,11 +98,15 @@ From the read-only checklist in `luke-features.md` §7. Ordered roughly by value
   - by number (default), name, or term count (starts descending), as in Luke (`luke-features.md` §4.1); fields without a count sort last in either direction, ties by number
   - `s` cycles the sort column, `S` flips the direction; the header marks the sorted column with ▲/▼; the selection stays on its field when rows move
 - [ ] Overview → other screens: browse/search docs by a top term (`luke-features.md` §4.1, needs Documents and Search)
+  - [x] browse: `Enter` on a top term opens the terms screen at that term, with its postings focused
+  - [ ] search docs by a top term (needs Search)
 - [x] Documents: doc by id with flags/norm/value, term vectors, doc values (with decoding), stored values (ADR 0006)
   - `getDocument {docId}`: every field of the index with the document's norm, stored values (typed, numbers as text), doc values (numbers raw, byte strings as text or hex) and whether it has a term vector; read from the document's segment, deleted documents included (`deleted: true`); `DOC_NOT_FOUND` (-32008) outside 0..maxDoc-1
   - `getTermVector {docId, field}`: terms with freq, positions, offsets and payloads (hex), on demand
   - TUI: `1`/`2` switch screens (tab line on top); documents screen with a field table (flags, norm, first value) and a details panel; `←`/`→` step, `i` goes to an id, `Enter` loads the term vector, `x` decodes numeric doc values (long, double/float bits, sortable double/float), `e` hides empty fields
-- [ ] Documents: term browse/seek per field, postings of the current term with positions/offsets/payloads (Luke's "first/next term", "first/next doc")
+- [x] Documents: term browse/seek per field, postings of the current term with positions/offsets/payloads (Luke's "first/next term", "first/next doc") (ADR 0007)
+  - `getTerms {field, from?, limit}`, `getPostings {field, term, fromDoc, limit}` (deleted documents marked) and `getPositions {docId, field, term}`: stateless pages, terms as text or hex both ways; `TERM_NOT_FOUND` (-32009)
+  - TUI: terms screen (`3`) with fields | terms | postings columns, pages of 100 fetched at the last row, `/` seeks as you type; `Enter` on a posting opens the document, whose details show the term's positions; `[`/`]` step through the term's documents
 - [ ] Documents: stored value viewer/copy, norm decoding (field length), size limits for huge values (ADR 0006, decision 6)
 - [ ] Search: parse/rewrite, term query, paging (configurable page size), exact/approx total hits, explain, query-parser options, similarity (BM25/TF-IDF), 2-level sort, fields to load, More-Like-This
 - [ ] Analysis: custom analyzer builder (char filters/tokenizer/filters + params, config dir, external jars), token attributes, step-by-step

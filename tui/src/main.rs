@@ -19,9 +19,13 @@ use leia::protocol::index::{
     CloseIndex, CloseIndexParams, GetIndexStats, GetIndexStatsParams, OpenIndex, OpenIndexParams,
 };
 use leia::protocol::job::{CancelJob, JobParams};
-use leia::protocol::terms::{GetFieldTermScan, StartFieldTermScan, StartFieldTermScanParams};
+use leia::protocol::terms::{
+    GetFieldTermScan, GetPositions, GetPositionsParams, GetPostings, GetPostingsParams, GetTerms,
+    GetTermsParams, StartFieldTermScan, StartFieldTermScanParams,
+};
 use leia::protocol::version::{Version, VersionParams, VersionResult};
 use leia::server::{SERVER_JAR_ENV, SHUTDOWN_TIMEOUT, Server, find_server_jar};
+use leia::terms::{POSTINGS_PAGE, TERMS_PAGE};
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
 
@@ -159,7 +163,7 @@ fn perform(
         }
         Action::LoadDocument(doc_id) => {
             match answered(server.call::<GetDocument>(GetDocumentParams { doc_id }))? {
-                Ok(document) => app.document_loaded(document),
+                Ok(document) => return Ok(app.document_loaded(document)),
                 Err(error) => app.document_failed(doc_id, error),
             }
         }
@@ -171,6 +175,49 @@ fn perform(
             match answered(server.call::<GetTermVector>(params))? {
                 Ok(result) => app.term_vector_loaded(doc_id, &field, result.terms),
                 Err(error) => app.term_vector_failed(doc_id, &field, error),
+            }
+        }
+        Action::LoadTerms { field, from, more } => {
+            let params = GetTermsParams {
+                field: field.clone(),
+                from,
+                limit: TERMS_PAGE,
+            };
+            return Ok(match answered(server.call::<GetTerms>(params))? {
+                Ok(result) => app.terms_loaded(&field, more, result),
+                Err(error) => app.terms_failed(&field, more, error),
+            });
+        }
+        Action::LoadPostings {
+            field,
+            term,
+            from_doc,
+            more,
+        } => {
+            let params = GetPostingsParams {
+                field: field.clone(),
+                term: term.clone(),
+                from_doc,
+                limit: POSTINGS_PAGE,
+            };
+            match answered(server.call::<GetPostings>(params))? {
+                Ok(result) => return Ok(app.postings_loaded(&field, &term, more, result)),
+                Err(error) => app.postings_failed(&field, &term, more, error),
+            }
+        }
+        Action::LoadPositions {
+            doc_id,
+            field,
+            term,
+        } => {
+            let params = GetPositionsParams {
+                doc_id,
+                field: field.clone(),
+                term: term.clone(),
+            };
+            match answered(server.call::<GetPositions>(params))? {
+                Ok(result) => app.positions_loaded(doc_id, &field, &term, result.positions),
+                Err(error) => app.positions_failed(doc_id, &field, &term, error),
             }
         }
     }

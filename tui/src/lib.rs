@@ -12,6 +12,7 @@ pub mod overview;
 pub mod prompt;
 pub mod protocol;
 pub mod server;
+pub mod terms;
 pub mod text;
 
 #[cfg(test)]

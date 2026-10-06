@@ -1,0 +1,13 @@
+{
+  "jsonrpc": "2.0",
+  "id": 9,
+  "method": "getTerms",
+  "params": {
+    "field": "body",
+    "from": {
+      "value": "qu",
+      "binary": false
+    },
+    "limit": 3
+  }
+}

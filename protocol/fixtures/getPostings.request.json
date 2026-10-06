@@ -1,0 +1,14 @@
+{
+  "jsonrpc": "2.0",
+  "id": 10,
+  "method": "getPostings",
+  "params": {
+    "field": "body",
+    "term": {
+      "value": "quick",
+      "binary": false
+    },
+    "fromDoc": 0,
+    "limit": 2
+  }
+}

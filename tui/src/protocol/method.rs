@@ -6,7 +6,7 @@ use serde::de::DeserializeOwned;
 use super::document::{GetDocument, GetTermVector};
 use super::index::{CloseIndex, GetIndexStats, OpenIndex};
 use super::job::CancelJob;
-use super::terms::{GetFieldTermScan, StartFieldTermScan};
+use super::terms::{GetFieldTermScan, GetPositions, GetPostings, GetTerms, StartFieldTermScan};
 use super::version::Version;
 
 /// One JSON-RPC method: its name and the DTOs of its params and result.
@@ -27,4 +27,7 @@ pub const METHOD_NAMES: &[&str] = &[
     CancelJob::NAME,
     GetDocument::NAME,
     GetTermVector::NAME,
+    GetTerms::NAME,
+    GetPostings::NAME,
+    GetPositions::NAME,
 ];

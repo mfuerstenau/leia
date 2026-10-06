@@ -14,8 +14,8 @@ use leia::client::CallError;
 use leia::java::find_java;
 use leia::protocol::ErrorCode;
 use leia::protocol::document::{
-    DocumentField, GetDocument, GetDocumentParams, GetDocumentResult, GetTermVector,
-    GetTermVectorParams, StoredType, StoredValue,
+    BytesValue, DocumentField, GetDocument, GetDocumentParams, GetDocumentResult, GetTermVector,
+    GetTermVectorParams, StoredType, StoredValue, TermPosition,
 };
 use leia::protocol::index::{
     CloseIndex, CloseIndexParams, DocValuesType, GetIndexStats, GetIndexStatsParams, IndexOptions,
@@ -23,7 +23,9 @@ use leia::protocol::index::{
 };
 use leia::protocol::job::{CancelJob, JobParams};
 use leia::protocol::terms::{
-    FieldTerms, GetFieldTermScan, StartFieldTermScan, StartFieldTermScanParams, TopTerm,
+    FieldTerms, GetFieldTermScan, GetPositions, GetPositionsParams, GetPostings, GetPostingsParams,
+    GetPostingsResult, GetTerms, GetTermsParams, Posting, StartFieldTermScan,
+    StartFieldTermScanParams, TermEntry, TopTerm,
 };
 use leia::protocol::version::{Version, VersionParams};
 use leia::server::{SERVER_JAR_ENV, SHUTDOWN_TIMEOUT, Server, find_server_jar};
@@ -371,6 +373,92 @@ fn reads_a_deleted_document_of_a_lucene9_index() {
         .unwrap_err();
     assert!(
         matches!(&missing, CallError::Rpc(e) if e.code == ErrorCode::DocNotFound),
+        "{missing:?}"
+    );
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn browses_the_terms_and_postings_of_a_lucene9_index() {
+    let mut server = start();
+    server
+        .call::<OpenIndex>(OpenIndexParams {
+            path: lucene9_index(),
+        })
+        .unwrap();
+    let text = |value: &str| BytesValue {
+        value: value.to_owned(),
+        binary: false,
+    };
+
+    // "document number N" for N = 1..3; document 2 is deleted.
+    let first = server
+        .call::<GetTerms>(GetTermsParams {
+            field: "body".to_owned(),
+            from: Some(text("2")),
+            limit: 2,
+        })
+        .unwrap();
+    let entry = |term: &str, doc_freq: i32| TermEntry {
+        term: term.to_owned(),
+        binary: false,
+        doc_freq,
+        total_term_freq: i64::from(doc_freq),
+    };
+    assert_eq!(first.terms, vec![entry("2", 1), entry("3", 1)]);
+    assert_eq!(first.next, Some(text("document")));
+
+    let postings = server
+        .call::<GetPostings>(GetPostingsParams {
+            field: "body".to_owned(),
+            term: text("number"),
+            from_doc: 1,
+            limit: 10,
+        })
+        .unwrap();
+    let posting = |doc_id: i32, deleted: bool| Posting {
+        doc_id,
+        deleted,
+        freq: Some(1),
+    };
+    assert_eq!(
+        postings,
+        GetPostingsResult {
+            doc_freq: 3,
+            total_term_freq: 3,
+            postings: vec![posting(1, true), posting(2, false)],
+            next_doc: None,
+        }
+    );
+
+    // Offsets are not indexed.
+    let positions = server
+        .call::<GetPositions>(GetPositionsParams {
+            doc_id: 2,
+            field: "body".to_owned(),
+            term: text("number"),
+        })
+        .unwrap();
+    assert_eq!(
+        positions.positions,
+        vec![TermPosition {
+            position: Some(1),
+            start_offset: None,
+            end_offset: None,
+            payload: None,
+        }]
+    );
+
+    let missing = server
+        .call::<GetPostings>(GetPostingsParams {
+            field: "body".to_owned(),
+            term: text("nothing"),
+            from_doc: 0,
+            limit: 10,
+        })
+        .unwrap_err();
+    assert!(
+        matches!(&missing, CallError::Rpc(e) if e.code == ErrorCode::TermNotFound),
         "{missing:?}"
     );
 }

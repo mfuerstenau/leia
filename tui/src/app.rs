@@ -1,7 +1,7 @@
 //! The application state: what is on screen and what a key does. It makes no calls itself:
 //! [`App::handle_key`] returns an [`Action`], the caller makes the RPC calls and reports back with
-//! [`App::opened`], [`App::open_failed`], [`App::closed`], the `scan_*`, `document_*` or
-//! `term_vector_*` methods.
+//! [`App::opened`], [`App::open_failed`], [`App::closed`], and the `scan_*`, `document_*`,
+//! `term_vector_*`, `terms_*`, `postings_*` or `positions_*` methods.
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -14,13 +14,14 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Paragraph, Tabs};
 
 use crate::build_info::{LEIA, java_line, server_line};
-use crate::documents::{Documents, Request};
+use crate::documents::{self, Documents};
 use crate::overview::{DEFAULT_TOP_TERMS, FieldScan, Overview, step_top_terms};
 use crate::prompt::{PathPrompt, PromptEvent, expand_home};
-use crate::protocol::document::{GetDocumentResult, TermVectorTerm};
+use crate::protocol::document::{BytesValue, GetDocumentResult, TermPosition, TermVectorTerm};
 use crate::protocol::index::GetIndexStatsResult;
-use crate::protocol::terms::GetFieldTermScanResult;
+use crate::protocol::terms::{GetFieldTermScanResult, GetPostingsResult, GetTermsResult};
 use crate::protocol::version::VersionResult;
+use crate::terms::{self, Terms};
 
 /// What the caller has to do after a key.
 #[derive(Debug, PartialEq, Eq)]
@@ -48,22 +49,38 @@ pub enum Action {
         doc_id: i32,
         field: String,
     },
+    /// Fetch a page of the terms of a field, and report back with [`App::terms_loaded`] or
+    /// [`App::terms_failed`].
+    LoadTerms {
+        field: String,
+        from: Option<BytesValue>,
+        /// Whether the page continues the shown terms.
+        more: bool,
+    },
+    /// Fetch a page of the postings of a term, and report back with [`App::postings_loaded`] or
+    /// [`App::postings_failed`].
+    LoadPostings {
+        field: String,
+        term: BytesValue,
+        from_doc: i32,
+        /// Whether the page continues the shown postings.
+        more: bool,
+    },
+    /// Fetch where a term occurs in a document, and report back with [`App::positions_loaded`]
+    /// or [`App::positions_failed`].
+    LoadPositions {
+        doc_id: i32,
+        field: String,
+        term: BytesValue,
+    },
 }
 
-impl From<Request> for Action {
-    fn from(request: Request) -> Self {
-        match request {
-            Request::Document(doc_id) => Action::LoadDocument(doc_id),
-            Request::TermVector { doc_id, field } => Action::LoadTermVector { doc_id, field },
-        }
-    }
-}
-
-/// The screens of an open index; `1` and `2` switch between them.
+/// The screens of an open index; `1`, `2` and `3` switch between them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Screen {
     Overview,
     Documents,
+    Terms,
 }
 
 /// The scan that runs in the server. There is at most one; the others wait in the queue.
@@ -80,6 +97,7 @@ pub struct App {
     home: Option<PathBuf>,
     overview: Option<Overview>,
     documents: Option<Documents>,
+    terms: Option<Terms>,
     /// The screen shown while an index is open; kept when another index is opened.
     screen: Screen,
     prompt: Option<PathPrompt>,
@@ -97,6 +115,7 @@ impl App {
             home,
             overview: None,
             documents: None,
+            terms: None,
             screen: Screen::Overview,
             prompt: None,
             scan: None,
@@ -116,10 +135,11 @@ impl App {
         self.prompt = Some(prompt);
     }
 
-    /// Shows the new index. The server stopped the scans of the previous one. Returns the first
-    /// document to fetch if the documents screen is shown.
+    /// Shows the new index. The server stopped the scans of the previous one. Returns what the
+    /// shown screen has to fetch first.
     pub fn opened(&mut self, stats: GetIndexStatsResult) -> Option<Action> {
         self.documents = Some(Documents::new(stats.fields.clone(), stats.max_doc));
+        self.terms = Some(Terms::new(stats.fields.clone()));
         self.overview = Some(Overview::new(stats, self.top_n));
         self.prompt = None;
         self.forget_scans();
@@ -137,21 +157,80 @@ impl App {
     pub fn closed(&mut self) {
         self.overview = None;
         self.documents = None;
+        self.terms = None;
         self.forget_scans();
     }
 
-    /// The first document to fetch, if the documents screen is shown and has none yet.
-    fn initial_request(&self) -> Option<Action> {
-        if self.screen != Screen::Documents {
-            return None;
+    /// What the shown screen has to fetch first, if anything.
+    fn initial_request(&mut self) -> Option<Action> {
+        match self.screen {
+            Screen::Overview => None,
+            Screen::Documents => {
+                let request = self.documents.as_ref()?.initial_request();
+                self.documents_request(request)
+            }
+            Screen::Terms => {
+                let request = self.terms.as_mut()?.initial_request();
+                self.terms_request(request)
+            }
         }
-        self.documents.as_ref()?.initial_request().map(Action::from)
     }
 
-    pub fn document_loaded(&mut self, document: GetDocumentResult) {
-        if let Some(documents) = &mut self.documents {
-            documents.loaded(document);
+    fn documents_request(&mut self, request: Option<documents::Request>) -> Option<Action> {
+        match request? {
+            documents::Request::Document(doc_id) => Some(Action::LoadDocument(doc_id)),
+            documents::Request::TermVector { doc_id, field } => {
+                Some(Action::LoadTermVector { doc_id, field })
+            }
+            documents::Request::Positions {
+                doc_id,
+                field,
+                term,
+            } => Some(Action::LoadPositions {
+                doc_id,
+                field,
+                term,
+            }),
+            documents::Request::StepTerm { forward } => {
+                let request = self.terms.as_mut()?.step(forward);
+                self.terms_request(request)
+            }
         }
+    }
+
+    /// Turns what the terms screen needs into an action; a document to show switches to the
+    /// documents screen.
+    fn terms_request(&mut self, request: Option<terms::Request>) -> Option<Action> {
+        match request? {
+            terms::Request::Terms { field, from, more } => {
+                Some(Action::LoadTerms { field, from, more })
+            }
+            terms::Request::Postings {
+                field,
+                term,
+                from_doc,
+                more,
+            } => Some(Action::LoadPostings {
+                field,
+                term,
+                from_doc,
+                more,
+            }),
+            terms::Request::Document(hit) => {
+                let doc_id = hit.doc_id;
+                self.documents.as_mut()?.show_hit(hit);
+                self.screen = Screen::Documents;
+                Some(Action::LoadDocument(doc_id))
+            }
+        }
+    }
+
+    /// Shows the document. Returns where the term occurs in it, if the terms screen opened it.
+    pub fn document_loaded(&mut self, document: GetDocumentResult) -> Option<Action> {
+        let documents = self.documents.as_mut()?;
+        documents.loaded(document);
+        let request = documents.positions_request();
+        self.documents_request(request)
     }
 
     pub fn document_failed(&mut self, doc_id: i32, error: String) {
@@ -169,6 +248,62 @@ impl App {
     pub fn term_vector_failed(&mut self, doc_id: i32, field: &str, error: String) {
         if let Some(documents) = &mut self.documents {
             documents.term_vector_failed(doc_id, field, error);
+        }
+    }
+
+    pub fn positions_loaded(
+        &mut self,
+        doc_id: i32,
+        field: &str,
+        term: &BytesValue,
+        positions: Vec<TermPosition>,
+    ) {
+        if let Some(documents) = &mut self.documents {
+            documents.positions_loaded(doc_id, field, term, positions);
+        }
+    }
+
+    pub fn positions_failed(&mut self, doc_id: i32, field: &str, term: &BytesValue, error: String) {
+        if let Some(documents) = &mut self.documents {
+            documents.positions_failed(doc_id, field, term, error);
+        }
+    }
+
+    /// Shows a page of terms. Returns what the terms screen needs next.
+    pub fn terms_loaded(
+        &mut self,
+        field: &str,
+        more: bool,
+        result: GetTermsResult,
+    ) -> Option<Action> {
+        let request = self.terms.as_mut()?.terms_loaded(field, more, result);
+        self.terms_request(request)
+    }
+
+    pub fn terms_failed(&mut self, field: &str, more: bool, error: String) -> Option<Action> {
+        let request = self.terms.as_mut()?.terms_failed(field, more, error);
+        self.terms_request(request)
+    }
+
+    /// Shows a page of postings. Returns what the terms screen needs next, or the document to
+    /// show if `]` waited for this page.
+    pub fn postings_loaded(
+        &mut self,
+        field: &str,
+        term: &BytesValue,
+        more: bool,
+        result: GetPostingsResult,
+    ) -> Option<Action> {
+        let request = self
+            .terms
+            .as_mut()?
+            .postings_loaded(field, term, more, result);
+        self.terms_request(request)
+    }
+
+    pub fn postings_failed(&mut self, field: &str, term: &BytesValue, more: bool, error: String) {
+        if let Some(terms) = &mut self.terms {
+            terms.postings_failed(field, term, more, error);
         }
     }
 
@@ -297,7 +432,15 @@ impl App {
             && self.screen == Screen::Documents
             && documents.prompting()
         {
-            return documents.handle_key(key.code).map(Action::from);
+            let request = documents.handle_key(key.code);
+            return self.documents_request(request);
+        }
+        if let Some(terms) = &mut self.terms
+            && self.screen == Screen::Terms
+            && terms.prompting()
+        {
+            let request = terms.handle_key(key.code);
+            return self.terms_request(request);
         }
         match key.code {
             // Esc stops the scans first, and quits only when there are none.
@@ -317,6 +460,10 @@ impl App {
                 self.screen = Screen::Documents;
                 self.initial_request()
             }
+            KeyCode::Char('3') if self.terms.is_some() => {
+                self.screen = Screen::Terms;
+                self.initial_request()
+            }
             KeyCode::Char('o') => {
                 // Starts from the open index, so a sibling is a Ctrl+W away.
                 let path = self.overview.as_ref().map_or("", Overview::path);
@@ -325,9 +472,19 @@ impl App {
             }
             KeyCode::Char('c') if self.overview.is_some() => Some(Action::Close),
             code if self.screen == Screen::Documents => {
-                self.documents.as_mut()?.handle_key(code).map(Action::from)
+                let request = self.documents.as_mut()?.handle_key(code);
+                self.documents_request(request)
+            }
+            code if self.screen == Screen::Terms => {
+                let request = self.terms.as_mut()?.handle_key(code);
+                self.terms_request(request)
             }
             KeyCode::Enter => {
+                if let Some((field, term)) = self.overview.as_ref()?.selected_top_term() {
+                    self.screen = Screen::Terms;
+                    let request = self.terms.as_mut()?.browse(&field, term);
+                    return self.terms_request(request);
+                }
                 let field = self.scannable_selected_field()?;
                 self.request_scans(vec![field])
             }
@@ -364,29 +521,55 @@ impl App {
         } else {
             ""
         };
-        let keys = match (&mut self.overview, &mut self.documents, self.screen) {
-            (Some(_), Some(documents), Screen::Documents) => {
+        let keys = match (
+            &mut self.overview,
+            &mut self.documents,
+            &mut self.terms,
+            self.screen,
+        ) {
+            (Some(_), Some(documents), _, Screen::Documents) => {
                 documents.render(frame, body);
+                let steps = if documents.has_hit() {
+                    "[ ] term docs   "
+                } else {
+                    ""
+                };
                 Line::from(format!(
-                    " {cancel}q quit   o open   c close   1/2 screen   ←/→ doc   i go to   \
+                    " {cancel}q quit   o open   c close   1-3 screen   ←/→ doc   {steps}i go to   \
                      ⏎ term vector   x numbers   e empty fields   Tab panel   ↑↓"
                 ))
             }
-            (Some(overview), _, _) => {
+            (Some(_), _, Some(terms), Screen::Terms) => {
+                terms.render(frame, body);
+                if terms.prompting() {
+                    Line::from(" type to seek   ⏎/Esc done")
+                } else {
+                    Line::from(format!(
+                        " {cancel}q quit   o open   c close   1-3 screen   / seek   \
+                         ⏎ open doc   ←/→ column   ↑↓"
+                    ))
+                }
+            }
+            (Some(overview), _, _, _) => {
                 overview.render(frame, body);
                 if self.scan.is_some() {
                     Line::from(
-                        " Esc cancel scan   q quit   o open   c close   1/2 screen   s/S sort   \
+                        " Esc cancel scan   q quit   o open   c close   1-3 screen   s/S sort   \
                          Tab panel   ↑↓",
+                    )
+                } else if overview.selected_top_term().is_some() {
+                    Line::from(
+                        " q quit   o open   c close   1-3 screen   ⏎ term's docs   \
+                         +/- top N   s/S sort   Tab panel   ↑↓",
                     )
                 } else {
                     Line::from(
-                        " q quit   o open   c close   1/2 screen   ⏎ terms   a all terms   \
+                        " q quit   o open   c close   1-3 screen   ⏎ terms   a all terms   \
                          +/- top N   s/S sort   Tab panel   ↑↓",
                     )
                 }
             }
-            (None, _, _) => {
+            (None, _, _, _) => {
                 let lines = vec![
                     Line::from("No index open. Press o to open one."),
                     Line::from(""),
@@ -405,9 +588,10 @@ impl App {
             let selected = match self.screen {
                 Screen::Overview => 0,
                 Screen::Documents => 1,
+                Screen::Terms => 2,
             };
             frame.render_widget(
-                Tabs::new(["1 Overview", "2 Documents"])
+                Tabs::new(["1 Overview", "2 Documents", "3 Terms"])
                     .select(selected)
                     .highlight_style(Style::new().add_modifier(Modifier::REVERSED)),
                 tabs,
@@ -435,7 +619,7 @@ mod tests {
     use super::*;
     use crate::protocol::document::{DocumentField, StoredType, StoredValue};
     use crate::protocol::index::{DocValuesType, IndexField, IndexOptions, TermStats};
-    use crate::protocol::terms::FieldTerms;
+    use crate::protocol::terms::{FieldTerms, Posting, TermEntry, TopTerm};
     use crate::protocol::version::JavaRuntime;
 
     fn version() -> VersionResult {
@@ -899,5 +1083,176 @@ mod tests {
         assert_eq!(app.polling(), None);
         assert_eq!(app.scan_progress(done("id", 1)), None);
         assert_eq!(app.handle_key(key(KeyCode::Esc)), Some(Action::Quit));
+    }
+
+    fn text(value: &str) -> BytesValue {
+        BytesValue {
+            value: value.to_owned(),
+            binary: false,
+        }
+    }
+
+    /// The documents index on the terms screen, with the terms "1" and "2" of `id` and the
+    /// postings of "1": documents 0 and 2.
+    fn app_on_terms() -> App {
+        let mut app = app_with_documents();
+        assert_eq!(
+            app.handle_key(key(KeyCode::Char('3'))),
+            Some(Action::LoadTerms {
+                field: "id".to_owned(),
+                from: None,
+                more: false,
+            })
+        );
+        let entry = |term: &str| TermEntry {
+            term: term.to_owned(),
+            binary: false,
+            doc_freq: 1,
+            total_term_freq: 1,
+        };
+        assert_eq!(
+            app.terms_loaded(
+                "id",
+                false,
+                GetTermsResult {
+                    terms: vec![entry("1"), entry("2")],
+                    next: None,
+                }
+            ),
+            Some(Action::LoadPostings {
+                field: "id".to_owned(),
+                term: text("1"),
+                from_doc: 0,
+                more: false,
+            })
+        );
+        let posting = |doc_id| Posting {
+            doc_id,
+            deleted: false,
+            freq: None,
+        };
+        let postings = GetPostingsResult {
+            doc_freq: 2,
+            total_term_freq: 2,
+            postings: vec![posting(0), posting(2)],
+            next_doc: None,
+        };
+        assert_eq!(app.postings_loaded("id", &text("1"), false, postings), None);
+        app
+    }
+
+    #[test]
+    fn opens_a_posting_on_the_documents_screen() {
+        let mut app = app_on_terms();
+        assert!(render(&mut app).contains("3 Terms"));
+        app.handle_key(key(KeyCode::Enter));
+        app.handle_key(key(KeyCode::Enter));
+
+        assert_eq!(
+            app.handle_key(key(KeyCode::Enter)),
+            Some(Action::LoadDocument(0))
+        );
+        assert_eq!(
+            app.document_loaded(document(0)),
+            Some(Action::LoadPositions {
+                doc_id: 0,
+                field: "id".to_owned(),
+                term: text("1"),
+            })
+        );
+        app.positions_loaded(0, "id", &text("1"), Vec::new());
+        let screen = render(&mut app);
+        assert!(screen.contains("id:1  1 of 2"), "{screen}");
+        assert!(screen.contains("[ ] term docs"), "{screen}");
+
+        assert_eq!(
+            app.handle_key(key(KeyCode::Char(']'))),
+            Some(Action::LoadDocument(2))
+        );
+        assert_eq!(app.handle_key(key(KeyCode::Char(']'))), None);
+        // The terms screen has everything it shows.
+        assert_eq!(app.handle_key(key(KeyCode::Char('3'))), None);
+    }
+
+    #[test]
+    fn the_seek_prompt_takes_the_keys() {
+        let mut app = app_on_terms();
+        app.handle_key(key(KeyCode::Char('/')));
+
+        let seek = |from: &str| {
+            Some(Action::LoadTerms {
+                field: "id".to_owned(),
+                from: Some(text(from)),
+                more: false,
+            })
+        };
+        assert_eq!(app.handle_key(key(KeyCode::Char('q'))), seek("q"));
+        assert_eq!(app.handle_key(key(KeyCode::Char('1'))), seek("q1"));
+        assert!(render(&mut app).contains("type to seek"));
+        assert_eq!(app.handle_key(key(KeyCode::Esc)), None);
+        assert!(render(&mut app).contains("3 Terms"));
+        assert_eq!(app.handle_key(key(KeyCode::Char('q'))), Some(Action::Quit));
+    }
+
+    #[test]
+    fn opening_another_index_on_the_terms_screen_fetches_its_terms() {
+        let mut app = app_on_terms();
+
+        assert_eq!(
+            app.opened(GetIndexStatsResult {
+                fields: vec![field("title", 0, true)],
+                ..stats("/data/other")
+            }),
+            Some(Action::LoadTerms {
+                field: "title".to_owned(),
+                from: None,
+                more: false,
+            })
+        );
+    }
+
+    #[test]
+    fn enter_on_a_top_term_browses_its_documents() {
+        let mut app = app_with_documents();
+        assert_eq!(app.handle_key(key(KeyCode::Enter)), start("id"));
+        app.scan_started(1);
+        let top = |term: &str| TopTerm {
+            term: term.to_owned(),
+            binary: false,
+            doc_freq: 1,
+            total_term_freq: 1,
+        };
+        app.scan_progress(GetFieldTermScanResult {
+            terms_scanned: 2,
+            terms: Some(FieldTerms {
+                field: "id".to_owned(),
+                unique_terms: 2,
+                top_terms: vec![top("1"), top("2")],
+            }),
+        });
+        app.handle_key(key(KeyCode::Tab));
+        app.handle_key(key(KeyCode::Down));
+        assert!(render(&mut app).contains("⏎ term's docs"));
+
+        assert_eq!(
+            app.handle_key(key(KeyCode::Enter)),
+            Some(Action::LoadTerms {
+                field: "id".to_owned(),
+                from: Some(text("2")),
+                more: false,
+            })
+        );
+        let entry = TermEntry {
+            term: "2".to_owned(),
+            binary: false,
+            doc_freq: 1,
+            total_term_freq: 1,
+        };
+        let page = GetTermsResult {
+            terms: vec![entry],
+            next: None,
+        };
+        app.terms_loaded("id", false, page);
+        assert!(render(&mut app).contains("id from 2 (/ seeks)"));
     }
 }

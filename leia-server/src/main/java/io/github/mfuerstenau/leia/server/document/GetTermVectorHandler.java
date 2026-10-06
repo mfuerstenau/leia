@@ -57,12 +57,14 @@ public final class GetTermVectorHandler implements MethodHandler<GetTermVectorPa
                 text.value(),
                 text.binary(),
                 term.freq(),
-                term.positions().stream()
-                        .map(position -> new TermPosition(
-                                position.position(),
-                                position.startOffset(),
-                                position.endOffset(),
-                                position.payload().map(ByteStrings::hex)))
-                        .toList());
+                term.positions().stream().map(GetTermVectorHandler::position).toList());
+    }
+
+    public static TermPosition position(io.github.mfuerstenau.leia.core.TermPosition position) {
+        return new TermPosition(
+                position.position(),
+                position.startOffset(),
+                position.endOffset(),
+                position.payload().map(ByteStrings::hex));
     }
 }

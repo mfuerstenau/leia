@@ -9,7 +9,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.stream.StreamSupport;
 import org.apache.lucene.index.BinaryDocValues;
@@ -18,10 +17,8 @@ import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.Fields;
 import org.apache.lucene.index.LeafReader;
-import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.NumericDocValues;
 import org.apache.lucene.index.PostingsEnum;
-import org.apache.lucene.index.ReaderUtil;
 import org.apache.lucene.index.SortedDocValues;
 import org.apache.lucene.index.SortedNumericDocValues;
 import org.apache.lucene.index.SortedSetDocValues;
@@ -39,16 +36,6 @@ import org.apache.lucene.util.BytesRef;
 final class DocumentReader {
 
     private DocumentReader() {}
-
-    /** The segment of a document, and the document's id within it. */
-    private record SegmentDoc(LeafReader leaf, int doc) {
-
-        static SegmentDoc of(DirectoryReader reader, int docId) {
-            List<LeafReaderContext> leaves = reader.leaves();
-            LeafReaderContext context = leaves.get(ReaderUtil.subIndex(docId, leaves));
-            return new SegmentDoc(context.reader(), docId - context.docBase);
-        }
-    }
 
     static IndexDocument document(DirectoryReader reader, FieldInfos fieldInfos, int docId) throws IOException {
         SegmentDoc segmentDoc = SegmentDoc.of(reader, docId);
@@ -200,22 +187,10 @@ final class DocumentReader {
             postings = termsEnum.postings(postings, PostingsEnum.ALL);
             postings.nextDoc();
             int freq = postings.freq();
-            List<TermVectorTerm.Position> positions = new ArrayList<>();
-            if (hasPositions || hasOffsets) {
-                for (int i = 0; i < freq; i++) {
-                    int position = postings.nextPosition();
-                    BytesRef payload = postings.getPayload();
-                    positions.add(new TermVectorTerm.Position(
-                            hasPositions ? OptionalInt.of(position) : OptionalInt.empty(),
-                            hasOffsets ? OptionalInt.of(postings.startOffset()) : OptionalInt.empty(),
-                            hasOffsets ? OptionalInt.of(postings.endOffset()) : OptionalInt.empty(),
-                            // Lucene doesn't tell an empty payload from none.
-                            payload != null && payload.length > 0
-                                    ? Optional.of(BytesRef.deepCopyOf(payload))
-                                    : Optional.empty()));
-                }
-            }
-            result.add(new TermVectorTerm(BytesRef.deepCopyOf(term), freq, List.copyOf(positions)));
+            List<TermPosition> positions = hasPositions || hasOffsets
+                    ? TermPosition.read(postings, freq, hasPositions, hasOffsets)
+                    : List.of();
+            result.add(new TermVectorTerm(BytesRef.deepCopyOf(term), freq, positions));
         }
         return List.copyOf(result);
     }

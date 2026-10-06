@@ -1,6 +1,7 @@
 //! The documents screen: one document of the open index at a time, field by field, as
 //! `getDocument` reports it (ADR 0006), with a panel for the selected field's values and its
-//! term vector.
+//! term vector. A document opened from the terms screen also shows where the term occurs in it,
+//! and `[`/`]` step through the term's other documents.
 
 use std::collections::HashMap;
 
@@ -13,10 +14,11 @@ use ratatui::widgets::{Block, Cell, Clear, Paragraph, Row, Table, TableState, Wr
 
 use crate::overview::{doc_values, highlight, panel, postings};
 use crate::protocol::document::{
-    DocValues, DocumentField, GetDocumentResult, StoredType, StoredValue, TermPosition,
+    BytesValue, DocValues, DocumentField, GetDocumentResult, StoredType, StoredValue, TermPosition,
     TermVectorTerm,
 };
 use crate::protocol::index::{IndexField, IndexOptions};
+use crate::terms::TermHit;
 use crate::text::{bytes_text, escape_control, first_chars};
 
 /// Rows or lines that PageUp and PageDown move.
@@ -40,6 +42,15 @@ pub enum Request {
     /// The term vector of a field of the shown document, reported back with
     /// [`Documents::term_vector_loaded`] or [`Documents::term_vector_failed`].
     TermVector { doc_id: i32, field: String },
+    /// Where the term of the [`TermHit`] occurs in its document, reported back with
+    /// [`Documents::positions_loaded`] or [`Documents::positions_failed`].
+    Positions {
+        doc_id: i32,
+        field: String,
+        term: BytesValue,
+    },
+    /// The previous or next document of the term of the [`TermHit`].
+    StepTerm { forward: bool },
 }
 
 /// How the raw numbers of numeric doc values are shown. The index doesn't record what they
@@ -139,6 +150,12 @@ pub struct Documents {
     /// The first line of the details panel that is shown.
     details_scroll: u16,
     prompt: Option<DocIdPrompt>,
+    /// The term and document that the terms screen opened, if any.
+    hit: Option<TermHit>,
+    /// Where the hit's term occurs in its document, once fetched.
+    positions: Option<Result<Vec<TermPosition>, String>>,
+    /// The field to select once the next document is in.
+    select_field: Option<String>,
 }
 
 impl Documents {
@@ -160,6 +177,9 @@ impl Documents {
             focus: Focus::Fields,
             details_scroll: 0,
             prompt: None,
+            hit: None,
+            positions: None,
+            select_field: None,
         }
     }
 
@@ -169,9 +189,65 @@ impl Documents {
             .then_some(Request::Document(self.doc_id))
     }
 
+    /// Shows the document of `hit` once it is loaded, with the hit's field selected and where
+    /// its term occurs in it.
+    pub fn show_hit(&mut self, hit: TermHit) {
+        self.select_field = Some(hit.field.clone());
+        self.hit = Some(hit);
+        self.positions = None;
+    }
+
+    /// Whether a document was opened from the terms screen, so `[`/`]` step through its term's
+    /// documents.
+    pub fn has_hit(&self) -> bool {
+        self.hit.is_some()
+    }
+
+    /// The positions to fetch, if the shown document is the hit's and they are not in yet.
+    pub fn positions_request(&self) -> Option<Request> {
+        let hit = self.hit.as_ref()?;
+        (self.shows(hit.doc_id) && self.positions.is_none()).then(|| Request::Positions {
+            doc_id: hit.doc_id,
+            field: hit.field.clone(),
+            term: hit.term.clone(),
+        })
+    }
+
+    pub fn positions_loaded(
+        &mut self,
+        doc_id: i32,
+        field: &str,
+        term: &BytesValue,
+        positions: Vec<TermPosition>,
+    ) {
+        if self.is_hit(doc_id, field, term) {
+            self.positions = Some(Ok(positions));
+        }
+    }
+
+    pub fn positions_failed(&mut self, doc_id: i32, field: &str, term: &BytesValue, error: String) {
+        if self.is_hit(doc_id, field, term) {
+            self.positions = Some(Err(error));
+        }
+    }
+
+    fn is_hit(&self, doc_id: i32, field: &str, term: &BytesValue) -> bool {
+        self.hit
+            .as_ref()
+            .is_some_and(|hit| hit.doc_id == doc_id && hit.field == field && hit.term == *term)
+    }
+
+    /// The hit, if the shown document is its document.
+    fn shown_hit(&self) -> Option<&TermHit> {
+        self.hit.as_ref().filter(|hit| self.shows(hit.doc_id))
+    }
+
     /// Shows `document`. The selection stays on its field if the new document shows it.
     pub fn loaded(&mut self, document: GetDocumentResult) {
-        let selected = self.selected_field().map(|field| field.name.clone());
+        let selected = self
+            .select_field
+            .take()
+            .or_else(|| self.selected_field().map(|field| field.name.clone()));
         self.doc_id = document.doc_id;
         self.document = Some(document);
         self.error = None;
@@ -216,11 +292,15 @@ impl Documents {
             self.rows.clear();
             return;
         };
+        // The hit's field has the term, even if nothing else is in it.
+        let hit_field = self.shown_hit().map(|hit| hit.field.as_str());
         self.rows = document
             .fields
             .iter()
             .enumerate()
-            .filter(|(_, field)| !self.hide_empty || !is_empty(field))
+            .filter(|(_, field)| {
+                !self.hide_empty || !is_empty(field) || Some(field.name.as_str()) == hit_field
+            })
             .map(|(i, _)| i)
             .collect();
         let row = selected
@@ -247,9 +327,10 @@ impl Documents {
         self.prompt.is_some()
     }
 
-    /// Goes to another document with ←/→ or the `i` prompt, loads the selected field's term
-    /// vector with Enter, cycles the number format with `x`, hides empty fields with `e`,
-    /// switches the focus with Tab, and moves the selection or scrolls the details.
+    /// Goes to another document with ←/→, the `i` prompt, or `[`/`]` through the documents of
+    /// the hit's term; loads the selected field's term vector with Enter, cycles the number
+    /// format with `x`, hides empty fields with `e`, switches the focus with Tab, and moves the
+    /// selection or scrolls the details.
     pub fn handle_key(&mut self, key: KeyCode) -> Option<Request> {
         if let Some(prompt) = &mut self.prompt {
             if key == KeyCode::Esc {
@@ -269,6 +350,12 @@ impl Documents {
                 return Some(Request::Document(self.doc_id + 1));
             }
             KeyCode::Char('i') if self.max_doc > 0 => self.prompt = Some(DocIdPrompt::default()),
+            KeyCode::Char('[') if self.hit.is_some() => {
+                return Some(Request::StepTerm { forward: false });
+            }
+            KeyCode::Char(']') if self.hit.is_some() => {
+                return Some(Request::StepTerm { forward: true });
+            }
             KeyCode::Enter => {
                 let field = self.selected_field()?;
                 let wanted = field.has_term_vector && !self.term_vectors.contains_key(&field.name);
@@ -380,6 +467,24 @@ impl Documents {
                 Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
             ));
         }
+        if let Some(hit) = &self.hit {
+            // Dimmed while another document is shown.
+            let style = if self.shows(hit.doc_id) {
+                Style::new()
+            } else {
+                Style::new().add_modifier(Modifier::DIM)
+            };
+            spans.push(Span::styled(
+                format!(
+                    "   {}:{}  {} of {}  [ ] steps",
+                    first_chars(&escape_control(&hit.field), 30),
+                    first_chars(&bytes_text(&hit.term.value, hit.term.binary), 40),
+                    hit.index + 1,
+                    hit.doc_freq
+                ),
+                style,
+            ));
+        }
         Line::from(spans)
     }
 
@@ -455,9 +560,14 @@ impl Documents {
             return;
         };
         let title = format!(" {} ", first_chars(&escape_control(&field.name), 40));
+        let hit = self
+            .shown_hit()
+            .filter(|hit| hit.field == field.name)
+            .map(|hit| (hit, self.positions.as_ref()));
         let lines = detail_lines(
             self.schema.get(&field.name),
             field,
+            hit,
             self.term_vectors.get(&field.name),
             self.numbers,
         );
@@ -563,10 +673,14 @@ fn label(text: &str) -> Span<'static> {
     )
 }
 
+/// The hit in the shown document and field, and where its term occurs once that is fetched.
+type HitPositions<'a> = (&'a TermHit, Option<&'a Result<Vec<TermPosition>, String>>);
+
 /// Everything about the selected field: how it is indexed, then what the document has in it.
 fn detail_lines(
     schema: Option<&IndexField>,
     field: &DocumentField,
+    hit: Option<HitPositions>,
     term_vector: Option<&TermVector>,
     numbers: NumberFormat,
 ) -> Vec<Line<'static>> {
@@ -613,6 +727,10 @@ fn detail_lines(
         label("Norm"),
         Span::raw(field.norm.map_or("-".to_owned(), |norm| norm.to_string())),
     ]));
+    if let Some((hit, positions)) = hit {
+        lines.push(Line::from(""));
+        lines.extend(hit_lines(hit, positions));
+    }
 
     lines.push(Line::from(""));
     if field.stored.is_empty() {
@@ -687,6 +805,39 @@ fn detail_lines(
                 }
                 lines.push(Line::from(spans));
             }
+        }
+    }
+    lines
+}
+
+/// The term of the hit, how often it occurs, and where.
+fn hit_lines(
+    hit: &TermHit,
+    positions: Option<&Result<Vec<TermPosition>, String>>,
+) -> Vec<Line<'static>> {
+    let mut heading = vec![Span::raw(bytes_text(&hit.term.value, hit.term.binary))];
+    if let Some(freq) = hit.freq {
+        heading.push(Span::styled(
+            format!(" ×{freq}"),
+            Style::new().add_modifier(Modifier::DIM),
+        ));
+    }
+    heading.push(Span::raw(format!(
+        ", doc {} of {} ([ ])",
+        hit.index + 1,
+        hit.doc_freq
+    )));
+    let mut lines = vec![Line::from([vec![label("Term")], heading].concat())];
+    match positions {
+        // Fetched right after the document, so this shows only for a moment.
+        None => {}
+        Some(Err(error)) => lines.push(Line::from(format!("  cannot read the positions: {error}"))),
+        Some(Ok(positions)) if positions.is_empty() => {
+            lines.push(Line::from("  no positions indexed"));
+        }
+        Some(Ok(positions)) => {
+            let texts: Vec<String> = positions.iter().map(position_text).collect();
+            lines.push(Line::from(format!("  {}", texts.join(", "))));
         }
     }
     lines
@@ -1105,5 +1256,105 @@ mod tests {
 
         documents.handle_key(KeyCode::Home);
         assert!(render(&mut documents, 140, 30).contains("Indexed"));
+    }
+
+    fn text(value: &str) -> BytesValue {
+        BytesValue {
+            value: value.to_owned(),
+            binary: false,
+        }
+    }
+
+    fn hit(field: &str, doc_id: i32, index: usize) -> TermHit {
+        TermHit {
+            field: field.to_owned(),
+            term: text("red"),
+            doc_id,
+            index,
+            doc_freq: 3,
+            freq: Some(2),
+        }
+    }
+
+    #[test]
+    fn shows_where_the_term_of_a_hit_occurs() {
+        let mut documents = documents();
+        documents.loaded(document(0, false));
+        assert_eq!(documents.handle_key(KeyCode::Char(']')), None);
+
+        documents.show_hit(hit("body", 2, 1));
+        assert_eq!(documents.positions_request(), None);
+        documents.loaded(document(2, false));
+
+        assert_eq!(documents.selected_field().unwrap().name, "body");
+        assert_eq!(
+            documents.positions_request(),
+            Some(Request::Positions {
+                doc_id: 2,
+                field: "body".to_owned(),
+                term: text("red"),
+            })
+        );
+        documents.positions_loaded(
+            2,
+            "body",
+            &text("red"),
+            vec![
+                TermPosition {
+                    position: Some(0),
+                    start_offset: Some(0),
+                    end_offset: Some(3),
+                    payload: None,
+                },
+                TermPosition {
+                    position: Some(2),
+                    start_offset: None,
+                    end_offset: None,
+                    payload: None,
+                },
+            ],
+        );
+        assert_eq!(documents.positions_request(), None);
+
+        let screen = render(&mut documents, 140, 30);
+        assert!(
+            screen.contains("#2 of 0–4   body:red  2 of 3  [ ] steps"),
+            "{screen}"
+        );
+        assert!(
+            screen.contains("Term        red ×2, doc 2 of 3 ([ ])"),
+            "{screen}"
+        );
+        assert!(screen.contains("  0 [0–3], 2"), "{screen}");
+        assert_eq!(
+            documents.handle_key(KeyCode::Char('[')),
+            Some(Request::StepTerm { forward: false })
+        );
+        assert_eq!(
+            documents.handle_key(KeyCode::Char(']')),
+            Some(Request::StepTerm { forward: true })
+        );
+
+        // Another document has no positions of the term.
+        documents.loaded(document(3, false));
+        assert_eq!(documents.positions_request(), None);
+        assert!(!render(&mut documents, 140, 30).contains("Term        red"));
+    }
+
+    #[test]
+    fn keeps_the_field_of_a_hit_among_the_empty_ones() {
+        let mut documents = documents();
+        documents.handle_key(KeyCode::Char('e'));
+        documents.show_hit(hit("extra", 1, 0));
+        documents.loaded(document(1, false));
+
+        assert_eq!(documents.selected_field().unwrap().name, "extra");
+        documents.positions_failed(1, "extra", &text("red"), "broken".to_owned());
+        let screen = render(&mut documents, 140, 30);
+        assert!(screen.contains("Fields (4) "), "{screen}");
+        assert!(
+            screen.contains("cannot read the positions: broken"),
+            "{screen}"
+        );
     }
 }

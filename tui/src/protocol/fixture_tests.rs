@@ -13,7 +13,7 @@ use serde_json::Value;
 use super::document::{GetDocument, GetTermVector};
 use super::index::{CloseIndex, GetIndexStats, OpenIndex};
 use super::job::CancelJob;
-use super::terms::{GetFieldTermScan, StartFieldTermScan};
+use super::terms::{GetFieldTermScan, GetPositions, GetPostings, GetTerms, StartFieldTermScan};
 use super::version::Version;
 use super::{ErrorCode, METHOD_NAMES, Request, Response, RpcMethod};
 
@@ -144,6 +144,9 @@ fn check(fixture: &Fixture, json: &str) -> Result<(), String> {
         CancelJob::NAME => check_method::<CancelJob>(fixture, json),
         GetDocument::NAME => check_method::<GetDocument>(fixture, json),
         GetTermVector::NAME => check_method::<GetTermVector>(fixture, json),
+        GetTerms::NAME => check_method::<GetTerms>(fixture, json),
+        GetPostings::NAME => check_method::<GetPostings>(fixture, json),
+        GetPositions::NAME => check_method::<GetPositions>(fixture, json),
         other => Err(format!("no method {other:?} in METHOD_NAMES")),
     }
 }

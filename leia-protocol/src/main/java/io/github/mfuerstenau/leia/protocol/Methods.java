@@ -14,6 +14,12 @@ import io.github.mfuerstenau.leia.protocol.job.CancelJobResult;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
 import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
+import io.github.mfuerstenau.leia.protocol.terms.GetPositionsParams;
+import io.github.mfuerstenau.leia.protocol.terms.GetPositionsResult;
+import io.github.mfuerstenau.leia.protocol.terms.GetPostingsParams;
+import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
+import io.github.mfuerstenau.leia.protocol.terms.GetTermsParams;
+import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.StartFieldTermScanParams;
 import io.github.mfuerstenau.leia.protocol.version.VersionParams;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
@@ -87,6 +93,32 @@ public final class Methods {
     public static final RpcMethod<GetTermVectorParams, GetTermVectorResult> GET_TERM_VECTOR =
             new RpcMethod<>("getTermVector", GetTermVectorParams.class, GetTermVectorResult.class);
 
+    /**
+     * A page of the terms of a field, in term order, from a given term on (ADR 0007). A field without
+     * postings has none. Fails with {@code NO_INDEX_OPEN}, {@code FIELD_NOT_FOUND}, or {@code
+     * INVALID_PARAMS} for a {@code limit} out of range or a {@code from} that is not valid hex.
+     */
+    public static final RpcMethod<GetTermsParams, GetTermsResult> GET_TERMS =
+            new RpcMethod<>("getTerms", GetTermsParams.class, GetTermsResult.class);
+
+    /**
+     * A page of the postings of a term: the documents that contain it, from a given document id on,
+     * deleted documents included (ADR 0007). Fails with {@code NO_INDEX_OPEN}, {@code
+     * FIELD_NOT_FOUND}, {@code TERM_NOT_FOUND}, or {@code INVALID_PARAMS} for a {@code limit} out of
+     * range, a negative {@code fromDoc} or a term that is not valid hex.
+     */
+    public static final RpcMethod<GetPostingsParams, GetPostingsResult> GET_POSTINGS =
+            new RpcMethod<>("getPostings", GetPostingsParams.class, GetPostingsResult.class);
+
+    /**
+     * Where a term occurs in a document, from the postings, with offsets and payloads as far as they
+     * were indexed (ADR 0007). Fails with {@code NO_INDEX_OPEN}, {@code DOC_NOT_FOUND}, {@code
+     * FIELD_NOT_FOUND}, {@code TERM_NOT_FOUND} if the document does not contain the term, or {@code
+     * INVALID_PARAMS} for a term that is not valid hex.
+     */
+    public static final RpcMethod<GetPositionsParams, GetPositionsResult> GET_POSITIONS =
+            new RpcMethod<>("getPositions", GetPositionsParams.class, GetPositionsResult.class);
+
     public static final List<RpcMethod<?, ?>> ALL = List.of(
             VERSION,
             OPEN_INDEX,
@@ -96,7 +128,10 @@ public final class Methods {
             GET_FIELD_TERM_SCAN,
             CANCEL_JOB,
             GET_DOCUMENT,
-            GET_TERM_VECTOR);
+            GET_TERM_VECTOR,
+            GET_TERMS,
+            GET_POSTINGS,
+            GET_POSITIONS);
 
     private Methods() {}
 

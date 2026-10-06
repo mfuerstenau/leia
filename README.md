@@ -15,10 +15,15 @@ because Lucene 10 can't read them.
   segment count, live, deleted and max documents, the Lucene versions that created the index, wrote
   its commit and wrote its oldest segment, and the commit user data.
 - **Fields:** every field with its index options, norms, payloads, term vectors, doc values type,
-  point and vector dimensions, and summed postings statistics (doc count, Σ doc freq, Σ term freq).
+  point and vector dimensions, and summed postings statistics (doc count, Σ doc freq, Σ term freq),
+  plus on request each field's term count and top terms.
+- **Documents:** one document at a time, deleted ones included: norms, stored values, doc values
+  and term vectors.
+- **Terms:** the terms of a field with their frequencies, and the documents that contain a term,
+  with the positions, offsets and payloads of each occurrence.
 
-Documents, search, analysis, commits and the rest of Luke's read-only features are still to come
-(see [`docs/tasklist.md`](docs/tasklist.md)).
+Search, analysis, commits and the rest of Luke's read-only features are still to come (see
+[`docs/tasklist.md`](docs/tasklist.md)).
 
 ## Requirements
 
@@ -51,7 +56,7 @@ leia --java /opt/jdk-25 /var/lib/solr/products/data/index
 |---|---|
 | `o` | open an index: type a path, `Tab` completes directories, `~` is your home directory, `Enter` opens and `Esc` cancels |
 | `c` | close the open index |
-| `1` `2` | switch between the overview and the documents |
+| `1` `2` `3` | switch between the overview, the documents and the terms |
 | `Esc` | stop the running term scans; with none running, quit |
 | `q`, `Ctrl+C` | quit |
 
@@ -65,6 +70,7 @@ leia --java /opt/jdk-25 /var/lib/solr/products/data/index
 | `s` | sort the field table by number, name or term count |
 | `S` | flip the sort direction |
 | `Tab` | switch between the field table and the top terms |
+| `Enter` on a top term | show the term and its documents on the terms screen |
 | `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the field table or the top terms |
 
 Counting terms reads every term of the field, which can take a while on a large index. The scan
@@ -82,6 +88,7 @@ scans it again; a smaller N needs no new scan.
 |---|---|
 | `←` `→` / `p` `n` | previous or next document id |
 | `i` | go to a document id |
+| `[` `]` | previous or next document of the term opened on the terms screen |
 | `Enter` | load the term vector of the selected field |
 | `x` | show numeric doc values as long, double bits, sortable double, float bits or sortable float |
 | `e` | hide or show the fields in which the document has nothing |
@@ -98,6 +105,26 @@ Flags: `I` indexed, `N` has a norm, `P` payloads, `S` stored, `V` term vector, `
 `T` points, `K` KNN vectors. `N`, `S`, `V` and `D` say what this document has; the others describe
 the field. Whether the document has terms in a field is not shown: finding out means reading the
 field's terms.
+
+#### Terms
+
+| Key | Action |
+|---|---|
+| `←` `→` / `h` `l`, `Tab` | switch between the fields, their terms and the postings of the selected term |
+| `/` | seek: type a text, and the terms start from the first one that is not smaller; `Enter` or `Esc` ends it, and an empty text goes back to the first term |
+| `Enter` | go to the next column; on a posting, show its document on the documents screen |
+| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the focused column |
+
+The terms screen lists the fields that have postings, the terms of the selected field in term
+order with their document frequency and total term frequency, and the documents that contain the
+selected term with the term's frequency in each. Terms and postings are fetched 100 at a time,
+the next ones once the selection reaches the last row. Lucene can't step back through terms, so
+to see the terms before the first one shown, seek again. Like the statistics, the frequencies
+include deleted documents, and the postings mark them `deleted`.
+
+A document opened from a posting shows the term in the header, and the details panel of the
+term's field shows where the term occurs: its positions, offsets and payloads, as far as they
+were indexed. `[` and `]` then step through the term's documents.
 
 If an index can't be opened, the prompt shows why (not found, not an index, unsupported format,
 corrupt, not readable) and keeps the path, so you can fix it. The index that was open before

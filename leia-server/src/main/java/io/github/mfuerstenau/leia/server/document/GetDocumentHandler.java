@@ -48,11 +48,11 @@ public final class GetDocumentHandler implements MethodHandler<GetDocumentParams
         }
     }
 
-    static ReadOnlyIndex openIndex(CurrentIndex currentIndex) throws RpcException {
+    public static ReadOnlyIndex openIndex(CurrentIndex currentIndex) throws RpcException {
         return currentIndex.get().orElseThrow(() -> new RpcException(ErrorCode.NO_INDEX_OPEN, "No index is open"));
     }
 
-    static void checkDocId(ReadOnlyIndex index, int docId) throws RpcException {
+    public static void checkDocId(ReadOnlyIndex index, int docId) throws RpcException {
         if (!index.hasDocId(docId)) {
             throw new RpcException(
                     ErrorCode.DOC_NOT_FOUND,

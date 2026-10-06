@@ -6,17 +6,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.mfuerstenau.leia.core.IndexDocument.DocValues;
 import io.github.mfuerstenau.leia.core.IndexDocument.StoredValue;
-import io.github.mfuerstenau.leia.core.TermVectorTerm.Position;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
-import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
-import org.apache.lucene.analysis.tokenattributes.OffsetAttribute;
-import org.apache.lucene.analysis.tokenattributes.PayloadAttribute;
 import org.apache.lucene.document.BinaryDocValuesField;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
@@ -201,7 +196,7 @@ class DocumentTest {
                             new TermVectorTerm(
                                     new BytesRef("a"),
                                     1,
-                                    List.of(new Position(
+                                    List.of(new TermPosition(
                                             OptionalInt.empty(),
                                             OptionalInt.of(0),
                                             OptionalInt.of(1),
@@ -209,7 +204,7 @@ class DocumentTest {
                             new TermVectorTerm(
                                     new BytesRef("b"),
                                     1,
-                                    List.of(new Position(
+                                    List.of(new TermPosition(
                                             OptionalInt.empty(),
                                             OptionalInt.of(2),
                                             OptionalInt.of(3),
@@ -270,8 +265,8 @@ class DocumentTest {
                 .orElseThrow();
     }
 
-    private static Position position(int position, int start, int end, Optional<BytesRef> payload) {
-        return new Position(OptionalInt.of(position), OptionalInt.of(start), OptionalInt.of(end), payload);
+    private static TermPosition position(int position, int start, int end, Optional<BytesRef> payload) {
+        return new TermPosition(OptionalInt.of(position), OptionalInt.of(start), OptionalInt.of(end), payload);
     }
 
     /**
@@ -325,36 +320,5 @@ class DocumentTest {
         doc.add(new Field("body", body, BODY));
         doc.add(new NumericDocValuesField("rank", rank));
         return doc;
-    }
-
-    /** Fixed tokens with offsets and a payload each; a {@code null} payload means none. */
-    private static final class PayloadTokens extends TokenStream {
-
-        private final CharTermAttribute term = addAttribute(CharTermAttribute.class);
-        private final OffsetAttribute offset = addAttribute(OffsetAttribute.class);
-        private final PayloadAttribute payload = addAttribute(PayloadAttribute.class);
-        private final String[] tokens;
-        private final int[] starts;
-        private final String[] payloads;
-        private int next;
-
-        PayloadTokens(String[] tokens, int[] starts, String... payloads) {
-            this.tokens = tokens;
-            this.starts = starts;
-            this.payloads = payloads;
-        }
-
-        @Override
-        public boolean incrementToken() {
-            if (next == tokens.length) {
-                return false;
-            }
-            clearAttributes();
-            term.append(tokens[next]);
-            offset.setOffset(starts[next], starts[next] + tokens[next].length());
-            payload.setPayload(payloads[next] == null ? null : new BytesRef(payloads[next]));
-            next++;
-            return true;
-        }
     }
 }

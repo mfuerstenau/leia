@@ -35,6 +35,15 @@ public final class ByteStrings {
         }
     }
 
+    /**
+     * The bytes of a byte string from the wire: the UTF-8 of the text, or else the bytes in hex.
+     *
+     * @throws IllegalArgumentException if {@code binary} and {@code value} is not valid hex
+     */
+    public static BytesRef decode(String value, boolean binary) {
+        return binary ? new BytesRef(HexFormat.of().parseHex(value)) : new BytesRef(value);
+    }
+
     /** The bytes in lowercase hex. */
     public static String hex(BytesRef bytes) {
         return HexFormat.of().formatHex(bytes.bytes, bytes.offset, bytes.offset + bytes.length);

@@ -10,6 +10,9 @@ import io.github.mfuerstenau.leia.server.index.GetIndexStatsHandler;
 import io.github.mfuerstenau.leia.server.index.OpenIndexHandler;
 import io.github.mfuerstenau.leia.server.job.CancelJobHandler;
 import io.github.mfuerstenau.leia.server.terms.GetFieldTermScanHandler;
+import io.github.mfuerstenau.leia.server.terms.GetPositionsHandler;
+import io.github.mfuerstenau.leia.server.terms.GetPostingsHandler;
+import io.github.mfuerstenau.leia.server.terms.GetTermsHandler;
 import io.github.mfuerstenau.leia.server.terms.StartFieldTermScanHandler;
 import io.github.mfuerstenau.leia.server.version.VersionHandler;
 
@@ -52,4 +55,16 @@ interface HandlerModule {
     @Binds
     @IntoSet
     MethodHandler<?, ?> getTermVector(GetTermVectorHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> getTerms(GetTermsHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> getPostings(GetPostingsHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> getPositions(GetPositionsHandler handler);
 }

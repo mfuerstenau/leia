@@ -201,9 +201,7 @@ public final class ReadOnlyIndex implements Closeable {
      * @throws IOException if reading the terms fails
      */
     public FieldTerms fieldTerms(String field, int topN, ScanProgress progress) throws IOException {
-        if (!hasField(field)) {
-            throw new IllegalArgumentException("No field " + field);
-        }
+        checkField(field);
         if (topN < 0) {
             throw new IllegalArgumentException("topN must not be negative: " + topN);
         }
@@ -269,10 +267,69 @@ public final class ReadOnlyIndex implements Closeable {
      */
     public List<TermVectorTerm> termVector(int docId, String field) throws IOException {
         checkDocId(docId);
+        checkField(field);
+        return DocumentReader.termVector(reader, docId, field);
+    }
+
+    /**
+     * A page of a field's terms in term order, from {@code from} on, or from the first term. A field
+     * without postings has no terms.
+     *
+     * @param from the first term of the page, or else the term after it; empty for the first term
+     * @param limit the most terms the page has, at least 1
+     * @throws IllegalArgumentException if there is no such field, or {@code limit} is below 1
+     * @throws IOException if reading the terms fails
+     */
+    public TermPage terms(String field, Optional<BytesRef> from, int limit) throws IOException {
+        checkField(field);
+        checkLimit(limit);
+        return TermReader.terms(reader, field, from, limit);
+    }
+
+    /**
+     * A page of the postings of a term: the documents that contain it, from document id {@code
+     * fromDoc} on, deleted documents included.
+     *
+     * @param fromDoc the first document id of the page, or else the one after it
+     * @param limit the most postings the page has, at least 1
+     * @return the page; empty if the field has no such term
+     * @throws IllegalArgumentException if there is no such field, {@code fromDoc} is negative or
+     *     {@code limit} is below 1
+     * @throws IOException if reading the postings fails
+     */
+    public Optional<PostingsPage> postings(String field, BytesRef term, int fromDoc, int limit) throws IOException {
+        checkField(field);
+        checkLimit(limit);
+        if (fromDoc < 0) {
+            throw new IllegalArgumentException("fromDoc must not be negative: " + fromDoc);
+        }
+        return TermReader.postings(reader, fieldInfos.fieldInfo(field), term, fromDoc, limit);
+    }
+
+    /**
+     * Where a term occurs in a document, from the postings: one entry per occurrence, in order. It is
+     * empty if positions are not indexed.
+     *
+     * @return the positions; empty if the document does not contain the term
+     * @throws IllegalArgumentException if there is no such document id or field
+     * @throws IOException if reading the postings fails
+     */
+    public Optional<List<TermPosition>> positions(int docId, String field, BytesRef term) throws IOException {
+        checkDocId(docId);
+        checkField(field);
+        return TermReader.positions(reader, docId, field, term);
+    }
+
+    private void checkField(String field) {
         if (!hasField(field)) {
             throw new IllegalArgumentException("No field " + field);
         }
-        return DocumentReader.termVector(reader, docId, field);
+    }
+
+    private static void checkLimit(int limit) {
+        if (limit < 1) {
+            throw new IllegalArgumentException("limit must be at least 1: " + limit);
+        }
     }
 
     private void checkDocId(int docId) {

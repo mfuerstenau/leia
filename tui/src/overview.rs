@@ -11,6 +11,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Cell, Paragraph, Row, Table, TableState, Wrap};
 
+use crate::protocol::document::BytesValue;
 use crate::protocol::index::{DocValuesType, GetIndexStatsResult, IndexField, IndexOptions};
 use crate::protocol::terms::{FieldTerms, TopTerm};
 use crate::text::bytes_text;
@@ -256,6 +257,27 @@ impl Overview {
         self.fields
             .selected()
             .map(|selected| self.order[selected.min(last)])
+    }
+
+    /// The field and the top term under the selection, while the top terms have the focus.
+    pub fn selected_top_term(&self) -> Option<(String, BytesValue)> {
+        if self.focus != Focus::Terms {
+            return None;
+        }
+        let field = self.selected_field()?;
+        let Some(FieldScan::Done { terms, table, .. }) = self.scans.get(&field.name) else {
+            return None;
+        };
+        let shown = terms.top_terms.len().min(self.top_n as usize);
+        // The table clamps the selection only when it renders.
+        let top = &terms.top_terms[table.selected()?.min(shown.checked_sub(1)?)];
+        Some((
+            field.name.clone(),
+            BytesValue {
+                value: top.term.clone(),
+                binary: top.binary,
+            },
+        ))
     }
 
     pub fn scan(&self, field: &str) -> Option<&FieldScan> {

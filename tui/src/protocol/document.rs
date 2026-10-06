@@ -146,17 +146,17 @@ pub struct TermVectorTerm {
     pub positions: Vec<TermPosition>,
 }
 
-/// One occurrence of a term in a term vector.
+/// One occurrence of a term in a document, from a term vector or from the postings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TermPosition {
-    /// `None` if the term vector has no positions.
+    /// `None` if positions are not indexed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub position: Option<i32>,
-    /// `None` if the term vector has no offsets.
+    /// `None` if offsets are not indexed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start_offset: Option<i32>,
-    /// `None` if the term vector has no offsets.
+    /// `None` if offsets are not indexed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub end_offset: Option<i32>,
     /// The payload in lowercase hex; `None` if there is none.

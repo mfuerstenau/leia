@@ -30,10 +30,12 @@ pub enum ErrorCode {
     JobNotFound,
     /// The open index has no document with that id: it is negative, or not below maxDoc.
     DocNotFound,
+    /// The field has no such term, or the document does not contain it.
+    TermNotFound,
 }
 
 impl ErrorCode {
-    pub const ALL: [ErrorCode; 14] = [
+    pub const ALL: [ErrorCode; 15] = [
         ErrorCode::ParseError,
         ErrorCode::InvalidRequest,
         ErrorCode::MethodNotFound,
@@ -48,6 +50,7 @@ impl ErrorCode {
         ErrorCode::FieldNotFound,
         ErrorCode::JobNotFound,
         ErrorCode::DocNotFound,
+        ErrorCode::TermNotFound,
     ];
 
     pub const fn code(self) -> i32 {
@@ -66,6 +69,7 @@ impl ErrorCode {
             ErrorCode::FieldNotFound => -32006,
             ErrorCode::JobNotFound => -32007,
             ErrorCode::DocNotFound => -32008,
+            ErrorCode::TermNotFound => -32009,
         }
     }
 
@@ -86,6 +90,7 @@ impl ErrorCode {
             ErrorCode::FieldNotFound => "FIELD_NOT_FOUND",
             ErrorCode::JobNotFound => "JOB_NOT_FOUND",
             ErrorCode::DocNotFound => "DOC_NOT_FOUND",
+            ErrorCode::TermNotFound => "TERM_NOT_FOUND",
         }
     }
 }
