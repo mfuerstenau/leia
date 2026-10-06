@@ -12,6 +12,9 @@ use leia::build_info::{LEIA, java_line, server_line};
 use leia::cli::Cli;
 use leia::client::CallError;
 use leia::java::find_java;
+use leia::protocol::document::{
+    GetDocument, GetDocumentParams, GetTermVector, GetTermVectorParams,
+};
 use leia::protocol::index::{
     CloseIndex, CloseIndexParams, GetIndexStats, GetIndexStatsParams, OpenIndex, OpenIndexParams,
 };
@@ -99,6 +102,7 @@ fn run(
     if let Some(path) = index_path {
         app.opening(&path);
         terminal.draw(|frame| app.draw(frame))?;
+        // The overview is shown at first, so no action follows.
         open_index(server, app, &path)?;
     }
     loop {
@@ -135,7 +139,7 @@ fn perform(
         Action::Open(path) => {
             // Shows "Opening…" while the server works.
             terminal.draw(|frame| app.draw(frame))?;
-            open_index(server, app, &path)?;
+            return open_index(server, app, &path);
         }
         Action::Close => {
             server.call::<CloseIndex>(CloseIndexParams {})?;
@@ -153,6 +157,22 @@ fn perform(
             server.call::<CancelJob>(JobParams { job_id })?;
             app.scan_cancelled();
         }
+        Action::LoadDocument(doc_id) => {
+            match answered(server.call::<GetDocument>(GetDocumentParams { doc_id }))? {
+                Ok(document) => app.document_loaded(document),
+                Err(error) => app.document_failed(doc_id, error),
+            }
+        }
+        Action::LoadTermVector { doc_id, field } => {
+            let params = GetTermVectorParams {
+                doc_id,
+                field: field.clone(),
+            };
+            match answered(server.call::<GetTermVector>(params))? {
+                Ok(result) => app.term_vector_loaded(doc_id, &field, result.terms),
+                Err(error) => app.term_vector_failed(doc_id, &field, error),
+            }
+        }
     }
     Ok(None)
 }
@@ -168,25 +188,26 @@ fn poll_scan(server: &mut Server, app: &mut App, job_id: i64) -> Result<Option<A
 }
 
 /// Opens the index and fetches its statistics for the overview. The server's errors are shown
-/// in the UI; a broken connection to the server ends leia.
-fn open_index(server: &mut Server, app: &mut App, path: &str) -> Result<()> {
+/// in the UI; a broken connection to the server ends leia. Returns the action that follows, if
+/// any: the first document, if the documents screen is shown.
+fn open_index(server: &mut Server, app: &mut App, path: &str) -> Result<Option<Action>> {
     let opened = server.call::<OpenIndex>(OpenIndexParams {
         path: path.to_owned(),
     });
     if let Err(error) = answered(opened)? {
         app.open_failed(error);
-        return Ok(());
+        return Ok(None);
     }
     match answered(server.call::<GetIndexStats>(GetIndexStatsParams {}))? {
-        Ok(stats) => app.opened(stats),
+        Ok(stats) => Ok(app.opened(stats)),
         Err(error) => {
             // Opened, but the overview can't show it: close it rather than keep it open unseen.
             server.call::<CloseIndex>(CloseIndexParams {})?;
             app.closed();
             app.open_failed(format!("cannot read the index statistics: {error}"));
+            Ok(None)
         }
     }
-    Ok(())
 }
 
 /// Splits the outcome of a call: an error the server answered with becomes a message for the UI,

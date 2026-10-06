@@ -13,6 +13,7 @@ use ratatui::widgets::{Block, BorderType, Cell, Paragraph, Row, Table, TableStat
 
 use crate::protocol::index::{DocValuesType, GetIndexStatsResult, IndexField, IndexOptions};
 use crate::protocol::terms::{FieldTerms, TopTerm};
+use crate::text::bytes_text;
 
 /// Rows that PageUp and PageDown move.
 const PAGE: u16 = 10;
@@ -481,7 +482,7 @@ impl Overview {
 }
 
 /// A bordered block; the focused one has a thick border.
-fn panel(title: String, focused: bool) -> Block<'static> {
+pub(crate) fn panel(title: String, focused: bool) -> Block<'static> {
     let block = Block::bordered().title(title);
     if focused {
         block.border_type(BorderType::Thick)
@@ -491,7 +492,7 @@ fn panel(title: String, focused: bool) -> Block<'static> {
 }
 
 /// The selected row: reversed in the focused table, bold in the other.
-fn highlight(focused: bool) -> Style {
+pub(crate) fn highlight(focused: bool) -> Style {
     Style::new().add_modifier(if focused {
         Modifier::REVERSED
     } else {
@@ -543,22 +544,9 @@ fn top_terms_table(top_terms: &[TopTerm]) -> Table<'static> {
         .column_spacing(COLUMN_SPACING)
 }
 
-/// The term as shown: control characters escaped, so that they can't break the layout, and a
-/// binary term as `0x` and its hex.
+/// The term as shown: control characters escaped, and a binary term as `0x` and its hex.
 fn term_text(term: &TopTerm) -> String {
-    if term.binary {
-        return format!("0x{}", term.term);
-    }
-    term.term
-        .chars()
-        .map(|c| {
-            if c.is_control() {
-                c.escape_default().to_string()
-            } else {
-                c.to_string()
-            }
-        })
-        .collect()
+    bytes_text(&term.term, term.binary)
 }
 
 fn summary_lines(stats: &GetIndexStatsResult) -> Vec<Line<'static>> {
@@ -740,7 +728,7 @@ fn field_cells(
     ]
 }
 
-fn postings(options: IndexOptions) -> &'static str {
+pub(crate) fn postings(options: IndexOptions) -> &'static str {
     match options {
         IndexOptions::None => "-",
         IndexOptions::Docs => "docs",
@@ -763,7 +751,7 @@ fn flags(field: &IndexField) -> String {
     .collect()
 }
 
-fn doc_values(doc_values_type: DocValuesType) -> &'static str {
+pub(crate) fn doc_values(doc_values_type: DocValuesType) -> &'static str {
     match doc_values_type {
         DocValuesType::None => "-",
         DocValuesType::Numeric => "numeric",

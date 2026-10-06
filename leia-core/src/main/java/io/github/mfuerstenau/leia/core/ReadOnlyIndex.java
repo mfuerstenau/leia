@@ -243,6 +243,44 @@ public final class ReadOnlyIndex implements Closeable {
         return new FieldTerms(field, scanned, List.of(topTerms));
     }
 
+    /** Whether {@code docId} is a document id of the index, deleted or not: from 0 to maxDoc - 1. */
+    public boolean hasDocId(int docId) {
+        return docId >= 0 && docId < reader.maxDoc();
+    }
+
+    /**
+     * What a document holds in every field of the index: norms, stored values, doc values, and
+     * whether it has a term vector. A deleted document is read too.
+     *
+     * @throws IllegalArgumentException if there is no such document id
+     * @throws IOException if reading the document fails
+     */
+    public IndexDocument document(int docId) throws IOException {
+        checkDocId(docId);
+        return DocumentReader.document(reader, fieldInfos, docId);
+    }
+
+    /**
+     * The term vector of a document for a field, in term order. It is empty if the document has
+     * none for the field.
+     *
+     * @throws IllegalArgumentException if there is no such document id or field
+     * @throws IOException if reading the term vector fails
+     */
+    public List<TermVectorTerm> termVector(int docId, String field) throws IOException {
+        checkDocId(docId);
+        if (!hasField(field)) {
+            throw new IllegalArgumentException("No field " + field);
+        }
+        return DocumentReader.termVector(reader, docId, field);
+    }
+
+    private void checkDocId(int docId) {
+        if (!hasDocId(docId)) {
+            throw new IllegalArgumentException("No document " + docId + "; maxDoc is " + reader.maxDoc());
+        }
+    }
+
     /** The weakest top term on top: the lowest document frequency, then the latest term. */
     private static final class TopTermsQueue extends PriorityQueue<TopTerm> {
 

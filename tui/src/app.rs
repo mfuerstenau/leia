@@ -1,6 +1,7 @@
 //! The application state: what is on screen and what a key does. It makes no calls itself:
 //! [`App::handle_key`] returns an [`Action`], the caller makes the RPC calls and reports back with
-//! [`App::opened`], [`App::open_failed`], [`App::closed`] or the `scan_*` methods.
+//! [`App::opened`], [`App::open_failed`], [`App::closed`], the `scan_*`, `document_*` or
+//! `term_vector_*` methods.
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -8,12 +9,15 @@ use std::path::PathBuf;
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Paragraph};
+use ratatui::widgets::{Block, Paragraph, Tabs};
 
 use crate::build_info::{LEIA, java_line, server_line};
+use crate::documents::{Documents, Request};
 use crate::overview::{DEFAULT_TOP_TERMS, FieldScan, Overview, step_top_terms};
 use crate::prompt::{PathPrompt, PromptEvent, expand_home};
+use crate::protocol::document::{GetDocumentResult, TermVectorTerm};
 use crate::protocol::index::GetIndexStatsResult;
 use crate::protocol::terms::GetFieldTermScanResult;
 use crate::protocol::version::VersionResult;
@@ -35,6 +39,31 @@ pub enum Action {
     },
     /// Cancel this scan job, and report back with [`App::scan_cancelled`].
     CancelScan(i64),
+    /// Fetch this document, and report back with [`App::document_loaded`] or
+    /// [`App::document_failed`].
+    LoadDocument(i32),
+    /// Fetch the term vector of a field of a document, and report back with
+    /// [`App::term_vector_loaded`] or [`App::term_vector_failed`].
+    LoadTermVector {
+        doc_id: i32,
+        field: String,
+    },
+}
+
+impl From<Request> for Action {
+    fn from(request: Request) -> Self {
+        match request {
+            Request::Document(doc_id) => Action::LoadDocument(doc_id),
+            Request::TermVector { doc_id, field } => Action::LoadTermVector { doc_id, field },
+        }
+    }
+}
+
+/// The screens of an open index; `1` and `2` switch between them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Screen {
+    Overview,
+    Documents,
 }
 
 /// The scan that runs in the server. There is at most one; the others wait in the queue.
@@ -50,6 +79,9 @@ pub struct App {
     /// The directory that `~` stands for in the prompt.
     home: Option<PathBuf>,
     overview: Option<Overview>,
+    documents: Option<Documents>,
+    /// The screen shown while an index is open; kept when another index is opened.
+    screen: Screen,
     prompt: Option<PathPrompt>,
     scan: Option<RunningScan>,
     /// Fields whose scan waits for the running one.
@@ -64,6 +96,8 @@ impl App {
             version,
             home,
             overview: None,
+            documents: None,
+            screen: Screen::Overview,
             prompt: None,
             scan: None,
             queue: VecDeque::new(),
@@ -82,11 +116,14 @@ impl App {
         self.prompt = Some(prompt);
     }
 
-    /// Shows the new index. The server stopped the scans of the previous one.
-    pub fn opened(&mut self, stats: GetIndexStatsResult) {
+    /// Shows the new index. The server stopped the scans of the previous one. Returns the first
+    /// document to fetch if the documents screen is shown.
+    pub fn opened(&mut self, stats: GetIndexStatsResult) -> Option<Action> {
+        self.documents = Some(Documents::new(stats.fields.clone(), stats.max_doc));
         self.overview = Some(Overview::new(stats, self.top_n));
         self.prompt = None;
         self.forget_scans();
+        self.initial_request()
     }
 
     /// Shows `error` in the prompt, which keeps the path, so it can be corrected.
@@ -99,7 +136,40 @@ impl App {
     /// The server stopped the scans of the closed index.
     pub fn closed(&mut self) {
         self.overview = None;
+        self.documents = None;
         self.forget_scans();
+    }
+
+    /// The first document to fetch, if the documents screen is shown and has none yet.
+    fn initial_request(&self) -> Option<Action> {
+        if self.screen != Screen::Documents {
+            return None;
+        }
+        self.documents.as_ref()?.initial_request().map(Action::from)
+    }
+
+    pub fn document_loaded(&mut self, document: GetDocumentResult) {
+        if let Some(documents) = &mut self.documents {
+            documents.loaded(document);
+        }
+    }
+
+    pub fn document_failed(&mut self, doc_id: i32, error: String) {
+        if let Some(documents) = &mut self.documents {
+            documents.failed(doc_id, error);
+        }
+    }
+
+    pub fn term_vector_loaded(&mut self, doc_id: i32, field: &str, terms: Vec<TermVectorTerm>) {
+        if let Some(documents) = &mut self.documents {
+            documents.term_vector_loaded(doc_id, field, terms);
+        }
+    }
+
+    pub fn term_vector_failed(&mut self, doc_id: i32, field: &str, error: String) {
+        if let Some(documents) = &mut self.documents {
+            documents.term_vector_failed(doc_id, field, error);
+        }
     }
 
     fn forget_scans(&mut self) {
@@ -223,6 +293,12 @@ impl App {
                 PromptEvent::None => None,
             };
         }
+        if let Some(documents) = &mut self.documents
+            && self.screen == Screen::Documents
+            && documents.prompting()
+        {
+            return documents.handle_key(key.code).map(Action::from);
+        }
         match key.code {
             // Esc stops the scans first, and quits only when there are none.
             KeyCode::Esc if self.scan.is_some() => match self.polling() {
@@ -233,6 +309,24 @@ impl App {
                 }
             },
             KeyCode::Char('q') | KeyCode::Esc => Some(Action::Quit),
+            KeyCode::Char('1') if self.overview.is_some() => {
+                self.screen = Screen::Overview;
+                None
+            }
+            KeyCode::Char('2') if self.documents.is_some() => {
+                self.screen = Screen::Documents;
+                self.initial_request()
+            }
+            KeyCode::Char('o') => {
+                // Starts from the open index, so a sibling is a Ctrl+W away.
+                let path = self.overview.as_ref().map_or("", Overview::path);
+                self.prompt = Some(PathPrompt::new(path, self.home.clone()));
+                None
+            }
+            KeyCode::Char('c') if self.overview.is_some() => Some(Action::Close),
+            code if self.screen == Screen::Documents => {
+                self.documents.as_mut()?.handle_key(code).map(Action::from)
+            }
             KeyCode::Enter => {
                 let field = self.scannable_selected_field()?;
                 self.request_scans(vec![field])
@@ -249,13 +343,6 @@ impl App {
                 self.step_top_terms(false);
                 None
             }
-            KeyCode::Char('o') => {
-                // Starts from the open index, so a sibling is a Ctrl+W away.
-                let path = self.overview.as_ref().map_or("", Overview::path);
-                self.prompt = Some(PathPrompt::new(path, self.home.clone()));
-                None
-            }
-            KeyCode::Char('c') if self.overview.is_some() => Some(Action::Close),
             code => {
                 if let Some(overview) = &mut self.overview {
                     overview.handle_key(code);
@@ -266,23 +353,40 @@ impl App {
     }
 
     pub fn draw(&mut self, frame: &mut Frame) {
-        let [body, footer] =
-            Layout::vertical([Constraint::Fill(1), Constraint::Length(1)]).areas(frame.area());
-        let keys = match &mut self.overview {
-            Some(overview) => {
+        let [tabs, body, footer] = Layout::vertical([
+            Constraint::Length(u16::from(self.overview.is_some())),
+            Constraint::Fill(1),
+            Constraint::Length(1),
+        ])
+        .areas(frame.area());
+        let cancel = if self.scan.is_some() {
+            "Esc cancel scan   "
+        } else {
+            ""
+        };
+        let keys = match (&mut self.overview, &mut self.documents, self.screen) {
+            (Some(_), Some(documents), Screen::Documents) => {
+                documents.render(frame, body);
+                Line::from(format!(
+                    " {cancel}q quit   o open   c close   1/2 screen   ←/→ doc   i go to   \
+                     ⏎ term vector   x numbers   e empty fields   Tab panel   ↑↓"
+                ))
+            }
+            (Some(overview), _, _) => {
                 overview.render(frame, body);
                 if self.scan.is_some() {
                     Line::from(
-                        " Esc cancel scan   q quit   o open   c close   s/S sort   Tab panel   ↑↓",
+                        " Esc cancel scan   q quit   o open   c close   1/2 screen   s/S sort   \
+                         Tab panel   ↑↓",
                     )
                 } else {
                     Line::from(
-                        " q quit   o open   c close   ⏎ terms   a all terms   +/- top N   \
-                         s/S sort   Tab panel   ↑↓",
+                        " q quit   o open   c close   1/2 screen   ⏎ terms   a all terms   \
+                         +/- top N   s/S sort   Tab panel   ↑↓",
                     )
                 }
             }
-            None => {
+            (None, _, _) => {
                 let lines = vec![
                     Line::from("No index open. Press o to open one."),
                     Line::from(""),
@@ -297,6 +401,18 @@ impl App {
                 Line::from(" q quit   o open")
             }
         };
+        if self.overview.is_some() {
+            let selected = match self.screen {
+                Screen::Overview => 0,
+                Screen::Documents => 1,
+            };
+            frame.render_widget(
+                Tabs::new(["1 Overview", "2 Documents"])
+                    .select(selected)
+                    .highlight_style(Style::new().add_modifier(Modifier::REVERSED)),
+                tabs,
+            );
+        }
         let build = Line::from(format!("{} ", LEIA.line())).right_aligned();
         // The build only if it fits next to the keys.
         if keys.width() + 2 + build.width() <= usize::from(footer.width) {
@@ -317,6 +433,7 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
+    use crate::protocol::document::{DocumentField, StoredType, StoredValue};
     use crate::protocol::index::{DocValuesType, IndexField, IndexOptions, TermStats};
     use crate::protocol::terms::FieldTerms;
     use crate::protocol::version::JavaRuntime;
@@ -668,6 +785,107 @@ mod tests {
                 top_n: 100,
             })
         );
+    }
+
+    fn document(doc_id: i32) -> GetDocumentResult {
+        GetDocumentResult {
+            doc_id,
+            deleted: false,
+            fields: vec![DocumentField {
+                name: "id".to_owned(),
+                norm: None,
+                stored: vec![StoredValue {
+                    kind: StoredType::String,
+                    value: format!("doc-{doc_id}"),
+                    binary: false,
+                }],
+                doc_values: None,
+                has_term_vector: false,
+            }],
+        }
+    }
+
+    fn app_with_documents() -> App {
+        let mut app = App::new(version(), None);
+        app.opened(GetIndexStatsResult {
+            num_docs: 3,
+            max_doc: 3,
+            fields: vec![field("id", 0, true)],
+            ..stats("/data/idx")
+        });
+        app
+    }
+
+    #[test]
+    fn switches_to_the_documents_and_fetches_the_first() {
+        let mut app = app_with_documents();
+        assert!(render(&mut app).contains("1 Overview"));
+
+        assert_eq!(
+            app.handle_key(key(KeyCode::Char('2'))),
+            Some(Action::LoadDocument(0))
+        );
+        app.document_loaded(document(0));
+        let screen = render(&mut app);
+        assert!(screen.contains("#0 of 0–2"), "{screen}");
+        assert!(screen.contains("doc-0"), "{screen}");
+
+        assert_eq!(
+            app.handle_key(key(KeyCode::Right)),
+            Some(Action::LoadDocument(1))
+        );
+        // Back and forth fetches nothing new.
+        assert_eq!(app.handle_key(key(KeyCode::Char('1'))), None);
+        assert!(render(&mut app).contains("Path       /data/idx"));
+        assert_eq!(app.handle_key(key(KeyCode::Char('2'))), None);
+    }
+
+    #[test]
+    fn opening_another_index_on_the_documents_screen_fetches_its_first_document() {
+        let mut app = app_with_documents();
+        app.handle_key(key(KeyCode::Char('2')));
+        app.document_loaded(document(0));
+
+        assert_eq!(
+            app.opened(GetIndexStatsResult {
+                max_doc: 1,
+                ..stats("/data/other")
+            }),
+            Some(Action::LoadDocument(0))
+        );
+        assert_eq!(app.opened(stats("/data/empty")), None);
+    }
+
+    #[test]
+    fn the_document_prompt_takes_the_keys() {
+        let mut app = app_with_documents();
+        app.handle_key(key(KeyCode::Char('2')));
+        app.document_loaded(document(0));
+        app.handle_key(key(KeyCode::Char('i')));
+
+        // Digits go to the prompt, not to the screen switch; Esc closes the prompt, not leia.
+        assert_eq!(app.handle_key(key(KeyCode::Char('1'))), None);
+        assert!(render(&mut app).contains("Go to document"));
+        assert_eq!(app.handle_key(key(KeyCode::Esc)), None);
+        assert!(!render(&mut app).contains("Go to document"));
+
+        app.handle_key(key(KeyCode::Char('i')));
+        app.handle_key(key(KeyCode::Char('2')));
+        assert_eq!(
+            app.handle_key(key(KeyCode::Enter)),
+            Some(Action::LoadDocument(2))
+        );
+        assert_eq!(app.handle_key(key(KeyCode::Esc)), Some(Action::Quit));
+    }
+
+    #[test]
+    fn a_failed_document_shows_the_error() {
+        let mut app = app_with_documents();
+        app.handle_key(key(KeyCode::Char('2')));
+
+        app.document_failed(0, "Cannot read document 0".to_owned());
+
+        assert!(render(&mut app).contains("Cannot read it: Cannot read document 0"));
     }
 
     #[test]

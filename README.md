@@ -51,6 +51,14 @@ leia --java /opt/jdk-25 /var/lib/solr/products/data/index
 |---|---|
 | `o` | open an index: type a path, `Tab` completes directories, `~` is your home directory, `Enter` opens and `Esc` cancels |
 | `c` | close the open index |
+| `1` `2` | switch between the overview and the documents |
+| `Esc` | stop the running term scans; with none running, quit |
+| `q`, `Ctrl+C` | quit |
+
+#### Overview
+
+| Key | Action |
+|---|---|
 | `Enter` | count the terms of the selected field and find its top N terms by document frequency (N is 50 at first) |
 | `a` | do so for every field with postings, one after another |
 | `+` `-` | show more or fewer top terms: 10, 20, 50, 100, 200, 500 or 1000 |
@@ -58,8 +66,6 @@ leia --java /opt/jdk-25 /var/lib/solr/products/data/index
 | `S` | flip the sort direction |
 | `Tab` | switch between the field table and the top terms |
 | `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the field table or the top terms |
-| `Esc` | stop the running term scans; with none running, quit |
-| `q`, `Ctrl+C` | quit |
 
 Counting terms reads every term of the field, which can take a while on a large index. The scan
 runs in the server while leia shows its progress, and `Esc` stops it. Once every field has been
@@ -69,6 +75,29 @@ Like Lucene's own statistics, the counts include deleted documents that no merge
 Sorted by term count, the fields without a count come last in either direction. With a larger N,
 the top-terms title shows `⏎ top N` for a field that was scanned for fewer, and `Enter` (or `a`)
 scans it again; a smaller N needs no new scan.
+
+#### Documents
+
+| Key | Action |
+|---|---|
+| `←` `→` / `p` `n` | previous or next document id |
+| `i` | go to a document id |
+| `Enter` | load the term vector of the selected field |
+| `x` | show numeric doc values as long, double bits, sortable double, float bits or sortable float |
+| `e` | hide or show the fields in which the document has nothing |
+| `Tab` | switch between the field table and the details of the selected field |
+| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the fields or scroll the details |
+
+The documents screen shows one document at a time, every field of the index in a row: its flags,
+its norm and its first stored value (or else its doc values). The details panel shows all of the
+selected field's stored values, doc values and, on `Enter`, its term vector with positions,
+offsets and payloads. Deleted documents can be read too, until a merge removes them; they are
+marked `deleted`. Byte strings that aren't UTF-8 are shown as `0x` and their hex.
+
+Flags: `I` indexed, `N` has a norm, `P` payloads, `S` stored, `V` term vector, `D` doc values,
+`T` points, `K` KNN vectors. `N`, `S`, `V` and `D` say what this document has; the others describe
+the field. Whether the document has terms in a field is not shown: finding out means reading the
+field's terms.
 
 If an index can't be opened, the prompt shows why (not found, not an index, unsupported format,
 corrupt, not readable) and keeps the path, so you can fix it. The index that was open before

@@ -1,0 +1,106 @@
+{
+  "jsonrpc": "2.0",
+  "id": 7,
+  "result": {
+    "docId": 1,
+    "deleted": true,
+    "fields": [
+      {
+        "name": "id",
+        "stored": [
+          {
+            "type": "STRING",
+            "value": "2",
+            "binary": false
+          }
+        ],
+        "hasTermVector": false
+      },
+      {
+        "name": "body",
+        "norm": 3,
+        "stored": [
+          {
+            "type": "STRING",
+            "value": "document number 2",
+            "binary": false
+          }
+        ],
+        "hasTermVector": true
+      },
+      {
+        "name": "stored",
+        "stored": [
+          {
+            "type": "INT",
+            "value": "7",
+            "binary": false
+          },
+          {
+            "type": "LONG",
+            "value": "-8",
+            "binary": false
+          },
+          {
+            "type": "FLOAT",
+            "value": "1.5",
+            "binary": false
+          },
+          {
+            "type": "DOUBLE",
+            "value": "NaN",
+            "binary": false
+          },
+          {
+            "type": "BINARY",
+            "value": "ff00",
+            "binary": true
+          },
+          {
+            "type": "BINARY",
+            "value": "text",
+            "binary": false
+          }
+        ],
+        "hasTermVector": false
+      },
+      {
+        "name": "prices",
+        "stored": [],
+        "docValues": {
+          "type": "SORTED_NUMERIC",
+          "numbers": [
+            -1,
+            4617315517961601024
+          ],
+          "values": []
+        },
+        "hasTermVector": false
+      },
+      {
+        "name": "tags",
+        "stored": [],
+        "docValues": {
+          "type": "SORTED_SET",
+          "numbers": [],
+          "values": [
+            {
+              "value": "a",
+              "binary": false
+            },
+            {
+              "value": "ff",
+              "binary": true
+            }
+          ]
+        },
+        "hasTermVector": false
+      },
+      {
+        "name": "missing",
+        "stored": [],
+        "hasTermVector": false
+      }
+    ]
+  }
+}

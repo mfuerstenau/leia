@@ -1,0 +1,52 @@
+{
+  "jsonrpc": "2.0",
+  "id": 8,
+  "result": {
+    "terms": [
+      {
+        "term": "2",
+        "binary": false,
+        "freq": 1,
+        "positions": [
+          {
+            "position": 2,
+            "startOffset": 16,
+            "endOffset": 17,
+            "payload": "0a0b"
+          }
+        ]
+      },
+      {
+        "term": "document",
+        "binary": false,
+        "freq": 1,
+        "positions": [
+          {
+            "position": 0,
+            "startOffset": 0,
+            "endOffset": 8
+          }
+        ]
+      },
+      {
+        "term": "ff00",
+        "binary": true,
+        "freq": 2,
+        "positions": [
+          {
+            "position": 3
+          },
+          {
+            "position": 5
+          }
+        ]
+      },
+      {
+        "term": "number",
+        "binary": false,
+        "freq": 1,
+        "positions": []
+      }
+    ]
+  }
+}

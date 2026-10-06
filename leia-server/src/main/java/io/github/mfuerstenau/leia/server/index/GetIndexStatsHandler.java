@@ -91,7 +91,7 @@ public final class GetIndexStatsHandler implements MethodHandler<GetIndexStatsPa
         };
     }
 
-    static DocValuesType docValuesType(org.apache.lucene.index.DocValuesType type) {
+    public static DocValuesType docValuesType(org.apache.lucene.index.DocValuesType type) {
         return switch (type) {
             case NONE -> DocValuesType.NONE;
             case NUMERIC -> DocValuesType.NUMERIC;

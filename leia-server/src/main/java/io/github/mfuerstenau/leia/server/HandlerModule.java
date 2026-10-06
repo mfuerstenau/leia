@@ -3,6 +3,8 @@ package io.github.mfuerstenau.leia.server;
 import dagger.Binds;
 import dagger.Module;
 import dagger.multibindings.IntoSet;
+import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
+import io.github.mfuerstenau.leia.server.document.GetTermVectorHandler;
 import io.github.mfuerstenau.leia.server.index.CloseIndexHandler;
 import io.github.mfuerstenau.leia.server.index.GetIndexStatsHandler;
 import io.github.mfuerstenau.leia.server.index.OpenIndexHandler;
@@ -42,4 +44,12 @@ interface HandlerModule {
     @Binds
     @IntoSet
     MethodHandler<?, ?> cancelJob(CancelJobHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> getDocument(GetDocumentHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> getTermVector(GetTermVectorHandler handler);
 }

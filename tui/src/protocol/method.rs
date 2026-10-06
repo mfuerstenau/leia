@@ -3,6 +3,7 @@
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+use super::document::{GetDocument, GetTermVector};
 use super::index::{CloseIndex, GetIndexStats, OpenIndex};
 use super::job::CancelJob;
 use super::terms::{GetFieldTermScan, StartFieldTermScan};
@@ -24,4 +25,6 @@ pub const METHOD_NAMES: &[&str] = &[
     StartFieldTermScan::NAME,
     GetFieldTermScan::NAME,
     CancelJob::NAME,
+    GetDocument::NAME,
+    GetTermVector::NAME,
 ];

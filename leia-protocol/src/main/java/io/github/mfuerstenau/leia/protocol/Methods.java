@@ -1,5 +1,9 @@
 package io.github.mfuerstenau.leia.protocol;
 
+import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
+import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
+import io.github.mfuerstenau.leia.protocol.document.GetTermVectorParams;
+import io.github.mfuerstenau.leia.protocol.document.GetTermVectorResult;
 import io.github.mfuerstenau.leia.protocol.index.CloseIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.CloseIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
@@ -67,8 +71,32 @@ public final class Methods {
     public static final RpcMethod<JobParams, CancelJobResult> CANCEL_JOB =
             new RpcMethod<>("cancelJob", JobParams.class, CancelJobResult.class);
 
+    /**
+     * What a document of the open index holds in every field: norm, stored values, doc values, and
+     * whether it has a term vector (ADR 0006). A deleted document is read too. Fails with {@code
+     * NO_INDEX_OPEN}, or {@code DOC_NOT_FOUND} for an id outside 0 to maxDoc - 1.
+     */
+    public static final RpcMethod<GetDocumentParams, GetDocumentResult> GET_DOCUMENT =
+            new RpcMethod<>("getDocument", GetDocumentParams.class, GetDocumentResult.class);
+
+    /**
+     * The term vector of a document for a field, with positions, offsets and payloads as far as they
+     * were stored. Empty if the document has none for the field. Fails with {@code NO_INDEX_OPEN},
+     * {@code DOC_NOT_FOUND} or {@code FIELD_NOT_FOUND}.
+     */
+    public static final RpcMethod<GetTermVectorParams, GetTermVectorResult> GET_TERM_VECTOR =
+            new RpcMethod<>("getTermVector", GetTermVectorParams.class, GetTermVectorResult.class);
+
     public static final List<RpcMethod<?, ?>> ALL = List.of(
-            VERSION, OPEN_INDEX, GET_INDEX_STATS, CLOSE_INDEX, START_FIELD_TERM_SCAN, GET_FIELD_TERM_SCAN, CANCEL_JOB);
+            VERSION,
+            OPEN_INDEX,
+            GET_INDEX_STATS,
+            CLOSE_INDEX,
+            START_FIELD_TERM_SCAN,
+            GET_FIELD_TERM_SCAN,
+            CANCEL_JOB,
+            GET_DOCUMENT,
+            GET_TERM_VECTOR);
 
     private Methods() {}
 

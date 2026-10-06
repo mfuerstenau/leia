@@ -13,6 +13,10 @@ use std::time::{Duration, Instant};
 use leia::client::CallError;
 use leia::java::find_java;
 use leia::protocol::ErrorCode;
+use leia::protocol::document::{
+    DocumentField, GetDocument, GetDocumentParams, GetDocumentResult, GetTermVector,
+    GetTermVectorParams, StoredType, StoredValue,
+};
 use leia::protocol::index::{
     CloseIndex, CloseIndexParams, DocValuesType, GetIndexStats, GetIndexStatsParams, IndexOptions,
     OpenIndex, OpenIndexParams,
@@ -309,4 +313,64 @@ fn cancels_a_scan_and_rejects_an_unknown_field() {
         .call::<CancelJob>(JobParams { job_id: job.job_id })
         .unwrap();
     assert!(!again.cancelled);
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn reads_a_deleted_document_of_a_lucene9_index() {
+    let mut server = start();
+    server
+        .call::<OpenIndex>(OpenIndexParams {
+            path: lucene9_index(),
+        })
+        .unwrap();
+
+    // "document number N" for N = 1..3; document 2 is deleted.
+    let document = server
+        .call::<GetDocument>(GetDocumentParams { doc_id: 1 })
+        .unwrap();
+
+    let string = |value: &str| StoredValue {
+        kind: StoredType::String,
+        value: value.to_owned(),
+        binary: false,
+    };
+    assert_eq!(
+        document,
+        GetDocumentResult {
+            doc_id: 1,
+            deleted: true,
+            fields: vec![
+                DocumentField {
+                    name: "id".to_owned(),
+                    norm: None,
+                    stored: vec![string("2")],
+                    doc_values: None,
+                    has_term_vector: false,
+                },
+                DocumentField {
+                    name: "body".to_owned(),
+                    norm: Some(3),
+                    stored: vec![string("document number 2")],
+                    doc_values: None,
+                    has_term_vector: false,
+                },
+            ],
+        }
+    );
+    let vector = server
+        .call::<GetTermVector>(GetTermVectorParams {
+            doc_id: 1,
+            field: "body".to_owned(),
+        })
+        .unwrap();
+    assert!(vector.terms.is_empty(), "{vector:?}");
+
+    let missing = server
+        .call::<GetDocument>(GetDocumentParams { doc_id: 3 })
+        .unwrap_err();
+    assert!(
+        matches!(&missing, CallError::Rpc(e) if e.code == ErrorCode::DocNotFound),
+        "{missing:?}"
+    );
 }

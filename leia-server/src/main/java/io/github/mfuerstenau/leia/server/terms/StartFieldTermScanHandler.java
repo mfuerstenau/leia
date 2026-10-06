@@ -9,18 +9,13 @@ import io.github.mfuerstenau.leia.protocol.job.JobStarted;
 import io.github.mfuerstenau.leia.protocol.terms.FieldTerms;
 import io.github.mfuerstenau.leia.protocol.terms.StartFieldTermScanParams;
 import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
+import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import jakarta.inject.Inject;
 import java.io.IOException;
-import java.nio.ByteBuffer;
-import java.nio.charset.CharacterCodingException;
-import java.nio.charset.StandardCharsets;
-import java.util.HexFormat;
-import java.util.Optional;
-import org.apache.lucene.util.BytesRef;
 
 /**
  * {@code startFieldTermScan}: checks the params at once, then counts the terms of a field of the
@@ -83,24 +78,7 @@ public final class StartFieldTermScanHandler implements MethodHandler<StartField
     }
 
     static TopTerm topTerm(io.github.mfuerstenau.leia.core.FieldTerms.TopTerm top) {
-        BytesRef bytes = top.term();
-        Optional<String> text = utf8(bytes);
-        return new TopTerm(
-                text.orElseGet(() -> HexFormat.of().formatHex(bytes.bytes, bytes.offset, bytes.offset + bytes.length)),
-                text.isEmpty(),
-                top.docFreq(),
-                top.totalTermFreq());
-    }
-
-    /** The bytes as text, if they are valid UTF-8. */
-    private static Optional<String> utf8(BytesRef bytes) {
-        try {
-            return Optional.of(StandardCharsets.UTF_8
-                    .newDecoder()
-                    .decode(ByteBuffer.wrap(bytes.bytes, bytes.offset, bytes.length))
-                    .toString());
-        } catch (CharacterCodingException e) {
-            return Optional.empty();
-        }
+        ByteStrings.Encoded term = ByteStrings.encode(top.term());
+        return new TopTerm(term.value(), term.binary(), top.docFreq(), top.totalTermFreq());
     }
 }

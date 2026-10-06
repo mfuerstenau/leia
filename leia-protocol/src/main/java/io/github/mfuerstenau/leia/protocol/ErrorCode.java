@@ -30,7 +30,9 @@ public enum ErrorCode {
     /** The open index has no field of that name. */
     FIELD_NOT_FOUND(-32006),
     /** No such job: the id is unknown, the job was cancelled, or its outcome was already fetched. */
-    JOB_NOT_FOUND(-32007);
+    JOB_NOT_FOUND(-32007),
+    /** The open index has no document with that id: it is negative, or not below maxDoc. */
+    DOC_NOT_FOUND(-32008);
 
     private final int code;
 

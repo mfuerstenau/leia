@@ -6,11 +6,13 @@ pub mod app;
 pub mod build_info;
 pub mod cli;
 pub mod client;
+pub mod documents;
 pub mod java;
 pub mod overview;
 pub mod prompt;
 pub mod protocol;
 pub mod server;
+pub mod text;
 
 #[cfg(test)]
 mod test_support;

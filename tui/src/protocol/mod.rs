@@ -6,6 +6,7 @@
 //!   are required
 //! - the golden files in `protocol/fixtures/` must round-trip (see `fixture_tests`)
 
+pub mod document;
 mod envelope;
 mod error;
 pub mod index;
