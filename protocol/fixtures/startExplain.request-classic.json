@@ -1,0 +1,24 @@
+{
+  "jsonrpc": "2.0",
+  "id": 25,
+  "method": "startExplain",
+  "params": {
+    "query": {
+      "classic": {
+        "expression": "\"quick lamp\" fox~",
+        "defaultField": "body",
+        "defaultOperator": "OR",
+        "options": {
+          "allowLeadingWildcard": false,
+          "phraseSlop": 3,
+          "fuzzyPrefixLength": 1,
+          "enablePositionIncrements": false
+        },
+        "fuzzyMaxEdits": 1,
+        "splitOnWhitespace": true,
+        "autoGeneratePhraseQueries": true
+      }
+    },
+    "docId": 223
+  }
+}

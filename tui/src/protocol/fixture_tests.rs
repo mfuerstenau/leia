@@ -50,24 +50,29 @@ fn protocol_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../protocol")
 }
 
-/// Parses `<method>.<kind>.json`, where kind is `request`, `response` or `error-<case>`.
+/// Parses `<method>.<kind>.json`, where kind is `request`, `response` or `error-<case>`, and a
+/// request or response may have a case too: `request-<case>`.
 fn parse_name(file_name: &str) -> Option<(String, Kind)> {
     let (method, rest) = file_name.strip_suffix(".json")?.split_once('.')?;
-    let kind = match rest {
-        "request" => Kind::Request,
-        "response" => Kind::Response,
-        _ => {
-            let case = rest.strip_prefix("error-")?;
-            let valid_case = !case.is_empty()
-                && case
-                    .chars()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
-            if !valid_case {
-                return None;
-            }
-            Kind::Error
-        }
+    let (kind, case) = match rest.split_once('-') {
+        Some((kind, case)) => (kind, Some(case)),
+        None => (rest, None),
     };
+    let kind = match (kind, case) {
+        ("request", _) => Kind::Request,
+        ("response", _) => Kind::Response,
+        ("error", Some(_)) => Kind::Error,
+        _ => return None,
+    };
+    let valid_case = case.is_none_or(|case| {
+        !case.is_empty()
+            && case
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    });
+    if !valid_case {
+        return None;
+    }
     let valid_method = method.starts_with(|c: char| c.is_ascii_lowercase())
         && method.chars().all(|c| c.is_ascii_alphabetic());
     valid_method.then(|| (method.to_owned(), kind))
@@ -232,7 +237,13 @@ fn parses_fixture_names() {
         parse_name("version.request.json"),
         Some(("version".to_owned(), Kind::Request))
     );
+    assert_eq!(
+        parse_name("startSearch.request-standard.json"),
+        Some(("startSearch".to_owned(), Kind::Request))
+    );
     assert_eq!(parse_name("version.reply.json"), None);
+    assert_eq!(parse_name("version.request-.json"), None);
+    assert_eq!(parse_name("version.error.json"), None);
     assert_eq!(parse_name("Version.request.json"), None);
     assert_eq!(parse_name("version.error-.json"), None);
 }

@@ -8,6 +8,8 @@ the file as JSON (key order ignored).
 |---|---|
 | `<method>.request.json` | a request for `<method>` |
 | `<method>.response.json` | a successful response to `<method>` |
+| `<method>.request-<case>.json` | another request for `<method>`, such as one per query alternative |
+| `<method>.response-<case>.json` | another successful response to `<method>` |
 | `<method>.error-<case>.json` | a failed response to `<method>` |
 | `rpc.error-<case>.json` | a failed response that belongs to no method (parse error, unknown method, ...) |
 

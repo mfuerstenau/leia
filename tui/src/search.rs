@@ -1,7 +1,8 @@
-//! The search screen (ADR 0010): a query line, the hits of the last query, and a details panel
-//! with the parsed query or the explanation of a hit. Searches and explanations run as server
-//! jobs; the next page of hits is fetched once the selection reaches the last row. Enter on a hit
-//! shows its document on the documents screen.
+//! The search screen (ADR 0010, ADR 0011): a query line, the hits of the last query, and a
+//! details panel with the parsed query or the explanation of a hit. Searches and explanations run
+//! as server jobs; the next page of hits is fetched once the selection reaches the last row. Enter
+//! on a hit shows its document on the documents screen. The query parser options, point types
+//! included, are set in a popup.
 
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
@@ -12,11 +13,12 @@ use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState, Wrap};
 
 use crate::input::{Edit, LineInput, word_start};
 use crate::overview::{highlight, panel};
+use crate::parser_options::{FormEvent, OptionsForm, ParserSettings};
 use crate::protocol::document::{BytesValue, StoredValue};
 use crate::protocol::index::{IndexField, IndexOptions};
 use crate::protocol::search::{
     ClassicQuery, Explanation, GetExplainResult, GetSearchResult, Hit, MAX_WINDOW, QueryOperator,
-    SearchQuery, SearchResults, StartExplainParams, StartSearchParams, TermQuery,
+    SearchQuery, SearchResults, StandardQuery, StartExplainParams, StartSearchParams, TermQuery,
     TotalHitsRelation,
 };
 use crate::terms::{moved, number_width, tail_row};
@@ -53,6 +55,8 @@ pub enum Request {
 enum Mode {
     /// Lucene's classic query syntax.
     Classic,
+    /// Lucene's standard query syntax, which knows point fields.
+    Standard,
     /// One term of the selected field, exactly as typed.
     Term,
 }
@@ -117,6 +121,9 @@ pub struct Search {
     /// The default field of a classic query, or the field of a term query.
     field: usize,
     operator: QueryOperator,
+    parser: ParserSettings,
+    /// The parser options popup, while it is open.
+    form: Option<OptionsForm>,
     exact: bool,
     input: LineInput,
     /// Whether the input holds a binary term in hex, as the overview's top terms bring it. An
@@ -155,6 +162,8 @@ impl Search {
             mode: Mode::Classic,
             field,
             operator: QueryOperator::Or,
+            parser: ParserSettings::new(fields),
+            form: None,
             exact: false,
             input: LineInput::new(""),
             binary: false,
@@ -168,9 +177,9 @@ impl Search {
         }
     }
 
-    /// Whether the query line takes the keys, Esc included.
+    /// Whether the query line or the options popup takes the keys, Esc included.
     pub fn prompting(&self) -> bool {
-        self.editing
+        self.editing || self.form.is_some()
     }
 
     /// The search job to poll, while one runs.
@@ -212,17 +221,31 @@ impl Search {
         if text.trim().is_empty() {
             return None;
         }
+        let parser = &self.parser;
         Some(match self.mode {
             Mode::Classic => SearchQuery {
                 classic: Some(ClassicQuery {
                     expression: text.to_owned(),
                     default_field: field,
                     default_operator: self.operator,
+                    options: parser.options,
+                    fuzzy_max_edits: parser.fuzzy_max_edits,
+                    split_on_whitespace: parser.split_on_whitespace,
+                    auto_generate_phrase_queries: parser.auto_generate_phrase_queries,
                 }),
-                term: None,
+                ..SearchQuery::default()
+            },
+            Mode::Standard => SearchQuery {
+                standard: Some(StandardQuery {
+                    expression: text.to_owned(),
+                    default_field: field,
+                    default_operator: self.operator,
+                    options: parser.options,
+                    points: parser.point_fields(),
+                }),
+                ..SearchQuery::default()
             },
             Mode::Term => SearchQuery {
-                classic: None,
                 term: Some(TermQuery {
                     field,
                     term: BytesValue {
@@ -230,6 +253,7 @@ impl Search {
                         binary: self.binary,
                     },
                 }),
+                ..SearchQuery::default()
             },
         })
     }
@@ -432,11 +456,27 @@ impl Search {
         shows.then_some(explain)
     }
 
-    /// Edits the query line while it is open (Enter searches, Esc closes it). Otherwise `/` opens
-    /// it, `m` switches between classic syntax and a term, `f`/`F` step the field, `a` switches
-    /// between OR and AND, `t` between an exact and an approximate count, `x` explains the
-    /// selected hit, Enter shows its document, and Tab switches between the hits and the details.
+    /// Edits the query line while it is open (Enter searches, Esc closes it), or the options
+    /// popup (Enter applies and searches again, Esc cancels). Otherwise `/` opens the line, `m`
+    /// cycles classic syntax, standard syntax and a term, `p` opens the parser options, `f`/`F`
+    /// step the field, `a` switches between OR and AND, `t` between an exact and an approximate
+    /// count, `x` explains the selected hit, Enter shows its document, and Tab switches between
+    /// the hits and the details.
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<Request> {
+        if let Some(form) = &mut self.form {
+            match form.handle_key(key.code) {
+                FormEvent::None => {}
+                FormEvent::Cancel => self.form = None,
+                FormEvent::Apply(settings) => {
+                    self.form = None;
+                    if settings != self.parser {
+                        self.parser = settings;
+                        return self.resubmit();
+                    }
+                }
+            }
+            return None;
+        }
         if self.editing {
             match key.code {
                 KeyCode::Enter => {
@@ -456,10 +496,14 @@ impl Search {
             KeyCode::Char('/') if !self.fields.is_empty() => self.editing = true,
             KeyCode::Char('m') => {
                 self.mode = match self.mode {
-                    Mode::Classic => Mode::Term,
+                    Mode::Classic => Mode::Standard,
+                    Mode::Standard => Mode::Term,
                     Mode::Term => Mode::Classic,
                 };
                 return self.resubmit();
+            }
+            KeyCode::Char('p') if self.mode != Mode::Term => {
+                self.form = Some(OptionsForm::new(&self.parser, self.mode == Mode::Classic));
             }
             KeyCode::Char('f') | KeyCode::Char('F') if !self.fields.is_empty() => {
                 let len = self.fields.len();
@@ -470,7 +514,7 @@ impl Search {
                 };
                 return self.resubmit();
             }
-            KeyCode::Char('a') if self.mode == Mode::Classic => {
+            KeyCode::Char('a') if self.mode != Mode::Term => {
                 self.operator = match self.operator {
                     QueryOperator::Or => QueryOperator::And,
                     QueryOperator::And => QueryOperator::Or,
@@ -518,11 +562,13 @@ impl Search {
 
     /// The keys for the footer.
     pub fn keys(&self) -> &'static str {
-        if self.editing {
+        if self.form.is_some() {
+            OptionsForm::keys()
+        } else if self.editing {
             " ⏎ search   Esc done   ←→ Ctrl+A/E/U/K/W edit"
-        } else if self.mode == Mode::Classic {
-            "/ query   m mode   f/F field   a AND/OR   t count   x explain   ⏎ open doc   \
-             Tab panel   ↑↓"
+        } else if self.mode != Mode::Term {
+            "/ query   m mode   p options   f/F field   a AND/OR   t count   x explain   \
+             ⏎ open doc   Tab panel   ↑↓"
         } else {
             "/ term   m mode   f/F field   t count   x explain   ⏎ open doc   Tab panel   ↑↓"
         }
@@ -547,6 +593,9 @@ impl Search {
         self.render_query(frame, query_area);
         self.render_hits(frame, hits_area);
         self.render_details(frame, details_area);
+        if let Some(form) = &self.form {
+            form.render(frame, area);
+        }
     }
 
     fn render_query(&self, frame: &mut Frame, area: Rect) {
@@ -556,13 +605,16 @@ impl Search {
         } else {
             "count to 1000"
         };
+        let operator = match self.operator {
+            QueryOperator::Or => "OR",
+            QueryOperator::And => "AND",
+        };
         let title = match self.mode {
             Mode::Classic => {
-                let operator = match self.operator {
-                    QueryOperator::Or => "OR",
-                    QueryOperator::And => "AND",
-                };
                 format!(" Classic query · default field {field} · {operator} · {count} ")
+            }
+            Mode::Standard => {
+                format!(" Standard query · default field {field} · {operator} · {count} ")
             }
             Mode::Term => {
                 let hex = if self.binary { " · hex" } else { "" };
@@ -707,12 +759,17 @@ impl Search {
     /// The parsed and rewritten query, or how to write one.
     fn query_lines(&self) -> Vec<Line<'static>> {
         let Some(list) = self.hit_list() else {
-            return match self.mode {
+            let mut lines: Vec<Line<'static>> = match self.mode {
                 Mode::Classic => vec![
                     Line::from("Classic syntax, for example:"),
                     Line::from("  fox  title:fox  +fox -dog  fox AND (red OR blue)"),
                     Line::from("  \"quick fox\"  \"quick fox\"~2  qu*  f?x  fox~  /f[ao]x/"),
                     Line::from("  title:[a TO m]  fox^2"),
+                ],
+                Mode::Standard => vec![
+                    Line::from("Standard syntax: the classic one, plus point fields, for example:"),
+                    Line::from("  price:[10 TO 20]  quantity>=5  rating:{2.5 TO *]  quantity:7"),
+                    Line::from("Point fields need the type of their values: p sets it."),
                 ],
                 Mode::Term => vec![Line::from(
                     "The line is one term of the field, as it is: nothing is analyzed or split.",
@@ -721,6 +778,8 @@ impl Search {
             .into_iter()
             .map(|line| line.style(dim()))
             .collect();
+            lines.extend(self.parser_lines());
+            return lines;
         };
         let mut lines = vec![
             Line::from(format!("Parsed     {}", escape_control(&list.query))),
@@ -729,9 +788,32 @@ impl Search {
                 escape_control(&list.rewritten_query)
             )),
         ];
+        lines.extend(self.parser_lines());
         if !list.hits.is_empty() {
             lines.push(Line::from(""));
             lines.push(Line::from("x explains the selected hit.").style(dim()));
+        }
+        lines
+    }
+}
+
+impl Search {
+    /// The parser options that differ from Lucene's defaults, and the point types of the
+    /// standard parser.
+    fn parser_lines(&self) -> Vec<Line<'static>> {
+        if self.mode == Mode::Term {
+            return Vec::new();
+        }
+        let mut lines = Vec::new();
+        let changed = self.parser.changed(self.mode == Mode::Classic);
+        if !changed.is_empty() {
+            lines.push(Line::from(format!("Options    {}", changed.join(" · "))));
+        }
+        if self.mode == Mode::Standard {
+            lines.push(Line::from(format!(
+                "Points     {}",
+                self.parser.points_text()
+            )));
         }
         lines
     }
@@ -822,7 +904,7 @@ mod tests {
     use super::*;
     use crate::protocol::document::StoredType;
     use crate::protocol::index::{DocValuesType, TermStats};
-    use crate::protocol::search::HitField;
+    use crate::protocol::search::{HitField, ParserOptions, PointField, PointType};
 
     fn field(name: &str, index_options: IndexOptions) -> IndexField {
         IndexField {
@@ -844,7 +926,17 @@ mod tests {
         }
     }
 
-    /// `id` (docs only), `stored` (no postings), `title` and `body` (positions).
+    fn point(name: &str, bytes: i32) -> IndexField {
+        IndexField {
+            point_dimension_count: 1,
+            point_num_bytes: bytes,
+            terms: None,
+            ..field(name, IndexOptions::None)
+        }
+    }
+
+    /// `id` (docs only), `stored` (no postings), `title` and `body` (positions), and the points
+    /// `price` (8 bytes) and `quantity` (4 bytes).
     fn search() -> Search {
         Search::new(
             &[
@@ -852,6 +944,8 @@ mod tests {
                 field("stored", IndexOptions::None),
                 field("title", IndexOptions::DocsAndFreqsAndPositions),
                 field("body", IndexOptions::DocsAndFreqsAndPositionsAndOffsets),
+                point("price", 8),
+                point("quantity", 4),
             ],
             500,
         )
@@ -877,8 +971,12 @@ mod tests {
                 expression: expression.to_owned(),
                 default_field: field.to_owned(),
                 default_operator: operator,
+                options: ParserOptions::default(),
+                fuzzy_max_edits: 2,
+                split_on_whitespace: false,
+                auto_generate_phrase_queries: false,
             }),
-            term: None,
+            ..SearchQuery::default()
         }
     }
 
@@ -1117,13 +1215,13 @@ mod tests {
     fn term_mode_takes_the_line_as_one_term() {
         let mut search = searched(2, 2);
 
+        press(&mut search, KeyCode::Char('m'));
         let Some(Request::Search { params, .. }) = press(&mut search, KeyCode::Char('m')) else {
             panic!("m searches again");
         };
         assert_eq!(
             params.query,
             SearchQuery {
-                classic: None,
                 term: Some(TermQuery {
                     field: "title".to_owned(),
                     term: BytesValue {
@@ -1131,11 +1229,120 @@ mod tests {
                         binary: false,
                     },
                 }),
+                ..SearchQuery::default()
             }
         );
         assert!(render(&mut search).contains("Term · field title"));
-        // There is no operator for a term.
+        // There is no operator and there are no parser options for a term.
         assert_eq!(press(&mut search, KeyCode::Char('a')), None);
+        assert_eq!(press(&mut search, KeyCode::Char('p')), None);
+        assert!(!search.prompting());
+    }
+
+    #[test]
+    fn standard_mode_sends_the_point_types() {
+        let mut search = searched(2, 2);
+
+        let Some(Request::Search { params, .. }) = press(&mut search, KeyCode::Char('m')) else {
+            panic!("m searches again");
+        };
+        assert_eq!(
+            params.query,
+            SearchQuery {
+                standard: Some(StandardQuery {
+                    expression: "red".to_owned(),
+                    default_field: "title".to_owned(),
+                    default_operator: QueryOperator::Or,
+                    options: ParserOptions::default(),
+                    points: vec![
+                        PointField {
+                            field: "price".to_owned(),
+                            point_type: PointType::Long,
+                        },
+                        PointField {
+                            field: "quantity".to_owned(),
+                            point_type: PointType::Int,
+                        },
+                    ],
+                }),
+                ..SearchQuery::default()
+            }
+        );
+        search.search_started(2);
+        search.search_progress(results(0..2, 2));
+        let screen = render(&mut search);
+        assert!(
+            screen.contains("Standard query · default field title"),
+            "{screen}"
+        );
+        assert!(
+            screen.contains("Points     price LONG · quantity INT"),
+            "{screen}"
+        );
+    }
+
+    #[test]
+    fn the_options_popup_searches_again_once_applied() {
+        let mut search = searched(2, 2);
+
+        assert_eq!(press(&mut search, KeyCode::Char('p')), None);
+        assert!(search.prompting());
+        assert!(render(&mut search).contains("Classic parser options"));
+        // Esc cancels: nothing changes, nothing is searched.
+        press(&mut search, KeyCode::Char(' '));
+        assert_eq!(press(&mut search, KeyCode::Esc), None);
+        assert!(!search.prompting());
+        // Enter without a change searches nothing either.
+        press(&mut search, KeyCode::Char('p'));
+        assert_eq!(press(&mut search, KeyCode::Enter), None);
+
+        // Leading wildcards on, phrase slop 2.
+        press(&mut search, KeyCode::Char('p'));
+        press(&mut search, KeyCode::Char(' '));
+        press(&mut search, KeyCode::Down);
+        press(&mut search, KeyCode::Char('2'));
+        let Some(Request::Search { params, cancel }) = press(&mut search, KeyCode::Enter) else {
+            panic!("applying searches again");
+        };
+        assert!(cancel.is_empty());
+        let classic = params.query.classic.unwrap();
+        assert!(classic.options.allow_leading_wildcard);
+        assert_eq!(classic.options.phrase_slop, 2);
+        assert!(!search.prompting());
+        search.search_started(3);
+        search.search_progress(results(0..2, 2));
+        let screen = render(&mut search);
+        assert!(
+            screen.contains("Options    leading wildcards · phrase slop 2"),
+            "{screen}"
+        );
+    }
+
+    #[test]
+    fn the_options_popup_lists_the_point_types_for_the_standard_parser() {
+        let mut search = searched(2, 2);
+        press(&mut search, KeyCode::Char('m'));
+        search.search_started(2);
+        search.search_progress(results(0..2, 2));
+
+        press(&mut search, KeyCode::Char('p'));
+        let screen = render(&mut search);
+        assert!(screen.contains("Standard parser options"), "{screen}");
+        assert!(screen.contains("price                  LONG"), "{screen}");
+        assert!(!screen.contains("Fuzzy max edits"), "{screen}");
+        // The last row is quantity: INT becomes FLOAT.
+        press(&mut search, KeyCode::End);
+        press(&mut search, KeyCode::Right);
+        let Some(Request::Search { params, .. }) = press(&mut search, KeyCode::Enter) else {
+            panic!("applying searches again");
+        };
+        assert_eq!(
+            params.query.standard.unwrap().points[1],
+            PointField {
+                field: "quantity".to_owned(),
+                point_type: PointType::Float,
+            }
+        );
     }
 
     #[test]

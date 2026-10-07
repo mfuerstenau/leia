@@ -25,8 +25,9 @@ use leia::protocol::index::{
 };
 use leia::protocol::job::{CancelJob, JobParams};
 use leia::protocol::search::{
-    ClassicQuery, GetExplain, GetSearch, QueryOperator, SearchQuery, StartExplain,
-    StartExplainParams, StartSearch, StartSearchParams, TotalHitsRelation,
+    ClassicQuery, GetExplain, GetSearch, MAX_FUZZY_EDITS, ParserOptions, PointField, PointType,
+    QueryOperator, SearchQuery, StandardQuery, StartExplain, StartExplainParams, StartSearch,
+    StartSearchParams, TotalHitsRelation,
 };
 use leia::protocol::terms::{
     FieldTerms, GetFieldTermScan, GetPositions, GetPositionsParams, GetPostings, GetPostingsParams,
@@ -558,14 +559,7 @@ fn searches_and_explains_a_lucene9_index() {
             path: lucene9_index(),
         })
         .unwrap();
-    let query = SearchQuery {
-        classic: Some(ClassicQuery {
-            expression: "number AND (1 OR 2 OR 3)".to_owned(),
-            default_field: "body".to_owned(),
-            default_operator: QueryOperator::Or,
-        }),
-        term: None,
-    };
+    let query = classic("number AND (1 OR 2 OR 3)");
 
     let job = server
         .call::<StartSearch>(StartSearchParams {
@@ -625,14 +619,7 @@ fn searches_and_explains_a_lucene9_index() {
 
     let broken = server
         .call::<StartSearch>(StartSearchParams {
-            query: SearchQuery {
-                classic: Some(ClassicQuery {
-                    expression: "body:(number".to_owned(),
-                    default_field: "body".to_owned(),
-                    default_operator: QueryOperator::Or,
-                }),
-                term: None,
-            },
+            query: classic("body:(number"),
             offset: 0,
             limit: 10,
             exact_total_hits: false,
@@ -643,4 +630,69 @@ fn searches_and_explains_a_lucene9_index() {
         matches!(&broken, CallError::Rpc(e) if e.code == ErrorCode::InvalidQuery),
         "{broken:?}"
     );
+
+    // The standard parser, with AND as the default operator.
+    let standard = |points: Vec<PointField>| SearchQuery {
+        standard: Some(StandardQuery {
+            expression: "number (1 OR 3)".to_owned(),
+            default_field: "body".to_owned(),
+            default_operator: QueryOperator::And,
+            options: ParserOptions::default(),
+            points,
+        }),
+        ..SearchQuery::default()
+    };
+    let job = server
+        .call::<StartSearch>(StartSearchParams {
+            query: standard(Vec::new()),
+            offset: 0,
+            limit: 10,
+            exact_total_hits: true,
+            fields: None,
+        })
+        .unwrap();
+    let results = loop {
+        let poll = server
+            .call::<GetSearch>(JobParams { job_id: job.job_id })
+            .unwrap();
+        if let Some(results) = poll.results {
+            break results;
+        }
+        assert!(Instant::now() < deadline, "the search did not finish");
+        thread::sleep(Duration::from_millis(10));
+    };
+    assert_eq!(results.query, "+body:number +(body:1 body:3)");
+    assert_eq!(results.total_hits, 2);
+    // `body` has no points, so it can't be read as ints.
+    let not_points = server
+        .call::<StartSearch>(StartSearchParams {
+            query: standard(vec![PointField {
+                field: "body".to_owned(),
+                point_type: PointType::Int,
+            }]),
+            offset: 0,
+            limit: 10,
+            exact_total_hits: false,
+            fields: None,
+        })
+        .unwrap_err();
+    assert!(
+        matches!(&not_points, CallError::Rpc(e) if e.code == ErrorCode::InvalidParams),
+        "{not_points:?}"
+    );
+}
+
+fn classic(expression: &str) -> SearchQuery {
+    SearchQuery {
+        classic: Some(ClassicQuery {
+            expression: expression.to_owned(),
+            default_field: "body".to_owned(),
+            default_operator: QueryOperator::Or,
+            options: ParserOptions::default(),
+            fuzzy_max_edits: MAX_FUZZY_EDITS,
+            split_on_whitespace: false,
+            auto_generate_phrase_queries: false,
+        }),
+        ..SearchQuery::default()
+    }
 }

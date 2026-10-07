@@ -12,6 +12,7 @@ pub mod documents;
 pub mod input;
 pub mod java;
 pub mod overview;
+pub mod parser_options;
 pub mod prompt;
 pub mod protocol;
 pub mod search;

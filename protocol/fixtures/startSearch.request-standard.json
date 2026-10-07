@@ -1,0 +1,29 @@
+{
+  "jsonrpc": "2.0",
+  "id": 24,
+  "method": "startSearch",
+  "params": {
+    "query": {
+      "standard": {
+        "expression": "title:lamp AND price:[10 TO 20] AND quantity>=50",
+        "defaultField": "body",
+        "defaultOperator": "AND",
+        "options": {
+          "allowLeadingWildcard": true,
+          "phraseSlop": 2,
+          "fuzzyPrefixLength": 1,
+          "enablePositionIncrements": true
+        },
+        "points": [
+          {"field": "price", "type": "DOUBLE"},
+          {"field": "quantity", "type": "INT"},
+          {"field": "rating", "type": "FLOAT"},
+          {"field": "timestamp", "type": "LONG"}
+        ]
+      }
+    },
+    "offset": 0,
+    "limit": 10,
+    "exactTotalHits": false
+  }
+}

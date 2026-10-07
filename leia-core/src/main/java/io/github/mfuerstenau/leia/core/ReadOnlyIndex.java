@@ -191,6 +191,11 @@ public final class ReadOnlyIndex implements Closeable {
         return fieldInfos.fieldInfo(name) != null;
     }
 
+    /** The field called {@code name}, merged over all segments. */
+    public Optional<FieldInfo> fieldInfo(String name) {
+        return Optional.ofNullable(fieldInfos.fieldInfo(name));
+    }
+
     /**
      * Counts the distinct terms of a field and finds its {@code topN} terms with the highest document
      * frequency, in one pass over the field's terms. A field without postings has no terms. With

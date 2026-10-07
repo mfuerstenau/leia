@@ -17,9 +17,13 @@ import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.HitField;
+import io.github.mfuerstenau.leia.protocol.search.ParserOptions;
+import io.github.mfuerstenau.leia.protocol.search.PointField;
+import io.github.mfuerstenau.leia.protocol.search.PointType;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
 import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
 import io.github.mfuerstenau.leia.protocol.search.SearchResults;
+import io.github.mfuerstenau.leia.protocol.search.StandardQuery;
 import io.github.mfuerstenau.leia.protocol.search.StartExplainParams;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.TermQuery;
@@ -36,6 +40,7 @@ import java.util.Optional;
 import java.util.OptionalLong;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
+import org.apache.lucene.document.IntPoint;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.IndexWriter;
@@ -53,6 +58,7 @@ class SearchHandlersTest {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
     private static final String LONG_BODY = "red " + "x".repeat(300);
+    private static final ParserOptions DEFAULTS = new ParserOptions(false, 0, 0, true);
 
     @TempDir
     Path tmp;
@@ -128,8 +134,10 @@ class SearchHandlersTest {
     @Test
     void checksTheFields() throws Exception {
         openIndex();
-        SearchQuery unknownDefault =
-                new SearchQuery(Optional.of(new ClassicQuery("red", "bdy", QueryOperator.OR)), Optional.empty());
+        SearchQuery unknownDefault = new SearchQuery(
+                Optional.of(new ClassicQuery("red", "bdy", QueryOperator.OR, DEFAULTS, 2, false, false)),
+                Optional.empty(),
+                Optional.empty());
 
         assertFails(
                 () -> startSearch.handle(params(unknownDefault, 0, 10, Optional.empty())), ErrorCode.FIELD_NOT_FOUND);
@@ -145,9 +153,10 @@ class SearchHandlersTest {
     void needsExactlyOneAlternative() throws Exception {
         openIndex();
         SearchQuery both = new SearchQuery(
-                Optional.of(new ClassicQuery("red", "body", QueryOperator.OR)),
+                classic("red").classic(),
+                Optional.empty(),
                 Optional.of(new TermQuery("body", new BytesValue("red", false))));
-        SearchQuery neither = new SearchQuery(Optional.empty(), Optional.empty());
+        SearchQuery neither = new SearchQuery(Optional.empty(), Optional.empty(), Optional.empty());
 
         assertFails(() -> startSearch.handle(params(both, 0, 10, Optional.empty())), ErrorCode.INVALID_PARAMS);
         assertFails(() -> startSearch.handle(params(neither, 0, 10, Optional.empty())), ErrorCode.INVALID_PARAMS);
@@ -178,6 +187,77 @@ class SearchHandlersTest {
 
         assertThat(results.hits()).isEmpty();
         assertThat(results.totalHits()).isEqualTo(2);
+    }
+
+    @Test
+    void appliesTheParserOptions() throws Exception {
+        openIndex();
+        ParserOptions options = new ParserOptions(true, 2, 1, true);
+
+        SearchResults classic =
+                search(params(classic("*ed \"red x\" blu~", options, 1, false, false), 0, 10, Optional.empty()));
+        assertThat(classic.query()).isEqualTo("body:*ed body:\"red x\"~2 body:blu~1");
+        SearchResults standard = search(params(standard("*ed \"red x\"", options, List.of()), 0, 10, Optional.empty()));
+        assertThat(standard.query()).isEqualTo("body:*ed body:\"red x\"~2");
+        assertThat(standard.hits()).extracting(Hit::docId).containsExactly(0, 2);
+    }
+
+    @Test
+    void rejectsParserOptionsOutOfRange() throws Exception {
+        openIndex();
+
+        for (SearchQuery query : List.of(
+                classic("red", new ParserOptions(false, -1, 0, true), 2, false, false),
+                standard("red", new ParserOptions(false, 0, -1, true), List.of()),
+                classic("red", DEFAULTS, 3, false, false),
+                classic("red", DEFAULTS, 2, false, true))) {
+            assertFails(() -> startSearch.handle(params(query, 0, 10, Optional.empty())), ErrorCode.INVALID_PARAMS);
+        }
+    }
+
+    @Test
+    void searchesPointsWithTheStandardParser() throws Exception {
+        openIndex();
+
+        SearchResults results = search(params(
+                standard("size:[15 TO 30]", DEFAULTS, List.of(new PointField("size", PointType.INT))),
+                0,
+                10,
+                Optional.empty()));
+        assertThat(results.query()).isEqualTo("size:[15 TO 30]");
+        assertThat(results.hits()).extracting(Hit::docId).containsExactly(1, 2);
+        // Without a type, the range is over text.
+        assertThat(search(params(standard("size:[15 TO 30]", DEFAULTS, List.of()), 0, 10, Optional.empty()))
+                        .hits())
+                .isEmpty();
+        assertFails(
+                () -> startSearch.handle(params(
+                        standard("size:[x TO 30]", DEFAULTS, List.of(new PointField("size", PointType.INT))),
+                        0,
+                        10,
+                        Optional.empty())),
+                ErrorCode.INVALID_QUERY);
+    }
+
+    @Test
+    void checksThePointTypes() throws Exception {
+        openIndex();
+
+        assertFails(
+                () -> startSearch.handle(params(
+                        standard("red", DEFAULTS, List.of(new PointField("sise", PointType.INT))),
+                        0,
+                        10,
+                        Optional.empty())),
+                ErrorCode.FIELD_NOT_FOUND);
+        for (List<PointField> points : List.of(
+                List.of(new PointField("size", PointType.LONG)),
+                List.of(new PointField("body", PointType.INT)),
+                List.of(new PointField("size", PointType.INT), new PointField("size", PointType.FLOAT)))) {
+            assertFails(
+                    () -> startSearch.handle(params(standard("red", DEFAULTS, points), 0, 10, Optional.empty())),
+                    ErrorCode.INVALID_PARAMS);
+        }
     }
 
     @Test
@@ -226,11 +306,37 @@ class SearchHandlersTest {
     }
 
     private static SearchQuery classic(String expression) {
-        return new SearchQuery(Optional.of(new ClassicQuery(expression, "body", QueryOperator.OR)), Optional.empty());
+        return classic(expression, DEFAULTS, 2, false, false);
+    }
+
+    private static SearchQuery classic(
+            String expression,
+            ParserOptions options,
+            int fuzzyMaxEdits,
+            boolean splitOnWhitespace,
+            boolean autoGeneratePhraseQueries) {
+        return new SearchQuery(
+                Optional.of(new ClassicQuery(
+                        expression,
+                        "body",
+                        QueryOperator.OR,
+                        options,
+                        fuzzyMaxEdits,
+                        splitOnWhitespace,
+                        autoGeneratePhraseQueries)),
+                Optional.empty(),
+                Optional.empty());
+    }
+
+    private static SearchQuery standard(String expression, ParserOptions options, List<PointField> points) {
+        return new SearchQuery(
+                Optional.empty(),
+                Optional.of(new StandardQuery(expression, "body", QueryOperator.OR, options, points)),
+                Optional.empty());
     }
 
     private static SearchQuery term(String field, BytesValue term) {
-        return new SearchQuery(Optional.empty(), Optional.of(new TermQuery(field, term)));
+        return new SearchQuery(Optional.empty(), Optional.empty(), Optional.of(new TermQuery(field, term)));
     }
 
     private static StartSearchParams params(SearchQuery query, int offset, int limit, Optional<List<String>> fields) {
@@ -272,7 +378,10 @@ class SearchHandlersTest {
         throw new AssertionError("job " + jobId + " did not finish");
     }
 
-    /** One segment: "red" (id 1), "blue" (id 2) with the binary key 0xff00, and a long "red …" (id 3). */
+    /**
+     * One segment: "red" (id 1), "blue" (id 2) with the binary key 0xff00, and a long "red …" (id 3);
+     * each with the int point {@code size}, 10 times its id.
+     */
     private void openIndex() throws Exception {
         Path dir = tmp.resolve("index");
         try (FSDirectory directory = FSDirectory.open(dir);
@@ -282,6 +391,7 @@ class SearchHandlersTest {
                 Document doc = new Document();
                 doc.add(new StringField("id", Integer.toString(id), Field.Store.YES));
                 doc.add(new TextField("body", body, Field.Store.YES));
+                doc.add(new IntPoint("size", id * 10));
                 if (id == 2) {
                     doc.add(new StringField("key", new BytesRef(new byte[] {(byte) 0xff, 0}), Field.Store.NO));
                 }

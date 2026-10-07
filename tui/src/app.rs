@@ -1738,7 +1738,6 @@ mod tests {
         assert_eq!(
             params.query,
             SearchQuery {
-                classic: None,
                 term: Some(TermQuery {
                     field: "body".to_owned(),
                     term: BytesValue {
@@ -1746,6 +1745,7 @@ mod tests {
                         binary: true,
                     },
                 }),
+                ..SearchQuery::default()
             }
         );
         assert!(render(&mut app).contains("Term · field body · hex"));

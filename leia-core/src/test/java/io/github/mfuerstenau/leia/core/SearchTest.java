@@ -59,13 +59,8 @@ class SearchTest {
     @Test
     void andRequiresEveryTerm() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            SearchResults results = index.search(
-                    Queries.classic("quick fox", "body", Operator.AND),
-                    0,
-                    10,
-                    true,
-                    Optional.empty(),
-                    ScanProgress.NONE);
+            SearchResults results =
+                    index.search(classic("quick fox", Operator.AND), 0, 10, true, Optional.empty(), ScanProgress.NONE);
 
             assertThat(results.query()).isEqualTo("+body:quick +body:fox");
             assertThat(results.hits()).extracting(Hit::docId).containsExactly(0);
@@ -130,7 +125,7 @@ class SearchTest {
             }
         }
         try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
-            Query query = Queries.classic("word", "body", Operator.OR);
+            Query query = classic("word", Operator.OR);
 
             SearchResults approximate = index.search(query, 0, 10, false, Optional.empty(), ScanProgress.NONE);
             assertThat(approximate.totalHits().relation()).isEqualTo(TotalHits.Relation.GREATER_THAN_OR_EQUAL_TO);
@@ -190,7 +185,7 @@ class SearchTest {
 
     @Test
     void rejectsBadQueriesAndPages() throws Exception {
-        assertThatThrownBy(() -> Queries.classic("body:(quick", "body", Operator.OR))
+        assertThatThrownBy(() -> classic("body:(quick", Operator.OR))
                 .isInstanceOf(InvalidQueryException.class)
                 .hasMessageContaining("Cannot parse");
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
@@ -208,7 +203,7 @@ class SearchTest {
     void searchesALucene9Index() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(legacyIndex("lucene9"))) {
             // "document number N" for N = 1..3; document 2 (id 2) is deleted.
-            SearchResults results = search(index, Queries.classic("document", "body", Operator.OR), 0, 10);
+            SearchResults results = search(index, classic("document", Operator.OR), 0, 10);
 
             assertThat(results.hits()).extracting(Hit::docId).containsExactly(0, 2);
             assertThat(results.hits().getFirst().fields())
@@ -217,7 +212,11 @@ class SearchTest {
     }
 
     private static Query classic(String expression) throws InvalidQueryException {
-        return Queries.classic(expression, "body", Operator.OR);
+        return classic(expression, Operator.OR);
+    }
+
+    private static Query classic(String expression, Operator operator) throws InvalidQueryException {
+        return Queries.classic(expression, "body", ParserOptions.defaults(operator), ClassicOptions.DEFAULTS);
     }
 
     private static SearchResults search(ReadOnlyIndex index, Query query, int offset, int limit)

@@ -24,8 +24,9 @@ because Lucene 10 can't read them.
 - **Commits:** every commit in the index directory with its segments, and for each segment its
   documents, deletions, versions, codec and codec formats, diagnostics, attributes and files with
   their sizes.
-- **Search:** a query in Lucene's classic syntax or a single term, the hits with their scores and
-  stored fields, exact or approximate hit counts, and an explanation of how a hit scores.
+- **Search:** a query in Lucene's classic or standard syntax or a single term, with the parsers'
+  options and ranges on point fields, the hits with their scores and stored fields, exact or
+  approximate hit counts, and an explanation of how a hit scores.
 
 Analysis, more search options and the rest of Luke's read-only features are still to come (see
 [`docs/tasklist.md`](docs/tasklist.md)).
@@ -191,8 +192,9 @@ shows as missing. The documents and terms screens always show the opened commit.
 | Key | Action |
 |---|---|
 | `/` | edit the query; `Enter` searches, `Esc` leaves the line, and `←` `→`, `Ctrl+A` `E` `U` `K` `W` edit |
-| `m` | switch between classic query syntax and a single term |
-| `f` `F` | step through the fields with postings: the default field of a classic query, or the field of a term |
+| `m` | switch between classic query syntax, standard query syntax and a single term |
+| `p` | set the parser options, and for the standard syntax the type of each point field; `Enter` applies, `Esc` cancels |
+| `f` `F` | step through the fields with postings: the default field of a query, or the field of a term |
 | `a` | combine clauses without an operator with OR or AND |
 | `t` | count every hit, or stop counting after 1000 |
 | `x` | explain how the selected hit scores |
@@ -201,14 +203,21 @@ shows as missing. The documents and terms screens always show the opened commit.
 | `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the hits, or scroll the details |
 
 A classic query is parsed with Lucene's classic `QueryParser` and the `StandardAnalyzer`, for
-example `title:fox AND body:qu*`, `"quick fox"~2` or `fox~`. A term query searches the field for
+example `title:fox AND body:qu*`, `"quick fox"~2` or `fox~`. A standard query is parsed with
+Lucene's `StandardQueryParser`, which also turns ranges and values on point fields into point
+queries: `price:[10 TO 20]`, `quantity>=5`, `quantity:7`. For that it needs the type of each
+point field's values, which the index doesn't record: leia guesses INT for 4 bytes and LONG for 8,
+and `p` corrects the guess to FLOAT or DOUBLE, or leaves a field to text. The details panel lists
+the types in use. In the same popup are the parser options: leading wildcards, phrase slop, fuzzy
+prefix length and position increments for both parsers, and fuzzy max edits, whitespace splitting
+and auto-generated phrases for the classic one. A term query searches the field for
 the line exactly as typed, `:` and spaces included, without analysis. A changed setting searches
 again. The hits come 100 at a time, the next ones once the selection reaches the last row, up to
 the first 10,000. Each hit shows its stored fields, with long values cut. The details panel shows
 the parsed and the rewritten query, or after `x` the explanation of the selected hit as Lucene
 computes it; parts that don't match are dimmed. Searches and explanations run in the server, so
 `Esc` stops a slow one, such as a fuzzy query on a large index. A numeric range in classic syntax
-doesn't match point fields yet.
+doesn't match point fields: use the standard syntax.
 
 If an index can't be opened, the prompt shows why (not found, not an index, unsupported format,
 corrupt, not readable) and keeps the path, so you can fix it. The index that was open before

@@ -10,8 +10,8 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * A golden file in {@code protocol/fixtures/}, named {@code <method>.<kind>.json} (see the README
- * there).
+ * A golden file in {@code protocol/fixtures/}, named {@code <method>.<kind>.json}, where a request or
+ * response may have a case, {@code request-<case>} (see the README there).
  */
 record Fixture(Path path, String method, Kind kind) {
 
@@ -25,7 +25,7 @@ record Fixture(Path path, String method, Kind kind) {
     static final String RPC = "rpc";
 
     private static final Pattern NAME =
-            Pattern.compile("([a-z][A-Za-z]*)\\.(request|response|error-[a-z0-9-]+)\\.json");
+            Pattern.compile("([a-z][A-Za-z]*)\\.((request|response)(-[a-z0-9-]+)?|error-[a-z0-9-]+)\\.json");
 
     static Path protocolDir() {
         String dir = System.getProperty("leia.protocol.dir");
@@ -52,7 +52,7 @@ record Fixture(Path path, String method, Kind kind) {
         if (!matcher.matches()) {
             throw new IllegalArgumentException("Fixture name doesn't match <method>.<kind>.json: " + fileName);
         }
-        String kind = matcher.group(2);
+        String kind = matcher.group(3) == null ? "error" : matcher.group(3);
         return new Fixture(
                 path,
                 matcher.group(1),

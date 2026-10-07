@@ -1,17 +1,30 @@
 package io.github.mfuerstenau.leia.server.search;
 
+import io.github.mfuerstenau.leia.core.ClassicOptions;
 import io.github.mfuerstenau.leia.core.InvalidQueryException;
+import io.github.mfuerstenau.leia.core.ParserOptions;
+import io.github.mfuerstenau.leia.core.PointType;
 import io.github.mfuerstenau.leia.core.Queries;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
+import io.github.mfuerstenau.leia.protocol.search.PointField;
+import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
 import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
+import io.github.mfuerstenau.leia.protocol.search.StandardQuery;
 import io.github.mfuerstenau.leia.protocol.search.TermQuery;
 import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.RpcException;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.stream.Stream;
+import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.search.Query;
 
-/** Turns the query of {@code startSearch} and {@code startExplain} into a Lucene query (ADR 0010). */
+/**
+ * Turns the query of {@code startSearch} and {@code startExplain} into a Lucene query (ADR 0010, ADR
+ * 0011).
+ */
 final class SearchQueries {
 
     private SearchQueries() {}
@@ -19,31 +32,72 @@ final class SearchQueries {
     /**
      * The Lucene query for {@code query}, parsed right away so that a syntax error fails the request.
      *
-     * @throws RpcException {@code INVALID_PARAMS} unless exactly one alternative is present or for a
-     *     binary term that is not hex, {@code FIELD_NOT_FOUND} for an unknown default or term field,
-     *     {@code INVALID_QUERY} if the expression doesn't parse
+     * @throws RpcException {@code INVALID_PARAMS} unless exactly one alternative is present, for a
+     *     parser option out of range, a point type that doesn't fit its field, or a binary term that
+     *     is not hex; {@code FIELD_NOT_FOUND} for an unknown default, term or point field; {@code
+     *     INVALID_QUERY} if the expression doesn't parse
      */
     static Query query(ReadOnlyIndex index, SearchQuery query) throws RpcException {
-        if (query.classic().isPresent() == query.term().isPresent()) {
+        long present = Stream.of(query.classic(), query.standard(), query.term())
+                .filter(alternative -> alternative.isPresent())
+                .count();
+        if (present != 1) {
             throw new RpcException(
-                    ErrorCode.INVALID_PARAMS, "Invalid params: the query needs exactly one of classic and term");
+                    ErrorCode.INVALID_PARAMS,
+                    "Invalid params: the query needs exactly one of classic, standard and term");
         }
-        if (query.classic().isPresent()) {
-            ClassicQuery classic = query.classic().get();
-            checkField(index, classic.defaultField());
-            try {
-                return Queries.classic(
-                        classic.expression(),
-                        classic.defaultField(),
-                        switch (classic.defaultOperator()) {
-                            case OR -> Queries.Operator.OR;
-                            case AND -> Queries.Operator.AND;
-                        });
-            } catch (InvalidQueryException e) {
-                throw invalidQuery(e);
+        try {
+            if (query.classic().isPresent()) {
+                return classic(index, query.classic().get());
+            }
+            if (query.standard().isPresent()) {
+                return standard(index, query.standard().get());
+            }
+        } catch (InvalidQueryException e) {
+            throw invalidQuery(e);
+        }
+        return term(index, query.term().orElseThrow());
+    }
+
+    private static Query classic(ReadOnlyIndex index, ClassicQuery classic) throws RpcException, InvalidQueryException {
+        checkField(index, classic.defaultField());
+        ParserOptions options = options(classic.defaultOperator(), classic.options());
+        ClassicOptions classicOptions;
+        try {
+            classicOptions = new ClassicOptions(
+                    classic.fuzzyMaxEdits(), classic.splitOnWhitespace(), classic.autoGeneratePhraseQueries());
+        } catch (IllegalArgumentException e) {
+            throw invalidParams(e);
+        }
+        return Queries.classic(classic.expression(), classic.defaultField(), options, classicOptions);
+    }
+
+    private static Query standard(ReadOnlyIndex index, StandardQuery standard)
+            throws RpcException, InvalidQueryException {
+        checkField(index, standard.defaultField());
+        ParserOptions options = options(standard.defaultOperator(), standard.options());
+        Map<String, PointType> points = new LinkedHashMap<>();
+        for (PointField point : standard.points()) {
+            FieldInfo field = index.fieldInfo(point.field())
+                    .orElseThrow(() -> new RpcException(
+                            ErrorCode.FIELD_NOT_FOUND, "No field '" + point.field() + "' in the index"));
+            PointType type = PointType.valueOf(point.type().name());
+            if (!type.fits(field)) {
+                throw new RpcException(
+                        ErrorCode.INVALID_PARAMS,
+                        "Invalid params: the field '" + point.field() + "' has no one-dimensional points of "
+                                + point.type() + " values");
+            }
+            if (points.put(point.field(), type) != null) {
+                throw new RpcException(
+                        ErrorCode.INVALID_PARAMS,
+                        "Invalid params: the point field '" + point.field() + "' is listed twice");
             }
         }
-        TermQuery term = query.term().orElseThrow();
+        return Queries.standard(standard.expression(), standard.defaultField(), options, points);
+    }
+
+    private static Query term(ReadOnlyIndex index, TermQuery term) throws RpcException {
         checkField(index, term.field());
         try {
             return Queries.term(
@@ -57,6 +111,24 @@ final class SearchQueries {
         }
     }
 
+    private static ParserOptions options(
+            QueryOperator operator, io.github.mfuerstenau.leia.protocol.search.ParserOptions options)
+            throws RpcException {
+        try {
+            return new ParserOptions(
+                    switch (operator) {
+                        case OR -> Queries.Operator.OR;
+                        case AND -> Queries.Operator.AND;
+                    },
+                    options.allowLeadingWildcard(),
+                    options.phraseSlop(),
+                    options.fuzzyPrefixLength(),
+                    options.enablePositionIncrements());
+        } catch (IllegalArgumentException e) {
+            throw invalidParams(e);
+        }
+    }
+
     static void checkField(ReadOnlyIndex index, String field) throws RpcException {
         if (!index.hasField(field)) {
             throw new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + field + "' in the index");
@@ -65,5 +137,9 @@ final class SearchQueries {
 
     static RpcException invalidQuery(InvalidQueryException e) {
         return new RpcException(ErrorCode.INVALID_QUERY, "Invalid query: " + e.getMessage(), e);
+    }
+
+    private static RpcException invalidParams(IllegalArgumentException e) {
+        return new RpcException(ErrorCode.INVALID_PARAMS, "Invalid params: " + e.getMessage(), e);
     }
 }

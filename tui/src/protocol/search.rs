@@ -8,9 +8,10 @@ use super::job::{JobParams, JobStarted};
 use super::method::RpcMethod;
 
 /// `startSearch`: starts a job that searches the open index and returns one page of hits with
-/// their stored fields (ADR 0010). Fails with `NO_INDEX_OPEN`, `INVALID_QUERY` if the expression
-/// doesn't parse, `FIELD_NOT_FOUND` for an unknown default field, term field or field to send, or
-/// `INVALID_PARAMS` for a page out of range or a query without exactly one alternative.
+/// their stored fields (ADR 0010, ADR 0011). Fails with `NO_INDEX_OPEN`, `INVALID_QUERY` if the
+/// expression doesn't parse, `FIELD_NOT_FOUND` for an unknown default field, term field, point
+/// field or field to send, or `INVALID_PARAMS` for a page out of range, a query without exactly
+/// one alternative, a parser option out of range, or a point type that doesn't fit its field.
 pub enum StartSearch {}
 
 impl RpcMethod for StartSearch {
@@ -39,13 +40,16 @@ pub const MAX_SEARCH_LIMIT: i32 = 1000;
 /// The largest `offset + limit` of `startSearch` the server accepts.
 pub const MAX_WINDOW: i32 = 10_000;
 
-/// A query, as one of several alternatives: exactly one is present (ADR 0010).
+/// A query, as one of several alternatives: exactly one is present (ADR 0010, ADR 0011).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SearchQuery {
     /// An expression for Lucene's classic query parser.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub classic: Option<ClassicQuery>,
+    /// An expression for Lucene's standard query parser, which knows point fields.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub standard: Option<StandardQuery>,
     /// A query for exactly one term.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub term: Option<TermQuery>,
@@ -61,6 +65,80 @@ pub struct ClassicQuery {
     pub default_field: String,
     /// How clauses without an operator are combined.
     pub default_operator: QueryOperator,
+    pub options: ParserOptions,
+    /// The edit distance of fuzzy terms that give none, 0 to [`MAX_FUZZY_EDITS`].
+    pub fuzzy_max_edits: i32,
+    /// Whether whitespace splits the text before it is analyzed.
+    pub split_on_whitespace: bool,
+    /// Whether text that analyzes to several terms becomes a phrase; needs
+    /// `split_on_whitespace`.
+    pub auto_generate_phrase_queries: bool,
+}
+
+/// The largest `fuzzy_max_edits` the server accepts, Lucene's largest fuzzy edit distance.
+pub const MAX_FUZZY_EDITS: i32 = 2;
+
+/// An expression for Lucene's standard (flexible) `StandardQueryParser`, analyzed with
+/// `StandardAnalyzer` (ADR 0011).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StandardQuery {
+    /// The query in the standard syntax, such as `price:[10 TO 20] AND fox`.
+    pub expression: String,
+    /// The field of terms that name none.
+    pub default_field: String,
+    /// How clauses without an operator are combined.
+    pub default_operator: QueryOperator,
+    pub options: ParserOptions,
+    /// The point fields whose ranges and values become point queries, each with the type of its
+    /// values.
+    pub points: Vec<PointField>,
+}
+
+/// The options that the classic and the standard query parser share (ADR 0011).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ParserOptions {
+    /// Whether a term may start with `*` or `?`.
+    pub allow_leading_wildcard: bool,
+    /// The slop of phrases that give none, 0 or more.
+    pub phrase_slop: i32,
+    /// How many leading characters of a fuzzy term must match exactly, 0 or more.
+    pub fuzzy_prefix_length: i32,
+    /// Whether phrases keep the gaps that the analyzer leaves.
+    pub enable_position_increments: bool,
+}
+
+impl Default for ParserOptions {
+    /// Lucene's defaults.
+    fn default() -> Self {
+        Self {
+            allow_leading_wildcard: false,
+            phrase_slop: 0,
+            fuzzy_prefix_length: 0,
+            enable_position_increments: true,
+        }
+    }
+}
+
+/// A point field for the standard query parser, with the type of its values.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PointField {
+    /// A field with one-dimensional points as wide as `type`.
+    pub field: String,
+    #[serde(rename = "type")]
+    pub point_type: PointType,
+}
+
+/// The type of a point field's values, which the index doesn't record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum PointType {
+    Int,
+    Long,
+    Float,
+    Double,
 }
 
 /// How a query parser combines clauses without an operator, as Lucene's `QueryParser.Operator`.

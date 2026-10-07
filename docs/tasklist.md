@@ -17,6 +17,7 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 - [x] ADR 0008: large stored values (cut at 64 KiB in `getDocument`, `getStoredValue` fetches one whole, `VALUE_NOT_FOUND`)
 - [x] ADR 0009: commits and segments on the wire (read from the directory on every call, one commit whole per call, `COMMIT_NOT_FOUND`)
 - [x] ADR 0010: search on the wire (search and explain as jobs, the query as alternatives `classic` / `term`, stateless offset paging up to 10,000, cancellation through `QueryTimeout`, `INVALID_QUERY`)
+- [x] ADR 0011: query parser options and the standard query parser (shared `ParserOptions`, classic-only fuzzy max edits / whitespace splitting / auto phrases, `standard` as a third query alternative with a type per point field, checked against the field's width)
 - [x] `README.md`: what leia is, build and run instructions
 
 ### Java build (Gradle 9, Java 25)
@@ -120,7 +121,12 @@ From the read-only checklist in `luke-features.md` §7. Ordered roughly by value
   - `startExplain {query, docId}` / `getExplain`: Lucene's `Explanation` tree, values as text
   - both are jobs; cancellation through a `QueryTimeout` on an `ExitableDirectoryReader` plus `IndexSearcher.setTimeout`; `INVALID_QUERY` (-32012)
   - TUI: search screen (`5`) with a query line (`/`, shared `LineInput` with the open prompt), mode/field/operator/count settings (`m`, `f`/`F`, `a`, `t`) that search again, hits fetched 100 at a time, `x` explains into the details panel, `Enter` opens the document; the TUI now polls the scan, search and explain jobs side by side
-- [ ] Search: query-parser options (Luke's list: phrase slop, leading wildcard, fuzzy settings, …) and the standard query parser with point fields (numeric ranges on points)
+- [x] Search: query-parser options and the standard query parser with point fields (ADR 0011)
+  - `ParserOptions {allowLeadingWildcard, phraseSlop, fuzzyPrefixLength, enablePositionIncrements}` on both parsers; `classic` adds `fuzzyMaxEdits` (0–2), `splitOnWhitespace` and `autoGeneratePhraseQueries` (needs splitting); the standard parser ignores `setFuzzyMinSim`, so it has no fuzzy max edits
+  - `standard {expression, defaultField, defaultOperator, options, points: [{field, type}]}`: `StandardQueryParser` with a `PointsConfig` per field (`INT`/`LONG`/`FLOAT`/`DOUBLE`); the server rejects unknown fields (`FIELD_NOT_FOUND`) and types that don't fit a one-dimensional point of the field's width (`INVALID_PARAMS`); syntax errors say what was found and where
+  - fixture harnesses accept `<method>.request-<case>.json` / `.response-<case>.json`
+  - TUI: `m` cycles classic → standard → term; `p` opens the options popup (`Enter` applies and searches again, `Esc` cancels), with each point field guessed as INT/LONG by width and cycled to FLOAT/DOUBLE/text; the details panel lists changed options and the point types
+- [ ] Search: date resolution, locale and time zone for date ranges (left out of ADR 0011 until there is a `DateTools` index to try them on)
 - [ ] Search: similarity (BM25 k1/b, classic TF-IDF), 2-level sort on doc values fields, choice of the stored fields per hit in the TUI, More-Like-This
 - [ ] Search: `[`/`]` on the documents screen to step through the search hits, as for a term's postings
 - [ ] Analysis: custom analyzer builder (char filters/tokenizer/filters + params, config dir, external jars), token attributes, step-by-step

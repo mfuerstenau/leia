@@ -74,4 +74,8 @@ their own indexes and the Lucene 9 and 8 indexes from `LegacyIndexWriter`.
   clause.
 - `*:*` with `t` (exact count): 487 hits, the live documents, fetched 100 at a time as you scroll.
 - `/` on a top term of `binary_key` in the overview: a term query for a binary term, shown as hex.
-- `title:(lamp`: a syntax error; `body:*a*`: a leading wildcard, which the classic parser rejects.
+- `title:(lamp`: a syntax error; `body:*a*`: a leading wildcard, which the classic parser rejects
+  until `p` turns leading wildcards on.
+- Standard syntax (`m`), `title:lamp AND price:[10 TO 20]`: no hits while `price` is guessed to be
+  LONG (the details panel says so). With `p`, set `price` to DOUBLE: 1 hit, doc 196.
+  `quantity>=50` needs no change, since `quantity` is an int point.
