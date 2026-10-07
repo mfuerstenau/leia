@@ -2,7 +2,9 @@ package io.github.mfuerstenau.leia.core;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import org.apache.lucene.search.TotalHits;
+import org.apache.lucene.util.BytesRef;
 
 /**
  * One page of the hits of a search (ADR 0010).
@@ -19,11 +21,30 @@ public record SearchResults(String query, String rewrittenQuery, TotalHits total
      * A matching document.
      *
      * @param docId the document id in the whole index
-     * @param score the document's score for the query
+     * @param score the document's score for the query, also when the hits are sorted by fields
+     * @param sortValues the values the hit was sorted by, one per sort field; empty when the hits
+     *     are sorted by score
      * @param fields the document's stored values in the fields asked for, in the order of each
      *     field's first value
      */
-    public record Hit(int docId, float score, List<HitField> fields) {}
+    public record Hit(int docId, float score, List<SortValue> sortValues, List<HitField> fields) {}
+
+    /**
+     * The value a hit was sorted by in one sort field (ADR 0012): a number, or a term of a {@code
+     * STRING} sort. Neither is present for a document without a value in a {@code STRING} sort.
+     */
+    public record SortValue(Optional<Number> number, Optional<BytesRef> term) {
+
+        /** The sort value as Lucene's {@code FieldDoc.fields} holds it. */
+        static SortValue of(Object value) {
+            return switch (value) {
+                case null -> new SortValue(Optional.empty(), Optional.empty());
+                case Number number -> new SortValue(Optional.of(number), Optional.empty());
+                case BytesRef term -> new SortValue(Optional.empty(), Optional.of(BytesRef.deepCopyOf(term)));
+                default -> throw new IllegalArgumentException("Unexpected sort value: " + value.getClass());
+            };
+        }
+    }
 
     /**
      * The stored values of a hit in one field.

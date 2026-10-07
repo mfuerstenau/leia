@@ -156,10 +156,12 @@ public final class Methods {
 
     /**
      * Starts a job that searches the open index and returns one page of hits with their stored fields
-     * (ADR 0010, ADR 0011). Fails with {@code NO_INDEX_OPEN}, {@code INVALID_QUERY} if the expression
-     * doesn't parse, {@code FIELD_NOT_FOUND} for an unknown default field, term field, point field or
-     * field to send, or {@code INVALID_PARAMS} for a page out of range, a query without exactly one
-     * alternative, a parser option out of range, or a point type that doesn't fit its field.
+     * (ADR 0010, ADR 0011, ADR 0012). Fails with {@code NO_INDEX_OPEN}, {@code INVALID_QUERY} if the
+     * expression doesn't parse, {@code FIELD_NOT_FOUND} for an unknown default field, term field,
+     * point field, sort field or field to send, or {@code INVALID_PARAMS} for a page out of range, a
+     * query or similarity without exactly one alternative, a parser option or BM25 parameter out of
+     * range, a point type that doesn't fit its field, or a sort field without doc values of the sort
+     * type.
      */
     public static final RpcMethod<StartSearchParams, JobStarted> START_SEARCH =
             new RpcMethod<>("startSearch", StartSearchParams.class, JobStarted.class);
@@ -173,8 +175,8 @@ public final class Methods {
             new RpcMethod<>("getSearch", JobParams.class, GetSearchResult.class);
 
     /**
-     * Starts a job that explains how a document scores for a query, or why it doesn't match (ADR
-     * 0010). Fails as {@code startSearch} does, and with {@code DOC_NOT_FOUND} for an id outside 0
+     * Starts a job that explains how a document scores for a query with a similarity, or why it
+     * doesn't match (ADR 0010, ADR 0012). Fails as {@code startSearch} does, and with {@code DOC_NOT_FOUND} for an id outside 0
      * to maxDoc - 1.
      */
     public static final RpcMethod<StartExplainParams, JobStarted> START_EXPLAIN =

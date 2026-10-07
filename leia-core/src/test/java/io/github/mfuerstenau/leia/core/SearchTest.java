@@ -27,12 +27,15 @@ import org.apache.lucene.index.Term;
 import org.apache.lucene.search.Explanation;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.TotalHits;
+import org.apache.lucene.search.similarities.Similarity;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class SearchTest {
+
+    private static final Similarity BM25 = Similarities.bm25(1.2f, 0.75f);
 
     private static final BytesRef BINARY = new BytesRef(new byte[] {(byte) 0xff, 0});
 
@@ -59,8 +62,15 @@ class SearchTest {
     @Test
     void andRequiresEveryTerm() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            SearchResults results =
-                    index.search(classic("quick fox", Operator.AND), 0, 10, true, Optional.empty(), ScanProgress.NONE);
+            SearchResults results = index.search(
+                    classic("quick fox", Operator.AND),
+                    BM25,
+                    Optional.empty(),
+                    0,
+                    10,
+                    true,
+                    Optional.empty(),
+                    ScanProgress.NONE);
 
             assertThat(results.query()).isEqualTo("+body:quick +body:fox");
             assertThat(results.hits()).extracting(Hit::docId).containsExactly(0);
@@ -92,8 +102,15 @@ class SearchTest {
                             new HitField("id", List.of(new StoredValue.Text("3"))),
                             new HitField("body", List.of(new StoredValue.Text("the lazy dog and the quick cat"))),
                             new HitField("rank", List.of(new StoredValue.IntValue(7), new StoredValue.IntValue(8))));
-            SearchResults onlyRank =
-                    index.search(query, 0, 1, false, Optional.of(Set.of("rank", "nothing")), ScanProgress.NONE);
+            SearchResults onlyRank = index.search(
+                    query,
+                    BM25,
+                    Optional.empty(),
+                    0,
+                    1,
+                    false,
+                    Optional.of(Set.of("rank", "nothing")),
+                    ScanProgress.NONE);
             assertThat(onlyRank.hits().getFirst().fields())
                     .extracting(HitField::name)
                     .containsExactly("rank");
@@ -127,12 +144,14 @@ class SearchTest {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
             Query query = classic("word", Operator.OR);
 
-            SearchResults approximate = index.search(query, 0, 10, false, Optional.empty(), ScanProgress.NONE);
+            SearchResults approximate =
+                    index.search(query, BM25, Optional.empty(), 0, 10, false, Optional.empty(), ScanProgress.NONE);
             assertThat(approximate.totalHits().relation()).isEqualTo(TotalHits.Relation.GREATER_THAN_OR_EQUAL_TO);
             assertThat(approximate.totalHits().value()).isBetween(1000L, 1500L);
             assertThat(approximate.hits()).hasSize(10);
 
-            SearchResults exact = index.search(query, 0, 10, true, Optional.empty(), ScanProgress.NONE);
+            SearchResults exact =
+                    index.search(query, BM25, Optional.empty(), 0, 10, true, Optional.empty(), ScanProgress.NONE);
             assertThat(exact.totalHits()).isEqualTo(new TotalHits(1500, TotalHits.Relation.EQUAL_TO));
         }
     }
@@ -142,7 +161,7 @@ class SearchTest {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             List<Long> reported = new java.util.ArrayList<>();
 
-            index.search(classic("quick"), 0, 10, true, Optional.empty(), reported::add);
+            index.search(classic("quick"), BM25, Optional.empty(), 0, 10, true, Optional.empty(), reported::add);
 
             // Segment 0 starts at document 0, segment 1 at 2; maxDoc at the end.
             assertThat(reported).contains(0L, 2L).endsWith(5L);
@@ -159,10 +178,11 @@ class SearchTest {
                 }
             };
 
-            assertThatThrownBy(() -> index.search(classic("*:*"), 0, 10, true, Optional.empty(), cancelled))
+            assertThatThrownBy(() -> index.search(
+                            classic("*:*"), BM25, Optional.empty(), 0, 10, true, Optional.empty(), cancelled))
                     .isInstanceOf(CancellationException.class);
             calls.set(0);
-            assertThatThrownBy(() -> index.explain(classic("qu*"), 0, cancelled))
+            assertThatThrownBy(() -> index.explain(classic("qu*"), BM25, 0, cancelled))
                     .isInstanceOf(CancellationException.class);
         }
     }
@@ -172,13 +192,13 @@ class SearchTest {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             Query query = classic("quick fox");
 
-            Explanation match = index.explain(query, 0, ScanProgress.NONE);
+            Explanation match = index.explain(query, BM25, 0, ScanProgress.NONE);
             assertThat(match.isMatch()).isTrue();
             assertThat(match.getValue().floatValue())
                     .isEqualTo(search(index, query, 0, 1).hits().getFirst().score());
             assertThat(match.getDetails()).hasSize(2);
 
-            Explanation miss = index.explain(query, 4, ScanProgress.NONE);
+            Explanation miss = index.explain(query, BM25, 4, ScanProgress.NONE);
             assertThat(miss.isMatch()).isFalse();
         }
     }
@@ -194,7 +214,7 @@ class SearchTest {
             assertThatThrownBy(() -> search(index, query, 0, 0)).isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(() -> search(index, query, Integer.MAX_VALUE, 1))
                     .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> index.explain(query, 5, ScanProgress.NONE))
+            assertThatThrownBy(() -> index.explain(query, BM25, 5, ScanProgress.NONE))
                     .isInstanceOf(IllegalArgumentException.class);
         }
     }
@@ -221,7 +241,7 @@ class SearchTest {
 
     private static SearchResults search(ReadOnlyIndex index, Query query, int offset, int limit)
             throws IOException, InvalidQueryException {
-        return index.search(query, offset, limit, true, Optional.empty(), ScanProgress.NONE);
+        return index.search(query, BM25, Optional.empty(), offset, limit, true, Optional.empty(), ScanProgress.NONE);
     }
 
     /**

@@ -30,6 +30,8 @@ import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.search.Explanation;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.Sort;
+import org.apache.lucene.search.similarities.Similarity;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.store.NoLockFactory;
@@ -343,12 +345,15 @@ public final class ReadOnlyIndex implements Closeable {
 
     /**
      * Runs {@code query} and returns the hits from {@code offset} to {@code offset + limit}, best
-     * first, with their stored values in {@code fields} (ADR 0010). Deleted documents never match.
+     * first or in the order of {@code sort}, with their stored values in {@code fields} (ADR 0010,
+     * ADR 0012). Deleted documents never match. Sorted hits have their scores too.
      *
      * <p>{@code progress} gets the number of documents before the segment being searched; it can stop
      * the search by throwing a {@link CancellationException}, which it is also asked about while the
      * query is rewritten and the hits are collected. The search runs in the calling thread.
      *
+     * @param similarity what scores the hits
+     * @param sort the order of the hits; empty for the best score first
      * @param exactTotalHits whether to count every hit; otherwise counting stops after {@value
      *     Searcher#TOTAL_HITS_THRESHOLD}
      * @param fields the stored fields to read per hit; empty for all of them
@@ -359,6 +364,8 @@ public final class ReadOnlyIndex implements Closeable {
      */
     public SearchResults search(
             Query query,
+            Similarity similarity,
+            Optional<Sort> sort,
             int offset,
             int limit,
             boolean exactTotalHits,
@@ -370,21 +377,22 @@ public final class ReadOnlyIndex implements Closeable {
             throw new IllegalArgumentException(
                     "offset must be from 0 to " + (Integer.MAX_VALUE - limit) + ": " + offset);
         }
-        return Searcher.search(reader, query, offset, limit, exactTotalHits, fields, progress);
+        return Searcher.search(reader, query, similarity, sort, offset, limit, exactTotalHits, fields, progress);
     }
 
     /**
-     * Explains how a document scores for {@code query}, or why it doesn't match. {@code progress} can
+     * Explains how a document scores for {@code query} with {@code similarity}, or why it doesn't
+     * match. {@code progress} can
      * stop the explanation by throwing a {@link CancellationException}, as for {@link #search}.
      *
      * @throws IllegalArgumentException if there is no such document id
      * @throws InvalidQueryException if the rewritten query has too many clauses
      * @throws IOException if reading the index fails
      */
-    public Explanation explain(Query query, int docId, ScanProgress progress)
+    public Explanation explain(Query query, Similarity similarity, int docId, ScanProgress progress)
             throws IOException, InvalidQueryException {
         checkDocId(docId);
-        return Searcher.explain(reader, query, docId, progress);
+        return Searcher.explain(reader, query, similarity, docId, progress);
     }
 
     /**

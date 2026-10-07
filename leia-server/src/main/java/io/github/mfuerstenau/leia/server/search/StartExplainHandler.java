@@ -18,6 +18,7 @@ import jakarta.inject.Inject;
 import java.io.IOException;
 import java.util.Arrays;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.similarities.Similarity;
 
 /**
  * {@code startExplain}: checks the params and parses the query at once, then explains a document of
@@ -45,17 +46,19 @@ public final class StartExplainHandler implements MethodHandler<StartExplainPara
         int docId = params.docId();
         GetDocumentHandler.checkDocId(index, docId);
         Query query = SearchQueries.query(index, params.query());
+        Similarity similarity = SearchQueries.similarity(params.similarity());
         long jobId = jobs.start(
-                "explain " + query + " for document " + docId,
+                "explain " + query + " with " + similarity + " for document " + docId,
                 Explanation.class,
-                progress -> explain(index, query, docId, progress));
+                progress -> explain(index, query, similarity, docId, progress));
         return new JobStarted(jobId);
     }
 
-    private static Explanation explain(ReadOnlyIndex index, Query query, int docId, ScanProgress progress)
+    private static Explanation explain(
+            ReadOnlyIndex index, Query query, Similarity similarity, int docId, ScanProgress progress)
             throws RpcException {
         try {
-            return toExplanation(index.explain(query, docId, progress));
+            return toExplanation(index.explain(query, similarity, docId, progress));
         } catch (InvalidQueryException e) {
             throw SearchQueries.invalidQuery(e);
         } catch (IOException e) {

@@ -38,6 +38,15 @@ const DETAIL_VALUE_LINES: usize = 20;
 const NAME_MAX_WIDTH: u16 = 32;
 const COLUMN_SPACING: u16 = 2;
 
+/// Which documents `[`/`]` step through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Walk {
+    /// The documents of the term of the [`TermHit`], from the terms screen.
+    TermDocs,
+    /// The hits of the search screen.
+    SearchHits,
+}
+
 /// What the caller has to fetch for the documents screen.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Request {
@@ -54,8 +63,9 @@ pub enum Request {
         field: String,
         term: BytesValue,
     },
-    /// The previous or next document of the term of the [`TermHit`].
-    StepTerm { forward: bool },
+    /// The previous or next document of the [`Walk`]: of the term of the [`TermHit`], or of the
+    /// search hits.
+    Step { walk: Walk, forward: bool },
     /// A stored value whole, which `getDocument` cut, reported back with
     /// [`Documents::stored_value_loaded`] or [`Documents::stored_value_failed`].
     StoredValue {
@@ -166,6 +176,8 @@ pub struct Documents {
     prompt: Option<DocIdPrompt>,
     /// The term and document that the terms screen opened, if any.
     hit: Option<TermHit>,
+    /// Whether the search screen opened the document, so `[`/`]` step through its hits.
+    search_hits: bool,
     /// Where the hit's term occurs in its document, once fetched.
     positions: Option<Result<Vec<TermPosition>, String>>,
     /// The field to select once the next document is in.
@@ -196,6 +208,7 @@ impl Documents {
             details_scroll: 0,
             prompt: None,
             hit: None,
+            search_hits: false,
             positions: None,
             select_field: None,
             viewer: None,
@@ -214,19 +227,27 @@ impl Documents {
     pub fn show_hit(&mut self, hit: TermHit) {
         self.select_field = Some(hit.field.clone());
         self.hit = Some(hit);
+        self.search_hits = false;
         self.positions = None;
     }
 
-    /// Forgets the hit, for a document opened from elsewhere.
-    pub fn clear_hit(&mut self) {
+    /// Forgets the term hit: the search screen opened the next document, so `[`/`]` step
+    /// through its hits.
+    pub fn show_search_hit(&mut self) {
         self.hit = None;
+        self.search_hits = true;
         self.positions = None;
     }
 
-    /// Whether a document was opened from the terms screen, so `[`/`]` step through its term's
-    /// documents.
-    pub fn has_hit(&self) -> bool {
-        self.hit.is_some()
+    /// What `[`/`]` step through, if anything.
+    pub fn walk(&self) -> Option<Walk> {
+        if self.hit.is_some() {
+            Some(Walk::TermDocs)
+        } else if self.search_hits {
+            Some(Walk::SearchHits)
+        } else {
+            None
+        }
     }
 
     /// The positions to fetch, if the shown document is the hit's and they are not in yet.
@@ -448,11 +469,11 @@ impl Documents {
                 return Some(Request::Document(self.doc_id + 1));
             }
             KeyCode::Char('i') if self.max_doc > 0 => self.prompt = Some(DocIdPrompt::default()),
-            KeyCode::Char('[') if self.hit.is_some() => {
-                return Some(Request::StepTerm { forward: false });
-            }
-            KeyCode::Char(']') if self.hit.is_some() => {
-                return Some(Request::StepTerm { forward: true });
+            KeyCode::Char('[') | KeyCode::Char(']') => {
+                return self.walk().map(|walk| Request::Step {
+                    walk,
+                    forward: key == KeyCode::Char(']'),
+                });
             }
             KeyCode::Enter => {
                 let field = self.selected_field()?;
@@ -1628,11 +1649,17 @@ mod tests {
         assert!(screen.contains("  0 [0–3], 2"), "{screen}");
         assert_eq!(
             documents.handle_key(KeyCode::Char('[')),
-            Some(Request::StepTerm { forward: false })
+            Some(Request::Step {
+                walk: Walk::TermDocs,
+                forward: false
+            })
         );
         assert_eq!(
             documents.handle_key(KeyCode::Char(']')),
-            Some(Request::StepTerm { forward: true })
+            Some(Request::Step {
+                walk: Walk::TermDocs,
+                forward: true
+            })
         );
 
         // Another document has no positions of the term.

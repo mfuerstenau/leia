@@ -12,6 +12,7 @@
         {
           "docId": 223,
           "score": 2.8514276,
+          "sortValues": [],
           "fields": [
             {
               "name": "id",
@@ -26,6 +27,7 @@
         {
           "docId": 344,
           "score": 2.6398077,
+          "sortValues": [],
           "fields": [
             {
               "name": "id",

@@ -25,9 +25,10 @@ use leia::protocol::index::{
 };
 use leia::protocol::job::{CancelJob, JobParams};
 use leia::protocol::search::{
-    ClassicQuery, GetExplain, GetSearch, MAX_FUZZY_EDITS, ParserOptions, PointField, PointType,
-    QueryOperator, SearchQuery, StandardQuery, StartExplain, StartExplainParams, StartSearch,
-    StartSearchParams, TotalHitsRelation,
+    Bm25Similarity, ClassicQuery, ClassicSimilarity, GetExplain, GetSearch, MAX_FUZZY_EDITS,
+    ParserOptions, PointField, PointType, QueryOperator, SearchQuery, Similarity, SortKey,
+    SortType, StandardQuery, StartExplain, StartExplainParams, StartSearch, StartSearchParams,
+    TotalHitsRelation,
 };
 use leia::protocol::terms::{
     FieldTerms, GetFieldTermScan, GetPositions, GetPositionsParams, GetPostings, GetPostingsParams,
@@ -560,10 +561,17 @@ fn searches_and_explains_a_lucene9_index() {
         })
         .unwrap();
     let query = classic("number AND (1 OR 2 OR 3)");
+    // TF-IDF, for the search and the explanation alike.
+    let tf_idf = Similarity {
+        classic: Some(ClassicSimilarity {}),
+        ..Similarity::default()
+    };
 
     let job = server
         .call::<StartSearch>(StartSearchParams {
             query: query.clone(),
+            similarity: tf_idf,
+            sort: Vec::new(),
             offset: 0,
             limit: 10,
             exact_total_hits: true,
@@ -594,10 +602,12 @@ fn searches_and_explains_a_lucene9_index() {
         .map(|hit| (hit.doc_id, hit.fields[0].values[0].value.as_str()))
         .collect();
     assert_eq!(hits, vec![(0, "1"), (2, "3")]);
+    assert!(results.hits.iter().all(|hit| hit.sort_values.is_empty()));
 
     let job = server
         .call::<StartExplain>(StartExplainParams {
             query: query.clone(),
+            similarity: tf_idf,
             doc_id: 2,
         })
         .unwrap();
@@ -612,6 +622,12 @@ fn searches_and_explains_a_lucene9_index() {
         thread::sleep(Duration::from_millis(10));
     };
     assert!(explanation.matches, "{explanation:?}");
+    assert!(
+        explanation.details[0]
+            .description
+            .contains("ClassicSimilarity"),
+        "{explanation:?}"
+    );
     assert_eq!(
         explanation.value.parse::<f64>().unwrap(),
         results.hits[1].score
@@ -620,6 +636,8 @@ fn searches_and_explains_a_lucene9_index() {
     let broken = server
         .call::<StartSearch>(StartSearchParams {
             query: classic("body:(number"),
+            similarity: bm25(),
+            sort: Vec::new(),
             offset: 0,
             limit: 10,
             exact_total_hits: false,
@@ -645,6 +663,8 @@ fn searches_and_explains_a_lucene9_index() {
     let job = server
         .call::<StartSearch>(StartSearchParams {
             query: standard(Vec::new()),
+            similarity: bm25(),
+            sort: Vec::new(),
             offset: 0,
             limit: 10,
             exact_total_hits: true,
@@ -670,6 +690,8 @@ fn searches_and_explains_a_lucene9_index() {
                 field: "body".to_owned(),
                 point_type: PointType::Int,
             }]),
+            similarity: bm25(),
+            sort: Vec::new(),
             offset: 0,
             limit: 10,
             exact_total_hits: false,
@@ -680,6 +702,34 @@ fn searches_and_explains_a_lucene9_index() {
         matches!(&not_points, CallError::Rpc(e) if e.code == ErrorCode::InvalidParams),
         "{not_points:?}"
     );
+    // The index has no doc values to sort by.
+    let unsortable = server
+        .call::<StartSearch>(StartSearchParams {
+            query: classic("number"),
+            similarity: bm25(),
+            sort: vec![SortKey {
+                field: "id".to_owned(),
+                sort_type: SortType::String,
+                reverse: false,
+            }],
+            offset: 0,
+            limit: 10,
+            exact_total_hits: false,
+            fields: None,
+        })
+        .unwrap_err();
+    assert!(
+        matches!(&unsortable, CallError::Rpc(e) if e.code == ErrorCode::InvalidParams
+            && e.message.contains("no doc values")),
+        "{unsortable:?}"
+    );
+}
+
+fn bm25() -> Similarity {
+    Similarity {
+        bm25: Some(Bm25Similarity { k1: 1.2, b: 0.75 }),
+        ..Similarity::default()
+    }
 }
 
 fn classic(expression: &str) -> SearchQuery {

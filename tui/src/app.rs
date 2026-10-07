@@ -16,7 +16,7 @@ use ratatui::widgets::{Block, Paragraph, Tabs};
 
 use crate::build_info::{LEIA, java_line, server_line};
 use crate::commits::{self, Commits};
-use crate::documents::{self, Documents};
+use crate::documents::{self, Documents, Walk};
 use crate::overview::{DEFAULT_TOP_TERMS, FieldScan, Overview, step_top_terms};
 use crate::prompt::{PathPrompt, PromptEvent, expand_home};
 use crate::protocol::commits::{Commit, GetCommitResult};
@@ -33,7 +33,7 @@ use crate::search::{self, Search};
 use crate::terms::{self, Terms};
 
 /// What the caller has to do after a key.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum Action {
     Quit,
     /// Open this index and fetch its statistics. The prompt shows "Opening…" until the outcome
@@ -250,7 +250,7 @@ impl App {
             }
             search::Request::Cancel(jobs) => Some(Action::CancelSearch(jobs)),
             search::Request::Document(doc_id) => {
-                self.documents.as_mut()?.clear_hit();
+                self.documents.as_mut()?.show_search_hit();
                 self.screen = Screen::Documents;
                 Some(Action::LoadDocument(doc_id))
             }
@@ -282,9 +282,19 @@ impl App {
                 index,
             }),
             documents::Request::Copy(text) => Some(Action::Copy(text)),
-            documents::Request::StepTerm { forward } => {
+            documents::Request::Step {
+                walk: Walk::TermDocs,
+                forward,
+            } => {
                 let request = self.terms.as_mut()?.step(forward);
                 self.terms_request(request)
+            }
+            documents::Request::Step {
+                walk: Walk::SearchHits,
+                forward,
+            } => {
+                let request = self.search.as_mut()?.step(forward);
+                self.search_request(request)
             }
         }
     }
@@ -774,10 +784,10 @@ impl App {
             }
             (Some(_), Some(documents), _, _, _, Screen::Documents) => {
                 documents.render(frame, body);
-                let steps = if documents.has_hit() {
-                    "[ ] term docs   "
-                } else {
-                    ""
+                let steps = match documents.walk() {
+                    Some(Walk::TermDocs) => "[ ] term docs   ",
+                    Some(Walk::SearchHits) => "[ ] hits   ",
+                    None => "",
                 };
                 match documents.viewer() {
                     Some(viewer) => Line::from(viewer.keys()),
@@ -1649,6 +1659,7 @@ mod tests {
                     .map(|&doc_id| Hit {
                         doc_id,
                         score: 1.0,
+                        sort_values: Vec::new(),
                         fields: Vec::new(),
                     })
                     .collect(),
@@ -1706,6 +1717,19 @@ mod tests {
         );
         assert!(render(&mut app).contains("2 Documents"));
         assert!(!render(&mut app).contains("[ ] term docs"));
+
+        // `[`/`]` step through the hits, as far as they go.
+        assert!(render(&mut app).contains("[ ] hits"));
+        assert_eq!(
+            app.handle_key(key(KeyCode::Char(']'))),
+            Some(Action::LoadDocument(0))
+        );
+        assert_eq!(app.handle_key(key(KeyCode::Char(']'))), None);
+        assert_eq!(
+            app.handle_key(key(KeyCode::Char('['))),
+            Some(Action::LoadDocument(2))
+        );
+        assert!(render(&mut app).contains("2 Documents"));
     }
 
     #[test]

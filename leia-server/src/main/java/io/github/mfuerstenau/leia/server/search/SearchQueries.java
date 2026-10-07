@@ -6,24 +6,33 @@ import io.github.mfuerstenau.leia.core.ParserOptions;
 import io.github.mfuerstenau.leia.core.PointType;
 import io.github.mfuerstenau.leia.core.Queries;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
+import io.github.mfuerstenau.leia.core.Similarities;
+import io.github.mfuerstenau.leia.core.SortType;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
 import io.github.mfuerstenau.leia.protocol.search.PointField;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
 import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
+import io.github.mfuerstenau.leia.protocol.search.Similarity;
+import io.github.mfuerstenau.leia.protocol.search.SortKey;
 import io.github.mfuerstenau.leia.protocol.search.StandardQuery;
 import io.github.mfuerstenau.leia.protocol.search.TermQuery;
 import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.RpcException;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Stream;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.Sort;
+import org.apache.lucene.search.SortField;
 
 /**
- * Turns the query of {@code startSearch} and {@code startExplain} into a Lucene query (ADR 0010, ADR
- * 0011).
+ * Turns the query, the similarity and the sort of {@code startSearch} and {@code startExplain} into
+ * their Lucene counterparts (ADR 0010, ADR 0011, ADR 0012).
  */
 final class SearchQueries {
 
@@ -57,6 +66,59 @@ final class SearchQueries {
             throw invalidQuery(e);
         }
         return term(index, query.term().orElseThrow());
+    }
+
+    /**
+     * The Lucene similarity for {@code similarity}.
+     *
+     * @throws RpcException {@code INVALID_PARAMS} unless exactly one alternative is present, or for
+     *     BM25 parameters out of range
+     */
+    static org.apache.lucene.search.similarities.Similarity similarity(Similarity similarity) throws RpcException {
+        long present = Stream.of(similarity.bm25(), similarity.classic(), similarity.booleanSimilarity())
+                .filter(alternative -> alternative.isPresent())
+                .count();
+        if (present != 1) {
+            throw new RpcException(
+                    ErrorCode.INVALID_PARAMS,
+                    "Invalid params: the similarity needs exactly one of bm25, classic and boolean");
+        }
+        if (similarity.classic().isPresent()) {
+            return Similarities.classic();
+        }
+        if (similarity.booleanSimilarity().isPresent()) {
+            return Similarities.bool();
+        }
+        var bm25 = similarity.bm25().orElseThrow();
+        try {
+            return Similarities.bm25(bm25.k1(), bm25.b());
+        } catch (IllegalArgumentException e) {
+            throw invalidParams(e);
+        }
+    }
+
+    /**
+     * The Lucene sort for {@code keys}; empty for no keys, which sorts by score.
+     *
+     * @throws RpcException {@code FIELD_NOT_FOUND} for an unknown field, {@code INVALID_PARAMS} for
+     *     a field without doc values that sort as the key's type
+     */
+    static Optional<Sort> sort(ReadOnlyIndex index, List<SortKey> keys) throws RpcException {
+        if (keys.isEmpty()) {
+            return Optional.empty();
+        }
+        List<SortField> fields = new ArrayList<>(keys.size());
+        for (SortKey key : keys) {
+            FieldInfo field = index.fieldInfo(key.field())
+                    .orElseThrow(() ->
+                            new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + key.field() + "' in the index"));
+            try {
+                fields.add(SortType.valueOf(key.type().name()).sortField(field, key.reverse()));
+            } catch (IllegalArgumentException e) {
+                throw invalidParams(e);
+            }
+        }
+        return Optional.of(new Sort(fields.toArray(SortField[]::new)));
     }
 
     private static Query classic(ReadOnlyIndex index, ClassicQuery classic) throws RpcException, InvalidQueryException {

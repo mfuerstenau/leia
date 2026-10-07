@@ -11,7 +11,10 @@ import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
+import io.github.mfuerstenau.leia.protocol.search.Bm25Similarity;
+import io.github.mfuerstenau.leia.protocol.search.BooleanSimilarity;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
+import io.github.mfuerstenau.leia.protocol.search.ClassicSimilarity;
 import io.github.mfuerstenau.leia.protocol.search.Explanation;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
@@ -23,6 +26,10 @@ import io.github.mfuerstenau.leia.protocol.search.PointType;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
 import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
 import io.github.mfuerstenau.leia.protocol.search.SearchResults;
+import io.github.mfuerstenau.leia.protocol.search.Similarity;
+import io.github.mfuerstenau.leia.protocol.search.SortKey;
+import io.github.mfuerstenau.leia.protocol.search.SortType;
+import io.github.mfuerstenau.leia.protocol.search.SortValue;
 import io.github.mfuerstenau.leia.protocol.search.StandardQuery;
 import io.github.mfuerstenau.leia.protocol.search.StartExplainParams;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
@@ -41,6 +48,8 @@ import java.util.OptionalLong;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.IntPoint;
+import org.apache.lucene.document.NumericDocValuesField;
+import org.apache.lucene.document.SortedDocValuesField;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.IndexWriter;
@@ -59,6 +68,10 @@ class SearchHandlersTest {
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
     private static final String LONG_BODY = "red " + "x".repeat(300);
     private static final ParserOptions DEFAULTS = new ParserOptions(false, 0, 0, true);
+    private static final Similarity BM25 =
+            new Similarity(Optional.of(new Bm25Similarity(1.2f, 0.75f)), Optional.empty(), Optional.empty());
+    private static final Similarity BOOLEAN =
+            new Similarity(Optional.empty(), Optional.empty(), Optional.of(new BooleanSimilarity()));
 
     @TempDir
     Path tmp;
@@ -126,7 +139,7 @@ class SearchHandlersTest {
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.INVALID_QUERY))
                 .hasMessageStartingWith("Invalid query: Cannot parse 'body:(red'")
                 .hasMessageNotContaining("\n");
-        assertFails(() -> startExplain.handle(new StartExplainParams(broken, 0)), ErrorCode.INVALID_QUERY);
+        assertFails(() -> startExplain.handle(new StartExplainParams(broken, BM25, 0)), ErrorCode.INVALID_QUERY);
         assertThat(errorCodeOf("startSearch.error-invalid-query.json")).isEqualTo(ErrorCode.INVALID_QUERY);
         assertThat(errorCodeOf("getSearch.error-invalid-query.json")).isEqualTo(ErrorCode.INVALID_QUERY);
     }
@@ -261,9 +274,85 @@ class SearchHandlersTest {
     }
 
     @Test
+    void sortsByDocValuesAndSendsTheSortValues() throws Exception {
+        openIndex();
+        SearchResults byScore = search(params(classic("red"), 0, 10, Optional.of(List.of())));
+
+        SearchResults byColor = search(sorted(classic("red"), new SortKey("color", SortType.STRING, false)));
+        SearchResults byRank = search(sorted(classic("red"), new SortKey("rank", SortType.LONG, false)));
+
+        assertThat(byScore.hits()).extracting(Hit::docId).containsExactly(0, 2);
+        assertThat(byScore.hits())
+                .allSatisfy(hit -> assertThat(hit.sortValues()).isEmpty());
+        assertThat(byColor.hits()).extracting(Hit::docId).containsExactly(2, 0);
+        assertThat(byColor.hits())
+                .extracting(Hit::sortValues)
+                .containsExactly(
+                        List.of(new SortValue(Optional.empty(), Optional.of(new BytesValue("crimson", false)))),
+                        List.of(new SortValue(Optional.empty(), Optional.of(new BytesValue("red", false)))));
+        assertThat(byRank.hits()).extracting(Hit::docId).containsExactly(2, 0);
+        assertThat(byRank.hits().getFirst().sortValues())
+                .containsExactly(new SortValue(Optional.of("70"), Optional.empty()));
+        // The hits keep the scores they have without a sort.
+        assertThat(byRank.hits().getLast().score())
+                .isEqualTo(byScore.hits().getFirst().score());
+    }
+
+    @Test
+    void checksTheSortKeys() throws Exception {
+        openIndex();
+
+        assertFails(
+                () -> startSearch.handle(sorted(classic("red"), new SortKey("nothing", SortType.LONG, false))),
+                ErrorCode.FIELD_NOT_FOUND);
+        assertThatThrownBy(
+                        () -> startSearch.handle(sorted(classic("red"), new SortKey("body", SortType.STRING, false))))
+                .isInstanceOfSatisfying(
+                        RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.INVALID_PARAMS))
+                .hasMessage("Invalid params: the field 'body' has no doc values to sort by");
+        assertFails(
+                () -> startSearch.handle(sorted(classic("red"), new SortKey("rank", SortType.STRING, false))),
+                ErrorCode.INVALID_PARAMS);
+    }
+
+    @Test
+    void scoresAndExplainsWithTheSimilarity() throws Exception {
+        openIndex();
+        SearchQuery query = term("body", new BytesValue("red", false));
+
+        SearchResults results = search(new StartSearchParams(query, BOOLEAN, List.of(), 0, 10, true, Optional.empty()));
+
+        assertThat(results.hits()).extracting(Hit::score).containsExactly(1f, 1f);
+        assertThat(explain(new StartExplainParams(query, BOOLEAN, 0)).value()).isEqualTo("1.0");
+        Similarity classic = new Similarity(Optional.empty(), Optional.of(new ClassicSimilarity()), Optional.empty());
+        assertThat(explain(new StartExplainParams(query, classic, 0)).description())
+                .contains("ClassicSimilarity");
+    }
+
+    @Test
+    void checksTheSimilarity() throws Exception {
+        openIndex();
+        SearchQuery query = classic("red");
+        Similarity both = new Similarity(
+                Optional.of(new Bm25Similarity(1.2f, 0.75f)), Optional.of(new ClassicSimilarity()), Optional.empty());
+        Similarity neither = new Similarity(Optional.empty(), Optional.empty(), Optional.empty());
+        Similarity badB = new Similarity(Optional.of(new Bm25Similarity(1.2f, 2f)), Optional.empty(), Optional.empty());
+
+        for (Similarity similarity : List.of(both, neither, badB)) {
+            assertFails(
+                    () -> startSearch.handle(
+                            new StartSearchParams(query, similarity, List.of(), 0, 10, true, Optional.empty())),
+                    ErrorCode.INVALID_PARAMS);
+            assertFails(
+                    () -> startExplain.handle(new StartExplainParams(query, similarity, 0)), ErrorCode.INVALID_PARAMS);
+        }
+    }
+
+    @Test
     void failsWithoutOpenIndex() {
         assertFails(() -> startSearch.handle(params(classic("red"), 0, 10, Optional.empty())), ErrorCode.NO_INDEX_OPEN);
-        assertFails(() -> startExplain.handle(new StartExplainParams(classic("red"), 0)), ErrorCode.NO_INDEX_OPEN);
+        assertFails(
+                () -> startExplain.handle(new StartExplainParams(classic("red"), BM25, 0)), ErrorCode.NO_INDEX_OPEN);
     }
 
     @Test
@@ -271,7 +360,7 @@ class SearchHandlersTest {
         openIndex();
         SearchQuery query = term("body", new BytesValue("red", false));
 
-        Explanation match = explain(new StartExplainParams(query, 0));
+        Explanation match = explain(new StartExplainParams(query, BM25, 0));
         assertThat(match.match()).isTrue();
         assertThat(match.description()).startsWith("weight(body:red in 0)");
         // Counts are longs and come as whole numbers; the score is a float.
@@ -281,7 +370,7 @@ class SearchHandlersTest {
         });
         assertThat(match.value()).contains(".");
 
-        Explanation miss = explain(new StartExplainParams(query, 1));
+        Explanation miss = explain(new StartExplainParams(query, BM25, 1));
         assertThat(miss.match()).isFalse();
     }
 
@@ -289,7 +378,8 @@ class SearchHandlersTest {
     void explainsOnlyDocumentsOfTheIndex() throws Exception {
         openIndex();
 
-        assertFails(() -> startExplain.handle(new StartExplainParams(classic("red"), 3)), ErrorCode.DOC_NOT_FOUND);
+        assertFails(
+                () -> startExplain.handle(new StartExplainParams(classic("red"), BM25, 3)), ErrorCode.DOC_NOT_FOUND);
         assertThat(errorCodeOf("startExplain.error-doc-not-found.json")).isEqualTo(ErrorCode.DOC_NOT_FOUND);
     }
 
@@ -340,7 +430,11 @@ class SearchHandlersTest {
     }
 
     private static StartSearchParams params(SearchQuery query, int offset, int limit, Optional<List<String>> fields) {
-        return new StartSearchParams(query, offset, limit, true, fields);
+        return new StartSearchParams(query, BM25, List.of(), offset, limit, true, fields);
+    }
+
+    private static StartSearchParams sorted(SearchQuery query, SortKey... sort) {
+        return new StartSearchParams(query, BM25, List.of(sort), 0, 10, true, Optional.of(List.of()));
     }
 
     private static List<Explanation> flatten(Explanation explanation) {
@@ -380,7 +474,8 @@ class SearchHandlersTest {
 
     /**
      * One segment: "red" (id 1), "blue" (id 2) with the binary key 0xff00, and a long "red …" (id 3);
-     * each with the int point {@code size}, 10 times its id.
+     * each with the int point {@code size}, 10 times its id, and the numeric doc values {@code rank},
+     * 100 minus that; and the sorted doc values {@code color}: "red" for id 1, "crimson" for id 3.
      */
     private void openIndex() throws Exception {
         Path dir = tmp.resolve("index");
@@ -392,6 +487,10 @@ class SearchHandlersTest {
                 doc.add(new StringField("id", Integer.toString(id), Field.Store.YES));
                 doc.add(new TextField("body", body, Field.Store.YES));
                 doc.add(new IntPoint("size", id * 10));
+                doc.add(new NumericDocValuesField("rank", 100 - id * 10));
+                if (id != 2) {
+                    doc.add(new SortedDocValuesField("color", new BytesRef(id == 1 ? "red" : "crimson")));
+                }
                 if (id == 2) {
                     doc.add(new StringField("key", new BytesRef(new byte[] {(byte) 0xff, 0}), Field.Store.NO));
                 }

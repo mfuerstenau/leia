@@ -1,5 +1,6 @@
 package io.github.mfuerstenau.leia.server;
 
+import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
@@ -33,6 +34,12 @@ public final class ByteStrings {
         } catch (CharacterCodingException e) {
             return new Encoded(hex(bytes), true);
         }
+    }
+
+    /** A byte string as {@link BytesValue}. */
+    public static BytesValue bytesValue(BytesRef bytes) {
+        Encoded encoded = encode(bytes);
+        return new BytesValue(encoded.value(), encoded.binary());
     }
 
     /**

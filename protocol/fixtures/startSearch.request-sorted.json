@@ -1,0 +1,25 @@
+{
+  "jsonrpc": "2.0",
+  "id": 26,
+  "method": "startSearch",
+  "params": {
+    "query": {
+      "term": {
+        "field": "title",
+        "term": {
+          "value": "lamp",
+          "binary": false
+        }
+      }
+    },
+    "similarity": {"bm25": {"k1": 1.2, "b": 0.75}},
+    "sort": [
+      {"field": "tags", "type": "STRING", "reverse": false},
+      {"field": "price", "type": "DOUBLE", "reverse": true}
+    ],
+    "offset": 4,
+    "limit": 3,
+    "exactTotalHits": false,
+    "fields": ["id"]
+  }
+}

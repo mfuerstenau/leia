@@ -1,8 +1,9 @@
-//! The search screen (ADR 0010, ADR 0011): a query line, the hits of the last query, and a
-//! details panel with the parsed query or the explanation of a hit. Searches and explanations run
-//! as server jobs; the next page of hits is fetched once the selection reaches the last row. Enter
-//! on a hit shows its document on the documents screen. The query parser options, point types
-//! included, are set in a popup.
+//! The search screen (ADR 0010, ADR 0011, ADR 0012): a query line, the hits of the last query,
+//! and a details panel with the parsed query or the explanation of a hit. Searches and
+//! explanations run as server jobs; the next page of hits is fetched once the selection reaches
+//! the last row. Enter on a hit shows its document on the documents screen, where `[`/`]` step
+//! through the hits. Popups set the query parser options (point types included), the similarity
+//! and the sort, and the stored fields per hit.
 
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
@@ -11,16 +12,19 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState, Wrap};
 
+use crate::form::FormEvent;
+use crate::hit_fields::{FieldsForm, HitFields};
 use crate::input::{Edit, LineInput, word_start};
 use crate::overview::{highlight, panel};
-use crate::parser_options::{FormEvent, OptionsForm, ParserSettings};
+use crate::parser_options::{OptionsForm, ParserSettings};
 use crate::protocol::document::{BytesValue, StoredValue};
 use crate::protocol::index::{IndexField, IndexOptions};
 use crate::protocol::search::{
     ClassicQuery, Explanation, GetExplainResult, GetSearchResult, Hit, MAX_WINDOW, QueryOperator,
-    SearchQuery, SearchResults, StandardQuery, StartExplainParams, StartSearchParams, TermQuery,
-    TotalHitsRelation,
+    SearchQuery, SearchResults, SortValue, StandardQuery, StartExplainParams, StartSearchParams,
+    TermQuery, TotalHitsRelation,
 };
+use crate::scoring::{ScoringForm, ScoringSettings};
 use crate::terms::{moved, number_width, tail_row};
 use crate::text::{bytes_text, escape_control};
 
@@ -28,9 +32,11 @@ use crate::text::{bytes_text, escape_control};
 pub const SEARCH_PAGE: i32 = 100;
 /// Rows that PageUp and PageDown scroll the details.
 const PAGE: u16 = 10;
+/// The widest the sort values of a hit get in the hit list.
+const MAX_SORT_WIDTH: usize = 32;
 
 /// What the caller has to start, stop or show for the search screen.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum Request {
     /// Cancel the jobs in `cancel`, then start this search and report back with
     /// [`Search::search_started`] or [`Search::search_failed`].
@@ -67,6 +73,14 @@ enum Focus {
     Details,
 }
 
+/// The popup that is open, if any.
+#[derive(Debug)]
+enum Popup {
+    Parser(OptionsForm),
+    Scoring(ScoringForm),
+    Fields(FieldsForm),
+}
+
 /// The hits of a query, as far as they are fetched.
 #[derive(Debug)]
 struct HitList {
@@ -82,11 +96,11 @@ struct HitList {
     error: Option<String>,
 }
 
-/// A submitted query and what came of it.
+/// A submitted search and what came of it.
 #[derive(Debug)]
 struct Submitted {
-    query: SearchQuery,
-    exact: bool,
+    /// The first page's params; later pages differ only in their offset and limit.
+    params: StartSearchParams,
     /// `None` until the first page is in.
     outcome: Option<Result<HitList, String>>,
 }
@@ -102,11 +116,10 @@ struct Running {
     docs_searched: i64,
 }
 
-/// The explanation of one hit for one query.
+/// The explanation of one hit for one query and similarity.
 #[derive(Debug)]
 struct Explain {
-    doc_id: i32,
-    query: SearchQuery,
+    params: StartExplainParams,
     /// `None` until the server has started the job.
     job_id: Option<i64>,
     /// `None` while the job runs.
@@ -122,8 +135,10 @@ pub struct Search {
     field: usize,
     operator: QueryOperator,
     parser: ParserSettings,
-    /// The parser options popup, while it is open.
-    form: Option<OptionsForm>,
+    scoring: ScoringSettings,
+    hit_fields: HitFields,
+    /// The popup that takes the keys, while it is open.
+    form: Option<Popup>,
     exact: bool,
     input: LineInput,
     /// Whether the input holds a binary term in hex, as the overview's top terms bring it. An
@@ -134,6 +149,8 @@ pub struct Search {
     submitted: Option<Submitted>,
     running: Option<Running>,
     explain: Option<Explain>,
+    /// Whether the documents screen waits for the next page to step to its first hit.
+    step_pending: bool,
     table: TableState,
     /// The first line of the details panel that is shown.
     details_scroll: u16,
@@ -163,6 +180,8 @@ impl Search {
             field,
             operator: QueryOperator::Or,
             parser: ParserSettings::new(fields),
+            scoring: ScoringSettings::new(fields),
+            hit_fields: HitFields::new(fields),
             form: None,
             exact: false,
             input: LineInput::new(""),
@@ -172,12 +191,13 @@ impl Search {
             submitted: None,
             running: None,
             explain: None,
+            step_pending: false,
             table: TableState::new(),
             details_scroll: 0,
         }
     }
 
-    /// Whether the query line or the options popup takes the keys, Esc included.
+    /// Whether the query line or a popup takes the keys, Esc included.
     pub fn prompting(&self) -> bool {
         self.editing || self.form.is_some()
     }
@@ -260,12 +280,20 @@ impl Search {
 
     /// Starts a search for the query line, stopping the jobs of the previous one.
     fn submit(&mut self) -> Option<Request> {
-        let query = self.query()?;
+        let params = StartSearchParams {
+            query: self.query()?,
+            similarity: self.scoring.similarity(),
+            sort: self.scoring.sort_keys(),
+            offset: 0,
+            limit: SEARCH_PAGE,
+            exact_total_hits: self.exact,
+            fields: self.hit_fields.param(),
+        };
         let cancel = self.jobs();
         self.explain = None;
+        self.step_pending = false;
         self.submitted = Some(Submitted {
-            query: query.clone(),
-            exact: self.exact,
+            params: params.clone(),
             outcome: None,
         });
         self.running = Some(Running {
@@ -276,16 +304,7 @@ impl Search {
         });
         self.table = TableState::new();
         self.details_scroll = 0;
-        Some(Request::Search {
-            params: StartSearchParams {
-                query,
-                offset: 0,
-                limit: SEARCH_PAGE,
-                exact_total_hits: self.exact,
-                fields: None,
-            },
-            cancel,
-        })
+        Some(Request::Search { params, cancel })
     }
 
     /// Searches again once a setting changed, if a query was submitted.
@@ -320,11 +339,9 @@ impl Search {
             return None;
         }
         let params = StartSearchParams {
-            query: submitted.query.clone(),
             offset,
             limit,
-            exact_total_hits: submitted.exact,
-            fields: None,
+            ..submitted.params.clone()
         };
         self.running = Some(Running {
             job_id: None,
@@ -362,6 +379,9 @@ impl Search {
                 list.total_hits = results.total_hits;
                 list.relation = results.total_hits_relation;
                 list.more = more_hits(full, list.hits.len(), list.total_hits, list.relation);
+                if std::mem::take(&mut self.step_pending) {
+                    return self.step(true);
+                }
             }
             _ if running.more => return None,
             outcome => {
@@ -380,6 +400,7 @@ impl Search {
 
     /// Shows why the search could not start or failed.
     pub fn search_failed(&mut self, error: String) {
+        self.step_pending = false;
         let Some(running) = self.running.take() else {
             return;
         };
@@ -407,27 +428,25 @@ impl Search {
 
     /// Explains the selected hit for the shown query, unless it is explained already.
     fn explain_selected(&mut self) -> Option<Request> {
-        let query = self.submitted.as_ref()?.query.clone();
-        let doc_id = self.selected_hit()?.doc_id;
+        let submitted = &self.submitted.as_ref()?.params;
+        let params = StartExplainParams {
+            query: submitted.query.clone(),
+            similarity: submitted.similarity,
+            doc_id: self.selected_hit()?.doc_id,
+        };
         if self.explain.as_ref().is_some_and(|explain| {
-            explain.doc_id == doc_id
-                && explain.query == query
-                && !matches!(explain.outcome, Some(Err(_)))
+            explain.params == params && !matches!(explain.outcome, Some(Err(_)))
         }) {
             return None;
         }
         let cancel = self.explain_job().into_iter().collect();
         self.explain = Some(Explain {
-            doc_id,
-            query: query.clone(),
+            params: params.clone(),
             job_id: None,
             outcome: None,
         });
         self.details_scroll = 0;
-        Some(Request::Explain {
-            params: StartExplainParams { query, doc_id },
-            cancel,
-        })
+        Some(Request::Explain { params, cancel })
     }
 
     pub fn explain_started(&mut self, job_id: i64) {
@@ -448,34 +467,60 @@ impl Search {
         }
     }
 
-    /// The explanation that belongs to the selected hit and the shown query, if any.
+    /// The explanation that belongs to the selected hit and the shown search, if any.
     fn shown_explanation(&self) -> Option<&Explain> {
         let explain = self.explain.as_ref()?;
-        let shows = Some(explain.doc_id) == self.selected_hit().map(|hit| hit.doc_id)
-            && Some(&explain.query) == self.submitted.as_ref().map(|s| &s.query);
+        let submitted = &self.submitted.as_ref()?.params;
+        let shows = Some(explain.params.doc_id) == self.selected_hit().map(|hit| hit.doc_id)
+            && explain.params.query == submitted.query
+            && explain.params.similarity == submitted.similarity;
         shows.then_some(explain)
     }
 
-    /// Edits the query line while it is open (Enter searches, Esc closes it), or the options
-    /// popup (Enter applies and searches again, Esc cancels). Otherwise `/` opens the line, `m`
-    /// cycles classic syntax, standard syntax and a term, `p` opens the parser options, `f`/`F`
-    /// step the field, `a` switches between OR and AND, `t` between an exact and an approximate
-    /// count, `x` explains the selected hit, Enter shows its document, and Tab switches between
-    /// the hits and the details.
+    /// Selects the previous or next hit and shows its document, for `[`/`]` on the documents
+    /// screen. Past the last hit, the next page is fetched first, if there is one.
+    pub fn step(&mut self, forward: bool) -> Option<Request> {
+        let len = self.hit_list()?.hits.len();
+        let selected = self.table.selected().unwrap_or_default();
+        let row = if forward {
+            selected + 1
+        } else {
+            selected.checked_sub(1)?
+        };
+        if row < len {
+            self.table.select(Some(row));
+            self.details_scroll = 0;
+            return self.selected_hit().map(|hit| Request::Document(hit.doc_id));
+        }
+        let request = self.next_page()?;
+        self.step_pending = true;
+        Some(request)
+    }
+
+    /// Edits the query line while it is open (Enter searches, Esc closes it), or a popup (Enter
+    /// applies and searches again, Esc cancels). Otherwise `/` opens the line, `m` cycles classic
+    /// syntax, standard syntax and a term, `p` opens the parser options, `s` the similarity and
+    /// the sort, `l` the stored fields per hit, `f`/`F` step the field, `a` switches between OR
+    /// and AND, `t` between an exact and an approximate count, `x` explains the selected hit,
+    /// Enter shows its document, and Tab switches between the hits and the details.
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<Request> {
         if let Some(form) = &mut self.form {
-            match form.handle_key(key.code) {
-                FormEvent::None => {}
-                FormEvent::Cancel => self.form = None,
-                FormEvent::Apply(settings) => {
+            let changed = match form {
+                Popup::Parser(form) => applied(form.handle_key(key.code), &mut self.parser),
+                Popup::Scoring(form) => applied(form.handle_key(key.code), &mut self.scoring),
+                Popup::Fields(form) => applied(form.handle_key(key.code), &mut self.hit_fields),
+            };
+            return match changed {
+                Applied::Open => None,
+                Applied::Closed => {
                     self.form = None;
-                    if settings != self.parser {
-                        self.parser = settings;
-                        return self.resubmit();
-                    }
+                    None
                 }
-            }
-            return None;
+                Applied::Changed => {
+                    self.form = None;
+                    self.resubmit()
+                }
+            };
         }
         if self.editing {
             match key.code {
@@ -503,7 +548,14 @@ impl Search {
                 return self.resubmit();
             }
             KeyCode::Char('p') if self.mode != Mode::Term => {
-                self.form = Some(OptionsForm::new(&self.parser, self.mode == Mode::Classic));
+                let form = OptionsForm::new(&self.parser, self.mode == Mode::Classic);
+                self.form = Some(Popup::Parser(form));
+            }
+            KeyCode::Char('s') => {
+                self.form = Some(Popup::Scoring(ScoringForm::new(&self.scoring)));
+            }
+            KeyCode::Char('l') => {
+                self.form = Some(Popup::Fields(FieldsForm::new(&self.hit_fields)));
             }
             KeyCode::Char('f') | KeyCode::Char('F') if !self.fields.is_empty() => {
                 let len = self.fields.len();
@@ -562,15 +614,19 @@ impl Search {
 
     /// The keys for the footer.
     pub fn keys(&self) -> &'static str {
-        if self.form.is_some() {
-            OptionsForm::keys()
-        } else if self.editing {
-            " ⏎ search   Esc done   ←→ Ctrl+A/E/U/K/W edit"
-        } else if self.mode != Mode::Term {
-            "/ query   m mode   p options   f/F field   a AND/OR   t count   x explain   \
-             ⏎ open doc   Tab panel   ↑↓"
-        } else {
-            "/ term   m mode   f/F field   t count   x explain   ⏎ open doc   Tab panel   ↑↓"
+        match &self.form {
+            Some(Popup::Parser(_)) => OptionsForm::keys(),
+            Some(Popup::Scoring(_)) => ScoringForm::keys(),
+            Some(Popup::Fields(_)) => FieldsForm::keys(),
+            None if self.editing => " ⏎ search   Esc done   ←→ Ctrl+A/E/U/K/W edit",
+            None if self.mode != Mode::Term => {
+                "/ query   m mode   p/s/l settings   f/F field   a AND/OR   t count   x explain   \
+                 ⏎ open doc   Tab panel   ↑↓"
+            }
+            None => {
+                "/ term   m mode   s/l settings   f/F field   t count   x explain   ⏎ open doc   \
+                 Tab panel   ↑↓"
+            }
         }
     }
 
@@ -593,8 +649,11 @@ impl Search {
         self.render_query(frame, query_area);
         self.render_hits(frame, hits_area);
         self.render_details(frame, details_area);
-        if let Some(form) = &self.form {
-            form.render(frame, area);
+        match &self.form {
+            Some(Popup::Parser(form)) => form.render(frame, area),
+            Some(Popup::Scoring(form)) => form.render(frame, area),
+            Some(Popup::Fields(form)) => form.render(frame, area),
+            None => {}
         }
     }
 
@@ -668,6 +727,9 @@ impl Search {
             Some(Ok(list)) => list,
         };
         let mut title = format!(" {} in {} ms ", list.total(), list.took_millis);
+        if let Some(sort) = self.scoring.sort_text() {
+            title.push_str(&format!("· sorted by {sort} "));
+        }
         if let Some(searching) = searching {
             title.push_str(&format!("· {searching} "));
         } else if list.error.is_some() {
@@ -682,12 +744,21 @@ impl Search {
         }
         let rank_width = list.hits.len().to_string().len().max(1) as u16;
         let doc_width = number_width(list.hits.iter().map(|hit| i64::from(hit.doc_id)));
+        let sort_texts: Vec<String> = list.hits.iter().map(sort_text).collect();
+        let sort_width = sort_texts
+            .iter()
+            .map(|text| text.chars().count())
+            .max()
+            .unwrap_or_default()
+            .min(MAX_SORT_WIDTH);
+        let sorted = sort_width > 0;
         let mut rows: Vec<Row> = list
             .hits
             .iter()
+            .zip(sort_texts)
             .enumerate()
-            .map(|(i, hit)| {
-                Row::new([
+            .map(|(i, (hit, sort))| {
+                let mut cells = vec![
                     Cell::from(format!(
                         "{:>rank_width$}",
                         i + 1,
@@ -699,25 +770,32 @@ impl Search {
                         doc_width = doc_width.into()
                     )),
                     Cell::from(format!("{:>9.4}", hit.score)),
-                    Cell::from(fields_text(hit)),
-                ])
+                ];
+                if sorted {
+                    cells.push(Cell::from(sort));
+                }
+                cells.push(Cell::from(fields_text(hit)));
+                Row::new(cells)
             })
             .collect();
         rows.extend(tail_row(list.more, list.error.as_deref()));
-        let header = Row::new(["#", "Doc", "    Score", "Fields"])
-            .style(Style::new().add_modifier(Modifier::BOLD));
-        let table = Table::new(
-            rows,
-            [
-                Constraint::Length(rank_width.max(1)),
-                Constraint::Length(doc_width),
-                Constraint::Length(9),
-                Constraint::Fill(1),
-            ],
-        )
-        .header(header)
-        .row_highlight_style(highlight(focused))
-        .block(block);
+        let mut header = vec!["#", "Doc", "    Score"];
+        let mut widths = vec![
+            Constraint::Length(rank_width.max(1)),
+            Constraint::Length(doc_width),
+            Constraint::Length(9),
+        ];
+        if sorted {
+            header.push("Sorted by");
+            widths.push(Constraint::Length(sort_width.max(9) as u16));
+        }
+        header.push("Fields");
+        widths.push(Constraint::Fill(1));
+        let header = Row::new(header).style(Style::new().add_modifier(Modifier::BOLD));
+        let table = Table::new(rows, widths)
+            .header(header)
+            .row_highlight_style(highlight(focused))
+            .block(block);
         frame.render_stateful_widget(table, area, &mut self.table);
     }
 
@@ -725,7 +803,7 @@ impl Search {
         let focused = self.focus == Focus::Details && !self.editing;
         let (title, lines) = match self.shown_explanation() {
             Some(explain) => (
-                format!(" Explanation of doc {} ", explain.doc_id),
+                format!(" Explanation of doc {} ", explain.params.doc_id),
                 match &explain.outcome {
                     None => vec![Line::from("Explaining…").style(dim())],
                     Some(Err(error)) => {
@@ -779,6 +857,8 @@ impl Search {
             .map(|line| line.style(dim()))
             .collect();
             lines.extend(self.parser_lines());
+            lines.push(Line::from(""));
+            lines.push(self.settings_line());
             return lines;
         };
         let mut lines = vec![
@@ -789,22 +869,40 @@ impl Search {
             )),
         ];
         lines.extend(self.parser_lines());
+        lines.push(Line::from(""));
         if !list.hits.is_empty() {
-            lines.push(Line::from(""));
             lines.push(Line::from("x explains the selected hit.").style(dim()));
         }
+        lines.push(self.settings_line());
         lines
+    }
+
+    /// What the settings popups set, for the footer's `p/s/l settings`.
+    fn settings_line(&self) -> Line<'static> {
+        let popups = if self.mode == Mode::Term {
+            "s similarity and sort · l stored fields per hit"
+        } else {
+            "p parser options · s similarity and sort · l stored fields per hit"
+        };
+        Line::from(popups).style(dim())
     }
 }
 
 impl Search {
-    /// The parser options that differ from Lucene's defaults, and the point types of the
-    /// standard parser.
+    /// The parser options that differ from Lucene's defaults, the point types of the standard
+    /// parser, a similarity other than Lucene's default, and the stored fields per hit unless
+    /// they are all of them.
     fn parser_lines(&self) -> Vec<Line<'static>> {
-        if self.mode == Mode::Term {
-            return Vec::new();
-        }
         let mut lines = Vec::new();
+        if let Some(similarity) = self.scoring.similarity_text() {
+            lines.push(Line::from(format!("Similarity {similarity}")));
+        }
+        if let Some(fields) = self.hit_fields.text() {
+            lines.push(Line::from(format!("Fields     {fields}")));
+        }
+        if self.mode == Mode::Term {
+            return lines;
+        }
         let changed = self.parser.changed(self.mode == Mode::Classic);
         if !changed.is_empty() {
             lines.push(Line::from(format!("Options    {}", changed.join(" · "))));
@@ -848,6 +946,47 @@ fn more_hits(full: bool, fetched: usize, total: i64, relation: TotalHitsRelation
     full && fetched < MAX_WINDOW as usize
         && (relation == TotalHitsRelation::GreaterThanOrEqualTo
             || i64::try_from(fetched).unwrap_or(i64::MAX) < total)
+}
+
+/// The values a hit was sorted by, one after the other; `–` for a missing value.
+fn sort_text(hit: &Hit) -> String {
+    hit.sort_values
+        .iter()
+        .map(|value| match value {
+            SortValue {
+                number: Some(number),
+                ..
+            } => number.clone(),
+            SortValue {
+                term: Some(term), ..
+            } => bytes_text(&term.value, term.binary),
+            SortValue { .. } => "–".to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+/// What a key did to a popup, once its outcome is applied.
+enum Applied {
+    /// The popup stays open.
+    Open,
+    /// The popup closed without a change.
+    Closed,
+    /// The popup closed and changed a setting.
+    Changed,
+}
+
+/// Applies a popup's outcome to `settings`.
+fn applied<T: PartialEq>(event: FormEvent<T>, settings: &mut T) -> Applied {
+    match event {
+        FormEvent::None => Applied::Open,
+        FormEvent::Cancel => Applied::Closed,
+        FormEvent::Apply(new) if new == *settings => Applied::Closed,
+        FormEvent::Apply(new) => {
+            *settings = new;
+            Applied::Changed
+        }
+    }
 }
 
 /// The stored fields of a hit on one line: `name=value, value  name=value`. A value that the
@@ -904,7 +1043,17 @@ mod tests {
     use super::*;
     use crate::protocol::document::StoredType;
     use crate::protocol::index::{DocValuesType, TermStats};
-    use crate::protocol::search::{HitField, ParserOptions, PointField, PointType};
+    use crate::protocol::search::{
+        Bm25Similarity, ClassicSimilarity, HitField, ParserOptions, PointField, PointType,
+        Similarity, SortKey, SortType,
+    };
+
+    fn bm25() -> Similarity {
+        Similarity {
+            bm25: Some(Bm25Similarity { k1: 1.2, b: 0.75 }),
+            ..Similarity::default()
+        }
+    }
 
     fn field(name: &str, index_options: IndexOptions) -> IndexField {
         IndexField {
@@ -935,8 +1084,9 @@ mod tests {
         }
     }
 
-    /// `id` (docs only), `stored` (no postings), `title` and `body` (positions), and the points
-    /// `price` (8 bytes) and `quantity` (4 bytes).
+    /// `id` (docs only), `stored` (no postings), `title` and `body` (positions), the points
+    /// `price` (8 bytes, with numeric doc values) and `quantity` (4 bytes), and `category`
+    /// (sorted doc values).
     fn search() -> Search {
         Search::new(
             &[
@@ -944,8 +1094,16 @@ mod tests {
                 field("stored", IndexOptions::None),
                 field("title", IndexOptions::DocsAndFreqsAndPositions),
                 field("body", IndexOptions::DocsAndFreqsAndPositionsAndOffsets),
-                point("price", 8),
+                IndexField {
+                    doc_values_type: DocValuesType::Numeric,
+                    ..point("price", 8)
+                },
                 point("quantity", 4),
+                IndexField {
+                    doc_values_type: DocValuesType::Sorted,
+                    terms: None,
+                    ..field("category", IndexOptions::None)
+                },
             ],
             500,
         )
@@ -984,6 +1142,8 @@ mod tests {
         Some(Request::Search {
             params: StartSearchParams {
                 query,
+                similarity: bm25(),
+                sort: vec![],
                 offset,
                 limit,
                 exact_total_hits: false,
@@ -997,6 +1157,7 @@ mod tests {
         Hit {
             doc_id,
             score: 1.5,
+            sort_values: vec![],
             fields: vec![HitField {
                 name: "id".to_owned(),
                 values: vec![StoredValue {
@@ -1384,6 +1545,7 @@ mod tests {
             Some(Request::Explain {
                 params: StartExplainParams {
                     query: query.clone(),
+                    similarity: bm25(),
                     doc_id: 0,
                 },
                 cancel: vec![],
@@ -1422,6 +1584,142 @@ mod tests {
             press(&mut search, KeyCode::Char('x')),
             Some(Request::Explain { params, .. }) if params.doc_id == 1
         ));
+    }
+
+    #[test]
+    fn the_sort_popup_searches_again_and_the_hits_show_their_sort_values() {
+        let mut search = searched(2, 2);
+
+        assert_eq!(press(&mut search, KeyCode::Char('s')), None);
+        assert!(search.prompting());
+        assert!(render(&mut search).contains("Similarity and sort"));
+        // Similarity, k1, b, then "Sort by": price, read as LONG.
+        for code in [KeyCode::Down, KeyCode::Down, KeyCode::Down, KeyCode::Right] {
+            assert_eq!(press(&mut search, code), None);
+        }
+        let Some(Request::Search { params, .. }) = press(&mut search, KeyCode::Enter) else {
+            panic!("applying searches again");
+        };
+        assert_eq!(
+            params.sort,
+            vec![SortKey {
+                field: "price".to_owned(),
+                sort_type: SortType::Long,
+                reverse: false,
+            }]
+        );
+        assert_eq!(params.similarity, bm25());
+        search.search_started(2);
+        let mut page = results(0..2, 2);
+        let found = page.results.as_mut().unwrap();
+        found.hits[0].sort_values = vec![SortValue {
+            number: Some("4621819117588971520".to_owned()),
+            term: None,
+        }];
+        found.hits[1].sort_values = vec![SortValue {
+            number: None,
+            term: None,
+        }];
+        search.search_progress(page);
+
+        let screen = render(&mut search);
+        assert!(screen.contains("sorted by price ↑"), "{screen}");
+        assert!(screen.contains("Sorted by"), "{screen}");
+        assert!(screen.contains("4621819117588971520"), "{screen}");
+        assert!(screen.contains("–"), "{screen}");
+    }
+
+    #[test]
+    fn the_similarity_goes_to_the_search_and_its_explanations() {
+        let mut search = searched(2, 2);
+
+        press(&mut search, KeyCode::Char('s'));
+        press(&mut search, KeyCode::Char(' '));
+        let Some(Request::Search { params, .. }) = press(&mut search, KeyCode::Enter) else {
+            panic!("applying searches again");
+        };
+        let classic = Similarity {
+            classic: Some(ClassicSimilarity {}),
+            ..Similarity::default()
+        };
+        assert_eq!(params.similarity, classic);
+        assert!(params.sort.is_empty());
+        search.search_started(2);
+        search.search_progress(results(0..2, 2));
+        assert!(
+            render(&mut search).contains("Similarity classic TF-IDF"),
+            "{}",
+            render(&mut search)
+        );
+        assert!(matches!(
+            press(&mut search, KeyCode::Char('x')),
+            Some(Request::Explain { params, .. }) if params.similarity == classic
+        ));
+        // Esc in the popup changes nothing.
+        press(&mut search, KeyCode::Char('s'));
+        press(&mut search, KeyCode::Char(' '));
+        assert_eq!(press(&mut search, KeyCode::Esc), None);
+        assert!(!search.prompting());
+    }
+
+    #[test]
+    fn the_fields_popup_chooses_the_stored_fields_per_hit() {
+        let mut search = searched(2, 2);
+
+        assert_eq!(press(&mut search, KeyCode::Char('l')), None);
+        assert!(render(&mut search).contains("Stored fields per hit"));
+        press(&mut search, KeyCode::Char('n'));
+        press(&mut search, KeyCode::Char(' '));
+        let Some(Request::Search { params, .. }) = press(&mut search, KeyCode::Enter) else {
+            panic!("applying searches again");
+        };
+        assert_eq!(params.fields, Some(vec!["id".to_owned()]));
+        search.search_started(2);
+        search.search_progress(results(0..2, 2));
+        assert!(render(&mut search).contains("Fields     id"));
+
+        // The next page asks for the same fields.
+        let mut search = searched(SEARCH_PAGE, 150);
+        press(&mut search, KeyCode::Char('l'));
+        press(&mut search, KeyCode::Char(' '));
+        press(&mut search, KeyCode::Enter);
+        search.search_started(2);
+        search.search_progress(results(0..SEARCH_PAGE, 150));
+        let Some(Request::Search { params, .. }) = press(&mut search, KeyCode::End) else {
+            panic!("the last row fetches the next page");
+        };
+        assert_eq!(params.offset, SEARCH_PAGE);
+        assert_eq!(params.fields.unwrap().len(), 6);
+    }
+
+    #[test]
+    fn steps_through_the_hits_and_into_the_next_page() {
+        let mut search = searched(SEARCH_PAGE, 150);
+
+        assert_eq!(search.step(false), None);
+        assert_eq!(search.step(true), Some(Request::Document(1)));
+        for doc_id in 2..SEARCH_PAGE {
+            assert_eq!(search.step(true), Some(Request::Document(doc_id)));
+        }
+        // Past the last hit: the next page first, then its first hit.
+        let next = search.step(true);
+        assert_eq!(
+            next,
+            request(
+                classic("red", "title", QueryOperator::Or),
+                SEARCH_PAGE,
+                SEARCH_PAGE,
+                vec![]
+            )
+        );
+        assert_eq!(search.step(true), None);
+        search.search_started(2);
+        assert_eq!(
+            search.search_progress(results(100..150, 150)),
+            Some(Request::Document(100))
+        );
+        assert_eq!(search.step(false), Some(Request::Document(99)));
+        assert!(render(&mut search).contains("150 hits"));
     }
 
     #[test]

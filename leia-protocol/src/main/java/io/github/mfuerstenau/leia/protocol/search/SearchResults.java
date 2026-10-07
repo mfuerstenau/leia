@@ -9,7 +9,7 @@ import java.util.List;
  * @param rewrittenQuery the query after rewriting, as Lucene writes it
  * @param totalHits how many documents match
  * @param totalHitsRelation whether {@code totalHits} is exact or a lower bound
- * @param hits the hits of the page, best first
+ * @param hits the hits of the page, best first or in the order of the sort
  * @param tookMillis how long the search took, in milliseconds
  */
 public record SearchResults(

@@ -10,8 +10,10 @@ import io.github.mfuerstenau.leia.protocol.job.JobStarted;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.HitField;
 import io.github.mfuerstenau.leia.protocol.search.SearchResults;
+import io.github.mfuerstenau.leia.protocol.search.SortValue;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.TotalHitsRelation;
+import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
@@ -23,6 +25,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.Sort;
+import org.apache.lucene.search.similarities.Similarity;
 
 /**
  * {@code startSearch}: checks the params and parses the query at once, then searches the {@link
@@ -67,17 +71,22 @@ public final class StartSearchHandler implements MethodHandler<StartSearchParams
             }
         }
         Query query = SearchQueries.query(index, params.query());
+        Similarity similarity = SearchQueries.similarity(params.similarity());
+        Optional<Sort> sort = SearchQueries.sort(index, params.sort());
         boolean exact = params.exactTotalHits();
         long jobId = jobs.start(
-                "search " + query + ", hits " + offset + " to " + (offset + limit),
+                "search " + query + sort.map(s -> " sorted by " + s).orElse("") + " with " + similarity + ", hits "
+                        + offset + " to " + (offset + limit),
                 SearchResults.class,
-                progress -> search(index, query, offset, limit, exact, fields, progress));
+                progress -> search(index, query, similarity, sort, offset, limit, exact, fields, progress));
         return new JobStarted(jobId);
     }
 
     private static SearchResults search(
             ReadOnlyIndex index,
             Query query,
+            Similarity similarity,
+            Optional<Sort> sort,
             int offset,
             int limit,
             boolean exact,
@@ -85,7 +94,7 @@ public final class StartSearchHandler implements MethodHandler<StartSearchParams
             ScanProgress progress)
             throws RpcException {
         try {
-            return toResults(index.search(query, offset, limit, exact, fields, progress));
+            return toResults(index.search(query, similarity, sort, offset, limit, exact, fields, progress));
         } catch (InvalidQueryException e) {
             throw SearchQueries.invalidQuery(e);
         } catch (IOException e) {
@@ -114,6 +123,10 @@ public final class StartSearchHandler implements MethodHandler<StartSearchParams
                                 .map(value -> GetDocumentHandler.storedValue(value, SearchResults.MAX_VALUE_LENGTH))
                                 .toList()))
                 .toList();
-        return new Hit(hit.docId(), hit.score(), fields);
+        List<SortValue> sortValues = hit.sortValues().stream()
+                .map(value -> new SortValue(
+                        value.number().map(Number::toString), value.term().map(ByteStrings::bytesValue)))
+                .toList();
+        return new Hit(hit.docId(), hit.score(), sortValues, fields);
     }
 }

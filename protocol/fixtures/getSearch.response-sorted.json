@@ -1,0 +1,49 @@
+{
+  "jsonrpc": "2.0",
+  "id": 27,
+  "result": {
+    "docsSearched": 500,
+    "results": {
+      "query": "title:lamp",
+      "rewrittenQuery": "title:lamp",
+      "totalHits": 19,
+      "totalHitsRelation": "EQUAL_TO",
+      "hits": [
+        {
+          "docId": 223,
+          "score": 1.8514276,
+          "sortValues": [{}, {"number": "97.57"}],
+          "fields": [
+            {
+              "name": "id",
+              "values": [{"type": "STRING", "value": "doc-0223", "binary": false}]
+            }
+          ]
+        },
+        {
+          "docId": 132,
+          "score": 1.6398076,
+          "sortValues": [{"term": {"value": "bestseller", "binary": false}}, {"number": "428.97"}],
+          "fields": [
+            {
+              "name": "id",
+              "values": [{"type": "STRING", "value": "doc-0132", "binary": false}]
+            }
+          ]
+        },
+        {
+          "docId": 499,
+          "score": 1.6398076,
+          "sortValues": [{"term": {"value": "bestseller", "binary": false}}, {"number": "278.69"}],
+          "fields": [
+            {
+              "name": "id",
+              "values": [{"type": "STRING", "value": "doc-0499", "binary": false}]
+            }
+          ]
+        }
+      ],
+      "tookMillis": 4
+    }
+  }
+}

@@ -25,10 +25,11 @@ because Lucene 10 can't read them.
   documents, deletions, versions, codec and codec formats, diagnostics, attributes and files with
   their sizes.
 - **Search:** a query in Lucene's classic or standard syntax or a single term, with the parsers'
-  options and ranges on point fields, the hits with their scores and stored fields, exact or
-  approximate hit counts, and an explanation of how a hit scores.
+  options and ranges on point fields, scored with BM25, classic TF-IDF or boolean similarity and
+  sorted by score or by up to two doc values fields; the hits with their scores, sort values and
+  chosen stored fields, exact or approximate hit counts, and an explanation of how a hit scores.
 
-Analysis, more search options and the rest of Luke's read-only features are still to come (see
+Analysis, More-Like-This and the rest of Luke's read-only features are still to come (see
 [`docs/tasklist.md`](docs/tasklist.md)).
 
 ## Requirements
@@ -194,6 +195,8 @@ shows as missing. The documents and terms screens always show the opened commit.
 | `/` | edit the query; `Enter` searches, `Esc` leaves the line, and `←` `→`, `Ctrl+A` `E` `U` `K` `W` edit |
 | `m` | switch between classic query syntax, standard query syntax and a single term |
 | `p` | set the parser options, and for the standard syntax the type of each point field; `Enter` applies, `Esc` cancels |
+| `s` | set the similarity (BM25 with `k1` and `b`, classic TF-IDF or boolean) and the sort; `Enter` applies, `Esc` cancels |
+| `l` | choose the stored fields each hit shows; `Space` shows or hides one, `a` all, `n` none |
 | `f` `F` | step through the fields with postings: the default field of a query, or the field of a term |
 | `a` | combine clauses without an operator with OR or AND |
 | `t` | count every hit, or stop counting after 1000 |
@@ -212,8 +215,23 @@ the types in use. In the same popup are the parser options: leading wildcards, p
 prefix length and position increments for both parsers, and fuzzy max edits, whitespace splitting
 and auto-generated phrases for the classic one. A term query searches the field for
 the line exactly as typed, `:` and spaces included, without analysis. A changed setting searches
-again. The hits come 100 at a time, the next ones once the selection reaches the last row, up to
-the first 10,000. Each hit shows its stored fields, with long values cut. The details panel shows
+again.
+
+`s` sets what scores the hits and how they are ordered. The similarity also scores the
+explanations, so an explanation always adds up to the score shown. "Discount overlaps" is not offered:
+Lucene only reads it while indexing. The hits are sorted by score, or by up to two fields with
+numeric, sorted or sorted set doc values, each ascending or descending. A sorted hit keeps its score
+and shows the values it was sorted by (`–` for a document without a value). Numeric doc values
+are read as LONG unless you choose INT, FLOAT or DOUBLE, since the index doesn't record the type:
+LONG orders Lucene's own number fields right, and raw double or float bits
+(`DoubleDocValuesField`) need DOUBLE or FLOAT. A wrong type orders the hits wrongly but never fails.
+Lucene's defaults apply to multi-valued fields (the smallest value) and to documents without a value
+(0 for numbers, first for strings).
+
+The hits come 100 at a time, the next ones once the selection reaches the last row, up to
+the first 10,000. Each hit shows its stored fields, all of them or those chosen with `l`, with long
+values cut. A document opened from a hit steps through the hits with `[` and `]` on the documents
+screen, fetching the next page as needed. The details panel shows
 the parsed and the rewritten query, or after `x` the explanation of the selected hit as Lucene
 computes it; parts that don't match are dimmed. Searches and explanations run in the server, so
 `Esc` stops a slow one, such as a fuzzy query on a large index. A numeric range in classic syntax

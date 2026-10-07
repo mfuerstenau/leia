@@ -5,10 +5,9 @@
 use ratatui::Frame;
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Clear, Paragraph};
 
+use crate::form::{FormEvent, dim, render_popup, row, type_digit};
 use crate::protocol::index::IndexField;
 use crate::protocol::search::{MAX_FUZZY_EDITS, ParserOptions, PointField, PointType};
 use crate::text::escape_control;
@@ -143,14 +142,6 @@ enum Row {
     Point(usize),
 }
 
-/// What a key did to the popup.
-#[derive(Debug, PartialEq, Eq)]
-pub enum FormEvent {
-    None,
-    Apply(ParserSettings),
-    Cancel,
-}
-
 /// The popup: a draft of the settings, applied with Enter.
 #[derive(Debug)]
 pub struct OptionsForm {
@@ -195,7 +186,7 @@ impl OptionsForm {
 
     /// ↑↓ select a row; ←→, Space, `-`/`+` change it; digits and Backspace edit a number; Enter
     /// applies, Esc cancels.
-    pub fn handle_key(&mut self, key: KeyCode) -> FormEvent {
+    pub fn handle_key(&mut self, key: KeyCode) -> FormEvent<ParserSettings> {
         let rows = self.rows();
         let row = rows[self.selected.min(rows.len() - 1)];
         match key {
@@ -212,10 +203,8 @@ impl OptionsForm {
                 self.change(row, 1);
             }
             KeyCode::Char(c) if c.is_ascii_digit() => {
-                let digit = c.to_digit(10).map_or(0, |d| d as i32);
                 if let Some((number, max)) = self.number(row) {
-                    let typed = *number * 10 + digit;
-                    *number = if typed <= max { typed } else { digit.min(max) };
+                    type_digit(number, c, max);
                 }
             }
             KeyCode::Backspace => {
@@ -293,15 +282,15 @@ impl OptionsForm {
         let draft = &self.draft;
         let mut lines: Vec<Line> = Vec::new();
         let mut selected_line = 0;
-        for (i, row) in rows.iter().enumerate() {
-            if *row == Row::Point(0) {
+        for (i, row_kind) in rows.iter().enumerate() {
+            if *row_kind == Row::Point(0) {
                 lines.push(Line::from(""));
                 lines.push(Line::from(Span::styled(
                     "Point types, guessed: the index doesn't say",
                     dim(),
                 )));
             }
-            let (label, value) = match *row {
+            let (label, value) = match *row_kind {
                 Row::LeadingWildcard => (
                     "Leading wildcard".to_owned(),
                     switch(draft.options.allow_leading_wildcard),
@@ -338,12 +327,7 @@ impl OptionsForm {
             if i == selected {
                 selected_line = lines.len();
             }
-            let line = Line::from(format!("{label:<22.22} {value}"));
-            lines.push(if i == selected {
-                line.style(Style::new().add_modifier(Modifier::REVERSED))
-            } else {
-                line
-            });
+            lines.push(row(&label, &value, i == selected));
         }
         if !self.classic && draft.points.is_empty() {
             lines.push(Line::from(""));
@@ -352,28 +336,12 @@ impl OptionsForm {
                 dim(),
             )));
         }
-        let width = area.width.min(48);
-        let height = (lines.len() as u16 + 2).min(area.height);
-        let popup = Rect {
-            x: area.x + (area.width - width) / 2,
-            y: area.y + (area.height - height) / 2,
-            width,
-            height,
-        };
-        let inner_height = height.saturating_sub(2) as usize;
-        let scroll = (selected_line + 1).saturating_sub(inner_height);
         let title = if self.classic {
             " Classic parser options "
         } else {
             " Standard parser options "
         };
-        frame.render_widget(Clear, popup);
-        frame.render_widget(
-            Paragraph::new(lines)
-                .scroll((scroll as u16, 0))
-                .block(Block::bordered().title(title)),
-            popup,
-        );
+        render_popup(frame, area, title, lines, selected_line, 48);
     }
 }
 
@@ -389,10 +357,6 @@ fn type_name(point_type: Option<PointType>) -> &'static str {
         Some(PointType::Double) => "DOUBLE",
         None => "text",
     }
-}
-
-fn dim() -> Style {
-    Style::new().add_modifier(Modifier::DIM)
 }
 
 #[cfg(test)]

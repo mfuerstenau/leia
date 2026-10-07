@@ -79,3 +79,11 @@ their own indexes and the Lucene 9 and 8 indexes from `LegacyIndexWriter`.
 - Standard syntax (`m`), `title:lamp AND price:[10 TO 20]`: no hits while `price` is guessed to be
   LONG (the details panel says so). With `p`, set `price` to DOUBLE: 1 hit, doc 196.
   `quantity>=50` needs no change, since `quantity` is an int point.
+- `title:lamp`, then `s`: sort by `price`, read as DOUBLE, descending (doc 51, 495.49, first), then
+  by `tags`: hits without tags show `–`. Read as LONG, `price` orders by its raw double bits, which
+  for these positive prices is the same order with odd numbers; read as INT, it orders by their
+  low 32 bits, which is nonsense, but no error.
+- `title:lamp` with `s` set to classic TF-IDF: doc 51 scores 2.4358, and `x` shows the
+  `ClassicSimilarity` explanation with the same value. Boolean scores every hit 1.
+- `body:the`: 471 hits. `Enter` on the first, then `]` a hundred times on the documents screen:
+  the second page is fetched on the way to hit 101 (doc 418).

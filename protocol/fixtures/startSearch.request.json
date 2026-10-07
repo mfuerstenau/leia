@@ -19,6 +19,8 @@
         "autoGeneratePhraseQueries": false
       }
     },
+    "similarity": {"bm25": {"k1": 1.2, "b": 0.75}},
+    "sort": [],
     "offset": 0,
     "limit": 2,
     "exactTotalHits": true,

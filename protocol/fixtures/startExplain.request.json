@@ -12,6 +12,7 @@
         }
       }
     },
+    "similarity": {"boolean": {}},
     "docId": 223
   }
 }

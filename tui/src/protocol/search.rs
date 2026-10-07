@@ -1,4 +1,4 @@
-//! Searching the open index and explaining a hit (ADR 0010). Mirrors
+//! Searching the open index and explaining a hit (ADR 0010, ADR 0011, ADR 0012). Mirrors
 //! `io.github.mfuerstenau.leia.protocol.search`.
 
 use serde::{Deserialize, Serialize};
@@ -8,10 +8,12 @@ use super::job::{JobParams, JobStarted};
 use super::method::RpcMethod;
 
 /// `startSearch`: starts a job that searches the open index and returns one page of hits with
-/// their stored fields (ADR 0010, ADR 0011). Fails with `NO_INDEX_OPEN`, `INVALID_QUERY` if the
-/// expression doesn't parse, `FIELD_NOT_FOUND` for an unknown default field, term field, point
-/// field or field to send, or `INVALID_PARAMS` for a page out of range, a query without exactly
-/// one alternative, a parser option out of range, or a point type that doesn't fit its field.
+/// their stored fields (ADR 0010, ADR 0011, ADR 0012). Fails with `NO_INDEX_OPEN`,
+/// `INVALID_QUERY` if the expression doesn't parse, `FIELD_NOT_FOUND` for an unknown default
+/// field, term field, point field, sort field or field to send, or `INVALID_PARAMS` for a page out
+/// of range, a query or similarity without exactly one alternative, a parser option or BM25
+/// parameter out of range, a point type that doesn't fit its field, or a sort field without doc
+/// values of the sort type.
 pub enum StartSearch {}
 
 impl RpcMethod for StartSearch {
@@ -20,11 +22,15 @@ impl RpcMethod for StartSearch {
     type Result = JobStarted;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StartSearchParams {
     pub query: SearchQuery,
-    /// How many of the best hits to skip; `offset + limit` is at most [`MAX_WINDOW`].
+    /// What scores the hits.
+    pub similarity: Similarity,
+    /// The order of the hits, one key after the other; empty for the best score first.
+    pub sort: Vec<SortKey>,
+    /// How many of the first hits to skip; `offset + limit` is at most [`MAX_WINDOW`].
     pub offset: i32,
     /// The most hits the page has, from 1 to [`MAX_SEARCH_LIMIT`].
     pub limit: i32,
@@ -53,6 +59,66 @@ pub struct SearchQuery {
     /// A query for exactly one term.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub term: Option<TermQuery>,
+}
+
+/// What scores the hits, as one of several alternatives: exactly one is present (ADR 0012).
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Similarity {
+    /// Lucene's default, `BM25Similarity`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bm25: Option<Bm25Similarity>,
+    /// TF-IDF, `ClassicSimilarity`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub classic: Option<ClassicSimilarity>,
+    /// `BooleanSimilarity`: a matching term scores its boost.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub boolean: Option<BooleanSimilarity>,
+}
+
+/// `BM25Similarity` with its parameters: Java `float`s, which the server reads from the shortest
+/// decimal of an `f64` as it would from an `f32`'s.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Bm25Similarity {
+    /// How quickly a term's frequency saturates, finite and 0 or more (Lucene: 1.2).
+    pub k1: f64,
+    /// How much the field length normalizes, from 0 to 1 (Lucene: 0.75).
+    pub b: f64,
+}
+
+/// `ClassicSimilarity`, TF-IDF; it has no parameters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClassicSimilarity {}
+
+/// `BooleanSimilarity`: a matching term scores its boost; it has no parameters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BooleanSimilarity {}
+
+/// One level of the order of the hits (ADR 0012).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SortKey {
+    /// A field with doc values other than `BINARY`.
+    pub field: String,
+    #[serde(rename = "type")]
+    pub sort_type: SortType,
+    /// Whether the largest value comes first.
+    pub reverse: bool,
+}
+
+/// How a field's doc values are read to sort by them: numeric doc values as `Int`, `Long`,
+/// `Float` or `Double`, sorted and sorted set doc values as `String`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SortType {
+    Int,
+    Long,
+    Float,
+    Double,
+    String,
 }
 
 /// An expression for Lucene's classic `QueryParser`, analyzed with `StandardAnalyzer`.
@@ -190,7 +256,7 @@ pub struct SearchResults {
     pub total_hits: i64,
     /// Whether `total_hits` is exact or a lower bound.
     pub total_hits_relation: TotalHitsRelation,
-    /// The hits of the page, best first.
+    /// The hits of the page, best first or in the order of the sort.
     pub hits: Vec<Hit>,
     /// How long the search took, in milliseconds.
     pub took_millis: i64,
@@ -214,8 +280,11 @@ pub enum TotalHitsRelation {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Hit {
     pub doc_id: i32,
-    /// The document's score for the query: a Java `float`, which an `f64` holds exactly.
+    /// The document's score for the query: a Java `float`, which an `f64` holds exactly. Sorted
+    /// hits have their scores too.
     pub score: f64,
+    /// The values the hit was sorted by, one per sort key; empty without a sort.
+    pub sort_values: Vec<SortValue>,
     /// The document's stored values in the fields asked for, in the order of each field's first
     /// value; values longer than [`MAX_HIT_VALUE_LENGTH`] bytes are cut.
     pub fields: Vec<HitField>,
@@ -230,8 +299,21 @@ pub struct HitField {
     pub values: Vec<StoredValue>,
 }
 
-/// `startExplain`: starts a job that explains how a document scores for a query, or why it
-/// doesn't match (ADR 0010). Fails as `startSearch` does, and with `DOC_NOT_FOUND` for an id
+/// The value a hit was sorted by in one sort key (ADR 0012). At most one is present; neither is
+/// for a document without a value in a `String` sort.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SortValue {
+    /// The number of a numeric sort, as Java writes it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub number: Option<String>,
+    /// The term of a `String` sort, as text or hex.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub term: Option<BytesValue>,
+}
+
+/// `startExplain`: starts a job that explains how a document scores for a query with a
+/// similarity, or why it doesn't match (ADR 0010, ADR 0012). Fails as `startSearch` does, and with `DOC_NOT_FOUND` for an id
 /// outside 0 to maxDoc - 1.
 pub enum StartExplain {}
 
@@ -241,10 +323,12 @@ impl RpcMethod for StartExplain {
     type Result = JobStarted;
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StartExplainParams {
     pub query: SearchQuery,
+    /// What scores the document: the search's, for the explanation to match its score.
+    pub similarity: Similarity,
     /// The document to explain, from 0 to maxDoc - 1.
     pub doc_id: i32,
 }
@@ -307,9 +391,29 @@ mod tests {
 
     #[test]
     fn scores_keep_the_digits_of_a_float() {
-        let json = r#"{"docId":3,"score":2.8514276,"fields":[]}"#;
+        let json = r#"{"docId":3,"score":2.8514276,"sortValues":[],"fields":[]}"#;
         let hit: Hit = serde_json::from_str(json).unwrap();
         assert_eq!(serde_json::to_string(&hit).unwrap(), json);
+    }
+
+    #[test]
+    fn similarities_have_only_their_alternative() {
+        let bm25 = Similarity {
+            bm25: Some(Bm25Similarity { k1: 1.2, b: 0.75 }),
+            ..Similarity::default()
+        };
+        assert_eq!(
+            serde_json::to_string(&bm25).unwrap(),
+            r#"{"bm25":{"k1":1.2,"b":0.75}}"#
+        );
+        let boolean = Similarity {
+            boolean: Some(BooleanSimilarity {}),
+            ..Similarity::default()
+        };
+        assert_eq!(
+            serde_json::to_string(&boolean).unwrap(),
+            r#"{"boolean":{}}"#
+        );
     }
 
     #[test]

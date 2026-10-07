@@ -5,7 +5,6 @@ import io.github.mfuerstenau.leia.core.TermPage;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
-import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
@@ -47,7 +46,7 @@ public final class GetTermsHandler implements MethodHandler<GetTermsParams, GetT
             TermPage page = index.terms(field, from, params.limit());
             return new GetTermsResult(
                     page.terms().stream().map(GetTermsHandler::entry).toList(),
-                    page.next().map(GetTermsHandler::bytesValue));
+                    page.next().map(ByteStrings::bytesValue));
         } catch (IOException e) {
             throw new RpcException(
                     ErrorCode.INDEX_NOT_READABLE,
@@ -59,10 +58,5 @@ public final class GetTermsHandler implements MethodHandler<GetTermsParams, GetT
     private static TermEntry entry(TermPage.Entry entry) {
         ByteStrings.Encoded term = ByteStrings.encode(entry.term());
         return new TermEntry(term.value(), term.binary(), entry.docFreq(), entry.totalTermFreq());
-    }
-
-    private static BytesValue bytesValue(BytesRef bytes) {
-        ByteStrings.Encoded encoded = ByteStrings.encode(bytes);
-        return new BytesValue(encoded.value(), encoded.binary());
     }
 }

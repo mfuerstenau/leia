@@ -19,6 +19,7 @@
         "autoGeneratePhraseQueries": true
       }
     },
+    "similarity": {"bm25": {"k1": 0.9, "b": 0.4}},
     "docId": 223
   }
 }

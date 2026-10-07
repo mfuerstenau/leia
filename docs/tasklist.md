@@ -18,6 +18,7 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 - [x] ADR 0009: commits and segments on the wire (read from the directory on every call, one commit whole per call, `COMMIT_NOT_FOUND`)
 - [x] ADR 0010: search on the wire (search and explain as jobs, the query as alternatives `classic` / `term`, stateless offset paging up to 10,000, cancellation through `QueryTimeout`, `INVALID_QUERY`)
 - [x] ADR 0011: query parser options and the standard query parser (shared `ParserOptions`, classic-only fuzzy max edits / whitespace splitting / auto phrases, `standard` as a third query alternative with a type per point field, checked against the field's width)
+- [x] ADR 0012: similarity and sort (`similarity` as alternatives `bm25 {k1, b}` / `classic` / `boolean`, required on search and explain; `sort` as `{field, type, reverse}` keys mapped by doc values type, never pruned; sorted hits keep their scores and carry their sort values)
 - [x] `README.md`: what leia is, build and run instructions
 
 ### Java build (Gradle 9, Java 25)
@@ -127,8 +128,13 @@ From the read-only checklist in `luke-features.md` §7. Ordered roughly by value
   - fixture harnesses accept `<method>.request-<case>.json` / `.response-<case>.json`
   - TUI: `m` cycles classic → standard → term; `p` opens the options popup (`Enter` applies and searches again, `Esc` cancels), with each point field guessed as INT/LONG by width and cycled to FLOAT/DOUBLE/text; the details panel lists changed options and the point types
 - [ ] Search: date resolution, locale and time zone for date ranges (left out of ADR 0011 until there is a `DateTools` index to try them on)
-- [ ] Search: similarity (BM25 k1/b, classic TF-IDF), 2-level sort on doc values fields, choice of the stored fields per hit in the TUI, More-Like-This
-- [ ] Search: `[`/`]` on the documents screen to step through the search hits, as for a term's postings
+- [x] Search: similarity, sort, stored fields per hit, and `[`/`]` through the hits (ADR 0012)
+  - `startSearch`/`startExplain` take a required `similarity`: `bm25 {k1, b}` (Lucene's checks → `INVALID_PARAMS`), `classic {}` or `boolean {}`; "discount overlaps" is left out, since Lucene reads it only while indexing
+  - `startSearch` takes a required `sort` list of `{field, type, reverse}` (`INT`/`LONG`/`FLOAT`/`DOUBLE`/`STRING`), mapped to `SortField`, `SortedNumericSortField` or `SortedSetSortField` by the doc values type; `BINARY`, no doc values or a type that doesn't fit is `INVALID_PARAMS`. Comparators never prune (`Pruning.NONE`): same-name points of another width made Lucene throw, and another encoding would skip the wrong hits
+  - sorted hits get their scores (`TopFieldCollector.populateScores`), and every hit has `sortValues` (`{number?, term?}`, neither for a missing value)
+  - TUI: `s` popup for similarity (BM25 `k1`/`b` in hundredths) and up to two sort levels (type guessed LONG/STRING, cycled for numbers); `l` popup for the stored fields per hit; a "Sorted by" column; `[`/`]` on the documents screen step through the search hits and fetch the next page
+- [ ] Search: More-Like-This as a fourth query alternative (next slice, ADR 0013)
+- [ ] Search: `SCORE`/`DOC` sort keys, sort selectors (`MAX`, middle) and missing values (left out of ADR 0012)
 - [ ] Analysis: custom analyzer builder (char filters/tokenizer/filters + params, config dir, external jars), token attributes, step-by-step
 - [x] Commits: commit list, files, segments, diagnostics/attributes/codec formats (ADR 0009)
   - `getCommits {}`: the commits of the directory, newest first, `current` marks the opened one; unreadable commits are skipped and logged

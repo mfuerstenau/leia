@@ -20,12 +20,15 @@ import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.search.FuzzyQuery;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.similarities.Similarity;
 import org.apache.lucene.store.FSDirectory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /** The options of both query parsers, and point fields in the standard parser (ADR 0011). */
 class QueryParsersTest {
+
+    private static final Similarity BM25 = Similarities.bm25(1.2f, 0.75f);
 
     private static final ParserOptions DEFAULTS = ParserOptions.defaults(Operator.OR);
 
@@ -174,7 +177,10 @@ class QueryParsersTest {
 
     private static java.util.List<Integer> docs(ReadOnlyIndex index, Query query)
             throws IOException, InvalidQueryException {
-        return index.search(query, 0, 10, true, Optional.empty(), ScanProgress.NONE).hits().stream()
+        return index
+                .search(query, BM25, Optional.empty(), 0, 10, true, Optional.empty(), ScanProgress.NONE)
+                .hits()
+                .stream()
                 .map(Hit::docId)
                 .sorted()
                 .toList();
