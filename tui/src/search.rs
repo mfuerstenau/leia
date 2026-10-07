@@ -1,12 +1,12 @@
-//! The search screen (ADR 0010, ADR 0011, ADR 0012): a query line, the hits of the last query,
-//! and a details panel with the parsed query or the explanation of a hit. Searches and
+//! The search screen (ADR 0010, ADR 0011, ADR 0012, ADR 0013): a query line, the hits of the last
+//! query, and a details panel with the parsed query or the explanation of a hit. Searches and
 //! explanations run as server jobs; the next page of hits is fetched once the selection reaches
 //! the last row. Enter on a hit shows its document on the documents screen, where `[`/`]` step
-//! through the hits. Popups set the query parser options (point types included), the similarity
-//! and the sort, and the stored fields per hit.
+//! through the hits. Popups set the query parser options (point types included), the
+//! More-Like-This settings, the similarity and the sort, and the stored fields per hit.
 
 use ratatui::Frame;
-use ratatui::crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
@@ -15,6 +15,7 @@ use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState, Wrap};
 use crate::form::FormEvent;
 use crate::hit_fields::{FieldsForm, HitFields};
 use crate::input::{Edit, LineInput, word_start};
+use crate::more_like_this::{LikeForm, LikeSettings};
 use crate::overview::{highlight, panel};
 use crate::parser_options::{OptionsForm, ParserSettings};
 use crate::protocol::document::{BytesValue, StoredValue};
@@ -34,6 +35,8 @@ pub const SEARCH_PAGE: i32 = 100;
 const PAGE: u16 = 10;
 /// The widest the sort values of a hit get in the hit list.
 const MAX_SORT_WIDTH: usize = 32;
+/// Marks the source document among the hits of a More-Like-This query.
+const SOURCE_MARK: &str = "◆";
 
 /// What the caller has to start, stop or show for the search screen.
 #[derive(Debug, PartialEq)]
@@ -65,6 +68,8 @@ enum Mode {
     Standard,
     /// One term of the selected field, exactly as typed.
     Term,
+    /// Documents like the document whose id the line holds (More-Like-This).
+    Like,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,6 +82,7 @@ enum Focus {
 #[derive(Debug)]
 enum Popup {
     Parser(OptionsForm),
+    Like(LikeForm),
     Scoring(ScoringForm),
     Fields(FieldsForm),
 }
@@ -135,6 +141,7 @@ pub struct Search {
     field: usize,
     operator: QueryOperator,
     parser: ParserSettings,
+    like: LikeSettings,
     scoring: ScoringSettings,
     hit_fields: HitFields,
     /// The popup that takes the keys, while it is open.
@@ -180,6 +187,7 @@ impl Search {
             field,
             operator: QueryOperator::Or,
             parser: ParserSettings::new(fields),
+            like: LikeSettings::new(fields),
             scoring: ScoringSettings::new(fields),
             hit_fields: HitFields::new(fields),
             form: None,
@@ -234,7 +242,18 @@ impl Search {
         self.submit()
     }
 
-    /// The query that the query line and the settings describe; `None` while the line is blank.
+    /// Searches for documents like `doc_id`, as the documents screen asks for.
+    pub fn more_like_this(&mut self, doc_id: i32) -> Option<Request> {
+        self.mode = Mode::Like;
+        self.input.set(doc_id.to_string());
+        self.binary = false;
+        self.editing = false;
+        self.focus = Focus::Hits;
+        self.submit()
+    }
+
+    /// The query that the query line and the settings describe; `None` while the line is blank,
+    /// or in More-Like-This mode while it is no document id.
     fn query(&self) -> Option<SearchQuery> {
         let field = self.fields.get(self.field)?.clone();
         let text = self.input.text();
@@ -275,6 +294,10 @@ impl Search {
                 }),
                 ..SearchQuery::default()
             },
+            Mode::Like => SearchQuery {
+                more_like_this: Some(self.like.query(text.trim().parse().ok()?)?),
+                ..SearchQuery::default()
+            },
         })
     }
 
@@ -311,6 +334,24 @@ impl Search {
     fn resubmit(&mut self) -> Option<Request> {
         self.submitted.as_ref()?;
         self.submit()
+    }
+
+    /// Searches again in another mode; forgets the hits, and stops their jobs, if the line is no
+    /// query in that mode, so that they don't pass for its hits.
+    fn switch_mode(&mut self, mode: Mode) -> Option<Request> {
+        self.mode = mode;
+        self.submitted.as_ref()?;
+        if self.query().is_some() {
+            return self.submit();
+        }
+        let cancel = self.jobs();
+        self.submitted = None;
+        self.running = None;
+        self.explain = None;
+        self.step_pending = false;
+        self.table = TableState::new();
+        self.details_scroll = 0;
+        (!cancel.is_empty()).then_some(Request::Cancel(cancel))
     }
 
     fn hit_list(&self) -> Option<&HitList> {
@@ -499,14 +540,16 @@ impl Search {
 
     /// Edits the query line while it is open (Enter searches, Esc closes it), or a popup (Enter
     /// applies and searches again, Esc cancels). Otherwise `/` opens the line, `m` cycles classic
-    /// syntax, standard syntax and a term, `p` opens the parser options, `s` the similarity and
-    /// the sort, `l` the stored fields per hit, `f`/`F` step the field, `a` switches between OR
-    /// and AND, `t` between an exact and an approximate count, `x` explains the selected hit,
-    /// Enter shows its document, and Tab switches between the hits and the details.
+    /// syntax, standard syntax, a term and More-Like-This, `p` opens the parser options or the
+    /// More-Like-This settings, `s` the similarity and the sort, `l` the stored fields per hit,
+    /// `f`/`F` step the field, `a` switches between OR and AND, `t` between an exact and an
+    /// approximate count, `x` explains the selected hit, Enter shows its document, and Tab
+    /// switches between the hits and the details.
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<Request> {
         if let Some(form) = &mut self.form {
             let changed = match form {
                 Popup::Parser(form) => applied(form.handle_key(key.code), &mut self.parser),
+                Popup::Like(form) => applied(form.handle_key(key.code), &mut self.like),
                 Popup::Scoring(form) => applied(form.handle_key(key.code), &mut self.scoring),
                 Popup::Fields(form) => applied(form.handle_key(key.code), &mut self.hit_fields),
             };
@@ -529,6 +572,11 @@ impl Search {
                     return self.submit();
                 }
                 KeyCode::Esc => self.editing = false,
+                // A document id has digits only.
+                KeyCode::Char(c)
+                    if self.mode == Mode::Like
+                        && !c.is_ascii_digit()
+                        && !key.modifiers.contains(KeyModifiers::CONTROL) => {}
                 _ => {
                     if self.input.handle_key(key, word_start) == Edit::Changed {
                         self.binary = false;
@@ -540,12 +588,15 @@ impl Search {
         match key.code {
             KeyCode::Char('/') if !self.fields.is_empty() => self.editing = true,
             KeyCode::Char('m') => {
-                self.mode = match self.mode {
+                return self.switch_mode(match self.mode {
                     Mode::Classic => Mode::Standard,
                     Mode::Standard => Mode::Term,
-                    Mode::Term => Mode::Classic,
-                };
-                return self.resubmit();
+                    Mode::Term => Mode::Like,
+                    Mode::Like => Mode::Classic,
+                });
+            }
+            KeyCode::Char('p') if self.mode == Mode::Like => {
+                self.form = Some(Popup::Like(LikeForm::new(&self.like)));
             }
             KeyCode::Char('p') if self.mode != Mode::Term => {
                 let form = OptionsForm::new(&self.parser, self.mode == Mode::Classic);
@@ -557,7 +608,9 @@ impl Search {
             KeyCode::Char('l') => {
                 self.form = Some(Popup::Fields(FieldsForm::new(&self.hit_fields)));
             }
-            KeyCode::Char('f') | KeyCode::Char('F') if !self.fields.is_empty() => {
+            KeyCode::Char('f') | KeyCode::Char('F')
+                if !self.fields.is_empty() && self.mode != Mode::Like =>
+            {
                 let len = self.fields.len();
                 self.field = if key.code == KeyCode::Char('f') {
                     (self.field + 1) % len
@@ -566,7 +619,7 @@ impl Search {
                 };
                 return self.resubmit();
             }
-            KeyCode::Char('a') if self.mode != Mode::Term => {
+            KeyCode::Char('a') if matches!(self.mode, Mode::Classic | Mode::Standard) => {
                 self.operator = match self.operator {
                     QueryOperator::Or => QueryOperator::And,
                     QueryOperator::And => QueryOperator::Or,
@@ -616,9 +669,13 @@ impl Search {
     pub fn keys(&self) -> &'static str {
         match &self.form {
             Some(Popup::Parser(_)) => OptionsForm::keys(),
+            Some(Popup::Like(_)) => LikeForm::keys(),
             Some(Popup::Scoring(_)) => ScoringForm::keys(),
             Some(Popup::Fields(_)) => FieldsForm::keys(),
             None if self.editing => " ⏎ search   Esc done   ←→ Ctrl+A/E/U/K/W edit",
+            None if self.mode == Mode::Like => {
+                "/ doc id   m mode   p/s/l settings   t count   x explain   ⏎ open doc   Tab panel   ↑↓"
+            }
             None if self.mode != Mode::Term => {
                 "/ query   m mode   p/s/l settings   f/F field   a AND/OR   t count   x explain   \
                  ⏎ open doc   Tab panel   ↑↓"
@@ -651,6 +708,7 @@ impl Search {
         self.render_details(frame, details_area);
         match &self.form {
             Some(Popup::Parser(form)) => form.render(frame, area),
+            Some(Popup::Like(form)) => form.render(frame, area),
             Some(Popup::Scoring(form)) => form.render(frame, area),
             Some(Popup::Fields(form)) => form.render(frame, area),
             None => {}
@@ -679,6 +737,10 @@ impl Search {
                 let hex = if self.binary { " · hex" } else { "" };
                 format!(" Term · field {field}{hex} · {count} ")
             }
+            Mode::Like => format!(
+                " More like this document · {} · {count} ",
+                self.like.fields_text()
+            ),
         };
         let block = panel(title, self.editing);
         let inner = block.inner(area);
@@ -688,7 +750,12 @@ impl Search {
             frame.render_widget(Line::from(shown.to_owned()), inner);
             frame.set_cursor_position((inner.x + cursor_x, inner.y));
         } else if self.input.text().is_empty() {
-            frame.render_widget(Line::from("Press / to type a query.").style(dim()), inner);
+            let hint = if self.mode == Mode::Like {
+                "Press / to type a document id, or m on the documents screen."
+            } else {
+                "Press / to type a query."
+            };
+            frame.render_widget(Line::from(hint).style(dim()), inner);
         } else {
             frame.render_widget(Line::from(escape_control(self.input.text())), inner);
         }
@@ -752,6 +819,12 @@ impl Search {
             .unwrap_or_default()
             .min(MAX_SORT_WIDTH);
         let sorted = sort_width > 0;
+        let source = submitted
+            .params
+            .query
+            .more_like_this
+            .as_ref()
+            .map(|like| like.doc_id);
         let mut rows: Vec<Row> = list
             .hits
             .iter()
@@ -774,7 +847,11 @@ impl Search {
                 if sorted {
                     cells.push(Cell::from(sort));
                 }
-                cells.push(Cell::from(fields_text(hit)));
+                if source == Some(hit.doc_id) {
+                    cells.push(Cell::from(format!("{SOURCE_MARK} {}", fields_text(hit))));
+                } else {
+                    cells.push(Cell::from(fields_text(hit)));
+                }
                 Row::new(cells)
             })
             .collect();
@@ -852,6 +929,15 @@ impl Search {
                 Mode::Term => vec![Line::from(
                     "The line is one term of the field, as it is: nothing is analyzed or split.",
                 )],
+                Mode::Like => vec![
+                    Line::from(
+                        "More like this: the line is a document id. Its terms come from each",
+                    ),
+                    Line::from(
+                        "field's term vector, or else from its stored text, analyzed with the",
+                    ),
+                    Line::from("standard analyzer. p chooses the fields and the limits."),
+                ],
             }
             .into_iter()
             .map(|line| line.style(dim()))
@@ -870,6 +956,29 @@ impl Search {
         ];
         lines.extend(self.parser_lines());
         lines.push(Line::from(""));
+        let source = self
+            .submitted
+            .as_ref()
+            .and_then(|submitted| submitted.params.query.more_like_this.as_ref());
+        if let Some(like) = source {
+            if list.rewritten_query.starts_with("MatchNoDocsQuery") {
+                lines.push(
+                    Line::from(
+                        "No term of the document passed the limits (p), or its fields have \
+                         neither a term vector nor stored text.",
+                    )
+                    .style(dim()),
+                );
+            } else if list.hits.iter().any(|hit| hit.doc_id == like.doc_id) {
+                lines.push(
+                    Line::from(format!(
+                        "{SOURCE_MARK} marks document {}, the source.",
+                        like.doc_id
+                    ))
+                    .style(dim()),
+                );
+            }
+        }
         if !list.hits.is_empty() {
             lines.push(Line::from("x explains the selected hit.").style(dim()));
         }
@@ -879,10 +988,12 @@ impl Search {
 
     /// What the settings popups set, for the footer's `p/s/l settings`.
     fn settings_line(&self) -> Line<'static> {
-        let popups = if self.mode == Mode::Term {
-            "s similarity and sort · l stored fields per hit"
-        } else {
-            "p parser options · s similarity and sort · l stored fields per hit"
+        let popups = match self.mode {
+            Mode::Term => "s similarity and sort · l stored fields per hit",
+            Mode::Like => "p more like this · s similarity and sort · l stored fields per hit",
+            Mode::Classic | Mode::Standard => {
+                "p parser options · s similarity and sort · l stored fields per hit"
+            }
         };
         Line::from(popups).style(dim())
     }
@@ -890,8 +1001,8 @@ impl Search {
 
 impl Search {
     /// The parser options that differ from Lucene's defaults, the point types of the standard
-    /// parser, a similarity other than Lucene's default, and the stored fields per hit unless
-    /// they are all of them.
+    /// parser or the More-Like-This limits, a similarity other than Lucene's default, and the
+    /// stored fields per hit unless they are all of them.
     fn parser_lines(&self) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
         if let Some(similarity) = self.scoring.similarity_text() {
@@ -900,8 +1011,16 @@ impl Search {
         if let Some(fields) = self.hit_fields.text() {
             lines.push(Line::from(format!("Fields     {fields}")));
         }
-        if self.mode == Mode::Term {
-            return lines;
+        match self.mode {
+            Mode::Term => return lines,
+            Mode::Like => {
+                lines.push(Line::from(format!(
+                    "Like       {}",
+                    self.like.limits_text()
+                )));
+                return lines;
+            }
+            Mode::Classic | Mode::Standard => {}
         }
         let changed = self.parser.changed(self.mode == Mode::Classic);
         if !changed.is_empty() {
@@ -1044,8 +1163,8 @@ mod tests {
     use crate::protocol::document::StoredType;
     use crate::protocol::index::{DocValuesType, TermStats};
     use crate::protocol::search::{
-        Bm25Similarity, ClassicSimilarity, HitField, ParserOptions, PointField, PointType,
-        Similarity, SortKey, SortType,
+        Bm25Similarity, ClassicSimilarity, HitField, MoreLikeThisQuery, ParserOptions, PointField,
+        PointType, Similarity, SortKey, SortType,
     };
 
     fn bm25() -> Similarity {
@@ -1398,6 +1517,114 @@ mod tests {
         assert_eq!(press(&mut search, KeyCode::Char('a')), None);
         assert_eq!(press(&mut search, KeyCode::Char('p')), None);
         assert!(!search.prompting());
+    }
+
+    fn like(doc_id: i32) -> MoreLikeThisQuery {
+        MoreLikeThisQuery {
+            doc_id,
+            fields: vec!["title".to_owned(), "body".to_owned()],
+            min_term_freq: 2,
+            min_doc_freq: 5,
+            max_doc_freq: None,
+            max_query_terms: 25,
+            boost: false,
+        }
+    }
+
+    #[test]
+    fn more_like_this_mode_takes_the_line_as_a_document_id() {
+        let mut search = search();
+        for _ in 0..3 {
+            assert_eq!(press(&mut search, KeyCode::Char('m')), None);
+        }
+        let screen = render(&mut search);
+        assert!(screen.contains("More like this document · fields title · body · count to 1000"));
+        assert!(screen.contains("Press / to type a document id"));
+
+        press(&mut search, KeyCode::Char('/'));
+        // Only digits go into the line.
+        typed(&mut search, "4x2 ");
+        let Some(Request::Search { params, .. }) = press(&mut search, KeyCode::Enter) else {
+            panic!("Enter searches");
+        };
+        assert_eq!(
+            params.query,
+            SearchQuery {
+                more_like_this: Some(like(42)),
+                ..SearchQuery::default()
+            }
+        );
+        // The fields are the popup's, and there is no operator.
+        assert_eq!(press(&mut search, KeyCode::Char('f')), None);
+        assert_eq!(press(&mut search, KeyCode::Char('a')), None);
+
+        assert_eq!(press(&mut search, KeyCode::Char('p')), None);
+        assert!(search.prompting());
+        assert!(search.keys().contains("a/n all/no fields"));
+        for _ in 0..4 {
+            press(&mut search, KeyCode::Down);
+        }
+        press(&mut search, KeyCode::Char(' '));
+        let Some(Request::Search { params, .. }) = press(&mut search, KeyCode::Enter) else {
+            panic!("applying the popup searches again");
+        };
+        assert_eq!(
+            params.query.more_like_this,
+            Some(MoreLikeThisQuery {
+                boost: true,
+                ..like(42)
+            })
+        );
+    }
+
+    #[test]
+    fn marks_the_source_among_the_hits() {
+        let mut search = search();
+        let Some(Request::Search { params, cancel }) = search.more_like_this(3) else {
+            panic!("a search starts");
+        };
+        assert!(cancel.is_empty());
+        assert_eq!(params.query.more_like_this, Some(like(3)));
+        search.search_started(1);
+        search.search_progress(results(2..5, 3));
+        let screen = render(&mut search);
+        assert!(screen.contains("◆ id=doc-3"));
+        assert!(screen.contains("◆ marks document 3, the source."));
+
+        search.more_like_this(4);
+        search.search_started(2);
+        search.search_progress(GetSearchResult {
+            docs_searched: 500,
+            results: Some(SearchResults {
+                query: "like(doc 4, …)".to_owned(),
+                rewritten_query: "MatchNoDocsQuery(\"empty BooleanQuery\")".to_owned(),
+                total_hits: 0,
+                total_hits_relation: TotalHitsRelation::EqualTo,
+                hits: vec![],
+                took_millis: 1,
+            }),
+        });
+        assert!(render(&mut search).contains("No term of the document passed the limits"));
+    }
+
+    #[test]
+    fn a_line_that_is_no_document_id_forgets_the_hits() {
+        let mut search = searched(2, 2);
+        press(&mut search, KeyCode::Char('m'));
+        let running = press(&mut search, KeyCode::Char('m'));
+        assert!(matches!(running, Some(Request::Search { .. })));
+        search.search_started(7);
+
+        // "red" is no document id: the term search's hits and job go.
+        assert_eq!(
+            press(&mut search, KeyCode::Char('m')),
+            Some(Request::Cancel(vec![7]))
+        );
+        assert_eq!(search.search_job(), None);
+        assert!(!render(&mut search).contains("Search failed"));
+        let screen = render(&mut search);
+        assert!(screen.contains("More like this document"));
+        assert!(!screen.contains("doc-0"));
     }
 
     #[test]

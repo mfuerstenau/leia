@@ -20,6 +20,7 @@ import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.HitField;
+import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
 import io.github.mfuerstenau.leia.protocol.search.ParserOptions;
 import io.github.mfuerstenau.leia.protocol.search.PointField;
 import io.github.mfuerstenau.leia.protocol.search.PointType;
@@ -44,6 +45,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.OptionalLong;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
@@ -150,6 +152,7 @@ class SearchHandlersTest {
         SearchQuery unknownDefault = new SearchQuery(
                 Optional.of(new ClassicQuery("red", "bdy", QueryOperator.OR, DEFAULTS, 2, false, false)),
                 Optional.empty(),
+                Optional.empty(),
                 Optional.empty());
 
         assertFails(
@@ -168,8 +171,9 @@ class SearchHandlersTest {
         SearchQuery both = new SearchQuery(
                 classic("red").classic(),
                 Optional.empty(),
-                Optional.of(new TermQuery("body", new BytesValue("red", false))));
-        SearchQuery neither = new SearchQuery(Optional.empty(), Optional.empty(), Optional.empty());
+                Optional.of(new TermQuery("body", new BytesValue("red", false))),
+                Optional.empty());
+        SearchQuery neither = new SearchQuery(Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
 
         assertFails(() -> startSearch.handle(params(both, 0, 10, Optional.empty())), ErrorCode.INVALID_PARAMS);
         assertFails(() -> startSearch.handle(params(neither, 0, 10, Optional.empty())), ErrorCode.INVALID_PARAMS);
@@ -330,6 +334,62 @@ class SearchHandlersTest {
     }
 
     @Test
+    void searchesForDocumentsLikeOne() throws Exception {
+        openIndex();
+        SearchQuery like = moreLikeThis(0, List.of("body"), 25);
+
+        SearchResults results = search(params(like, 0, 10, Optional.of(List.of("id"))));
+
+        assertThat(results.query())
+                .isEqualTo("like(doc 0, fields [body], minTermFreq 1, minDocFreq 1, maxQueryTerms 25)");
+        // body is stored without a term vector: its text is analyzed.
+        assertThat(results.rewrittenQuery()).isEqualTo("body:red");
+        assertThat(results.hits()).extracting(Hit::docId).containsExactly(0, 2);
+
+        Explanation explanation = explain(new StartExplainParams(like, BM25, 2));
+        assertThat(explanation.match()).isTrue();
+        assertThat(Float.parseFloat(explanation.value()))
+                .isEqualTo(results.hits().get(1).score());
+    }
+
+    @Test
+    void checksTheMoreLikeThisParams() throws Exception {
+        openIndex();
+
+        assertFails(
+                () -> startSearch.handle(params(moreLikeThis(3, List.of("body"), 25), 0, 10, Optional.empty())),
+                ErrorCode.DOC_NOT_FOUND);
+        assertFails(
+                () -> startExplain.handle(new StartExplainParams(moreLikeThis(-1, List.of("body"), 25), BM25, 0)),
+                ErrorCode.DOC_NOT_FOUND);
+        assertFails(
+                () -> startSearch.handle(params(moreLikeThis(0, List.of("nope"), 25), 0, 10, Optional.empty())),
+                ErrorCode.FIELD_NOT_FOUND);
+        // Doc values and points only: no terms.
+        for (String field : List.of("rank", "size")) {
+            assertThatThrownBy(() ->
+                            startSearch.handle(params(moreLikeThis(0, List.of(field), 25), 0, 10, Optional.empty())))
+                    .isInstanceOfSatisfying(
+                            RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.INVALID_PARAMS))
+                    .hasMessageContaining("'" + field + "' is not indexed");
+        }
+        for (SearchQuery invalid : List.of(
+                moreLikeThis(0, List.of(), 25),
+                moreLikeThis(0, List.of("body", "body"), 25),
+                moreLikeThis(0, List.of("body"), 0),
+                moreLikeThis(0, List.of("body"), MoreLikeThisQuery.MAX_QUERY_TERMS + 1))) {
+            assertFails(() -> startSearch.handle(params(invalid, 0, 10, Optional.empty())), ErrorCode.INVALID_PARAMS);
+        }
+        assertThat(search(params(
+                                moreLikeThis(0, List.of("body"), MoreLikeThisQuery.MAX_QUERY_TERMS),
+                                0,
+                                10,
+                                Optional.empty()))
+                        .hits())
+                .isNotEmpty();
+    }
+
+    @Test
     void checksTheSimilarity() throws Exception {
         openIndex();
         SearchQuery query = classic("red");
@@ -415,6 +475,7 @@ class SearchHandlersTest {
                         splitOnWhitespace,
                         autoGeneratePhraseQueries)),
                 Optional.empty(),
+                Optional.empty(),
                 Optional.empty());
     }
 
@@ -422,11 +483,21 @@ class SearchHandlersTest {
         return new SearchQuery(
                 Optional.empty(),
                 Optional.of(new StandardQuery(expression, "body", QueryOperator.OR, options, points)),
+                Optional.empty(),
                 Optional.empty());
     }
 
     private static SearchQuery term(String field, BytesValue term) {
-        return new SearchQuery(Optional.empty(), Optional.empty(), Optional.of(new TermQuery(field, term)));
+        return new SearchQuery(
+                Optional.empty(), Optional.empty(), Optional.of(new TermQuery(field, term)), Optional.empty());
+    }
+
+    private static SearchQuery moreLikeThis(int docId, List<String> fields, int maxQueryTerms) {
+        return new SearchQuery(
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(new MoreLikeThisQuery(docId, fields, 1, 1, OptionalInt.empty(), maxQueryTerms, false)));
     }
 
     private static StartSearchParams params(SearchQuery query, int offset, int limit, Optional<List<String>> fields) {

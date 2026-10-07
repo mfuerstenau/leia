@@ -282,6 +282,11 @@ impl App {
                 index,
             }),
             documents::Request::Copy(text) => Some(Action::Copy(text)),
+            documents::Request::MoreLikeThis(doc_id) => {
+                let request = self.search.as_mut()?.more_like_this(doc_id);
+                self.screen = Screen::Search;
+                self.search_request(request)
+            }
             documents::Request::Step {
                 walk: Walk::TermDocs,
                 forward,
@@ -792,8 +797,8 @@ impl App {
                 match documents.viewer() {
                     Some(viewer) => Line::from(viewer.keys()),
                     None => Line::from(format!(
-                        " {cancel}q quit   o open   c close   1-5 screen   ←/→ doc   {steps}i go to   \
-                         ⏎ term vector   v view   x numbers   e empty fields   Tab panel   ↑↓"
+                        " {cancel}q quit   o open   c close   1-5 screen   ←→ doc   {steps}i go to   \
+                         ⏎ term vector   v view   x numbers   e empty   m similar   Tab panel   ↑↓"
                     )),
                 }
             }
@@ -1730,6 +1735,31 @@ mod tests {
             Some(Action::LoadDocument(2))
         );
         assert!(render(&mut app).contains("2 Documents"));
+    }
+
+    #[test]
+    fn m_on_a_document_searches_for_documents_like_it() {
+        let mut app = App::new(version(), None);
+        app.opened(GetIndexStatsResult {
+            fields: vec![field("id", 0, true), field("body", 1, true)],
+            max_doc: 3,
+            ..stats("/data/idx")
+        });
+        assert_eq!(
+            app.handle_key(key(KeyCode::Char('2'))),
+            Some(Action::LoadDocument(0))
+        );
+
+        let Some(Action::StartSearch { params, cancel }) = app.handle_key(key(KeyCode::Char('m')))
+        else {
+            panic!("m starts a search");
+        };
+        assert!(cancel.is_empty());
+        let like = params.query.more_like_this.expect("a More-Like-This query");
+        assert_eq!(like.doc_id, 0);
+        // No field has positions: the first indexed one.
+        assert_eq!(like.fields, ["id"]);
+        assert!(render(&mut app).contains("More like this document · field id"));
     }
 
     #[test]

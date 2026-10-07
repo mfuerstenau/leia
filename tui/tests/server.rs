@@ -26,9 +26,9 @@ use leia::protocol::index::{
 use leia::protocol::job::{CancelJob, JobParams};
 use leia::protocol::search::{
     Bm25Similarity, ClassicQuery, ClassicSimilarity, GetExplain, GetSearch, MAX_FUZZY_EDITS,
-    ParserOptions, PointField, PointType, QueryOperator, SearchQuery, Similarity, SortKey,
-    SortType, StandardQuery, StartExplain, StartExplainParams, StartSearch, StartSearchParams,
-    TotalHitsRelation,
+    MoreLikeThisQuery, ParserOptions, PointField, PointType, QueryOperator, SearchQuery,
+    Similarity, SortKey, SortType, StandardQuery, StartExplain, StartExplainParams, StartSearch,
+    StartSearchParams, TotalHitsRelation,
 };
 use leia::protocol::terms::{
     FieldTerms, GetFieldTermScan, GetPositions, GetPositionsParams, GetPostings, GetPostingsParams,
@@ -722,6 +722,100 @@ fn searches_and_explains_a_lucene9_index() {
         matches!(&unsortable, CallError::Rpc(e) if e.code == ErrorCode::InvalidParams
             && e.message.contains("no doc values")),
         "{unsortable:?}"
+    );
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn searches_for_documents_like_one_of_a_lucene9_index() {
+    let mut server = start();
+    server
+        .call::<OpenIndex>(OpenIndexParams {
+            path: lucene9_index(),
+        })
+        .unwrap();
+    let like = |doc_id: i32, fields: &[&str]| SearchQuery {
+        more_like_this: Some(MoreLikeThisQuery {
+            doc_id,
+            fields: fields.iter().map(|field| (*field).to_owned()).collect(),
+            min_term_freq: 1,
+            min_doc_freq: 2,
+            max_doc_freq: None,
+            max_query_terms: 25,
+            boost: false,
+        }),
+        ..SearchQuery::default()
+    };
+    let params = |query: SearchQuery| StartSearchParams {
+        query,
+        similarity: bm25(),
+        sort: Vec::new(),
+        offset: 0,
+        limit: 10,
+        exact_total_hits: true,
+        fields: None,
+    };
+
+    let job = server
+        .call::<StartSearch>(params(like(0, &["body"])))
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let results = loop {
+        let poll = server
+            .call::<GetSearch>(JobParams { job_id: job.job_id })
+            .unwrap();
+        if let Some(results) = poll.results {
+            break results;
+        }
+        assert!(Instant::now() < deadline, "the search did not finish");
+        thread::sleep(Duration::from_millis(10));
+    };
+
+    // "document number 1": the stored text is analyzed, and "1" occurs in only one document.
+    assert_eq!(
+        results.query,
+        "like(doc 0, fields [body], minTermFreq 1, minDocFreq 2, maxQueryTerms 25)"
+    );
+    let mut terms: Vec<&str> = results.rewritten_query.split(' ').collect();
+    terms.sort_unstable();
+    assert_eq!(terms, ["body:document", "body:number"]);
+    // Document 1 is deleted.
+    let mut docs: Vec<i32> = results.hits.iter().map(|hit| hit.doc_id).collect();
+    docs.sort_unstable();
+    assert_eq!(docs, [0, 2]);
+
+    let job = server
+        .call::<StartExplain>(StartExplainParams {
+            query: like(0, &["body"]),
+            similarity: bm25(),
+            doc_id: 2,
+        })
+        .unwrap();
+    let explanation = loop {
+        let poll = server
+            .call::<GetExplain>(JobParams { job_id: job.job_id })
+            .unwrap();
+        if let Some(explanation) = poll.explanation {
+            break explanation;
+        }
+        assert!(Instant::now() < deadline, "the explanation did not finish");
+        thread::sleep(Duration::from_millis(10));
+    };
+    assert!(explanation.matches, "{explanation:?}");
+
+    let missing = server
+        .call::<StartSearch>(params(like(3, &["body"])))
+        .unwrap_err();
+    assert!(
+        matches!(&missing, CallError::Rpc(e) if e.code == ErrorCode::DocNotFound),
+        "{missing:?}"
+    );
+    let unknown = server
+        .call::<StartSearch>(params(like(0, &["nope"])))
+        .unwrap_err();
+    assert!(
+        matches!(&unknown, CallError::Rpc(e) if e.code == ErrorCode::FieldNotFound),
+        "{unknown:?}"
     );
 }
 

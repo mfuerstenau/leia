@@ -18,7 +18,7 @@ import org.apache.lucene.search.Query;
 import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.util.BytesRef;
 
-/** Builds the queries that {@link ReadOnlyIndex#search} runs (ADR 0010, ADR 0011). */
+/** Builds the queries that {@link ReadOnlyIndex#search} runs (ADR 0010, ADR 0011, ADR 0013). */
 public final class Queries {
 
     /** How a query parser combines clauses without an operator. */
@@ -101,6 +101,17 @@ public final class Queries {
     /** A query for exactly this term, which is neither analyzed nor split. */
     public static Query term(String field, BytesRef term) {
         return new TermQuery(new Term(field, term));
+    }
+
+    /**
+     * A query for documents like {@code docId}, built with Lucene's {@code MoreLikeThis} once the
+     * query is rewritten, which happens inside the search (ADR 0013). The source document matches its
+     * own query unless it is deleted.
+     *
+     * @param docId the source document, which may be deleted; the caller checks that it exists
+     */
+    public static Query moreLikeThis(int docId, MoreLikeThisOptions options) {
+        return new MoreLikeDocumentQuery(docId, options);
     }
 
     /** Whole numbers for integer types and decimals for the others, as Luke reads them. */

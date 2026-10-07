@@ -75,6 +75,8 @@ pub enum Request {
     },
     /// Put this text on the clipboard.
     Copy(String),
+    /// Search for documents like this one on the search screen (ADR 0013).
+    MoreLikeThis(i32),
 }
 
 /// How the raw numbers of numeric doc values are shown. The index doesn't record what they
@@ -441,8 +443,9 @@ impl Documents {
 
     /// Goes to another document with ←/→, the `i` prompt, or `[`/`]` through the documents of
     /// the hit's term; loads the selected field's term vector with Enter, views its values with
-    /// `v`, cycles the number format with `x`, hides empty fields with `e`, switches the focus
-    /// with Tab, and moves the selection or scrolls the details.
+    /// `v`, cycles the number format with `x`, hides empty fields with `e`, searches for documents
+    /// like this one with `m`, switches the focus with Tab, and moves the selection or scrolls the
+    /// details.
     pub fn handle_key(&mut self, key: KeyCode) -> Option<Request> {
         if let Some(viewer) = &mut self.viewer {
             let event = viewer.handle_key(key)?;
@@ -484,6 +487,9 @@ impl Documents {
                 });
             }
             KeyCode::Char('v') => return self.view(),
+            KeyCode::Char('m') if self.max_doc > 0 => {
+                return Some(Request::MoreLikeThis(self.doc_id));
+            }
             KeyCode::Char('x') => self.numbers = self.numbers.next(),
             KeyCode::Char('e') => {
                 self.hide_empty = !self.hide_empty;

@@ -1,0 +1,49 @@
+{
+  "jsonrpc": "2.0",
+  "id": 29,
+  "result": {
+    "docsSearched": 500,
+    "results": {
+      "query": "like(doc 223, fields [title, body], minTermFreq 1, minDocFreq 2, maxDocFreq 100, maxQueryTerms 5, boost)",
+      "rewrittenQuery": "title:red (title:lamp)^1.0117002 (body:xl)^1.2611927 (body:sku2919)^1.4666356 (body:sku5437)^1.4666356",
+      "totalHits": 125,
+      "totalHitsRelation": "EQUAL_TO",
+      "hits": [
+        {
+          "docId": 223,
+          "score": 11.301981,
+          "sortValues": [],
+          "fields": [
+            {
+              "name": "id",
+              "values": [{"type": "STRING", "value": "doc-0223", "binary": false}]
+            }
+          ]
+        },
+        {
+          "docId": 335,
+          "score": 4.5857267,
+          "sortValues": [],
+          "fields": [
+            {
+              "name": "id",
+              "values": [{"type": "STRING", "value": "doc-0335", "binary": false}]
+            }
+          ]
+        },
+        {
+          "docId": 108,
+          "score": 3.2775373,
+          "sortValues": [],
+          "fields": [
+            {
+              "name": "id",
+              "values": [{"type": "STRING", "value": "doc-0108", "binary": false}]
+            }
+          ]
+        }
+      ],
+      "tookMillis": 9
+    }
+  }
+}

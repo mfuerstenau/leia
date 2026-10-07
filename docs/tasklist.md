@@ -19,6 +19,7 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 - [x] ADR 0010: search on the wire (search and explain as jobs, the query as alternatives `classic` / `term`, stateless offset paging up to 10,000, cancellation through `QueryTimeout`, `INVALID_QUERY`)
 - [x] ADR 0011: query parser options and the standard query parser (shared `ParserOptions`, classic-only fuzzy max edits / whitespace splitting / auto phrases, `standard` as a third query alternative with a type per point field, checked against the field's width)
 - [x] ADR 0012: similarity and sort (`similarity` as alternatives `bm25 {k1, b}` / `classic` / `boolean`, required on search and explain; `sort` as `{field, type, reverse}` keys mapped by doc values type, never pruned; sorted hits keep their scores and carry their sort values)
+- [x] ADR 0013: More-Like-This (`moreLikeThis {docId, fields, minTermFreq, minDocFreq, maxDocFreq?, maxQueryTerms, boost}` as a fourth query alternative, checked in the handler and built by the query's rewrite inside the job, cancellable through the `ExitableDirectoryReader`; terms from term vectors or stored strings with `StandardAnalyzer`; the source document stays in the hits)
 - [x] `README.md`: what leia is, build and run instructions
 
 ### Java build (Gradle 9, Java 25)
@@ -133,7 +134,11 @@ From the read-only checklist in `luke-features.md` §7. Ordered roughly by value
   - `startSearch` takes a required `sort` list of `{field, type, reverse}` (`INT`/`LONG`/`FLOAT`/`DOUBLE`/`STRING`), mapped to `SortField`, `SortedNumericSortField` or `SortedSetSortField` by the doc values type; `BINARY`, no doc values or a type that doesn't fit is `INVALID_PARAMS`. Comparators never prune (`Pruning.NONE`): same-name points of another width made Lucene throw, and another encoding would skip the wrong hits
   - sorted hits get their scores (`TopFieldCollector.populateScores`), and every hit has `sortValues` (`{number?, term?}`, neither for a missing value)
   - TUI: `s` popup for similarity (BM25 `k1`/`b` in hundredths) and up to two sort levels (type guessed LONG/STRING, cycled for numbers); `l` popup for the stored fields per hit; a "Sorted by" column; `[`/`]` on the documents screen step through the search hits and fetch the next page
-- [ ] Search: More-Like-This as a fourth query alternative (next slice, ADR 0013)
+- [x] Search: More-Like-This as a fourth query alternative (ADR 0013)
+  - `moreLikeThis {docId, fields, minTermFreq, minDocFreq, maxDocFreq?, maxQueryTerms, boost}` on `startSearch` and `startExplain`: `DOC_NOT_FOUND` for the document (deleted ones allowed), `FIELD_NOT_FOUND`/`INVALID_PARAMS` for unknown, unindexed or repeated fields, `INVALID_PARAMS` for numbers out of range (`maxQueryTerms` 1–1024)
+  - core: `MoreLikeDocumentQuery` rewrites to Lucene's `MoreLikeThis` query from the searcher's (exitable) reader, so the build runs in the job and can be cancelled; `query` shows the settings, `rewrittenQuery` the chosen terms (weakest first, with boosts); no terms → `MatchNoDocsQuery`
+  - TUI: `m` cycles to "more like this" (the line is a document id, digits only), `p` opens the fields-and-limits popup (Lucene's defaults, fields with positions chosen), `◆` marks the source among the hits; `m` on the documents screen starts it for the shown document
+- [ ] Search: chosen MLT terms as data (`{field, term, tf, docFreq, score}`), like-text instead of a document, MLT word lengths / stop words (left out of ADR 0013)
 - [ ] Search: `SCORE`/`DOC` sort keys, sort selectors (`MAX`, middle) and missing values (left out of ADR 0012)
 - [ ] Analysis: custom analyzer builder (char filters/tokenizer/filters + params, config dir, external jars), token attributes, step-by-step
 - [x] Commits: commit list, files, segments, diagnostics/attributes/codec formats (ADR 0009)

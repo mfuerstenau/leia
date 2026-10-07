@@ -76,6 +76,10 @@ their own indexes and the Lucene 9 and 8 indexes from `LegacyIndexWriter`.
 - `/` on a top term of `binary_key` in the overview: a term query for a binary term, shown as hex.
 - `title:(lamp`: a syntax error; `body:*a*`: a leading wildcard, which the classic parser rejects
   until `p` turns leading wildcards on.
+- `m` on document 223 (documents screen): More-Like-This with Lucene's defaults, 485 hits with doc 223
+  (`◆`) first. `body` has term vectors, `title` is analyzed from its stored text. With `p`, a min
+  term freq of 1, a max doc freq of 50 and "boost", the rewritten query shows the weighted terms.
+  Document 0 has nothing to take terms from, and document 37 is deleted: a source, but no hit.
 - Standard syntax (`m`), `title:lamp AND price:[10 TO 20]`: no hits while `price` is guessed to be
   LONG (the details panel says so). With `p`, set `price` to DOUBLE: 1 hit, doc 196.
   `quantity>=50` needs no change, since `quantity` is an int point.

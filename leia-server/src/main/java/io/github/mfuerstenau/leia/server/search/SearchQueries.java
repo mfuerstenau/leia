@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.server.search;
 
 import io.github.mfuerstenau.leia.core.ClassicOptions;
 import io.github.mfuerstenau.leia.core.InvalidQueryException;
+import io.github.mfuerstenau.leia.core.MoreLikeThisOptions;
 import io.github.mfuerstenau.leia.core.ParserOptions;
 import io.github.mfuerstenau.leia.core.PointType;
 import io.github.mfuerstenau.leia.core.Queries;
@@ -10,6 +11,7 @@ import io.github.mfuerstenau.leia.core.Similarities;
 import io.github.mfuerstenau.leia.core.SortType;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
+import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
 import io.github.mfuerstenau.leia.protocol.search.PointField;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
 import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
@@ -19,6 +21,7 @@ import io.github.mfuerstenau.leia.protocol.search.StandardQuery;
 import io.github.mfuerstenau.leia.protocol.search.TermQuery;
 import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -26,13 +29,14 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
 import org.apache.lucene.index.FieldInfo;
+import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.Sort;
 import org.apache.lucene.search.SortField;
 
 /**
  * Turns the query, the similarity and the sort of {@code startSearch} and {@code startExplain} into
- * their Lucene counterparts (ADR 0010, ADR 0011, ADR 0012).
+ * their Lucene counterparts (ADR 0010, ADR 0011, ADR 0012, ADR 0013).
  */
 final class SearchQueries {
 
@@ -40,20 +44,26 @@ final class SearchQueries {
 
     /**
      * The Lucene query for {@code query}, parsed right away so that a syntax error fails the request.
+     * A More-Like-This query is only checked here: the search builds it (ADR 0013).
      *
      * @throws RpcException {@code INVALID_PARAMS} unless exactly one alternative is present, for a
-     *     parser option out of range, a point type that doesn't fit its field, or a binary term that
-     *     is not hex; {@code FIELD_NOT_FOUND} for an unknown default, term or point field; {@code
-     *     INVALID_QUERY} if the expression doesn't parse
+     *     parser option or More-Like-This setting out of range, a point type that doesn't fit its
+     *     field, a More-Like-This field that isn't indexed, or a binary term that is not hex; {@code
+     *     FIELD_NOT_FOUND} for an unknown default, term, point or More-Like-This field; {@code
+     *     DOC_NOT_FOUND} for a More-Like-This document outside 0 to maxDoc - 1; {@code INVALID_QUERY}
+     *     if the expression doesn't parse
      */
     static Query query(ReadOnlyIndex index, SearchQuery query) throws RpcException {
-        long present = Stream.of(query.classic(), query.standard(), query.term())
+        long present = Stream.of(query.classic(), query.standard(), query.term(), query.moreLikeThis())
                 .filter(alternative -> alternative.isPresent())
                 .count();
         if (present != 1) {
             throw new RpcException(
                     ErrorCode.INVALID_PARAMS,
-                    "Invalid params: the query needs exactly one of classic, standard and term");
+                    "Invalid params: the query needs exactly one of classic, standard, term and moreLikeThis");
+        }
+        if (query.moreLikeThis().isPresent()) {
+            return moreLikeThis(index, query.moreLikeThis().get());
         }
         try {
             if (query.classic().isPresent()) {
@@ -170,6 +180,33 @@ final class SearchQueries {
                     ErrorCode.INVALID_PARAMS,
                     "Invalid params: the binary term '" + term.term().value() + "' is not hex",
                     e);
+        }
+    }
+
+    private static Query moreLikeThis(ReadOnlyIndex index, MoreLikeThisQuery like) throws RpcException {
+        GetDocumentHandler.checkDocId(index, like.docId());
+        for (String name : like.fields()) {
+            FieldInfo field = index.fieldInfo(name)
+                    .orElseThrow(
+                            () -> new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + name + "' in the index"));
+            if (field.getIndexOptions() == IndexOptions.NONE) {
+                throw new RpcException(
+                        ErrorCode.INVALID_PARAMS,
+                        "Invalid params: the field '" + name + "' is not indexed, so it has no terms to search for");
+            }
+        }
+        try {
+            return Queries.moreLikeThis(
+                    like.docId(),
+                    new MoreLikeThisOptions(
+                            like.fields(),
+                            like.minTermFreq(),
+                            like.minDocFreq(),
+                            like.maxDocFreq(),
+                            like.maxQueryTerms(),
+                            like.boost()));
+        } catch (IllegalArgumentException e) {
+            throw invalidParams(e);
         }
     }
 

@@ -1,0 +1,24 @@
+{
+  "jsonrpc": "2.0",
+  "id": 28,
+  "method": "startSearch",
+  "params": {
+    "query": {
+      "moreLikeThis": {
+        "docId": 223,
+        "fields": ["title", "body"],
+        "minTermFreq": 1,
+        "minDocFreq": 2,
+        "maxDocFreq": 100,
+        "maxQueryTerms": 5,
+        "boost": true
+      }
+    },
+    "similarity": {"bm25": {"k1": 1.2, "b": 0.75}},
+    "sort": [],
+    "offset": 0,
+    "limit": 3,
+    "exactTotalHits": false,
+    "fields": ["id"]
+  }
+}

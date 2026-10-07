@@ -7,6 +7,8 @@ dependencies {
     api(libs.lucene.core)
     // The classic query parser for search (ADR 0010); the API takes and returns lucene-core types only.
     implementation(libs.lucene.queryparser)
+    // MoreLikeThis (ADR 0013).
+    implementation(libs.lucene.queries)
     // Lucene 9 indexes must open with Lucene 10 (AGENTS.md, hard rule 5).
     runtimeOnly(libs.lucene.backward.codecs)
 }

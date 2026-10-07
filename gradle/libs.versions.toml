@@ -15,6 +15,7 @@ shadow = "9.6.1"
 lucene-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene" }
 lucene-backward-codecs = { module = "org.apache.lucene:lucene-backward-codecs", version.ref = "lucene" }
 lucene-queryparser = { module = "org.apache.lucene:lucene-queryparser", version.ref = "lucene" }
+lucene-queries = { module = "org.apache.lucene:lucene-queries", version.ref = "lucene" }
 lucene9-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene9" }
 lucene8-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene8" }
 dagger = { module = "com.google.dagger:dagger", version.ref = "dagger" }

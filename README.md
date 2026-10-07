@@ -24,12 +24,12 @@ because Lucene 10 can't read them.
 - **Commits:** every commit in the index directory with its segments, and for each segment its
   documents, deletions, versions, codec and codec formats, diagnostics, attributes and files with
   their sizes.
-- **Search:** a query in Lucene's classic or standard syntax or a single term, with the parsers'
-  options and ranges on point fields, scored with BM25, classic TF-IDF or boolean similarity and
+- **Search:** a query in Lucene's classic or standard syntax, a single term, or the documents like
+  a given one (More-Like-This), with the parsers' options and ranges on point fields, scored with BM25, classic TF-IDF or boolean similarity and
   sorted by score or by up to two doc values fields; the hits with their scores, sort values and
   chosen stored fields, exact or approximate hit counts, and an explanation of how a hit scores.
 
-Analysis, More-Like-This and the rest of Luke's read-only features are still to come (see
+Analysis and the rest of Luke's read-only features are still to come (see
 [`docs/tasklist.md`](docs/tasklist.md)).
 
 ## Requirements
@@ -101,6 +101,7 @@ scans it again; a smaller N needs no new scan.
 | `v` | view the selected field's values (see below) |
 | `x` | show numeric doc values as long, double bits, sortable double, float bits or sortable float |
 | `e` | hide or show the fields in which the document has nothing |
+| `m` | search for documents like this one (More-Like-This) on the search screen |
 | `Tab` | switch between the field table and the details of the selected field |
 | `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the fields or scroll the details |
 
@@ -192,9 +193,9 @@ shows as missing. The documents and terms screens always show the opened commit.
 
 | Key | Action |
 |---|---|
-| `/` | edit the query; `Enter` searches, `Esc` leaves the line, and `←` `→`, `Ctrl+A` `E` `U` `K` `W` edit |
-| `m` | switch between classic query syntax, standard query syntax and a single term |
-| `p` | set the parser options, and for the standard syntax the type of each point field; `Enter` applies, `Esc` cancels |
+| `/` | edit the query, or for More-Like-This the document id; `Enter` searches, `Esc` leaves the line, and `←` `→`, `Ctrl+A` `E` `U` `K` `W` edit |
+| `m` | switch between classic query syntax, standard query syntax, a single term and More-Like-This |
+| `p` | set the parser options, and for the standard syntax the type of each point field; for More-Like-This, its fields and limits; `Enter` applies, `Esc` cancels |
 | `s` | set the similarity (BM25 with `k1` and `b`, classic TF-IDF or boolean) and the sort; `Enter` applies, `Esc` cancels |
 | `l` | choose the stored fields each hit shows; `Space` shows or hides one, `a` all, `n` none |
 | `f` `F` | step through the fields with postings: the default field of a query, or the field of a term |
@@ -216,6 +217,17 @@ prefix length and position increments for both parsers, and fuzzy max edits, whi
 and auto-generated phrases for the classic one. A term query searches the field for
 the line exactly as typed, `:` and spaces included, without analysis. A changed setting searches
 again.
+
+More-Like-This searches for the documents like the one whose id the line holds, as Lucene's
+`MoreLikeThis` does; `m` on the documents screen starts it for the document shown. It takes the
+terms of each chosen field from the document's term vector, or else from its stored text,
+analyzed with the `StandardAnalyzer`, and keeps the best of them by tf × idf. `p` chooses the
+fields (at first those with positions) and the limits, which start from Lucene's defaults: a term
+must occur at least twice in the document and in at least 5 documents, and the query keeps the
+best 25 terms. With "boost", each term is weighted by its score. The rewritten query lists the
+terms, weakest first. The source document matches its own terms and is marked `◆`; a deleted
+source can be used too, but is no hit. If no term passes the limits, nothing matches, and the
+details panel says so.
 
 `s` sets what scores the hits and how they are ordered. The similarity also scores the
 explanations, so an explanation always adds up to the score shown. "Discount overlaps" is not offered:

@@ -1,4 +1,4 @@
-//! Searching the open index and explaining a hit (ADR 0010, ADR 0011, ADR 0012). Mirrors
+//! Searching the open index and explaining a hit (ADR 0010, ADR 0011, ADR 0012, ADR 0013). Mirrors
 //! `io.github.mfuerstenau.leia.protocol.search`.
 
 use serde::{Deserialize, Serialize};
@@ -8,12 +8,13 @@ use super::job::{JobParams, JobStarted};
 use super::method::RpcMethod;
 
 /// `startSearch`: starts a job that searches the open index and returns one page of hits with
-/// their stored fields (ADR 0010, ADR 0011, ADR 0012). Fails with `NO_INDEX_OPEN`,
+/// their stored fields (ADR 0010, ADR 0011, ADR 0012, ADR 0013). Fails with `NO_INDEX_OPEN`,
 /// `INVALID_QUERY` if the expression doesn't parse, `FIELD_NOT_FOUND` for an unknown default
-/// field, term field, point field, sort field or field to send, or `INVALID_PARAMS` for a page out
-/// of range, a query or similarity without exactly one alternative, a parser option or BM25
-/// parameter out of range, a point type that doesn't fit its field, or a sort field without doc
-/// values of the sort type.
+/// field, term field, point field, More-Like-This field, sort field or field to send,
+/// `DOC_NOT_FOUND` for a More-Like-This document outside 0 to maxDoc - 1, or `INVALID_PARAMS` for
+/// a page out of range, a query or similarity without exactly one alternative, a parser option,
+/// More-Like-This setting or BM25 parameter out of range, a point type that doesn't fit its field,
+/// a More-Like-This field that isn't indexed, or a sort field without doc values of the sort type.
 pub enum StartSearch {}
 
 impl RpcMethod for StartSearch {
@@ -46,7 +47,7 @@ pub const MAX_SEARCH_LIMIT: i32 = 1000;
 /// The largest `offset + limit` of `startSearch` the server accepts.
 pub const MAX_WINDOW: i32 = 10_000;
 
-/// A query, as one of several alternatives: exactly one is present (ADR 0010, ADR 0011).
+/// A query, as one of several alternatives: exactly one is present (ADR 0010, ADR 0011, ADR 0013).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SearchQuery {
@@ -59,7 +60,36 @@ pub struct SearchQuery {
     /// A query for exactly one term.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub term: Option<TermQuery>,
+    /// Documents like one document of the index.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub more_like_this: Option<MoreLikeThisQuery>,
 }
+
+/// Documents like one document of the index, by the terms that Lucene's `MoreLikeThis` picks from
+/// it (ADR 0013). A field's terms come from the document's term vector, or else from its stored
+/// strings analyzed with `StandardAnalyzer`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MoreLikeThisQuery {
+    /// The source document, from 0 to maxDoc - 1; it may be deleted.
+    pub doc_id: i32,
+    /// The indexed fields to take terms from, at least one and none twice.
+    pub fields: Vec<String>,
+    /// Terms that occur fewer times in the document are left out (Lucene: 2).
+    pub min_term_freq: i32,
+    /// Terms that occur in fewer documents are left out (Lucene: 5).
+    pub min_doc_freq: i32,
+    /// Terms that occur in more documents are left out; `None` for no limit.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_doc_freq: Option<i32>,
+    /// How many of the best terms the query has, from 1 to [`MAX_QUERY_TERMS`] (Lucene: 25).
+    pub max_query_terms: i32,
+    /// Whether each term is boosted by its score, relative to the weakest term's.
+    pub boost: bool,
+}
+
+/// The largest `max_query_terms` the server accepts: Lucene's maximum clause count.
+pub const MAX_QUERY_TERMS: i32 = 1024;
 
 /// What scores the hits, as one of several alternatives: exactly one is present (ADR 0012).
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
