@@ -36,7 +36,9 @@ public enum ErrorCode {
     /** The field has no such term, or the document does not contain it. */
     TERM_NOT_FOUND(-32009),
     /** The document has no stored value with that index in the field. */
-    VALUE_NOT_FOUND(-32010);
+    VALUE_NOT_FOUND(-32010),
+    /** The index directory has no commit of that generation. */
+    COMMIT_NOT_FOUND(-32011);
 
     private final int code;
 

@@ -1,0 +1,32 @@
+{
+  "jsonrpc": "2.0",
+  "id": 12,
+  "result": {
+    "commits": [
+      {
+        "generation": 4,
+        "segmentsFile": "segments_4",
+        "current": true,
+        "version": 13,
+        "segmentCount": 2,
+        "maxDoc": 500,
+        "delCount": 13,
+        "luceneVersion": "10.5.2",
+        "userData": {
+          "writer": "leia DemoIndexWriter"
+        }
+      },
+      {
+        "generation": 3,
+        "segmentsFile": "segments_3",
+        "current": false,
+        "version": 10,
+        "segmentCount": 2,
+        "maxDoc": 500,
+        "delCount": 0,
+        "luceneVersion": "10.5.2",
+        "userData": {}
+      }
+    ]
+  }
+}

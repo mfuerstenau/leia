@@ -15,6 +15,7 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 - [x] ADR 0006: documents on the wire (per-segment reads, deleted documents readable, text-or-hex byte strings, raw numeric doc values)
 - [x] ADR 0007: terms and postings on the wire (stateless pages, no jobs, positions on demand, `TERM_NOT_FOUND`)
 - [x] ADR 0008: large stored values (cut at 64 KiB in `getDocument`, `getStoredValue` fetches one whole, `VALUE_NOT_FOUND`)
+- [x] ADR 0009: commits and segments on the wire (read from the directory on every call, one commit whole per call, `COMMIT_NOT_FOUND`)
 - [x] `README.md`: what leia is, build and run instructions
 
 ### Java build (Gradle 9, Java 25)
@@ -115,7 +116,11 @@ From the read-only checklist in `luke-features.md` §7. Ordered roughly by value
   - the details panel shows a value's first 2000 characters or 20 lines; the norm shows the field length it encodes (`SmallFloat.byte4ToInt`, exact below 40, a range above)
 - [ ] Search: parse/rewrite, term query, paging (configurable page size), exact/approx total hits, explain, query-parser options, similarity (BM25/TF-IDF), 2-level sort, fields to load, More-Like-This
 - [ ] Analysis: custom analyzer builder (char filters/tokenizer/filters + params, config dir, external jars), token attributes, step-by-step
-- [ ] Commits: commit list, files, segments, diagnostics/attributes/codec formats
+- [x] Commits: commit list, files, segments, diagnostics/attributes/codec formats (ADR 0009)
+  - `getCommits {}`: the commits of the directory, newest first, `current` marks the opened one; unreadable commits are skipped and logged
+  - `getCommit {generation}`: segments in commit order (docBase, deletions, generations, versions, codec and its formats, compound, blocks, index sort, size, diagnostics, attributes) and every file with its segment and size; `COMMIT_NOT_FOUND` (-32011)
+  - TUI: commits screen (`4`) with commits on top, segments and details below; `r` reads the directory again; the demo index keeps all 4 commits and has one non-compound segment
+- [ ] Commits: per-field postings, doc values and KNN vectors formats (from each segment's field infos; ADR 0009 leaves them out)
 - [ ] Tools: check index (streamed output), export terms
 - [ ] Misc: log view with level filter, cross-screen navigation (`luke-features.md` §5), themes, about
 - [ ] Improvements over Luke (§6): KNN vector inspection/search, point values, per-segment doc view, deleted-doc inspection, readable binary values, highlighting, cancellation of long operations

@@ -43,6 +43,7 @@ import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.index.NoDeletionPolicy;
 import org.apache.lucene.index.NoMergePolicy;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.VectorSimilarityFunction;
@@ -57,8 +58,9 @@ import org.apache.lucene.util.NumericUtils;
  * <p>A small product catalogue with a field for nearly everything leia shows: every index option,
  * norms, payloads, term vectors, each doc values type, points, KNN vectors, binary terms, stored
  * values of every type, JSON and delimited values for the viewer, values over the 64 KiB cut, and
- * sparse and empty fields. 500 documents in 3 segments, some deleted, with commit user data. The
- * content is random but the same on every run. See {@code docs/demo-index.md} for what is where.
+ * sparse and empty fields. 500 documents in 3 segments, some deleted, with commit user data, and
+ * all 4 commits kept. The content is random but the same on every run. See {@code
+ * docs/demo-index.md} for what is where.
  */
 public final class DemoIndexWriter {
 
@@ -198,11 +200,15 @@ public final class DemoIndexWriter {
                         directory,
                         new IndexWriterConfig(new DemoAnalyzer())
                                 // No merges: keep the segments and the deleted documents.
-                                .setMergePolicy(NoMergePolicy.INSTANCE))) {
+                                .setMergePolicy(NoMergePolicy.INSTANCE)
+                                // Keep every commit, for the commits screen.
+                                .setIndexDeletionPolicy(NoDeletionPolicy.INSTANCE))) {
             for (int i = 0; i < DOCS; i++) {
                 writer.addDocument(i == 0 ? sparse() : product(i, random));
                 if ((i + 1) % SEGMENT_SIZE == 0) {
                     writer.commit();
+                    // The last segment is not in a compound file, so that both kinds show.
+                    writer.getConfig().setUseCompoundFile(i + 1 + SEGMENT_SIZE < DOCS);
                 }
             }
             writer.commit();

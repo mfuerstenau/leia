@@ -21,8 +21,11 @@ because Lucene 10 can't read them.
   encode, stored values, doc values and term vectors, and a viewer for whole values as text, hex, pretty-printed JSON or delimited data.
 - **Terms:** the terms of a field with their frequencies, and the documents that contain a term,
   with the positions, offsets and payloads of each occurrence.
+- **Commits:** every commit in the index directory with its segments, and for each segment its
+  documents, deletions, versions, codec and codec formats, diagnostics, attributes and files with
+  their sizes.
 
-Search, analysis, commits and the rest of Luke's read-only features are still to come (see
+Search, analysis and the rest of Luke's read-only features are still to come (see
 [`docs/tasklist.md`](docs/tasklist.md)).
 
 ## Requirements
@@ -56,7 +59,7 @@ leia --java /opt/jdk-25 /var/lib/solr/products/data/index
 |---|---|
 | `o` | open an index: type a path, `Tab` completes directories, `~` is your home directory, `Enter` opens and `Esc` cancels |
 | `c` | close the open index |
-| `1` `2` `3` | switch between the overview, the documents and the terms |
+| `1` `2` `3` `4` | switch between the overview, the documents, the terms and the commits |
 | `Esc` | stop the running term scans; with none running, quit |
 | `q`, `Ctrl+C` | quit |
 
@@ -162,6 +165,23 @@ include deleted documents, and the postings mark them `deleted`.
 A document opened from a posting shows the term in the header, and the details panel of the
 term's field shows where the term occurs: its positions, offsets and payloads, as far as they
 were indexed. `[` and `]` then step through the term's documents.
+
+#### Commits
+
+| Key | Action |
+|---|---|
+| `Tab`, `Shift+Tab` | switch between the commits, the segments of the selected commit and the details |
+| `Enter` | on a commit, go to its segments |
+| `r` | read the commits from the directory again |
+| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the focused list, or scroll the details |
+
+The commits screen lists the commits of the index directory, newest first; `●` marks the one leia
+opened. A directory keeps older commits only if the writer's deletion policy kept them, and it
+can hold commits written after leia opened the index: `r` reads them again. Below are the
+segments of the selected commit in document id order, and the details of the commit (its user
+data and all its files) or of the selected segment (document range, deletions, versions,
+generations, diagnostics, attributes, codec formats and its files). A file that can't be read
+shows as missing. The documents and terms screens always show the opened commit.
 
 If an index can't be opened, the prompt shows why (not found, not an index, unsupported format,
 corrupt, not readable) and keeps the path, so you can fix it. The index that was open before

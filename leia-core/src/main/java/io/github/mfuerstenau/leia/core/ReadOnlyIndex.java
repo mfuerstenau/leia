@@ -333,6 +333,26 @@ public final class ReadOnlyIndex implements Closeable {
         return TermReader.positions(reader, docId, field, term);
     }
 
+    /**
+     * The commits of the index directory, newest first, read from the directory again: they include
+     * commits written after the index was opened. The opened one is {@link CommitInfo#current()}.
+     *
+     * @throws IOException if the directory can't be listed
+     */
+    public CommitList commits() throws IOException {
+        return CommitReader.commits(directory, commit.getGeneration());
+    }
+
+    /**
+     * One commit of the index directory with its segments and files, read from the directory again.
+     *
+     * @return the commit; empty if the directory has no commit of that generation
+     * @throws IOException if the commit can't be read
+     */
+    public Optional<CommitDetails> commit(long generation) throws IOException {
+        return CommitReader.commit(directory, generation, commit.getGeneration());
+    }
+
     private void checkField(String field) {
         if (!hasField(field)) {
             throw new IllegalArgumentException("No field " + field);

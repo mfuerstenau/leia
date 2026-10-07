@@ -1,5 +1,9 @@
 package io.github.mfuerstenau.leia.protocol;
 
+import io.github.mfuerstenau.leia.protocol.commits.GetCommitParams;
+import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
+import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
+import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
 import io.github.mfuerstenau.leia.protocol.document.GetStoredValueParams;
@@ -130,6 +134,22 @@ public final class Methods {
     public static final RpcMethod<GetPositionsParams, GetPositionsResult> GET_POSITIONS =
             new RpcMethod<>("getPositions", GetPositionsParams.class, GetPositionsResult.class);
 
+    /**
+     * The commits of the open index's directory, newest first, read from the directory on every call
+     * (ADR 0009). Commits that can't be read are left out. Fails with {@code NO_INDEX_OPEN}.
+     */
+    public static final RpcMethod<GetCommitsParams, GetCommitsResult> GET_COMMITS =
+            new RpcMethod<>("getCommits", GetCommitsParams.class, GetCommitsResult.class);
+
+    /**
+     * One commit of the open index's directory whole: its segments with their details, and its files
+     * (ADR 0009). Fails with {@code NO_INDEX_OPEN}, {@code COMMIT_NOT_FOUND} if the directory has no
+     * {@code segments_N} of that generation, or {@code UNSUPPORTED_INDEX_FORMAT}, {@code CORRUPT_INDEX}
+     * or {@code INDEX_NOT_READABLE} if the commit can't be read.
+     */
+    public static final RpcMethod<GetCommitParams, GetCommitResult> GET_COMMIT =
+            new RpcMethod<>("getCommit", GetCommitParams.class, GetCommitResult.class);
+
     public static final List<RpcMethod<?, ?>> ALL = List.of(
             VERSION,
             OPEN_INDEX,
@@ -143,7 +163,9 @@ public final class Methods {
             GET_TERM_VECTOR,
             GET_TERMS,
             GET_POSTINGS,
-            GET_POSITIONS);
+            GET_POSITIONS,
+            GET_COMMITS,
+            GET_COMMIT);
 
     private Methods() {}
 

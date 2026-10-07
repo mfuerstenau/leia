@@ -15,7 +15,10 @@ their own indexes and the Lucene 9 and 8 indexes from `LegacyIndexWriter`.
 
 ## Index
 
-- 500 documents in 3 segments (documents 0–199, 200–399, 400–499), with no merges.
+- 500 documents in 3 segments (documents 0–199, 200–399, 400–499), with no merges. The first two
+  are compound files, the third (`_2`) is not.
+- 4 commits, all kept (`NoDeletionPolicy`): `segments_1` to `segments_3` after each segment, and
+  `segments_4`, the latest, with the deletions and the user data.
 - 13 deleted documents: every multiple of 37 (37, 74, …, 481).
 - Commit user data: `writer`, `source`, `docs`.
 
