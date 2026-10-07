@@ -16,6 +16,7 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 - [x] ADR 0007: terms and postings on the wire (stateless pages, no jobs, positions on demand, `TERM_NOT_FOUND`)
 - [x] ADR 0008: large stored values (cut at 64 KiB in `getDocument`, `getStoredValue` fetches one whole, `VALUE_NOT_FOUND`)
 - [x] ADR 0009: commits and segments on the wire (read from the directory on every call, one commit whole per call, `COMMIT_NOT_FOUND`)
+- [x] ADR 0010: search on the wire (search and explain as jobs, the query as alternatives `classic` / `term`, stateless offset paging up to 10,000, cancellation through `QueryTimeout`, `INVALID_QUERY`)
 - [x] `README.md`: what leia is, build and run instructions
 
 ### Java build (Gradle 9, Java 25)
@@ -100,9 +101,9 @@ From the read-only checklist in `luke-features.md` §7. Ordered roughly by value
 - [x] Overview: sort the field table (TUI only, no protocol change)
   - by number (default), name, or term count (starts descending), as in Luke (`luke-features.md` §4.1); fields without a count sort last in either direction, ties by number
   - `s` cycles the sort column, `S` flips the direction; the header marks the sorted column with ▲/▼; the selection stays on its field when rows move
-- [ ] Overview → other screens: browse/search docs by a top term (`luke-features.md` §4.1, needs Documents and Search)
+- [x] Overview → other screens: browse/search docs by a top term (`luke-features.md` §4.1, needs Documents and Search)
   - [x] browse: `Enter` on a top term opens the terms screen at that term, with its postings focused
-  - [ ] search docs by a top term (needs Search)
+  - [x] search: `/` on a top term runs a term query for it on the search screen (binary terms as hex)
 - [x] Documents: doc by id with flags/norm/value, term vectors, doc values (with decoding), stored values (ADR 0006)
   - `getDocument {docId}`: every field of the index with the document's norm, stored values (typed, numbers as text), doc values (numbers raw, byte strings as text or hex) and whether it has a term vector; read from the document's segment, deleted documents included (`deleted: true`); `DOC_NOT_FOUND` (-32008) outside 0..maxDoc-1
   - `getTermVector {docId, field}`: terms with freq, positions, offsets and payloads (hex), on demand
@@ -114,7 +115,14 @@ From the read-only checklist in `luke-features.md` §7. Ordered roughly by value
   - `getDocument` cuts `STRING`/`BINARY` stored values over 64 KiB between two characters and gives their `fullLength`; `getStoredValue {docId, field, index}` sends one whole; `VALUE_NOT_FOUND` (-32010)
   - TUI: `v` opens the viewer on the selected field's stored values and doc values (←/→ value, `h` text/hex dump, `y` copy via OSC 52, scrolling); a cut value is fetched whole when shown
   - the details panel shows a value's first 2000 characters or 20 lines; the norm shows the field length it encodes (`SmallFloat.byte4ToInt`, exact below 40, a range above)
-- [ ] Search: parse/rewrite, term query, paging (configurable page size), exact/approx total hits, explain, query-parser options, similarity (BM25/TF-IDF), 2-level sort, fields to load, More-Like-This
+- [x] Search, first slice: parse/rewrite, term query, paging (configurable page size), exact/approx total hits, explain, fields to load (ADR 0010)
+  - `startSearch {query, offset, limit, exactTotalHits, fields?}` / `getSearch`: the query is `classic {expression, defaultField, defaultOperator}` (classic `QueryParser`, `StandardAnalyzer`) or `term {field, term}` (raw `TermQuery`, any bytes); offset paging, `limit` ≤ 1000, `offset + limit` ≤ 10,000; hits with score and stored fields cut at 256 bytes; parsed and rewritten query, total hits and relation, time taken
+  - `startExplain {query, docId}` / `getExplain`: Lucene's `Explanation` tree, values as text
+  - both are jobs; cancellation through a `QueryTimeout` on an `ExitableDirectoryReader` plus `IndexSearcher.setTimeout`; `INVALID_QUERY` (-32012)
+  - TUI: search screen (`5`) with a query line (`/`, shared `LineInput` with the open prompt), mode/field/operator/count settings (`m`, `f`/`F`, `a`, `t`) that search again, hits fetched 100 at a time, `x` explains into the details panel, `Enter` opens the document; the TUI now polls the scan, search and explain jobs side by side
+- [ ] Search: query-parser options (Luke's list: phrase slop, leading wildcard, fuzzy settings, …) and the standard query parser with point fields (numeric ranges on points)
+- [ ] Search: similarity (BM25 k1/b, classic TF-IDF), 2-level sort on doc values fields, choice of the stored fields per hit in the TUI, More-Like-This
+- [ ] Search: `[`/`]` on the documents screen to step through the search hits, as for a term's postings
 - [ ] Analysis: custom analyzer builder (char filters/tokenizer/filters + params, config dir, external jars), token attributes, step-by-step
 - [x] Commits: commit list, files, segments, diagnostics/attributes/codec formats (ADR 0009)
   - `getCommits {}`: the commits of the directory, newest first, `current` marks the opened one; unreadable commits are skipped and logged

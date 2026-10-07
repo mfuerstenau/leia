@@ -24,8 +24,10 @@ because Lucene 10 can't read them.
 - **Commits:** every commit in the index directory with its segments, and for each segment its
   documents, deletions, versions, codec and codec formats, diagnostics, attributes and files with
   their sizes.
+- **Search:** a query in Lucene's classic syntax or a single term, the hits with their scores and
+  stored fields, exact or approximate hit counts, and an explanation of how a hit scores.
 
-Search, analysis and the rest of Luke's read-only features are still to come (see
+Analysis, more search options and the rest of Luke's read-only features are still to come (see
 [`docs/tasklist.md`](docs/tasklist.md)).
 
 ## Requirements
@@ -59,8 +61,8 @@ leia --java /opt/jdk-25 /var/lib/solr/products/data/index
 |---|---|
 | `o` | open an index: type a path, `Tab` completes directories, `~` is your home directory, `Enter` opens and `Esc` cancels |
 | `c` | close the open index |
-| `1` `2` `3` `4` | switch between the overview, the documents, the terms and the commits |
-| `Esc` | stop the running term scans; with none running, quit |
+| `1` … `5` | switch between the overview, the documents, the terms, the commits and the search |
+| `Esc` | stop the running term scans, or on the search screen the running search; with none running, quit |
 | `q`, `Ctrl+C` | quit |
 
 #### Overview
@@ -74,6 +76,7 @@ leia --java /opt/jdk-25 /var/lib/solr/products/data/index
 | `S` | flip the sort direction |
 | `Tab` | switch between the field table and the top terms |
 | `Enter` on a top term | show the term and its documents on the terms screen |
+| `/` on a top term | search for the documents that contain it |
 | `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the field table or the top terms |
 
 Counting terms reads every term of the field, which can take a while on a large index. The scan
@@ -182,6 +185,30 @@ segments of the selected commit in document id order, and the details of the com
 data and all its files) or of the selected segment (document range, deletions, versions,
 generations, diagnostics, attributes, codec formats and its files). A file that can't be read
 shows as missing. The documents and terms screens always show the opened commit.
+
+#### Search
+
+| Key | Action |
+|---|---|
+| `/` | edit the query; `Enter` searches, `Esc` leaves the line, and `←` `→`, `Ctrl+A` `E` `U` `K` `W` edit |
+| `m` | switch between classic query syntax and a single term |
+| `f` `F` | step through the fields with postings: the default field of a classic query, or the field of a term |
+| `a` | combine clauses without an operator with OR or AND |
+| `t` | count every hit, or stop counting after 1000 |
+| `x` | explain how the selected hit scores |
+| `Enter` | show the selected hit's document on the documents screen |
+| `Tab` | switch between the hits and the details |
+| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the hits, or scroll the details |
+
+A classic query is parsed with Lucene's classic `QueryParser` and the `StandardAnalyzer`, for
+example `title:fox AND body:qu*`, `"quick fox"~2` or `fox~`. A term query searches the field for
+the line exactly as typed, `:` and spaces included, without analysis. A changed setting searches
+again. The hits come 100 at a time, the next ones once the selection reaches the last row, up to
+the first 10,000. Each hit shows its stored fields, with long values cut. The details panel shows
+the parsed and the rewritten query, or after `x` the explanation of the selected hit as Lucene
+computes it; parts that don't match are dimmed. Searches and explanations run in the server, so
+`Esc` stops a slow one, such as a fuzzy query on a large index. A numeric range in classic syntax
+doesn't match point fields yet.
 
 If an index can't be opened, the prompt shows why (not found, not an index, unsupported format,
 corrupt, not readable) and keeps the path, so you can fix it. The index that was open before

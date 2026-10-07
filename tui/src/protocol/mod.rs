@@ -13,6 +13,7 @@ mod error;
 pub mod index;
 pub mod job;
 mod method;
+pub mod search;
 pub mod terms;
 pub mod version;
 

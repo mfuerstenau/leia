@@ -19,6 +19,10 @@ import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.job.CancelJobResult;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
+import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
+import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
+import io.github.mfuerstenau.leia.protocol.search.StartExplainParams;
+import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetPositionsParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetPositionsResult;
@@ -150,6 +154,37 @@ public final class Methods {
     public static final RpcMethod<GetCommitParams, GetCommitResult> GET_COMMIT =
             new RpcMethod<>("getCommit", GetCommitParams.class, GetCommitResult.class);
 
+    /**
+     * Starts a job that searches the open index and returns one page of hits with their stored fields
+     * (ADR 0010). Fails with {@code NO_INDEX_OPEN}, {@code INVALID_QUERY} if the expression doesn't
+     * parse, {@code FIELD_NOT_FOUND} for an unknown default field, term field or field to send, or
+     * {@code INVALID_PARAMS} for a page out of range or a query without exactly one alternative.
+     */
+    public static final RpcMethod<StartSearchParams, JobStarted> START_SEARCH =
+            new RpcMethod<>("startSearch", StartSearchParams.class, JobStarted.class);
+
+    /**
+     * The progress of a search, and its outcome once it is done. The outcome is handed out once: a
+     * search that failed answers with its error ({@code INVALID_QUERY} for too many clauses), and
+     * afterwards the job is gone ({@code JOB_NOT_FOUND}).
+     */
+    public static final RpcMethod<JobParams, GetSearchResult> GET_SEARCH =
+            new RpcMethod<>("getSearch", JobParams.class, GetSearchResult.class);
+
+    /**
+     * Starts a job that explains how a document scores for a query, or why it doesn't match (ADR
+     * 0010). Fails as {@code startSearch} does, and with {@code DOC_NOT_FOUND} for an id outside 0
+     * to maxDoc - 1.
+     */
+    public static final RpcMethod<StartExplainParams, JobStarted> START_EXPLAIN =
+            new RpcMethod<>("startExplain", StartExplainParams.class, JobStarted.class);
+
+    /**
+     * The outcome of an explanation once it is done, handed out once as for {@code getSearch}.
+     */
+    public static final RpcMethod<JobParams, GetExplainResult> GET_EXPLAIN =
+            new RpcMethod<>("getExplain", JobParams.class, GetExplainResult.class);
+
     public static final List<RpcMethod<?, ?>> ALL = List.of(
             VERSION,
             OPEN_INDEX,
@@ -165,7 +200,11 @@ public final class Methods {
             GET_POSTINGS,
             GET_POSITIONS,
             GET_COMMITS,
-            GET_COMMIT);
+            GET_COMMIT,
+            START_SEARCH,
+            GET_SEARCH,
+            START_EXPLAIN,
+            GET_EXPLAIN);
 
     private Methods() {}
 

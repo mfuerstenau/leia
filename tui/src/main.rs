@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use leia::app::{Action, App};
+use leia::app::{Action, App, Poll};
 use leia::build_info::{LEIA, java_line, server_line};
 use leia::cli::Cli;
 use leia::client::CallError;
@@ -22,6 +22,7 @@ use leia::protocol::index::{
     CloseIndex, CloseIndexParams, GetIndexStats, GetIndexStatsParams, OpenIndex, OpenIndexParams,
 };
 use leia::protocol::job::{CancelJob, JobParams};
+use leia::protocol::search::{GetExplain, GetSearch, StartExplain, StartSearch};
 use leia::protocol::terms::{
     GetFieldTermScan, GetPositions, GetPositionsParams, GetPostings, GetPostingsParams, GetTerms,
     GetTermsParams, StartFieldTermScan, StartFieldTermScanParams,
@@ -99,6 +100,10 @@ fn start_server(cli: &Cli) -> Result<(Server, VersionResult)> {
 
 /// How often a running job is polled while no key is pressed.
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
+/// How often a job is polled at first: most searches take a few milliseconds.
+const FIRST_POLL_INTERVAL: Duration = Duration::from_millis(10);
+/// How many polls of a new job use [`FIRST_POLL_INTERVAL`].
+const FIRST_POLLS: u32 = 10;
 
 fn run(
     terminal: &mut DefaultTerminal,
@@ -112,23 +117,42 @@ fn run(
         // The overview is shown at first, so no action follows.
         open_index(server, app, &path)?;
     }
+    let mut polled: Vec<Poll> = Vec::new();
+    let mut first_polls = 0;
     loop {
         terminal.draw(|frame| app.draw(frame))?;
-        let mut next = match app.polling() {
-            // Waits for a key only as long as the next poll of the job.
-            Some(job_id) if !event::poll(POLL_INTERVAL)? => poll_scan(server, app, job_id)?,
-            _ => match event::read()? {
-                // Windows reports both press and release; only handle presses.
-                Event::Key(key) if key.kind == KeyEventKind::Press => app.handle_key(key),
-                _ => None,
-            },
+        let polls = app.polls();
+        if polls != polled {
+            first_polls = FIRST_POLLS;
+            polled.clone_from(&polls);
+        }
+        let interval = if first_polls > 0 {
+            first_polls -= 1;
+            FIRST_POLL_INTERVAL
+        } else {
+            POLL_INTERVAL
         };
-        // An action can lead to another one: a finished scan starts the next queued one.
-        while let Some(action) = next {
-            if action == Action::Quit {
-                return Ok(());
+        // Waits for a key only as long as the next poll of the jobs.
+        let actions = if !polls.is_empty() && !event::poll(interval)? {
+            poll_jobs(server, app, &polls)?
+        } else {
+            match event::read()? {
+                // Windows reports both press and release; only handle presses.
+                Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    app.handle_key(key).into_iter().collect()
+                }
+                _ => Vec::new(),
             }
-            next = perform(terminal, server, app, action)?;
+        };
+        for action in actions {
+            // An action can lead to another one: a finished scan starts the next queued one.
+            let mut next = Some(action);
+            while let Some(action) = next {
+                if action == Action::Quit {
+                    return Ok(());
+                }
+                next = perform(terminal, server, app, action)?;
+            }
         }
     }
 }
@@ -254,18 +278,66 @@ fn perform(
                 Err(error) => app.commit_failed(generation, error),
             }
         }
+        Action::StartSearch { params, cancel } => {
+            cancel_jobs(server, cancel)?;
+            match answered(server.call::<StartSearch>(params))? {
+                Ok(job) => app.search_started(job.job_id),
+                Err(error) => app.search_failed(error),
+            }
+        }
+        Action::StartExplain { params, cancel } => {
+            cancel_jobs(server, cancel)?;
+            match answered(server.call::<StartExplain>(params))? {
+                Ok(job) => app.explain_started(job.job_id),
+                Err(error) => app.explain_failed(error),
+            }
+        }
+        Action::CancelSearch(jobs) => {
+            cancel_jobs(server, jobs)?;
+            app.search_cancelled();
+        }
     }
     Ok(None)
 }
 
-/// Fetches the progress or the outcome of the running scan.
-fn poll_scan(server: &mut Server, app: &mut App, job_id: i64) -> Result<Option<Action>> {
-    Ok(
-        match answered(server.call::<GetFieldTermScan>(JobParams { job_id }))? {
-            Ok(result) => app.scan_progress(result),
-            Err(error) => app.scan_failed(error),
-        },
-    )
+fn cancel_jobs(server: &mut Server, jobs: Vec<i64>) -> Result<()> {
+    for job_id in jobs {
+        server.call::<CancelJob>(JobParams { job_id })?;
+    }
+    Ok(())
+}
+
+/// Fetches the progress or the outcome of each running job. Returns the actions that follow.
+fn poll_jobs(server: &mut Server, app: &mut App, polls: &[Poll]) -> Result<Vec<Action>> {
+    let mut actions = Vec::new();
+    for &poll in polls {
+        let next = match poll {
+            Poll::Scan(job_id) => {
+                match answered(server.call::<GetFieldTermScan>(JobParams { job_id }))? {
+                    Ok(result) => app.scan_progress(result),
+                    Err(error) => app.scan_failed(error),
+                }
+            }
+            Poll::Search(job_id) => {
+                match answered(server.call::<GetSearch>(JobParams { job_id }))? {
+                    Ok(result) => app.search_progress(result),
+                    Err(error) => {
+                        app.search_failed(error);
+                        None
+                    }
+                }
+            }
+            Poll::Explain(job_id) => {
+                match answered(server.call::<GetExplain>(JobParams { job_id }))? {
+                    Ok(result) => app.explain_progress(result),
+                    Err(error) => app.explain_failed(error),
+                }
+                None
+            }
+        };
+        actions.extend(next);
+    }
+    Ok(actions)
 }
 
 /// Opens the index and fetches its statistics for the overview. The server's errors are shown

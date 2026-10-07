@@ -5,11 +5,12 @@ import io.github.mfuerstenau.leia.core.IndexDocument.StoredValue;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.function.Predicate;
 import java.util.stream.StreamSupport;
 import org.apache.lucene.index.BinaryDocValues;
 import org.apache.lucene.index.DirectoryReader;
@@ -44,7 +45,7 @@ final class DocumentReader {
         Bits liveDocs = leaf.getLiveDocs();
         boolean deleted = liveDocs != null && !liveDocs.get(doc);
 
-        StoredValues stored = new StoredValues(null);
+        StoredValues stored = new StoredValues(_ -> true);
         leaf.storedFields().document(doc, stored);
         Fields termVectors = leaf.termVectors().get(doc);
 
@@ -128,20 +129,23 @@ final class DocumentReader {
 
     static List<StoredValue> storedValues(DirectoryReader reader, int docId, String field) throws IOException {
         SegmentDoc segmentDoc = SegmentDoc.of(reader, docId);
-        StoredValues stored = new StoredValues(field);
+        StoredValues stored = new StoredValues(field::equals);
         segmentDoc.leaf().storedFields().document(segmentDoc.doc(), stored);
         return List.copyOf(stored.values.getOrDefault(field, List.of()));
     }
 
-    /** Collects the stored values, by field name, in the order the values were added. */
-    private static final class StoredValues extends StoredFieldVisitor {
+    /**
+     * Collects the stored values, by field name, in the order the values were added. The fields come
+     * in the order of their first value.
+     */
+    static final class StoredValues extends StoredFieldVisitor {
 
-        final Map<String, List<StoredValue>> values = new HashMap<>();
-        /** The only field to collect; {@code null} for every field. */
-        private final String only;
+        final Map<String, List<StoredValue>> values = new LinkedHashMap<>();
+        /** Which fields to collect, by name. */
+        private final Predicate<String> wanted;
 
-        StoredValues(String only) {
-            this.only = only;
+        StoredValues(Predicate<String> wanted) {
+            this.wanted = wanted;
         }
 
         private void add(FieldInfo field, StoredValue value) {
@@ -150,7 +154,7 @@ final class DocumentReader {
 
         @Override
         public Status needsField(FieldInfo field) {
-            return only == null || only.equals(field.getName()) ? Status.YES : Status.NO;
+            return wanted.test(field.getName()) ? Status.YES : Status.NO;
         }
 
         @Override

@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 22,
+  "error": {
+    "code": -32008,
+    "message": "No document 500 in the index: maxDoc is 500"
+  }
+}

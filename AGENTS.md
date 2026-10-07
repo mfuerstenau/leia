@@ -47,7 +47,7 @@ Dependency direction: `leia-server → leia-protocol`, `leia-server → leia-cor
 
 ## Tech stack
 
-**Java:** Java 25 via a Gradle toolchain · Gradle 9 (Kotlin DSL, version catalog in `gradle/libs.versions.toml`) · Lucene 10 (+ backward-codecs) · Dagger 2.60 (annotation processor, no reflection DI) · Jackson 3 (`tools.jackson.*`) · JUnit 6 + AssertJ · Spotless with Palantir Java Format · Shadow for the fat jar. Base package and group: `io.github.mfuerstenau.leia` (`.core`, `.protocol`, `.server`). Shared build config lives in the `build-logic/` convention plugins (`leia.java-conventions`, `leia.java-library-conventions`); see ADR 0002.
+**Java:** Java 25 via a Gradle toolchain · Gradle 9 (Kotlin DSL, version catalog in `gradle/libs.versions.toml`) · Lucene 10 (+ backward-codecs, queryparser) · Dagger 2.60 (annotation processor, no reflection DI) · Jackson 3 (`tools.jackson.*`) · JUnit 6 + AssertJ · Spotless with Palantir Java Format · Shadow for the fat jar. Base package and group: `io.github.mfuerstenau.leia` (`.core`, `.protocol`, `.server`). Shared build config lives in the `build-logic/` convention plugins (`leia.java-conventions`, `leia.java-library-conventions`); see ADR 0002.
 
 **Rust:** standard tooling — stable toolchain, edition 2024, `rustfmt`, `clippy` (warnings are errors in CI), `cargo test`. Crates: ratatui, serde/serde_json, anyhow, clap. Release builds for Linux and Windows on x86_64; no macOS, no bundled Java (ADR 0004).
 

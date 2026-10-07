@@ -217,6 +217,12 @@ impl Documents {
         self.positions = None;
     }
 
+    /// Forgets the hit, for a document opened from elsewhere.
+    pub fn clear_hit(&mut self) {
+        self.hit = None;
+        self.positions = None;
+    }
+
     /// Whether a document was opened from the terms screen, so `[`/`]` step through its term's
     /// documents.
     pub fn has_hit(&self) -> bool {

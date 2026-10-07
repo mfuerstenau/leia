@@ -1,0 +1,17 @@
+{
+  "jsonrpc": "2.0",
+  "id": 22,
+  "method": "startExplain",
+  "params": {
+    "query": {
+      "term": {
+        "field": "title",
+        "term": {
+          "value": "lamp",
+          "binary": false
+        }
+      }
+    },
+    "docId": 223
+  }
+}

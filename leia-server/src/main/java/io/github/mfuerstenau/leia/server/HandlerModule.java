@@ -12,6 +12,10 @@ import io.github.mfuerstenau.leia.server.index.CloseIndexHandler;
 import io.github.mfuerstenau.leia.server.index.GetIndexStatsHandler;
 import io.github.mfuerstenau.leia.server.index.OpenIndexHandler;
 import io.github.mfuerstenau.leia.server.job.CancelJobHandler;
+import io.github.mfuerstenau.leia.server.search.GetExplainHandler;
+import io.github.mfuerstenau.leia.server.search.GetSearchHandler;
+import io.github.mfuerstenau.leia.server.search.StartExplainHandler;
+import io.github.mfuerstenau.leia.server.search.StartSearchHandler;
 import io.github.mfuerstenau.leia.server.terms.GetFieldTermScanHandler;
 import io.github.mfuerstenau.leia.server.terms.GetPositionsHandler;
 import io.github.mfuerstenau.leia.server.terms.GetPostingsHandler;
@@ -82,4 +86,20 @@ interface HandlerModule {
     @Binds
     @IntoSet
     MethodHandler<?, ?> getCommit(GetCommitHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> startSearch(StartSearchHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> getSearch(GetSearchHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> startExplain(StartExplainHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> getExplain(GetExplainHandler handler);
 }

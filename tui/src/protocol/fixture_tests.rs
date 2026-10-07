@@ -14,6 +14,7 @@ use super::commits::{GetCommit, GetCommits};
 use super::document::{GetDocument, GetStoredValue, GetTermVector};
 use super::index::{CloseIndex, GetIndexStats, OpenIndex};
 use super::job::CancelJob;
+use super::search::{GetExplain, GetSearch, StartExplain, StartSearch};
 use super::terms::{GetFieldTermScan, GetPositions, GetPostings, GetTerms, StartFieldTermScan};
 use super::version::Version;
 use super::{ErrorCode, METHOD_NAMES, Request, Response, RpcMethod};
@@ -151,6 +152,10 @@ fn check(fixture: &Fixture, json: &str) -> Result<(), String> {
         GetPositions::NAME => check_method::<GetPositions>(fixture, json),
         GetCommits::NAME => check_method::<GetCommits>(fixture, json),
         GetCommit::NAME => check_method::<GetCommit>(fixture, json),
+        StartSearch::NAME => check_method::<StartSearch>(fixture, json),
+        GetSearch::NAME => check_method::<GetSearch>(fixture, json),
+        StartExplain::NAME => check_method::<StartExplain>(fixture, json),
+        GetExplain::NAME => check_method::<GetExplain>(fixture, json),
         other => Err(format!("no method {other:?} in METHOD_NAMES")),
     }
 }

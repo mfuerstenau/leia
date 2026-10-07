@@ -641,7 +641,7 @@ pub(crate) fn moved(selected: usize, len: usize, key: KeyCode) -> Option<usize> 
 }
 
 /// The row after the last one: `…` while there are more, or why the next page failed.
-fn tail_row(more: bool, error: Option<&str>) -> Option<Row<'static>> {
+pub(crate) fn tail_row(more: bool, error: Option<&str>) -> Option<Row<'static>> {
     let text = match error {
         Some(error) => format!("Cannot read more: {error}"),
         None if more => "…".to_owned(),

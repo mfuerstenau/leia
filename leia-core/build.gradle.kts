@@ -5,6 +5,8 @@ plugins {
 dependencies {
     // api: the public API (IndexSummary, ReadOnlyIndex.reader()) exposes Lucene types.
     api(libs.lucene.core)
+    // The classic query parser for search (ADR 0010); the API takes and returns lucene-core types only.
+    implementation(libs.lucene.queryparser)
     // Lucene 9 indexes must open with Lucene 10 (AGENTS.md, hard rule 5).
     runtimeOnly(libs.lucene.backward.codecs)
 }

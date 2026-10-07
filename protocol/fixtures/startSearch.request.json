@@ -1,0 +1,18 @@
+{
+  "jsonrpc": "2.0",
+  "id": 20,
+  "method": "startSearch",
+  "params": {
+    "query": {
+      "classic": {
+        "expression": "title:lamp AND body:qu*",
+        "defaultField": "body",
+        "defaultOperator": "OR"
+      }
+    },
+    "offset": 0,
+    "limit": 2,
+    "exactTotalHits": true,
+    "fields": ["id", "title"]
+  }
+}

@@ -7,6 +7,7 @@ use super::commits::{GetCommit, GetCommits};
 use super::document::{GetDocument, GetStoredValue, GetTermVector};
 use super::index::{CloseIndex, GetIndexStats, OpenIndex};
 use super::job::CancelJob;
+use super::search::{GetExplain, GetSearch, StartExplain, StartSearch};
 use super::terms::{GetFieldTermScan, GetPositions, GetPostings, GetTerms, StartFieldTermScan};
 use super::version::Version;
 
@@ -34,4 +35,8 @@ pub const METHOD_NAMES: &[&str] = &[
     GetPositions::NAME,
     GetCommits::NAME,
     GetCommit::NAME,
+    StartSearch::NAME,
+    GetSearch::NAME,
+    StartExplain::NAME,
+    GetExplain::NAME,
 ];

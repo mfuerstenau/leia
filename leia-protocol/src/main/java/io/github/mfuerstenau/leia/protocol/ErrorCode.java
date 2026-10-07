@@ -38,7 +38,9 @@ public enum ErrorCode {
     /** The document has no stored value with that index in the field. */
     VALUE_NOT_FOUND(-32010),
     /** The index directory has no commit of that generation. */
-    COMMIT_NOT_FOUND(-32011);
+    COMMIT_NOT_FOUND(-32011),
+    /** The query can't be run: the expression doesn't parse, or it has too many clauses once rewritten. */
+    INVALID_QUERY(-32012);
 
     private final int code;
 

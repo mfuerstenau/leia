@@ -67,3 +67,11 @@ their own indexes and the Lucene 9 and 8 indexes from `LegacyIndexWriter`.
 - **42:** a 5000-word `body` (its norm encodes a range), a `_source` of about 108 KiB with a
   3000-entry `history` array (cut, then fetched whole by the viewer), and `blob`.
 - **37, 74, …:** deleted; 74 has `deleted_only`.
+
+## Searches worth a try
+
+- `title:lamp AND body:qu*`: 10 hits; `x` on doc 223 shows a BM25 explanation with a prefix
+  clause.
+- `*:*` with `t` (exact count): 487 hits, the live documents, fetched 100 at a time as you scroll.
+- `/` on a top term of `binary_key` in the overview: a term query for a binary term, shown as hex.
+- `title:(lamp`: a syntax error; `body:*a*`: a leading wildcard, which the classic parser rejects.

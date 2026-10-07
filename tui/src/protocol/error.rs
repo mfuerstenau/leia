@@ -36,10 +36,13 @@ pub enum ErrorCode {
     ValueNotFound,
     /// The index directory has no commit of that generation.
     CommitNotFound,
+    /// The query can't be run: the expression doesn't parse, or it has too many clauses once
+    /// rewritten.
+    InvalidQuery,
 }
 
 impl ErrorCode {
-    pub const ALL: [ErrorCode; 17] = [
+    pub const ALL: [ErrorCode; 18] = [
         ErrorCode::ParseError,
         ErrorCode::InvalidRequest,
         ErrorCode::MethodNotFound,
@@ -57,6 +60,7 @@ impl ErrorCode {
         ErrorCode::TermNotFound,
         ErrorCode::ValueNotFound,
         ErrorCode::CommitNotFound,
+        ErrorCode::InvalidQuery,
     ];
 
     pub const fn code(self) -> i32 {
@@ -78,6 +82,7 @@ impl ErrorCode {
             ErrorCode::TermNotFound => -32009,
             ErrorCode::ValueNotFound => -32010,
             ErrorCode::CommitNotFound => -32011,
+            ErrorCode::InvalidQuery => -32012,
         }
     }
 
@@ -101,6 +106,7 @@ impl ErrorCode {
             ErrorCode::TermNotFound => "TERM_NOT_FOUND",
             ErrorCode::ValueNotFound => "VALUE_NOT_FOUND",
             ErrorCode::CommitNotFound => "COMMIT_NOT_FOUND",
+            ErrorCode::InvalidQuery => "INVALID_QUERY",
         }
     }
 }

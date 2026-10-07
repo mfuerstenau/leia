@@ -1,0 +1,76 @@
+{
+  "jsonrpc": "2.0",
+  "id": 23,
+  "result": {
+    "explanation": {
+      "match": true,
+      "value": "1.8514276",
+      "description": "weight(title:lamp in 23) [BM25Similarity], result of:",
+      "details": [
+        {
+          "match": true,
+          "value": "1.8514276",
+          "description": "score(freq=1.0), computed as boost * idf * tf from:",
+          "details": [
+            {
+              "match": true,
+              "value": "3.2441936",
+              "description": "idf, computed as log(1 + (N - n + 0.5) / (n + 0.5)) from:",
+              "details": [
+                {
+                  "match": true,
+                  "value": "19",
+                  "description": "n, number of documents containing term",
+                  "details": []
+                },
+                {
+                  "match": true,
+                  "value": "499",
+                  "description": "N, total number of documents with field",
+                  "details": []
+                }
+              ]
+            },
+            {
+              "match": true,
+              "value": "0.5706896",
+              "description": "tf, computed as freq / (freq + k1 * (1 - b + b * dl / avgdl)) from:",
+              "details": [
+                {
+                  "match": true,
+                  "value": "1.0",
+                  "description": "freq, occurrences of term within document",
+                  "details": []
+                },
+                {
+                  "match": true,
+                  "value": "1.2",
+                  "description": "k1, term saturation parameter",
+                  "details": []
+                },
+                {
+                  "match": true,
+                  "value": "0.75",
+                  "description": "b, length normalization parameter",
+                  "details": []
+                },
+                {
+                  "match": true,
+                  "value": "2.0",
+                  "description": "dl, length of field",
+                  "details": []
+                },
+                {
+                  "match": true,
+                  "value": "3.97996",
+                  "description": "avgdl, average length of field",
+                  "details": []
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

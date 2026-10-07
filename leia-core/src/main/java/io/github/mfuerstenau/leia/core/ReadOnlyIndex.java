@@ -14,6 +14,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CancellationException;
 import org.apache.lucene.index.CorruptIndexException;
@@ -27,6 +28,8 @@ import org.apache.lucene.index.MultiTerms;
 import org.apache.lucene.index.SegmentInfos;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
+import org.apache.lucene.search.Explanation;
+import org.apache.lucene.search.Query;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.store.NoLockFactory;
@@ -331,6 +334,52 @@ public final class ReadOnlyIndex implements Closeable {
         checkDocId(docId);
         checkField(field);
         return TermReader.positions(reader, docId, field, term);
+    }
+
+    /**
+     * Runs {@code query} and returns the hits from {@code offset} to {@code offset + limit}, best
+     * first, with their stored values in {@code fields} (ADR 0010). Deleted documents never match.
+     *
+     * <p>{@code progress} gets the number of documents before the segment being searched; it can stop
+     * the search by throwing a {@link CancellationException}, which it is also asked about while the
+     * query is rewritten and the hits are collected. The search runs in the calling thread.
+     *
+     * @param exactTotalHits whether to count every hit; otherwise counting stops after {@value
+     *     Searcher#TOTAL_HITS_THRESHOLD}
+     * @param fields the stored fields to read per hit; empty for all of them
+     * @throws IllegalArgumentException if {@code offset} is negative, {@code limit} is below 1, or their sum
+     *     overflows
+     * @throws InvalidQueryException if the rewritten query has too many clauses
+     * @throws IOException if reading the index fails
+     */
+    public SearchResults search(
+            Query query,
+            int offset,
+            int limit,
+            boolean exactTotalHits,
+            Optional<Set<String>> fields,
+            ScanProgress progress)
+            throws IOException, InvalidQueryException {
+        checkLimit(limit);
+        if (offset < 0 || offset > Integer.MAX_VALUE - limit) {
+            throw new IllegalArgumentException(
+                    "offset must be from 0 to " + (Integer.MAX_VALUE - limit) + ": " + offset);
+        }
+        return Searcher.search(reader, query, offset, limit, exactTotalHits, fields, progress);
+    }
+
+    /**
+     * Explains how a document scores for {@code query}, or why it doesn't match. {@code progress} can
+     * stop the explanation by throwing a {@link CancellationException}, as for {@link #search}.
+     *
+     * @throws IllegalArgumentException if there is no such document id
+     * @throws InvalidQueryException if the rewritten query has too many clauses
+     * @throws IOException if reading the index fails
+     */
+    public Explanation explain(Query query, int docId, ScanProgress progress)
+            throws IOException, InvalidQueryException {
+        checkDocId(docId);
+        return Searcher.explain(reader, query, docId, progress);
     }
 
     /**

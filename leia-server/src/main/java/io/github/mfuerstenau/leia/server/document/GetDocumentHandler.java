@@ -90,7 +90,7 @@ public final class GetDocumentHandler implements MethodHandler<GetDocumentParams
      * {@code value} as it goes on the wire, with text and bytes cut to at most {@code maxLength} bytes
      * (ADR 0008). Text is cut between two characters, so the cut text is still valid UTF-8.
      */
-    static StoredValue storedValue(IndexDocument.StoredValue value, int maxLength) {
+    public static StoredValue storedValue(IndexDocument.StoredValue value, int maxLength) {
         return switch (value) {
             case IndexDocument.StoredValue.Text(String text) -> text(StoredType.STRING, text, maxLength);
             case IndexDocument.StoredValue.Binary(BytesRef bytes) -> {

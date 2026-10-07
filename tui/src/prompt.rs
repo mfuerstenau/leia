@@ -5,11 +5,13 @@ use std::fs;
 use std::path::{self, MAIN_SEPARATOR, Path, PathBuf};
 
 use ratatui::Frame;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::{Line, Span};
+use ratatui::text::Line;
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
+
+use crate::input::{Edit, LineInput};
 
 /// The popup is at most this wide, borders included.
 const MAX_WIDTH: u16 = 100;
@@ -26,9 +28,7 @@ pub enum PromptEvent {
 }
 
 pub struct PathPrompt {
-    input: String,
-    /// Byte offset of the cursor in `input`, always on a char boundary.
-    cursor: usize,
+    input: LineInput,
     /// The directories that the last Tab found, if it found more than one.
     candidates: Vec<String>,
     /// Why the last open failed.
@@ -42,8 +42,7 @@ pub struct PathPrompt {
 impl PathPrompt {
     pub fn new(input: &str, home: Option<PathBuf>) -> Self {
         Self {
-            input: input.to_owned(),
-            cursor: input.len(),
+            input: LineInput::new(input),
             candidates: Vec::new(),
             error: None,
             busy: false,
@@ -52,7 +51,7 @@ impl PathPrompt {
     }
 
     pub fn input(&self) -> &str {
-        &self.input
+        self.input.text()
     }
 
     pub fn error(&self) -> Option<&str> {
@@ -71,81 +70,28 @@ impl PathPrompt {
     }
 
     pub fn handle_key(&mut self, key: KeyEvent) -> PromptEvent {
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        let alt = key.modifiers.contains(KeyModifiers::ALT);
         match key.code {
-            KeyCode::Enter if !self.input.trim().is_empty() => {
-                return PromptEvent::Submit(self.input.clone());
+            KeyCode::Enter if !self.input().trim().is_empty() => {
+                return PromptEvent::Submit(self.input().to_owned());
             }
             KeyCode::Esc => return PromptEvent::Cancel,
             KeyCode::Tab => {
-                let (input, candidates) = complete(&self.input, self.home.as_deref());
+                let (input, candidates) = complete(self.input(), self.home.as_deref());
                 self.candidates = candidates;
-                self.set_input(input);
+                if input != self.input() {
+                    self.error = None;
+                }
+                self.input.set(input);
                 return PromptEvent::None;
-            }
-            KeyCode::Left => self.cursor = self.previous_boundary(),
-            KeyCode::Right => self.cursor = self.next_boundary(),
-            KeyCode::Home => self.cursor = 0,
-            KeyCode::End => self.cursor = self.input.len(),
-            KeyCode::Char('a') if ctrl => self.cursor = 0,
-            KeyCode::Char('e') if ctrl => self.cursor = self.input.len(),
-            KeyCode::Backspace => self.delete(self.previous_boundary()..self.cursor),
-            KeyCode::Delete => self.delete(self.cursor..self.next_boundary()),
-            KeyCode::Char('u') if ctrl => self.delete(0..self.cursor),
-            KeyCode::Char('k') if ctrl => self.delete(self.cursor..self.input.len()),
-            KeyCode::Char('w') if ctrl => self.delete(self.component_start()..self.cursor),
-            KeyCode::Char(c) if !ctrl && !alt => {
-                self.input.insert(self.cursor, c);
-                self.cursor += c.len_utf8();
-                self.edited();
             }
             _ => {}
         }
-        PromptEvent::None
-    }
-
-    fn set_input(&mut self, input: String) {
-        if input != self.input {
-            self.input = input;
+        if self.input.handle_key(key, component_start) == Edit::Changed {
+            // The error and the candidates describe the input before the edit.
             self.error = None;
+            self.candidates.clear();
         }
-        self.cursor = self.input.len();
-    }
-
-    fn delete(&mut self, range: std::ops::Range<usize>) {
-        if !range.is_empty() {
-            self.input.replace_range(range.clone(), "");
-            self.cursor = range.start;
-            self.edited();
-        }
-    }
-
-    /// The error and the candidates describe the input before the edit.
-    fn edited(&mut self) {
-        self.error = None;
-        self.candidates.clear();
-    }
-
-    fn previous_boundary(&self) -> usize {
-        self.input[..self.cursor]
-            .char_indices()
-            .next_back()
-            .map_or(0, |(i, _)| i)
-    }
-
-    fn next_boundary(&self) -> usize {
-        self.input[self.cursor..]
-            .chars()
-            .next()
-            .map_or(self.cursor, |c| self.cursor + c.len_utf8())
-    }
-
-    /// Where the path component before the cursor starts, for Ctrl+W. Separators right before
-    /// the cursor belong to that component, so repeated Ctrl+W walks up the path.
-    fn component_start(&self) -> usize {
-        let before = self.input[..self.cursor].trim_end_matches(is_separator);
-        before.rfind(is_separator).map_or(0, |i| i + 1)
+        PromptEvent::None
     }
 
     /// Draws the popup, centered in `area`.
@@ -180,7 +126,7 @@ impl PathPrompt {
         ])
         .areas(inner);
 
-        let (shown, cursor_x) = self.visible_input(input.width);
+        let (shown, cursor_x) = self.input.visible(input.width);
         frame.render_widget(Line::from(shown), input);
         if !self.busy {
             frame.set_cursor_position((input.x + cursor_x, input.y));
@@ -202,21 +148,13 @@ impl PathPrompt {
             hint,
         );
     }
+}
 
-    /// The part of the input that fits into `width` cells with the cursor visible, and the
-    /// cursor's column in it. Long input scrolls so that the cursor stays in the last cell.
-    fn visible_input(&self, width: u16) -> (&str, u16) {
-        let width = usize::from(width.max(1));
-        let before = &self.input[..self.cursor];
-        let mut start = 0;
-        while Span::raw(&before[start..]).width() >= width {
-            start += before[start..].chars().next().map_or(1, char::len_utf8);
-        }
-        (
-            &self.input[start..],
-            Span::raw(&before[start..]).width() as u16,
-        )
-    }
+/// Where the path component before the cursor starts, for Ctrl+W. Separators right before the
+/// cursor belong to that component, so repeated Ctrl+W walks up the path.
+fn component_start(before: &str) -> usize {
+    let before = before.trim_end_matches(is_separator);
+    before.rfind(is_separator).map_or(0, |i| i + 1)
 }
 
 fn is_separator(c: char) -> bool {
@@ -283,6 +221,8 @@ pub fn complete(input: &str, home: Option<&Path>) -> (String, Vec<String>) {
 mod tests {
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
+
+    use ratatui::crossterm::event::KeyModifiers;
 
     use super::*;
     use crate::test_support::TempDir;
@@ -492,15 +432,5 @@ mod tests {
 
         assert!(screen.contains("│LAST"), "{screen}");
         assert!(screen.contains("│Enter open"), "{screen}");
-    }
-
-    #[test]
-    fn visible_input_keeps_the_cursor_in_view() {
-        let mut prompt = PathPrompt::new("abcdefghij", None);
-
-        assert_eq!(prompt.visible_input(20), ("abcdefghij", 10));
-        assert_eq!(prompt.visible_input(5), ("ghij", 4));
-        prompt.handle_key(key(KeyCode::Home));
-        assert_eq!(prompt.visible_input(5), ("abcdefghij", 0));
     }
 }

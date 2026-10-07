@@ -1,8 +1,8 @@
 //! The application state: what is on screen and what a key does. It makes no calls itself:
 //! [`App::handle_key`] returns an [`Action`], the caller makes the RPC calls and reports back with
 //! [`App::opened`], [`App::open_failed`], [`App::closed`], and the `scan_*`, `document_*`,
-//! `stored_value_*`, `term_vector_*`, `terms_*`, `postings_*`, `positions_*`, `commits_*` or
-//! `commit_*` methods.
+//! `stored_value_*`, `term_vector_*`, `terms_*`, `postings_*`, `positions_*`, `commits_*`,
+//! `commit_*`, `search_*` or `explain_*` methods.
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -24,8 +24,12 @@ use crate::protocol::document::{
     BytesValue, GetDocumentResult, StoredValue, TermPosition, TermVectorTerm,
 };
 use crate::protocol::index::GetIndexStatsResult;
+use crate::protocol::search::{
+    GetExplainResult, GetSearchResult, StartExplainParams, StartSearchParams,
+};
 use crate::protocol::terms::{GetFieldTermScanResult, GetPostingsResult, GetTermsResult};
 use crate::protocol::version::VersionResult;
+use crate::search::{self, Search};
 use crate::terms::{self, Terms};
 
 /// What the caller has to do after a key.
@@ -93,15 +97,42 @@ pub enum Action {
     /// Fetch a commit whole, and report back with [`App::commit_loaded`] or
     /// [`App::commit_failed`].
     LoadCommit(i64),
+    /// Cancel the jobs in `cancel`, then start this search, and report back with
+    /// [`App::search_started`] or [`App::search_failed`].
+    StartSearch {
+        params: StartSearchParams,
+        cancel: Vec<i64>,
+    },
+    /// Cancel the jobs in `cancel`, then start this explanation, and report back with
+    /// [`App::explain_started`] or [`App::explain_failed`].
+    StartExplain {
+        params: StartExplainParams,
+        cancel: Vec<i64>,
+    },
+    /// Cancel these search and explanation jobs, and report back with
+    /// [`App::search_cancelled`].
+    CancelSearch(Vec<i64>),
 }
 
-/// The screens of an open index; `1` to `4` switch between them.
+/// A running job to poll.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Poll {
+    /// Report back with [`App::scan_progress`] or [`App::scan_failed`].
+    Scan(i64),
+    /// Report back with [`App::search_progress`] or [`App::search_failed`].
+    Search(i64),
+    /// Report back with [`App::explain_progress`] or [`App::explain_failed`].
+    Explain(i64),
+}
+
+/// The screens of an open index; `1` to `5` switch between them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Screen {
     Overview,
     Documents,
     Terms,
     Commits,
+    Search,
 }
 
 /// The scan that runs in the server. There is at most one; the others wait in the queue.
@@ -120,6 +151,7 @@ pub struct App {
     documents: Option<Documents>,
     terms: Option<Terms>,
     commits: Option<Commits>,
+    search: Option<Search>,
     /// The screen shown while an index is open; kept when another index is opened.
     screen: Screen,
     prompt: Option<PathPrompt>,
@@ -139,6 +171,7 @@ impl App {
             documents: None,
             terms: None,
             commits: None,
+            search: None,
             screen: Screen::Overview,
             prompt: None,
             scan: None,
@@ -158,12 +191,13 @@ impl App {
         self.prompt = Some(prompt);
     }
 
-    /// Shows the new index. The server stopped the scans of the previous one. Returns what the
+    /// Shows the new index. The server stopped the jobs of the previous one. Returns what the
     /// shown screen has to fetch first.
     pub fn opened(&mut self, stats: GetIndexStatsResult) -> Option<Action> {
         self.documents = Some(Documents::new(stats.fields.clone(), stats.max_doc));
         self.terms = Some(Terms::new(stats.fields.clone()));
         self.commits = Some(Commits::new());
+        self.search = Some(Search::new(&stats.fields, stats.max_doc));
         self.overview = Some(Overview::new(stats, self.top_n));
         self.prompt = None;
         self.forget_scans();
@@ -177,12 +211,13 @@ impl App {
             .set_error(error);
     }
 
-    /// The server stopped the scans of the closed index.
+    /// The server stopped the jobs of the closed index.
     pub fn closed(&mut self) {
         self.overview = None;
         self.documents = None;
         self.terms = None;
         self.commits = None;
+        self.search = None;
         self.forget_scans();
     }
 
@@ -199,6 +234,26 @@ impl App {
                 self.terms_request(request)
             }
             Screen::Commits => commits_action(self.commits.as_ref()?.initial_request()),
+            Screen::Search => None,
+        }
+    }
+
+    /// Turns what the search screen needs into an action; a document to show switches to the
+    /// documents screen.
+    fn search_request(&mut self, request: Option<search::Request>) -> Option<Action> {
+        match request? {
+            search::Request::Search { params, cancel } => {
+                Some(Action::StartSearch { params, cancel })
+            }
+            search::Request::Explain { params, cancel } => {
+                Some(Action::StartExplain { params, cancel })
+            }
+            search::Request::Cancel(jobs) => Some(Action::CancelSearch(jobs)),
+            search::Request::Document(doc_id) => {
+                self.documents.as_mut()?.clear_hit();
+                self.screen = Screen::Documents;
+                Some(Action::LoadDocument(doc_id))
+            }
         }
     }
 
@@ -384,14 +439,68 @@ impl App {
         }
     }
 
+    pub fn search_started(&mut self, job_id: i64) {
+        if let Some(search) = &mut self.search {
+            search.search_started(job_id);
+        }
+    }
+
+    /// Shows the progress of the running search, or its hits. Returns the next page to fetch.
+    pub fn search_progress(&mut self, result: GetSearchResult) -> Option<Action> {
+        let request = self.search.as_mut()?.search_progress(result);
+        self.search_request(request)
+    }
+
+    pub fn search_failed(&mut self, error: String) {
+        if let Some(search) = &mut self.search {
+            search.search_failed(error);
+        }
+    }
+
+    /// Forgets the cancelled search and explanation jobs.
+    pub fn search_cancelled(&mut self) {
+        if let Some(search) = &mut self.search {
+            search.cancelled();
+        }
+    }
+
+    pub fn explain_started(&mut self, job_id: i64) {
+        if let Some(search) = &mut self.search {
+            search.explain_started(job_id);
+        }
+    }
+
+    pub fn explain_progress(&mut self, result: GetExplainResult) {
+        if let Some(search) = &mut self.search {
+            search.explain_progress(result);
+        }
+    }
+
+    pub fn explain_failed(&mut self, error: String) {
+        if let Some(search) = &mut self.search {
+            search.explain_failed(error);
+        }
+    }
+
     fn forget_scans(&mut self) {
         self.scan = None;
         self.queue.clear();
     }
 
-    /// The job to poll, while a scan runs.
-    pub fn polling(&self) -> Option<i64> {
+    /// The scan job, while one runs.
+    fn scan_job(&self) -> Option<i64> {
         self.scan.as_ref().and_then(|scan| scan.job_id)
+    }
+
+    /// The jobs to poll: the running scan, search and explanation.
+    pub fn polls(&self) -> Vec<Poll> {
+        let search = self.search.as_ref();
+        self.scan_job()
+            .map(Poll::Scan)
+            .into_iter()
+            .chain(search.and_then(Search::search_job).map(Poll::Search))
+            .chain(search.and_then(Search::explain_job).map(Poll::Explain))
+            .collect()
     }
 
     pub fn scan_started(&mut self, job_id: i64) {
@@ -519,15 +628,28 @@ impl App {
             let request = terms.handle_key(key.code);
             return self.terms_request(request);
         }
+        if let Some(search) = &mut self.search
+            && self.screen == Screen::Search
+            && search.prompting()
+        {
+            let request = search.handle_key(key);
+            return self.search_request(request);
+        }
+        let search_jobs = match (&self.search, self.screen) {
+            (Some(search), Screen::Search) => search.jobs(),
+            _ => Vec::new(),
+        };
         match key.code {
-            // Esc stops the scans first, and quits only when there are none.
-            KeyCode::Esc if self.scan.is_some() => match self.polling() {
+            // Esc stops the scans first, then the search screen's jobs, and quits only when there
+            // are none.
+            KeyCode::Esc if self.scan.is_some() => match self.scan_job() {
                 Some(job_id) => Some(Action::CancelScan(job_id)),
                 None => {
                     self.scan_cancelled();
                     None
                 }
             },
+            KeyCode::Esc if !search_jobs.is_empty() => Some(Action::CancelSearch(search_jobs)),
             KeyCode::Char('q') | KeyCode::Esc => Some(Action::Quit),
             KeyCode::Char('1') if self.overview.is_some() => {
                 self.screen = Screen::Overview;
@@ -544,6 +666,10 @@ impl App {
             KeyCode::Char('4') if self.commits.is_some() => {
                 self.screen = Screen::Commits;
                 self.initial_request()
+            }
+            KeyCode::Char('5') if self.search.is_some() => {
+                self.screen = Screen::Search;
+                None
             }
             KeyCode::Char('o') => {
                 // Starts from the open index, so a sibling is a Ctrl+W away.
@@ -562,6 +688,16 @@ impl App {
             }
             code if self.screen == Screen::Commits => {
                 commits_action(self.commits.as_mut()?.handle_key(code))
+            }
+            _ if self.screen == Screen::Search => {
+                let request = self.search.as_mut()?.handle_key(key);
+                self.search_request(request)
+            }
+            KeyCode::Char('/') => {
+                let (field, term) = self.overview.as_ref()?.selected_top_term()?;
+                self.screen = Screen::Search;
+                let request = self.search.as_mut()?.term_query(&field, term);
+                self.search_request(request)
             }
             KeyCode::Enter => {
                 if let Some((field, term)) = self.overview.as_ref()?.selected_top_term() {
@@ -610,16 +746,33 @@ impl App {
             &mut self.documents,
             &mut self.terms,
             &mut self.commits,
+            &mut self.search,
             self.screen,
         ) {
-            (Some(_), _, _, Some(commits), Screen::Commits) => {
+            (Some(_), _, _, _, Some(search), Screen::Search) => {
+                search.render(frame, body);
+                if search.prompting() {
+                    Line::from(search.keys())
+                } else {
+                    let cancel = if self.scan.is_some() || !search.jobs().is_empty() {
+                        "Esc cancel   "
+                    } else {
+                        ""
+                    };
+                    Line::from(format!(
+                        " {cancel}q quit   o open   c close   1-5 screen   {}",
+                        search.keys()
+                    ))
+                }
+            }
+            (Some(_), _, _, Some(commits), _, Screen::Commits) => {
                 commits.render(frame, body);
                 Line::from(format!(
-                    " {cancel}q quit   o open   c close   1-4 screen   r read again   ⏎ segments   \
+                    " {cancel}q quit   o open   c close   1-5 screen   r read again   ⏎ segments   \
                      Tab panel   ↑↓"
                 ))
             }
-            (Some(_), Some(documents), _, _, Screen::Documents) => {
+            (Some(_), Some(documents), _, _, _, Screen::Documents) => {
                 documents.render(frame, body);
                 let steps = if documents.has_hit() {
                     "[ ] term docs   "
@@ -629,42 +782,42 @@ impl App {
                 match documents.viewer() {
                     Some(viewer) => Line::from(viewer.keys()),
                     None => Line::from(format!(
-                        " {cancel}q quit   o open   c close   1-4 screen   ←/→ doc   {steps}i go to   \
+                        " {cancel}q quit   o open   c close   1-5 screen   ←/→ doc   {steps}i go to   \
                          ⏎ term vector   v view   x numbers   e empty fields   Tab panel   ↑↓"
                     )),
                 }
             }
-            (Some(_), _, Some(terms), _, Screen::Terms) => {
+            (Some(_), _, Some(terms), _, _, Screen::Terms) => {
                 terms.render(frame, body);
                 if terms.prompting() {
                     Line::from(" type to seek   ⏎/Esc done")
                 } else {
                     Line::from(format!(
-                        " {cancel}q quit   o open   c close   1-4 screen   / seek   \
+                        " {cancel}q quit   o open   c close   1-5 screen   / seek   \
                          ⏎ open doc   ←/→ column   ↑↓"
                     ))
                 }
             }
-            (Some(overview), _, _, _, _) => {
+            (Some(overview), _, _, _, _, _) => {
                 overview.render(frame, body);
                 if self.scan.is_some() {
                     Line::from(
-                        " Esc cancel scan   q quit   o open   c close   1-4 screen   s/S sort   \
+                        " Esc cancel scan   q quit   o open   c close   1-5 screen   s/S sort   \
                          Tab panel   ↑↓",
                     )
                 } else if overview.selected_top_term().is_some() {
                     Line::from(
-                        " q quit   o open   c close   1-4 screen   ⏎ term's docs   \
+                        " q quit   o open   c close   1-5 screen   ⏎ term's docs   / search term   \
                          +/- top N   s/S sort   Tab panel   ↑↓",
                     )
                 } else {
                     Line::from(
-                        " q quit   o open   c close   1-4 screen   ⏎ terms   a all terms   \
+                        " q quit   o open   c close   1-5 screen   ⏎ terms   a all terms   \
                          +/- top N   s/S sort   Tab panel   ↑↓",
                     )
                 }
             }
-            (None, _, _, _, _) => {
+            (None, _, _, _, _, _) => {
                 let lines = vec![
                     Line::from("No index open. Press o to open one."),
                     Line::from(""),
@@ -685,11 +838,18 @@ impl App {
                 Screen::Documents => 1,
                 Screen::Terms => 2,
                 Screen::Commits => 3,
+                Screen::Search => 4,
             };
             frame.render_widget(
-                Tabs::new(["1 Overview", "2 Documents", "3 Terms", "4 Commits"])
-                    .select(selected)
-                    .highlight_style(Style::new().add_modifier(Modifier::REVERSED)),
+                Tabs::new([
+                    "1 Overview",
+                    "2 Documents",
+                    "3 Terms",
+                    "4 Commits",
+                    "5 Search",
+                ])
+                .select(selected)
+                .highlight_style(Style::new().add_modifier(Modifier::REVERSED)),
                 tabs,
             );
         }
@@ -722,6 +882,9 @@ mod tests {
     use super::*;
     use crate::protocol::document::{DocumentField, StoredType, StoredValue};
     use crate::protocol::index::{DocValuesType, IndexField, IndexOptions, TermStats};
+    use crate::protocol::search::{
+        Explanation, Hit, SearchQuery, SearchResults, TermQuery, TotalHitsRelation,
+    };
     use crate::protocol::terms::{FieldTerms, Posting, TermEntry, TopTerm};
     use crate::protocol::version::JavaRuntime;
 
@@ -961,9 +1124,9 @@ mod tests {
         let mut app = app_with_fields();
 
         assert_eq!(app.handle_key(key(KeyCode::Enter)), start("id"));
-        assert_eq!(app.polling(), None);
+        assert_eq!(app.polls(), Vec::new());
         app.scan_started(7);
-        assert_eq!(app.polling(), Some(7));
+        assert_eq!(app.polls(), vec![Poll::Scan(7)]);
 
         assert_eq!(app.scan_progress(running(1024)), None);
         let screen = render(&mut app);
@@ -973,7 +1136,7 @@ mod tests {
         assert_eq!(app.handle_key(key(KeyCode::Enter)), None);
 
         assert_eq!(app.scan_progress(done("id", 3)), None);
-        assert_eq!(app.polling(), None);
+        assert_eq!(app.polls(), Vec::new());
         assert!(render(&mut app).contains("id: 3 terms, top 0"));
     }
 
@@ -988,7 +1151,7 @@ mod tests {
         assert_eq!(app.scan_progress(done("id", 3)), start("body"));
         app.scan_started(2);
         assert_eq!(app.scan_failed("Cannot read".to_owned()), None);
-        assert_eq!(app.polling(), None);
+        assert_eq!(app.polls(), Vec::new());
         assert!(render(&mut app).contains("failed"));
 
         // A failed field is scanned again; the others are done or have no postings.
@@ -1015,7 +1178,7 @@ mod tests {
         );
         app.scan_cancelled();
 
-        assert_eq!(app.polling(), None);
+        assert_eq!(app.polls(), Vec::new());
         let screen = render(&mut app);
         assert!(!screen.contains("queued"), "{screen}");
         assert!(!screen.contains('…'), "{screen}");
@@ -1028,7 +1191,7 @@ mod tests {
         app.handle_key(key(KeyCode::End));
 
         assert_eq!(app.handle_key(key(KeyCode::Enter)), None);
-        assert_eq!(app.polling(), None);
+        assert_eq!(app.polls(), Vec::new());
     }
 
     #[test]
@@ -1224,7 +1387,7 @@ mod tests {
 
         app.opened(stats("/data/other"));
 
-        assert_eq!(app.polling(), None);
+        assert_eq!(app.polls(), Vec::new());
         assert_eq!(app.scan_progress(done("id", 1)), None);
         assert_eq!(app.handle_key(key(KeyCode::Esc)), Some(Action::Quit));
     }
@@ -1457,5 +1620,134 @@ mod tests {
         assert!(render(&mut app).contains("Cannot list the commits: unreadable"));
 
         assert_eq!(app.opened(stats("/data/other")), Some(Action::LoadCommits));
+    }
+
+    /// The search screen of [`app_with_fields`] after `query` was submitted, as job 1.
+    fn searching(query: &str) -> App {
+        let mut app = app_with_fields();
+        assert_eq!(app.handle_key(key(KeyCode::Char('5'))), None);
+        app.handle_key(key(KeyCode::Char('/')));
+        typed(&mut app, query);
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Enter)),
+            Some(Action::StartSearch { cancel, .. }) if cancel.is_empty()
+        ));
+        app.search_started(1);
+        app
+    }
+
+    fn page(doc_ids: &[i32]) -> GetSearchResult {
+        GetSearchResult {
+            docs_searched: 3,
+            results: Some(SearchResults {
+                query: "body:q".to_owned(),
+                rewritten_query: "body:q".to_owned(),
+                total_hits: doc_ids.len() as i64,
+                total_hits_relation: TotalHitsRelation::EqualTo,
+                hits: doc_ids
+                    .iter()
+                    .map(|&doc_id| Hit {
+                        doc_id,
+                        score: 1.0,
+                        fields: Vec::new(),
+                    })
+                    .collect(),
+                took_millis: 1,
+            }),
+        }
+    }
+
+    #[test]
+    fn the_query_line_takes_every_key() {
+        // `q` and `1` are typed, not handled as quit and screen keys.
+        let mut app = searching("q1");
+
+        let screen = render(&mut app);
+        assert!(screen.contains("5 Search"), "{screen}");
+        assert!(screen.contains("│q1"), "{screen}");
+        assert!(screen.contains("Esc cancel"), "{screen}");
+        assert_eq!(app.polls(), vec![Poll::Search(1)]);
+    }
+
+    #[test]
+    fn esc_stops_the_search_jobs_before_it_quits() {
+        let mut app = searching("q");
+        app.search_progress(page(&[2]));
+        app.handle_key(key(KeyCode::Char('x')));
+        app.explain_started(2);
+        assert_eq!(app.polls(), vec![Poll::Explain(2)]);
+
+        assert_eq!(
+            app.handle_key(key(KeyCode::Esc)),
+            Some(Action::CancelSearch(vec![2]))
+        );
+        app.search_cancelled();
+        assert_eq!(app.polls(), Vec::new());
+        assert!(render(&mut app).contains("Cancelled."));
+        assert_eq!(app.handle_key(key(KeyCode::Esc)), Some(Action::Quit));
+    }
+
+    #[test]
+    fn enter_on_a_hit_opens_its_document() {
+        let mut app = searching("q");
+        assert_eq!(app.search_progress(page(&[2, 0])), None);
+        app.explain_progress(GetExplainResult {
+            explanation: Some(Explanation {
+                matches: true,
+                value: "1.0".to_owned(),
+                description: "d".to_owned(),
+                details: Vec::new(),
+            }),
+        });
+
+        assert_eq!(
+            app.handle_key(key(KeyCode::Enter)),
+            Some(Action::LoadDocument(2))
+        );
+        assert!(render(&mut app).contains("2 Documents"));
+        assert!(!render(&mut app).contains("[ ] term docs"));
+    }
+
+    #[test]
+    fn slash_on_a_top_term_searches_for_it() {
+        let mut app = app_with_fields();
+        app.handle_key(key(KeyCode::Char('j')));
+        assert_eq!(app.handle_key(key(KeyCode::Enter)), start("body"));
+        app.scan_started(1);
+        app.scan_progress(GetFieldTermScanResult {
+            terms_scanned: 1,
+            terms: Some(FieldTerms {
+                field: "body".to_owned(),
+                unique_terms: 1,
+                top_terms: vec![TopTerm {
+                    term: "ff".to_owned(),
+                    binary: true,
+                    doc_freq: 1,
+                    total_term_freq: 1,
+                }],
+            }),
+        });
+        app.handle_key(key(KeyCode::Tab));
+        assert!(render(&mut app).contains("/ search term"));
+
+        let Some(Action::StartSearch { params, cancel }) = app.handle_key(key(KeyCode::Char('/')))
+        else {
+            panic!("/ starts a search");
+        };
+        assert!(cancel.is_empty());
+        assert_eq!(
+            params.query,
+            SearchQuery {
+                classic: None,
+                term: Some(TermQuery {
+                    field: "body".to_owned(),
+                    term: BytesValue {
+                        value: "ff".to_owned(),
+                        binary: true,
+                    },
+                }),
+            }
+        );
+        assert!(render(&mut app).contains("Term · field body · hex"));
     }
 }

@@ -24,6 +24,10 @@ use leia::protocol::index::{
     OpenIndex, OpenIndexParams,
 };
 use leia::protocol::job::{CancelJob, JobParams};
+use leia::protocol::search::{
+    ClassicQuery, GetExplain, GetSearch, QueryOperator, SearchQuery, StartExplain,
+    StartExplainParams, StartSearch, StartSearchParams, TotalHitsRelation,
+};
 use leia::protocol::terms::{
     FieldTerms, GetFieldTermScan, GetPositions, GetPositionsParams, GetPostings, GetPostingsParams,
     GetPostingsResult, GetTerms, GetTermsParams, Posting, StartFieldTermScan,
@@ -542,5 +546,101 @@ fn reads_the_commit_of_a_lucene9_index() {
     assert!(
         matches!(&missing, CallError::Rpc(e) if e.code == ErrorCode::CommitNotFound),
         "{missing:?}"
+    );
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn searches_and_explains_a_lucene9_index() {
+    let mut server = start();
+    server
+        .call::<OpenIndex>(OpenIndexParams {
+            path: lucene9_index(),
+        })
+        .unwrap();
+    let query = SearchQuery {
+        classic: Some(ClassicQuery {
+            expression: "number AND (1 OR 2 OR 3)".to_owned(),
+            default_field: "body".to_owned(),
+            default_operator: QueryOperator::Or,
+        }),
+        term: None,
+    };
+
+    let job = server
+        .call::<StartSearch>(StartSearchParams {
+            query: query.clone(),
+            offset: 0,
+            limit: 10,
+            exact_total_hits: true,
+            fields: Some(vec!["id".to_owned()]),
+        })
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let results = loop {
+        let poll = server
+            .call::<GetSearch>(JobParams { job_id: job.job_id })
+            .unwrap();
+        if let Some(results) = poll.results {
+            break results;
+        }
+        assert!(Instant::now() < deadline, "the search did not finish");
+        thread::sleep(Duration::from_millis(10));
+    };
+
+    // "document number N" for N = 1..3; document 1 (id 2) is deleted.
+    assert_eq!(results.query, "+body:number +(body:1 body:2 body:3)");
+    assert_eq!(
+        (results.total_hits, results.total_hits_relation),
+        (2, TotalHitsRelation::EqualTo)
+    );
+    let hits: Vec<(i32, &str)> = results
+        .hits
+        .iter()
+        .map(|hit| (hit.doc_id, hit.fields[0].values[0].value.as_str()))
+        .collect();
+    assert_eq!(hits, vec![(0, "1"), (2, "3")]);
+
+    let job = server
+        .call::<StartExplain>(StartExplainParams {
+            query: query.clone(),
+            doc_id: 2,
+        })
+        .unwrap();
+    let explanation = loop {
+        let poll = server
+            .call::<GetExplain>(JobParams { job_id: job.job_id })
+            .unwrap();
+        if let Some(explanation) = poll.explanation {
+            break explanation;
+        }
+        assert!(Instant::now() < deadline, "the explanation did not finish");
+        thread::sleep(Duration::from_millis(10));
+    };
+    assert!(explanation.matches, "{explanation:?}");
+    assert_eq!(
+        explanation.value.parse::<f64>().unwrap(),
+        results.hits[1].score
+    );
+
+    let broken = server
+        .call::<StartSearch>(StartSearchParams {
+            query: SearchQuery {
+                classic: Some(ClassicQuery {
+                    expression: "body:(number".to_owned(),
+                    default_field: "body".to_owned(),
+                    default_operator: QueryOperator::Or,
+                }),
+                term: None,
+            },
+            offset: 0,
+            limit: 10,
+            exact_total_hits: false,
+            fields: None,
+        })
+        .unwrap_err();
+    assert!(
+        matches!(&broken, CallError::Rpc(e) if e.code == ErrorCode::InvalidQuery),
+        "{broken:?}"
     );
 }
