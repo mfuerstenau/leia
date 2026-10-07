@@ -1,0 +1,19 @@
+{
+  "jsonrpc": "2.0",
+  "id": 33,
+  "method": "analyze",
+  "params": {
+    "analyzer": {
+      "custom": {
+        "charFilters": [],
+        "tokenizer": {"name": "whitespace", "params": {"rule": "java"}},
+        "tokenFilters": [
+          {"name": "synonymGraph", "params": {"synonyms": "synonyms.txt", "ignoreCase": "true"}},
+          {"name": "flattenGraph", "params": {}}
+        ],
+        "configDir": "/etc/leia/analysis"
+      }
+    },
+    "text": "wifi router"
+  }
+}

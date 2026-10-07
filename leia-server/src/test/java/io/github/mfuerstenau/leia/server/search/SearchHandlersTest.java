@@ -7,6 +7,10 @@ import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.ProtocolJson;
 import io.github.mfuerstenau.leia.protocol.Response;
+import io.github.mfuerstenau.leia.protocol.analysis.AnalysisComponent;
+import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.CustomAnalyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.StandardAnalyzer;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
@@ -44,6 +48,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
@@ -70,6 +75,7 @@ class SearchHandlersTest {
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
     private static final String LONG_BODY = "red " + "x".repeat(300);
     private static final ParserOptions DEFAULTS = new ParserOptions(false, 0, 0, true);
+    private static final Analyzer STANDARD = new Analyzer(Optional.of(new StandardAnalyzer()), Optional.empty());
     private static final Similarity BM25 =
             new Similarity(Optional.of(new Bm25Similarity(1.2f, 0.75f)), Optional.empty(), Optional.empty());
     private static final Similarity BOOLEAN =
@@ -150,7 +156,7 @@ class SearchHandlersTest {
     void checksTheFields() throws Exception {
         openIndex();
         SearchQuery unknownDefault = new SearchQuery(
-                Optional.of(new ClassicQuery("red", "bdy", QueryOperator.OR, DEFAULTS, 2, false, false)),
+                Optional.of(new ClassicQuery("red", "bdy", QueryOperator.OR, DEFAULTS, 2, false, false, STANDARD)),
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty());
@@ -444,6 +450,39 @@ class SearchHandlersTest {
     }
 
     @Test
+    void parsesWithTheQuerysAnalyzer() throws Exception {
+        openIndex();
+
+        // The whitespace tokenizer keeps the case, and the index has only "red".
+        SearchResults upper = search(params(classic("RED", whitespace()), 0, 10, Optional.empty()));
+        assertThat(upper.query()).isEqualTo("body:RED");
+        assertThat(upper.hits()).isEmpty();
+        assertThat(search(params(classic("red", whitespace()), 0, 10, Optional.empty()))
+                        .hits())
+                .isNotEmpty();
+    }
+
+    @Test
+    void failsForAnAnalyzerThatCantBeBuilt() throws Exception {
+        openIndex();
+        var broken = new Analyzer(
+                Optional.empty(),
+                Optional.of(new CustomAnalyzer(
+                        List.of(), new AnalysisComponent("nope", Map.of()), List.of(), Optional.empty())));
+        var both = new Analyzer(STANDARD.standard(), whitespace().custom());
+
+        assertFails(
+                () -> startSearch.handle(params(classic("red", broken), 0, 10, Optional.empty())),
+                ErrorCode.INVALID_ANALYZER);
+        assertFails(
+                () -> startSearch.handle(params(moreLikeThis(0, List.of("body"), 25, broken), 0, 10, Optional.empty())),
+                ErrorCode.INVALID_ANALYZER);
+        assertFails(
+                () -> startExplain.handle(new StartExplainParams(classic("red", both), BM25, 0)),
+                ErrorCode.INVALID_PARAMS);
+    }
+
+    @Test
     void searchAndExplainJobsAreKeptApart() throws Exception {
         openIndex();
 
@@ -459,12 +498,26 @@ class SearchHandlersTest {
         return classic(expression, DEFAULTS, 2, false, false);
     }
 
+    private static SearchQuery classic(String expression, Analyzer analyzer) {
+        return classic(expression, DEFAULTS, 2, false, false, analyzer);
+    }
+
     private static SearchQuery classic(
             String expression,
             ParserOptions options,
             int fuzzyMaxEdits,
             boolean splitOnWhitespace,
             boolean autoGeneratePhraseQueries) {
+        return classic(expression, options, fuzzyMaxEdits, splitOnWhitespace, autoGeneratePhraseQueries, STANDARD);
+    }
+
+    private static SearchQuery classic(
+            String expression,
+            ParserOptions options,
+            int fuzzyMaxEdits,
+            boolean splitOnWhitespace,
+            boolean autoGeneratePhraseQueries,
+            Analyzer analyzer) {
         return new SearchQuery(
                 Optional.of(new ClassicQuery(
                         expression,
@@ -473,7 +526,8 @@ class SearchHandlersTest {
                         options,
                         fuzzyMaxEdits,
                         splitOnWhitespace,
-                        autoGeneratePhraseQueries)),
+                        autoGeneratePhraseQueries,
+                        analyzer)),
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty());
@@ -482,7 +536,7 @@ class SearchHandlersTest {
     private static SearchQuery standard(String expression, ParserOptions options, List<PointField> points) {
         return new SearchQuery(
                 Optional.empty(),
-                Optional.of(new StandardQuery(expression, "body", QueryOperator.OR, options, points)),
+                Optional.of(new StandardQuery(expression, "body", QueryOperator.OR, options, points, STANDARD)),
                 Optional.empty(),
                 Optional.empty());
     }
@@ -493,11 +547,23 @@ class SearchHandlersTest {
     }
 
     private static SearchQuery moreLikeThis(int docId, List<String> fields, int maxQueryTerms) {
+        return moreLikeThis(docId, fields, maxQueryTerms, STANDARD);
+    }
+
+    private static SearchQuery moreLikeThis(int docId, List<String> fields, int maxQueryTerms, Analyzer analyzer) {
         return new SearchQuery(
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
-                Optional.of(new MoreLikeThisQuery(docId, fields, 1, 1, OptionalInt.empty(), maxQueryTerms, false)));
+                Optional.of(new MoreLikeThisQuery(
+                        docId, fields, 1, 1, OptionalInt.empty(), maxQueryTerms, false, analyzer)));
+    }
+
+    private static Analyzer whitespace() {
+        return new Analyzer(
+                Optional.empty(),
+                Optional.of(new CustomAnalyzer(
+                        List.of(), new AnalysisComponent("whitespace", Map.of()), List.of(), Optional.empty())));
     }
 
     private static StartSearchParams params(SearchQuery query, int offset, int limit, Optional<List<String>> fields) {

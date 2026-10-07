@@ -9,6 +9,7 @@ use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 
 use crate::form::{FormEvent, dim, render_popup, row, type_digit};
+use crate::protocol::analysis::Analyzer;
 use crate::protocol::index::{IndexField, IndexOptions};
 use crate::protocol::search::{MAX_QUERY_TERMS, MoreLikeThisQuery};
 use crate::text::escape_control;
@@ -77,8 +78,9 @@ impl LikeSettings {
             .collect()
     }
 
-    /// The query for documents like `doc_id`; `None` without a field to take terms from.
-    pub fn query(&self, doc_id: i32) -> Option<MoreLikeThisQuery> {
+    /// The query for documents like `doc_id`, whose stored text `analyzer` analyzes; `None`
+    /// without a field to take terms from.
+    pub fn query(&self, doc_id: i32, analyzer: Analyzer) -> Option<MoreLikeThisQuery> {
         let fields = self.fields();
         (!fields.is_empty()).then(|| MoreLikeThisQuery {
             doc_id,
@@ -88,6 +90,7 @@ impl LikeSettings {
             max_doc_freq: (self.max_doc_freq > 0).then_some(self.max_doc_freq),
             max_query_terms: self.max_query_terms,
             boost: self.boost,
+            analyzer,
         })
     }
 
@@ -346,7 +349,7 @@ mod tests {
     fn starts_from_lucenes_defaults_with_the_text_fields() {
         let settings = settings();
         assert_eq!(
-            settings.query(42),
+            settings.query(42, Analyzer::default()),
             Some(MoreLikeThisQuery {
                 doc_id: 42,
                 fields: vec!["title".to_owned(), "body".to_owned()],
@@ -355,6 +358,7 @@ mod tests {
                 max_doc_freq: None,
                 max_query_terms: 25,
                 boost: false,
+                analyzer: Analyzer::default(),
             })
         );
         assert_eq!(settings.fields_text(), "fields title · body");
@@ -369,7 +373,9 @@ mod tests {
             field("id", IndexOptions::Docs),
         ]);
         assert_eq!(
-            keyword.query(0).map(|query| query.fields),
+            keyword
+                .query(0, Analyzer::default())
+                .map(|query| query.fields),
             Some(vec!["id".to_owned()])
         );
     }
@@ -394,7 +400,9 @@ mod tests {
         form.handle_key(KeyCode::Char(' '));
         let edited = applied(form);
 
-        let query = edited.query(7).expect("a field is chosen");
+        let query = edited
+            .query(7, Analyzer::default())
+            .expect("a field is chosen");
         assert_eq!(query.min_term_freq, 1);
         assert_eq!(query.min_doc_freq, 4);
         assert_eq!(query.max_doc_freq, Some(100));
@@ -424,7 +432,11 @@ mod tests {
         form.handle_key(KeyCode::Backspace);
         form.handle_key(KeyCode::Backspace);
         let one = applied(form);
-        assert_eq!(one.query(0).map(|query| query.max_query_terms), Some(1));
+        assert_eq!(
+            one.query(0, Analyzer::default())
+                .map(|query| query.max_query_terms),
+            Some(1)
+        );
         assert_eq!(one.fields_text(), "fields id · title · body");
         let mut form = LikeForm::new(&one);
         form.handle_key(KeyCode::Char('n'));

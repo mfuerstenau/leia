@@ -2,7 +2,7 @@
 //! [`App::handle_key`] returns an [`Action`], the caller makes the RPC calls and reports back with
 //! [`App::opened`], [`App::open_failed`], [`App::closed`], and the `scan_*`, `document_*`,
 //! `stored_value_*`, `term_vector_*`, `terms_*`, `postings_*`, `positions_*`, `commits_*`,
-//! `commit_*`, `search_*` or `explain_*` methods.
+//! `commit_*`, `search_*`, `explain_*`, `components_*` or `analy*` methods.
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -14,11 +14,13 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Paragraph, Tabs};
 
+use crate::analysis::{self, Analysis};
 use crate::build_info::{LEIA, java_line, server_line};
 use crate::commits::{self, Commits};
 use crate::documents::{self, Documents, Walk};
 use crate::overview::{DEFAULT_TOP_TERMS, FieldScan, Overview, step_top_terms};
 use crate::prompt::{PathPrompt, PromptEvent, expand_home};
+use crate::protocol::analysis::{AnalyzeParams, AnalyzeResult, GetAnalysisComponentsResult};
 use crate::protocol::commits::{Commit, GetCommitResult};
 use crate::protocol::document::{
     BytesValue, GetDocumentResult, StoredValue, TermPosition, TermVectorTerm,
@@ -112,6 +114,11 @@ pub enum Action {
     /// Cancel these search and explanation jobs, and report back with
     /// [`App::search_cancelled`].
     CancelSearch(Vec<i64>),
+    /// Fetch what custom analyzers can be built from, and report back with
+    /// [`App::components_loaded`] or [`App::components_failed`].
+    LoadAnalysisComponents,
+    /// Analyze a text, and report back with [`App::analyzed`] or [`App::analyze_failed`].
+    Analyze(AnalyzeParams),
 }
 
 /// A running job to poll.
@@ -125,7 +132,8 @@ pub enum Poll {
     Explain(i64),
 }
 
-/// The screens of an open index; `1` to `5` switch between them.
+/// The screens; `1` to `6` switch between them. The first five need an open index, the
+/// analysis screen doesn't.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Screen {
     Overview,
@@ -133,6 +141,7 @@ enum Screen {
     Terms,
     Commits,
     Search,
+    Analysis,
 }
 
 /// The scan that runs in the server. There is at most one; the others wait in the queue.
@@ -152,7 +161,9 @@ pub struct App {
     terms: Option<Terms>,
     commits: Option<Commits>,
     search: Option<Search>,
-    /// The screen shown while an index is open; kept when another index is opened.
+    /// Kept when an index is opened or closed: its analyzer is the search screen's.
+    analysis: Analysis,
+    /// The screen shown; kept when another index is opened.
     screen: Screen,
     prompt: Option<PathPrompt>,
     scan: Option<RunningScan>,
@@ -172,6 +183,7 @@ impl App {
             terms: None,
             commits: None,
             search: None,
+            analysis: Analysis::new(),
             screen: Screen::Overview,
             prompt: None,
             scan: None,
@@ -197,7 +209,9 @@ impl App {
         self.documents = Some(Documents::new(stats.fields.clone(), stats.max_doc));
         self.terms = Some(Terms::new(stats.fields.clone()));
         self.commits = Some(Commits::new());
-        self.search = Some(Search::new(&stats.fields, stats.max_doc));
+        let mut search = Search::new(&stats.fields, stats.max_doc);
+        search.set_analyzer(self.analysis.settings());
+        self.search = Some(search);
         self.overview = Some(Overview::new(stats, self.top_n));
         self.prompt = None;
         self.forget_scans();
@@ -235,6 +249,7 @@ impl App {
             }
             Screen::Commits => commits_action(self.commits.as_ref()?.initial_request()),
             Screen::Search => None,
+            Screen::Analysis => analysis_action(self.analysis.initial_request()),
         }
     }
 
@@ -497,6 +512,27 @@ impl App {
         }
     }
 
+    pub fn components_loaded(&mut self, components: GetAnalysisComponentsResult) {
+        self.analysis.components_loaded(components);
+    }
+
+    pub fn components_failed(&mut self, error: String) {
+        self.analysis.components_failed(error);
+    }
+
+    /// Shows what the analyzer made of `text`. An analyzer that the builder applied is now the
+    /// current one, which the search screen parses with from now on.
+    pub fn analyzed(&mut self, text: String, result: AnalyzeResult) {
+        self.analysis.analyzed(text, result);
+        if let Some(search) = &mut self.search {
+            search.set_analyzer(self.analysis.settings());
+        }
+    }
+
+    pub fn analyze_failed(&mut self, error: String) {
+        self.analysis.analyze_failed(error);
+    }
+
     fn forget_scans(&mut self) {
         self.scan = None;
         self.queue.clear();
@@ -650,6 +686,9 @@ impl App {
             let request = search.handle_key(key);
             return self.search_request(request);
         }
+        if self.screen == Screen::Analysis && self.analysis.prompting() {
+            return analysis_action(self.analysis.handle_key(key));
+        }
         let search_jobs = match (&self.search, self.screen) {
             (Some(search), Screen::Search) => search.jobs(),
             _ => Vec::new(),
@@ -686,6 +725,10 @@ impl App {
                 self.screen = Screen::Search;
                 None
             }
+            KeyCode::Char('6') => {
+                self.screen = Screen::Analysis;
+                self.initial_request()
+            }
             KeyCode::Char('o') => {
                 // Starts from the open index, so a sibling is a Ctrl+W away.
                 let path = self.overview.as_ref().map_or("", Overview::path);
@@ -708,6 +751,7 @@ impl App {
                 let request = self.search.as_mut()?.handle_key(key);
                 self.search_request(request)
             }
+            _ if self.screen == Screen::Analysis => analysis_action(self.analysis.handle_key(key)),
             KeyCode::Char('/') => {
                 let (field, term) = self.overview.as_ref()?.selected_top_term()?;
                 self.screen = Screen::Search;
@@ -745,8 +789,10 @@ impl App {
     }
 
     pub fn draw(&mut self, frame: &mut Frame) {
+        // The analysis screen needs no index, so its tab shows without one.
+        let tabs_shown = self.overview.is_some() || self.screen == Screen::Analysis;
         let [tabs, body, footer] = Layout::vertical([
-            Constraint::Length(u16::from(self.overview.is_some())),
+            Constraint::Length(u16::from(tabs_shown)),
             Constraint::Fill(1),
             Constraint::Length(1),
         ])
@@ -764,6 +810,19 @@ impl App {
             &mut self.search,
             self.screen,
         ) {
+            (overview, _, _, _, _, Screen::Analysis) => {
+                self.analysis.render(frame, body);
+                if self.analysis.prompting() {
+                    Line::from(self.analysis.keys())
+                } else if overview.is_some() {
+                    Line::from(format!(
+                        " {cancel}q quit   o open   c close   1-6 screen   {}",
+                        self.analysis.keys()
+                    ))
+                } else {
+                    Line::from(format!(" q quit   o open   {}", self.analysis.keys()))
+                }
+            }
             (Some(_), _, _, _, Some(search), Screen::Search) => {
                 search.render(frame, body);
                 if search.prompting() {
@@ -775,7 +834,7 @@ impl App {
                         ""
                     };
                     Line::from(format!(
-                        " {cancel}q quit   o open   c close   1-5 screen   {}",
+                        " {cancel}q quit   o open   c close   1-6 screen   {}",
                         search.keys()
                     ))
                 }
@@ -783,7 +842,7 @@ impl App {
             (Some(_), _, _, Some(commits), _, Screen::Commits) => {
                 commits.render(frame, body);
                 Line::from(format!(
-                    " {cancel}q quit   o open   c close   1-5 screen   r read again   ⏎ segments   \
+                    " {cancel}q quit   o open   c close   1-6 screen   r read again   ⏎ segments   \
                      Tab panel   ↑↓"
                 ))
             }
@@ -797,7 +856,7 @@ impl App {
                 match documents.viewer() {
                     Some(viewer) => Line::from(viewer.keys()),
                     None => Line::from(format!(
-                        " {cancel}q quit   o open   c close   1-5 screen   ←→ doc   {steps}i go to   \
+                        " {cancel}q quit   o open   c close   1-6 screen   ←→ doc   {steps}i go to   \
                          ⏎ term vector   v view   x numbers   e empty   m similar   Tab panel   ↑↓"
                     )),
                 }
@@ -808,7 +867,7 @@ impl App {
                     Line::from(" type to seek   ⏎/Esc done")
                 } else {
                     Line::from(format!(
-                        " {cancel}q quit   o open   c close   1-5 screen   / seek   \
+                        " {cancel}q quit   o open   c close   1-6 screen   / seek   \
                          ⏎ open doc   ←/→ column   ↑↓"
                     ))
                 }
@@ -817,24 +876,24 @@ impl App {
                 overview.render(frame, body);
                 if self.scan.is_some() {
                     Line::from(
-                        " Esc cancel scan   q quit   o open   c close   1-5 screen   s/S sort   \
+                        " Esc cancel scan   q quit   o open   c close   1-6 screen   s/S sort   \
                          Tab panel   ↑↓",
                     )
                 } else if overview.selected_top_term().is_some() {
                     Line::from(
-                        " q quit   o open   c close   1-5 screen   ⏎ term's docs   / search term   \
+                        " q quit   o open   c close   1-6 screen   ⏎ term's docs   / search term   \
                          +/- top N   s/S sort   Tab panel   ↑↓",
                     )
                 } else {
                     Line::from(
-                        " q quit   o open   c close   1-5 screen   ⏎ terms   a all terms   \
+                        " q quit   o open   c close   1-6 screen   ⏎ terms   a all terms   \
                          +/- top N   s/S sort   Tab panel   ↑↓",
                     )
                 }
             }
             (None, _, _, _, _, _) => {
                 let lines = vec![
-                    Line::from("No index open. Press o to open one."),
+                    Line::from("No index open. Press o to open one, or 6 to try an analyzer."),
                     Line::from(""),
                     Line::from(LEIA.line()),
                     Line::from(server_line(&self.version)),
@@ -844,16 +903,17 @@ impl App {
                     Paragraph::new(lines).block(Block::bordered().title(" leia ")),
                     body,
                 );
-                Line::from(" q quit   o open")
+                Line::from(" q quit   o open   6 analysis")
             }
         };
-        if self.overview.is_some() {
+        if tabs_shown {
             let selected = match self.screen {
                 Screen::Overview => 0,
                 Screen::Documents => 1,
                 Screen::Terms => 2,
                 Screen::Commits => 3,
                 Screen::Search => 4,
+                Screen::Analysis => 5,
             };
             frame.render_widget(
                 Tabs::new([
@@ -862,6 +922,7 @@ impl App {
                     "3 Terms",
                     "4 Commits",
                     "5 Search",
+                    "6 Analysis",
                 ])
                 .select(selected)
                 .highlight_style(Style::new().add_modifier(Modifier::REVERSED)),
@@ -880,6 +941,13 @@ impl App {
     }
 }
 
+fn analysis_action(request: Option<analysis::Request>) -> Option<Action> {
+    match request? {
+        analysis::Request::Components => Some(Action::LoadAnalysisComponents),
+        analysis::Request::Analyze(params) => Some(Action::Analyze(params)),
+    }
+}
+
 fn commits_action(request: Option<commits::Request>) -> Option<Action> {
     match request? {
         commits::Request::Commits => Some(Action::LoadCommits),
@@ -895,6 +963,7 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
+    use crate::protocol::analysis::AnalyzeResult;
     use crate::protocol::document::{DocumentField, StoredType, StoredValue};
     use crate::protocol::index::{DocValuesType, IndexField, IndexOptions, TermStats};
     use crate::protocol::search::{
@@ -1021,6 +1090,52 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    #[test]
+    fn the_analysis_screen_needs_no_index_and_its_analyzer_parses_queries() {
+        let mut app = App::new(version(), None);
+        assert!(render(&mut app).contains("6 analysis"));
+        assert_eq!(
+            app.handle_key(key(KeyCode::Char('6'))),
+            Some(Action::LoadAnalysisComponents)
+        );
+        app.components_failed("down".to_owned());
+        let screen = render(&mut app);
+        assert!(screen.contains("6 Analysis"), "{screen}");
+        assert!(screen.contains("standard analyzer"), "{screen}");
+        assert!(screen.contains("q quit   o open   / text"), "{screen}");
+        // The other screens need an index.
+        assert_eq!(app.handle_key(key(KeyCode::Char('5'))), None);
+        assert!(render(&mut app).contains("standard analyzer"));
+
+        // b builds a custom analyzer, which the server tries first.
+        assert_eq!(app.handle_key(key(KeyCode::Char('b'))), None);
+        assert_eq!(app.handle_key(key(KeyCode::Char(' '))), None);
+        let Some(Action::Analyze(params)) = app.handle_key(key(KeyCode::Enter)) else {
+            panic!("applying the analyzer analyzes");
+        };
+        let custom = params.analyzer.clone();
+        assert!(custom.custom.is_some());
+        app.analyzed(params.text, AnalyzeResult::default());
+        assert!(render(&mut app).contains("standard › lowercase"));
+
+        // An index opened now parses with it, and keeps the analysis screen shown.
+        assert_eq!(
+            app.opened(GetIndexStatsResult {
+                fields: vec![field("body", 0, true)],
+                ..stats("/data/idx")
+            }),
+            None
+        );
+        assert!(render(&mut app).contains("1-6 screen"));
+        app.handle_key(key(KeyCode::Char('5')));
+        app.handle_key(key(KeyCode::Char('/')));
+        typed(&mut app, "red");
+        let Some(Action::StartSearch { params, .. }) = app.handle_key(key(KeyCode::Enter)) else {
+            panic!("Enter searches");
+        };
+        assert_eq!(params.query.classic.unwrap().analyzer, custom);
     }
 
     #[test]

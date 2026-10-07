@@ -5,7 +5,6 @@ import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import org.apache.lucene.analysis.Analyzer;
-import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.queryparser.classic.ParseException;
 import org.apache.lucene.queryparser.classic.QueryParser;
@@ -18,7 +17,7 @@ import org.apache.lucene.search.Query;
 import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.util.BytesRef;
 
-/** Builds the queries that {@link ReadOnlyIndex#search} runs (ADR 0010, ADR 0011, ADR 0013). */
+/** Builds the queries that {@link ReadOnlyIndex#search} runs (ADR 0010, ADR 0011, ADR 0013, ADR 0014). */
 public final class Queries {
 
     /** How a query parser combines clauses without an operator. */
@@ -30,15 +29,17 @@ public final class Queries {
     private Queries() {}
 
     /**
-     * Parses {@code expression} with Lucene's classic {@link QueryParser} and {@link
-     * StandardAnalyzer}.
+     * Parses {@code expression} with Lucene's classic {@link QueryParser} (ADR 0014: with the
+     * caller's analyzer).
      *
      * @param defaultField the field of terms that name none
+     * @param analyzer analyzes the text of the expression; the caller closes it
      * @throws InvalidQueryException if the expression doesn't parse
      */
-    public static Query classic(String expression, String defaultField, ParserOptions options, ClassicOptions classic)
+    public static Query classic(
+            String expression, String defaultField, ParserOptions options, ClassicOptions classic, Analyzer analyzer)
             throws InvalidQueryException {
-        try (Analyzer analyzer = new StandardAnalyzer()) {
+        try {
             QueryParser parser = new QueryParser(defaultField, analyzer);
             parser.setDefaultOperator(
                     switch (options.defaultOperator()) {
@@ -63,18 +64,23 @@ public final class Queries {
     }
 
     /**
-     * Parses {@code expression} with Lucene's {@link StandardQueryParser} and {@link
-     * StandardAnalyzer}. A range or a value on a field in {@code points} becomes a point query for
+     * Parses {@code expression} with Lucene's {@link StandardQueryParser} (ADR 0014: with the
+     * caller's analyzer). A range or a value on a field in {@code points} becomes a point query for
      * values of its type; other fields are text. A fuzzy term without a distance always allows 2
      * edits: the parser ignores {@code setFuzzyMinSim}.
      *
      * @param defaultField the field of terms that name none
+     * @param analyzer analyzes the text of the expression; the caller closes it
      * @throws InvalidQueryException if the expression doesn't parse, or a point value is not a number
      */
     public static Query standard(
-            String expression, String defaultField, ParserOptions options, Map<String, PointType> points)
+            String expression,
+            String defaultField,
+            ParserOptions options,
+            Map<String, PointType> points,
+            Analyzer analyzer)
             throws InvalidQueryException {
-        try (Analyzer analyzer = new StandardAnalyzer()) {
+        try {
             StandardQueryParser parser = new StandardQueryParser(analyzer);
             parser.setDefaultOperator(
                     switch (options.defaultOperator()) {
@@ -109,9 +115,11 @@ public final class Queries {
      * own query unless it is deleted.
      *
      * @param docId the source document, which may be deleted; the caller checks that it exists
+     * @param analyzer analyzes the stored strings of fields without a term vector (ADR 0014); the
+     *     caller closes it once the search is done
      */
-    public static Query moreLikeThis(int docId, MoreLikeThisOptions options) {
-        return new MoreLikeDocumentQuery(docId, options);
+    public static Query moreLikeThis(int docId, MoreLikeThisOptions options, Analyzer analyzer) {
+        return new MoreLikeDocumentQuery(docId, options, analyzer);
     }
 
     /** Whole numbers for integer types and decimals for the others, as Luke reads them. */

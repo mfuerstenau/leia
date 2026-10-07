@@ -19,7 +19,14 @@
           {"field": "quantity", "type": "INT"},
           {"field": "rating", "type": "FLOAT"},
           {"field": "timestamp", "type": "LONG"}
-        ]
+        ],
+        "analyzer": {
+          "custom": {
+            "charFilters": [],
+            "tokenizer": {"name": "standard", "params": {"maxTokenLength": "255"}},
+            "tokenFilters": [{"name": "lowercase", "params": {}}]
+          }
+        }
       }
     },
     "similarity": {"classic": {}},

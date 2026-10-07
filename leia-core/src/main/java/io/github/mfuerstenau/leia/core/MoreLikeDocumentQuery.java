@@ -3,7 +3,6 @@ package io.github.mfuerstenau.leia.core;
 import java.io.IOException;
 import java.util.Objects;
 import org.apache.lucene.analysis.Analyzer;
-import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.queries.mlt.MoreLikeThis;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
@@ -13,35 +12,35 @@ import org.apache.lucene.search.QueryVisitor;
  * Documents like one document of the index (ADR 0013). The query only holds the settings: it
  * rewrites to the {@link MoreLikeThis} query, which is built from the searcher's reader. Rewriting
  * happens inside the search, so it can be cancelled through the {@code ExitableDirectoryReader}
- * like the search (ADR 0010).
+ * like the search (ADR 0010). Stored strings are analyzed with the caller's analyzer (ADR 0014).
  */
 final class MoreLikeDocumentQuery extends Query {
 
     private final int docId;
     private final MoreLikeThisOptions options;
+    private final Analyzer analyzer;
 
-    MoreLikeDocumentQuery(int docId, MoreLikeThisOptions options) {
+    MoreLikeDocumentQuery(int docId, MoreLikeThisOptions options, Analyzer analyzer) {
         this.docId = docId;
         this.options = Objects.requireNonNull(options);
+        this.analyzer = Objects.requireNonNull(analyzer);
     }
 
     /**
      * The terms of the document's term vectors or, for fields without one, of its stored strings
-     * analyzed with {@link StandardAnalyzer}, as {@code SHOULD} clauses of a {@code BooleanQuery}.
+     * analyzed with the query's analyzer, as {@code SHOULD} clauses of a {@code BooleanQuery}.
      */
     @Override
     public Query rewrite(IndexSearcher searcher) throws IOException {
-        try (Analyzer analyzer = new StandardAnalyzer()) {
-            MoreLikeThis mlt = new MoreLikeThis(searcher.getIndexReader());
-            mlt.setAnalyzer(analyzer);
-            mlt.setFieldNames(options.fields().toArray(String[]::new));
-            mlt.setMinTermFreq(options.minTermFreq());
-            mlt.setMinDocFreq(options.minDocFreq());
-            mlt.setMaxDocFreq(options.maxDocFreq().orElse(MoreLikeThis.DEFAULT_MAX_DOC_FREQ));
-            mlt.setMaxQueryTerms(options.maxQueryTerms());
-            mlt.setBoost(options.boost());
-            return mlt.like(docId);
-        }
+        MoreLikeThis mlt = new MoreLikeThis(searcher.getIndexReader());
+        mlt.setAnalyzer(analyzer);
+        mlt.setFieldNames(options.fields().toArray(String[]::new));
+        mlt.setMinTermFreq(options.minTermFreq());
+        mlt.setMinDocFreq(options.minDocFreq());
+        mlt.setMaxDocFreq(options.maxDocFreq().orElse(MoreLikeThis.DEFAULT_MAX_DOC_FREQ));
+        mlt.setMaxQueryTerms(options.maxQueryTerms());
+        mlt.setBoost(options.boost());
+        return mlt.like(docId);
     }
 
     @Override
@@ -72,11 +71,12 @@ final class MoreLikeDocumentQuery extends Query {
     public boolean equals(Object other) {
         return sameClassAs(other)
                 && docId == ((MoreLikeDocumentQuery) other).docId
-                && options.equals(((MoreLikeDocumentQuery) other).options);
+                && options.equals(((MoreLikeDocumentQuery) other).options)
+                && analyzer == ((MoreLikeDocumentQuery) other).analyzer;
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(classHash(), docId, options);
+        return Objects.hash(classHash(), docId, options, System.identityHashCode(analyzer));
     }
 }

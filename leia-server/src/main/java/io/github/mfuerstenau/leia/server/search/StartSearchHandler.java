@@ -70,15 +70,21 @@ public final class StartSearchHandler implements MethodHandler<StartSearchParams
                 SearchQueries.checkField(index, field);
             }
         }
-        Query query = SearchQueries.query(index, params.query());
         Similarity similarity = SearchQueries.similarity(params.similarity());
         Optional<Sort> sort = SearchQueries.sort(index, params.sort());
         boolean exact = params.exactTotalHits();
+        // Last: from here on, the job owns the query's analyzer and closes it.
+        SearchQueries.AnalyzedQuery analyzed = SearchQueries.query(index, params.query());
+        Query query = analyzed.query();
         long jobId = jobs.start(
                 "search " + query + sort.map(s -> " sorted by " + s).orElse("") + " with " + similarity + ", hits "
                         + offset + " to " + (offset + limit),
                 SearchResults.class,
-                progress -> search(index, query, similarity, sort, offset, limit, exact, fields, progress));
+                progress -> {
+                    try (analyzed) {
+                        return search(index, query, similarity, sort, offset, limit, exact, fields, progress);
+                    }
+                });
         return new JobStarted(jobId);
     }
 

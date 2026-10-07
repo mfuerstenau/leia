@@ -1,0 +1,20 @@
+{
+  "jsonrpc": "2.0",
+  "id": 30,
+  "result": {
+    "charFilters": [
+      {"name": "htmlStrip", "className": "org.apache.lucene.analysis.charfilter.HTMLStripCharFilterFactory"},
+      {"name": "mapping", "className": "org.apache.lucene.analysis.charfilter.MappingCharFilterFactory"}
+    ],
+    "tokenizers": [
+      {"name": "keyword", "className": "org.apache.lucene.analysis.core.KeywordTokenizerFactory"},
+      {"name": "standard", "className": "org.apache.lucene.analysis.standard.StandardTokenizerFactory"},
+      {"name": "whitespace", "className": "org.apache.lucene.analysis.core.WhitespaceTokenizerFactory"}
+    ],
+    "tokenFilters": [
+      {"name": "lowercase", "className": "org.apache.lucene.analysis.core.LowerCaseFilterFactory"},
+      {"name": "stop", "className": "org.apache.lucene.analysis.core.StopFilterFactory"},
+      {"name": "synonymGraph", "className": "org.apache.lucene.analysis.synonym.SynonymGraphFilterFactory"}
+    ]
+  }
+}

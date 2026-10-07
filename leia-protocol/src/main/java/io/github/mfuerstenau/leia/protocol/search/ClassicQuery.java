@@ -1,8 +1,9 @@
 package io.github.mfuerstenau.leia.protocol.search;
 
+import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
+
 /**
- * An expression for Lucene's classic {@code QueryParser}, analyzed with {@code StandardAnalyzer}
- * (ADR 0010, ADR 0011).
+ * An expression for Lucene's classic {@code QueryParser} (ADR 0010, ADR 0011, ADR 0014).
  *
  * @param expression the query in the classic syntax, such as {@code title:fox AND body:qu*}
  * @param defaultField the field of terms that name none
@@ -12,6 +13,7 @@ package io.github.mfuerstenau.leia.protocol.search;
  * @param splitOnWhitespace whether whitespace splits the text before it is analyzed
  * @param autoGeneratePhraseQueries whether text that analyzes to several terms becomes a phrase;
  *     needs {@code splitOnWhitespace}
+ * @param analyzer analyzes the text of the expression
  */
 public record ClassicQuery(
         String expression,
@@ -20,4 +22,5 @@ public record ClassicQuery(
         ParserOptions options,
         int fuzzyMaxEdits,
         boolean splitOnWhitespace,
-        boolean autoGeneratePhraseQueries) {}
+        boolean autoGeneratePhraseQueries,
+        Analyzer analyzer) {}

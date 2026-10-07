@@ -1,9 +1,10 @@
-//! The search screen (ADR 0010, ADR 0011, ADR 0012, ADR 0013): a query line, the hits of the last
-//! query, and a details panel with the parsed query or the explanation of a hit. Searches and
-//! explanations run as server jobs; the next page of hits is fetched once the selection reaches
-//! the last row. Enter on a hit shows its document on the documents screen, where `[`/`]` step
-//! through the hits. Popups set the query parser options (point types included), the
-//! More-Like-This settings, the similarity and the sort, and the stored fields per hit.
+//! The search screen (ADR 0010 to ADR 0014): a query line, the hits of the last query, and a
+//! details panel with the parsed query or the explanation of a hit. Searches and explanations run
+//! as server jobs; the next page of hits is fetched once the selection reaches the last row. Enter
+//! on a hit shows its document on the documents screen, where `[`/`]` step through the hits.
+//! Popups set the query parser options (point types included), the More-Like-This settings, the
+//! similarity and the sort, and the stored fields per hit. The parsers and More-Like-This analyze
+//! with the analysis screen's analyzer.
 
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -12,6 +13,7 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState, Wrap};
 
+use crate::analyzer::AnalyzerSettings;
 use crate::form::FormEvent;
 use crate::hit_fields::{FieldsForm, HitFields};
 use crate::input::{Edit, LineInput, word_start};
@@ -144,6 +146,8 @@ pub struct Search {
     like: LikeSettings,
     scoring: ScoringSettings,
     hit_fields: HitFields,
+    /// Analyzes classic and standard queries and More-Like-This text.
+    analyzer: AnalyzerSettings,
     /// The popup that takes the keys, while it is open.
     form: Option<Popup>,
     exact: bool,
@@ -190,6 +194,7 @@ impl Search {
             like: LikeSettings::new(fields),
             scoring: ScoringSettings::new(fields),
             hit_fields: HitFields::new(fields),
+            analyzer: AnalyzerSettings::default(),
             form: None,
             exact: false,
             input: LineInput::new(""),
@@ -203,6 +208,11 @@ impl Search {
             table: TableState::new(),
             details_scroll: 0,
         }
+    }
+
+    /// From now on, queries are analyzed with `analyzer`; the shown hits stay as they are.
+    pub fn set_analyzer(&mut self, analyzer: &AnalyzerSettings) {
+        self.analyzer = analyzer.clone();
     }
 
     /// Whether the query line or a popup takes the keys, Esc included.
@@ -271,6 +281,7 @@ impl Search {
                     fuzzy_max_edits: parser.fuzzy_max_edits,
                     split_on_whitespace: parser.split_on_whitespace,
                     auto_generate_phrase_queries: parser.auto_generate_phrase_queries,
+                    analyzer: self.analyzer.analyzer(),
                 }),
                 ..SearchQuery::default()
             },
@@ -281,6 +292,7 @@ impl Search {
                     default_operator: self.operator,
                     options: parser.options,
                     points: parser.point_fields(),
+                    analyzer: self.analyzer.analyzer(),
                 }),
                 ..SearchQuery::default()
             },
@@ -295,7 +307,10 @@ impl Search {
                 ..SearchQuery::default()
             },
             Mode::Like => SearchQuery {
-                more_like_this: Some(self.like.query(text.trim().parse().ok()?)?),
+                more_like_this: Some(
+                    self.like
+                        .query(text.trim().parse().ok()?, self.analyzer.analyzer())?,
+                ),
                 ..SearchQuery::default()
             },
         })
@@ -936,7 +951,9 @@ impl Search {
                     Line::from(
                         "field's term vector, or else from its stored text, analyzed with the",
                     ),
-                    Line::from("standard analyzer. p chooses the fields and the limits."),
+                    Line::from(
+                        "analyzer of the analysis screen (6). p chooses the fields and the limits.",
+                    ),
                 ],
             }
             .into_iter()
@@ -1001,8 +1018,8 @@ impl Search {
 
 impl Search {
     /// The parser options that differ from Lucene's defaults, the point types of the standard
-    /// parser or the More-Like-This limits, a similarity other than Lucene's default, and the
-    /// stored fields per hit unless they are all of them.
+    /// parser or the More-Like-This limits, a similarity other than Lucene's default, a custom
+    /// analyzer, and the stored fields per hit unless they are all of them.
     fn parser_lines(&self) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
         if let Some(similarity) = self.scoring.similarity_text() {
@@ -1010,6 +1027,9 @@ impl Search {
         }
         if let Some(fields) = self.hit_fields.text() {
             lines.push(Line::from(format!("Fields     {fields}")));
+        }
+        if self.mode != Mode::Term && self.analyzer.is_custom() {
+            lines.push(Line::from(format!("Analyzer   {}", self.analyzer.text())));
         }
         match self.mode {
             Mode::Term => return lines,
@@ -1160,6 +1180,7 @@ mod tests {
     use ratatui::crossterm::event::KeyModifiers;
 
     use super::*;
+    use crate::protocol::analysis::Analyzer;
     use crate::protocol::document::StoredType;
     use crate::protocol::index::{DocValuesType, TermStats};
     use crate::protocol::search::{
@@ -1252,6 +1273,7 @@ mod tests {
                 fuzzy_max_edits: 2,
                 split_on_whitespace: false,
                 auto_generate_phrase_queries: false,
+                analyzer: Analyzer::default(),
             }),
             ..SearchQuery::default()
         }
@@ -1528,6 +1550,7 @@ mod tests {
             max_doc_freq: None,
             max_query_terms: 25,
             boost: false,
+            analyzer: Analyzer::default(),
         }
     }
 
@@ -1652,6 +1675,7 @@ mod tests {
                             point_type: PointType::Int,
                         },
                     ],
+                    analyzer: Analyzer::default(),
                 }),
                 ..SearchQuery::default()
             }

@@ -3,6 +3,7 @@
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
+use super::analysis::{Analyze, GetAnalysisComponents};
 use super::commits::{GetCommit, GetCommits};
 use super::document::{GetDocument, GetStoredValue, GetTermVector};
 use super::index::{CloseIndex, GetIndexStats, OpenIndex};
@@ -39,4 +40,6 @@ pub const METHOD_NAMES: &[&str] = &[
     GetSearch::NAME,
     StartExplain::NAME,
     GetExplain::NAME,
+    GetAnalysisComponents::NAME,
+    Analyze::NAME,
 ];

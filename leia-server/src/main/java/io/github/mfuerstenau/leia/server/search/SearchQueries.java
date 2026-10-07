@@ -21,6 +21,7 @@ import io.github.mfuerstenau.leia.protocol.search.StandardQuery;
 import io.github.mfuerstenau.leia.protocol.search.TermQuery;
 import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.analysis.AnalyzerSpecs;
 import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -28,6 +29,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
+import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.search.Query;
@@ -36,24 +38,38 @@ import org.apache.lucene.search.SortField;
 
 /**
  * Turns the query, the similarity and the sort of {@code startSearch} and {@code startExplain} into
- * their Lucene counterparts (ADR 0010, ADR 0011, ADR 0012, ADR 0013).
+ * their Lucene counterparts (ADR 0010, ADR 0011, ADR 0012, ADR 0013, ADR 0014).
  */
 final class SearchQueries {
 
     private SearchQueries() {}
 
     /**
+     * A Lucene query and the analyzer that it still needs while it runs: More-Like-This analyzes in
+     * the search. The job closes it once the query has run.
+     */
+    record AnalyzedQuery(Query query, Optional<Analyzer> analyzer) implements AutoCloseable {
+
+        @Override
+        public void close() {
+            analyzer.ifPresent(Analyzer::close);
+        }
+    }
+
+    /**
      * The Lucene query for {@code query}, parsed right away so that a syntax error fails the request.
-     * A More-Like-This query is only checked here: the search builds it (ADR 0013).
+     * A More-Like-This query is only checked here: the search builds it (ADR 0013), with the analyzer
+     * that comes along, which the caller closes.
      *
      * @throws RpcException {@code INVALID_PARAMS} unless exactly one alternative is present, for a
      *     parser option or More-Like-This setting out of range, a point type that doesn't fit its
      *     field, a More-Like-This field that isn't indexed, or a binary term that is not hex; {@code
      *     FIELD_NOT_FOUND} for an unknown default, term, point or More-Like-This field; {@code
      *     DOC_NOT_FOUND} for a More-Like-This document outside 0 to maxDoc - 1; {@code INVALID_QUERY}
-     *     if the expression doesn't parse
+     *     if the expression doesn't parse; {@code INVALID_ANALYZER} if the query's analyzer can't be
+     *     built
      */
-    static Query query(ReadOnlyIndex index, SearchQuery query) throws RpcException {
+    static AnalyzedQuery query(ReadOnlyIndex index, SearchQuery query) throws RpcException {
         long present = Stream.of(query.classic(), query.standard(), query.term(), query.moreLikeThis())
                 .filter(alternative -> alternative.isPresent())
                 .count();
@@ -67,15 +83,15 @@ final class SearchQueries {
         }
         try {
             if (query.classic().isPresent()) {
-                return classic(index, query.classic().get());
+                return new AnalyzedQuery(classic(index, query.classic().get()), Optional.empty());
             }
             if (query.standard().isPresent()) {
-                return standard(index, query.standard().get());
+                return new AnalyzedQuery(standard(index, query.standard().get()), Optional.empty());
             }
         } catch (InvalidQueryException e) {
             throw invalidQuery(e);
         }
-        return term(index, query.term().orElseThrow());
+        return new AnalyzedQuery(term(index, query.term().orElseThrow()), Optional.empty());
     }
 
     /**
@@ -141,7 +157,9 @@ final class SearchQueries {
         } catch (IllegalArgumentException e) {
             throw invalidParams(e);
         }
-        return Queries.classic(classic.expression(), classic.defaultField(), options, classicOptions);
+        try (Analyzer analyzer = AnalyzerSpecs.build(classic.analyzer())) {
+            return Queries.classic(classic.expression(), classic.defaultField(), options, classicOptions, analyzer);
+        }
     }
 
     private static Query standard(ReadOnlyIndex index, StandardQuery standard)
@@ -166,7 +184,9 @@ final class SearchQueries {
                         "Invalid params: the point field '" + point.field() + "' is listed twice");
             }
         }
-        return Queries.standard(standard.expression(), standard.defaultField(), options, points);
+        try (Analyzer analyzer = AnalyzerSpecs.build(standard.analyzer())) {
+            return Queries.standard(standard.expression(), standard.defaultField(), options, points, analyzer);
+        }
     }
 
     private static Query term(ReadOnlyIndex index, TermQuery term) throws RpcException {
@@ -183,7 +203,7 @@ final class SearchQueries {
         }
     }
 
-    private static Query moreLikeThis(ReadOnlyIndex index, MoreLikeThisQuery like) throws RpcException {
+    private static AnalyzedQuery moreLikeThis(ReadOnlyIndex index, MoreLikeThisQuery like) throws RpcException {
         GetDocumentHandler.checkDocId(index, like.docId());
         for (String name : like.fields()) {
             FieldInfo field = index.fieldInfo(name)
@@ -195,19 +215,20 @@ final class SearchQueries {
                         "Invalid params: the field '" + name + "' is not indexed, so it has no terms to search for");
             }
         }
+        MoreLikeThisOptions options;
         try {
-            return Queries.moreLikeThis(
-                    like.docId(),
-                    new MoreLikeThisOptions(
-                            like.fields(),
-                            like.minTermFreq(),
-                            like.minDocFreq(),
-                            like.maxDocFreq(),
-                            like.maxQueryTerms(),
-                            like.boost()));
+            options = new MoreLikeThisOptions(
+                    like.fields(),
+                    like.minTermFreq(),
+                    like.minDocFreq(),
+                    like.maxDocFreq(),
+                    like.maxQueryTerms(),
+                    like.boost());
         } catch (IllegalArgumentException e) {
             throw invalidParams(e);
         }
+        Analyzer analyzer = AnalyzerSpecs.build(like.analyzer());
+        return new AnalyzedQuery(Queries.moreLikeThis(like.docId(), options, analyzer), Optional.of(analyzer));
     }
 
     private static ParserOptions options(

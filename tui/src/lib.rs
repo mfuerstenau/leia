@@ -2,6 +2,8 @@
 //!
 //! The terminal UI spawns `leia-server.jar` and talks JSON-RPC 2.0 to it over stdio.
 
+pub mod analysis;
+pub mod analyzer;
 pub mod app;
 pub mod build_info;
 pub mod cli;

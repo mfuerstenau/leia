@@ -7,10 +7,13 @@ import io.github.mfuerstenau.leia.core.SearchResults.Hit;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.FieldType;
@@ -32,13 +35,16 @@ class MoreLikeThisTest {
 
     private static final Similarity BM25 = Similarities.bm25(1.2f, 0.75f);
 
+    /** Lucene's analyzers are thread-safe; this one lives as long as the tests. */
+    private static final Analyzer ANALYZER = new StandardAnalyzer();
+
     @TempDir
     Path tmp;
 
     @Test
     void takesTheTermsOfTheTermVectorAndFindsTheSourceFirst() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            SearchResults results = search(index, Queries.moreLikeThis(0, options(List.of("body"), 1, 1)));
+            SearchResults results = search(index, Queries.moreLikeThis(0, options(List.of("body"), 1, 1), ANALYZER));
 
             assertThat(results.query())
                     .isEqualTo("like(doc 0, fields [body], minTermFreq 1, minDocFreq 1, maxQueryTerms 25)");
@@ -53,14 +59,26 @@ class MoreLikeThisTest {
     void analyzesStoredStringsWithoutATermVector() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             // "Red Lamp Red": the standard analyzer lowercases, and only "red" occurs twice.
-            SearchResults red = search(index, Queries.moreLikeThis(0, options(List.of("title"), 2, 1)));
+            SearchResults red = search(index, Queries.moreLikeThis(0, options(List.of("title"), 2, 1), ANALYZER));
             assertThat(red.rewrittenQuery()).isEqualTo("title:red");
             assertThat(red.hits()).extracting(Hit::docId).containsExactly(0, 1);
 
             // A stored number has no string to analyze, and no term vector: no terms, no hits.
-            SearchResults number = search(index, Queries.moreLikeThis(0, options(List.of("n"), 1, 1)));
+            SearchResults number = search(index, Queries.moreLikeThis(0, options(List.of("n"), 1, 1), ANALYZER));
             assertThat(number.rewrittenQuery()).startsWith("MatchNoDocsQuery");
             assertThat(number.hits()).isEmpty();
+        }
+    }
+
+    @Test
+    void analyzesStoredStringsWithTheCallersAnalyzer() throws Exception {
+        var whitespace = new AnalyzerSpec.Custom(
+                List.of(), new AnalyzerSpec.Component("whitespace", Map.of()), List.of(), Optional.empty());
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex());
+                Analyzer analyzer = Analyzers.build(whitespace)) {
+            // "Red Lamp Red" without lowercasing: "Red" is no term of the index.
+            SearchResults red = search(index, Queries.moreLikeThis(0, options(List.of("title"), 2, 1), analyzer));
+            assertThat(red.rewrittenQuery()).startsWith("MatchNoDocsQuery");
         }
     }
 
@@ -69,17 +87,18 @@ class MoreLikeThisTest {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             // Document frequencies count deleted documents: apple 3, banana 3, cherry 2.
             var onlyRare = new MoreLikeThisOptions(List.of("body"), 1, 1, OptionalInt.of(2), 25, false);
-            assertThat(search(index, Queries.moreLikeThis(0, onlyRare)).rewrittenQuery())
+            assertThat(search(index, Queries.moreLikeThis(0, onlyRare, ANALYZER))
+                            .rewrittenQuery())
                     .isEqualTo("body:cherry");
 
             // apple scores tf 2 × idf; the rarer cherry has tf 1.
             var best = new MoreLikeThisOptions(List.of("body"), 1, 1, OptionalInt.empty(), 1, false);
-            assertThat(search(index, Queries.moreLikeThis(0, best)).rewrittenQuery())
+            assertThat(search(index, Queries.moreLikeThis(0, best, ANALYZER)).rewrittenQuery())
                     .isEqualTo("body:apple");
 
             // Lucene's defaults want terms in at least 5 documents.
             SearchResults defaults =
-                    search(index, Queries.moreLikeThis(0, MoreLikeThisOptions.defaults(List.of("body"))));
+                    search(index, Queries.moreLikeThis(0, MoreLikeThisOptions.defaults(List.of("body")), ANALYZER));
             assertThat(defaults.query())
                     .isEqualTo("like(doc 0, fields [body], minTermFreq 2, minDocFreq 5, maxQueryTerms 25)");
             assertThat(defaults.rewrittenQuery()).startsWith("MatchNoDocsQuery");
@@ -90,7 +109,7 @@ class MoreLikeThisTest {
     void boostsTheTermsByTheirScores() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             var boost = new MoreLikeThisOptions(List.of("body", "title"), 1, 1, OptionalInt.of(3), 25, true);
-            SearchResults results = search(index, Queries.moreLikeThis(0, boost));
+            SearchResults results = search(index, Queries.moreLikeThis(0, boost, ANALYZER));
 
             assertThat(results.query())
                     .isEqualTo("like(doc 0, fields [body, title], minTermFreq 1, minDocFreq 1, maxDocFreq 3, "
@@ -105,7 +124,7 @@ class MoreLikeThisTest {
     @Test
     void aDeletedDocumentIsASourceButNoHit() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            SearchResults results = search(index, Queries.moreLikeThis(3, options(List.of("body"), 1, 1)));
+            SearchResults results = search(index, Queries.moreLikeThis(3, options(List.of("body"), 1, 1), ANALYZER));
 
             assertThat(results.rewrittenQuery()).contains("body:apple", "body:cherry");
             assertThat(results.hits()).extracting(Hit::docId).containsExactlyInAnyOrder(0, 1);
@@ -115,7 +134,7 @@ class MoreLikeThisTest {
     @Test
     void explainsTheScoreOfTheSameQuery() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            Query query = Queries.moreLikeThis(0, options(List.of("body"), 1, 1));
+            Query query = Queries.moreLikeThis(0, options(List.of("body"), 1, 1), ANALYZER);
             Hit second = search(index, query).hits().get(1);
 
             Explanation explanation = index.explain(query, BM25, second.docId(), ScanProgress.NONE);
@@ -134,7 +153,7 @@ class MoreLikeThisTest {
                     throw new CancellationException("cancelled");
                 }
             };
-            Query query = Queries.moreLikeThis(0, options(List.of("body", "title"), 1, 1));
+            Query query = Queries.moreLikeThis(0, options(List.of("body", "title"), 1, 1), ANALYZER);
 
             assertThatThrownBy(
                             () -> index.search(query, BM25, Optional.empty(), 0, 10, true, Optional.empty(), cancelled))

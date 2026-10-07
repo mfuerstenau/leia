@@ -91,3 +91,19 @@ their own indexes and the Lucene 9 and 8 indexes from `LegacyIndexWriter`.
   `ClassicSimilarity` explanation with the same value. Boolean scores every hit 1.
 - `body:the`: 471 hits. `Enter` on the first, then `]` a hundred times on the documents screen:
   the second page is fetched on the way to hit 101 (doc 418).
+
+## Analysis worth a try
+
+The analysis screen (`6`) needs no index, but these go with the demo index's text:
+
+- `<b>The</b> Wi-Fi routers are running FASTER` with the standard analyzer: the tags come out
+  as terms (`b`), and `Wi-Fi` as `wi` and `fi`. With `htmlStrip` added as a char filter (`b`, `Space`, then `+ char filter`), the tags
+  are gone, and `the` keeps the offsets of the original text (3–10).
+- Add `porterStem` after `lowercase`: `routers` becomes `router`, `running` becomes `run`. On the
+  search screen, `routers running` then parses to `title:router title:run`, and the details panel
+  shows the analyzer.
+- Add `stop`: `the` and `are` are gone, and the next tokens' positions are marked `·`. With
+  `words=nope.txt`, the builder stays open and says that the resource is not found.
+- A config directory with `syn.txt` (`wifi, wireless network`) and `synonymGraph` with
+  `synonyms=syn.txt`: `fast wifi router` gives `wireless` and `network` at positions 1 and 2, and
+  `wifi` in italics, stacked on `wireless` and spanning `1–2`; `router` moves to position 3.

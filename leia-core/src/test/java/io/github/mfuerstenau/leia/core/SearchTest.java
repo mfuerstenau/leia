@@ -15,6 +15,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicInteger;
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.StoredField;
@@ -36,6 +38,9 @@ import org.junit.jupiter.api.io.TempDir;
 class SearchTest {
 
     private static final Similarity BM25 = Similarities.bm25(1.2f, 0.75f);
+
+    /** Lucene's analyzers are thread-safe; this one lives as long as the tests. */
+    private static final Analyzer ANALYZER = new StandardAnalyzer();
 
     private static final BytesRef BINARY = new BytesRef(new byte[] {(byte) 0xff, 0});
 
@@ -236,7 +241,7 @@ class SearchTest {
     }
 
     private static Query classic(String expression, Operator operator) throws InvalidQueryException {
-        return Queries.classic(expression, "body", ParserOptions.defaults(operator), ClassicOptions.DEFAULTS);
+        return Queries.classic(expression, "body", ParserOptions.defaults(operator), ClassicOptions.DEFAULTS, ANALYZER);
     }
 
     private static SearchResults search(ReadOnlyIndex index, Query query, int offset, int limit)

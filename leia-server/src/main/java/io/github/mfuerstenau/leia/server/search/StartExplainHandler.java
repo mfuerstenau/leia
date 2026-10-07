@@ -45,12 +45,16 @@ public final class StartExplainHandler implements MethodHandler<StartExplainPara
         ReadOnlyIndex index = GetDocumentHandler.openIndex(currentIndex);
         int docId = params.docId();
         GetDocumentHandler.checkDocId(index, docId);
-        Query query = SearchQueries.query(index, params.query());
         Similarity similarity = SearchQueries.similarity(params.similarity());
+        // Last: from here on, the job owns the query's analyzer and closes it.
+        SearchQueries.AnalyzedQuery analyzed = SearchQueries.query(index, params.query());
+        Query query = analyzed.query();
         long jobId = jobs.start(
-                "explain " + query + " with " + similarity + " for document " + docId,
-                Explanation.class,
-                progress -> explain(index, query, similarity, docId, progress));
+                "explain " + query + " with " + similarity + " for document " + docId, Explanation.class, progress -> {
+                    try (analyzed) {
+                        return explain(index, query, similarity, docId, progress);
+                    }
+                });
         return new JobStarted(jobId);
     }
 

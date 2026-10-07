@@ -40,7 +40,12 @@ public enum ErrorCode {
     /** The index directory has no commit of that generation. */
     COMMIT_NOT_FOUND(-32011),
     /** The query can't be run: the expression doesn't parse, or it has too many clauses once rewritten. */
-    INVALID_QUERY(-32012);
+    INVALID_QUERY(-32012),
+    /**
+     * The analyzer can't be built: an unknown component, an unknown or bad parameter, a config
+     * directory that is not a directory, or a resource file that can't be read or parsed.
+     */
+    INVALID_ANALYZER(-32013);
 
     private final int code;
 

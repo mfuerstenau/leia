@@ -13,6 +13,7 @@ use leia::cli::Cli;
 use leia::client::CallError;
 use leia::clipboard::osc52;
 use leia::java::find_java;
+use leia::protocol::analysis::{Analyze, GetAnalysisComponents, GetAnalysisComponentsParams};
 use leia::protocol::commits::{GetCommit, GetCommitParams, GetCommits, GetCommitsParams};
 use leia::protocol::document::{
     GetDocument, GetDocumentParams, GetStoredValue, GetStoredValueParams, GetTermVector,
@@ -295,6 +296,20 @@ fn perform(
         Action::CancelSearch(jobs) => {
             cancel_jobs(server, jobs)?;
             app.search_cancelled();
+        }
+        Action::LoadAnalysisComponents => {
+            let params = GetAnalysisComponentsParams {};
+            match answered(server.call::<GetAnalysisComponents>(params))? {
+                Ok(result) => app.components_loaded(result),
+                Err(error) => app.components_failed(error),
+            }
+        }
+        Action::Analyze(params) => {
+            let text = params.text.clone();
+            match answered(server.call::<Analyze>(params))? {
+                Ok(result) => app.analyzed(text, result),
+                Err(error) => app.analyze_failed(error),
+            }
         }
     }
     Ok(None)

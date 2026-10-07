@@ -13,6 +13,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.BinaryDocValuesField;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.DoubleDocValuesField;
@@ -39,6 +41,9 @@ import org.junit.jupiter.api.io.TempDir;
 class SimilarityAndSortTest {
 
     private static final Similarity BM25 = Similarities.bm25(1.2f, 0.75f);
+
+    /** Lucene's analyzers are thread-safe; this one lives as long as the tests. */
+    private static final Analyzer ANALYZER = new StandardAnalyzer();
 
     @TempDir
     Path tmp;
@@ -162,8 +167,8 @@ class SimilarityAndSortTest {
     @Test
     void scoresWithTheSimilarityAndExplainsTheSameScore() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            Query query =
-                    Queries.classic("fox dog", "body", ParserOptions.defaults(Operator.OR), ClassicOptions.DEFAULTS);
+            Query query = Queries.classic(
+                    "fox dog", "body", ParserOptions.defaults(Operator.OR), ClassicOptions.DEFAULTS, ANALYZER);
 
             // Boolean: each matching term scores its boost, 1.
             List<Hit> bool = search(index, Similarities.bool(), query);

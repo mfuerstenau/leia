@@ -28,8 +28,12 @@ because Lucene 10 can't read them.
   a given one (More-Like-This), with the parsers' options and ranges on point fields, scored with BM25, classic TF-IDF or boolean similarity and
   sorted by score or by up to two doc values fields; the hits with their scores, sort values and
   chosen stored fields, exact or approximate hit counts, and an explanation of how a hit scores.
+- **Analysis:** the standard analyzer, or a custom one built from Lucene's char filters, tokenizers
+  and token filters with their parameters and a config directory for resource files. The screen
+  shows what the analyzer makes of a text step by step, with every token attribute. It needs no
+  open index, and the search parses queries with the analyzer you build.
 
-Analysis and the rest of Luke's read-only features are still to come (see
+The rest of Luke's read-only features are still to come (see
 [`docs/tasklist.md`](docs/tasklist.md)).
 
 ## Requirements
@@ -63,7 +67,7 @@ leia --java /opt/jdk-25 /var/lib/solr/products/data/index
 |---|---|
 | `o` | open an index: type a path, `Tab` completes directories, `~` is your home directory, `Enter` opens and `Esc` cancels |
 | `c` | close the open index |
-| `1` … `5` | switch between the overview, the documents, the terms, the commits and the search |
+| `1` … `6` | switch between the overview, the documents, the terms, the commits, the search and the analysis; only the analysis works without an open index |
 | `Esc` | stop the running term scans, or on the search screen the running search; with none running, quit |
 | `q`, `Ctrl+C` | quit |
 
@@ -206,8 +210,8 @@ shows as missing. The documents and terms screens always show the opened commit.
 | `Tab` | switch between the hits and the details |
 | `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the hits, or scroll the details |
 
-A classic query is parsed with Lucene's classic `QueryParser` and the `StandardAnalyzer`, for
-example `title:fox AND body:qu*`, `"quick fox"~2` or `fox~`. A standard query is parsed with
+A classic query is parsed with Lucene's classic `QueryParser` and the analyzer of the analysis
+screen (at first the `StandardAnalyzer`), for example `title:fox AND body:qu*`, `"quick fox"~2` or `fox~`. A standard query is parsed with
 Lucene's `StandardQueryParser`, which also turns ranges and values on point fields into point
 queries: `price:[10 TO 20]`, `quantity>=5`, `quantity:7`. For that it needs the type of each
 point field's values, which the index doesn't record: leia guesses INT for 4 bytes and LONG for 8,
@@ -221,7 +225,7 @@ again.
 More-Like-This searches for the documents like the one whose id the line holds, as Lucene's
 `MoreLikeThis` does; `m` on the documents screen starts it for the document shown. It takes the
 terms of each chosen field from the document's term vector, or else from its stored text,
-analyzed with the `StandardAnalyzer`, and keeps the best of them by tf × idf. `p` chooses the
+analyzed with the analyzer of the analysis screen, and keeps the best of them by tf × idf. `p` chooses the
 fields (at first those with positions) and the limits, which start from Lucene's defaults: a term
 must occur at least twice in the document and in at least 5 documents, and the query keeps the
 best 25 terms. With "boost", each term is weighted by its score. The rewritten query lists the
@@ -248,6 +252,38 @@ the parsed and the rewritten query, or after `x` the explanation of the selected
 computes it; parts that don't match are dimmed. Searches and explanations run in the server, so
 `Esc` stops a slow one, such as a fuzzy query on a large index. A numeric range in classic syntax
 doesn't match point fields: use the standard syntax.
+
+#### Analysis
+
+| Key | Action |
+|---|---|
+| `/` | edit the text; `Enter` analyzes it, `Esc` leaves the line |
+| `b` | build the analyzer; `Enter` applies, `Esc` cancels |
+| `r` | analyze again, such as after a resource file changed |
+| `Tab` | switch between the steps, the tokens and the selected token |
+| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the steps or the tokens, or scroll the token |
+
+The analyzer is the `StandardAnalyzer` or a custom one. In the builder (`b`), `Space` switches
+between them and changes the selected row: the config directory, a component (from a list that
+you filter by typing; a name that isn't listed is taken as typed) or a parameter (`name=value`;
+blank removes it). `a` adds a filter after the selected one, `p` a parameter to the selected
+component, `d` deletes, and `K` `J` move a filter up or down. The custom chain starts as the
+standard tokenizer and lowercase, which is what the `StandardAnalyzer` does. Resource files, such
+as `words` of `stop` or `synonyms` of `synonymGraph`, are read from the config directory first and
+then from the classpath, which has Lucene's own word lists. The server builds the analyzer before
+it takes it: if it can't, the builder stays open and says why.
+
+The steps are the text after each char filter and the tokens after the tokenizer and each token
+filter, each step running the chain again from the start. A token shows its position (`·` marks a
+gap, such as a removed stop word; `1–2` a token that spans two positions, such as a multi-word
+synonym), its offsets into the original text and its type. A token stacked on the one before
+(position increment 0) is in italics. The selected token shows every attribute, such as keyword
+marks, flags and payloads. The text can be up to 10,000 characters long, and a step shows at most
+10,000 tokens.
+
+The analyzer is kept while indexes are opened and closed, and the search screen parses classic
+and standard queries and analyzes More-Like-This text with it; its details panel shows a custom
+analyzer.
 
 If an index can't be opened, the prompt shows why (not found, not an index, unsupported format,
 corrupt, not readable) and keeps the path, so you can fix it. The index that was open before

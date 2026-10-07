@@ -1,20 +1,22 @@
-//! Searching the open index and explaining a hit (ADR 0010, ADR 0011, ADR 0012, ADR 0013). Mirrors
+//! Searching the open index and explaining a hit (ADR 0010 to ADR 0014). Mirrors
 //! `io.github.mfuerstenau.leia.protocol.search`.
 
 use serde::{Deserialize, Serialize};
 
+use super::analysis::Analyzer;
 use super::document::{BytesValue, StoredValue};
 use super::job::{JobParams, JobStarted};
 use super::method::RpcMethod;
 
 /// `startSearch`: starts a job that searches the open index and returns one page of hits with
-/// their stored fields (ADR 0010, ADR 0011, ADR 0012, ADR 0013). Fails with `NO_INDEX_OPEN`,
-/// `INVALID_QUERY` if the expression doesn't parse, `FIELD_NOT_FOUND` for an unknown default
-/// field, term field, point field, More-Like-This field, sort field or field to send,
-/// `DOC_NOT_FOUND` for a More-Like-This document outside 0 to maxDoc - 1, or `INVALID_PARAMS` for
-/// a page out of range, a query or similarity without exactly one alternative, a parser option,
-/// More-Like-This setting or BM25 parameter out of range, a point type that doesn't fit its field,
-/// a More-Like-This field that isn't indexed, or a sort field without doc values of the sort type.
+/// their stored fields (ADR 0010 to ADR 0014). Fails with `NO_INDEX_OPEN`, `INVALID_QUERY` if the
+/// expression doesn't parse, `INVALID_ANALYZER` if the query's analyzer can't be built,
+/// `FIELD_NOT_FOUND` for an unknown default field, term field, point field, More-Like-This field,
+/// sort field or field to send, `DOC_NOT_FOUND` for a More-Like-This document outside 0 to
+/// maxDoc - 1, or `INVALID_PARAMS` for a page out of range, a query, analyzer or similarity without
+/// exactly one alternative, a parser option, More-Like-This setting or BM25 parameter out of range,
+/// a point type that doesn't fit its field, a More-Like-This field that isn't indexed, or a sort
+/// field without doc values of the sort type.
 pub enum StartSearch {}
 
 impl RpcMethod for StartSearch {
@@ -67,7 +69,7 @@ pub struct SearchQuery {
 
 /// Documents like one document of the index, by the terms that Lucene's `MoreLikeThis` picks from
 /// it (ADR 0013). A field's terms come from the document's term vector, or else from its stored
-/// strings analyzed with `StandardAnalyzer`.
+/// strings, analyzed with `analyzer` (ADR 0014).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MoreLikeThisQuery {
@@ -86,6 +88,8 @@ pub struct MoreLikeThisQuery {
     pub max_query_terms: i32,
     /// Whether each term is boosted by its score, relative to the weakest term's.
     pub boost: bool,
+    /// Analyzes the stored strings of fields without a term vector.
+    pub analyzer: Analyzer,
 }
 
 /// The largest `max_query_terms` the server accepts: Lucene's maximum clause count.
@@ -151,7 +155,7 @@ pub enum SortType {
     String,
 }
 
-/// An expression for Lucene's classic `QueryParser`, analyzed with `StandardAnalyzer`.
+/// An expression for Lucene's classic `QueryParser` (ADR 0010, ADR 0011, ADR 0014).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ClassicQuery {
@@ -169,13 +173,14 @@ pub struct ClassicQuery {
     /// Whether text that analyzes to several terms becomes a phrase; needs
     /// `split_on_whitespace`.
     pub auto_generate_phrase_queries: bool,
+    /// Analyzes the text of the expression.
+    pub analyzer: Analyzer,
 }
 
 /// The largest `fuzzy_max_edits` the server accepts, Lucene's largest fuzzy edit distance.
 pub const MAX_FUZZY_EDITS: i32 = 2;
 
-/// An expression for Lucene's standard (flexible) `StandardQueryParser`, analyzed with
-/// `StandardAnalyzer` (ADR 0011).
+/// An expression for Lucene's standard (flexible) `StandardQueryParser` (ADR 0011, ADR 0014).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StandardQuery {
@@ -189,6 +194,8 @@ pub struct StandardQuery {
     /// The point fields whose ranges and values become point queries, each with the type of its
     /// values.
     pub points: Vec<PointField>,
+    /// Analyzes the text of the expression.
+    pub analyzer: Analyzer,
 }
 
 /// The options that the classic and the standard query parser share (ADR 0011).

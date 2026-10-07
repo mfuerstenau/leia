@@ -10,6 +10,7 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
+use super::analysis::{Analyze, GetAnalysisComponents};
 use super::commits::{GetCommit, GetCommits};
 use super::document::{GetDocument, GetStoredValue, GetTermVector};
 use super::index::{CloseIndex, GetIndexStats, OpenIndex};
@@ -161,6 +162,8 @@ fn check(fixture: &Fixture, json: &str) -> Result<(), String> {
         GetSearch::NAME => check_method::<GetSearch>(fixture, json),
         StartExplain::NAME => check_method::<StartExplain>(fixture, json),
         GetExplain::NAME => check_method::<GetExplain>(fixture, json),
+        GetAnalysisComponents::NAME => check_method::<GetAnalysisComponents>(fixture, json),
+        Analyze::NAME => check_method::<Analyze>(fixture, json),
         other => Err(format!("no method {other:?} in METHOD_NAMES")),
     }
 }

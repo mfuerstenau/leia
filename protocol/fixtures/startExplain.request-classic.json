@@ -16,7 +16,8 @@
         },
         "fuzzyMaxEdits": 1,
         "splitOnWhitespace": true,
-        "autoGeneratePhraseQueries": true
+        "autoGeneratePhraseQueries": true,
+        "analyzer": {"standard": {}}
       }
     },
     "similarity": {"bm25": {"k1": 0.9, "b": 0.4}},

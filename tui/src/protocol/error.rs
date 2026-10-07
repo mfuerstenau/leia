@@ -39,10 +39,13 @@ pub enum ErrorCode {
     /// The query can't be run: the expression doesn't parse, or it has too many clauses once
     /// rewritten.
     InvalidQuery,
+    /// The analyzer can't be built: an unknown component, an unknown or bad parameter, a config
+    /// directory that is not a directory, or a resource file that can't be read or parsed.
+    InvalidAnalyzer,
 }
 
 impl ErrorCode {
-    pub const ALL: [ErrorCode; 18] = [
+    pub const ALL: [ErrorCode; 19] = [
         ErrorCode::ParseError,
         ErrorCode::InvalidRequest,
         ErrorCode::MethodNotFound,
@@ -61,6 +64,7 @@ impl ErrorCode {
         ErrorCode::ValueNotFound,
         ErrorCode::CommitNotFound,
         ErrorCode::InvalidQuery,
+        ErrorCode::InvalidAnalyzer,
     ];
 
     pub const fn code(self) -> i32 {
@@ -83,6 +87,7 @@ impl ErrorCode {
             ErrorCode::ValueNotFound => -32010,
             ErrorCode::CommitNotFound => -32011,
             ErrorCode::InvalidQuery => -32012,
+            ErrorCode::InvalidAnalyzer => -32013,
         }
     }
 
@@ -107,6 +112,7 @@ impl ErrorCode {
             ErrorCode::ValueNotFound => "VALUE_NOT_FOUND",
             ErrorCode::CommitNotFound => "COMMIT_NOT_FOUND",
             ErrorCode::InvalidQuery => "INVALID_QUERY",
+            ErrorCode::InvalidAnalyzer => "INVALID_ANALYZER",
         }
     }
 }

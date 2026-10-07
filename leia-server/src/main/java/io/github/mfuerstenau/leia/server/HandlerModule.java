@@ -3,6 +3,8 @@ package io.github.mfuerstenau.leia.server;
 import dagger.Binds;
 import dagger.Module;
 import dagger.multibindings.IntoSet;
+import io.github.mfuerstenau.leia.server.analysis.AnalyzeHandler;
+import io.github.mfuerstenau.leia.server.analysis.GetAnalysisComponentsHandler;
 import io.github.mfuerstenau.leia.server.commits.GetCommitHandler;
 import io.github.mfuerstenau.leia.server.commits.GetCommitsHandler;
 import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
@@ -102,4 +104,12 @@ interface HandlerModule {
     @Binds
     @IntoSet
     MethodHandler<?, ?> getExplain(GetExplainHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> getAnalysisComponents(GetAnalysisComponentsHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> analyze(AnalyzeHandler handler);
 }

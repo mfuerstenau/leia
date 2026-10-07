@@ -13,6 +13,10 @@ use std::time::{Duration, Instant};
 use leia::client::CallError;
 use leia::java::find_java;
 use leia::protocol::ErrorCode;
+use leia::protocol::analysis::{
+    AnalysisComponent, Analyze, AnalyzeParams, Analyzer, CustomAnalyzer, GetAnalysisComponents,
+    GetAnalysisComponentsParams,
+};
 use leia::protocol::commits::{GetCommit, GetCommitParams, GetCommits, GetCommitsParams};
 use leia::protocol::document::{
     BytesValue, DocumentField, GetDocument, GetDocumentParams, GetDocumentResult, GetStoredValue,
@@ -657,6 +661,7 @@ fn searches_and_explains_a_lucene9_index() {
             default_operator: QueryOperator::And,
             options: ParserOptions::default(),
             points,
+            analyzer: Analyzer::default(),
         }),
         ..SearchQuery::default()
     };
@@ -743,6 +748,7 @@ fn searches_for_documents_like_one_of_a_lucene9_index() {
             max_doc_freq: None,
             max_query_terms: 25,
             boost: false,
+            analyzer: Analyzer::default(),
         }),
         ..SearchQuery::default()
     };
@@ -836,7 +842,115 @@ fn classic(expression: &str) -> SearchQuery {
             fuzzy_max_edits: MAX_FUZZY_EDITS,
             split_on_whitespace: false,
             auto_generate_phrase_queries: false,
+            analyzer: Analyzer::default(),
         }),
         ..SearchQuery::default()
     }
+}
+
+fn component(name: &str, params: &[(&str, &str)]) -> AnalysisComponent {
+    AnalysisComponent {
+        name: name.to_owned(),
+        params: params
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+            .collect(),
+    }
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn analyzes_without_an_open_index() {
+    let mut server = start();
+
+    let components = server
+        .call::<GetAnalysisComponents>(GetAnalysisComponentsParams {})
+        .unwrap();
+    assert!(components.tokenizers.iter().any(|c| c.name == "standard"));
+    assert!(
+        components
+            .token_filters
+            .iter()
+            .any(|c| c.name == "porterStem")
+    );
+    assert!(
+        components
+            .char_filters
+            .iter()
+            .any(|c| c.name == "htmlStrip")
+    );
+
+    let custom = Analyzer {
+        standard: None,
+        custom: Some(CustomAnalyzer {
+            char_filters: vec![component("htmlStrip", &[])],
+            tokenizer: component("whitespace", &[]),
+            token_filters: vec![
+                component("lowercase", &[]),
+                component("stop", &[("ignoreCase", "true")]),
+                component("porterStem", &[]),
+            ],
+            config_dir: None,
+        }),
+    };
+    let result = server
+        .call::<Analyze>(AnalyzeParams {
+            analyzer: custom,
+            text: "<p>The Foxes running</p>".to_owned(),
+        })
+        .unwrap();
+    assert_eq!(result.char_filters[0].text.trim(), "The Foxes running");
+    let names: Vec<&str> = result.stages.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["whitespace", "lowercase", "stop", "porterStem"]);
+    let terms: Vec<&str> = result.stages[3]
+        .tokens
+        .iter()
+        .map(|t| t.term.as_str())
+        .collect();
+    assert_eq!(terms, ["fox", "run"]);
+    assert_eq!(result.stages[3].tokens[0].position, 1);
+
+    let broken = Analyzer {
+        standard: None,
+        custom: Some(CustomAnalyzer {
+            char_filters: Vec::new(),
+            tokenizer: component("nope", &[]),
+            token_filters: Vec::new(),
+            config_dir: None,
+        }),
+    };
+    let error = server
+        .call::<Analyze>(AnalyzeParams {
+            analyzer: broken.clone(),
+            text: "x".to_owned(),
+        })
+        .unwrap_err();
+    assert!(
+        matches!(&error, CallError::Rpc(e) if e.code == ErrorCode::InvalidAnalyzer),
+        "{error:?}"
+    );
+
+    // A search parses with the query's analyzer, and refuses one that can't be built.
+    server
+        .call::<OpenIndex>(OpenIndexParams {
+            path: lucene9_index(),
+        })
+        .unwrap();
+    let mut query = classic("x");
+    query.classic.as_mut().unwrap().analyzer = broken;
+    let error = server
+        .call::<StartSearch>(StartSearchParams {
+            query,
+            similarity: bm25(),
+            sort: Vec::new(),
+            offset: 0,
+            limit: 10,
+            exact_total_hits: false,
+            fields: None,
+        })
+        .unwrap_err();
+    assert!(
+        matches!(&error, CallError::Rpc(e) if e.code == ErrorCode::InvalidAnalyzer),
+        "{error:?}"
+    );
 }

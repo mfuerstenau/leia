@@ -1,5 +1,9 @@
 package io.github.mfuerstenau.leia.protocol;
 
+import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeParams;
+import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeResult;
+import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsParams;
+import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
@@ -156,11 +160,12 @@ public final class Methods {
 
     /**
      * Starts a job that searches the open index and returns one page of hits with their stored fields
-     * (ADR 0010, ADR 0011, ADR 0012, ADR 0013). Fails with {@code NO_INDEX_OPEN}, {@code INVALID_QUERY}
-     * if the expression doesn't parse, {@code FIELD_NOT_FOUND} for an unknown default field, term
+     * (ADR 0010, ADR 0011, ADR 0012, ADR 0013, ADR 0014). Fails with {@code NO_INDEX_OPEN}, {@code
+     * INVALID_QUERY} if the expression doesn't parse, {@code INVALID_ANALYZER} if the query's analyzer
+     * can't be built, {@code FIELD_NOT_FOUND} for an unknown default field, term
      * field, point field, More-Like-This field, sort field or field to send, {@code DOC_NOT_FOUND} for
      * a More-Like-This document outside 0 to maxDoc - 1, or {@code INVALID_PARAMS} for a page out of
-     * range, a query or similarity without exactly one alternative, a parser option, More-Like-This
+     * range, a query, analyzer or similarity without exactly one alternative, a parser option, More-Like-This
      * setting or BM25 parameter out of range, a point type that doesn't fit its field, a
      * More-Like-This field that isn't indexed, or a sort field without doc values of the sort type.
      */
@@ -177,7 +182,7 @@ public final class Methods {
 
     /**
      * Starts a job that explains how a document scores for a query with a similarity, or why it
-     * doesn't match (ADR 0010, ADR 0012, ADR 0013). Fails as {@code startSearch} does, and with {@code
+     * doesn't match (ADR 0010, ADR 0012, ADR 0013, ADR 0014). Fails as {@code startSearch} does, and with {@code
      * DOC_NOT_FOUND} for an id outside 0 to maxDoc - 1.
      */
     public static final RpcMethod<StartExplainParams, JobStarted> START_EXPLAIN =
@@ -188,6 +193,24 @@ public final class Methods {
      */
     public static final RpcMethod<JobParams, GetExplainResult> GET_EXPLAIN =
             new RpcMethod<>("getExplain", JobParams.class, GetExplainResult.class);
+
+    /**
+     * The char filters, tokenizers and token filters that a custom analyzer can be built from (ADR
+     * 0014). Needs no open index.
+     */
+    public static final RpcMethod<GetAnalysisComponentsParams, GetAnalysisComponentsResult> GET_ANALYSIS_COMPONENTS =
+            new RpcMethod<>(
+                    "getAnalysisComponents", GetAnalysisComponentsParams.class, GetAnalysisComponentsResult.class);
+
+    /**
+     * What an analyzer makes of a text: the text after each char filter, and the tokens with their
+     * attributes after the tokenizer and each token filter (ADR 0014). Needs no open index. Fails
+     * with {@code INVALID_ANALYZER} if the analyzer can't be built, or {@code INVALID_PARAMS} for an
+     * analyzer without exactly one alternative or a text longer than {@code
+     * AnalyzeParams.MAX_TEXT_LENGTH}.
+     */
+    public static final RpcMethod<AnalyzeParams, AnalyzeResult> ANALYZE =
+            new RpcMethod<>("analyze", AnalyzeParams.class, AnalyzeResult.class);
 
     public static final List<RpcMethod<?, ?>> ALL = List.of(
             VERSION,
@@ -208,7 +231,9 @@ public final class Methods {
             START_SEARCH,
             GET_SEARCH,
             START_EXPLAIN,
-            GET_EXPLAIN);
+            GET_EXPLAIN,
+            GET_ANALYSIS_COMPONENTS,
+            ANALYZE);
 
     private Methods() {}
 

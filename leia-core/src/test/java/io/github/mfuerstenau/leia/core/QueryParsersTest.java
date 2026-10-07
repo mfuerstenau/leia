@@ -9,6 +9,8 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Optional;
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.DoublePoint;
 import org.apache.lucene.document.Field;
@@ -31,6 +33,9 @@ class QueryParsersTest {
     private static final Similarity BM25 = Similarities.bm25(1.2f, 0.75f);
 
     private static final ParserOptions DEFAULTS = ParserOptions.defaults(Operator.OR);
+
+    /** Lucene's analyzers are thread-safe; this one lives as long as the tests. */
+    private static final Analyzer ANALYZER = new StandardAnalyzer();
 
     @TempDir
     Path tmp;
@@ -63,11 +68,12 @@ class QueryParsersTest {
         ClassicOptions oneEdit = new ClassicOptions(1, false, false);
 
         assertThat(classic("fox~", DEFAULTS)).hasToString("body:fox~2");
-        assertThat(Queries.classic("fox~", "body", prefix, oneEdit)).isInstanceOfSatisfying(FuzzyQuery.class, q -> {
-            assertThat(q.getMaxEdits()).isEqualTo(1);
-            assertThat(q.getPrefixLength()).isEqualTo(2);
-        });
-        assertThat(Queries.classic("fox~2", "body", prefix, oneEdit)).hasToString("body:fox~2");
+        assertThat(Queries.classic("fox~", "body", prefix, oneEdit, ANALYZER))
+                .isInstanceOfSatisfying(FuzzyQuery.class, q -> {
+                    assertThat(q.getMaxEdits()).isEqualTo(1);
+                    assertThat(q.getPrefixLength()).isEqualTo(2);
+                });
+        assertThat(Queries.classic("fox~2", "body", prefix, oneEdit, ANALYZER)).hasToString("body:fox~2");
         // The standard parser takes the prefix length, but always allows 2 edits.
         assertThat(standard("fox~", prefix, Map.of())).isInstanceOfSatisfying(FuzzyQuery.class, q -> {
             assertThat(q.getMaxEdits()).isEqualTo(2);
@@ -88,7 +94,7 @@ class QueryParsersTest {
     @Test
     void classicSplitsOnWhitespaceAndGeneratesPhrasesOnRequest() throws Exception {
         assertThat(classic("wi-fi", DEFAULTS)).hasToString("body:wi body:fi");
-        assertThat(Queries.classic("wi-fi", "body", DEFAULTS, new ClassicOptions(2, true, true)))
+        assertThat(Queries.classic("wi-fi", "body", DEFAULTS, new ClassicOptions(2, true, true), ANALYZER))
                 .hasToString("body:\"wi fi\"");
         assertThatThrownBy(() -> new ClassicOptions(2, false, true)).isInstanceOf(IllegalArgumentException.class);
     }
@@ -167,12 +173,12 @@ class QueryParsersTest {
     }
 
     private static Query classic(String expression, ParserOptions options) throws InvalidQueryException {
-        return Queries.classic(expression, "body", options, ClassicOptions.DEFAULTS);
+        return Queries.classic(expression, "body", options, ClassicOptions.DEFAULTS, ANALYZER);
     }
 
     private static Query standard(String expression, ParserOptions options, Map<String, PointType> points)
             throws InvalidQueryException {
-        return Queries.standard(expression, "body", options, points);
+        return Queries.standard(expression, "body", options, points, ANALYZER);
     }
 
     private static java.util.List<Integer> docs(ReadOnlyIndex index, Query query)
