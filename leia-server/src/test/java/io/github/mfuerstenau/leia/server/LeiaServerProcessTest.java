@@ -12,6 +12,7 @@ import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.apache.lucene.index.IndexWriter;
@@ -81,6 +82,41 @@ class LeiaServerProcessTest {
         String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
         assertThat(process.exitValue()).as(stderr).isZero();
         assertThat(stderr).contains("Opened " + dir, "Closed " + dir);
+    }
+
+    @Test
+    void exitsWithStatus2OnAnUnknownArgument() throws Exception {
+        Process process = server("--verbose");
+        process.getOutputStream().close();
+
+        assertThat(process.waitFor(30, TimeUnit.SECONDS)).isTrue();
+        assertThat(process.exitValue()).isEqualTo(2);
+        assertThat(new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8))
+                .contains("unknown argument '--verbose'; " + ServerArgs.USAGE);
+    }
+
+    @Test
+    void exitsWithStatus1IfTheAnalysisJarsCantBeLoaded() throws Exception {
+        Path missing = tmp.resolve("missing.jar");
+        Process process = server("--analysis-jar", missing.toString());
+        process.getOutputStream().close();
+
+        assertThat(process.waitFor(30, TimeUnit.SECONDS)).isTrue();
+        String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertThat(process.exitValue()).as(stderr).isEqualTo(1);
+        assertThat(stderr.strip().lines().toList().getLast())
+                .endsWith("Cannot load the analysis jars: no such jar or directory: " + missing);
+        assertThat(process.getInputStream().readAllBytes()).isEmpty();
+    }
+
+    private static Process server(String... args) throws Exception {
+        List<String> command = new ArrayList<>(List.of(
+                Path.of(System.getProperty("java.home"), "bin", "java").toString(),
+                "-cp",
+                System.getProperty("java.class.path"),
+                LeiaServer.class.getName()));
+        command.addAll(List.of(args));
+        return new ProcessBuilder(command).start();
     }
 
     @Test

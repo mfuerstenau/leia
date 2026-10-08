@@ -31,7 +31,8 @@ import org.apache.lucene.analysis.TokenizerFactory;
 
 /**
  * The analyzers that can be created by class name (ADR 0015): the public, concrete {@link Analyzer}
- * classes with a public no-argument constructor in the jars that analysis comes from.
+ * classes with a public no-argument constructor in the jars that analysis comes from, the analysis
+ * jars included (ADR 0016).
  */
 final class PresetAnalyzers {
 
@@ -41,14 +42,23 @@ final class PresetAnalyzers {
 
     private PresetAnalyzers() {}
 
-    /** Found once, when first needed. */
-    private static final class Holder {
-        static final Map<String, Class<? extends Analyzer>> BY_CLASS_NAME = scan();
+    /** The presets that {@code loader} sees. */
+    private record Scan(ClassLoader loader, Map<String, Class<? extends Analyzer>> byClassName) {}
+
+    /** Found when first needed, and again once analysis jars have been loaded. */
+    private static Scan scan;
+
+    private static synchronized Map<String, Class<? extends Analyzer>> presets() {
+        ClassLoader loader = AnalysisJars.classLoader();
+        if (scan == null || scan.loader() != loader) {
+            scan = new Scan(loader, scan(loader));
+        }
+        return scan.byClassName();
     }
 
     /** The presets, sorted by simple name, ignoring case, then by class name. */
     static List<Available> list() {
-        return Holder.BY_CLASS_NAME.values().stream()
+        return presets().values().stream()
                 .map(type -> new Available(type.getSimpleName(), type.getName()))
                 .sorted(Comparator.comparing(Available::name, String.CASE_INSENSITIVE_ORDER)
                         .thenComparing(Available::className))
@@ -61,7 +71,7 @@ final class PresetAnalyzers {
      * @throws InvalidAnalyzerException if the class is not listed, or its constructor fails
      */
     static Analyzer create(String className) throws InvalidAnalyzerException {
-        Class<? extends Analyzer> type = Holder.BY_CLASS_NAME.get(className);
+        Class<? extends Analyzer> type = presets().get(className);
         if (type == null) {
             throw new InvalidAnalyzerException("no preset analyzer '" + className + "'", null);
         }
@@ -76,7 +86,7 @@ final class PresetAnalyzers {
         }
     }
 
-    private static Map<String, Class<? extends Analyzer>> scan() {
+    private static Map<String, Class<? extends Analyzer>> scan(ClassLoader loader) {
         long start = System.nanoTime();
         Set<String> names = new TreeSet<>();
         for (Path location : locations()) {
@@ -87,7 +97,7 @@ final class PresetAnalyzers {
             }
         }
         Map<String, Class<? extends Analyzer>> presets = names.stream()
-                .map(PresetAnalyzers::preset)
+                .map(name -> preset(name, loader))
                 .flatMap(Optional::stream)
                 .collect(Collectors.toMap(Class::getName, Function.identity(), (a, b) -> a));
         LOG.fine(() ->
@@ -95,7 +105,10 @@ final class PresetAnalyzers {
         return Map.copyOf(presets);
     }
 
-    /** The jar or directory of Lucene's {@code Analyzer} and of every analysis factory. */
+    /**
+     * The jar or directory of Lucene's {@code Analyzer} and of every analysis factory, and the
+     * analysis jars.
+     */
     private static Set<Path> locations() {
         Stream<Class<?>> factories = Stream.of(
                         CharFilterFactory.availableCharFilters().stream().map(CharFilterFactory::lookupClass),
@@ -105,6 +118,7 @@ final class PresetAnalyzers {
         Set<Path> locations = new LinkedHashSet<>();
         Stream.concat(Stream.of(Analyzer.class), factories)
                 .forEach(type -> location(type).ifPresent(locations::add));
+        locations.addAll(AnalysisJars.jars());
         return locations;
     }
 
@@ -149,10 +163,10 @@ final class PresetAnalyzers {
     }
 
     /** The class, if it is a preset; it is loaded but not initialized. */
-    private static Optional<Class<? extends Analyzer>> preset(String className) {
+    private static Optional<Class<? extends Analyzer>> preset(String className, ClassLoader loader) {
         Class<?> type;
         try {
-            type = Class.forName(className, false, PresetAnalyzers.class.getClassLoader());
+            type = Class.forName(className, false, loader);
         } catch (ClassNotFoundException | LinkageError e) {
             LOG.log(Level.FINE, "Skipping " + className, e);
             return Optional.empty();

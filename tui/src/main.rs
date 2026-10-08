@@ -2,7 +2,7 @@
 
 use std::env;
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -29,7 +29,9 @@ use leia::protocol::terms::{
     GetTermsParams, StartFieldTermScan, StartFieldTermScanParams,
 };
 use leia::protocol::version::{Version, VersionParams, VersionResult};
-use leia::server::{SERVER_JAR_ENV, SHUTDOWN_TIMEOUT, Server, find_server_jar};
+use leia::server::{
+    SERVER_JAR_ENV, SHUTDOWN_TIMEOUT, Server, check_analysis_jars, find_server_jar,
+};
 use leia::terms::{POSTINGS_PAGE, TERMS_PAGE};
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
@@ -40,10 +42,11 @@ fn main() -> Result<()> {
         return print_version(&cli);
     }
     let index_path = cli.index_path.as_deref().map(utf8_path).transpose()?;
+    check_analysis_jars(&cli.analysis_jars)?;
 
     // Start the server before taking over the terminal, so that startup errors are printed
     // normally.
-    let (mut server, version) = start_server(&cli)?;
+    let (mut server, version) = start_server(&cli, &cli.analysis_jars)?;
     let mut app = App::new(version, env::home_dir());
 
     // ratatui::run restores the terminal on exit and on panic; dropping the server on a panic
@@ -74,11 +77,12 @@ fn utf8_path(path: &Path) -> Result<String> {
 }
 
 /// `--version`: leia's own line comes first, so it is printed even if the server can't start.
+/// The analysis jars don't matter to it, so the server starts without them.
 fn print_version(cli: &Cli) -> Result<()> {
     let mut out = io::stdout().lock();
     writeln!(out, "{}", LEIA.line())?;
     out.flush()?;
-    let (mut server, version) = start_server(cli)?;
+    let (mut server, version) = start_server(cli, &[])?;
     writeln!(out, "{}", server_line(&version))?;
     writeln!(out, "{}", java_line(&version.java))?;
     server
@@ -87,14 +91,22 @@ fn print_version(cli: &Cli) -> Result<()> {
     Ok(())
 }
 
-/// Finds the JVM and the jar, starts the server and checks that it answers `version`.
-fn start_server(cli: &Cli) -> Result<(Server, VersionResult)> {
+/// Finds the JVM and the jar, starts the server with the analysis jars and checks that it
+/// answers `version`.
+fn start_server(cli: &Cli, analysis_jars: &[PathBuf]) -> Result<(Server, VersionResult)> {
     let java = find_java(cli.java.as_deref(), env::var_os("JAVA_HOME").as_deref())?;
     let jar = find_server_jar(env::var_os(SERVER_JAR_ENV).as_deref())?;
-    let mut server = Server::spawn(&java.executable, &jar)
+    let mut server = Server::spawn(&java.executable, &jar, analysis_jars)
         .with_context(|| format!("no usable JVM: {java}; choose one with --java or JAVA_HOME"))?;
     let version = server.call::<Version>(VersionParams {}).with_context(|| {
-        format!("leia-server did not start with {java}; it needs Java 25 or newer (see --java)")
+        if analysis_jars.is_empty() {
+            format!("leia-server did not start with {java}; it needs Java 25 or newer (see --java)")
+        } else {
+            format!(
+                "leia-server did not start with {java}; it needs Java 25 or newer (see --java) \
+                 and analysis jars it can load (see --analysis-jar)"
+            )
+        }
     })?;
     Ok((server, version))
 }

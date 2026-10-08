@@ -48,6 +48,30 @@ sourceSets.main {
     resources.srcDir(files(buildInfoDir) { builtBy(generateBuildInfo) })
 }
 
+// Lucene's analysis modules that Luke bundles and leia doesn't (ADR 0016). For a user who builds
+// leia: ./gradlew :leia-server:analysisModules writes each module with its dependencies to
+// build/analysis-modules/<module>/, a directory that `leia --analysis-jar` takes.
+val analysisModules = listOf("icu", "kuromoji", "morfologik", "nori", "opennlp", "phonetic", "smartcn", "stempel")
+
+val analysisModuleJars = analysisModules.associateWith { module ->
+    configurations.create("${module}AnalysisModule") {
+        isCanBeConsumed = false
+        dependencies.add(project.dependencies.create("org.apache.lucene:lucene-analysis-$module:${libs.versions.lucene.get()}"))
+        // In the server jar already.
+        exclude(group = "org.apache.lucene", module = "lucene-core")
+        exclude(group = "org.apache.lucene", module = "lucene-analysis-common")
+    }
+}
+
+tasks.register<Sync>("analysisModules") {
+    description = "Copies Lucene's analysis modules, each with its dependencies, for leia --analysis-jar."
+    group = "leia"
+    into(layout.buildDirectory.dir("analysis-modules"))
+    for ((module, jars) in analysisModuleJars) {
+        from(jars) { into(module) }
+    }
+}
+
 tasks.shadowJar {
     archiveFileName = "leia-server.jar"
     // Lucene finds codecs, postings formats etc. via ServiceLoader; lucene-core and

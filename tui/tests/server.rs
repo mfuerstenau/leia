@@ -1,4 +1,5 @@
-//! Talks to the real `leia-server.jar`. Needs a built jar and Java 25:
+//! Talks to the real `leia-server.jar`. Needs a built jar, Java 25, and the test indexes and
+//! analysis jars that `./gradlew build` writes to `leia-core/build/`:
 //!
 //! ```sh
 //! ./gradlew :leia-server:shadowJar
@@ -7,6 +8,7 @@
 //! ```
 
 use std::env;
+use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -43,9 +45,13 @@ use leia::protocol::version::{Version, VersionParams};
 use leia::server::{SERVER_JAR_ENV, SHUTDOWN_TIMEOUT, Server, find_server_jar};
 
 fn start() -> Server {
+    start_with(&[])
+}
+
+fn start_with(analysis_jars: &[PathBuf]) -> Server {
     let java = find_java(None, env::var_os("JAVA_HOME").as_deref()).unwrap();
     let jar = find_server_jar(env::var_os(SERVER_JAR_ENV).as_deref()).unwrap();
-    Server::spawn(&java.executable, &jar).unwrap()
+    Server::spawn(&java.executable, &jar, analysis_jars).unwrap()
 }
 
 #[test]
@@ -80,6 +86,15 @@ fn shutdown_server_rejects_calls() {
         server.call::<Version>(VersionParams {}),
         Err(CallError::Transport(_))
     ));
+}
+
+/// A directory of analysis jars written by `./gradlew :leia-core:testAnalysisJars` (also part of
+/// `build`): `phonetic` (with commons-codec) or `stempel` (ADR 0016).
+fn test_analysis_jars(module: &str) -> PathBuf {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../leia-core/build/test-analysis-jars")
+        .join(module);
+    std::fs::canonicalize(dir).expect("run ./gradlew :leia-core:testAnalysisJars first")
 }
 
 /// A Lucene 9 index written by `./gradlew :leia-core:lucene9TestIndex` (also part of `build`).
@@ -846,6 +861,77 @@ fn classic(expression: &str) -> SearchQuery {
         }),
         ..SearchQuery::default()
     }
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn analyzes_with_analysis_jars() {
+    let mut server = start_with(&[
+        test_analysis_jars("phonetic"),
+        test_analysis_jars("stempel"),
+    ]);
+
+    let components = server
+        .call::<GetAnalysisComponents>(GetAnalysisComponentsParams {})
+        .unwrap();
+    assert!(
+        components
+            .token_filters
+            .iter()
+            .any(|c| c.name == "doubleMetaphone")
+    );
+    let polish = components
+        .analyzers
+        .iter()
+        .find(|a| a.name == "PolishAnalyzer")
+        .unwrap();
+
+    let result = server
+        .call::<Analyze>(AnalyzeParams {
+            analyzer: Analyzer {
+                standard: None,
+                preset: Some(PresetAnalyzer {
+                    class_name: polish.class_name.clone(),
+                }),
+                custom: None,
+            },
+            text: "kot i pies".to_owned(),
+        })
+        .unwrap();
+    let terms: Vec<&str> = result.stages[0]
+        .tokens
+        .iter()
+        .map(|t| t.term.as_str())
+        .collect();
+    assert_eq!(terms, ["kot", "pies"]);
+    assert!(server.shutdown(SHUTDOWN_TIMEOUT).unwrap().success());
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn a_jar_without_its_dependencies_stops_the_server() {
+    let phonetic = std::fs::read_dir(test_analysis_jars("phonetic"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| {
+            path.file_name()
+                .unwrap()
+                .to_string_lossy()
+                .starts_with("lucene-analysis-phonetic-")
+        })
+        .unwrap();
+    let mut server = start_with(&[phonetic]);
+
+    let Err(CallError::Transport(error)) = server.call::<Version>(VersionParams {}) else {
+        panic!("the server answered");
+    };
+
+    let message = format!("{error:#}");
+    assert!(
+        message.contains("Cannot load the analysis jars: cannot load the analysis factories")
+            && message.contains("org/apache/commons/codec/"),
+        "{message}"
+    );
 }
 
 fn component(name: &str, params: &[(&str, &str)]) -> AnalysisComponent {

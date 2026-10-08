@@ -31,8 +31,11 @@ import org.apache.lucene.analysis.tokenattributes.OffsetAttribute;
 import org.apache.lucene.analysis.tokenattributes.PositionIncrementAttribute;
 import org.apache.lucene.analysis.tokenattributes.PositionLengthAttribute;
 import org.apache.lucene.analysis.tokenattributes.TypeAttribute;
+import org.apache.lucene.analysis.util.FilesystemResourceLoader;
 import org.apache.lucene.util.Attribute;
 import org.apache.lucene.util.AttributeImpl;
+import org.apache.lucene.util.ClasspathResourceLoader;
+import org.apache.lucene.util.ResourceLoader;
 
 /** Builds analyzers and shows what they make of a text (ADR 0014). */
 public final class Analyzers {
@@ -50,8 +53,8 @@ public final class Analyzers {
     private Analyzers() {}
 
     /**
-     * The preset analyzers, char filters, tokenizers and token filters on the classpath. The first
-     * call reads the analysis jars for the presets.
+     * The preset analyzers, char filters, tokenizers and token filters on the classpath and in the
+     * analysis jars (ADR 0016). The first call reads the jars for the presets.
      */
     public static AnalysisComponents components() {
         return new AnalysisComponents(
@@ -139,9 +142,13 @@ public final class Analyzers {
         return builder.build();
     }
 
+    /** A builder that reads resource files from the config directory, then through the analysis jars' loader. */
     private static CustomAnalyzer.Builder builder(AnalyzerSpec.Custom spec) throws InvalidAnalyzerException {
+        ResourceLoader classpath = new ClasspathResourceLoader(AnalysisJars.classLoader());
         try {
-            return spec.configDir().map(CustomAnalyzer::builder).orElseGet(CustomAnalyzer::builder);
+            return CustomAnalyzer.builder(spec.configDir()
+                    .<ResourceLoader>map(dir -> new FilesystemResourceLoader(dir, classpath))
+                    .orElse(classpath));
         } catch (IllegalArgumentException e) {
             throw new InvalidAnalyzerException("config directory: " + e.getMessage(), e);
         }
@@ -165,6 +172,9 @@ public final class Analyzers {
             throw new InvalidAnalyzerException(what + ": no file " + e.getMessage(), e);
         } catch (IOException | UncheckedIOException | IllegalArgumentException | IllegalStateException e) {
             throw new InvalidAnalyzerException(what + ": " + message(e), e);
+        } catch (LinkageError e) {
+            // A factory from an analysis jar whose dependency is missing (ADR 0016).
+            throw new InvalidAnalyzerException(what + ": " + e, e);
         }
     }
 

@@ -2,7 +2,7 @@
 //! shutting it down.
 
 use std::collections::VecDeque;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{self, BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -54,6 +54,29 @@ pub fn find_server_jar(override_path: Option<&OsStr>) -> Result<PathBuf> {
     Ok(jar)
 }
 
+/// Checks that each analysis jar or directory exists; the server checks the rest (ADR 0016).
+pub fn check_analysis_jars(paths: &[PathBuf]) -> Result<()> {
+    for path in paths {
+        if !path.exists() {
+            bail!(
+                "--analysis-jar {}: no such jar or directory",
+                path.display()
+            );
+        }
+    }
+    Ok(())
+}
+
+/// The server's arguments after `java`.
+fn server_args(jar: &Path, analysis_jars: &[PathBuf]) -> Vec<OsString> {
+    let mut args = vec![OsString::from("-jar"), jar.into()];
+    for path in analysis_jars {
+        args.push("--analysis-jar".into());
+        args.push(path.into());
+    }
+    args
+}
+
 type ChildClient = RpcClient<ChildStdin, BufReader<ChildStdout>>;
 
 /// A running server. Dropping it shuts the server down.
@@ -65,10 +88,11 @@ pub struct Server {
 }
 
 impl Server {
-    /// Starts `<java> -jar <jar>`.
-    pub fn spawn(java: &Path, jar: &Path) -> Result<Self> {
+    /// Starts `<java> -jar <jar>`, with an `--analysis-jar` argument for each of `analysis_jars`
+    /// (ADR 0016).
+    pub fn spawn(java: &Path, jar: &Path, analysis_jars: &[PathBuf]) -> Result<Self> {
         let mut command = Command::new(java);
-        command.arg("-jar").arg(jar);
+        command.args(server_args(jar, analysis_jars));
         Self::from_command(command).with_context(|| format!("cannot start {}", java.display()))
     }
 
@@ -236,6 +260,43 @@ mod tests {
         let error = find_server_jar(None).unwrap_err();
 
         assert!(error.to_string().contains(SERVER_JAR_ENV), "{error}");
+    }
+
+    #[test]
+    fn analysis_jars_follow_the_jar() {
+        let args = server_args(
+            Path::new("leia-server.jar"),
+            &[PathBuf::from("icu"), PathBuf::from("my.jar")],
+        );
+
+        assert_eq!(
+            args,
+            [
+                "-jar",
+                "leia-server.jar",
+                "--analysis-jar",
+                "icu",
+                "--analysis-jar",
+                "my.jar"
+            ]
+        );
+        assert_eq!(server_args(Path::new("s.jar"), &[]), ["-jar", "s.jar"]);
+    }
+
+    #[test]
+    fn analysis_jars_must_exist() {
+        let dir = TempDir::new();
+        let jar = dir.path().join("my.jar");
+        fs::write(&jar, "").unwrap();
+
+        assert!(check_analysis_jars(&[dir.path().to_path_buf(), jar.clone()]).is_ok());
+        let error = check_analysis_jars(&[jar, dir.path().join("missing.jar")]).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .ends_with("missing.jar: no such jar or directory"),
+            "{error}"
+        );
     }
 
     /// A fake server: a shell script in place of `java -jar leia-server.jar`.

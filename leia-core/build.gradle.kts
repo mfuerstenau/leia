@@ -54,6 +54,53 @@ tasks.test {
     }
 }
 
+// Analysis jars (ADR 0016): two small Lucene modules that leia doesn't bundle, each with its
+// dependencies in a directory of its own under build/test-analysis-jars. Loading them changes
+// Lucene's global lists of factories, so the tests that do run in a JVM of their own
+// (analysisJarsTest). The real-server tests in tui/ use these directories too.
+val testAnalysisModules = mapOf("phonetic" to libs.lucene.analysis.phonetic, "stempel" to libs.lucene.analysis.stempel)
+val testAnalysisJarsDir = layout.buildDirectory.dir("test-analysis-jars")
+
+val testAnalysisModuleJars = testAnalysisModules.mapValues { (name, library) ->
+    configurations.create("${name}AnalysisJars") {
+        isCanBeConsumed = false
+        dependencies.addLater(library.map { project.dependencies.create(it) })
+        // In the server jar already.
+        exclude(group = "org.apache.lucene", module = "lucene-core")
+        exclude(group = "org.apache.lucene", module = "lucene-analysis-common")
+    }
+}
+
+val testAnalysisJars = tasks.register<Sync>("testAnalysisJars") {
+    description = "Copies the analysis modules that the analysis-jar tests load."
+    into(testAnalysisJarsDir)
+    for ((name, jars) in testAnalysisModuleJars) {
+        from(jars) { into(name) }
+    }
+}
+
+tasks.test {
+    useJUnitPlatform { excludeTags("analysis-jars") }
+}
+
+val analysisJarsTest = tasks.register<Test>("analysisJarsTest") {
+    description = "Runs the tests that load analysis jars, in a JVM of their own."
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform { includeTags("analysis-jars") }
+    val projectPath = projectDir.toPath()
+    inputs.files(testAnalysisJars).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("analysisJars")
+    systemProperty(
+        "leia.test.analysis.jars",
+        projectPath.relativize(testAnalysisJarsDir.get().asFile.toPath()).toString(),
+    )
+}
+
+tasks.check {
+    dependsOn(analysisJarsTest)
+}
+
 // A demo index for trying leia by hand (docs/demo-index.md): ./gradlew :leia-core:demoIndex writes
 // it to build/test-indexes/demo. Not used by the tests.
 val demoIndex by sourceSets.creating
