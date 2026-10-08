@@ -19,7 +19,7 @@ use crate::protocol::analysis::{
     AnalysisComponent, Analyzer, CustomAnalyzer, GetAnalysisComponentsResult, PresetAnalyzer,
     WordSet, WordSetSupport,
 };
-use crate::text::escape_control;
+use crate::text::{escape_control, wrap};
 
 /// How wide the popups are at most.
 const WIDTH: u16 = 76;
@@ -933,7 +933,7 @@ impl AnalyzerForm {
             let width = usize::from(area.width.min(WIDTH).saturating_sub(2));
             for note in notes {
                 lines.extend(
-                    wrap_words(note, width)
+                    wrap(note, width, usize::MAX)
                         .into_iter()
                         .map(|line| Line::from(line).style(dim())),
                 );
@@ -942,7 +942,7 @@ impl AnalyzerForm {
         if let Some(error) = &self.error {
             lines.push(Line::from(""));
             let width = usize::from(area.width.min(WIDTH).saturating_sub(2));
-            for line in wrap_words(error, width) {
+            for line in wrap(error, width, usize::MAX) {
                 lines.push(Line::from(line).style(Style::new().fg(Color::Red)));
             }
             selected_line = lines.len() - 1;
@@ -1052,33 +1052,6 @@ impl AnalyzerForm {
         };
         render_popup(frame, area, &title, lines, selected + 2, WIDTH - 8);
     }
-}
-
-/// `text` in lines of at most `width` characters, broken between words where it can be.
-fn wrap_words(text: &str, width: usize) -> Vec<String> {
-    let width = width.max(1);
-    let mut lines = Vec::new();
-    let mut line = String::new();
-    for word in text.split(' ') {
-        let mut word = word.to_owned();
-        if !line.is_empty() && line.chars().count() + 1 + word.chars().count() > width {
-            lines.push(std::mem::take(&mut line));
-        }
-        if !line.is_empty() {
-            line.push(' ');
-        }
-        // A word longer than a line is broken anywhere.
-        while line.chars().count() + word.chars().count() > width {
-            let take = width - line.chars().count();
-            let split = word.char_indices().nth(take).map_or(word.len(), |(i, _)| i);
-            line.push_str(&word[..split]);
-            word = word[split..].to_owned();
-            lines.push(std::mem::take(&mut line));
-        }
-        line.push_str(&word);
-    }
-    lines.push(line);
-    lines
 }
 
 /// A one-line input in a popup of its own, with the cursor.
@@ -1570,13 +1543,6 @@ mod tests {
                 Ok(Some(set.clone()))
             );
         }
-    }
-
-    #[test]
-    fn wraps_between_words() {
-        assert_eq!(wrap_words("ab cd ef", 5), ["ab cd", "ef"]);
-        assert_eq!(wrap_words("abcdefg h", 3), ["abc", "def", "g h"]);
-        assert_eq!(wrap_words("", 3), [""]);
     }
 
     fn render(form: &AnalyzerForm) -> String {

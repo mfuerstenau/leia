@@ -59,6 +59,7 @@ pub struct Commits {
     lists: Vec<Option<Result<Vec<Commit>, String>>>,
     /// The `segments_N` files of each index directory that could not be read.
     unreadable: Vec<Vec<UnreadableCommit>>,
+    /// The selected row of the commits panel: a commit, or after them an unreadable one.
     commit_row: usize,
     commit_table: TableState,
     /// The commits fetched whole, or why they could not be, by index directory and generation.
@@ -118,15 +119,25 @@ impl Commits {
     /// the selection stays on its commit, or else goes to the opened one.
     pub fn commits_loaded(&mut self, index: usize, result: GetCommitsResult) -> Option<Request> {
         let commits = result.commits;
-        self.unreadable[index] = result.unreadable;
+        let unreadable = result.unreadable;
         if index == self.index_row {
-            let selected = self.selected_commit().map(|commit| commit.generation);
-            self.commit_row = selected
+            let generation = self.selected_commit().map(|commit| commit.generation);
+            let file = self
+                .selected_unreadable()
+                .map(|commit| commit.segments_file.clone());
+            self.commit_row = generation
                 .and_then(|generation| commits.iter().position(|c| c.generation == generation))
+                .or_else(|| {
+                    let at = unreadable
+                        .iter()
+                        .position(|c| Some(&c.segments_file) == file.as_ref());
+                    at.map(|at| commits.len() + at)
+                })
                 .or_else(|| commits.iter().position(|commit| commit.current))
                 .unwrap_or_default();
         }
         self.lists[index] = Some(Ok(commits));
+        self.unreadable[index] = unreadable;
         self.next_request()
     }
 
@@ -144,6 +155,13 @@ impl Commits {
 
     fn selected_commit(&self) -> Option<&Commit> {
         self.commits()?.as_ref().ok()?.get(self.commit_row)
+    }
+
+    /// The selected unreadable commit, if the selection is below the commits.
+    fn selected_unreadable(&self) -> Option<&UnreadableCommit> {
+        let commits = self.commits()?.as_ref().ok()?;
+        let row = self.commit_row.checked_sub(commits.len())?;
+        self.unreadable[self.index_row].get(row)
     }
 
     fn selected_details(&self) -> Option<&Result<GetCommitResult, String>> {
@@ -231,7 +249,8 @@ impl Commits {
                     self.next_request()
                 }
                 Focus::Commits => {
-                    let len = self.commits()?.as_ref().ok()?.len();
+                    let len = self.commits()?.as_ref().ok()?.len()
+                        + self.unreadable[self.index_row].len();
                     let row = moved(self.commit_row, len, key)?;
                     if row != self.commit_row {
                         self.commit_row = row;
@@ -372,7 +391,7 @@ impl Commits {
                 Cell::from(user_data(&commit.user_data)),
             ])
         });
-        // Below the commits, where the selection never goes.
+        // Below the commits.
         let unreadable_rows = unreadable.iter().map(|commit| {
             Row::new([
                 Cell::from("✗"),
@@ -411,8 +430,7 @@ impl Commits {
             ),
             Constraint::Fill(1),
         ];
-        self.commit_table
-            .select((!commits.is_empty()).then_some(self.commit_row));
+        self.commit_table.select(Some(self.commit_row));
         let table = Table::new(rows, widths)
             .header(header)
             .column_spacing(COLUMN_SPACING)
@@ -423,6 +441,10 @@ impl Commits {
 
     fn render_segments(&mut self, frame: &mut Frame, area: Rect) {
         let focused = self.focus == Focus::Segments;
+        if let Some(commit) = self.selected_unreadable() {
+            let text = format!("{} could not be read.", commit.segments_file);
+            return message(frame, area, " Segments ", focused, &text);
+        }
         let details = match self.selected_details() {
             None if self.selected_commit().is_some() => {
                 return message(frame, area, " Segments ", focused, "Reading the commit…");
@@ -509,7 +531,12 @@ impl Commits {
                 format!(" {} ", details.commit.segments_file),
                 commit_lines(details),
             )),
-            _ => None,
+            _ => self.selected_unreadable().map(|commit| {
+                (
+                    format!(" {} ", commit.segments_file),
+                    unreadable_lines(commit),
+                )
+            }),
         };
         let Some((title, lines)) = content else {
             frame.render_widget(panel(" Details ".to_owned(), focused), area);
@@ -584,6 +611,21 @@ fn commit_lines(details: &GetCommitResult) -> Vec<Line<'static>> {
         .collect();
     section(&mut lines, "User data", &user_data);
     file_section(&mut lines, &details.files, true);
+    lines
+}
+
+/// The details of an unreadable commit: why it could not be read, its line breaks kept.
+fn unreadable_lines(commit: &UnreadableCommit) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        Line::from("Could not be read:").style(Style::new().fg(Color::Red)),
+        Line::from(""),
+    ];
+    lines.extend(
+        commit
+            .message
+            .lines()
+            .map(|line| Line::from(escape_control(line))),
+    );
     lines
 }
 
@@ -1009,8 +1051,60 @@ mod tests {
                 && screen.contains("unreadable: Corrupt index, missing file: _0.si"),
             "{screen}"
         );
-        // The selection never goes to them.
+        // The selection is on it, and the details say why, whole and with its line breaks.
+        assert!(screen.contains("segments_2 could not be read."), "{screen}");
+        assert!(screen.contains("Could not be read:"), "{screen}");
         assert_eq!(commits.handle_key(KeyCode::Down), None);
+    }
+
+    #[test]
+    fn the_details_show_an_unreadable_commit_whole() {
+        let mut commits = loaded();
+        let message = "Corrupt index, missing file: /data/products/broken/_0.si \
+                       (resource=MMapIndexInput(path=\"/data/products/broken/_0.si\"))\n\
+                       Suppressed: checksum failed";
+        commits.commits_loaded(
+            0,
+            GetCommitsResult {
+                commits: vec![commit(4, true), commit(3, false)],
+                unreadable: vec![UnreadableCommit {
+                    segments_file: "segments_5".to_owned(),
+                    message: message.to_owned(),
+                }],
+            },
+        );
+        // Past the two commits to the unreadable one, which needs nothing fetched.
+        assert_eq!(
+            commits.handle_key(KeyCode::Down),
+            Some(Request::Commit(0, 3))
+        );
+        assert_eq!(commits.handle_key(KeyCode::Down), None);
+        assert_eq!(commits.handle_key(KeyCode::Down), None);
+
+        let screen = render(&mut commits, 100, 24);
+        assert!(screen.contains("┌ segments_5 "), "{screen}");
+        // Wrapped in the details, not cut at their width, and the line break kept.
+        assert!(screen.contains("││roducts/broken/_0.si\"))"), "{screen}");
+        assert!(screen.contains("││Suppressed: checksum failed"), "{screen}");
+
+        // Reading the commits again keeps the selection on it.
+        assert_eq!(
+            commits.handle_key(KeyCode::Char('r')),
+            Some(Request::Commits(0))
+        );
+        commits.commits_loaded(
+            0,
+            GetCommitsResult {
+                commits: vec![commit(6, false), commit(4, true)],
+                unreadable: vec![UnreadableCommit {
+                    segments_file: "segments_5".to_owned(),
+                    message: message.to_owned(),
+                }],
+            },
+        );
+        assert!(render(&mut commits, 100, 24).contains("┌ segments_5 "));
+        // Back up to the commits.
+        assert_eq!(commits.handle_key(KeyCode::Up), Some(Request::Commit(0, 4)));
     }
 
     #[test]

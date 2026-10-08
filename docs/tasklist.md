@@ -107,6 +107,7 @@ From the read-only checklist in `luke-features.md` §7. Ordered roughly by value
   - `openIndex {mode?: READER | DIRECTORY_ONLY}`: without a reader only `getCommits`/`getCommit` work, everything else fails with `NO_READER` (-32015)
   - `openIndex`/`reopenIndex` results list `indexes` (each with its `reader` info: `docBase`, `segmentsFile`, counts, versions); `getIndexStats` has the merged counts and fields, and per-commit data in `indexes`; `getCommits`/`getCommit` take `index`; `getCommits` lists `unreadable` commits with the reason
   - `reopenIndex` reopens each index with `openIfChanged` and shares the unchanged readers
+  - follow-ups: the overview wraps why an index was skipped under the start of the reason (at most 3 lines, `…` past them); the selection on the commits screen goes on to the unreadable commits, whose details show the whole reason with its line breaks
   - TUI: `--no-reader` and Ctrl+N in the prompt, offered after `CORRUPT_INDEX`/`MISSING_CODEC`; overview lists the indexes and skipped ones; documents say a document's index; commits get an `Indexes` panel and show unreadable commits; screens without a reader say so; tab line marker (`no reader`, `N indexes`)
 - [x] Open options: directory implementation choice and recent paths (ADR 0020)
   - `openIndex {path, directoryImpl?}` with `FS` (absent; `FSDirectory.open`), `MMAP` or `NIO`, each with `NoLockFactory`; the class in use is `getIndexStats`' `directoryImpl`; `reopenIndex` keeps the directory. No third-party `Directory` classes
@@ -197,7 +198,7 @@ From the read-only checklist in `luke-features.md` §7. Ordered roughly by value
   - tests: a test codec jar (`:leia-core:testCodecJar`: codec `LeiaTest`, formats `LeiaTestPostings`/`LeiaTestDocValues`/`LeiaTestKnnVectors`) and two indexes (`:leia-core:testCodecIndexes`: `custom-codec`, `custom-formats`); `:leia-core:jarsTest` (was `analysisJarsTest`) opens them with the jar, the plain tests and the real-server tests without and with it
 - [ ] Open options: Elasticsearch/OpenSearch indexes (left out of ADR 0018): their codecs need the server's `lib/`, which has its own `lucene-*.jar` of another version; skipping those jars, or saying which ones clash, untested without an installation
 - [x] Commits: commit list, files, segments, diagnostics/attributes/codec formats (ADR 0009)
-  - `getCommits {}`: the commits of the directory, newest first, `current` marks the opened one; unreadable commits are skipped and logged
+  - `getCommits {}`: the commits of the directory, newest first, `current` marks the opened one; unreadable commits are skipped and logged (listed in `unreadable` since ADR 0021)
   - `getCommit {generation}`: segments in commit order (docBase, deletions, generations, versions, codec and its formats, compound, blocks, index sort, size, diagnostics, attributes) and every file with its segment and size; `COMMIT_NOT_FOUND` (-32011)
   - TUI: commits screen (`4`) with commits on top, segments and details below; `r` reads the directory again; the demo index keeps all 4 commits and has one non-compound segment
 - [ ] Commits: per-field postings, doc values and KNN vectors formats (from each segment's field infos; ADR 0009 leaves them out)

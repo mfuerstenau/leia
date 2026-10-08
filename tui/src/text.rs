@@ -1,6 +1,8 @@
 //! How text from the index is shown: control characters escaped, so that they can't break the
 //! layout, and byte strings that are not UTF-8 as `0x` and their hex.
 
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
 /// `text` with control characters, line breaks included, escaped.
 pub fn escape_control(text: &str) -> String {
     text.chars()
@@ -29,6 +31,58 @@ pub fn first_chars(text: &str, max: usize) -> String {
         Some((end, _)) => format!("{}…", &text[..end]),
         None => text.to_owned(),
     }
+}
+
+/// `text` in lines at most `width` columns wide, broken at spaces, and inside a word only where
+/// the word alone is wider; at most `max` lines, the last one ending in `…` if the text was cut.
+/// At least one line, empty for an empty text.
+pub fn wrap(text: &str, width: usize, max: usize) -> Vec<String> {
+    wrap_hanging(text, width, width, max)
+}
+
+/// [`wrap`], with the first line `first` columns wide and the others `width`.
+pub fn wrap_hanging(text: &str, first: usize, width: usize, max: usize) -> Vec<String> {
+    let max = max.max(1);
+    let mut lines: Vec<String> = Vec::new();
+    let mut line = String::new();
+    let mut line_width = 0;
+    let fits = |lines: &Vec<String>, columns: usize| {
+        let width = if lines.is_empty() { first } else { width };
+        columns <= width.max(1)
+    };
+    for word in text.split(' ') {
+        let word_width = word.width();
+        if line_width > 0 && fits(&lines, line_width + 1 + word_width) {
+            line.push(' ');
+            line.push_str(word);
+            line_width += 1 + word_width;
+            continue;
+        }
+        if line_width > 0 {
+            lines.push(std::mem::take(&mut line));
+            line_width = 0;
+        }
+        for c in word.chars() {
+            let c_width = c.width().unwrap_or_default();
+            if line_width > 0 && !fits(&lines, line_width + c_width) {
+                lines.push(std::mem::take(&mut line));
+                line_width = 0;
+            }
+            line.push(c);
+            line_width += c_width;
+        }
+    }
+    if !line.is_empty() || lines.is_empty() {
+        lines.push(line);
+    }
+    if lines.len() > max {
+        lines.truncate(max);
+        let last_width = if max == 1 { first } else { width };
+        let last = lines.last_mut().expect("at least one line");
+        while last.width() + 1 > last_width.max(1) && last.pop().is_some() {}
+        last.push('…');
+    }
+    lines
 }
 
 /// `n` and the noun, in the plural unless `n` is 1: `1 segment`, `3 segments`.
@@ -60,5 +114,41 @@ mod tests {
     fn cuts_at_characters() {
         assert_eq!(first_chars("grüße", 3), "grü…");
         assert_eq!(first_chars("grüße", 5), "grüße");
+    }
+
+    #[test]
+    fn wraps_at_spaces() {
+        assert_eq!(wrap("one two three", 7, 5), ["one two", "three"]);
+        assert_eq!(wrap("one two three", 13, 5), ["one two three"]);
+        assert_eq!(wrap("", 10, 5), [""]);
+    }
+
+    #[test]
+    fn breaks_words_wider_than_the_line() {
+        assert_eq!(
+            wrap("a /very/long/path b", 6, 5),
+            ["a", "/very/", "long/p", "ath b"]
+        );
+        // By columns: each of these characters takes two.
+        assert_eq!(wrap("索引索引", 4, 5), ["索引", "索引"]);
+    }
+
+    #[test]
+    fn cuts_after_the_last_line() {
+        assert_eq!(wrap("one two three four", 7, 2), ["one two", "three…"]);
+        assert_eq!(wrap("one two three four", 5, 2), ["one", "two…"]);
+        assert_eq!(wrap("abcdefghij", 5, 1), ["abcd…"]);
+    }
+
+    #[test]
+    fn wraps_the_first_line_narrower() {
+        assert_eq!(
+            wrap_hanging("one two three four", 3, 9, 5),
+            ["one", "two three", "four"]
+        );
+        assert_eq!(
+            wrap_hanging("one two three four", 3, 9, 2),
+            ["one", "two thre…"]
+        );
     }
 }

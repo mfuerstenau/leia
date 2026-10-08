@@ -11,13 +11,14 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Cell, Paragraph, Row, Table, TableState, Wrap};
+use unicode_width::UnicodeWidthStr;
 
 use crate::protocol::document::BytesValue;
 use crate::protocol::index::{
     DocValuesType, GetIndexStatsResult, IndexCommitStats, IndexField, IndexOptions, SkippedIndex,
 };
 use crate::protocol::terms::{FieldTerms, TopTerm};
-use crate::text::bytes_text;
+use crate::text::{bytes_text, escape_control, wrap_hanging};
 
 /// Rows that PageUp and PageDown move.
 const PAGE: u16 = 10;
@@ -400,7 +401,8 @@ impl Overview {
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
-        let summary = summary_lines(&self.stats, &self.skipped);
+        // Inside the block's left and right border.
+        let summary = summary_lines(&self.stats, &self.skipped, area.width.saturating_sub(2));
         let [top, bottom] = Layout::vertical([
             // The lines plus the block's top and bottom border.
             Constraint::Length(summary.len() as u16 + 2),
@@ -612,8 +614,18 @@ fn term_text(term: &TopTerm) -> String {
 
 /// The index panel shows at most this many index directories, and as many skipped ones.
 const SUMMARY_INDEXES: usize = 8;
+/// Why an index directory was skipped takes at most this many lines.
+const SKIPPED_LINES: usize = 3;
+/// A skipped index directory's reason wraps under its start if this many columns are left there,
+/// and at the panel's left edge otherwise.
+const SKIPPED_MIN_WIDTH: usize = 30;
 
-fn summary_lines(stats: &GetIndexStatsResult, skipped: &[SkippedIndex]) -> Vec<Line<'static>> {
+/// The lines of the index panel, `width` columns wide inside its border.
+fn summary_lines(
+    stats: &GetIndexStatsResult,
+    skipped: &[SkippedIndex],
+    width: u16,
+) -> Vec<Line<'static>> {
     let deleted = stats.max_doc - stats.num_docs;
     let merged = if stats.segment_count == 1 {
         " (fully merged)"
@@ -660,13 +672,18 @@ fn summary_lines(stats: &GetIndexStatsResult, skipped: &[SkippedIndex]) -> Vec<L
         .map(|(label, value)| label_line(label, value))
         .collect();
     if stats.indexes.len() > 1 || !skipped.is_empty() {
-        lines.extend(index_lines(stats, skipped));
+        lines.extend(index_lines(stats, skipped, usize::from(width)));
     }
     lines
 }
 
-/// One line per index directory, below the opened path, then one per skipped one with why.
-fn index_lines(stats: &GetIndexStatsResult, skipped: &[SkippedIndex]) -> Vec<Line<'static>> {
+/// One line per index directory, below the opened path, then each skipped one with why, wrapped
+/// to `panel_width`.
+fn index_lines(
+    stats: &GetIndexStatsResult,
+    skipped: &[SkippedIndex],
+    panel_width: usize,
+) -> Vec<Line<'static>> {
     let names: Vec<String> = stats
         .indexes
         .iter()
@@ -705,10 +722,32 @@ fn index_lines(stats: &GetIndexStatsResult, skipped: &[SkippedIndex]) -> Vec<Lin
     for (i, index) in skipped.iter().enumerate() {
         let name = names.next().unwrap_or_default();
         if i < SUMMARY_INDEXES {
-            lines.push(Line::styled(
-                format!("  {name:<width$}  skipped: {}", index.message),
-                Style::new().fg(Color::Red),
-            ));
+            let prefix = format!("  {name:<width$}  skipped: ");
+            let indent = prefix.width();
+            let indent = if panel_width.saturating_sub(indent) >= SKIPPED_MIN_WIDTH {
+                indent
+            } else {
+                4
+            };
+            let message = wrap_hanging(
+                &escape_control(&index.message),
+                panel_width.saturating_sub(prefix.width()),
+                panel_width.saturating_sub(indent),
+                SKIPPED_LINES,
+            );
+            lines.extend(
+                message
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, line)| {
+                        if i == 0 {
+                            format!("{prefix}{line}")
+                        } else {
+                            format!("{:indent$}{line}", "")
+                        }
+                    })
+                    .map(|line| Line::styled(line, Style::new().fg(Color::Red))),
+            );
         }
     }
     if skipped.len() > SUMMARY_INDEXES {
@@ -1442,5 +1481,47 @@ mod tests {
             "{screen}"
         );
         assert_eq!(overview.fields_to_scan(), ["body"]);
+    }
+
+    #[test]
+    fn wraps_why_an_index_was_skipped() {
+        let skipped = |name: &str, message: &str| SkippedIndex {
+            path: format!("/data/products/{name}"),
+            message: message.to_owned(),
+        };
+        let long = "Corrupt index, missing file: /data/products/broken/_0.si \
+                    (resource=MMapIndexInput(path=\"/data/products/broken/_0.si\")) \
+                    and the rest of a message that is far too long to be shown whole";
+        let mut overview = Overview::new(stats(vec![field("id", 0)]), 50).with_skipped(vec![
+            skipped("broken", long),
+            skipped("old", "Unsupported\nformat"),
+        ]);
+        let screen = render(&mut overview, 72, 30);
+        let lines: Vec<&str> = screen.lines().collect();
+        let at = lines
+            .iter()
+            .position(|line| line.contains("broken  skipped: Corrupt index, missing file:"))
+            .unwrap_or_else(|| panic!("no skipped line in\n{screen}"));
+        // Under the start of the message, cut after three lines.
+        assert!(
+            lines[at + 1].starts_with("│                   /data/products/broken/_0.si"),
+            "{screen}"
+        );
+        assert!(lines[at + 2].trim_end().ends_with("…│"), "{screen}");
+        // Line breaks are escaped.
+        assert!(
+            lines[at + 3].contains("old     skipped: Unsupported\\nformat"),
+            "{screen}"
+        );
+
+        // Too narrow to wrap under the message: under the name instead.
+        let screen = render(&mut overview, 44, 30);
+        let lines: Vec<&str> = screen.lines().collect();
+        let at = lines
+            .iter()
+            .position(|line| line.contains("broken  skipped: Corrupt"))
+            .unwrap_or_else(|| panic!("no skipped line in\n{screen}"));
+        assert!(lines[at + 1].starts_with("│    "), "{screen}");
+        assert!(!lines[at + 1].starts_with("│     "), "{screen}");
     }
 }
