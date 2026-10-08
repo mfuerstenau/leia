@@ -142,6 +142,10 @@ From the read-only checklist in `luke-features.md` §7. Ordered roughly by value
   - TUI: `m` cycles to "more like this" (the line is a document id, digits only), `p` opens the fields-and-limits popup (Lucene's defaults, fields with positions chosen), `◆` marks the source among the hits; `m` on the documents screen starts it for the shown document
 - [ ] Search: chosen MLT terms as data (`{field, term, tf, docFreq, score}`), like-text instead of a document (the analyzer is in place since ADR 0014), MLT word lengths / stop words (left out of ADR 0013)
 - [ ] Search: `SCORE`/`DOC` sort keys, sort selectors (`MAX`, middle) and missing values (left out of ADR 0012)
+- [ ] Search: regex over stored values — a brute-force scan of every document's stored fields with a Java regex (`find`, not whole-value match), for values that were never indexed or were analyzed away; slow by design, so it is a job (rule 7) with progress (documents read of maxDoc) and `cancelJob`
+  - `regex {pattern, fields?, caseInsensitive, includeDeleted}` as a further query alternative, or its own `startStoredScan`/`getStoredScan`; `INVALID_QUERY` with the position for a bad pattern; a cap on hits, and on matching time per value against catastrophic backtracking
+  - hits: doc id, field, value index and the match spans, so the TUI can highlight them; `STRING` values, and `BINARY` ones that are UTF-8; partial results visible while the scan runs
+  - TUI: `m` cycles to "regex (stored values)" on the search screen, the field popup limits the fields; `Enter` opens the document, `v` the value in the viewer
 - [x] Analysis: custom analyzer builder (char filters, tokenizer, filters with params, config dir), token attributes, step by step, and the analyzer for search and More-Like-This (ADR 0014)
   - `getAnalysisComponents {}`: the char filters, tokenizers and token filters as `{name, className}`; `analyze {analyzer, text}`: the text after each char filter, and per tokenizer and token filter the tokens (`term`, `position`, increment, length, offsets, `type`, and every other attribute as `{attribute, key, value}`), `truncated` past 10,000; `INVALID_ANALYZER` (-32013) with the failing component and Lucene's message
   - `ClassicQuery`, `StandardQuery` and `MoreLikeThisQuery` take a required `analyzer`; the handler builds it, the search job closes it
@@ -160,6 +164,17 @@ From the read-only checklist in `luke-features.md` §7. Ordered roughly by value
 - [ ] Tools: check index (streamed output), export terms
 - [ ] Misc: log view with level filter, cross-screen navigation (`luke-features.md` §5), themes, about
 - [ ] Improvements over Luke (§6): KNN vector inspection/search, point values, per-segment doc view, deleted-doc inspection, readable binary values, highlighting, cancellation of long operations
+- [ ] Documents: reconstruct a document's indexed values (uninvert) — per field, the terms the document was indexed with, rebuilt from the postings, so fields without term vectors show what was indexed too (Luke dropped its "Reconstruct")
+  - a job (rule 7): `startReconstruct {docId, fields?}` / `getReconstruct {jobId}`, cancellable through `ScanProgress`; it walks every term of each indexed field in the document's segment and `advance`s the postings to the document, so it costs a full term pass per field
+  - per field: terms in position order with positions and offsets where indexed (gaps and stacked tokens visible, as on the analysis screen), else terms with freq; term vectors used directly when present; binary terms as hex; point values (decoded by width) as a possible extra
+  - TUI: a key on the documents screen (e.g. `r`) fills the details panel or a viewer with the rebuilt field text; progress and `Esc` like the term scan
+- [ ] Documents: export a document as JSON, with everything leia knows about it: doc id, deleted flag, and per field the flags, norm, stored values (whole, not cut), doc values, term vector and the reconstructed indexed values (needs the item above)
+  - the TUI assembles it from `getDocument`, `getStoredValue`, `getTermVector` and the reconstruct job, so no new data method; the export format is a typed serde struct of its own (rule 3), versioned, binary as hex
+  - TUI: a key on the documents screen (e.g. `E`) asks for a file path (default `doc-<id>.json` in the working directory) and writes it, or copies it via OSC 52; never into the index directory (rule 1); progress and `Esc` while the reconstruction runs
+- [ ] Documents: browse through a filter — a query (any of the search alternatives) narrows the documents screen to the matching documents until it is cleared, so ←/→ step to the previous/next match instead of the next id, unlike `[`/`]`, which only walk the fetched hits in score order
+  - a job (rule 7): `startFilter {query, includeDeleted}` / `getFilter {jobId}` collects the matches into a bit set once and gives their count; `filterStep {filterId, fromDoc, direction, count}` returns the next matching ids in doc-id order; `releaseFilter` (or replacing it) frees the set
+  - `i` (go to id) jumps to the nearest match; the terms screen's postings can mark or hide documents outside the filter
+  - TUI: a free key on the search screen (`f`/`F` are taken by the field) turns the current query into the filter; the tab line and the documents title show it with `n of M`; a key clears it
 - [x] Cross-cutting: progress and cancellation for long-running RPCs (ADR 0005: polled server jobs, `cancelJob`, cooperative cancellation; the term scan is the first job)
 - [x] Value viewer: hex view for values, switchable from the normal view (`h` in the viewer)
 - [x] Value viewer: pretty-printed JSON (`J`; TUI only)
