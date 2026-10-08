@@ -54,6 +54,22 @@ pub struct AvailableAnalyzer {
     pub name: String,
     /// The fully qualified class name, which [`PresetAnalyzer`] takes.
     pub class_name: String,
+    /// Whether the preset takes stop words (ADR 0017).
+    pub stopwords: WordSetSupport,
+    /// Whether it takes stem exclusions; never [`WordSetSupport::Required`].
+    pub stem_exclusion: WordSetSupport,
+}
+
+/// Whether a preset analyzer takes stop words or stem exclusions (ADR 0017).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum WordSetSupport {
+    /// It doesn't take the set.
+    None,
+    /// It takes the set, and has a default without it.
+    Optional,
+    /// It can't be created without the set.
+    Required,
 }
 
 /// A factory that a custom analyzer can name.
@@ -98,12 +114,49 @@ impl Default for Analyzer {
 #[serde(deny_unknown_fields)]
 pub struct StandardAnalyzer {}
 
-/// An analyzer created by class name with its public no-argument constructor (ADR 0015).
+/// An analyzer created by class name (ADR 0015), with its default settings and, if given, stop
+/// words and stem exclusions of its own (ADR 0017).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PresetAnalyzer {
     /// The fully qualified class name, one that `getAnalysisComponents` lists in `analyzers`.
     pub class_name: String,
+    /// The stop words; `None` for the analyzer's default ones.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stopwords: Option<WordSet>,
+    /// The words kept from stemming; `None` for none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stem_exclusion: Option<WordSet>,
+}
+
+/// The stop words or stem exclusions of a preset, as one of two alternatives: exactly one is
+/// present (ADR 0017).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WordSet {
+    /// The words themselves; empty for a set without words.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub words: Option<Vec<String>>,
+    /// A word list file that the server reads: UTF-8, one word per line, and lines starting with
+    /// `#` are skipped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+}
+
+impl WordSet {
+    pub fn words(words: Vec<String>) -> Self {
+        Self {
+            words: Some(words),
+            file: None,
+        }
+    }
+
+    pub fn file(path: String) -> Self {
+        Self {
+            words: None,
+            file: Some(path),
+        }
+    }
 }
 
 /// A `CustomAnalyzer`: the text goes through the char filters, the tokenizer and the token

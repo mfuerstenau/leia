@@ -17,14 +17,47 @@ public sealed interface AnalyzerSpec {
     record Standard() implements AnalyzerSpec {}
 
     /**
-     * An analyzer created with its public no-argument constructor (ADR 0015).
+     * An analyzer created by class name (ADR 0015), with its default settings and, if given, stop
+     * words and stem exclusions of its own (ADR 0017).
      *
      * @param className the class's fully qualified name, one that {@link Analyzers#components} lists
+     * @param stopwords the stop words; empty for the analyzer's default ones
+     * @param stemExclusion the words kept from stemming; empty for none
      */
-    record Preset(String className) implements AnalyzerSpec {
+    record Preset(String className, Optional<WordSet> stopwords, Optional<WordSet> stemExclusion)
+            implements AnalyzerSpec {
 
         public Preset {
             Objects.requireNonNull(className);
+            Objects.requireNonNull(stopwords);
+            Objects.requireNonNull(stemExclusion);
+        }
+
+        /** The analyzer with its default stop words and no stem exclusions. */
+        public Preset(String className) {
+            this(className, Optional.empty(), Optional.empty());
+        }
+    }
+
+    /** The words of a preset's stop words or stem exclusions (ADR 0017). */
+    sealed interface WordSet {
+
+        /** The words themselves; none for an empty set. */
+        record Words(List<String> words) implements WordSet {
+
+            public Words {
+                words = List.copyOf(words);
+            }
+        }
+
+        /**
+         * A word list file: UTF-8, one word per line, and lines starting with {@code #} are skipped.
+         */
+        record File(Path path) implements WordSet {
+
+            public File {
+                Objects.requireNonNull(path);
+            }
         }
     }
 

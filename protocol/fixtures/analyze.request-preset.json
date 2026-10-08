@@ -3,7 +3,13 @@
   "id": 34,
   "method": "analyze",
   "params": {
-    "analyzer": {"preset": {"className": "org.apache.lucene.analysis.en.EnglishAnalyzer"}},
+    "analyzer": {
+      "preset": {
+        "className": "org.apache.lucene.analysis.en.EnglishAnalyzer",
+        "stopwords": {"words": []},
+        "stemExclusion": {"words": ["running", "news"]}
+      }
+    },
     "text": "The running foxes"
   }
 }

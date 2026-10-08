@@ -1,12 +1,20 @@
 package io.github.mfuerstenau.leia.core;
 
-import io.github.mfuerstenau.leia.core.AnalysisComponents.Available;
+import io.github.mfuerstenau.leia.core.AnalysisComponents.AvailableAnalyzer;
+import io.github.mfuerstenau.leia.core.AnalyzerSpec.WordSet;
 import java.io.IOException;
+import java.io.Reader;
 import java.io.UncheckedIOException;
+import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.net.URISyntaxException;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.security.CodeSource;
 import java.util.ArrayList;
@@ -25,14 +33,19 @@ import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.CharArraySet;
 import org.apache.lucene.analysis.CharFilterFactory;
+import org.apache.lucene.analysis.StopwordAnalyzerBase;
 import org.apache.lucene.analysis.TokenFilterFactory;
 import org.apache.lucene.analysis.TokenizerFactory;
+import org.apache.lucene.analysis.WordlistLoader;
 
 /**
  * The analyzers that can be created by class name (ADR 0015): the public, concrete {@link Analyzer}
- * classes with a public no-argument constructor in the jars that analysis comes from, the analysis
- * jars included (ADR 0016).
+ * classes with a public no-argument or stop words constructor in the jars that analysis comes from,
+ * the analysis jars included (ADR 0016). By Lucene's convention, a constructor that takes one
+ * {@link CharArraySet} takes the stop words, and one that takes two takes the stop words and the
+ * stem exclusions (ADR 0017).
  */
 final class PresetAnalyzers {
 
@@ -43,12 +56,50 @@ final class PresetAnalyzers {
     private PresetAnalyzers() {}
 
     /** The presets that {@code loader} sees. */
-    private record Scan(ClassLoader loader, Map<String, Class<? extends Analyzer>> byClassName) {}
+    private record Scan(ClassLoader loader, Map<String, Preset> byClassName) {}
+
+    /**
+     * A preset's class and its constructors: without arguments, with the stop words, and with the
+     * stop words and the stem exclusions; at least one of the first two is present.
+     *
+     * @param defaultStopSet the static {@code getDefaultStopSet()}, for an analyzer that is not a
+     *     {@link StopwordAnalyzerBase}
+     */
+    private record Preset(
+            Class<? extends Analyzer> type,
+            Optional<Constructor<? extends Analyzer>> noArguments,
+            Optional<Constructor<? extends Analyzer>> stopwords,
+            Optional<Constructor<? extends Analyzer>> stopwordsAndStemExclusion,
+            Optional<Method> defaultStopSet) {
+
+        String name() {
+            return type.getSimpleName();
+        }
+
+        WordSetSupport stopwordSupport() {
+            if (stopwords.isEmpty()) {
+                return WordSetSupport.NONE;
+            }
+            return noArguments.isPresent() ? WordSetSupport.OPTIONAL : WordSetSupport.REQUIRED;
+        }
+
+        WordSetSupport stemExclusionSupport() {
+            return stopwordsAndStemExclusion.isPresent() && hasDefaultStopwords()
+                    ? WordSetSupport.OPTIONAL
+                    : WordSetSupport.NONE;
+        }
+
+        /** Whether the default stop words can be found, for stem exclusions without stop words. */
+        boolean hasDefaultStopwords() {
+            return (StopwordAnalyzerBase.class.isAssignableFrom(type) && noArguments.isPresent())
+                    || defaultStopSet.isPresent();
+        }
+    }
 
     /** Found when first needed, and again once analysis jars have been loaded. */
     private static Scan scan;
 
-    private static synchronized Map<String, Class<? extends Analyzer>> presets() {
+    private static synchronized Map<String, Preset> presets() {
         ClassLoader loader = AnalysisJars.classLoader();
         if (scan == null || scan.loader() != loader) {
             scan = new Scan(loader, scan(loader));
@@ -57,36 +108,113 @@ final class PresetAnalyzers {
     }
 
     /** The presets, sorted by simple name, ignoring case, then by class name. */
-    static List<Available> list() {
+    static List<AvailableAnalyzer> list() {
         return presets().values().stream()
-                .map(type -> new Available(type.getSimpleName(), type.getName()))
-                .sorted(Comparator.comparing(Available::name, String.CASE_INSENSITIVE_ORDER)
-                        .thenComparing(Available::className))
+                .map(preset -> new AvailableAnalyzer(
+                        preset.name(),
+                        preset.type().getName(),
+                        preset.stopwordSupport(),
+                        preset.stemExclusionSupport()))
+                .sorted(Comparator.comparing(AvailableAnalyzer::name, String.CASE_INSENSITIVE_ORDER)
+                        .thenComparing(AvailableAnalyzer::className))
                 .toList();
     }
 
     /**
-     * A new analyzer of the listed class {@code className}.
+     * A new analyzer for {@code spec}, of a listed class. With stem exclusions but no stop words, it
+     * gets its default stop words.
      *
-     * @throws InvalidAnalyzerException if the class is not listed, or its constructor fails
+     * @throws InvalidAnalyzerException if the class is not listed, doesn't take a set it is given,
+     *     needs stop words that are not given, a word list file can't be read, or the constructor
+     *     fails
      */
-    static Analyzer create(String className) throws InvalidAnalyzerException {
-        Class<? extends Analyzer> type = presets().get(className);
-        if (type == null) {
-            throw new InvalidAnalyzerException("no preset analyzer '" + className + "'", null);
+    static Analyzer create(AnalyzerSpec.Preset spec) throws InvalidAnalyzerException {
+        Preset preset = presets().get(spec.className());
+        if (preset == null) {
+            throw new InvalidAnalyzerException("no preset analyzer '" + spec.className() + "'", null);
+        }
+        if (spec.stopwords().isPresent() && preset.stopwordSupport() == WordSetSupport.NONE) {
+            throw new InvalidAnalyzerException(preset.name() + " takes no stop words", null);
+        }
+        if (spec.stemExclusion().isPresent() && preset.stemExclusionSupport() == WordSetSupport.NONE) {
+            throw new InvalidAnalyzerException(preset.name() + " takes no stem exclusions", null);
+        }
+        if (spec.stopwords().isEmpty() && preset.stopwordSupport() == WordSetSupport.REQUIRED) {
+            throw new InvalidAnalyzerException(preset.name() + " needs stop words", null);
+        }
+        Optional<CharArraySet> stopwords = spec.stopwords().isPresent()
+                ? Optional.of(read("stop words", spec.stopwords().orElseThrow()))
+                : Optional.empty();
+        if (spec.stemExclusion().isPresent()) {
+            CharArraySet stemExclusion =
+                    read("stem exclusions", spec.stemExclusion().orElseThrow());
+            return construct(
+                    preset,
+                    preset.stopwordsAndStemExclusion().orElseThrow(),
+                    stopwords.isPresent() ? stopwords.orElseThrow() : defaultStopwords(preset),
+                    stemExclusion);
+        }
+        if (stopwords.isPresent()) {
+            return construct(preset, preset.stopwords().orElseThrow(), stopwords.orElseThrow());
+        }
+        return construct(preset, preset.noArguments().orElseThrow());
+    }
+
+    /** What the preset uses without stop words of its own. */
+    private static CharArraySet defaultStopwords(Preset preset) throws InvalidAnalyzerException {
+        if (StopwordAnalyzerBase.class.isAssignableFrom(preset.type())
+                && preset.noArguments().isPresent()) {
+            try (Analyzer analyzer = construct(preset, preset.noArguments().orElseThrow())) {
+                return ((StopwordAnalyzerBase) analyzer).getStopwordSet();
+            }
         }
         try {
-            return type.getConstructor().newInstance();
+            return (CharArraySet) preset.defaultStopSet().orElseThrow().invoke(null);
         } catch (InvocationTargetException e) {
-            Throwable cause = e.getCause();
-            String message = cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage();
-            throw new InvalidAnalyzerException(type.getSimpleName() + ": " + message, cause);
+            throw failed(preset, e.getCause());
         } catch (ReflectiveOperationException | LinkageError e) {
-            throw new InvalidAnalyzerException(type.getSimpleName() + ": " + e, e);
+            throw new InvalidAnalyzerException(preset.name() + ": " + e, e);
         }
     }
 
-    private static Map<String, Class<? extends Analyzer>> scan(ClassLoader loader) {
+    private static Analyzer construct(Preset preset, Constructor<? extends Analyzer> constructor, Object... arguments)
+            throws InvalidAnalyzerException {
+        try {
+            return constructor.newInstance(arguments);
+        } catch (InvocationTargetException e) {
+            throw failed(preset, e.getCause());
+        } catch (ReflectiveOperationException | LinkageError e) {
+            throw new InvalidAnalyzerException(preset.name() + ": " + e, e);
+        }
+    }
+
+    private static InvalidAnalyzerException failed(Preset preset, Throwable cause) {
+        String message = cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage();
+        return new InvalidAnalyzerException(preset.name() + ": " + message, cause);
+    }
+
+    /** The words of {@code set}, case-sensitive as Lucene loads them; {@code what} names the set. */
+    private static CharArraySet read(String what, WordSet set) throws InvalidAnalyzerException {
+        return switch (set) {
+            case WordSet.Words words -> new CharArraySet(words.words(), false);
+            case WordSet.File file -> {
+                Path path = file.path();
+                try (Reader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+                    yield WordlistLoader.getWordSet(reader);
+                } catch (NoSuchFileException e) {
+                    throw new InvalidAnalyzerException(what + ": no file " + path, e);
+                } catch (AccessDeniedException e) {
+                    throw new InvalidAnalyzerException(what + ": cannot read " + path, e);
+                } catch (CharacterCodingException e) {
+                    throw new InvalidAnalyzerException(what + ": " + path + " is not UTF-8", e);
+                } catch (IOException | UncheckedIOException e) {
+                    throw new InvalidAnalyzerException(what + ": " + path + ": " + e.getMessage(), e);
+                }
+            }
+        };
+    }
+
+    private static Map<String, Preset> scan(ClassLoader loader) {
         long start = System.nanoTime();
         Set<String> names = new TreeSet<>();
         for (Path location : locations()) {
@@ -96,10 +224,10 @@ final class PresetAnalyzers {
                 LOG.log(Level.WARNING, "Cannot read " + location + " for analyzers", e);
             }
         }
-        Map<String, Class<? extends Analyzer>> presets = names.stream()
+        Map<String, Preset> presets = names.stream()
                 .map(name -> preset(name, loader))
                 .flatMap(Optional::stream)
-                .collect(Collectors.toMap(Class::getName, Function.identity(), (a, b) -> a));
+                .collect(Collectors.toMap(preset -> preset.type().getName(), Function.identity(), (a, b) -> a));
         LOG.fine(() ->
                 "Found " + presets.size() + " preset analyzers in " + (System.nanoTime() - start) / 1_000_000 + " ms");
         return Map.copyOf(presets);
@@ -163,7 +291,7 @@ final class PresetAnalyzers {
     }
 
     /** The class, if it is a preset; it is loaded but not initialized. */
-    private static Optional<Class<? extends Analyzer>> preset(String className, ClassLoader loader) {
+    private static Optional<Preset> preset(String className, ClassLoader loader) {
         Class<?> type;
         try {
             type = Class.forName(className, false, loader);
@@ -178,12 +306,40 @@ final class PresetAnalyzers {
                 || type.isMemberClass()) {
             return Optional.empty();
         }
+        Class<? extends Analyzer> analyzer = type.asSubclass(Analyzer.class);
+        Optional<Constructor<? extends Analyzer>> noArguments = constructor(analyzer);
+        Optional<Constructor<? extends Analyzer>> stopwords = constructor(analyzer, CharArraySet.class);
+        if (noArguments.isEmpty() && stopwords.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(new Preset(
+                analyzer,
+                noArguments,
+                stopwords,
+                constructor(analyzer, CharArraySet.class, CharArraySet.class),
+                defaultStopSet(analyzer)));
+    }
+
+    /** The public constructor with these parameters, if there is one. */
+    private static Optional<Constructor<? extends Analyzer>> constructor(
+            Class<? extends Analyzer> type, Class<?>... parameters) {
         try {
-            // Only a public constructor is found.
-            type.getConstructor();
+            return Optional.of(type.getConstructor(parameters));
         } catch (NoSuchMethodException | LinkageError e) {
             return Optional.empty();
         }
-        return Optional.of(type.asSubclass(Analyzer.class));
+    }
+
+    /** The public, static {@code getDefaultStopSet()}, if there is one. */
+    private static Optional<Method> defaultStopSet(Class<? extends Analyzer> type) {
+        try {
+            Method method = type.getMethod("getDefaultStopSet");
+            return Modifier.isStatic(method.getModifiers())
+                            && CharArraySet.class.isAssignableFrom(method.getReturnType())
+                    ? Optional.of(method)
+                    : Optional.empty();
+        } catch (NoSuchMethodException | LinkageError e) {
+            return Optional.empty();
+        }
     }
 }

@@ -1,8 +1,8 @@
 //! The current analyzer (ADR 0014): the analysis screen tries it, and the search screen parses
 //! queries and analyzes More-Like-This text with it. It is Lucene's `StandardAnalyzer`, a preset
-//! analyzer by class name (ADR 0015), or a custom analyzer of char filters, a tokenizer and token
-//! filters, each with its parameters, and a config directory for resource files. The popup builds
-//! it.
+//! analyzer by class name (ADR 0015) with stop words and stem exclusions of its own if it takes
+//! them (ADR 0017), or a custom analyzer of char filters, a tokenizer and token filters, each with
+//! its parameters, and a config directory for resource files. The popup builds it.
 
 use std::collections::BTreeMap;
 
@@ -17,6 +17,7 @@ use crate::form::{FormEvent, dim, render_popup};
 use crate::input::{Edit, LineInput, word_start};
 use crate::protocol::analysis::{
     AnalysisComponent, Analyzer, CustomAnalyzer, GetAnalysisComponentsResult, PresetAnalyzer,
+    WordSet, WordSetSupport,
 };
 use crate::text::escape_control;
 
@@ -53,6 +54,31 @@ impl Kind {
     }
 }
 
+/// A preset's word set (ADR 0017).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WordSetKind {
+    Stopwords,
+    StemExclusion,
+}
+
+impl WordSetKind {
+    const ALL: [WordSetKind; 2] = [WordSetKind::Stopwords, WordSetKind::StemExclusion];
+
+    fn label(self) -> &'static str {
+        match self {
+            WordSetKind::Stopwords => "Stop words",
+            WordSetKind::StemExclusion => "Stem exclusions",
+        }
+    }
+
+    fn noun(self) -> &'static str {
+        match self {
+            WordSetKind::Stopwords => "stop words",
+            WordSetKind::StemExclusion => "stem exclusions",
+        }
+    }
+}
+
 /// The current analyzer. The preset and the custom chain are kept while another kind is chosen,
 /// so that switching back finds them again.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,6 +86,10 @@ pub struct AnalyzerSettings {
     kind: Kind,
     /// The preset's class name.
     preset: String,
+    /// The preset's stop words; `None` for its default ones.
+    stopwords: Option<WordSet>,
+    /// The preset's stem exclusions; `None` for none.
+    stem_exclusion: Option<WordSet>,
     chain: CustomAnalyzer,
 }
 
@@ -70,6 +100,8 @@ impl Default for AnalyzerSettings {
         Self {
             kind: Kind::Standard,
             preset: DEFAULT_PRESET.to_owned(),
+            stopwords: None,
+            stem_exclusion: None,
             chain: CustomAnalyzer {
                 char_filters: Vec::new(),
                 tokenizer: component("standard"),
@@ -89,6 +121,8 @@ impl AnalyzerSettings {
                 standard: None,
                 preset: Some(PresetAnalyzer {
                     class_name: self.preset.clone(),
+                    stopwords: self.stopwords.clone(),
+                    stem_exclusion: self.stem_exclusion.clone(),
                 }),
                 custom: None,
             },
@@ -108,13 +142,35 @@ impl AnalyzerSettings {
         self.kind == Kind::Custom
     }
 
-    /// The analyzer on one line: `standard analyzer`, the preset's simple class name, such as
-    /// `EnglishAnalyzer`, or the chain, such as `htmlStrip › standard › lowercase ›
-    /// stop(ignoreCase=true)`, and its config directory.
+    fn word_set(&self, kind: WordSetKind) -> Option<&WordSet> {
+        match kind {
+            WordSetKind::Stopwords => self.stopwords.as_ref(),
+            WordSetKind::StemExclusion => self.stem_exclusion.as_ref(),
+        }
+    }
+
+    fn word_set_mut(&mut self, kind: WordSetKind) -> &mut Option<WordSet> {
+        match kind {
+            WordSetKind::Stopwords => &mut self.stopwords,
+            WordSetKind::StemExclusion => &mut self.stem_exclusion,
+        }
+    }
+
+    /// The analyzer on one line: `standard analyzer`, the preset's simple class name and its word
+    /// sets, such as `EnglishAnalyzer · stop words none`, or the chain, such as `htmlStrip ›
+    /// standard › lowercase › stop(ignoreCase=true)`, and its config directory.
     pub fn text(&self) -> String {
         match self.kind {
             Kind::Standard => return "standard analyzer".to_owned(),
-            Kind::Preset => return escape_control(simple_name(&self.preset)),
+            Kind::Preset => {
+                let mut text = escape_control(simple_name(&self.preset));
+                for kind in WordSetKind::ALL {
+                    if let Some(set) = self.word_set(kind) {
+                        text.push_str(&format!(" · {} {}", kind.noun(), word_set_text(set)));
+                    }
+                }
+                return text;
+            }
             Kind::Custom => {}
         }
         let chain = &self.chain;
@@ -131,6 +187,59 @@ impl AnalyzerSettings {
         }
         text
     }
+}
+
+/// The words, separated by commas; `none` for no words; or `file` and the path.
+fn word_set_text(set: &WordSet) -> String {
+    match (&set.words, &set.file) {
+        (Some(words), _) if words.is_empty() => "none".to_owned(),
+        (Some(words), _) => escape_control(&words.join(", ")),
+        (None, Some(file)) => format!("file {}", escape_control(file)),
+        (None, None) => String::new(),
+    }
+}
+
+/// The text that edits a word set: the words, `-` for no words, `@` and the path for a file, or
+/// blank for none.
+fn word_set_input(set: Option<&WordSet>) -> String {
+    match set {
+        None => String::new(),
+        Some(WordSet {
+            words: Some(words), ..
+        }) if words.is_empty() => "-".to_owned(),
+        Some(WordSet {
+            words: Some(words), ..
+        }) => words.join(", "),
+        Some(WordSet {
+            file: Some(file), ..
+        }) => format!("@{file}"),
+        Some(_) => String::new(),
+    }
+}
+
+/// A word set from its text (see [`word_set_input`]): words are separated by commas or white
+/// space.
+fn parse_word_set(text: &str) -> Result<Option<WordSet>, String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(None);
+    }
+    if text == "-" {
+        return Ok(Some(WordSet::words(Vec::new())));
+    }
+    if let Some(path) = text.strip_prefix('@') {
+        let path = path.trim();
+        if path.is_empty() {
+            return Err("Write the word list file's path after @.".to_owned());
+        }
+        return Ok(Some(WordSet::file(path.to_owned())));
+    }
+    let words = text
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|word| !word.is_empty())
+        .map(str::to_owned)
+        .collect();
+    Ok(Some(WordSet::words(words)))
 }
 
 /// The class name without its package.
@@ -223,6 +332,8 @@ enum Row {
     Kind,
     /// The preset's class.
     Preset,
+    /// A preset's stop words or stem exclusions.
+    WordSet(WordSetKind),
     ConfigDir,
     /// A component: its section and its index there (0 for the tokenizer).
     Component(Section, usize),
@@ -258,6 +369,7 @@ struct Picker {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum TextTarget {
     ConfigDir,
+    WordSet(WordSetKind),
     /// A parameter of a component as `name=value`; `key` is the one it replaces, if any.
     Param {
         section: Section,
@@ -322,6 +434,12 @@ impl AnalyzerForm {
             Kind::Standard => return rows,
             Kind::Preset => {
                 rows.push(Row::Preset);
+                rows.extend(
+                    WordSetKind::ALL
+                        .into_iter()
+                        .filter(|kind| self.support(*kind) != Some(WordSetSupport::None))
+                        .map(Row::WordSet),
+                );
                 return rows;
             }
             Kind::Custom => {}
@@ -344,6 +462,21 @@ impl AnalyzerForm {
             }
         }
         rows
+    }
+
+    /// Whether the draft's preset takes the word set; `None` while the presets are not loaded, or
+    /// for a preset that is not listed.
+    fn support(&self, kind: WordSetKind) -> Option<WordSetSupport> {
+        let preset = self
+            .components
+            .as_ref()?
+            .analyzers
+            .iter()
+            .find(|analyzer| analyzer.class_name == self.draft.preset)?;
+        Some(match kind {
+            WordSetKind::Stopwords => preset.stopwords,
+            WordSetKind::StemExclusion => preset.stem_exclusion,
+        })
     }
 
     fn select(&mut self, row: Row) {
@@ -379,9 +512,10 @@ impl AnalyzerForm {
     }
 
     /// While a picker or a line input is open, it takes the keys. Otherwise ↑↓ select a row;
-    /// Space or → changes it (standard, preset or custom, ← the other way round; the preset, the
-    /// config directory, another component, a parameter); `a` adds a filter after the selected one, `p` a parameter to the selected
-    /// component, `d` deletes, `K`/`J` move a filter up or down; Enter applies, Esc cancels.
+    /// Space or → changes it (standard, preset or custom, ← the other way round; the preset, a
+    /// word set, the config directory, another component, a parameter); `a` adds a filter after
+    /// the selected one, `p` a parameter to the selected component, `d` deletes (a word set goes
+    /// back to its default), `K`/`J` move a filter up or down; Enter applies, Esc cancels.
     pub fn handle_key(&mut self, key: KeyEvent) -> FormEvent<AnalyzerSettings> {
         match &mut self.editing {
             Editing::Pick(_) => {
@@ -433,6 +567,7 @@ impl AnalyzerForm {
                 self.error = None;
             }
             Row::Preset => self.open_picker(Pick::Preset),
+            Row::WordSet(kind) => self.edit_text(TextTarget::WordSet(kind)),
             Row::ConfigDir => self.edit_text(TextTarget::ConfigDir),
             Row::Component(section, index) => self.pick(section, Target::Replace(index)),
             Row::Param(section, index, param) => {
@@ -481,6 +616,7 @@ impl AnalyzerForm {
     fn edit_text(&mut self, target: TextTarget) {
         let text = match &target {
             TextTarget::ConfigDir => self.draft.chain.config_dir.clone().unwrap_or_default(),
+            TextTarget::WordSet(kind) => word_set_input(self.draft.word_set(*kind)),
             TextTarget::Param {
                 section,
                 index,
@@ -505,6 +641,7 @@ impl AnalyzerForm {
     fn delete(&mut self, row: Row) {
         match row {
             Row::ConfigDir => self.draft.chain.config_dir = None,
+            Row::WordSet(kind) => *self.draft.word_set_mut(kind) = None,
             Row::Component(section, index) => {
                 let Some(list) = self.list_mut(section) else {
                     return;
@@ -607,6 +744,12 @@ impl AnalyzerForm {
                     Pick::Component(section, target) => self.put(section, target, name),
                     Pick::Preset => {
                         self.draft.preset = name;
+                        // A set that the new preset doesn't take would fail.
+                        for kind in WordSetKind::ALL {
+                            if self.support(kind) == Some(WordSetSupport::None) {
+                                *self.draft.word_set_mut(kind) = None;
+                            }
+                        }
                         self.error = None;
                     }
                 }
@@ -679,13 +822,17 @@ impl AnalyzerForm {
         }
     }
 
-    /// Applies an edited text: a config directory (none if blank), or a parameter as
-    /// `name=value` (removed if blank).
+    /// Applies an edited text: a config directory (none if blank), a word set (the default if
+    /// blank), or a parameter as `name=value` (removed if blank).
     fn take_text(&mut self, target: TextTarget, text: &str) -> Result<(), String> {
         let text = text.trim();
         let (section, index, old) = match target {
             TextTarget::ConfigDir => {
                 self.draft.chain.config_dir = (!text.is_empty()).then(|| text.to_owned());
+                return Ok(());
+            }
+            TextTarget::WordSet(kind) => {
+                *self.draft.word_set_mut(kind) = parse_word_set(text)?;
                 return Ok(());
             }
             TextTarget::Param {
@@ -734,7 +881,9 @@ impl AnalyzerForm {
                     " ␣ change   a add filter   p add parameter   d delete   K/J move   ⏎ apply   \
                      Esc cancel   ↑↓"
                 }
-                Kind::Preset => " ␣ change   ←→ standard/preset/custom   ⏎ apply   Esc cancel   ↑↓",
+                Kind::Preset => {
+                    " ␣ change   d default   ←→ standard/preset/custom   ⏎ apply   Esc cancel   ↑↓"
+                }
                 Kind::Standard => " ␣/←→ standard/preset/custom   ⏎ apply   Esc cancel",
             },
         }
@@ -772,8 +921,10 @@ impl AnalyzerForm {
                  analyzer of your own chain.",
             ],
             Kind::Preset => &[
-                "One of Lucene's analyzers, by class name, with its default settings and stop \
-                 words.",
+                "One of Lucene's analyzers, by class name, with its default settings.",
+                "Stop words and stem exclusions, for an analyzer that takes them: words separated \
+                 by spaces or commas, - for no words, or @ and a word list file (UTF-8, one word \
+                 per line, # for comments).",
             ],
             Kind::Custom => &[],
         };
@@ -806,18 +957,35 @@ impl AnalyzerForm {
 
     fn row_line(&self, row: Row) -> Line<'static> {
         match row {
-            Row::Kind => Line::from(format!("Analyzer       {}", self.draft.kind.name())),
+            Row::Kind => Line::from(format!("Analyzer        {}", self.draft.kind.name())),
             Row::Preset => Line::from(vec![
                 Span::raw(format!(
-                    "Class          {}  ",
+                    "Class           {}  ",
                     escape_control(simple_name(&self.draft.preset))
                 )),
                 Span::styled(escape_control(package(&self.draft.preset)), dim()),
             ]),
+            Row::WordSet(kind) => {
+                let label = format!("{:<16}", kind.label());
+                match self.draft.word_set(kind) {
+                    Some(set) => Line::from(format!("{label}{}", word_set_text(set))),
+                    None => {
+                        let (text, style) = match (kind, self.support(kind)) {
+                            (WordSetKind::Stopwords, Some(WordSetSupport::Required)) => (
+                                "none: this analyzer needs some",
+                                Style::new().fg(Color::Red),
+                            ),
+                            (WordSetKind::Stopwords, _) => ("default: the analyzer's own", dim()),
+                            (WordSetKind::StemExclusion, _) => ("none", dim()),
+                        };
+                        Line::from(vec![Span::raw(label), Span::styled(text, style)])
+                    }
+                }
+            }
             Row::ConfigDir => match &self.draft.chain.config_dir {
-                Some(dir) => Line::from(format!("Config dir     {}", escape_control(dir))),
+                Some(dir) => Line::from(format!("Config dir      {}", escape_control(dir))),
                 None => Line::from(vec![
-                    Span::raw("Config dir     "),
+                    Span::raw("Config dir      "),
                     Span::styled("none: resources from the classpath", dim()),
                 ]),
             },
@@ -917,6 +1085,12 @@ fn wrap_words(text: &str, width: usize) -> Vec<String> {
 fn render_text(frame: &mut Frame, area: Rect, edit: &TextEdit) {
     let title = match edit.target {
         TextTarget::ConfigDir => " Config directory (blank for none) ",
+        TextTarget::WordSet(WordSetKind::Stopwords) => {
+            " Stop words: words, - for none, or @file (blank for the default) "
+        }
+        TextTarget::WordSet(WordSetKind::StemExclusion) => {
+            " Stem exclusions: words, or @file (blank for none) "
+        }
         TextTarget::Param { .. } => " Parameter: name=value (blank removes it) ",
     };
     let width = area.width.min(WIDTH - 4);
@@ -956,6 +1130,7 @@ mod tests {
     use ratatui::crossterm::event::KeyModifiers;
 
     use super::*;
+    use crate::protocol::analysis::WordSetSupport::{Optional, Required};
     use crate::protocol::analysis::{AvailableAnalyzer, AvailableComponent};
 
     fn key(code: KeyCode) -> KeyEvent {
@@ -984,13 +1159,24 @@ mod tests {
 
     fn components() -> GetAnalysisComponentsResult {
         GetAnalysisComponentsResult {
-            analyzers: ["EnglishAnalyzer", "GermanAnalyzer", "WhitespaceAnalyzer"]
-                .iter()
-                .map(|name| AvailableAnalyzer {
-                    name: (*name).to_owned(),
-                    class_name: format!("org.apache.lucene.analysis.x.{name}"),
-                })
-                .collect(),
+            analyzers: [
+                ("EnglishAnalyzer", Optional, Optional),
+                ("GermanAnalyzer", Optional, Optional),
+                ("StopAnalyzer", Required, WordSetSupport::None),
+                (
+                    "WhitespaceAnalyzer",
+                    WordSetSupport::None,
+                    WordSetSupport::None,
+                ),
+            ]
+            .into_iter()
+            .map(|(name, stopwords, stem_exclusion)| AvailableAnalyzer {
+                name: name.to_owned(),
+                class_name: format!("org.apache.lucene.analysis.x.{name}"),
+                stopwords,
+                stem_exclusion,
+            })
+            .collect(),
             char_filters: available(&["htmlStrip", "mapping"]),
             tokenizers: available(&["keyword", "standard", "whitespace"]),
             token_filters: available(&["asciiFolding", "lowercase", "stop", "stemmerOverride"]),
@@ -1196,7 +1382,9 @@ mod tests {
             Analyzer {
                 standard: None,
                 preset: Some(PresetAnalyzer {
-                    class_name: DEFAULT_PRESET.to_owned()
+                    class_name: DEFAULT_PRESET.to_owned(),
+                    stopwords: None,
+                    stem_exclusion: None,
                 }),
                 custom: None,
             }
@@ -1218,7 +1406,7 @@ mod tests {
             "org.apache.lucene.analysis.x.GermanAnalyzer"
         );
         assert!(
-            render(&form).contains("Class          GermanAnalyzer  org.apache.lucene.analysis.x")
+            render(&form).contains("Class           GermanAnalyzer  org.apache.lucene.analysis.x")
         );
 
         // A class name that is not listed is taken as typed.
@@ -1233,6 +1421,155 @@ mod tests {
         assert!(applied(&mut form).is_custom());
         press(&mut form, KeyCode::Left);
         assert_eq!(applied(&mut form).text(), "MyAnalyzer");
+    }
+
+    /// The preset form, with `EnglishAnalyzer`.
+    fn preset_form() -> AnalyzerForm {
+        let mut form = AnalyzerForm::new(&AnalyzerSettings::default(), Some(components()));
+        press(&mut form, KeyCode::Char(' '));
+        form.draft.preset = "org.apache.lucene.analysis.x.EnglishAnalyzer".to_owned();
+        form
+    }
+
+    fn edit(form: &mut AnalyzerForm, row: Row, text: &str) {
+        form.select(row);
+        press(form, KeyCode::Char(' '));
+        form.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        typed(form, text);
+        press(form, KeyCode::Enter);
+    }
+
+    const STOPWORDS: Row = Row::WordSet(WordSetKind::Stopwords);
+    const STEM_EXCLUSION: Row = Row::WordSet(WordSetKind::StemExclusion);
+
+    #[test]
+    fn edits_a_presets_word_sets() {
+        let mut form = preset_form();
+        assert_eq!(
+            form.rows(),
+            [Row::Kind, Row::Preset, STOPWORDS, STEM_EXCLUSION]
+        );
+
+        edit(&mut form, STOPWORDS, "-");
+        edit(&mut form, STEM_EXCLUSION, " running, news  foxes ");
+        let settings = applied(&mut form);
+        assert_eq!(
+            settings.text(),
+            "EnglishAnalyzer · stop words none · stem exclusions running, news, foxes"
+        );
+        let preset = settings.analyzer().preset.unwrap();
+        assert_eq!(preset.stopwords, Some(WordSet::words(Vec::new())));
+        assert_eq!(
+            preset.stem_exclusion,
+            Some(WordSet::words(vec![
+                "running".to_owned(),
+                "news".to_owned(),
+                "foxes".to_owned()
+            ]))
+        );
+
+        // The editor starts with the set as it is typed.
+        form.select(STEM_EXCLUSION);
+        press(&mut form, KeyCode::Char(' '));
+        assert!(
+            matches!(&form.editing, Editing::Text(edit) if edit.input.text() == "running, news, foxes")
+        );
+        press(&mut form, KeyCode::Esc);
+
+        // @ and a path is a file; @ alone is refused.
+        edit(&mut form, STOPWORDS, "@");
+        assert!(matches!(&form.editing, Editing::Text(edit) if edit.error.is_some()));
+        typed(&mut form, " /etc/stop.txt");
+        press(&mut form, KeyCode::Enter);
+        let preset = applied(&mut form).analyzer().preset.unwrap();
+        assert_eq!(
+            preset.stopwords,
+            Some(WordSet::file("/etc/stop.txt".to_owned()))
+        );
+        let screen = render(&form);
+        assert!(
+            screen.contains("Stop words      file /etc/stop.txt"),
+            "{screen}"
+        );
+
+        // d goes back to the default, and so does a blank text.
+        form.select(STOPWORDS);
+        press(&mut form, KeyCode::Char('d'));
+        edit(&mut form, STEM_EXCLUSION, "");
+        let settings = applied(&mut form);
+        assert_eq!(settings.text(), "EnglishAnalyzer");
+        assert_eq!(
+            settings.analyzer().preset.unwrap(),
+            PresetAnalyzer {
+                class_name: "org.apache.lucene.analysis.x.EnglishAnalyzer".to_owned(),
+                stopwords: None,
+                stem_exclusion: None,
+            }
+        );
+        assert!(render(&form).contains("Stop words      default: the analyzer's own"));
+    }
+
+    #[test]
+    fn shows_only_the_word_sets_that_a_preset_takes() {
+        let mut form = preset_form();
+        edit(&mut form, STOPWORDS, "a");
+        edit(&mut form, STEM_EXCLUSION, "b");
+
+        // StopAnalyzer takes stop words only, and needs them.
+        form.select(Row::Preset);
+        press(&mut form, KeyCode::Char(' '));
+        typed(&mut form, "Stop");
+        press(&mut form, KeyCode::Enter);
+        assert_eq!(form.rows(), [Row::Kind, Row::Preset, STOPWORDS]);
+        assert_eq!(applied(&mut form).text(), "StopAnalyzer · stop words a");
+        form.select(STOPWORDS);
+        press(&mut form, KeyCode::Char('d'));
+        let screen = render(&form);
+        assert!(
+            screen.contains("none: this analyzer needs some"),
+            "{screen}"
+        );
+
+        // WhitespaceAnalyzer takes neither.
+        form.select(Row::Preset);
+        press(&mut form, KeyCode::Char(' '));
+        typed(&mut form, "White");
+        press(&mut form, KeyCode::Enter);
+        assert_eq!(form.rows(), [Row::Kind, Row::Preset]);
+
+        // Without the list, both rows are there, and the server judges.
+        let form = AnalyzerForm::new(&applied(&mut form), None);
+        assert_eq!(
+            form.rows(),
+            [Row::Kind, Row::Preset, STOPWORDS, STEM_EXCLUSION]
+        );
+    }
+
+    #[test]
+    fn parses_word_sets() {
+        assert_eq!(parse_word_set("  "), Ok(None));
+        assert_eq!(parse_word_set(" - "), Ok(Some(WordSet::words(Vec::new()))));
+        assert_eq!(
+            parse_word_set("a,b c,,\td"),
+            Ok(Some(WordSet::words(
+                ["a", "b", "c", "d"].map(str::to_owned).to_vec()
+            )))
+        );
+        assert_eq!(
+            parse_word_set("@ my stop.txt "),
+            Ok(Some(WordSet::file("my stop.txt".to_owned())))
+        );
+        assert!(parse_word_set("@ ").is_err());
+        for set in [
+            WordSet::words(Vec::new()),
+            WordSet::words(vec!["a".to_owned(), "b".to_owned()]),
+            WordSet::file("/x".to_owned()),
+        ] {
+            assert_eq!(
+                parse_word_set(&word_set_input(Some(&set))),
+                Ok(Some(set.clone()))
+            );
+        }
     }
 
     #[test]
@@ -1257,8 +1594,8 @@ mod tests {
         form.set_error("Invalid analyzer: no token filter 'nope'".to_owned());
         let screen = render(&form);
         for text in [
-            "Analyzer       custom",
-            "Config dir     none",
+            "Analyzer        custom",
+            "Config dir      none",
             "Char filters",
             "+ char filter",
             "Tokenizer",

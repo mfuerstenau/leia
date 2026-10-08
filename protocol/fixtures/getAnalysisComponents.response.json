@@ -3,9 +3,30 @@
   "id": 30,
   "result": {
     "analyzers": [
-      {"name": "EnglishAnalyzer", "className": "org.apache.lucene.analysis.en.EnglishAnalyzer"},
-      {"name": "StandardAnalyzer", "className": "org.apache.lucene.analysis.standard.StandardAnalyzer"},
-      {"name": "WhitespaceAnalyzer", "className": "org.apache.lucene.analysis.core.WhitespaceAnalyzer"}
+      {
+        "name": "EnglishAnalyzer",
+        "className": "org.apache.lucene.analysis.en.EnglishAnalyzer",
+        "stopwords": "OPTIONAL",
+        "stemExclusion": "OPTIONAL"
+      },
+      {
+        "name": "StandardAnalyzer",
+        "className": "org.apache.lucene.analysis.standard.StandardAnalyzer",
+        "stopwords": "OPTIONAL",
+        "stemExclusion": "NONE"
+      },
+      {
+        "name": "StopAnalyzer",
+        "className": "org.apache.lucene.analysis.core.StopAnalyzer",
+        "stopwords": "REQUIRED",
+        "stemExclusion": "NONE"
+      },
+      {
+        "name": "WhitespaceAnalyzer",
+        "className": "org.apache.lucene.analysis.core.WhitespaceAnalyzer",
+        "stopwords": "NONE",
+        "stemExclusion": "NONE"
+      }
     ],
     "charFilters": [
       {"name": "htmlStrip", "className": "org.apache.lucene.analysis.charfilter.HTMLStripCharFilterFactory"},

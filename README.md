@@ -301,7 +301,11 @@ a custom one. In the builder (`b`), `Space` (or `→`, and `←` back) switches 
 changes the selected row: the preset or a component (from a list that you filter by typing; a name
 that isn't listed is taken as typed), the config directory or a parameter (`name=value`;
 blank removes it). `a` adds a filter after the selected one, `p` a parameter to the selected
-component, `d` deletes, and `K` `J` move a filter up or down. The custom chain starts as the
+component, `d` deletes, and `K` `J` move a filter up or down. A preset that takes them, such as
+`EnglishAnalyzer`, has stop words and stem exclusions of its own: words separated by spaces or
+commas, `-` for no words (no stop words at all), or `@` and a word list file (UTF-8, one word per
+line, `#` for comments); blank or `d` goes back to the analyzer's default stop words, or to no
+stem exclusions. `StopAnalyzer` needs stop words. The custom chain starts as the
 standard tokenizer and lowercase, which is what the `StandardAnalyzer` does. Resource files, such
 as `words` of `stop` or `synonyms` of `synonymGraph`, are read from the config directory first and
 then from the classpath and the analysis jars, which have Lucene's own word lists. The server builds the analyzer before

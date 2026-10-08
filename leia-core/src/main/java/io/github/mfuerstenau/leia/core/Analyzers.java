@@ -68,14 +68,15 @@ public final class Analyzers {
      * A new analyzer for {@code spec}, which the caller closes. A custom analyzer reads its resource
      * files now.
      *
-     * @throws InvalidAnalyzerException for a preset that is not listed or fails to construct, an
+     * @throws InvalidAnalyzerException for a preset that is not listed, doesn't take or misses a word
+     *     set, has a word list file that can't be read, or fails to construct, an
      *     unknown component, an unknown or bad parameter, a config directory that is not a
      *     directory, or a resource file that can't be read or parsed
      */
     public static Analyzer build(AnalyzerSpec spec) throws InvalidAnalyzerException {
         return switch (spec) {
             case AnalyzerSpec.Standard _ -> new StandardAnalyzer();
-            case AnalyzerSpec.Preset preset -> PresetAnalyzers.create(preset.className());
+            case AnalyzerSpec.Preset preset -> PresetAnalyzers.create(preset);
             case AnalyzerSpec.Custom custom -> custom(custom);
         };
     }

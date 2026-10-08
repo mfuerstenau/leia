@@ -17,7 +17,7 @@ use leia::java::find_java;
 use leia::protocol::ErrorCode;
 use leia::protocol::analysis::{
     AnalysisComponent, Analyze, AnalyzeParams, Analyzer, CustomAnalyzer, GetAnalysisComponents,
-    GetAnalysisComponentsParams, PresetAnalyzer,
+    GetAnalysisComponentsParams, PresetAnalyzer, WordSet, WordSetSupport,
 };
 use leia::protocol::commits::{GetCommit, GetCommitParams, GetCommits, GetCommitsParams};
 use leia::protocol::document::{
@@ -892,6 +892,8 @@ fn analyzes_with_analysis_jars() {
                 standard: None,
                 preset: Some(PresetAnalyzer {
                     class_name: polish.class_name.clone(),
+                    stopwords: None,
+                    stem_exclusion: None,
                 }),
                 custom: None,
             },
@@ -1009,6 +1011,8 @@ fn analyzes_without_an_open_index() {
                 standard: None,
                 preset: Some(PresetAnalyzer {
                     class_name: english.class_name.clone(),
+                    stopwords: None,
+                    stem_exclusion: None,
                 }),
                 custom: None,
             },
@@ -1023,6 +1027,55 @@ fn analyzes_without_an_open_index() {
         .map(|t| t.term.as_str())
         .collect();
     assert_eq!(terms, ["fox", "run"]);
+
+    // Its own stop words and stem exclusions (ADR 0017).
+    assert_eq!(english.stopwords, WordSetSupport::Optional);
+    assert_eq!(english.stem_exclusion, WordSetSupport::Optional);
+    let preset = server
+        .call::<Analyze>(AnalyzeParams {
+            analyzer: Analyzer {
+                standard: None,
+                preset: Some(PresetAnalyzer {
+                    class_name: english.class_name.clone(),
+                    stopwords: Some(WordSet::words(vec!["foxes".to_owned()])),
+                    stem_exclusion: Some(WordSet::words(vec!["running".to_owned()])),
+                }),
+                custom: None,
+            },
+            text: "The Foxes running".to_owned(),
+        })
+        .unwrap();
+    let terms: Vec<&str> = preset.stages[0]
+        .tokens
+        .iter()
+        .map(|t| t.term.as_str())
+        .collect();
+    assert_eq!(terms, ["the", "running"]);
+    let stop = components
+        .analyzers
+        .iter()
+        .find(|a| a.name == "StopAnalyzer")
+        .unwrap();
+    assert_eq!(stop.stopwords, WordSetSupport::Required);
+    let error = server
+        .call::<Analyze>(AnalyzeParams {
+            analyzer: Analyzer {
+                standard: None,
+                preset: Some(PresetAnalyzer {
+                    class_name: stop.class_name.clone(),
+                    stopwords: None,
+                    stem_exclusion: None,
+                }),
+                custom: None,
+            },
+            text: "x".to_owned(),
+        })
+        .unwrap_err();
+    assert!(
+        matches!(&error, CallError::Rpc(e) if e.code == ErrorCode::InvalidAnalyzer
+            && e.message.contains("StopAnalyzer needs stop words")),
+        "{error:?}"
+    );
 
     let broken = Analyzer {
         standard: None,

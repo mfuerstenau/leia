@@ -7,6 +7,8 @@ import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalysisComponent;
 import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.CustomAnalyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.PresetAnalyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.WordSet;
 import io.github.mfuerstenau.leia.server.RpcException;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -14,7 +16,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Stream;
 
-/** Builds the Lucene analyzer for an {@link Analyzer} of a request (ADR 0014, ADR 0015). */
+/** Builds the Lucene analyzer for an {@link Analyzer} of a request (ADR 0014, ADR 0015, ADR 0017). */
 public final class AnalyzerSpecs {
 
     private AnalyzerSpecs() {}
@@ -22,8 +24,8 @@ public final class AnalyzerSpecs {
     /**
      * A new Lucene analyzer for {@code analyzer}, which the caller closes.
      *
-     * @throws RpcException {@code INVALID_PARAMS} unless exactly one alternative is present, {@code
-     *     INVALID_ANALYZER} if the analyzer can't be built
+     * @throws RpcException {@code INVALID_PARAMS} unless exactly one alternative is present, of the
+     *     analyzer and of each word set, {@code INVALID_ANALYZER} if the analyzer can't be built
      */
     public static org.apache.lucene.analysis.Analyzer build(Analyzer analyzer) throws RpcException {
         try {
@@ -46,7 +48,11 @@ public final class AnalyzerSpecs {
             return new AnalyzerSpec.Standard();
         }
         if (analyzer.preset().isPresent()) {
-            return new AnalyzerSpec.Preset(analyzer.preset().orElseThrow().className());
+            PresetAnalyzer preset = analyzer.preset().orElseThrow();
+            return new AnalyzerSpec.Preset(
+                    preset.className(),
+                    wordSet("stop words", preset.stopwords()),
+                    wordSet("stem exclusions", preset.stemExclusion()));
         }
         CustomAnalyzer custom = analyzer.custom().orElseThrow();
         return new AnalyzerSpec.Custom(
@@ -54,6 +60,26 @@ public final class AnalyzerSpecs {
                 component(custom.tokenizer()),
                 components(custom.tokenFilters()),
                 configDir(custom.configDir()));
+    }
+
+    private static Optional<AnalyzerSpec.WordSet> wordSet(String what, Optional<WordSet> wordSet)
+            throws RpcException, InvalidAnalyzerException {
+        if (wordSet.isEmpty()) {
+            return Optional.empty();
+        }
+        WordSet set = wordSet.orElseThrow();
+        if (set.words().isPresent() == set.file().isPresent()) {
+            throw new RpcException(
+                    ErrorCode.INVALID_PARAMS, "Invalid params: the " + what + " need exactly one of words and file");
+        }
+        if (set.words().isPresent()) {
+            return Optional.of(new AnalyzerSpec.WordSet.Words(set.words().orElseThrow()));
+        }
+        try {
+            return Optional.of(new AnalyzerSpec.WordSet.File(Path.of(set.file().orElseThrow())));
+        } catch (InvalidPathException e) {
+            throw new InvalidAnalyzerException(what + ": " + e.getMessage(), e);
+        }
     }
 
     private static Optional<Path> configDir(Optional<String> configDir) throws InvalidAnalyzerException {

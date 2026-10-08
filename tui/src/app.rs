@@ -956,7 +956,7 @@ impl App {
 fn analysis_action(request: Option<analysis::Request>) -> Option<Action> {
     match request? {
         analysis::Request::Components => Some(Action::LoadAnalysisComponents),
-        analysis::Request::Analyze(params) => Some(Action::Analyze(params)),
+        analysis::Request::Analyze(params) => Some(Action::Analyze(*params)),
     }
 }
 

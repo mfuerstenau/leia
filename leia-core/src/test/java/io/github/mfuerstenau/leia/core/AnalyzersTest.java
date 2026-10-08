@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.mfuerstenau.leia.core.AnalysisComponents.Available;
+import io.github.mfuerstenau.leia.core.AnalysisComponents.AvailableAnalyzer;
 import io.github.mfuerstenau.leia.core.AnalyzerSpec.Component;
+import io.github.mfuerstenau.leia.core.AnalyzerSpec.WordSet;
 import io.github.mfuerstenau.leia.core.TextAnalysis.CharFilterStep;
 import io.github.mfuerstenau.leia.core.TextAnalysis.Token;
 import io.github.mfuerstenau.leia.core.TextAnalysis.TokenAttribute;
@@ -163,16 +165,40 @@ class AnalyzersTest {
 
     @Test
     void listsThePresetAnalyzersSortedBySimpleName() {
-        List<Available> analyzers = Analyzers.components().analyzers();
+        List<AvailableAnalyzer> analyzers = Analyzers.components().analyzers();
 
         assertThat(analyzers)
                 .contains(
-                        new Available("EnglishAnalyzer", "org.apache.lucene.analysis.en.EnglishAnalyzer"),
-                        new Available("StandardAnalyzer", "org.apache.lucene.analysis.standard.StandardAnalyzer"),
-                        new Available("WhitespaceAnalyzer", "org.apache.lucene.analysis.core.WhitespaceAnalyzer"));
+                        new AvailableAnalyzer(
+                                "EnglishAnalyzer",
+                                "org.apache.lucene.analysis.en.EnglishAnalyzer",
+                                WordSetSupport.OPTIONAL,
+                                WordSetSupport.OPTIONAL),
+                        new AvailableAnalyzer(
+                                "StandardAnalyzer",
+                                "org.apache.lucene.analysis.standard.StandardAnalyzer",
+                                WordSetSupport.OPTIONAL,
+                                WordSetSupport.NONE),
+                        new AvailableAnalyzer(
+                                "WhitespaceAnalyzer",
+                                "org.apache.lucene.analysis.core.WhitespaceAnalyzer",
+                                WordSetSupport.NONE,
+                                WordSetSupport.NONE),
+                        // Only a stop words constructor (ADR 0017).
+                        new AvailableAnalyzer(
+                                "StopAnalyzer",
+                                "org.apache.lucene.analysis.core.StopAnalyzer",
+                                WordSetSupport.REQUIRED,
+                                WordSetSupport.NONE),
+                        // Not a StopwordAnalyzerBase: its default stop words are getDefaultStopSet().
+                        new AvailableAnalyzer(
+                                "DutchAnalyzer",
+                                "org.apache.lucene.analysis.nl.DutchAnalyzer",
+                                WordSetSupport.OPTIONAL,
+                                WordSetSupport.OPTIONAL));
         assertThat(analyzers)
-                .extracting(Available::name)
-                // Abstract, without a no-argument constructor, or built by a builder.
+                .extracting(AvailableAnalyzer::name)
+                // Abstract, without a no-argument or stop words constructor, or built by a builder.
                 .doesNotContain(
                         "Analyzer",
                         "StopwordAnalyzerBase",
@@ -208,6 +234,70 @@ class AnalyzersTest {
     }
 
     @Test
+    void aPresetTakesStopWordsOfItsOwn() throws Exception {
+        assertThat(terms(english(Optional.of(words("running")), Optional.empty()), "The running foxes"))
+                .containsExactly("the", "fox");
+        // No stop words at all.
+        assertThat(terms(english(Optional.of(words()), Optional.empty()), "The running foxes"))
+                .containsExactly("the", "run", "fox");
+    }
+
+    @Test
+    void stemExclusionsKeepTheDefaultStopWords() throws Exception {
+        assertThat(terms(english(Optional.empty(), Optional.of(words("running"))), "The running foxes"))
+                .containsExactly("running", "fox");
+        assertThat(terms(english(Optional.of(words()), Optional.of(words("running"))), "The running foxes"))
+                .containsExactly("the", "running", "fox");
+        // From the static getDefaultStopSet(): "de" is a Dutch stop word.
+        var dutch = new AnalyzerSpec.Preset(
+                "org.apache.lucene.analysis.nl.DutchAnalyzer", Optional.empty(), Optional.of(words("fietsen")));
+        assertThat(terms(dutch, "de fietsen")).containsExactly("fietsen");
+    }
+
+    @Test
+    void stopAnalyzerNeedsStopWords() throws Exception {
+        String stop = "org.apache.lucene.analysis.core.StopAnalyzer";
+        assertThatThrownBy(() -> Analyzers.build(new AnalyzerSpec.Preset(stop)))
+                .isInstanceOf(InvalidAnalyzerException.class)
+                .hasMessage("StopAnalyzer needs stop words");
+
+        var spec = new AnalyzerSpec.Preset(stop, Optional.of(words("a")), Optional.empty());
+        assertThat(terms(spec, "A Fox")).containsExactly("fox");
+    }
+
+    @Test
+    void readsAWordListFile() throws Exception {
+        Path file = tmp.resolve("stopwords.txt");
+        Files.writeString(file, "# Lucene's word set format\n  running \n\nfoxes\n");
+
+        var spec = english(Optional.of(new WordSet.File(file)), Optional.empty());
+        assertThat(terms(spec, "The running foxes")).containsExactly("the");
+    }
+
+    @Test
+    void aWordSetThatCantBeUsedFails() throws Exception {
+        assertThatThrownBy(() -> Analyzers.build(new AnalyzerSpec.Preset(
+                        "org.apache.lucene.analysis.core.KeywordAnalyzer", Optional.of(words()), Optional.empty())))
+                .isInstanceOf(InvalidAnalyzerException.class)
+                .hasMessage("KeywordAnalyzer takes no stop words");
+        assertThatThrownBy(() -> Analyzers.build(new AnalyzerSpec.Preset(
+                        "org.apache.lucene.analysis.standard.StandardAnalyzer",
+                        Optional.empty(),
+                        Optional.of(words()))))
+                .isInstanceOf(InvalidAnalyzerException.class)
+                .hasMessage("StandardAnalyzer takes no stem exclusions");
+        Path missing = tmp.resolve("missing.txt");
+        assertThatThrownBy(() -> Analyzers.build(english(Optional.of(new WordSet.File(missing)), Optional.empty())))
+                .isInstanceOf(InvalidAnalyzerException.class)
+                .hasMessage("stop words: no file " + missing);
+        Path latin1 = tmp.resolve("latin1.txt");
+        Files.write(latin1, new byte[] {'s', (byte) 0xE9, '\n'});
+        assertThatThrownBy(() -> Analyzers.build(english(Optional.empty(), Optional.of(new WordSet.File(latin1)))))
+                .isInstanceOf(InvalidAnalyzerException.class)
+                .hasMessage("stem exclusions: " + latin1 + " is not UTF-8");
+    }
+
+    @Test
     void componentNamesIgnoreCase() throws Exception {
         var spec =
                 custom(List.of(), new Component("Whitespace", Map.of()), List.of(new Component("LowerCase", Map.of())));
@@ -215,6 +305,21 @@ class AnalyzersTest {
         TextAnalysis analysis = analyze(spec, "Fox", 100);
 
         assertThat(analysis.stages()).extracting(TokenStage::name).containsExactly("whitespace", "lowercase");
+    }
+
+    private static AnalyzerSpec.Preset english(Optional<WordSet> stopwords, Optional<WordSet> stemExclusion) {
+        return new AnalyzerSpec.Preset("org.apache.lucene.analysis.en.EnglishAnalyzer", stopwords, stemExclusion);
+    }
+
+    private static WordSet words(String... words) {
+        return new WordSet.Words(List.of(words));
+    }
+
+    /** The terms of the single stage. */
+    private static List<String> terms(AnalyzerSpec spec, String text) throws Exception {
+        return analyze(spec, text, 100).stages().getFirst().tokens().stream()
+                .map(Token::term)
+                .toList();
     }
 
     private static AnalyzerSpec.Custom custom(

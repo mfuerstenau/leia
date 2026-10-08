@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.mfuerstenau.leia.core.AnalysisComponents.Available;
+import io.github.mfuerstenau.leia.core.AnalysisComponents.AvailableAnalyzer;
 import io.github.mfuerstenau.leia.core.AnalyzerSpec.Component;
 import io.github.mfuerstenau.leia.core.TextAnalysis.Token;
 import java.io.IOException;
@@ -59,7 +60,11 @@ class AnalysisJarsTest {
         AnalysisJars.load(List.of(stempelJar()));
 
         assertThat(Analyzers.components().analyzers())
-                .contains(new Available("PolishAnalyzer", "org.apache.lucene.analysis.pl.PolishAnalyzer"));
+                .contains(new AvailableAnalyzer(
+                        "PolishAnalyzer",
+                        "org.apache.lucene.analysis.pl.PolishAnalyzer",
+                        WordSetSupport.OPTIONAL,
+                        WordSetSupport.OPTIONAL));
         TextAnalysis analysis =
                 analyze(new AnalyzerSpec.Preset("org.apache.lucene.analysis.pl.PolishAnalyzer"), "kot i pies");
         // The stop words and the stemmer table are resources of the jar.

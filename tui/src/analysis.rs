@@ -33,7 +33,7 @@ pub enum Request {
     /// [`Analysis::components_loaded`] or [`Analysis::components_failed`].
     Components,
     /// Analyze, and report back with [`Analysis::analyzed`] or [`Analysis::analyze_failed`].
-    Analyze(AnalyzeParams),
+    Analyze(Box<AnalyzeParams>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -179,10 +179,10 @@ impl Analysis {
 
     /// The analysis of the text line with `settings`.
     fn analyze(&self, settings: &AnalyzerSettings) -> Option<Request> {
-        Some(Request::Analyze(AnalyzeParams {
+        Some(Request::Analyze(Box::new(AnalyzeParams {
             analyzer: settings.analyzer(),
             text: self.input.text().to_owned(),
-        }))
+        })))
     }
 
     /// Edits the text line while it is open (Enter analyzes, Esc closes it), or the analyzer
@@ -735,10 +735,10 @@ mod tests {
         typed(&mut analysis, "<b>The</b> Fox");
         assert_eq!(
             press(&mut analysis, KeyCode::Enter),
-            Some(Request::Analyze(AnalyzeParams {
+            Some(Request::Analyze(Box::new(AnalyzeParams {
                 analyzer: Analyzer::default(),
                 text: "<b>The</b> Fox".to_owned(),
-            }))
+            })))
         );
         assert!(!analysis.prompting());
         analysis.analyzed("<b>The</b> Fox".to_owned(), result());
@@ -820,10 +820,10 @@ mod tests {
         let mut analysis = Analysis::new();
         assert_eq!(
             analysis.analyze_value("doc 3 · body".to_owned(), "The Fox"),
-            Some(Request::Analyze(AnalyzeParams {
+            Some(Request::Analyze(Box::new(AnalyzeParams {
                 analyzer: Analyzer::default(),
                 text: "The Fox".to_owned(),
-            }))
+            })))
         );
         analysis.analyzed("The Fox".to_owned(), result());
         assert!(render(&mut analysis, 100).contains("Text · doc 3 · body"));

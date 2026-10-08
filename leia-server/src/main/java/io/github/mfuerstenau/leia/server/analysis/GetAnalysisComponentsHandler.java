@@ -8,13 +8,14 @@ import io.github.mfuerstenau.leia.protocol.analysis.AvailableAnalyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.AvailableComponent;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsParams;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsResult;
+import io.github.mfuerstenau.leia.protocol.analysis.WordSetSupport;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import jakarta.inject.Inject;
 import java.util.List;
 
 /**
- * {@code getAnalysisComponents}: the preset analyzers (ADR 0015), and what a custom analyzer can be
- * built from (ADR 0014).
+ * {@code getAnalysisComponents}: the preset analyzers and the word sets they take (ADR 0015, ADR
+ * 0017), and what a custom analyzer can be built from (ADR 0014).
  */
 public final class GetAnalysisComponentsHandler
         implements MethodHandler<GetAnalysisComponentsParams, GetAnalysisComponentsResult> {
@@ -32,11 +33,23 @@ public final class GetAnalysisComponentsHandler
         AnalysisComponents components = Analyzers.components();
         return new GetAnalysisComponentsResult(
                 components.analyzers().stream()
-                        .map(analyzer -> new AvailableAnalyzer(analyzer.name(), analyzer.className()))
+                        .map(analyzer -> new AvailableAnalyzer(
+                                analyzer.name(),
+                                analyzer.className(),
+                                support(analyzer.stopwords()),
+                                support(analyzer.stemExclusion())))
                         .toList(),
                 available(components.charFilters()),
                 available(components.tokenizers()),
                 available(components.tokenFilters()));
+    }
+
+    private static WordSetSupport support(io.github.mfuerstenau.leia.core.WordSetSupport support) {
+        return switch (support) {
+            case NONE -> WordSetSupport.NONE;
+            case OPTIONAL -> WordSetSupport.OPTIONAL;
+            case REQUIRED -> WordSetSupport.REQUIRED;
+        };
     }
 
     private static List<AvailableComponent> available(List<AnalysisComponents.Available> components) {
