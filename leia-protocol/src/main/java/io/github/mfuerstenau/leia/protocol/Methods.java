@@ -152,8 +152,9 @@ public final class Methods {
     /**
      * One commit of the open index's directory whole: its segments with their details, and its files
      * (ADR 0009). Fails with {@code NO_INDEX_OPEN}, {@code COMMIT_NOT_FOUND} if the directory has no
-     * {@code segments_N} of that generation, or {@code UNSUPPORTED_INDEX_FORMAT}, {@code CORRUPT_INDEX}
-     * or {@code INDEX_NOT_READABLE} if the commit can't be read.
+     * {@code segments_N} of that generation, {@code MISSING_CODEC} if it names a codec that isn't
+     * loaded, or {@code UNSUPPORTED_INDEX_FORMAT}, {@code CORRUPT_INDEX} or {@code INDEX_NOT_READABLE}
+     * if the commit can't be read.
      */
     public static final RpcMethod<GetCommitParams, GetCommitResult> GET_COMMIT =
             new RpcMethod<>("getCommit", GetCommitParams.class, GetCommitResult.class);

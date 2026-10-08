@@ -42,10 +42,12 @@ pub enum ErrorCode {
     /// The analyzer can't be built: an unknown component, an unknown or bad parameter, a config
     /// directory that is not a directory, or a resource file that can't be read or parsed.
     InvalidAnalyzer,
+    /// The index names a codec or format that isn't loaded, and that a jar could add (ADR 0018).
+    MissingCodec,
 }
 
 impl ErrorCode {
-    pub const ALL: [ErrorCode; 19] = [
+    pub const ALL: [ErrorCode; 20] = [
         ErrorCode::ParseError,
         ErrorCode::InvalidRequest,
         ErrorCode::MethodNotFound,
@@ -65,6 +67,7 @@ impl ErrorCode {
         ErrorCode::CommitNotFound,
         ErrorCode::InvalidQuery,
         ErrorCode::InvalidAnalyzer,
+        ErrorCode::MissingCodec,
     ];
 
     pub const fn code(self) -> i32 {
@@ -88,6 +91,7 @@ impl ErrorCode {
             ErrorCode::CommitNotFound => -32011,
             ErrorCode::InvalidQuery => -32012,
             ErrorCode::InvalidAnalyzer => -32013,
+            ErrorCode::MissingCodec => -32014,
         }
     }
 
@@ -113,6 +117,7 @@ impl ErrorCode {
             ErrorCode::CommitNotFound => "COMMIT_NOT_FOUND",
             ErrorCode::InvalidQuery => "INVALID_QUERY",
             ErrorCode::InvalidAnalyzer => "INVALID_ANALYZER",
+            ErrorCode::MissingCodec => "MISSING_CODEC",
         }
     }
 }

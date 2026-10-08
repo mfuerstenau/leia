@@ -1,6 +1,6 @@
 package io.github.mfuerstenau.leia.core;
 
-import static io.github.mfuerstenau.leia.core.TestIndexes.legacyIndex;
+import static io.github.mfuerstenau.leia.core.TestIndexes.testIndex;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
@@ -21,7 +21,9 @@ import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.NoDeletionPolicy;
 import org.apache.lucene.index.NoMergePolicy;
 import org.apache.lucene.index.Term;
+import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
+import org.apache.lucene.store.NoLockFactory;
 import org.apache.lucene.util.Version;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -163,6 +165,22 @@ class CommitsTest {
     }
 
     @Test
+    void aCommitWithACodecThatIsNotLoadedIsUnreadable() throws Exception {
+        try (Directory directory = FSDirectory.open(testIndex("custom-codec"), NoLockFactory.INSTANCE)) {
+            CommitList list = CommitReader.commits(directory, 1);
+
+            assertThat(list.commits()).isEmpty();
+            assertThat(list.unreadable()).singleElement().satisfies(unreadable -> {
+                assertThat(unreadable.segmentsFile()).isEqualTo("segments_1");
+                assertThat(unreadable.error())
+                        .isInstanceOf(MissingCodecException.class)
+                        .hasMessage("the index needs the codec 'LeiaTest', which isn't loaded");
+            });
+            assertThatThrownBy(() -> CommitReader.commit(directory, 1, 1)).isInstanceOf(MissingCodecException.class);
+        }
+    }
+
+    @Test
     void anUnknownGenerationIsNotFound() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             assertThat(index.commit(7)).isEmpty();
@@ -173,7 +191,7 @@ class CommitsTest {
 
     @Test
     void readsTheCommitOfALucene9Index() throws Exception {
-        try (ReadOnlyIndex index = ReadOnlyIndex.open(legacyIndex("lucene9"))) {
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(testIndex("lucene9"))) {
             CommitInfo current = index.commits().commits().getFirst();
             assertThat(current.current()).isTrue();
             assertThat(current.luceneVersion().major).isEqualTo(9);

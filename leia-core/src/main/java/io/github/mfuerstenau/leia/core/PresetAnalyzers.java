@@ -43,7 +43,7 @@ import org.apache.lucene.analysis.WordlistLoader;
 /**
  * The analyzers that can be created by class name (ADR 0015): the public, concrete {@link Analyzer}
  * classes with a public no-argument or stop words constructor in the jars that analysis comes from,
- * the analysis jars included (ADR 0016). By Lucene's convention, a constructor that takes one
+ * the extension jars included (ADR 0016). By Lucene's convention, a constructor that takes one
  * {@link CharArraySet} takes the stop words, and one that takes two takes the stop words and the
  * stem exclusions (ADR 0017).
  */
@@ -96,11 +96,11 @@ final class PresetAnalyzers {
         }
     }
 
-    /** Found when first needed, and again once analysis jars have been loaded. */
+    /** Found when first needed, and again once extension jars have been loaded. */
     private static Scan scan;
 
     private static synchronized Map<String, Preset> presets() {
-        ClassLoader loader = AnalysisJars.classLoader();
+        ClassLoader loader = ExtensionJars.classLoader();
         if (scan == null || scan.loader() != loader) {
             scan = new Scan(loader, scan(loader));
         }
@@ -235,7 +235,7 @@ final class PresetAnalyzers {
 
     /**
      * The jar or directory of Lucene's {@code Analyzer} and of every analysis factory, and the
-     * analysis jars.
+     * extension jars.
      */
     private static Set<Path> locations() {
         Stream<Class<?>> factories = Stream.of(
@@ -246,7 +246,7 @@ final class PresetAnalyzers {
         Set<Path> locations = new LinkedHashSet<>();
         Stream.concat(Stream.of(Analyzer.class), factories)
                 .forEach(type -> location(type).ifPresent(locations::add));
-        locations.addAll(AnalysisJars.jars());
+        locations.addAll(ExtensionJars.jars());
         return locations;
     }
 

@@ -18,11 +18,11 @@ pub struct Cli {
     #[arg(short, long, value_name = "PATH")]
     pub java: Option<PathBuf>,
 
-    /// A jar with analysis components of its own (char filters, tokenizers, token filters,
-    /// analyzers), such as one of Lucene's analysis modules, or a directory of such jars.
-    /// Can be repeated.
-    #[arg(long = "analysis-jar", value_name = "PATH")]
-    pub analysis_jars: Vec<PathBuf>,
+    /// A jar with analysis components (char filters, tokenizers, token filters, analyzers),
+    /// codecs or formats of its own, such as one of Lucene's analysis modules, or a directory of
+    /// such jars. Can be repeated.
+    #[arg(long = "jar", value_name = "PATH")]
+    pub jars: Vec<PathBuf>,
 
     /// Lucene index directory to open.
     pub index_path: Option<PathBuf>,
@@ -61,25 +61,15 @@ mod tests {
         let cli = Cli::try_parse_from(["leia"]).unwrap();
         assert!(!cli.version);
         assert_eq!(cli.java, None);
-        assert!(cli.analysis_jars.is_empty());
+        assert!(cli.jars.is_empty());
         assert_eq!(cli.index_path, None);
     }
 
     #[test]
-    fn analysis_jars_can_be_repeated() {
-        let cli = Cli::try_parse_from([
-            "leia",
-            "--analysis-jar",
-            "icu",
-            "--analysis-jar",
-            "my.jar",
-            "/data/index",
-        ])
-        .unwrap();
-        assert_eq!(
-            cli.analysis_jars,
-            [PathBuf::from("icu"), PathBuf::from("my.jar")]
-        );
+    fn jars_can_be_repeated() {
+        let cli = Cli::try_parse_from(["leia", "--jar", "icu", "--jar", "my.jar", "/data/index"])
+            .unwrap();
+        assert_eq!(cli.jars, [PathBuf::from("icu"), PathBuf::from("my.jar")]);
         assert_eq!(cli.index_path, Some(PathBuf::from("/data/index")));
     }
 }

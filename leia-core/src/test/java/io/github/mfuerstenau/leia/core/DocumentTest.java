@@ -1,6 +1,6 @@
 package io.github.mfuerstenau.leia.core;
 
-import static io.github.mfuerstenau.leia.core.TestIndexes.legacyIndex;
+import static io.github.mfuerstenau.leia.core.TestIndexes.testIndex;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -262,7 +262,7 @@ class DocumentTest {
 
     @Test
     void readsDocumentsOfALucene9Index() throws Exception {
-        try (ReadOnlyIndex index = ReadOnlyIndex.open(legacyIndex("lucene9"))) {
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(testIndex("lucene9"))) {
             // "document number N" for N = 1..3; document 2 is deleted.
             IndexDocument doc = index.document(1);
 

@@ -43,7 +43,7 @@ final class CommitReader {
                 continue;
             }
             try {
-                commits.add(info(SegmentInfos.readCommit(directory, file), currentGeneration));
+                commits.add(info(readCommit(directory, file), currentGeneration));
             } catch (IOException e) {
                 unreadable.add(new CommitList.Unreadable(file, e));
             }
@@ -62,7 +62,7 @@ final class CommitReader {
         if (!Arrays.asList(directory.listAll()).contains(segmentsFile)) {
             return Optional.empty();
         }
-        SegmentInfos infos = SegmentInfos.readCommit(directory, segmentsFile);
+        SegmentInfos infos = readCommit(directory, segmentsFile);
 
         Map<String, String> segmentOfFile = new HashMap<>();
         for (SegmentCommitInfo segment : infos) {
@@ -85,6 +85,17 @@ final class CommitReader {
         }
         return Optional.of(
                 new CommitDetails(info(infos, currentGeneration), List.copyOf(segments), List.copyOf(files)));
+    }
+
+    /**
+     * @throws MissingCodecException if a segment's codec isn't loaded (ADR 0018)
+     */
+    private static SegmentInfos readCommit(Directory directory, String segmentsFile) throws IOException {
+        try {
+            return SegmentInfos.readCommit(directory, segmentsFile);
+        } catch (IllegalArgumentException e) {
+            throw MissingCodecException.of(e).orElseThrow(() -> e);
+        }
     }
 
     private static CommitInfo info(SegmentInfos infos, long currentGeneration) {

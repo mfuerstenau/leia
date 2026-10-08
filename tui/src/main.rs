@@ -13,6 +13,7 @@ use leia::cli::Cli;
 use leia::client::CallError;
 use leia::clipboard::osc52;
 use leia::java::find_java;
+use leia::protocol::ErrorCode;
 use leia::protocol::analysis::{Analyze, GetAnalysisComponents, GetAnalysisComponentsParams};
 use leia::protocol::commits::{GetCommit, GetCommitParams, GetCommits, GetCommitsParams};
 use leia::protocol::document::{
@@ -29,9 +30,7 @@ use leia::protocol::terms::{
     GetTermsParams, StartFieldTermScan, StartFieldTermScanParams,
 };
 use leia::protocol::version::{Version, VersionParams, VersionResult};
-use leia::server::{
-    SERVER_JAR_ENV, SHUTDOWN_TIMEOUT, Server, check_analysis_jars, find_server_jar,
-};
+use leia::server::{SERVER_JAR_ENV, SHUTDOWN_TIMEOUT, Server, check_jars, find_server_jar};
 use leia::terms::{POSTINGS_PAGE, TERMS_PAGE};
 use ratatui::DefaultTerminal;
 use ratatui::crossterm::event::{self, Event, KeyEventKind};
@@ -42,11 +41,11 @@ fn main() -> Result<()> {
         return print_version(&cli);
     }
     let index_path = cli.index_path.as_deref().map(utf8_path).transpose()?;
-    check_analysis_jars(&cli.analysis_jars)?;
+    check_jars(&cli.jars)?;
 
     // Start the server before taking over the terminal, so that startup errors are printed
     // normally.
-    let (mut server, version) = start_server(&cli, &cli.analysis_jars)?;
+    let (mut server, version) = start_server(&cli, &cli.jars)?;
     let mut app = App::new(version, env::home_dir());
 
     // ratatui::run restores the terminal on exit and on panic; dropping the server on a panic
@@ -77,7 +76,7 @@ fn utf8_path(path: &Path) -> Result<String> {
 }
 
 /// `--version`: leia's own line comes first, so it is printed even if the server can't start.
-/// The analysis jars don't matter to it, so the server starts without them.
+/// The jars don't matter to it, so the server starts without them.
 fn print_version(cli: &Cli) -> Result<()> {
     let mut out = io::stdout().lock();
     writeln!(out, "{}", LEIA.line())?;
@@ -91,20 +90,20 @@ fn print_version(cli: &Cli) -> Result<()> {
     Ok(())
 }
 
-/// Finds the JVM and the jar, starts the server with the analysis jars and checks that it
+/// Finds the JVM and the jar, starts the server with the jars of `--jar` and checks that it
 /// answers `version`.
-fn start_server(cli: &Cli, analysis_jars: &[PathBuf]) -> Result<(Server, VersionResult)> {
+fn start_server(cli: &Cli, jars: &[PathBuf]) -> Result<(Server, VersionResult)> {
     let java = find_java(cli.java.as_deref(), env::var_os("JAVA_HOME").as_deref())?;
     let jar = find_server_jar(env::var_os(SERVER_JAR_ENV).as_deref())?;
-    let mut server = Server::spawn(&java.executable, &jar, analysis_jars)
+    let mut server = Server::spawn(&java.executable, &jar, jars)
         .with_context(|| format!("no usable JVM: {java}; choose one with --java or JAVA_HOME"))?;
     let version = server.call::<Version>(VersionParams {}).with_context(|| {
-        if analysis_jars.is_empty() {
+        if jars.is_empty() {
             format!("leia-server did not start with {java}; it needs Java 25 or newer (see --java)")
         } else {
             format!(
                 "leia-server did not start with {java}; it needs Java 25 or newer (see --java) \
-                 and analysis jars it can load (see --analysis-jar)"
+                 and jars it can load (see --jar)"
             )
         }
     })?;
@@ -374,7 +373,7 @@ fn open_index(server: &mut Server, app: &mut App, path: &str) -> Result<Option<A
     let opened = server.call::<OpenIndex>(OpenIndexParams {
         path: path.to_owned(),
     });
-    if let Err(error) = answered(opened)? {
+    if let Err(error) = answered(opened.map_err(with_jar_hint))? {
         app.open_failed(error);
         return Ok(None);
     }
@@ -390,6 +389,19 @@ fn open_index(server: &mut Server, app: &mut App, path: &str) -> Result<Option<A
     }
 }
 
+/// A codec or format that isn't loaded can come from a jar that leia is started with (ADR 0018).
+fn with_jar_hint(error: CallError) -> CallError {
+    match error {
+        CallError::Rpc(mut error) if error.code == ErrorCode::MissingCodec => {
+            error
+                .message
+                .push_str("; start leia with --jar and a jar that has it");
+            CallError::Rpc(error)
+        }
+        error => error,
+    }
+}
+
 /// Splits the outcome of a call: an error the server answered with becomes a message for the UI,
 /// a transport error is returned as an error.
 fn answered<T>(result: Result<T, CallError>) -> Result<Result<T, String>> {
@@ -397,5 +409,40 @@ fn answered<T>(result: Result<T, CallError>) -> Result<Result<T, String>> {
         Ok(value) => Ok(Ok(value)),
         Err(error @ CallError::Rpc(_)) => Ok(Err(error.to_string())),
         Err(CallError::Transport(error)) => Err(error),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use leia::protocol::RpcError;
+
+    use super::*;
+
+    fn rpc_error(code: ErrorCode, message: &str) -> CallError {
+        CallError::Rpc(RpcError {
+            code,
+            message: message.to_owned(),
+        })
+    }
+
+    #[test]
+    fn a_missing_codec_hints_at_jar() {
+        let error = with_jar_hint(rpc_error(
+            ErrorCode::MissingCodec,
+            "Missing codec: the index needs the codec 'X', which isn't loaded",
+        ));
+
+        assert_eq!(
+            error.to_string(),
+            "Missing codec: the index needs the codec 'X', which isn't loaded; start leia with \
+             --jar and a jar that has it (MISSING_CODEC -32014)"
+        );
+    }
+
+    #[test]
+    fn other_errors_get_no_hint() {
+        let error = with_jar_hint(rpc_error(ErrorCode::CorruptIndex, "Corrupt index: x"));
+
+        assert_eq!(error.to_string(), "Corrupt index: x (CORRUPT_INDEX -32003)");
     }
 }

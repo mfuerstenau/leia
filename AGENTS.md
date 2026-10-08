@@ -71,8 +71,8 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
 cargo test -- --ignored   # against the real server: needs LEIA_SERVER_JAR, a Java 25 JAVA_HOME, the
-                          # Lucene 9 test index and the test analysis jars from ./gradlew build
-                          # (leia-core/build/test-indexes/, leia-core/build/test-analysis-jars/)
+                          # test indexes, the test analysis jars and the test codec jar from ./gradlew build
+                          # (leia-core/build/test-indexes/, test-analysis-jars/, test-codec-jar/)
 cargo build --release
 ```
 
@@ -84,7 +84,7 @@ To talk to the server by hand: `jq -c . protocol/fixtures/version.request.json |
 
 - `leia [OPTIONS] [INDEX_PATH]`
 - `-j, --java <PATH>`: the JVM, given as a `java` executable or a JDK/JRE directory. Default: `$JAVA_HOME/bin/java`, then `java` on `PATH`.
-- `--analysis-jar <PATH>` (repeatable): a jar with analysis components of its own, or a directory of such jars. The TUI checks that the path exists and passes it to the server as `--analysis-jar <PATH>`, which loads it at startup (ADR 0016). `--version` starts the server without them.
+- `--jar <PATH>` (repeatable): a jar with analysis components, codecs or formats of its own, or a directory of such jars. The TUI checks that the path exists and passes it to the server as `--jar <PATH>`, which loads it at startup (ADR 0016, ADR 0018). `--version` starts the server without them.
 - `leia-server.jar` is looked up next to the executable (symlinks resolved). For development, `LEIA_SERVER_JAR=<path>` overrides it.
 - `--version` prints the name, version and build of leia, plus the Java version actually in use. The Java version comes from the server, which needs a `version` RPC method.
 

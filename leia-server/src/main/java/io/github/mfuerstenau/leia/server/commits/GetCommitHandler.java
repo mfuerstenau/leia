@@ -1,6 +1,7 @@
 package io.github.mfuerstenau.leia.server.commits;
 
 import io.github.mfuerstenau.leia.core.CommitDetails;
+import io.github.mfuerstenau.leia.core.MissingCodecException;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
@@ -46,6 +47,11 @@ public final class GetCommitHandler implements MethodHandler<GetCommitParams, Ge
             details = index.commit(generation)
                     .orElseThrow(() -> new RpcException(
                             ErrorCode.COMMIT_NOT_FOUND, "No commit of generation " + generation + " in the index"));
+        } catch (MissingCodecException e) {
+            throw new RpcException(
+                    e.isLucenes() ? ErrorCode.UNSUPPORTED_INDEX_FORMAT : ErrorCode.MISSING_CODEC,
+                    "Cannot read the commit of generation " + generation + ": " + e.getMessage(),
+                    e);
         } catch (IndexFormatTooOldException | IndexFormatTooNewException e) {
             throw new RpcException(
                     ErrorCode.UNSUPPORTED_INDEX_FORMAT,

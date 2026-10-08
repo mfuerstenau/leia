@@ -96,16 +96,16 @@ class LeiaServerProcessTest {
     }
 
     @Test
-    void exitsWithStatus1IfTheAnalysisJarsCantBeLoaded() throws Exception {
+    void exitsWithStatus1IfTheExtensionJarsCantBeLoaded() throws Exception {
         Path missing = tmp.resolve("missing.jar");
-        Process process = server("--analysis-jar", missing.toString());
+        Process process = server("--jar", missing.toString());
         process.getOutputStream().close();
 
         assertThat(process.waitFor(30, TimeUnit.SECONDS)).isTrue();
         String stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
         assertThat(process.exitValue()).as(stderr).isEqualTo(1);
         assertThat(stderr.strip().lines().toList().getLast())
-                .endsWith("Cannot load the analysis jars: no such jar or directory: " + missing);
+                .endsWith("Cannot load the jars: no such jar or directory: " + missing);
         assertThat(process.getInputStream().readAllBytes()).isEmpty();
     }
 

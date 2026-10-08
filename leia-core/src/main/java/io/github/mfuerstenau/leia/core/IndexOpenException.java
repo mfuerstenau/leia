@@ -18,7 +18,9 @@ public final class IndexOpenException extends Exception {
         /** The index is damaged: a checksum mismatch, a truncated or missing file. */
         CORRUPT,
         /** The index can't be read: no permission, or another I/O error. */
-        NOT_READABLE
+        NOT_READABLE,
+        /** The index names a codec or format that isn't loaded, and that a jar could add (ADR 0018). */
+        MISSING_CODEC
     }
 
     private final Reason reason;

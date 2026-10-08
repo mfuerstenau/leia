@@ -1,5 +1,5 @@
-//! Talks to the real `leia-server.jar`. Needs a built jar, Java 25, and the test indexes and
-//! analysis jars that `./gradlew build` writes to `leia-core/build/`:
+//! Talks to the real `leia-server.jar`. Needs a built jar, Java 25, and the test indexes,
+//! analysis jars and codec jar that `./gradlew build` writes to `leia-core/build/`:
 //!
 //! ```sh
 //! ./gradlew :leia-server:shadowJar
@@ -48,10 +48,10 @@ fn start() -> Server {
     start_with(&[])
 }
 
-fn start_with(analysis_jars: &[PathBuf]) -> Server {
+fn start_with(jars: &[PathBuf]) -> Server {
     let java = find_java(None, env::var_os("JAVA_HOME").as_deref()).unwrap();
     let jar = find_server_jar(env::var_os(SERVER_JAR_ENV).as_deref()).unwrap();
-    Server::spawn(&java.executable, &jar, analysis_jars).unwrap()
+    Server::spawn(&java.executable, &jar, jars).unwrap()
 }
 
 #[test]
@@ -99,15 +99,78 @@ fn test_analysis_jars(module: &str) -> PathBuf {
 
 /// A Lucene 9 index written by `./gradlew :leia-core:lucene9TestIndex` (also part of `build`).
 fn lucene9_index() -> String {
-    let dir = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../leia-core/build/test-indexes/lucene9"
-    );
+    test_index("lucene9", "lucene9TestIndex")
+}
+
+/// A test index in `leia-core/build/test-indexes/`, written by the Gradle task `task`.
+fn test_index(name: &str, task: &str) -> String {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../leia-core/build/test-indexes")
+        .join(name);
     std::fs::canonicalize(dir)
-        .expect("run ./gradlew :leia-core:lucene9TestIndex first")
+        .unwrap_or_else(|_| panic!("run ./gradlew :leia-core:{task} first"))
         .to_str()
         .unwrap()
         .to_owned()
+}
+
+/// The jar with the codec `LeiaTest` and a postings, doc values and KNN vectors format, written
+/// by `./gradlew :leia-core:testCodecJar` (ADR 0018). The indexes `custom-codec` and
+/// `custom-formats` need it.
+fn test_codec_jar() -> PathBuf {
+    let jar = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../leia-core/build/test-codec-jar/leia-test-codec.jar");
+    std::fs::canonicalize(jar).expect("run ./gradlew :leia-core:testCodecJar first")
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn reports_a_missing_codec() {
+    let mut server = start();
+
+    for (name, missing) in [
+        ("custom-codec", "the codec 'LeiaTest'"),
+        ("custom-formats", "the postings format 'LeiaTestPostings'"),
+    ] {
+        let error = server
+            .call::<OpenIndex>(OpenIndexParams {
+                path: test_index(name, "testCodecIndexes"),
+            })
+            .unwrap_err();
+
+        let CallError::Rpc(error) = error else {
+            panic!("expected an RPC error, got {error:?}");
+        };
+        assert_eq!(error.code, ErrorCode::MissingCodec);
+        assert_eq!(
+            error.message,
+            format!("Missing codec: the index needs {missing}, which isn't loaded")
+        );
+    }
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn opens_indexes_with_codecs_from_a_jar() {
+    let mut server = start_with(&[test_codec_jar()]);
+
+    for name in ["custom-codec", "custom-formats"] {
+        let index = server
+            .call::<OpenIndex>(OpenIndexParams {
+                path: test_index(name, "testCodecIndexes"),
+            })
+            .unwrap();
+        assert_eq!(index.max_doc, 3, "{name}");
+
+        let document = server
+            .call::<GetDocument>(GetDocumentParams { doc_id: 2 })
+            .unwrap();
+        let rank = document.fields.iter().find(|f| f.name == "rank").unwrap();
+        assert!(rank.doc_values.is_some(), "{name}: {rank:?}");
+        let commits = server.call::<GetCommits>(GetCommitsParams {}).unwrap();
+        assert_eq!(commits.commits.len(), 1, "{name}");
+    }
+    assert!(server.shutdown(SHUTDOWN_TIMEOUT).unwrap().success());
 }
 
 #[test]
@@ -930,7 +993,7 @@ fn a_jar_without_its_dependencies_stops_the_server() {
 
     let message = format!("{error:#}");
     assert!(
-        message.contains("Cannot load the analysis jars: cannot load the analysis factories")
+        message.contains("Cannot load the jars: cannot load the analysis factories")
             && message.contains("org/apache/commons/codec/"),
         "{message}"
     );

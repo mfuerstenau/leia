@@ -54,24 +54,21 @@ pub fn find_server_jar(override_path: Option<&OsStr>) -> Result<PathBuf> {
     Ok(jar)
 }
 
-/// Checks that each analysis jar or directory exists; the server checks the rest (ADR 0016).
-pub fn check_analysis_jars(paths: &[PathBuf]) -> Result<()> {
+/// Checks that each jar or directory exists; the server checks the rest (ADR 0016, ADR 0018).
+pub fn check_jars(paths: &[PathBuf]) -> Result<()> {
     for path in paths {
         if !path.exists() {
-            bail!(
-                "--analysis-jar {}: no such jar or directory",
-                path.display()
-            );
+            bail!("--jar {}: no such jar or directory", path.display());
         }
     }
     Ok(())
 }
 
 /// The server's arguments after `java`.
-fn server_args(jar: &Path, analysis_jars: &[PathBuf]) -> Vec<OsString> {
+fn server_args(jar: &Path, jars: &[PathBuf]) -> Vec<OsString> {
     let mut args = vec![OsString::from("-jar"), jar.into()];
-    for path in analysis_jars {
-        args.push("--analysis-jar".into());
+    for path in jars {
+        args.push("--jar".into());
         args.push(path.into());
     }
     args
@@ -88,11 +85,11 @@ pub struct Server {
 }
 
 impl Server {
-    /// Starts `<java> -jar <jar>`, with an `--analysis-jar` argument for each of `analysis_jars`
-    /// (ADR 0016).
-    pub fn spawn(java: &Path, jar: &Path, analysis_jars: &[PathBuf]) -> Result<Self> {
+    /// Starts `<java> -jar <jar>`, with a `--jar` argument for each of `jars` (ADR 0016,
+    /// ADR 0018).
+    pub fn spawn(java: &Path, jar: &Path, jars: &[PathBuf]) -> Result<Self> {
         let mut command = Command::new(java);
-        command.args(server_args(jar, analysis_jars));
+        command.args(server_args(jar, jars));
         Self::from_command(command).with_context(|| format!("cannot start {}", java.display()))
     }
 
@@ -263,7 +260,7 @@ mod tests {
     }
 
     #[test]
-    fn analysis_jars_follow_the_jar() {
+    fn jars_follow_the_jar() {
         let args = server_args(
             Path::new("leia-server.jar"),
             &[PathBuf::from("icu"), PathBuf::from("my.jar")],
@@ -271,26 +268,19 @@ mod tests {
 
         assert_eq!(
             args,
-            [
-                "-jar",
-                "leia-server.jar",
-                "--analysis-jar",
-                "icu",
-                "--analysis-jar",
-                "my.jar"
-            ]
+            ["-jar", "leia-server.jar", "--jar", "icu", "--jar", "my.jar"]
         );
         assert_eq!(server_args(Path::new("s.jar"), &[]), ["-jar", "s.jar"]);
     }
 
     #[test]
-    fn analysis_jars_must_exist() {
+    fn jars_must_exist() {
         let dir = TempDir::new();
         let jar = dir.path().join("my.jar");
         fs::write(&jar, "").unwrap();
 
-        assert!(check_analysis_jars(&[dir.path().to_path_buf(), jar.clone()]).is_ok());
-        let error = check_analysis_jars(&[jar, dir.path().join("missing.jar")]).unwrap_err();
+        assert!(check_jars(&[dir.path().to_path_buf(), jar.clone()]).is_ok());
+        let error = check_jars(&[jar, dir.path().join("missing.jar")]).unwrap_err();
         assert!(
             error
                 .to_string()

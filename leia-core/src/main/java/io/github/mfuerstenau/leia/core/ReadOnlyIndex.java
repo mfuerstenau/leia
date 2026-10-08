@@ -90,6 +90,10 @@ public final class ReadOnlyIndex implements Closeable {
             throw translate(dir, e);
         } catch (RuntimeException e) {
             IOUtils.closeWhileHandlingException(reader, directory);
+            Optional<MissingCodecException> missing = MissingCodecException.of(e);
+            if (missing.isPresent()) {
+                throw translate(dir, missing.get());
+            }
             throw e;
         }
     }
@@ -116,6 +120,11 @@ public final class ReadOnlyIndex implements Closeable {
                     e);
         }
         return switch (e) {
+            case MissingCodecException missing
+            when missing.isLucenes() ->
+                new IndexOpenException(Reason.UNSUPPORTED_FORMAT, "Unsupported index format: " + e.getMessage(), e);
+            case MissingCodecException _ ->
+                new IndexOpenException(Reason.MISSING_CODEC, "Missing codec: " + e.getMessage(), e);
             case IndexNotFoundException _ ->
                 new IndexOpenException(Reason.NOT_AN_INDEX, "Not a Lucene index (no segments_N file): " + dir, e);
             case IndexFormatTooOldException _, IndexFormatTooNewException _ ->
@@ -409,7 +418,8 @@ public final class ReadOnlyIndex implements Closeable {
      * One commit of the index directory with its segments and files, read from the directory again.
      *
      * @return the commit; empty if the directory has no commit of that generation
-     * @throws IOException if the commit can't be read
+     * @throws IOException if the commit can't be read; a {@link MissingCodecException} if it names a codec
+     *     that isn't loaded
      */
     public Optional<CommitDetails> commit(long generation) throws IOException {
         return CommitReader.commit(directory, generation, commit.getGeneration());

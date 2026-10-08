@@ -1,6 +1,6 @@
 # ADR 0016 — Analysis jars
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by ADR 0018 (`--analysis-jar` is now `--jar`, and the jars also add codecs and formats)
 - **Date:** 2026-10-07
 
 ## Context

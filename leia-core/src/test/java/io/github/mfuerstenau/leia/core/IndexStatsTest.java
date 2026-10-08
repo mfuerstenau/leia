@@ -1,6 +1,6 @@
 package io.github.mfuerstenau.leia.core;
 
-import static io.github.mfuerstenau.leia.core.TestIndexes.legacyIndex;
+import static io.github.mfuerstenau.leia.core.TestIndexes.testIndex;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
 
@@ -101,7 +101,7 @@ class IndexStatsTest {
 
     @Test
     void reportsLucene9Index() throws Exception {
-        try (ReadOnlyIndex index = ReadOnlyIndex.open(legacyIndex("lucene9"))) {
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(testIndex("lucene9"))) {
             IndexStats stats = index.stats();
 
             assertThat(stats.generation()).isEqualTo(2);

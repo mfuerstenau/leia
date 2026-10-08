@@ -56,8 +56,9 @@ pub struct Commit {
 
 /// `getCommit`: one commit of the open index's directory whole: its segments with their details,
 /// and its files. Fails with `NO_INDEX_OPEN`, `COMMIT_NOT_FOUND` if the directory has no
-/// `segments_N` of that generation, or `UNSUPPORTED_INDEX_FORMAT`, `CORRUPT_INDEX` or
-/// `INDEX_NOT_READABLE` if the commit can't be read.
+/// `segments_N` of that generation, `MISSING_CODEC` if it names a codec that isn't loaded, or
+/// `UNSUPPORTED_INDEX_FORMAT`, `CORRUPT_INDEX` or `INDEX_NOT_READABLE` if the commit can't be
+/// read.
 pub enum GetCommit {}
 
 impl RpcMethod for GetCommit {

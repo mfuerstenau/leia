@@ -1,6 +1,6 @@
 package io.github.mfuerstenau.leia.core;
 
-import static io.github.mfuerstenau.leia.core.TestIndexes.legacyIndex;
+import static io.github.mfuerstenau.leia.core.TestIndexes.testIndex;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assumptions.assumeThat;
@@ -16,6 +16,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
 import java.util.stream.Stream;
+import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.StringField;
@@ -57,7 +58,7 @@ class ReadOnlyIndexTest {
 
     @Test
     void opensLucene9Index() throws Exception {
-        try (ReadOnlyIndex index = ReadOnlyIndex.open(legacyIndex("lucene9"))) {
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(testIndex("lucene9"))) {
             IndexSummary summary = index.summary();
             assertThat(summary.createdVersionMajor()).isEqualTo(9);
             assertThat(summary.minSegmentLuceneVersion())
@@ -70,12 +71,44 @@ class ReadOnlyIndexTest {
 
     @Test
     void rejectsLucene8IndexAsUnsupported() {
-        assertOpenFails(legacyIndex("lucene8"), Reason.UNSUPPORTED_FORMAT, "Unsupported index format");
+        assertOpenFails(testIndex("lucene8"), Reason.UNSUPPORTED_FORMAT, "Unsupported index format");
+    }
+
+    @Test
+    void opensIndexWithABundledCodec() throws Exception {
+        Path dir = tmp.resolve("index");
+        try (FSDirectory directory = FSDirectory.open(dir);
+                IndexWriter writer =
+                        new IndexWriter(directory, new IndexWriterConfig().setCodec(Codec.forName("SimpleText")))) {
+            Document doc = new Document();
+            doc.add(new StringField("id", "1", Field.Store.YES));
+            writer.addDocument(doc);
+        }
+
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
+            assertThat(index.reader().numDocs()).isEqualTo(1);
+        }
+    }
+
+    @Test
+    void rejectsIndexWithACodecThatIsNotLoaded() {
+        assertOpenFails(
+                testIndex("custom-codec"),
+                Reason.MISSING_CODEC,
+                "Missing codec: the index needs the codec 'LeiaTest', which isn't loaded");
+    }
+
+    @Test
+    void rejectsIndexWithAFormatThatIsNotLoaded() {
+        assertOpenFails(
+                testIndex("custom-formats"),
+                Reason.MISSING_CODEC,
+                "Missing codec: the index needs the postings format 'LeiaTestPostings', which isn't loaded");
     }
 
     @Test
     void neverWritesToTheIndexDirectory() throws Exception {
-        Path dir = copy(legacyIndex("lucene9"), tmp.resolve("index"));
+        Path dir = copy(testIndex("lucene9"), tmp.resolve("index"));
         // The old IndexWriter left its lock file behind; without it, a lock taken on open would show.
         Files.delete(dir.resolve("write.lock"));
         Map<String, FileTime> before = snapshot(dir);

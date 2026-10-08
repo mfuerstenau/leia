@@ -1,5 +1,6 @@
 package io.github.mfuerstenau.leia.core;
 
+import static io.github.mfuerstenau.leia.core.TestIndexes.testIndex;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -15,26 +16,50 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
 import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.index.LeafReader;
+import org.apache.lucene.index.NumericDocValues;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Loads Lucene's phonetic and stempel modules as analysis jars (ADR 0016). Lucene's lists of
- * factories only grow, so this runs in a JVM of its own (the {@code analysisJarsTest} task).
+ * Loads Lucene's phonetic and stempel modules as analysis jars (ADR 0016), and the test codec jar
+ * (ADR 0018). Lucene's lists of
+ * factories, codecs and formats only grow, so this runs in a JVM of its own (the {@code jarsTest} task).
  */
-@Tag("analysis-jars")
-class AnalysisJarsTest {
+@Tag("jars")
+class ExtensionJarsTest {
 
     /** Each module with its dependencies, in a directory of its own. */
     private static final Path JARS = Path.of(System.getProperty("leia.test.analysis.jars"));
+
+    /** A codec and one format of each kind; the custom-codec and custom-formats indexes need it. */
+    private static final Path CODEC_JAR = Path.of(System.getProperty("leia.test.codec.jar"));
 
     @TempDir
     Path tmp;
 
     @Test
+    void aJarAddsItsCodecsAndFormats() throws Exception {
+        ExtensionJars.load(List.of(CODEC_JAR));
+
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(testIndex("custom-codec"))) {
+            assertThat(index.summary().maxDoc()).isEqualTo(3);
+            assertThat(index.commits().unreadable()).isEmpty();
+        }
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(testIndex("custom-formats"))) {
+            LeafReader leaf = index.reader().leaves().getFirst().reader();
+            assertThat(leaf.terms("title").size()).isEqualTo(5);
+            NumericDocValues rank = leaf.getNumericDocValues("rank");
+            assertThat(rank.advanceExact(2)).isTrue();
+            assertThat(rank.longValue()).isEqualTo(2);
+            assertThat(leaf.getFloatVectorValues("vector").size()).isEqualTo(3);
+        }
+    }
+
+    @Test
     void aDirectoryAddsTheFactoriesOfItsJars() throws Exception {
-        List<Path> loaded = AnalysisJars.load(List.of(JARS.resolve("phonetic")));
+        List<Path> loaded = ExtensionJars.load(List.of(JARS.resolve("phonetic")));
 
         assertThat(loaded)
                 .extracting(jar -> jar.getFileName().toString())
@@ -57,7 +82,7 @@ class AnalysisJarsTest {
 
     @Test
     void aJarAddsItsAnalyzersAsPresets() throws Exception {
-        AnalysisJars.load(List.of(stempelJar()));
+        ExtensionJars.load(List.of(stempelJar()));
 
         assertThat(Analyzers.components().analyzers())
                 .contains(new AvailableAnalyzer(
@@ -75,7 +100,7 @@ class AnalysisJarsTest {
 
     @Test
     void aCustomAnalyzerReadsResourceFilesFromTheJars() throws Exception {
-        AnalysisJars.load(List.of(stempelJar()));
+        ExtensionJars.load(List.of(stempelJar()));
 
         TextAnalysis analysis = analyze(
                 new AnalyzerSpec.Custom(
@@ -97,8 +122,8 @@ class AnalysisJarsTest {
                     .orElseThrow();
         }
 
-        assertThatThrownBy(() -> AnalysisJars.load(List.of(phonetic)))
-                .isInstanceOf(AnalysisJarException.class)
+        assertThatThrownBy(() -> ExtensionJars.load(List.of(phonetic)))
+                .isInstanceOf(ExtensionJarException.class)
                 .hasMessageStartingWith("cannot load the analysis factories: java.lang.NoClassDefFoundError: ")
                 .hasMessageContaining("org/apache/commons/codec/");
     }
@@ -109,20 +134,20 @@ class AnalysisJarsTest {
         Path empty = Files.createDirectory(tmp.resolve("empty"));
         Path missing = tmp.resolve("missing.jar");
 
-        assertThatThrownBy(() -> AnalysisJars.load(List.of(text)))
-                .isInstanceOf(AnalysisJarException.class)
+        assertThatThrownBy(() -> ExtensionJars.load(List.of(text)))
+                .isInstanceOf(ExtensionJarException.class)
                 .hasMessage("not a jar: " + text);
-        assertThatThrownBy(() -> AnalysisJars.load(List.of(empty)))
-                .isInstanceOf(AnalysisJarException.class)
+        assertThatThrownBy(() -> ExtensionJars.load(List.of(empty)))
+                .isInstanceOf(ExtensionJarException.class)
                 .hasMessage("no jars in " + empty);
-        assertThatThrownBy(() -> AnalysisJars.load(List.of(missing)))
-                .isInstanceOf(AnalysisJarException.class)
+        assertThatThrownBy(() -> ExtensionJars.load(List.of(missing)))
+                .isInstanceOf(ExtensionJarException.class)
                 .hasMessage("no such jar or directory: " + missing);
     }
 
     @Test
     void noPathsLoadNothing() throws Exception {
-        assertThat(AnalysisJars.load(List.of())).isEmpty();
+        assertThat(ExtensionJars.load(List.of())).isEmpty();
     }
 
     private static Path stempelJar() throws IOException {

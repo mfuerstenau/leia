@@ -45,7 +45,9 @@ public enum ErrorCode {
      * The analyzer can't be built: an unknown component, an unknown or bad parameter, a config
      * directory that is not a directory, or a resource file that can't be read or parsed.
      */
-    INVALID_ANALYZER(-32013);
+    INVALID_ANALYZER(-32013),
+    /** The index names a codec or format that isn't loaded, and that a jar could add (ADR 0018). */
+    MISSING_CODEC(-32014);
 
     private final int code;
 

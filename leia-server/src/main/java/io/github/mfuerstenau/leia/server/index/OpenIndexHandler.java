@@ -62,6 +62,7 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
             case UNSUPPORTED_FORMAT -> ErrorCode.UNSUPPORTED_INDEX_FORMAT;
             case CORRUPT -> ErrorCode.CORRUPT_INDEX;
             case NOT_READABLE -> ErrorCode.INDEX_NOT_READABLE;
+            case MISSING_CODEC -> ErrorCode.MISSING_CODEC;
         };
     }
 

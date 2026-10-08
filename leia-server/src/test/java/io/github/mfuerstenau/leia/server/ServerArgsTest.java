@@ -9,15 +9,15 @@ import org.junit.jupiter.api.Test;
 class ServerArgsTest {
 
     @Test
-    void noArgumentsMeanNoAnalysisJars() {
-        assertThat(ServerArgs.parse().analysisJars()).isEmpty();
+    void noArgumentsMeanNoExtensionJars() {
+        assertThat(ServerArgs.parse().jars()).isEmpty();
     }
 
     @Test
-    void analysisJarsCanBeRepeated() {
-        ServerArgs args = ServerArgs.parse("--analysis-jar", "a.jar", "--analysis-jar", "lib");
+    void jarsCanBeRepeated() {
+        ServerArgs args = ServerArgs.parse("--jar", "a.jar", "--jar", "lib");
 
-        assertThat(args.analysisJars()).containsExactly(Path.of("a.jar"), Path.of("lib"));
+        assertThat(args.jars()).containsExactly(Path.of("a.jar"), Path.of("lib"));
     }
 
     @Test
@@ -25,8 +25,8 @@ class ServerArgsTest {
         assertThatThrownBy(() -> ServerArgs.parse("--verbose"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("unknown argument '--verbose'");
-        assertThatThrownBy(() -> ServerArgs.parse("--analysis-jar"))
+        assertThatThrownBy(() -> ServerArgs.parse("--jar"))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("--analysis-jar needs a path");
+                .hasMessage("--jar needs a path");
     }
 }

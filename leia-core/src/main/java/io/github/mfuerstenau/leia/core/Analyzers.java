@@ -54,7 +54,7 @@ public final class Analyzers {
 
     /**
      * The preset analyzers, char filters, tokenizers and token filters on the classpath and in the
-     * analysis jars (ADR 0016). The first call reads the jars for the presets.
+     * extension jars (ADR 0016). The first call reads the jars for the presets.
      */
     public static AnalysisComponents components() {
         return new AnalysisComponents(
@@ -143,9 +143,9 @@ public final class Analyzers {
         return builder.build();
     }
 
-    /** A builder that reads resource files from the config directory, then through the analysis jars' loader. */
+    /** A builder that reads resource files from the config directory, then through the extension jars' loader. */
     private static CustomAnalyzer.Builder builder(AnalyzerSpec.Custom spec) throws InvalidAnalyzerException {
-        ResourceLoader classpath = new ClasspathResourceLoader(AnalysisJars.classLoader());
+        ResourceLoader classpath = new ClasspathResourceLoader(ExtensionJars.classLoader());
         try {
             return CustomAnalyzer.builder(spec.configDir()
                     .<ResourceLoader>map(dir -> new FilesystemResourceLoader(dir, classpath))
@@ -174,7 +174,7 @@ public final class Analyzers {
         } catch (IOException | UncheckedIOException | IllegalArgumentException | IllegalStateException e) {
             throw new InvalidAnalyzerException(what + ": " + message(e), e);
         } catch (LinkageError e) {
-            // A factory from an analysis jar whose dependency is missing (ADR 0016).
+            // A factory from an extension jar whose dependency is missing (ADR 0016).
             throw new InvalidAnalyzerException(what + ": " + e, e);
         }
     }

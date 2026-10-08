@@ -50,7 +50,7 @@ sourceSets.main {
 
 // Lucene's analysis modules that Luke bundles and leia doesn't (ADR 0016). For a user who builds
 // leia: ./gradlew :leia-server:analysisModules writes each module with its dependencies to
-// build/analysis-modules/<module>/, a directory that `leia --analysis-jar` takes.
+// build/analysis-modules/<module>/, a directory that `leia --jar` takes.
 val analysisModules = listOf("icu", "kuromoji", "morfologik", "nori", "opennlp", "phonetic", "smartcn", "stempel")
 
 val analysisModuleJars = analysisModules.associateWith { module ->
@@ -64,7 +64,7 @@ val analysisModuleJars = analysisModules.associateWith { module ->
 }
 
 tasks.register<Sync>("analysisModules") {
-    description = "Copies Lucene's analysis modules, each with its dependencies, for leia --analysis-jar."
+    description = "Copies Lucene's analysis modules, each with its dependencies, for leia --jar."
     group = "leia"
     into(layout.buildDirectory.dir("analysis-modules"))
     for ((module, jars) in analysisModuleJars) {

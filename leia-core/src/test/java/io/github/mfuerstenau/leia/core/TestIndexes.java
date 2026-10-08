@@ -7,8 +7,8 @@ final class TestIndexes {
 
     private TestIndexes() {}
 
-    /** A test index written by an older Lucene version (see build.gradle.kts). */
-    static Path legacyIndex(String name) {
+    /** A test index that the build writes: by an older Lucene version, or with the test codec jar (see build.gradle.kts). */
+    static Path testIndex(String name) {
         String dir = System.getProperty("leia.test.index." + name);
         if (dir == null) {
             throw new IllegalStateException("System property leia.test.index." + name + " is not set");

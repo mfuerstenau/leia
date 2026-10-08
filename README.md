@@ -31,7 +31,7 @@ because Lucene 10 can't read them.
 - **Analysis:** the standard analyzer, one of Lucene's analyzers by class name (such as
   `EnglishAnalyzer`), or a custom one built from Lucene's char filters, tokenizers and token filters
   with their parameters and a config directory for resource files. More analyzers and components
-  come from analysis jars, such as Lucene's ICU, Japanese or Korean modules, or your own. The screen
+  come from jars, such as Lucene's ICU, Japanese or Korean modules, or your own. The screen
   shows what the analyzer makes of a text step by step, with every token attribute. It needs no
   open index, and the search parses queries with the analyzer you build.
 
@@ -55,7 +55,7 @@ leia [OPTIONS] [INDEX_PATH]
 | `INDEX_PATH` | the index directory to open on start; without one, leia starts with no index open |
 | `-j, --java <PATH>` | the JVM, given as a `java` executable or a JDK/JRE directory; default: `$JAVA_HOME/bin/java`, then `java` on `PATH` |
 | `-V, --version` | print the versions of leia, leia-server and the Java in use |
-| `--analysis-jar <PATH>` | a jar with analysis components of its own, or a directory of such jars; can be repeated (see [Analysis jars](#analysis-jars)) |
+| `--jar <PATH>` | a jar with analysis components, codecs or formats of its own, or a directory of such jars; can be repeated (see [Jars](#jars)) |
 
 `leia-server.jar` has to be next to the `leia` executable. leia resolves symlinks, so a link to
 `leia` in `~/bin` works.
@@ -64,13 +64,23 @@ leia [OPTIONS] [INDEX_PATH]
 leia --java /opt/jdk-25 /var/lib/solr/products/data/index
 ```
 
-### Analysis jars
+### Jars
 
-leia knows the analyzers, char filters, tokenizers and token filters of `lucene-core` and
-`lucene-analysis-common`. Lucene's other analysis modules aren't bundled, since together they add
-about 38 MB. `--analysis-jar` adds them, or jars of your own with factories (registered through
-`META-INF/services`, as Lucene's are) or `Analyzer` classes. A directory stands for the jars
-directly in it. A module needs its dependencies too:
+`--jar` adds jars with analysis components, codecs or formats of their own. A directory stands for
+the jars directly in it.
+
+**Codecs and formats.** leia opens indexes written with the codecs and formats of `lucene-core`,
+`lucene-backward-codecs`, `lucene-codecs` (such as `SimpleText`), `lucene-suggest` (the
+`Completion` postings formats of suggesters) and `lucene-sandbox`. An index with a codec, postings
+format, doc values format or KNN vectors format from elsewhere needs a jar that has it (registered
+through `META-INF/services`, as Lucene's are). Without one, opening the index says which one is
+missing. Indexes written by Elasticsearch or OpenSearch need those servers' classes, and their
+`lib/` folders come with a Lucene version of their own, so they may not open even with those jars.
+
+**Analysis.** leia knows the analyzers, char filters, tokenizers and token filters of `lucene-core`
+and `lucene-analysis-common`. Lucene's other analysis modules aren't bundled, since together they
+add about 38 MB. `--jar` adds them, or jars of your own with factories (registered through
+`META-INF/services`) or `Analyzer` classes. A module needs its dependencies too:
 
 | Module | Jars (Lucene 10.5.2) |
 |---|---|
@@ -87,12 +97,13 @@ If you build leia, `./gradlew :leia-server:analysisModules` puts each module wit
 into a directory of its own:
 
 ```sh
-leia --analysis-jar leia-server/build/analysis-modules/kuromoji \
-     --analysis-jar leia-server/build/analysis-modules/icu /data/index
+leia --jar leia-server/build/analysis-modules/kuromoji \
+     --jar leia-server/build/analysis-modules/icu /data/index
 ```
 
 The jars are loaded when leia starts. If one can't be loaded, for instance because a dependency is
-missing, leia says why and doesn't start. A factory whose name is already taken is ignored.
+missing, leia says why and doesn't start. A factory, codec or format whose name is already taken
+is ignored.
 
 ### Keys
 
@@ -308,7 +319,7 @@ line, `#` for comments); blank or `d` goes back to the analyzer's default stop w
 stem exclusions. `StopAnalyzer` needs stop words. The custom chain starts as the
 standard tokenizer and lowercase, which is what the `StandardAnalyzer` does. Resource files, such
 as `words` of `stop` or `synonyms` of `synonymGraph`, are read from the config directory first and
-then from the classpath and the analysis jars, which have Lucene's own word lists. The server builds the analyzer before
+then from the classpath and the jars, which have Lucene's own word lists. The server builds the analyzer before
 it takes it: if it can't, the builder stays open and says why.
 
 The steps are the text after each char filter and the tokens after the tokenizer and each token
