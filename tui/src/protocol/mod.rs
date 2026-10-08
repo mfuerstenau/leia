@@ -7,6 +7,7 @@
 //! - the golden files in `protocol/fixtures/` must round-trip (see `fixture_tests`)
 
 pub mod analysis;
+pub mod check;
 pub mod commits;
 pub mod document;
 mod envelope;

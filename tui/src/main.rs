@@ -16,6 +16,9 @@ use leia::history::{self, History};
 use leia::java::find_java;
 use leia::protocol::ErrorCode;
 use leia::protocol::analysis::{Analyze, GetAnalysisComponents, GetAnalysisComponentsParams};
+use leia::protocol::check::{
+    GetCheckIndex, GetCheckIndexParams, StartCheckIndex, StartCheckIndexParams,
+};
 use leia::protocol::commits::{GetCommit, GetCommitParams, GetCommits, GetCommitsParams};
 use leia::protocol::document::{
     GetDocument, GetDocumentParams, GetStoredValue, GetStoredValueParams, GetTermVector,
@@ -28,8 +31,9 @@ use leia::protocol::index::{
 use leia::protocol::job::{CancelJob, JobParams};
 use leia::protocol::search::{GetExplain, GetSearch, StartExplain, StartSearch};
 use leia::protocol::terms::{
-    GetFieldTermScan, GetPositions, GetPositionsParams, GetPostings, GetPostingsParams, GetTerms,
-    GetTermsParams, StartFieldTermScan, StartFieldTermScanParams,
+    GetExportTerms, GetFieldTermScan, GetPositions, GetPositionsParams, GetPostings,
+    GetPostingsParams, GetTerms, GetTermsParams, StartExportTerms, StartFieldTermScan,
+    StartFieldTermScanParams,
 };
 use leia::protocol::version::{Version, VersionParams, VersionResult};
 use leia::server::{SERVER_JAR_ENV, SHUTDOWN_TIMEOUT, Server, check_jars, find_server_jar};
@@ -53,7 +57,8 @@ fn main() -> Result<()> {
         history::default_file(home.as_deref()).map_or_else(History::in_memory, History::load);
     let mut app = App::new(version, home)
         .with_history(history)
-        .with_directory(cli.directory);
+        .with_directory(cli.directory)
+        .with_cwd(env::current_dir().ok());
 
     // ratatui::run restores the terminal on exit and on panic; dropping the server on a panic
     // shuts it down too.
@@ -356,6 +361,29 @@ fn perform(
                 Err(error) => app.analyze_failed(error),
             });
         }
+        Action::StartCheck(level) => {
+            let params = StartCheckIndexParams { level: Some(level) };
+            match answered(server.call::<StartCheckIndex>(params))? {
+                Ok(job) => app.check_started(job.job_id),
+                Err(error) => app.check_failed(error),
+            }
+        }
+        Action::CancelCheck(job_id) => {
+            server.call::<CancelJob>(JobParams { job_id })?;
+            app.check_cancelled();
+        }
+        Action::StartExport(params) => {
+            // Shows "Exporting…" while the server checks the path.
+            terminal.draw(|frame| app.draw(frame))?;
+            match answered(server.call::<StartExportTerms>(params))? {
+                Ok(job) => app.export_started(job.job_id),
+                Err(error) => app.export_failed(error),
+            }
+        }
+        Action::CancelExport(job_id) => {
+            server.call::<CancelJob>(JobParams { job_id })?;
+            app.export_cancelled();
+        }
     }
     Ok(None)
 }
@@ -391,6 +419,24 @@ fn poll_jobs(server: &mut Server, app: &mut App, polls: &[Poll]) -> Result<Vec<A
                 match answered(server.call::<GetExplain>(JobParams { job_id }))? {
                     Ok(result) => app.explain_progress(result),
                     Err(error) => app.explain_failed(error),
+                }
+                None
+            }
+            Poll::Check(job_id) => {
+                let params = GetCheckIndexParams {
+                    job_id,
+                    from_line: app.check_from_line(),
+                };
+                match answered(server.call::<GetCheckIndex>(params))? {
+                    Ok(result) => app.check_progress(result),
+                    Err(error) => app.check_failed(error),
+                }
+                None
+            }
+            Poll::Export(job_id) => {
+                match answered(server.call::<GetExportTerms>(JobParams { job_id }))? {
+                    Ok(result) => app.export_progress(result),
+                    Err(error) => app.export_failed(error),
                 }
                 None
             }

@@ -19,11 +19,13 @@ public final class DirectoryOnlyIndex implements OpenedIndex {
     private static final long NO_GENERATION = 0;
 
     private final Path path;
+    private final DirectoryImpl directoryImpl;
     private final List<Path> dirs;
     private final List<Directory> directories;
 
-    private DirectoryOnlyIndex(Path path, List<Path> dirs, List<Directory> directories) {
+    private DirectoryOnlyIndex(Path path, DirectoryImpl directoryImpl, List<Path> dirs, List<Directory> directories) {
         this.path = path;
+        this.directoryImpl = directoryImpl;
         this.dirs = List.copyOf(dirs);
         this.directories = List.copyOf(directories);
     }
@@ -47,7 +49,7 @@ public final class DirectoryOnlyIndex implements OpenedIndex {
                 throw ReadOnlyIndex.translate(dir, e);
             }
         }
-        return new DirectoryOnlyIndex(root, dirs, directories);
+        return new DirectoryOnlyIndex(root, directoryImpl, dirs, directories);
     }
 
     @Override
@@ -58,6 +60,11 @@ public final class DirectoryOnlyIndex implements OpenedIndex {
     @Override
     public List<Path> directories() {
         return dirs;
+    }
+
+    @Override
+    public DirectoryImpl directoryImpl() {
+        return directoryImpl;
     }
 
     @Override

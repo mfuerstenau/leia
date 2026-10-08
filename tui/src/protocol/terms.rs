@@ -274,3 +274,74 @@ mod tests {
         );
     }
 }
+
+/// `startExportTerms`: starts a job that writes the terms of a field of the open index to a file,
+/// one `term<delimiter>docFreq` per line (ADR 0022). Fails with `NO_INDEX_OPEN`, `NO_READER`,
+/// `FIELD_NOT_FOUND`, `INVALID_PARAMS` for a path that isn't absolute, or `OUTPUT_NOT_WRITABLE`
+/// for a file in an index directory, in a directory that doesn't exist, or that exists without
+/// `overwrite`.
+pub enum StartExportTerms {}
+
+impl RpcMethod for StartExportTerms {
+    const NAME: &'static str = "startExportTerms";
+    type Params = StartExportTermsParams;
+    type Result = JobStarted;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StartExportTermsParams {
+    /// The field whose terms to write.
+    pub field: String,
+    /// The absolute path of the file to write; it must lie outside every index directory.
+    pub path: String,
+    /// What separates a term from its document frequency; `None` means [`TermDelimiter::Tab`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delimiter: Option<TermDelimiter>,
+    /// Whether to replace a file that exists; `None` means false.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub overwrite: Option<bool>,
+}
+
+/// What separates a term from its document frequency in an export.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum TermDelimiter {
+    Comma,
+    Space,
+    #[default]
+    Tab,
+}
+
+/// `getExportTerms`: the progress of an export of terms, and its outcome once it is done. The
+/// outcome is handed out once: an export that failed answers with its error
+/// (`OUTPUT_NOT_WRITABLE` if writing failed), and afterwards the job is gone (`JOB_NOT_FOUND`).
+pub enum GetExportTerms {}
+
+impl RpcMethod for GetExportTerms {
+    const NAME: &'static str = "getExportTerms";
+    type Params = JobParams;
+    type Result = GetExportTermsResult;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetExportTermsResult {
+    /// The terms written so far.
+    pub terms_written: i64,
+    /// The outcome; `None` while the export is running.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<ExportTermsResult>,
+}
+
+/// The outcome of an export of the terms of a field.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ExportTermsResult {
+    /// The file written.
+    pub path: String,
+    /// The terms written, one per line.
+    pub terms: i64,
+    /// The size of the file.
+    pub bytes: i64,
+}

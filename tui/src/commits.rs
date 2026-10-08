@@ -17,7 +17,7 @@ use crate::protocol::commits::{
     Commit, CommitFile, GetCommitResult, GetCommitsResult, Segment, UnreadableCommit,
 };
 use crate::terms::{moved, number_width};
-use crate::text::{count, escape_control, first_chars};
+use crate::text::{count, escape_control, first_chars, utc_parts};
 use crate::viewer::size;
 
 /// The commits panel shows at most this many rows before it scrolls.
@@ -774,24 +774,8 @@ fn file_section(lines: &mut Vec<Line<'static>>, files: &[CommitFile], with_segme
 
 /// Milliseconds since the epoch as `2001-09-09 01:46:40 UTC`.
 fn utc_time(millis: i64) -> String {
-    let seconds = millis.div_euclid(1000);
-    let (days, time) = (seconds.div_euclid(86_400), seconds.rem_euclid(86_400));
-    // Howard Hinnant's civil_from_days.
-    let z = days + 719_468;
-    let era = z.div_euclid(146_097);
-    let doe = z.rem_euclid(146_097);
-    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let day = doy - (153 * mp + 2) / 5 + 1;
-    let month = if mp < 10 { mp + 3 } else { mp - 9 };
-    let year = yoe + era * 400 + i64::from(month <= 2);
-    format!(
-        "{year:04}-{month:02}-{day:02} {:02}:{:02}:{:02} UTC",
-        time / 3600,
-        time % 3600 / 60,
-        time % 60
-    )
+    let [year, month, day, hour, minute, second] = utc_parts(millis);
+    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02} UTC")
 }
 
 #[cfg(test)]

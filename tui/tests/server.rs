@@ -19,6 +19,9 @@ use leia::protocol::analysis::{
     AnalysisComponent, Analyze, AnalyzeParams, Analyzer, CustomAnalyzer, GetAnalysisComponents,
     GetAnalysisComponentsParams, PresetAnalyzer, WordSet, WordSetSupport,
 };
+use leia::protocol::check::{
+    CheckIndexResult, GetCheckIndex, GetCheckIndexParams, StartCheckIndex, StartCheckIndexParams,
+};
 use leia::protocol::commits::{GetCommit, GetCommitParams, GetCommits, GetCommitsParams};
 use leia::protocol::document::{
     BytesValue, DocumentField, GetDocument, GetDocumentParams, GetDocumentResult, GetStoredValue,
@@ -37,9 +40,10 @@ use leia::protocol::search::{
     StartSearchParams, TotalHitsRelation,
 };
 use leia::protocol::terms::{
-    FieldTerms, GetFieldTermScan, GetPositions, GetPositionsParams, GetPostings, GetPostingsParams,
-    GetPostingsResult, GetTerms, GetTermsParams, Posting, StartFieldTermScan,
-    StartFieldTermScanParams, TermEntry, TopTerm,
+    ExportTermsResult, FieldTerms, GetExportTerms, GetFieldTermScan, GetPositions,
+    GetPositionsParams, GetPostings, GetPostingsParams, GetPostingsResult, GetTerms,
+    GetTermsParams, Posting, StartExportTerms, StartExportTermsParams, StartFieldTermScan,
+    StartFieldTermScanParams, TermDelimiter, TermEntry, TopTerm,
 };
 use leia::protocol::version::{Version, VersionParams};
 use leia::server::{SERVER_JAR_ENV, SHUTDOWN_TIMEOUT, Server, find_server_jar};
@@ -1428,4 +1432,179 @@ fn analyzes_without_an_open_index() {
         matches!(&error, CallError::Rpc(e) if e.code == ErrorCode::InvalidAnalyzer),
         "{error:?}"
     );
+}
+
+/// Polls a check as the TUI does, collecting its lines, until the outcome is there.
+fn await_check(server: &mut Server, job_id: i64) -> (Vec<String>, CheckIndexResult) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut lines = Vec::new();
+    loop {
+        let poll = server
+            .call::<GetCheckIndex>(GetCheckIndexParams {
+                job_id,
+                from_line: i32::try_from(lines.len()).unwrap(),
+            })
+            .unwrap();
+        lines.extend(poll.lines);
+        assert_eq!(usize::try_from(poll.line_count).unwrap(), lines.len());
+        if let Some(result) = poll.result {
+            return (lines, result);
+        }
+        assert!(Instant::now() < deadline, "the check did not finish");
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn checks_the_indexes_with_and_without_a_reader() {
+    let mut server = start();
+    let dir = env::temp_dir().join(format!("leia-check-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    copy_index(&lucene9_index(), &dir.join("a"), |_| false);
+    copy_index(&lucene9_index(), &dir.join("b"), |name| {
+        name.ends_with(".si")
+    });
+    let path = |sub: &str| dir.join(sub).to_str().unwrap().to_owned();
+    server
+        .call::<OpenIndex>(OpenIndexParams {
+            path: path(""),
+            directory_impl: Some(DirectoryImpl::Nio),
+            mode: None,
+        })
+        .unwrap();
+
+    let job = server
+        .call::<StartCheckIndex>(StartCheckIndexParams { level: Some(2) })
+        .unwrap();
+    let (lines, result) = await_check(&mut server, job.job_id);
+
+    assert!(
+        lines.contains(&format!("Checking index 1 of 2: {}", path("a"))),
+        "{lines:?}"
+    );
+    assert!(
+        lines.contains(&"No problems were detected with this index.".to_owned()),
+        "{lines:?}"
+    );
+    let [a, b] = result.indexes.as_slice() else {
+        panic!("expected two indexes: {result:?}");
+    };
+    assert_eq!(
+        (a.path.as_str(), a.skipped, a.clean),
+        (path("a").as_str(), false, true)
+    );
+    assert!(!a.segments.is_empty());
+    assert_eq!(
+        (b.path.as_str(), b.skipped, b.clean),
+        (path("b").as_str(), true, false)
+    );
+    assert!(b.missing_segments, "{b:?}");
+
+    // A level out of range, and a check without a reader.
+    let invalid = server.call::<StartCheckIndex>(StartCheckIndexParams { level: Some(4) });
+    assert!(
+        matches!(&invalid, Err(CallError::Rpc(e)) if e.code == ErrorCode::InvalidParams),
+        "{invalid:?}"
+    );
+    server
+        .call::<OpenIndex>(OpenIndexParams {
+            path: path("b"),
+            directory_impl: None,
+            mode: Some(OpenMode::DirectoryOnly),
+        })
+        .unwrap();
+    let job = server
+        .call::<StartCheckIndex>(StartCheckIndexParams { level: None })
+        .unwrap();
+    let (_, result) = await_check(&mut server, job.job_id);
+    assert_eq!(result.indexes.len(), 1);
+    assert!(result.indexes[0].missing_segments);
+
+    // Cancelling forgets the job.
+    let job = server
+        .call::<StartCheckIndex>(StartCheckIndexParams { level: Some(3) })
+        .unwrap();
+    server
+        .call::<CancelJob>(JobParams { job_id: job.job_id })
+        .unwrap();
+    let gone = server.call::<GetCheckIndex>(GetCheckIndexParams {
+        job_id: job.job_id,
+        from_line: 0,
+    });
+    assert!(
+        matches!(&gone, Err(CallError::Rpc(e)) if e.code == ErrorCode::JobNotFound),
+        "{gone:?}"
+    );
+
+    server.call::<CloseIndex>(CloseIndexParams {}).unwrap();
+    assert!(server.shutdown(SHUTDOWN_TIMEOUT).unwrap().success());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn exports_the_terms_of_a_field() {
+    let mut server = start();
+    let dir = env::temp_dir().join(format!("leia-export-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    copy_index(&lucene9_index(), &dir.join("index"), |_| false);
+    let path = |sub: &str| dir.join(sub).to_str().unwrap().to_owned();
+    server
+        .call::<OpenIndex>(OpenIndexParams {
+            path: path("index"),
+            directory_impl: None,
+            mode: None,
+        })
+        .unwrap();
+
+    let job = server
+        .call::<StartExportTerms>(StartExportTermsParams {
+            field: "body".to_owned(),
+            path: path("body.out"),
+            delimiter: Some(TermDelimiter::Comma),
+            overwrite: None,
+        })
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let result = loop {
+        let poll = server
+            .call::<GetExportTerms>(JobParams { job_id: job.job_id })
+            .unwrap();
+        if let Some(result) = poll.result {
+            break result;
+        }
+        assert!(Instant::now() < deadline, "the export did not finish");
+        thread::sleep(Duration::from_millis(10));
+    };
+
+    // "document number N" for N = 1..3; the deleted document 2 still counts.
+    let written = std::fs::read_to_string(dir.join("body.out")).unwrap();
+    assert_eq!(written, "1,1\n2,1\n3,1\ndocument,3\nnumber,3\n");
+    assert_eq!(
+        result,
+        ExportTermsResult {
+            path: path("body.out"),
+            terms: 5,
+            bytes: i64::try_from(written.len()).unwrap(),
+        }
+    );
+
+    for (file, overwrite) in [("body.out", None), ("index/body.out", Some(true))] {
+        let refused = server.call::<StartExportTerms>(StartExportTermsParams {
+            field: "body".to_owned(),
+            path: path(file),
+            delimiter: None,
+            overwrite,
+        });
+        assert!(
+            matches!(&refused, Err(CallError::Rpc(e)) if e.code == ErrorCode::OutputNotWritable),
+            "{refused:?}"
+        );
+    }
+    assert!(!dir.join("index/body.out").exists());
+
+    server.call::<CloseIndex>(CloseIndexParams {}).unwrap();
+    assert!(server.shutdown(SHUTDOWN_TIMEOUT).unwrap().success());
+    std::fs::remove_dir_all(&dir).unwrap();
 }

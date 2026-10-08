@@ -5,6 +5,8 @@ import dagger.Module;
 import dagger.multibindings.IntoSet;
 import io.github.mfuerstenau.leia.server.analysis.AnalyzeHandler;
 import io.github.mfuerstenau.leia.server.analysis.GetAnalysisComponentsHandler;
+import io.github.mfuerstenau.leia.server.check.GetCheckIndexHandler;
+import io.github.mfuerstenau.leia.server.check.StartCheckIndexHandler;
 import io.github.mfuerstenau.leia.server.commits.GetCommitHandler;
 import io.github.mfuerstenau.leia.server.commits.GetCommitsHandler;
 import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
@@ -19,10 +21,12 @@ import io.github.mfuerstenau.leia.server.search.GetExplainHandler;
 import io.github.mfuerstenau.leia.server.search.GetSearchHandler;
 import io.github.mfuerstenau.leia.server.search.StartExplainHandler;
 import io.github.mfuerstenau.leia.server.search.StartSearchHandler;
+import io.github.mfuerstenau.leia.server.terms.GetExportTermsHandler;
 import io.github.mfuerstenau.leia.server.terms.GetFieldTermScanHandler;
 import io.github.mfuerstenau.leia.server.terms.GetPositionsHandler;
 import io.github.mfuerstenau.leia.server.terms.GetPostingsHandler;
 import io.github.mfuerstenau.leia.server.terms.GetTermsHandler;
+import io.github.mfuerstenau.leia.server.terms.StartExportTermsHandler;
 import io.github.mfuerstenau.leia.server.terms.StartFieldTermScanHandler;
 import io.github.mfuerstenau.leia.server.version.VersionHandler;
 
@@ -117,4 +121,20 @@ interface HandlerModule {
     @Binds
     @IntoSet
     MethodHandler<?, ?> analyze(AnalyzeHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> startCheckIndex(StartCheckIndexHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> getCheckIndex(GetCheckIndexHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> startExportTerms(StartExportTermsHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> getExportTerms(GetExportTermsHandler handler);
 }

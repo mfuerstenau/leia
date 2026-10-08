@@ -49,6 +49,8 @@ pub enum Request {
     },
     /// Show this document on the documents screen.
     Document(TermHit),
+    /// Ask where to export the terms of this field to (ADR 0022).
+    Export(String),
 }
 
 /// A document that contains a term: a posting, as the documents screen shows it.
@@ -389,12 +391,14 @@ impl Terms {
     }
 
     /// Moves the selection in the focused column, switches columns with ←/→ and Tab, seeks with
-    /// `/`, and with Enter goes one column to the right or shows the selected posting's document.
+    /// `/`, with Enter goes one column to the right or shows the selected posting's document, and
+    /// with `e` exports the selected field's terms.
     pub fn handle_key(&mut self, key: KeyCode) -> Option<Request> {
         if self.seek.is_some() {
             return self.seek_key(key);
         }
         match key {
+            KeyCode::Char('e') => Some(Request::Export(self.selected_field()?.name.clone())),
             KeyCode::Char('/') if self.selected_field().is_some() => {
                 self.seek = Some(String::new());
                 self.focus = Column::Terms;

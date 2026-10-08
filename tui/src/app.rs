@@ -2,7 +2,8 @@
 //! [`App::handle_key`] returns an [`Action`], the caller makes the RPC calls and reports back with
 //! [`App::opened`], [`App::open_failed`], [`App::closed`], and the `scan_*`, `document_*`,
 //! `stored_value_*`, `term_vector_*`, `terms_*`, `postings_*`, `positions_*`, `commits_*`,
-//! `commit_*`, `search_*`, `explain_*`, `components_*` or `analy*` methods.
+//! `commit_*`, `search_*`, `explain_*`, `components_*`, `analy*`, `check_*` or `export_*`
+//! methods.
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -16,13 +17,16 @@ use ratatui::widgets::{Block, Paragraph, Tabs, Wrap};
 
 use crate::analysis::{self, Analysis};
 use crate::build_info::{LEIA, java_line, server_line};
+use crate::check::{self, Check};
 use crate::commits::{self, Commits};
 use crate::documents::{self, Documents, Walk};
+use crate::export::{ExportEvent, ExportPrompt};
 use crate::history::History;
 use crate::overview::{DEFAULT_TOP_TERMS, FieldScan, Overview, step_top_terms};
 use crate::overview::{label_line, relative};
 use crate::prompt::{PathPrompt, PromptEvent, expand_home};
 use crate::protocol::analysis::{AnalyzeParams, AnalyzeResult, GetAnalysisComponentsResult};
+use crate::protocol::check::GetCheckIndexResult;
 use crate::protocol::commits::{GetCommitResult, GetCommitsResult};
 use crate::protocol::document::{
     BytesValue, GetDocumentResult, StoredValue, TermPosition, TermVectorTerm,
@@ -34,10 +38,14 @@ use crate::protocol::index::{
 use crate::protocol::search::{
     GetExplainResult, GetSearchResult, StartExplainParams, StartSearchParams,
 };
-use crate::protocol::terms::{GetFieldTermScanResult, GetPostingsResult, GetTermsResult};
+use crate::protocol::terms::{
+    GetExportTermsResult, GetFieldTermScanResult, GetPostingsResult, GetTermsResult,
+    StartExportTermsParams,
+};
 use crate::protocol::version::VersionResult;
 use crate::search::{self, Search};
 use crate::terms::{self, Terms};
+use crate::text::count;
 
 /// What the caller has to do after a key.
 #[derive(Debug, PartialEq)]
@@ -131,6 +139,16 @@ pub enum Action {
     LoadAnalysisComponents,
     /// Analyze a text, and report back with [`App::analyzed`] or [`App::analyze_failed`].
     Analyze(AnalyzeParams),
+    /// Start a check of the open path at this level, and report back with
+    /// [`App::check_started`] or [`App::check_failed`] (ADR 0022).
+    StartCheck(i32),
+    /// Cancel this check job, and report back with [`App::check_cancelled`].
+    CancelCheck(i64),
+    /// Start this export of terms, and report back with [`App::export_started`] or
+    /// [`App::export_failed`] (ADR 0022).
+    StartExport(StartExportTermsParams),
+    /// Cancel this export job, and report back with [`App::export_cancelled`].
+    CancelExport(i64),
 }
 
 /// A running job to poll.
@@ -142,10 +160,15 @@ pub enum Poll {
     Search(i64),
     /// Report back with [`App::explain_progress`] or [`App::explain_failed`].
     Explain(i64),
+    /// Ask for the lines from [`App::check_from_line`] on, and report back with
+    /// [`App::check_progress`] or [`App::check_failed`].
+    Check(i64),
+    /// Report back with [`App::export_progress`] or [`App::export_failed`].
+    Export(i64),
 }
 
-/// The screens; `1` to `6` switch between them. The first five need an open index, the
-/// analysis screen doesn't. Without a reader, only the commits screen shows the index (ADR 0021).
+/// The screens; `1` to `7` switch between them. All but the analysis screen need an open index.
+/// Without a reader, only the commits and check screens show the index (ADR 0021, ADR 0022).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Screen {
     Overview,
@@ -154,6 +177,7 @@ enum Screen {
     Commits,
     Search,
     Analysis,
+    Check,
 }
 
 /// The scan that runs in the server. There is at most one; the others wait in the queue.
@@ -162,6 +186,14 @@ struct RunningScan {
     top_n: i32,
     /// `None` until the server has started the job.
     job_id: Option<i64>,
+}
+
+/// The export of terms that runs in the server (ADR 0022). There is at most one.
+struct RunningExport {
+    field: String,
+    /// `None` until the server has started the job.
+    job_id: Option<i64>,
+    terms_written: i64,
 }
 
 /// What was opened (ADR 0021).
@@ -193,6 +225,13 @@ pub struct App {
     search: Option<Search>,
     /// Kept when an index is opened or closed: its analyzer is the search screen's.
     analysis: Analysis,
+    /// The check screen of the open path, with or without a reader.
+    check: Option<Check>,
+    /// Where to export the terms of a field, while it is asked.
+    export_prompt: Option<ExportPrompt>,
+    export: Option<RunningExport>,
+    /// The directory that a relative export path is resolved against.
+    cwd: Option<PathBuf>,
     /// The screen shown; kept when another index is opened.
     screen: Screen,
     prompt: Option<PathPrompt>,
@@ -205,7 +244,8 @@ pub struct App {
     notice: Option<Notice>,
 }
 
-/// What the tab line says about the last reopen.
+/// What the tab line says about the last reopen, or the footer about the last export, until the
+/// next key.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Notice {
     Reopening,
@@ -214,6 +254,11 @@ enum Notice {
     Failed(String),
     /// `R` without a reader.
     NoReader,
+    /// The terms were written: how many, and where.
+    Exported(String),
+    ExportFailed(String),
+    /// `e` while an export runs.
+    ExportRunning,
 }
 
 impl Notice {
@@ -227,7 +272,19 @@ impl Notice {
                 Style::new().fg(Color::Red),
             ),
             Self::NoReader => Line::from("No reader to reopen"),
+            Self::Exported(text) => Line::styled(text.clone(), Style::new().fg(Color::Green)),
+            Self::ExportFailed(error) => Line::styled(
+                format!("Export failed: {error}"),
+                Style::new().fg(Color::Red),
+            ),
+            Self::ExportRunning => Line::from("An export runs; Esc cancels it"),
         }
+    }
+
+    /// Whether the notice takes the footer, which is wider than the tab line: the outcome of an
+    /// export names its file.
+    fn in_footer(&self) -> bool {
+        matches!(self, Self::Exported(_) | Self::ExportFailed(_))
     }
 }
 
@@ -245,6 +302,10 @@ impl App {
             commits: None,
             search: None,
             analysis: Analysis::new(),
+            check: None,
+            export_prompt: None,
+            export: None,
+            cwd: None,
             screen: Screen::Overview,
             prompt: None,
             scan: None,
@@ -257,6 +318,12 @@ impl App {
     /// Keeps the recently opened paths in `history` instead of in memory.
     pub fn with_history(mut self, history: History) -> Self {
         self.history = history;
+        self
+    }
+
+    /// Resolves relative export paths against `cwd`.
+    pub fn with_cwd(mut self, cwd: Option<PathBuf>) -> Self {
+        self.cwd = cwd;
         self
     }
 
@@ -319,9 +386,11 @@ impl App {
             directory: self.directory,
             indexes: paths,
         });
+        self.check = Some(Check::new(&stats.path));
         self.overview = Some(Overview::new(stats, self.top_n).with_skipped(skipped));
         self.prompt = None;
         self.forget_scans();
+        self.forget_export();
         self.initial_request()
     }
 
@@ -336,17 +405,19 @@ impl App {
         self.terms = None;
         self.search = None;
         self.commits = Some(Commits::new(index_names(&result.path, &paths)));
+        self.check = Some(Check::new(&result.path));
         self.opened = Some(Opened {
             path: result.path,
             no_reader: true,
             directory: self.directory,
             indexes: paths,
         });
-        if self.screen != Screen::Analysis {
+        if !matches!(self.screen, Screen::Analysis | Screen::Check) {
             self.screen = Screen::Commits;
         }
         self.prompt = None;
         self.forget_scans();
+        self.forget_export();
         self.initial_request()
     }
 
@@ -394,6 +465,15 @@ impl App {
         });
         self.overview = Some(overview.reopened(stats, self.top_n));
         self.forget_scans();
+        if let Some(check) = &mut self.check {
+            check.stopped_by_reopen();
+        }
+        if self.export.is_some()
+            && let Some(Notice::Reopened(text)) = &mut self.notice
+        {
+            text.push_str("; export stopped");
+        }
+        self.forget_export();
         self.initial_request()
     }
 
@@ -438,7 +518,9 @@ impl App {
         self.terms = None;
         self.commits = None;
         self.search = None;
+        self.check = None;
         self.forget_scans();
+        self.forget_export();
     }
 
     /// What the shown screen has to fetch first, if anything.
@@ -454,7 +536,7 @@ impl App {
                 self.terms_request(request)
             }
             Screen::Commits => commits_action(self.commits.as_ref()?.initial_request()),
-            Screen::Search => None,
+            Screen::Search | Screen::Check => None,
             Screen::Analysis => analysis_action(self.analysis.initial_request()),
         }
     }
@@ -557,6 +639,18 @@ impl App {
                 self.documents.as_mut()?.show_hit(hit);
                 self.screen = Screen::Documents;
                 Some(Action::LoadDocument(doc_id))
+            }
+            terms::Request::Export(field) => {
+                if self.export.is_some() {
+                    self.notice = Some(Notice::ExportRunning);
+                } else {
+                    self.export_prompt = Some(ExportPrompt::new(
+                        &field,
+                        self.home.clone(),
+                        self.cwd.clone(),
+                    ));
+                }
+                None
             }
         }
     }
@@ -762,7 +856,7 @@ impl App {
         self.scan.as_ref().and_then(|scan| scan.job_id)
     }
 
-    /// The jobs to poll: the running scan, search and explanation.
+    /// The jobs to poll: the running scan, search, explanation, check and export.
     pub fn polls(&self) -> Vec<Poll> {
         let search = self.search.as_ref();
         self.scan_job()
@@ -770,7 +864,92 @@ impl App {
             .into_iter()
             .chain(search.and_then(Search::search_job).map(Poll::Search))
             .chain(search.and_then(Search::explain_job).map(Poll::Explain))
+            .chain(self.check.as_ref().and_then(Check::job).map(Poll::Check))
+            .chain(self.export_job().map(Poll::Export))
             .collect()
+    }
+
+    pub fn check_started(&mut self, job_id: i64) {
+        if let Some(check) = &mut self.check {
+            check.started(job_id);
+        }
+    }
+
+    /// The first line of output the next poll of the check asks for.
+    pub fn check_from_line(&self) -> i32 {
+        self.check.as_ref().map_or(0, Check::from_line)
+    }
+
+    pub fn check_progress(&mut self, result: GetCheckIndexResult) {
+        if let Some(check) = &mut self.check {
+            check.progress(result);
+        }
+    }
+
+    pub fn check_failed(&mut self, error: String) {
+        if let Some(check) = &mut self.check {
+            check.failed(error);
+        }
+    }
+
+    pub fn check_cancelled(&mut self) {
+        if let Some(check) = &mut self.check {
+            check.cancelled();
+        }
+    }
+
+    fn export_job(&self) -> Option<i64> {
+        self.export.as_ref().and_then(|export| export.job_id)
+    }
+
+    fn forget_export(&mut self) {
+        self.export_prompt = None;
+        self.export = None;
+    }
+
+    /// The export runs: the prompt closes, and the tab line shows the progress.
+    pub fn export_started(&mut self, job_id: i64) {
+        let Some(prompt) = self.export_prompt.take() else {
+            return;
+        };
+        self.export = Some(RunningExport {
+            field: prompt.field().to_owned(),
+            job_id: Some(job_id),
+            terms_written: 0,
+        });
+    }
+
+    /// Shows the progress of the export, or where it wrote the terms.
+    pub fn export_progress(&mut self, result: GetExportTermsResult) {
+        let Some(export) = &mut self.export else {
+            return;
+        };
+        export.terms_written = result.terms_written;
+        if let Some(done) = result.result {
+            self.export = None;
+            // The file as it would be typed: below the working directory, relative to it.
+            let path = match self.cwd.as_ref().and_then(|cwd| cwd.to_str()) {
+                Some(cwd) => relative(cwd, &done.path),
+                None => done.path,
+            };
+            self.notice = Some(Notice::Exported(format!(
+                "Exported {} to {path}",
+                count(usize::try_from(done.terms).unwrap_or(0), "term")
+            )));
+        }
+    }
+
+    /// Shows why the export couldn't start in its prompt, or why the running one failed.
+    pub fn export_failed(&mut self, error: String) {
+        if let Some(prompt) = &mut self.export_prompt {
+            prompt.set_error(error);
+        } else if self.export.take().is_some() {
+            self.notice = Some(Notice::ExportFailed(error));
+        }
+    }
+
+    pub fn export_cancelled(&mut self) {
+        self.export = None;
     }
 
     pub fn scan_started(&mut self, job_id: i64) {
@@ -890,6 +1069,19 @@ impl App {
                 PromptEvent::None => None,
             };
         }
+        if let Some(prompt) = &mut self.export_prompt {
+            return match prompt.handle_key(key) {
+                ExportEvent::Submit(params) => {
+                    prompt.set_busy();
+                    Some(Action::StartExport(params))
+                }
+                ExportEvent::Cancel => {
+                    self.export_prompt = None;
+                    None
+                }
+                ExportEvent::None => None,
+            };
+        }
         if let Some(documents) = &mut self.documents
             && self.screen == Screen::Documents
             && documents.prompting()
@@ -918,9 +1110,11 @@ impl App {
             (Some(search), Screen::Search) => search.jobs(),
             _ => Vec::new(),
         };
+        let checking =
+            self.screen == Screen::Check && self.check.as_ref().is_some_and(Check::running);
         match key.code {
-            // Esc stops the scans first, then the search screen's jobs, and quits only when there
-            // are none.
+            // Esc stops the scans first, then the export, then the shown screen's jobs, and quits
+            // only when there are none.
             KeyCode::Esc if self.scan.is_some() => match self.scan_job() {
                 Some(job_id) => Some(Action::CancelScan(job_id)),
                 None => {
@@ -928,7 +1122,21 @@ impl App {
                     None
                 }
             },
+            KeyCode::Esc if self.export.is_some() => match self.export_job() {
+                Some(job_id) => Some(Action::CancelExport(job_id)),
+                None => {
+                    self.export_cancelled();
+                    None
+                }
+            },
             KeyCode::Esc if !search_jobs.is_empty() => Some(Action::CancelSearch(search_jobs)),
+            KeyCode::Esc if checking => match self.check.as_ref().and_then(Check::job) {
+                Some(job_id) => Some(Action::CancelCheck(job_id)),
+                None => {
+                    self.check_cancelled();
+                    None
+                }
+            },
             KeyCode::Char('q') | KeyCode::Esc => Some(Action::Quit),
             KeyCode::Char('1') if self.has_index() => {
                 self.screen = Screen::Overview;
@@ -953,6 +1161,10 @@ impl App {
             KeyCode::Char('6') => {
                 self.screen = Screen::Analysis;
                 self.initial_request()
+            }
+            KeyCode::Char('7') if self.check.is_some() => {
+                self.screen = Screen::Check;
+                None
             }
             KeyCode::Char('o') => {
                 // Starts from the open index, so a sibling is a Ctrl+W away.
@@ -983,6 +1195,9 @@ impl App {
             code if self.screen == Screen::Commits => {
                 commits_action(self.commits.as_mut()?.handle_key(code))
             }
+            code if self.screen == Screen::Check => match self.check.as_mut()?.handle_key(code)? {
+                check::Request::Start(level) => Some(Action::StartCheck(level)),
+            },
             _ if self.screen == Screen::Search => {
                 let request = self.search.as_mut()?.handle_key(key);
                 self.search_request(request)
@@ -1035,6 +1250,8 @@ impl App {
         .areas(frame.area());
         let cancel = if self.scan.is_some() {
             "Esc cancel scan   "
+        } else if self.export.is_some() {
+            "Esc cancel export   "
         } else {
             ""
         };
@@ -1046,13 +1263,25 @@ impl App {
             &mut self.search,
             self.screen,
         ) {
+            (overview, _, _, _, _, Screen::Check) if let Some(check) = &mut self.check => {
+                check.render(frame, body);
+                let reopen = if overview.is_some() {
+                    "R reopen   "
+                } else {
+                    ""
+                };
+                Line::from(format!(
+                    " {cancel}q quit   o open   c close   {reopen}1-7 screen   {}",
+                    check.keys()
+                ))
+            }
             (overview, _, _, _, _, Screen::Analysis) => {
                 self.analysis.render(frame, body);
                 if self.analysis.prompting() {
                     Line::from(self.analysis.keys())
                 } else if overview.is_some() || self.opened.is_some() {
                     Line::from(format!(
-                        " {cancel}q quit   o open   c close   1-6 screen   {}",
+                        " {cancel}q quit   o open   c close   1-7 screen   {}",
                         self.analysis.keys()
                     ))
                 } else {
@@ -1070,7 +1299,7 @@ impl App {
                         ""
                     };
                     Line::from(format!(
-                        " {cancel}q quit   o open   c close   1-6 screen   {}",
+                        " {cancel}q quit   o open   c close   1-7 screen   {}",
                         search.keys()
                     ))
                 }
@@ -1083,7 +1312,7 @@ impl App {
                     ""
                 };
                 Line::from(format!(
-                    " {cancel}q quit   o open   c close   {reopen}1-6 screen   r read again   ⏎ segments   \
+                    " {cancel}q quit   o open   c close   {reopen}1-7 screen   r read again   ⏎ segments   \
                      Tab panel   ↑↓"
                 ))
             }
@@ -1097,7 +1326,7 @@ impl App {
                 match documents.viewer() {
                     Some(viewer) => Line::from(viewer.keys()),
                     None => Line::from(format!(
-                        " {cancel}q quit   o open   c close   1-6 screen   ←→ doc   {steps}i go to   \
+                        " {cancel}q quit   o open   c close   1-7 screen   ←→ doc   {steps}i go to   \
                          ⏎ term vector   v view   a analyze   x numbers   e empty   m similar   Tab panel   ↑↓"
                     )),
                 }
@@ -1108,8 +1337,8 @@ impl App {
                     Line::from(" type to seek   ⏎/Esc done")
                 } else {
                     Line::from(format!(
-                        " {cancel}q quit   o open   c close   1-6 screen   / seek   \
-                         ⏎ open doc   ←/→ column   ↑↓"
+                        " {cancel}q quit   o open   c close   1-7 screen   / seek   \
+                         ⏎ open doc   e export   ←/→ column   ↑↓"
                     ))
                 }
             }
@@ -1117,24 +1346,24 @@ impl App {
                 overview.render(frame, body);
                 if self.scan.is_some() {
                     Line::from(
-                        " Esc cancel scan   q quit   o open   c close   R reopen   1-6 screen   s/S sort   \
+                        " Esc cancel scan   q quit   o open   c close   R reopen   1-7 screen   s/S sort   \
                          Tab panel   ↑↓",
                     )
                 } else if overview.selected_top_term().is_some() {
                     Line::from(
-                        " q quit   o open   c close   R reopen   1-6 screen   ⏎ term's docs   / search term   \
+                        " q quit   o open   c close   R reopen   1-7 screen   ⏎ term's docs   / search term   \
                          +/- top N   s/S sort   Tab panel   ↑↓",
                     )
                 } else {
                     Line::from(
-                        " q quit   o open   c close   R reopen   1-6 screen   ⏎ terms   a all terms   \
+                        " q quit   o open   c close   R reopen   1-7 screen   ⏎ terms   a all terms   \
                          +/- top N   s/S sort   Tab panel   ↑↓",
                     )
                 }
             }
             (None, _, _, _, _, screen) if let Some(opened) = &self.opened => {
                 render_without_reader(frame, body, opened, screen);
-                Line::from(" q quit   o open   c close   1-6 screen")
+                Line::from(" q quit   o open   c close   1-7 screen")
             }
             (None, _, _, _, _, _) => {
                 let lines = vec![
@@ -1159,60 +1388,95 @@ impl App {
                 Screen::Commits => 3,
                 Screen::Search => 4,
                 Screen::Analysis => 5,
+                Screen::Check => 6,
             };
-            let line = match (&self.notice, &self.opened) {
-                (Some(notice), _) => Some(notice.line()),
-                (None, Some(opened)) => marker(opened),
-                (None, None) => None,
+            let notice = self.notice.as_ref().filter(|notice| !notice.in_footer());
+            let line = match (notice, &self.export, &self.opened) {
+                (Some(notice), _, _) => Some(notice.line()),
+                (None, Some(export), _) => Some(Line::from(format!(
+                    "Exporting {}: {}",
+                    export.field,
+                    count(usize::try_from(export.terms_written).unwrap_or(0), "term")
+                ))),
+                (None, None, Some(opened)) => marker(opened),
+                (None, None, None) => None,
+            };
+            // Without padding, the tabs leave the line more room when it needs it.
+            let compact = line.as_ref().is_some_and(|line| {
+                usize::from(tabs.width.saturating_sub(TABS_WIDTH)) < line.width()
+            });
+            let tabs_width = if compact {
+                COMPACT_TABS_WIDTH
+            } else {
+                TABS_WIDTH
             };
             let tabs = if let Some(line) = line {
                 let [tabs, notice] =
-                    Layout::horizontal([Constraint::Length(TABS_WIDTH), Constraint::Fill(1)])
+                    Layout::horizontal([Constraint::Length(tabs_width), Constraint::Fill(1)])
                         .areas(tabs);
                 frame.render_widget(line.right_aligned(), notice);
                 tabs
             } else {
                 tabs
             };
-            frame.render_widget(
-                Tabs::new(TAB_TITLES)
-                    .select(selected)
-                    .highlight_style(Style::new().add_modifier(Modifier::REVERSED)),
-                tabs,
-            );
+            let widget = Tabs::new(TAB_TITLES)
+                .select(selected)
+                .highlight_style(Style::new().add_modifier(Modifier::REVERSED));
+            let widget = if compact {
+                widget.padding("", "")
+            } else {
+                widget
+            };
+            frame.render_widget(widget, tabs);
         }
+        let keys = match &self.notice {
+            Some(notice) if notice.in_footer() => {
+                let mut line = notice.line();
+                line.spans.insert(0, " ".into());
+                line
+            }
+            _ => keys,
+        };
         let build = Line::from(format!("{} ", LEIA.line())).right_aligned();
         // The build only if it fits next to the keys.
         if keys.width() + 2 + build.width() <= usize::from(footer.width) {
             frame.render_widget(build, footer);
         }
         frame.render_widget(keys, footer);
+        if let Some(prompt) = &self.export_prompt {
+            prompt.render(frame, body);
+        }
         if let Some(prompt) = &self.prompt {
             prompt.render(frame, body);
         }
     }
 }
 
-const TAB_TITLES: [&str; 6] = [
+const TAB_TITLES: [&str; 7] = [
     "1 Overview",
     "2 Documents",
     "3 Terms",
     "4 Commits",
     "5 Search",
     "6 Analysis",
+    "7 Check",
 ];
 
 /// How wide the tabs are: each title with a space on either side, and a divider between two.
 /// The notice takes the rest of the line.
-const TABS_WIDTH: u16 = {
+const TABS_WIDTH: u16 = tabs_width(2);
+/// How wide the tabs are without the spaces around the titles.
+const COMPACT_TABS_WIDTH: u16 = tabs_width(0);
+
+const fn tabs_width(padding: usize) -> u16 {
     let mut width = TAB_TITLES.len() - 1;
     let mut i = 0;
     while i < TAB_TITLES.len() {
-        width += TAB_TITLES[i].len() + 2;
+        width += TAB_TITLES[i].len() + padding;
         i += 1;
     }
     width as u16
-};
+}
 
 /// What the screens build on from each field: everything but the postings statistics, which
 /// change with the documents.
@@ -1253,7 +1517,8 @@ fn render_without_reader(frame: &mut Frame, area: Rect, opened: &Opened, screen:
             label_line("Directory", directory_name(opened.directory).to_owned()),
             label_line(
                 "Reader",
-                "none: opened without a reader, so only the commits (4) can be read".to_owned(),
+                "none: opened without a reader, so only the commits (4) and check (7) work"
+                    .to_owned(),
             ),
         ];
         if opened.indexes.len() > 1 {
@@ -1267,8 +1532,8 @@ fn render_without_reader(frame: &mut Frame, area: Rect, opened: &Opened, screen:
         (" Index ", lines)
     } else {
         let lines = vec![Line::from(
-            "This screen needs a reader, and the index was opened without one. The commits \
-             screen (4) works; o opens the index again, Ctrl+N switches the reader on.",
+            "This screen needs a reader, and the index was opened without one. The commits (4) \
+             and check (7) screens work; o opens the index again, Ctrl+N switches the reader on.",
         )];
         (" No reader ", lines)
     };
@@ -1321,7 +1586,9 @@ mod tests {
     use crate::protocol::search::{
         Explanation, Hit, SearchQuery, SearchResults, TermQuery, TotalHitsRelation,
     };
-    use crate::protocol::terms::{FieldTerms, Posting, TermEntry, TopTerm};
+    use crate::protocol::terms::{
+        ExportTermsResult, FieldTerms, Posting, TermDelimiter, TermEntry, TopTerm,
+    };
     use crate::protocol::version::JavaRuntime;
 
     fn version() -> VersionResult {
@@ -1493,7 +1760,7 @@ mod tests {
             ),
             None
         );
-        assert!(render(&mut app).contains("1-6 screen"));
+        assert!(render(&mut app).contains("1-7 screen"));
         app.handle_key(key(KeyCode::Char('5')));
         app.handle_key(key(KeyCode::Char('/')));
         typed(&mut app, "red");
@@ -2682,5 +2949,162 @@ mod tests {
             }
         );
         assert!(render(&mut app).contains("Term · field body · hex"));
+    }
+    #[test]
+    fn checks_the_index_on_screen_7() {
+        let mut app = app_with_fields();
+        assert_eq!(app.handle_key(key(KeyCode::Char('7'))), None);
+        let screen = render(&mut app);
+        assert!(screen.contains("Lucene's CheckIndex"), "{screen}");
+        assert!(
+            screen.contains("⏎ check   l level: 1 checksums"),
+            "{screen}"
+        );
+
+        app.handle_key(key(KeyCode::Char('l')));
+        assert_eq!(
+            app.handle_key(key(KeyCode::Enter)),
+            Some(Action::StartCheck(2))
+        );
+        app.check_started(5);
+        assert_eq!(app.polls(), vec![Poll::Check(5)]);
+        app.check_progress(GetCheckIndexResult {
+            line_count: 2,
+            lines: vec![
+                "Checking /data/idx".to_owned(),
+                "1 of 1: name=_0".to_owned(),
+            ],
+            result: None,
+        });
+        assert_eq!(app.check_from_line(), 2);
+        assert!(render(&mut app).contains("Esc cancel check"));
+
+        // Esc cancels the check rather than quitting.
+        assert_eq!(
+            app.handle_key(key(KeyCode::Esc)),
+            Some(Action::CancelCheck(5))
+        );
+        app.check_cancelled();
+        assert!(app.polls().is_empty());
+        assert!(render(&mut app).contains("Cancelled."));
+        assert_eq!(app.handle_key(key(KeyCode::Esc)), Some(Action::Quit));
+    }
+
+    #[test]
+    fn checks_without_a_reader_and_stops_on_reopen() {
+        let mut app = App::new(version(), None);
+        opened_without_reader(&mut app);
+        app.handle_key(key(KeyCode::Char('1')));
+        assert!(render(&mut app).contains("only the commits (4) and check (7) work"));
+        app.handle_key(key(KeyCode::Char('7')));
+        assert_eq!(
+            app.handle_key(key(KeyCode::Enter)),
+            Some(Action::StartCheck(1))
+        );
+        app.check_started(1);
+
+        // Opening the path again keeps the screen, with a new check.
+        opened_without_reader(&mut app);
+        assert!(app.polls().is_empty());
+        assert!(render(&mut app).contains("Lucene's CheckIndex"));
+
+        let mut app = app_with_fields();
+        app.handle_key(key(KeyCode::Char('7')));
+        app.handle_key(key(KeyCode::Enter));
+        app.check_started(2);
+        app.reopened(stats("/data/idx"));
+        assert!(app.polls().is_empty());
+        assert!(render(&mut app).contains("Stopped: the index was reopened."));
+    }
+
+    #[test]
+    fn exports_the_terms_of_the_selected_field() {
+        let mut app = app_on_terms().with_cwd(Some(PathBuf::from("/work")));
+        assert_eq!(app.handle_key(key(KeyCode::Char('e'))), None);
+        let screen = render(&mut app);
+        assert!(screen.contains("Export the terms of id"), "{screen}");
+        assert!(screen.contains("Tab delimiter: tab"), "{screen}");
+        app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL));
+        typed(&mut app, "ids.out");
+
+        assert_eq!(
+            app.handle_key(key(KeyCode::Enter)),
+            Some(Action::StartExport(StartExportTermsParams {
+                field: "id".to_owned(),
+                path: "/work/ids.out".to_owned(),
+                delimiter: Some(TermDelimiter::Tab),
+                overwrite: Some(false),
+            }))
+        );
+        assert!(render(&mut app).contains("Exporting…"));
+        app.export_started(9);
+        assert_eq!(app.polls(), vec![Poll::Export(9)]);
+        app.export_progress(GetExportTermsResult {
+            terms_written: 1024,
+            result: None,
+        });
+        let screen = render(&mut app);
+        assert!(screen.contains("Exporting id: 1024 terms"), "{screen}");
+        assert!(screen.contains("Esc cancel export"), "{screen}");
+        // One export at a time.
+        app.handle_key(key(KeyCode::Char('e')));
+        assert!(render(&mut app).contains("An export runs; Esc cancels it"));
+
+        app.export_progress(GetExportTermsResult {
+            terms_written: 2,
+            result: Some(ExportTermsResult {
+                path: "/work/ids.out".to_owned(),
+                terms: 2,
+                bytes: 6,
+            }),
+        });
+        assert!(app.polls().is_empty());
+        let screen = render(&mut app);
+        assert!(screen.contains(" Exported 2 terms to ids.out"), "{screen}");
+        // Until the next key.
+        app.handle_key(key(KeyCode::Down));
+        assert!(!render(&mut app).contains("Exported"));
+    }
+
+    #[test]
+    fn the_tabs_make_room_for_a_long_notice() {
+        let mut app = app_with_fields();
+        assert!(render(&mut app).contains("6 Analysis │ 7 Check"));
+        app.reopen_failed("Corrupt index".to_owned());
+        let screen = render(&mut app);
+        assert!(screen.contains("6 Analysis│7 Check"), "{screen}");
+        assert!(screen.contains("Reopen failed: Corrupt index"), "{screen}");
+    }
+
+    #[test]
+    fn an_export_that_cant_start_says_why_in_its_prompt() {
+        let mut app = app_on_terms().with_cwd(Some(PathBuf::from("/work")));
+        app.handle_key(key(KeyCode::Char('e')));
+        app.handle_key(key(KeyCode::Enter));
+        app.export_failed("Not writing into the index directory /work".to_owned());
+        assert!(render(&mut app).contains("Not writing into the index directory /work"));
+        assert_eq!(app.handle_key(key(KeyCode::Esc)), None);
+        assert!(!render(&mut app).contains("Export the terms"));
+    }
+
+    #[test]
+    fn esc_cancels_a_running_export_and_a_failure_is_shown() {
+        let mut app = app_on_terms().with_cwd(Some(PathBuf::from("/work")));
+        app.handle_key(key(KeyCode::Char('e')));
+        app.handle_key(key(KeyCode::Enter));
+        app.export_started(4);
+        assert_eq!(
+            app.handle_key(key(KeyCode::Esc)),
+            Some(Action::CancelExport(4))
+        );
+        app.export_cancelled();
+        assert!(app.polls().is_empty());
+
+        app.handle_key(key(KeyCode::Char('e')));
+        app.handle_key(key(KeyCode::Enter));
+        app.export_started(5);
+        app.export_failed("Cannot write /work/x: disk full".to_owned());
+        assert!(app.polls().is_empty());
+        assert!(render(&mut app).contains("Export failed: Cannot write /work/x: disk full"));
     }
 }

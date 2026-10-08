@@ -55,6 +55,7 @@ public final class ReadOnlyIndex implements OpenedIndex {
     public static final int PROGRESS_INTERVAL = 1024;
 
     private final Path path;
+    private final DirectoryImpl directoryImpl;
     private final List<Part> parts;
     private final List<SkippedIndex> skipped;
     /** The reader of the only part, or a {@link MultiReader} over the parts' readers. */
@@ -119,8 +120,10 @@ public final class ReadOnlyIndex implements OpenedIndex {
         }
     }
 
-    private ReadOnlyIndex(Path path, List<Part> parts, List<SkippedIndex> skipped) throws IOException {
+    private ReadOnlyIndex(Path path, DirectoryImpl directoryImpl, List<Part> parts, List<SkippedIndex> skipped)
+            throws IOException {
         this.path = path;
+        this.directoryImpl = directoryImpl;
         this.parts = List.copyOf(parts);
         this.skipped = List.copyOf(skipped);
         this.reader = parts.size() == 1
@@ -166,7 +169,7 @@ public final class ReadOnlyIndex implements OpenedIndex {
                 throw dir.equals(root) ? e : named(dir, e);
             }
             try {
-                return new ReadOnlyIndex(root, List.of(part), List.of());
+                return new ReadOnlyIndex(root, directoryImpl, List.of(part), List.of());
             } catch (IOException | RuntimeException e) {
                 part.closeAll();
                 throw translate(part.dir(), e);
@@ -191,7 +194,7 @@ public final class ReadOnlyIndex implements OpenedIndex {
             }
             List<Part> compatible = compatible(parts, skipped);
             skipped.sort(Comparator.comparingInt(skippedIndex -> dirs.indexOf(skippedIndex.path())));
-            return new ReadOnlyIndex(root, compatible, skipped);
+            return new ReadOnlyIndex(root, directoryImpl, compatible, skipped);
         } catch (IOException | RuntimeException e) {
             parts.forEach(Part::closeAll);
             throw translate(root, e);
@@ -272,7 +275,7 @@ public final class ReadOnlyIndex implements OpenedIndex {
         List<Part> shared = newParts.stream().filter(parts::contains).toList();
         shared.forEach(part -> part.reader().incRef());
         try {
-            ReadOnlyIndex index = new ReadOnlyIndex(path, newParts, skipped);
+            ReadOnlyIndex index = new ReadOnlyIndex(path, directoryImpl, newParts, skipped);
             ownsDirectories = false;
             return Optional.of(index);
         } catch (IOException | RuntimeException e) {
@@ -388,6 +391,16 @@ public final class ReadOnlyIndex implements OpenedIndex {
         return skipped;
     }
 
+    @Override
+    public List<Path> skippedDirectories() {
+        return skipped.stream().map(SkippedIndex::path).toList();
+    }
+
+    @Override
+    public DirectoryImpl directoryImpl() {
+        return directoryImpl;
+    }
+
     /** Live documents in all index directories. */
     public int numDocs() {
         return reader.numDocs();
@@ -463,6 +476,35 @@ public final class ReadOnlyIndex implements OpenedIndex {
     /** The field called {@code name}, merged over all segments. */
     public Optional<FieldInfo> fieldInfo(String name) {
         return Optional.ofNullable(fieldInfos.fieldInfo(name));
+    }
+
+    /** Receives the terms of a field, one by one. */
+    @FunctionalInterface
+    interface TermVisitor {
+        /**
+         * @param term the term's bytes, valid only until the call returns
+         * @param docFreq documents that contain the term, deleted ones included
+         */
+        void term(BytesRef term, int docFreq) throws IOException;
+    }
+
+    /**
+     * Passes every term of {@code field}, over all index directories, to {@code visitor} in term
+     * order. A field without postings has none.
+     *
+     * @throws IllegalArgumentException if the index has no such field
+     * @throws IOException if reading the terms fails, or {@code visitor} fails
+     */
+    void forEachTerm(String field, TermVisitor visitor) throws IOException {
+        checkField(field);
+        Terms terms = MultiTerms.getTerms(reader, field);
+        if (terms == null) {
+            return;
+        }
+        TermsEnum termsEnum = terms.iterator();
+        for (BytesRef term = termsEnum.next(); term != null; term = termsEnum.next()) {
+            visitor.term(term, termsEnum.docFreq());
+        }
     }
 
     /**

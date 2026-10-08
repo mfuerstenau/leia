@@ -11,12 +11,16 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use super::analysis::{Analyze, GetAnalysisComponents};
+use super::check::{GetCheckIndex, StartCheckIndex};
 use super::commits::{GetCommit, GetCommits};
 use super::document::{GetDocument, GetStoredValue, GetTermVector};
 use super::index::{CloseIndex, GetIndexStats, OpenIndex, ReopenIndex};
 use super::job::CancelJob;
 use super::search::{GetExplain, GetSearch, StartExplain, StartSearch};
-use super::terms::{GetFieldTermScan, GetPositions, GetPostings, GetTerms, StartFieldTermScan};
+use super::terms::{
+    GetExportTerms, GetFieldTermScan, GetPositions, GetPostings, GetTerms, StartExportTerms,
+    StartFieldTermScan,
+};
 use super::version::Version;
 use super::{ErrorCode, METHOD_NAMES, Request, Response, RpcMethod};
 
@@ -165,6 +169,10 @@ fn check(fixture: &Fixture, json: &str) -> Result<(), String> {
         GetExplain::NAME => check_method::<GetExplain>(fixture, json),
         GetAnalysisComponents::NAME => check_method::<GetAnalysisComponents>(fixture, json),
         Analyze::NAME => check_method::<Analyze>(fixture, json),
+        StartCheckIndex::NAME => check_method::<StartCheckIndex>(fixture, json),
+        GetCheckIndex::NAME => check_method::<GetCheckIndex>(fixture, json),
+        StartExportTerms::NAME => check_method::<StartExportTerms>(fixture, json),
+        GetExportTerms::NAME => check_method::<GetExportTerms>(fixture, json),
         other => Err(format!("no method {other:?} in METHOD_NAMES")),
     }
 }

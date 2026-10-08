@@ -46,10 +46,13 @@ pub enum ErrorCode {
     MissingCodec,
     /// The path was opened without a reader (ADR 0021): only its commits can be read.
     NoReader,
+    /// A file can't be written (ADR 0022): it lies in an index directory, its directory doesn't
+    /// exist, it exists, or writing it failed.
+    OutputNotWritable,
 }
 
 impl ErrorCode {
-    pub const ALL: [ErrorCode; 21] = [
+    pub const ALL: [ErrorCode; 22] = [
         ErrorCode::ParseError,
         ErrorCode::InvalidRequest,
         ErrorCode::MethodNotFound,
@@ -71,6 +74,7 @@ impl ErrorCode {
         ErrorCode::InvalidAnalyzer,
         ErrorCode::MissingCodec,
         ErrorCode::NoReader,
+        ErrorCode::OutputNotWritable,
     ];
 
     pub const fn code(self) -> i32 {
@@ -96,6 +100,7 @@ impl ErrorCode {
             ErrorCode::InvalidAnalyzer => -32013,
             ErrorCode::MissingCodec => -32014,
             ErrorCode::NoReader => -32015,
+            ErrorCode::OutputNotWritable => -32016,
         }
     }
 
@@ -123,6 +128,7 @@ impl ErrorCode {
             ErrorCode::InvalidAnalyzer => "INVALID_ANALYZER",
             ErrorCode::MissingCodec => "MISSING_CODEC",
             ErrorCode::NoReader => "NO_READER",
+            ErrorCode::OutputNotWritable => "OUTPUT_NOT_WRITABLE",
         }
     }
 }

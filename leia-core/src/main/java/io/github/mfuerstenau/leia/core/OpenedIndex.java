@@ -20,6 +20,17 @@ public sealed interface OpenedIndex extends Closeable permits ReadOnlyIndex, Dir
     List<Path> directories();
 
     /**
+     * The index directories that were found but left out, as {@link ReadOnlyIndex#skipped()} lists
+     * them; empty for an index without a reader, which leaves none out.
+     */
+    default List<Path> skippedDirectories() {
+        return List.of();
+    }
+
+    /** The {@code Directory} the index directories were opened through. */
+    DirectoryImpl directoryImpl();
+
+    /**
      * The commits of the index directory at {@code index} in {@link #directories()}, newest first,
      * read from the directory again: they include commits written after it was opened. The opened
      * one, if any, is {@link CommitInfo#current()}.

@@ -202,7 +202,12 @@ From the read-only checklist in `luke-features.md` §7. Ordered roughly by value
   - `getCommit {generation}`: segments in commit order (docBase, deletions, generations, versions, codec and its formats, compound, blocks, index sort, size, diagnostics, attributes) and every file with its segment and size; `COMMIT_NOT_FOUND` (-32011)
   - TUI: commits screen (`4`) with commits on top, segments and details below; `r` reads the directory again; the demo index keeps all 4 commits and has one non-compound segment
 - [ ] Commits: per-field postings, doc values and KNN vectors formats (from each segment's field infos; ADR 0009 leaves them out)
-- [ ] Tools: check index (streamed output), export terms
+- [x] Tools: check index (streamed output), export terms (ADR 0022)
+  - `startCheckIndex {level?}` / `getCheckIndex {jobId, fromLine}`: `CheckIndex` on every index of the path (opened, then skipped), with or without a reader, through a read-only `CheckDirectory` that checks cancellation on positioning and bulk reads; the lines from `fromLine` on, then per index `clean`, `error`, `missingSegments`, bad segments, lost documents and per segment its error
+  - `startExportTerms {field, path, delimiter?, overwrite?}` / `getExportTerms {jobId}`: the server writes `term<delimiter>docFreq` lines; `OUTPUT_NOT_WRITABLE` (-32016) for a file in or below an index directory, in a missing directory, a directory, a symbolic link, or one that exists without `overwrite`; a failed or cancelled export deletes its file
+  - TUI: check screen (`7`) with level (`l`), summary and following output (`←`/`→` sideways); `e` on the terms screen asks for the file (`Tab` delimiter, second `Enter` overwrites), progress on the tab line, the outcome in the footer
+- [ ] Tools: check only the selected index or segments, and the thread count (left out of ADR 0022)
+- [ ] Tools: export terms with `totalTermFreq` and a marker for binary terms (left out of ADR 0022, which keeps Luke's format)
 - [ ] Misc: log view with level filter, cross-screen navigation (`luke-features.md` §5), themes, about
 - [ ] Improvements over Luke (§6): KNN vector inspection/search, point values, per-segment doc view, deleted-doc inspection, readable binary values, highlighting, cancellation of long operations
 - [ ] Documents: reconstruct a document's indexed values (uninvert) — per field, the terms the document was indexed with, rebuilt from the postings, so fields without term vectors show what was indexed too (Luke dropped its "Reconstruct")

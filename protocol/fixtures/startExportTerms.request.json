@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 33,
+  "method": "startExportTerms",
+  "params": {
+    "field": "body",
+    "path": "/home/user/terms_body_20261007T103000Z.out",
+    "delimiter": "COMMA",
+    "overwrite": true
+  }
+}

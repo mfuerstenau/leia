@@ -3,8 +3,9 @@ package io.github.mfuerstenau.leia.core;
 import java.util.concurrent.CancellationException;
 
 /**
- * Receives the progress of a scan, and can stop it. The scan calls {@link #scanned} from its own
- * thread, regularly and once more at the end.
+ * Receives the progress of a scan, and can stop it. The scan calls {@link #scanned} regularly and
+ * once more at the end, from its own thread or, for a check (ADR 0022), from the threads that read,
+ * but never from two threads at once.
  */
 @FunctionalInterface
 public interface ScanProgress {

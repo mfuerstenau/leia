@@ -276,7 +276,7 @@ fn directory_label(directory: DirectoryImpl) -> &'static str {
 
 /// Where the path component before the cursor starts, for Ctrl+W. Separators right before the
 /// cursor belong to that component, so repeated Ctrl+W walks up the path.
-fn component_start(before: &str) -> usize {
+pub(crate) fn component_start(before: &str) -> usize {
     let before = before.trim_end_matches(is_separator);
     before.rfind(is_separator).map_or(0, |i| i + 1)
 }

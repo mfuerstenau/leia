@@ -4,6 +4,9 @@ import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeParams;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeResult;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsParams;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsResult;
+import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexParams;
+import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexResult;
+import io.github.mfuerstenau.leia.protocol.check.StartCheckIndexParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
@@ -29,6 +32,7 @@ import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
 import io.github.mfuerstenau.leia.protocol.search.StartExplainParams;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
+import io.github.mfuerstenau.leia.protocol.terms.GetExportTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetPositionsParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetPositionsResult;
@@ -36,6 +40,7 @@ import io.github.mfuerstenau.leia.protocol.terms.GetPostingsParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
+import io.github.mfuerstenau.leia.protocol.terms.StartExportTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.StartFieldTermScanParams;
 import io.github.mfuerstenau.leia.protocol.version.VersionParams;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
@@ -224,6 +229,40 @@ public final class Methods {
     public static final RpcMethod<AnalyzeParams, AnalyzeResult> ANALYZE =
             new RpcMethod<>("analyze", AnalyzeParams.class, AnalyzeResult.class);
 
+    /**
+     * Starts a job that checks every index of the open path with Lucene's {@code CheckIndex}, with or
+     * without a reader (ADR 0022): the opened indexes, then the skipped ones. Nothing is written.
+     * Fails with {@code NO_INDEX_OPEN}, or {@code INVALID_PARAMS} for a level out of range.
+     */
+    public static final RpcMethod<StartCheckIndexParams, JobStarted> START_CHECK_INDEX =
+            new RpcMethod<>("startCheckIndex", StartCheckIndexParams.class, JobStarted.class);
+
+    /**
+     * The output of a check from a given line on, and its outcome once it is done (ADR 0022). The
+     * outcome is handed out once, with the last lines; afterwards the job is gone ({@code
+     * JOB_NOT_FOUND}). Fails with {@code INVALID_PARAMS} for a negative {@code fromLine}.
+     */
+    public static final RpcMethod<GetCheckIndexParams, GetCheckIndexResult> GET_CHECK_INDEX =
+            new RpcMethod<>("getCheckIndex", GetCheckIndexParams.class, GetCheckIndexResult.class);
+
+    /**
+     * Starts a job that writes the terms of a field of the open index to a file, one {@code
+     * term<delimiter>docFreq} per line (ADR 0022). Fails with {@code NO_INDEX_OPEN}, {@code
+     * NO_READER}, {@code FIELD_NOT_FOUND}, {@code INVALID_PARAMS} for a path that isn't absolute, or
+     * {@code OUTPUT_NOT_WRITABLE} for a file in an index directory, in a directory that doesn't
+     * exist, or that exists without {@code overwrite}.
+     */
+    public static final RpcMethod<StartExportTermsParams, JobStarted> START_EXPORT_TERMS =
+            new RpcMethod<>("startExportTerms", StartExportTermsParams.class, JobStarted.class);
+
+    /**
+     * The progress of an export of terms, and its outcome once it is done. The outcome is handed out
+     * once: an export that failed answers with its error ({@code OUTPUT_NOT_WRITABLE} if writing
+     * failed), and afterwards the job is gone ({@code JOB_NOT_FOUND}).
+     */
+    public static final RpcMethod<JobParams, GetExportTermsResult> GET_EXPORT_TERMS =
+            new RpcMethod<>("getExportTerms", JobParams.class, GetExportTermsResult.class);
+
     public static final List<RpcMethod<?, ?>> ALL = List.of(
             VERSION,
             OPEN_INDEX,
@@ -246,7 +285,11 @@ public final class Methods {
             START_EXPLAIN,
             GET_EXPLAIN,
             GET_ANALYSIS_COMPONENTS,
-            ANALYZE);
+            ANALYZE,
+            START_CHECK_INDEX,
+            GET_CHECK_INDEX,
+            START_EXPORT_TERMS,
+            GET_EXPORT_TERMS);
 
     private Methods() {}
 

@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 33,
+  "error": {
+    "code": -32016,
+    "message": "Not writing into the index directory /data/index: leia never changes an index"
+  }
+}

@@ -71,8 +71,25 @@ public final class Jobs {
      * @return the job's id
      */
     public <R> long start(String description, Class<R> resultType, Work<R> work) {
+        return start(description, resultType, Optional.empty(), work);
+    }
+
+    /**
+     * Starts {@code work} on a new thread, with an object that the work writes and polls read, such
+     * as the lines of output of a check (ADR 0022). It must be safe to use from both threads.
+     *
+     * @param description what the job does, for the log
+     * @param resultType the type of the outcome, which polls must ask for
+     * @param attachment what {@link #attachment} returns
+     * @return the job's id
+     */
+    public <R> long start(String description, Class<R> resultType, Object attachment, Work<R> work) {
+        return start(description, resultType, Optional.of(attachment), work);
+    }
+
+    private <R> long start(String description, Class<R> resultType, Optional<Object> attachment, Work<R> work) {
         long id = nextId++;
-        Job<R> job = new Job<>(id, description, resultType);
+        Job<R> job = new Job<>(id, description, resultType, attachment);
         jobs.put(id, job);
         executor.execute(() -> job.run(work));
         LOG.fine(() -> "Started job " + id + ": " + description);
@@ -103,6 +120,21 @@ public final class Jobs {
             }
             throw new RpcException(ErrorCode.INTERNAL_ERROR, "Internal error: " + e.getCause(), e.getCause());
         }
+    }
+
+    /**
+     * The object a job was started with. Take it before {@link #poll}, which forgets a job that is
+     * done.
+     *
+     * @throws RpcException {@code JOB_NOT_FOUND} if there is no such job with this result type, or it
+     *     has no attachment of this type
+     */
+    public <A> A attachment(long id, Class<?> resultType, Class<A> type) throws RpcException {
+        Job<?> job = jobs.get(id);
+        if (job == null || job.resultType != resultType) {
+            throw notFound(id);
+        }
+        return job.attachment.filter(type::isInstance).map(type::cast).orElseThrow(() -> notFound(id));
     }
 
     /**
@@ -159,16 +191,18 @@ public final class Jobs {
         final long id;
         final String description;
         final Class<R> resultType;
+        final Optional<Object> attachment;
         /** Completed by the job's thread only, when the work has returned or failed. */
         final CompletableFuture<R> outcome = new CompletableFuture<>();
 
         volatile long progress;
         volatile boolean cancelled;
 
-        Job(long id, String description, Class<R> resultType) {
+        Job(long id, String description, Class<R> resultType, Optional<Object> attachment) {
             this.id = id;
             this.description = description;
             this.resultType = resultType;
+            this.attachment = attachment;
         }
 
         void run(Work<R> work) {

@@ -31,6 +31,26 @@ class JobsTest {
     }
 
     @Test
+    void handsOutTheAttachmentUntilTheOutcomeIsFetched() throws Exception {
+        StringBuilder attachment = new StringBuilder("lines");
+        long id = jobs.start("test", String.class, attachment, _ -> "done");
+        awaitFinished(id);
+
+        assertThat(jobs.attachment(id, String.class, StringBuilder.class)).isSameAs(attachment);
+        assertFails(() -> jobs.attachment(id, String.class, Integer.class), ErrorCode.JOB_NOT_FOUND);
+        assertFails(() -> jobs.attachment(id, Integer.class, StringBuilder.class), ErrorCode.JOB_NOT_FOUND);
+        assertThat(jobs.poll(id, String.class).result()).contains("done");
+        assertFails(() -> jobs.attachment(id, String.class, StringBuilder.class), ErrorCode.JOB_NOT_FOUND);
+    }
+
+    @Test
+    void aJobWithoutAttachmentHasNone() throws Exception {
+        long id = jobs.start("test", String.class, _ -> "done");
+
+        assertFails(() -> jobs.attachment(id, String.class, Object.class), ErrorCode.JOB_NOT_FOUND);
+    }
+
+    @Test
     void reportsProgressWhileRunning() throws Exception {
         CountDownLatch reported = new CountDownLatch(1);
         CountDownLatch release = new CountDownLatch(1);

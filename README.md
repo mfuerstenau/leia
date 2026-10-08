@@ -34,6 +34,10 @@ because Lucene 10 can't read them.
   come from jars, such as Lucene's ICU, Japanese or Korean modules, or your own. The screen
   shows what the analyzer makes of a text step by step, with every token attribute. It needs no
   open index, and the search parses queries with the analyzer you build.
+- **Check:** Lucene's `CheckIndex` on every index of the path, at one of its three levels, with
+  its report as it is written and a summary of what is broken. It writes nothing, and works
+  without a reader too.
+- **Export terms:** the terms of a field with their document frequencies, written to a file.
 
 The rest of Luke's read-only features are still to come (see
 [`docs/tasklist.md`](docs/tasklist.md)).
@@ -85,10 +89,11 @@ reopens the indexes that changed. Indexes added or removed below the path need `
 
 An index that a reader can't open (a missing or corrupt file, a codec that isn't loaded) can
 still be opened without one: `Ctrl+N` in the open prompt, or `--no-reader`. When an open fails
-with a corrupt index or a missing codec, the prompt offers it. Only the commits screen works
-then: it lists the commits that can be read and, in red, the `segments_N` files that can't, with
-the reason. Overview, documents, terms and search say that they need a reader. The tab line
-shows `no reader`.
+with a corrupt index or a missing codec, the prompt offers it. Only the commits and check
+screens work then: the commits screen lists the commits that can be read and, in red, the
+`segments_N` files that can't, with the reason, and the check screen says what `CheckIndex` finds
+broken. Overview, documents, terms and search say that they need a reader. The tab line shows
+`no reader`.
 
 ### Jars
 
@@ -138,8 +143,8 @@ is ignored.
 | `o` | open an index: type a path, `Tab` completes directories, `~` is your home directory, `↑` `↓` step through the last 10 opened paths, `Ctrl+D` switches the `Directory` (FS, MMap, NIO), `Ctrl+N` switches the reader off for this open, `Enter` opens and `Esc` cancels |
 | `c` | close the open index |
 | `R` | reopen the open index, if another process committed to it since: the screens keep their place, and the tab line says `Reopened: segments_N`, `Unchanged: segments_N` (with several indexes, how many changed) or why it failed |
-| `1` … `6` | switch between the overview, the documents, the terms, the commits, the search and the analysis; only the analysis works without an open index |
-| `Esc` | stop the running term scans, or on the search screen the running search; with none running, quit |
+| `1` … `7` | switch between the overview, the documents, the terms, the commits, the search, the analysis and the check; only the analysis works without an open index |
+| `Esc` | stop the running term scans, then a running export, or on the search and check screens the running search or check; with none running, quit |
 | `q`, `Ctrl+C` | quit |
 
 #### Overview
@@ -234,6 +239,7 @@ takes about 1 MiB.
 | `←` `→` / `h` `l`, `Tab` | switch between the fields, their terms and the postings of the selected term |
 | `/` | seek: type a text, and the terms start from the first one that is not smaller; `Enter` or `Esc` ends it, and an empty text goes back to the first term |
 | `Enter` | go to the next column; on a posting, show its document on the documents screen |
+| `e` | export the selected field's terms to a file |
 | `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the focused column |
 
 The terms screen lists the fields that have postings, the terms of the selected field in term
@@ -246,6 +252,14 @@ include deleted documents, and the postings mark them `deleted`.
 A document opened from a posting shows the term in the header, and the details panel of the
 term's field shows where the term occurs: its positions, offsets and payloads, as far as they
 were indexed. `[` and `]` then step through the term's documents.
+
+`e` writes every term of the selected field, over all indexes, with its document frequency to a
+file, one `term<delimiter>docFreq` per line as Luke does. It asks for the file, at first
+`terms_<field>_<UTC time>.out` in the current directory; `~` and relative paths work, and `Tab`
+switches the delimiter between tab, comma and space. A file that exists is only overwritten after
+a second `Enter`, and leia refuses to write into an index directory. While the export runs, the
+tab line counts the terms written and `Esc` cancels it, which deletes the file. A term that isn't
+valid UTF-8 is written as hex, and a term may contain the delimiter, so split at the last one.
 
 #### Commits
 
@@ -323,6 +337,23 @@ the parsed and the rewritten query, or after `x` the explanation of the selected
 computes it; parts that don't match are dimmed. Searches and explanations run in the server, so
 `Esc` stops a slow one, such as a fuzzy query on a large index. A numeric range in classic syntax
 doesn't match point fields: use the standard syntax.
+
+#### Check
+
+| Key | Action |
+|---|---|
+| `Enter` | check every index of the path with Lucene's `CheckIndex` |
+| `l` | switch the level: 1 checks the checksums of every file, 2 also the integrity of every part of each segment, 3 also runs the slow checks |
+| `Esc` | cancel the running check |
+| `Tab` | switch between the summary and the output |
+| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | scroll the focused panel; at the end, the output follows new lines |
+| `←` `→` | scroll the output sideways |
+
+The check reads the latest commit of each index, the opened ones and then those skipped when the
+path was opened, through a directory of its own that refuses to write. The summary says per index
+whether it is clean or which segments are broken, why, and how many documents they hold; the
+output is `CheckIndex`'s report. It even checks a Lucene 8 index, which leia can't open with a
+reader. A check stays until another path is opened; a reopen stops a running one.
 
 #### Analysis
 

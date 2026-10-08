@@ -4,12 +4,16 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use super::analysis::{Analyze, GetAnalysisComponents};
+use super::check::{GetCheckIndex, StartCheckIndex};
 use super::commits::{GetCommit, GetCommits};
 use super::document::{GetDocument, GetStoredValue, GetTermVector};
 use super::index::{CloseIndex, GetIndexStats, OpenIndex, ReopenIndex};
 use super::job::CancelJob;
 use super::search::{GetExplain, GetSearch, StartExplain, StartSearch};
-use super::terms::{GetFieldTermScan, GetPositions, GetPostings, GetTerms, StartFieldTermScan};
+use super::terms::{
+    GetExportTerms, GetFieldTermScan, GetPositions, GetPostings, GetTerms, StartExportTerms,
+    StartFieldTermScan,
+};
 use super::version::Version;
 
 /// One JSON-RPC method: its name and the DTOs of its params and result.
@@ -43,4 +47,8 @@ pub const METHOD_NAMES: &[&str] = &[
     GetExplain::NAME,
     GetAnalysisComponents::NAME,
     Analyze::NAME,
+    StartCheckIndex::NAME,
+    GetCheckIndex::NAME,
+    StartExportTerms::NAME,
+    GetExportTerms::NAME,
 ];

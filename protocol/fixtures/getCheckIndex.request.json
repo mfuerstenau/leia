@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 31,
+  "method": "getCheckIndex",
+  "params": {
+    "jobId": 12,
+    "fromLine": 3
+  }
+}

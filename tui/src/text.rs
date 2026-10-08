@@ -94,6 +94,24 @@ pub fn count(n: usize, noun: &str) -> String {
     }
 }
 
+/// The UTC date and time of `millis` since the Unix epoch: year, month, day, hour, minute and
+/// second.
+pub fn utc_parts(millis: i64) -> [i64; 6] {
+    let seconds = millis.div_euclid(1000);
+    let (days, time) = (seconds.div_euclid(86_400), seconds.rem_euclid(86_400));
+    // Howard Hinnant's civil_from_days.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    [year, month, day, time / 3600, time % 3600 / 60, time % 60]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
