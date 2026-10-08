@@ -1,5 +1,6 @@
 package io.github.mfuerstenau.leia.server.index;
 
+import io.github.mfuerstenau.leia.core.DirectoryImpl;
 import io.github.mfuerstenau.leia.core.IndexOpenException;
 import io.github.mfuerstenau.leia.core.IndexSummary;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
@@ -42,16 +43,21 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
             throw new RpcException(ErrorCode.INVALID_PARAMS, "Invalid params: not a path: " + e.getMessage(), e);
         }
 
+        DirectoryImpl directoryImpl = params.directoryImpl()
+                .map(Enum::name)
+                .map(DirectoryImpl::valueOf)
+                .orElse(DirectoryImpl.FS);
         ReadOnlyIndex index;
         try {
-            index = ReadOnlyIndex.open(path);
+            index = ReadOnlyIndex.open(path, directoryImpl);
         } catch (IndexOpenException e) {
             throw new RpcException(errorCode(e.reason()), e.getMessage(), e);
         }
         currentIndex.replace(index);
         IndexSummary summary = index.summary();
         LOG.info(() -> "Opened " + summary.path() + " (" + summary.segmentsFile() + ", " + summary.maxDoc()
-                + " docs, created by Lucene " + summary.createdVersionMajor() + ")");
+                + " docs, created by Lucene " + summary.createdVersionMajor() + ", "
+                + directoryImpl + ")");
         return toResult(summary);
     }
 

@@ -28,6 +28,8 @@ import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.Version;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 class ReadOnlyIndexTest {
 
@@ -118,6 +120,39 @@ class ReadOnlyIndexTest {
             assertThat(snapshot(dir)).isEqualTo(before);
         }
         assertThat(snapshot(dir)).isEqualTo(before);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"FS, MMapDirectory", "MMAP, MMapDirectory", "NIO, NIOFSDirectory"})
+    void opensThroughTheChosenDirectory(DirectoryImpl directoryImpl, String className) throws Exception {
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(testIndex("lucene9"), directoryImpl)) {
+            assertThat(index.stats().directoryImpl()).isEqualTo(className);
+            assertThat(index.document(0).docId()).isZero();
+        }
+    }
+
+    @Test
+    void neverWritesToTheIndexDirectoryThroughNio() throws Exception {
+        Path dir = copy(testIndex("lucene9"), tmp.resolve("index"));
+        Files.delete(dir.resolve("write.lock"));
+        Map<String, FileTime> before = snapshot(dir);
+
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(dir, DirectoryImpl.NIO)) {
+            assertThat(index.reader().maxDoc()).isEqualTo(3);
+        }
+        assertThat(snapshot(dir)).isEqualTo(before);
+    }
+
+    @Test
+    void reopensThroughTheSameDirectory() throws Exception {
+        Path dir = writeIndex(tmp.resolve("index"), 1, null);
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(dir, DirectoryImpl.NIO)) {
+            addDocuments(dir, 2, 1);
+
+            try (ReadOnlyIndex reopened = index.reopen().orElseThrow()) {
+                assertThat(reopened.stats().directoryImpl()).isEqualTo("NIOFSDirectory");
+            }
+        }
     }
 
     @Test

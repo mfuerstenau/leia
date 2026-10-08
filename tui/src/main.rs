@@ -12,6 +12,7 @@ use leia::build_info::{LEIA, java_line, server_line};
 use leia::cli::Cli;
 use leia::client::CallError;
 use leia::clipboard::osc52;
+use leia::history::{self, History};
 use leia::java::find_java;
 use leia::protocol::ErrorCode;
 use leia::protocol::analysis::{Analyze, GetAnalysisComponents, GetAnalysisComponentsParams};
@@ -21,8 +22,8 @@ use leia::protocol::document::{
     GetTermVectorParams,
 };
 use leia::protocol::index::{
-    CloseIndex, CloseIndexParams, GetIndexStats, GetIndexStatsParams, OpenIndex, OpenIndexParams,
-    ReopenIndex, ReopenIndexParams,
+    CloseIndex, CloseIndexParams, DirectoryImpl, GetIndexStats, GetIndexStatsParams, OpenIndex,
+    OpenIndexParams, ReopenIndex, ReopenIndexParams,
 };
 use leia::protocol::job::{CancelJob, JobParams};
 use leia::protocol::search::{GetExplain, GetSearch, StartExplain, StartSearch};
@@ -47,7 +48,12 @@ fn main() -> Result<()> {
     // Start the server before taking over the terminal, so that startup errors are printed
     // normally.
     let (mut server, version) = start_server(&cli, &cli.jars)?;
-    let mut app = App::new(version, env::home_dir());
+    let home = env::home_dir();
+    let history =
+        history::default_file(home.as_deref()).map_or_else(History::in_memory, History::load);
+    let mut app = App::new(version, home)
+        .with_history(history)
+        .with_directory(cli.directory);
 
     // ratatui::run restores the terminal on exit and on panic; dropping the server on a panic
     // shuts it down too.
@@ -128,7 +134,7 @@ fn run(
         app.opening(&path);
         terminal.draw(|frame| app.draw(frame))?;
         // The overview is shown at first, so no action follows.
-        open_index(server, app, &path)?;
+        open_index(server, app, &path, app.directory())?;
     }
     let mut polled: Vec<Poll> = Vec::new();
     let mut first_polls = 0;
@@ -180,10 +186,13 @@ fn perform(
 ) -> Result<Option<Action>> {
     match action {
         Action::Quit => {}
-        Action::Open(path) => {
+        Action::Open {
+            path,
+            directory_impl,
+        } => {
             // Shows "Opening…" while the server works.
             terminal.draw(|frame| app.draw(frame))?;
-            return open_index(server, app, &path);
+            return open_index(server, app, &path, directory_impl);
         }
         Action::Close => {
             server.call::<CloseIndex>(CloseIndexParams {})?;
@@ -375,9 +384,15 @@ fn poll_jobs(server: &mut Server, app: &mut App, polls: &[Poll]) -> Result<Vec<A
 /// Opens the index and fetches its statistics for the overview. The server's errors are shown
 /// in the UI; a broken connection to the server ends leia. Returns the action that follows, if
 /// any: the first document, if the documents screen is shown.
-fn open_index(server: &mut Server, app: &mut App, path: &str) -> Result<Option<Action>> {
+fn open_index(
+    server: &mut Server,
+    app: &mut App,
+    path: &str,
+    directory_impl: DirectoryImpl,
+) -> Result<Option<Action>> {
     let opened = server.call::<OpenIndex>(OpenIndexParams {
         path: path.to_owned(),
+        directory_impl: Some(directory_impl),
     });
     if let Err(error) = answered(opened.map_err(with_jar_hint))? {
         app.open_failed(error);

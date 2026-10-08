@@ -10,6 +10,7 @@ import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.ProtocolJson;
 import io.github.mfuerstenau.leia.protocol.Request;
 import io.github.mfuerstenau.leia.protocol.Response;
+import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.server.RpcException;
@@ -29,6 +30,7 @@ import org.apache.lucene.util.Version;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.EnumSource;
 
 class OpenIndexHandlerTest {
@@ -55,6 +57,16 @@ class OpenIndexHandlerTest {
                         Optional.of(Version.LATEST.toString())));
         assertThat(currentIndex.get())
                 .hasValueSatisfying(index -> assertThat(index.summary().path()).isEqualTo(dir));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"FS, MMapDirectory", "MMAP, MMapDirectory", "NIO, NIOFSDirectory"})
+    void opensThroughTheChosenDirectory(DirectoryImpl directoryImpl, String className) throws Exception {
+        Path dir = writeIndex(tmp.resolve("index"), 1);
+
+        handler.handle(new OpenIndexParams(dir.toString(), Optional.of(directoryImpl)));
+
+        assertThat(currentIndex.get().orElseThrow().stats().directoryImpl()).isEqualTo(className);
     }
 
     @Test
@@ -123,6 +135,15 @@ class OpenIndexHandlerTest {
                 .readValue(fixture("openIndex.request.json"), ProtocolJson.requestType(Methods.OPEN_INDEX));
 
         assertThat(request.params().path()).isEqualTo("/data/indexes/products");
+        assertThat(request.params().directoryImpl()).isEmpty();
+    }
+
+    @Test
+    void directoryFixtureIsReadAsOpenIndexParams() throws IOException {
+        Request<OpenIndexParams> request = ProtocolJson.mapper()
+                .readValue(fixture("openIndex.request-directory.json"), ProtocolJson.requestType(Methods.OPEN_INDEX));
+
+        assertThat(request.params().directoryImpl()).contains(DirectoryImpl.NIO);
     }
 
     private static Path writeIndex(Path dir, int docs) throws IOException {

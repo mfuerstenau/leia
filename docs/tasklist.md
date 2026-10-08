@@ -26,6 +26,7 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 - [x] ADR 0017: stop words and stem exclusions for presets (`preset` gains `stopwords?` and `stemExclusion?`, each a `WordSet` of `words` or `file`; the constructor goes by Lucene's convention, `(CharArraySet)` and `(CharArraySet, CharArraySet)`, with the default stop words filled in for stem exclusions alone; `getAnalysisComponents` gives each preset's `stopwords`/`stemExclusion` as `NONE`/`OPTIONAL`/`REQUIRED`; a `(CharArraySet)` constructor makes a preset too, which adds `StopAnalyzer`)
 - [x] ADR 0018: codecs and formats from jars (`--analysis-jar` becomes `--jar`, one loader that also reloads Lucene's codecs, postings, doc values and KNN vectors formats; `lucene-codecs` and `lucene-suggest` bundled; `MISSING_CODEC` (-32014) for a codec or format that isn't loaded, `UNSUPPORTED_INDEX_FORMAT` for one of Lucene's own)
 - [x] ADR 0019: reopening the index (`reopenIndex {}` with `openIfChanged`, `changed` plus the `openIndex` fields; a failed reopen keeps the open index; the TUI's `R` keeps each screen's place)
+- [x] ADR 0020: directory choice and recent paths (`openIndex`' optional `directoryImpl` `FS`/`MMAP`/`NIO`; the TUI's `--directory` and Ctrl+D in the open prompt; the last 10 paths in a state-dir file, Up/Down in the prompt)
 - [x] `README.md`: what leia is, build and run instructions
 
 ### Java build (Gradle 9, Java 25)
@@ -100,7 +101,12 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 
 From the read-only checklist in `luke-features.md` §7. Ordered roughly by value. Each area will need its own protocol methods, fixtures and probably an ADR for the cross-cutting parts.
 
-- [ ] Open options: directory implementation choice, recursive multi-index (`MultiReader`), no-reader mode for corrupt indexes, recent-path history
+- [ ] Open options: recursive multi-index (`MultiReader`), no-reader mode for corrupt indexes
+- [x] Open options: directory implementation choice and recent paths (ADR 0020)
+  - `openIndex {path, directoryImpl?}` with `FS` (absent; `FSDirectory.open`), `MMAP` or `NIO`, each with `NoLockFactory`; the class in use is `getIndexStats`' `directoryImpl`; `reopenIndex` keeps the directory. No third-party `Directory` classes
+  - TUI: `--directory fs|mmap|nio` is the default, and Ctrl+D in the open prompt cycles it (shown in the prompt's bottom border) for that open and the next prompts
+  - TUI: the last 10 opened paths (absolute, from the server), newest first and without duplicates; Up/Down in the open prompt step through them like a shell's history, skipping the input, and Down past the newest brings back what was typed. Kept in `$XDG_STATE_HOME/leia/history` (or `~/.local/state/…`) / `%LOCALAPPDATA%\leia\history`, one path per line, written through a temporary file; read or write failures are ignored
+  - tests: core (each implementation, NIO writes nothing, reopen keeps NIO), server handler (each implementation, the fixture), TUI (prompt, history file, app, CLI), real server (each implementation)
 - [x] Open options: reopen (ADR 0019)
   - `reopenIndex {}` → `{changed, path, segmentsFile, numDocs, maxDoc, createdVersionMajor, minSegmentLuceneVersion?}`: `DirectoryReader.openIfChanged`, so unchanged segments are shared; unchanged → nothing happens, the jobs keep running; changed → the new reader becomes the open index, the old one's jobs stop and its reader closes (the directory is handed on); `NO_INDEX_OPEN`, or `openIndex`'s errors with the open index kept
   - TUI: `R` on every screen (listed on the overview and the commits screen); the tab line says "Reopening…", "Unchanged: segments_N", "Reopened: segments_N" or "Reopen failed: …" until the next key

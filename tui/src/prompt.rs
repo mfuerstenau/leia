@@ -1,17 +1,18 @@
-//! The open-index prompt: a one-line path editor with directory completion, drawn as a popup. It
-//! also shows why the last open failed.
+//! The open-index prompt: a one-line path editor with directory completion and the recent paths,
+//! drawn as a popup. It also shows the `Directory` to open with, and why the last open failed.
 
 use std::fs;
 use std::path::{self, MAIN_SEPARATOR, Path, PathBuf};
 
 use ratatui::Frame;
-use ratatui::crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 
 use crate::input::{Edit, LineInput};
+use crate::protocol::index::DirectoryImpl;
 
 /// The popup is at most this wide, borders included.
 const MAX_WIDTH: u16 = 100;
@@ -37,6 +38,13 @@ pub struct PathPrompt {
     busy: bool,
     /// The directory that `~` stands for.
     home: Option<PathBuf>,
+    /// The recently opened paths, newest first (ADR 0020).
+    recent: Vec<String>,
+    /// While Up and Down step through `recent`: the input before the first Up, and the position
+    /// among the recent paths other than that input.
+    browsing: Option<(String, usize)>,
+    /// The `Directory` to open with; Ctrl+D cycles it.
+    directory: DirectoryImpl,
 }
 
 impl PathPrompt {
@@ -47,7 +55,25 @@ impl PathPrompt {
             error: None,
             busy: false,
             home,
+            recent: Vec::new(),
+            browsing: None,
+            directory: DirectoryImpl::default(),
         }
+    }
+
+    /// Up and Down step through `recent`, newest first.
+    pub fn with_recent(mut self, recent: &[String]) -> Self {
+        self.recent = recent.to_vec();
+        self
+    }
+
+    pub fn with_directory(mut self, directory: DirectoryImpl) -> Self {
+        self.directory = directory;
+        self
+    }
+
+    pub fn directory(&self) -> DirectoryImpl {
+        self.directory
     }
 
     pub fn input(&self) -> &str {
@@ -75,7 +101,24 @@ impl PathPrompt {
                 return PromptEvent::Submit(self.input().to_owned());
             }
             KeyCode::Esc => return PromptEvent::Cancel,
+            KeyCode::Up => {
+                self.browse(true);
+                return PromptEvent::None;
+            }
+            KeyCode::Down => {
+                self.browse(false);
+                return PromptEvent::None;
+            }
+            KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.directory = match self.directory {
+                    DirectoryImpl::Fs => DirectoryImpl::Mmap,
+                    DirectoryImpl::Mmap => DirectoryImpl::Nio,
+                    DirectoryImpl::Nio => DirectoryImpl::Fs,
+                };
+                return PromptEvent::None;
+            }
             KeyCode::Tab => {
+                self.browsing = None;
                 let (input, candidates) = complete(self.input(), self.home.as_deref());
                 self.candidates = candidates;
                 if input != self.input() {
@@ -87,11 +130,38 @@ impl PathPrompt {
             _ => {}
         }
         if self.input.handle_key(key, component_start) == Edit::Changed {
-            // The error and the candidates describe the input before the edit.
+            // The error and the candidates describe the input before the edit. The next Up starts
+            // from the edited input.
             self.error = None;
             self.candidates.clear();
+            self.browsing = None;
         }
         PromptEvent::None
+    }
+
+    /// Steps to an older (`older`) or newer recent path, like a shell's history. The path that was
+    /// in the input before the first Up is skipped, and Down past the newest brings it back.
+    fn browse(&mut self, older: bool) {
+        let (typed, position) = match self.browsing.take() {
+            Some((typed, position)) => (typed, Some(position)),
+            None => (self.input().to_owned(), None),
+        };
+        let entries: Vec<&String> = self.recent.iter().filter(|path| **path != typed).collect();
+        let next = match (older, position) {
+            (true, None) => (!entries.is_empty()).then_some(0),
+            (true, Some(position)) => Some((position + 1).min(entries.len() - 1)),
+            (false, None | Some(0)) => None,
+            (false, Some(position)) => Some(position - 1),
+        };
+        if position.is_some() || next.is_some() {
+            let input = next.map_or_else(|| typed.clone(), |next| entries[next].clone());
+            if input != self.input() {
+                self.error = None;
+                self.candidates.clear();
+            }
+            self.input.set(input);
+        }
+        self.browsing = next.map(|next| (typed, next));
     }
 
     /// Draws the popup, centered in `area`.
@@ -114,7 +184,13 @@ impl PathPrompt {
             .min(area.height);
         let popup = area.centered(Constraint::Length(width), Constraint::Length(height));
         frame.render_widget(Clear, popup);
-        let block = Block::bordered().title(" Open index ");
+        let block = Block::bordered().title(" Open index ").title_bottom(
+            Line::from(format!(
+                " ^D directory: {} ",
+                directory_label(self.directory)
+            ))
+            .right_aligned(),
+        );
         let inner = block.inner(popup);
         frame.render_widget(block, popup);
 
@@ -140,6 +216,8 @@ impl PathPrompt {
         }
         let hint_text = if self.busy {
             "Opening…"
+        } else if self.browsing.is_some() || self.recent.iter().any(|path| path != self.input()) {
+            "Enter open   Tab complete   ↑↓ recent   Esc cancel"
         } else {
             "Enter open   Tab complete   Esc cancel"
         };
@@ -147,6 +225,15 @@ impl PathPrompt {
             Line::from(hint_text).style(Style::new().add_modifier(Modifier::DIM)),
             hint,
         );
+    }
+}
+
+/// How the prompt names a `Directory`.
+fn directory_label(directory: DirectoryImpl) -> &'static str {
+    match directory {
+        DirectoryImpl::Fs => "FS (auto)",
+        DirectoryImpl::Mmap => "MMap",
+        DirectoryImpl::Nio => "NIO",
     }
 }
 
@@ -419,6 +506,80 @@ mod tests {
         assert!(screen.contains("xxx/end"), "{screen}");
         assert!(screen.contains("INDEX_NOT_FOUND"), "{screen}");
         assert!(screen.contains("Esc cancel"), "{screen}");
+    }
+
+    fn recent(paths: &[&str]) -> Vec<String> {
+        paths.iter().map(|path| (*path).to_owned()).collect()
+    }
+
+    #[test]
+    fn up_and_down_step_through_the_recent_paths_but_skip_the_input() {
+        let mut prompt = PathPrompt::new("/b", None).with_recent(&recent(&["/a", "/b", "/c"]));
+        prompt.set_error("Not a Lucene index".to_owned());
+
+        prompt.handle_key(key(KeyCode::Up));
+        assert_eq!(prompt.input(), "/a");
+        assert_eq!(prompt.error(), None);
+        prompt.handle_key(key(KeyCode::Up));
+        assert_eq!(prompt.input(), "/c");
+        prompt.handle_key(key(KeyCode::Up));
+        assert_eq!(prompt.input(), "/c", "the oldest stays");
+        prompt.handle_key(key(KeyCode::Down));
+        assert_eq!(prompt.input(), "/a");
+        prompt.handle_key(key(KeyCode::Down));
+        assert_eq!(prompt.input(), "/b", "back to the input");
+        prompt.handle_key(key(KeyCode::Down));
+        assert_eq!(prompt.input(), "/b");
+        prompt.handle_key(key(KeyCode::Up));
+        assert_eq!(prompt.input(), "/a");
+    }
+
+    #[test]
+    fn an_edit_starts_over_from_the_edited_input() {
+        let mut prompt = PathPrompt::new("", None).with_recent(&recent(&["/a", "/b"]));
+
+        prompt.handle_key(key(KeyCode::Up));
+        prompt.handle_key(key(KeyCode::Up));
+        typed(&mut prompt, "x");
+        assert_eq!(prompt.input(), "/bx");
+        prompt.handle_key(key(KeyCode::Up));
+        assert_eq!(prompt.input(), "/a");
+        prompt.handle_key(key(KeyCode::Down));
+        assert_eq!(prompt.input(), "/bx");
+    }
+
+    #[test]
+    fn up_without_recent_paths_keeps_the_input() {
+        let mut prompt = PathPrompt::new("/x", None).with_recent(&recent(&["/x"]));
+
+        prompt.handle_key(key(KeyCode::Up));
+        prompt.handle_key(key(KeyCode::Down));
+
+        assert_eq!(prompt.input(), "/x");
+        assert!(!render(&prompt, 80, 8).contains("recent"));
+    }
+
+    #[test]
+    fn ctrl_d_cycles_the_directory() {
+        let mut prompt = PathPrompt::new("/x", None).with_directory(DirectoryImpl::Mmap);
+        assert!(render(&prompt, 80, 8).contains("^D directory: MMap"));
+
+        prompt.handle_key(ctrl('d'));
+        assert_eq!(prompt.directory(), DirectoryImpl::Nio);
+        assert!(render(&prompt, 80, 8).contains("^D directory: NIO"));
+        prompt.handle_key(ctrl('d'));
+        assert_eq!(prompt.directory(), DirectoryImpl::Fs);
+        assert!(render(&prompt, 80, 8).contains("^D directory: FS (auto)"));
+        assert_eq!(prompt.input(), "/x");
+    }
+
+    #[test]
+    fn the_hint_fits_with_the_recent_paths() {
+        let prompt = PathPrompt::new("/x", None).with_recent(&recent(&["/a"]));
+
+        let screen = render(&prompt, 60, 8);
+
+        assert!(screen.contains("↑↓ recent   Esc cancel"), "{screen}");
     }
 
     #[test]

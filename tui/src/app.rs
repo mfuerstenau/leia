@@ -18,6 +18,7 @@ use crate::analysis::{self, Analysis};
 use crate::build_info::{LEIA, java_line, server_line};
 use crate::commits::{self, Commits};
 use crate::documents::{self, Documents, Walk};
+use crate::history::History;
 use crate::overview::{DEFAULT_TOP_TERMS, FieldScan, Overview, step_top_terms};
 use crate::prompt::{PathPrompt, PromptEvent, expand_home};
 use crate::protocol::analysis::{AnalyzeParams, AnalyzeResult, GetAnalysisComponentsResult};
@@ -25,7 +26,7 @@ use crate::protocol::commits::{Commit, GetCommitResult};
 use crate::protocol::document::{
     BytesValue, GetDocumentResult, StoredValue, TermPosition, TermVectorTerm,
 };
-use crate::protocol::index::{GetIndexStatsResult, IndexField, ReopenIndexResult};
+use crate::protocol::index::{DirectoryImpl, GetIndexStatsResult, IndexField, ReopenIndexResult};
 use crate::protocol::search::{
     GetExplainResult, GetSearchResult, StartExplainParams, StartSearchParams,
 };
@@ -38,9 +39,12 @@ use crate::terms::{self, Terms};
 #[derive(Debug, PartialEq)]
 pub enum Action {
     Quit,
-    /// Open this index and fetch its statistics. The prompt shows "Opening…" until the outcome
-    /// is reported.
-    Open(String),
+    /// Open this index through this `Directory` and fetch its statistics. The prompt shows
+    /// "Opening…" until the outcome is reported.
+    Open {
+        path: String,
+        directory_impl: DirectoryImpl,
+    },
     /// Close the open index.
     Close,
     /// Reopen the open index if it changed, and report back with [`App::reopened`],
@@ -159,6 +163,10 @@ pub struct App {
     version: VersionResult,
     /// The directory that `~` stands for in the prompt.
     home: Option<PathBuf>,
+    /// The recently opened paths, for the prompt (ADR 0020).
+    history: History,
+    /// The `Directory` the next prompt opens with: `--directory`, then the last one chosen.
+    directory: DirectoryImpl,
     overview: Option<Overview>,
     documents: Option<Documents>,
     terms: Option<Terms>,
@@ -206,6 +214,8 @@ impl App {
         Self {
             version,
             home,
+            history: History::in_memory(),
+            directory: DirectoryImpl::default(),
             overview: None,
             documents: None,
             terms: None,
@@ -221,13 +231,36 @@ impl App {
         }
     }
 
+    /// Keeps the recently opened paths in `history` instead of in memory.
+    pub fn with_history(mut self, history: History) -> Self {
+        self.history = history;
+        self
+    }
+
+    /// Opens with `directory` until another one is chosen in the prompt.
+    pub fn with_directory(mut self, directory: DirectoryImpl) -> Self {
+        self.directory = directory;
+        self
+    }
+
+    /// The `Directory` the next open uses.
+    pub fn directory(&self) -> DirectoryImpl {
+        self.directory
+    }
+
+    fn path_prompt(&self, input: &str) -> PathPrompt {
+        PathPrompt::new(input, self.home.clone())
+            .with_recent(self.history.paths())
+            .with_directory(self.directory)
+    }
+
     pub fn has_index(&self) -> bool {
         self.overview.is_some()
     }
 
     /// Shows `path` being opened, for an open that no key started (the command line's path).
     pub fn opening(&mut self, path: &str) {
-        let mut prompt = PathPrompt::new(path, self.home.clone());
+        let mut prompt = self.path_prompt(path);
         prompt.set_busy();
         self.prompt = Some(prompt);
     }
@@ -235,6 +268,7 @@ impl App {
     /// Shows the new index. The server stopped the jobs of the previous one. Returns what the
     /// shown screen has to fetch first.
     pub fn opened(&mut self, stats: GetIndexStatsResult) -> Option<Action> {
+        self.history.add(&stats.path);
         self.documents = Some(Documents::new(stats.fields.clone(), stats.max_doc));
         self.terms = Some(Terms::new(stats.fields.clone()));
         self.commits = Some(Commits::new());
@@ -290,9 +324,12 @@ impl App {
 
     /// Shows `error` in the prompt, which keeps the path, so it can be corrected.
     pub fn open_failed(&mut self, error: String) {
-        self.prompt
-            .get_or_insert_with(|| PathPrompt::new("", self.home.clone()))
-            .set_error(error);
+        if self.prompt.is_none() {
+            self.prompt = Some(self.path_prompt(""));
+        }
+        if let Some(prompt) = &mut self.prompt {
+            prompt.set_error(error);
+        }
     }
 
     /// The server stopped the jobs of the closed index.
@@ -739,7 +776,11 @@ impl App {
             return match prompt.handle_key(key) {
                 PromptEvent::Submit(path) => {
                     prompt.set_busy();
-                    Some(Action::Open(expand_home(&path, self.home.as_deref())))
+                    self.directory = prompt.directory();
+                    Some(Action::Open {
+                        path: expand_home(&path, self.home.as_deref()),
+                        directory_impl: self.directory,
+                    })
                 }
                 PromptEvent::Cancel => {
                     self.prompt = None;
@@ -815,7 +856,7 @@ impl App {
             KeyCode::Char('o') => {
                 // Starts from the open index, so a sibling is a Ctrl+W away.
                 let path = self.overview.as_ref().map_or("", Overview::path);
-                self.prompt = Some(PathPrompt::new(path, self.home.clone()));
+                self.prompt = Some(self.path_prompt(path));
                 None
             }
             KeyCode::Char('c') if self.overview.is_some() => Some(Action::Close),
@@ -1261,6 +1302,49 @@ mod tests {
         assert_eq!(params.query.classic.unwrap().analyzer, custom);
     }
 
+    fn open(path: &str) -> Option<Action> {
+        Some(Action::Open {
+            path: path.to_owned(),
+            directory_impl: DirectoryImpl::Fs,
+        })
+    }
+
+    #[test]
+    fn the_prompt_offers_the_opened_paths() {
+        let mut app = App::new(version(), None);
+        app.opened(stats("/data/a"));
+        app.opened(stats("/data/b"));
+
+        app.handle_key(key(KeyCode::Char('o')));
+        app.handle_key(key(KeyCode::Up));
+
+        assert_eq!(app.handle_key(key(KeyCode::Enter)), open("/data/a"));
+    }
+
+    #[test]
+    fn opens_with_the_directory_chosen_last() {
+        let mut app = App::new(version(), None).with_directory(DirectoryImpl::Nio);
+        app.handle_key(key(KeyCode::Char('o')));
+        typed(&mut app, "/data/idx");
+        let ctrl_d = KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL);
+
+        app.handle_key(ctrl_d);
+        app.handle_key(ctrl_d);
+        assert_eq!(
+            app.handle_key(key(KeyCode::Enter)),
+            Some(Action::Open {
+                path: "/data/idx".to_owned(),
+                directory_impl: DirectoryImpl::Mmap,
+            })
+        );
+        app.open_failed("No such file or directory: /data/idx".to_owned());
+        assert!(render(&mut app).contains("directory: MMap"));
+        app.handle_key(key(KeyCode::Esc));
+        assert_eq!(app.directory(), DirectoryImpl::Mmap);
+        app.handle_key(key(KeyCode::Char('o')));
+        assert!(render(&mut app).contains("directory: MMap"));
+    }
+
     #[test]
     fn opens_an_index_from_the_prompt() {
         let mut app = App::new(version(), None);
@@ -1270,10 +1354,7 @@ mod tests {
         typed(&mut app, "/data/idx");
         assert!(render(&mut app).contains("Open index"));
 
-        assert_eq!(
-            app.handle_key(key(KeyCode::Enter)),
-            Some(Action::Open("/data/idx".to_owned()))
-        );
+        assert_eq!(app.handle_key(key(KeyCode::Enter)), open("/data/idx"));
         assert!(render(&mut app).contains("Opening…"));
         app.opened(stats("/data/idx"));
 
@@ -1290,10 +1371,7 @@ mod tests {
         app.handle_key(key(KeyCode::Char('o')));
         typed(&mut app, "x");
 
-        assert_eq!(
-            app.handle_key(key(KeyCode::Enter)),
-            Some(Action::Open("/data/firstx".to_owned()))
-        );
+        assert_eq!(app.handle_key(key(KeyCode::Enter)), open("/data/firstx"));
         app.open_failed("No such file or directory: /data/firstx".to_owned());
 
         let screen = render(&mut app);
@@ -1326,10 +1404,7 @@ mod tests {
         app.handle_key(key(KeyCode::Char('o')));
         typed(&mut app, "~/idx");
 
-        assert_eq!(
-            app.handle_key(key(KeyCode::Enter)),
-            Some(Action::Open("/home/me/idx".to_owned()))
-        );
+        assert_eq!(app.handle_key(key(KeyCode::Enter)), open("/home/me/idx"));
     }
 
     #[test]
@@ -1366,10 +1441,7 @@ mod tests {
         app.opened(stats("/data/idx"));
         app.handle_key(key(KeyCode::Char('o')));
 
-        assert_eq!(
-            app.handle_key(key(KeyCode::Enter)),
-            Some(Action::Open("/data/idx".to_owned()))
-        );
+        assert_eq!(app.handle_key(key(KeyCode::Enter)), open("/data/idx"));
     }
 
     #[test]

@@ -26,8 +26,8 @@ use leia::protocol::document::{
     TermPosition,
 };
 use leia::protocol::index::{
-    CloseIndex, CloseIndexParams, DocValuesType, GetIndexStats, GetIndexStatsParams, IndexOptions,
-    OpenIndex, OpenIndexParams, ReopenIndex, ReopenIndexParams,
+    CloseIndex, CloseIndexParams, DirectoryImpl, DocValuesType, GetIndexStats, GetIndexStatsParams,
+    IndexOptions, OpenIndex, OpenIndexParams, ReopenIndex, ReopenIndexParams,
 };
 use leia::protocol::job::{CancelJob, JobParams};
 use leia::protocol::search::{
@@ -135,6 +135,7 @@ fn reports_a_missing_codec() {
         let error = server
             .call::<OpenIndex>(OpenIndexParams {
                 path: test_index(name, "testCodecIndexes"),
+                directory_impl: None,
             })
             .unwrap_err();
 
@@ -158,6 +159,7 @@ fn opens_indexes_with_codecs_from_a_jar() {
         let index = server
             .call::<OpenIndex>(OpenIndexParams {
                 path: test_index(name, "testCodecIndexes"),
+                directory_impl: None,
             })
             .unwrap();
         assert_eq!(index.max_doc, 3, "{name}");
@@ -202,6 +204,7 @@ fn reopens_an_index_that_has_a_new_commit() {
     let opened = server
         .call::<OpenIndex>(OpenIndexParams {
             path: dir.to_str().unwrap().to_owned(),
+            directory_impl: None,
         })
         .unwrap();
     assert_eq!(opened.segments_file, "segments_3");
@@ -232,7 +235,10 @@ fn opens_lucene9_index() {
     let path = lucene9_index();
 
     let index = server
-        .call::<OpenIndex>(OpenIndexParams { path: path.clone() })
+        .call::<OpenIndex>(OpenIndexParams {
+            path: path.clone(),
+            directory_impl: None,
+        })
         .unwrap();
 
     assert_eq!(index.path, path);
@@ -256,6 +262,7 @@ fn reports_missing_index() {
     let error = server
         .call::<OpenIndex>(OpenIndexParams {
             path: "/nonexistent/index".to_owned(),
+            directory_impl: None,
         })
         .unwrap_err();
 
@@ -275,7 +282,10 @@ fn reports_lucene9_index_stats() {
     let mut server = start();
     let path = lucene9_index();
     server
-        .call::<OpenIndex>(OpenIndexParams { path: path.clone() })
+        .call::<OpenIndex>(OpenIndexParams {
+            path: path.clone(),
+            directory_impl: None,
+        })
         .unwrap();
 
     let stats = server
@@ -324,6 +334,30 @@ fn reports_lucene9_index_stats() {
 
 #[test]
 #[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn opens_through_the_chosen_directory() {
+    let mut server = start();
+    for (directory_impl, class) in [
+        (None, "MMapDirectory"),
+        (Some(DirectoryImpl::Nio), "NIOFSDirectory"),
+        (Some(DirectoryImpl::Mmap), "MMapDirectory"),
+    ] {
+        server
+            .call::<OpenIndex>(OpenIndexParams {
+                path: lucene9_index(),
+                directory_impl,
+            })
+            .unwrap();
+
+        let stats = server
+            .call::<GetIndexStats>(GetIndexStatsParams {})
+            .unwrap();
+
+        assert_eq!(stats.directory_impl, class, "{directory_impl:?}");
+    }
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
 fn index_stats_need_an_open_index() {
     let mut server = start();
 
@@ -343,7 +377,10 @@ fn closes_the_open_index() {
     let mut server = start();
     let path = lucene9_index();
     server
-        .call::<OpenIndex>(OpenIndexParams { path: path.clone() })
+        .call::<OpenIndex>(OpenIndexParams {
+            path: path.clone(),
+            directory_impl: None,
+        })
         .unwrap();
 
     let closed = server.call::<CloseIndex>(CloseIndexParams {}).unwrap();
@@ -376,6 +413,7 @@ fn scans_the_terms_of_a_field() {
     server
         .call::<OpenIndex>(OpenIndexParams {
             path: lucene9_index(),
+            directory_impl: None,
         })
         .unwrap();
 
@@ -422,6 +460,7 @@ fn cancels_a_scan_and_rejects_an_unknown_field() {
     server
         .call::<OpenIndex>(OpenIndexParams {
             path: lucene9_index(),
+            directory_impl: None,
         })
         .unwrap();
 
@@ -466,6 +505,7 @@ fn reads_a_deleted_document_of_a_lucene9_index() {
     server
         .call::<OpenIndex>(OpenIndexParams {
             path: lucene9_index(),
+            directory_impl: None,
         })
         .unwrap();
 
@@ -540,6 +580,7 @@ fn browses_the_terms_and_postings_of_a_lucene9_index() {
     server
         .call::<OpenIndex>(OpenIndexParams {
             path: lucene9_index(),
+            directory_impl: None,
         })
         .unwrap();
     let text = |value: &str| BytesValue {
@@ -626,6 +667,7 @@ fn reads_the_commit_of_a_lucene9_index() {
     server
         .call::<OpenIndex>(OpenIndexParams {
             path: lucene9_index(),
+            directory_impl: None,
         })
         .unwrap();
 
@@ -692,6 +734,7 @@ fn searches_and_explains_a_lucene9_index() {
     server
         .call::<OpenIndex>(OpenIndexParams {
             path: lucene9_index(),
+            directory_impl: None,
         })
         .unwrap();
     let query = classic("number AND (1 OR 2 OR 3)");
@@ -867,6 +910,7 @@ fn searches_for_documents_like_one_of_a_lucene9_index() {
     server
         .call::<OpenIndex>(OpenIndexParams {
             path: lucene9_index(),
+            directory_impl: None,
         })
         .unwrap();
     let like = |doc_id: i32, fields: &[&str]| SearchQuery {
@@ -1217,6 +1261,7 @@ fn analyzes_without_an_open_index() {
     server
         .call::<OpenIndex>(OpenIndexParams {
             path: lucene9_index(),
+            directory_impl: None,
         })
         .unwrap();
     let mut query = classic("x");

@@ -56,9 +56,13 @@ leia [OPTIONS] [INDEX_PATH]
 | `-j, --java <PATH>` | the JVM, given as a `java` executable or a JDK/JRE directory; default: `$JAVA_HOME/bin/java`, then `java` on `PATH` |
 | `-V, --version` | print the versions of leia, leia-server and the Java in use |
 | `--jar <PATH>` | a jar with analysis components, codecs or formats of its own, or a directory of such jars; can be repeated (see [Jars](#jars)) |
+| `--directory <IMPL>` | the Lucene `Directory` to read indexes through: `fs` (default) lets Lucene choose, which is `MMapDirectory` on 64-bit; `mmap` is `MMapDirectory`, `nio` is `NIOFSDirectory`. `Ctrl+D` in the open prompt changes it |
 
 `leia-server.jar` has to be next to the `leia` executable. leia resolves symlinks, so a link to
 `leia` in `~/bin` works.
+
+leia keeps the last 10 opened index paths for the open prompt in `~/.local/state/leia/history`
+(`$XDG_STATE_HOME/leia/history` if that is set), or `%LOCALAPPDATA%\leia\history` on Windows.
 
 ```sh
 leia --java /opt/jdk-25 /var/lib/solr/products/data/index
@@ -109,7 +113,7 @@ is ignored.
 
 | Key | Action |
 |---|---|
-| `o` | open an index: type a path, `Tab` completes directories, `~` is your home directory, `Enter` opens and `Esc` cancels |
+| `o` | open an index: type a path, `Tab` completes directories, `~` is your home directory, `↑` `↓` step through the last 10 opened paths, `Ctrl+D` switches the `Directory` (FS, MMap, NIO), `Enter` opens and `Esc` cancels |
 | `c` | close the open index |
 | `R` | reopen the open index, if another process committed to it since: the screens keep their place, and the tab line says `Reopened: segments_N`, `Unchanged: segments_N` or why it failed |
 | `1` … `6` | switch between the overview, the documents, the terms, the commits, the search and the analysis; only the analysis works without an open index |

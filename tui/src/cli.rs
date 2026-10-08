@@ -2,7 +2,10 @@
 
 use std::path::PathBuf;
 
+use clap::builder::{PossibleValuesParser, TypedValueParser};
 use clap::{ArgAction, Parser};
+
+use crate::protocol::index::DirectoryImpl;
 
 // clap's own version flag is replaced, because `--version` also reports the Java version, which
 // only the server knows.
@@ -24,8 +27,27 @@ pub struct Cli {
     #[arg(long = "jar", value_name = "PATH")]
     pub jars: Vec<PathBuf>,
 
+    /// The Lucene `Directory` to read indexes through: `fs` lets Lucene choose (`MMapDirectory`
+    /// on 64-bit), `mmap` is `MMapDirectory`, `nio` is `NIOFSDirectory`. Ctrl+D in the open
+    /// prompt changes it.
+    #[arg(
+        long,
+        value_name = "IMPL",
+        default_value = "fs",
+        value_parser = PossibleValuesParser::new(["fs", "mmap", "nio"]).map(directory_impl),
+    )]
+    pub directory: DirectoryImpl,
+
     /// Lucene index directory to open.
     pub index_path: Option<PathBuf>,
+}
+
+fn directory_impl(name: String) -> DirectoryImpl {
+    match name.as_str() {
+        "mmap" => DirectoryImpl::Mmap,
+        "nio" => DirectoryImpl::Nio,
+        _ => DirectoryImpl::Fs,
+    }
 }
 
 #[cfg(test)]
@@ -62,7 +84,21 @@ mod tests {
         assert!(!cli.version);
         assert_eq!(cli.java, None);
         assert!(cli.jars.is_empty());
+        assert_eq!(cli.directory, DirectoryImpl::Fs);
         assert_eq!(cli.index_path, None);
+    }
+
+    #[test]
+    fn parses_the_directory() {
+        for (name, directory) in [
+            ("fs", DirectoryImpl::Fs),
+            ("mmap", DirectoryImpl::Mmap),
+            ("nio", DirectoryImpl::Nio),
+        ] {
+            let cli = Cli::try_parse_from(["leia", "--directory", name]).unwrap();
+            assert_eq!(cli.directory, directory);
+        }
+        assert!(Cli::try_parse_from(["leia", "--directory", "ram"]).is_err());
     }
 
     #[test]

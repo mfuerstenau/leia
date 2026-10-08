@@ -23,6 +23,22 @@ pub struct OpenIndexParams {
     /// The index directory. A relative path is resolved against the server's working directory,
     /// which is the TUI's.
     pub path: String,
+    /// The `Directory` to read it through (ADR 0020); `None` means [`DirectoryImpl::Fs`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub directory_impl: Option<DirectoryImpl>,
+}
+
+/// The Lucene `Directory` an index is read through (ADR 0020). Each opens without locking.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum DirectoryImpl {
+    /// `FSDirectory.open`: Lucene's choice for the platform, `MMapDirectory` on 64-bit.
+    #[default]
+    Fs,
+    /// `MMapDirectory`.
+    Mmap,
+    /// `NIOFSDirectory`.
+    Nio,
 }
 
 /// What identifies the opened index. The full statistics come from `getIndexStats`.

@@ -12,6 +12,7 @@ pub mod clipboard;
 pub mod commits;
 pub mod documents;
 pub mod form;
+pub mod history;
 pub mod hit_fields;
 pub mod input;
 pub mod java;

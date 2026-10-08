@@ -33,16 +33,14 @@ import org.apache.lucene.search.Query;
 import org.apache.lucene.search.Sort;
 import org.apache.lucene.search.similarities.Similarity;
 import org.apache.lucene.store.Directory;
-import org.apache.lucene.store.FSDirectory;
-import org.apache.lucene.store.NoLockFactory;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.PriorityQueue;
 
 /**
  * A Lucene index opened for reading only: a {@link DirectoryReader} on the latest commit, never an
- * {@code IndexWriter}. The directory uses {@link NoLockFactory}, so no lock file can be created
- * either (AGENTS.md, hard rule 1).
+ * {@code IndexWriter}. The directory is one of {@link DirectoryImpl}, which use no locking, so no
+ * lock file can be created either (AGENTS.md, hard rule 1).
  */
 public final class ReadOnlyIndex implements Closeable {
 
@@ -66,11 +64,20 @@ public final class ReadOnlyIndex implements Closeable {
     }
 
     /**
-     * Opens the latest commit of the index in {@code path}.
+     * Opens the latest commit of the index in {@code path} through {@link DirectoryImpl#FS}.
      *
      * @throws IndexOpenException if there is no readable index at {@code path}
      */
     public static ReadOnlyIndex open(Path path) throws IndexOpenException {
+        return open(path, DirectoryImpl.FS);
+    }
+
+    /**
+     * Opens the latest commit of the index in {@code path} through {@code directoryImpl} (ADR 0020).
+     *
+     * @throws IndexOpenException if there is no readable index at {@code path}
+     */
+    public static ReadOnlyIndex open(Path path, DirectoryImpl directoryImpl) throws IndexOpenException {
         Path dir = path.toAbsolutePath().normalize();
         if (!Files.exists(dir)) {
             throw new IndexOpenException(Reason.NOT_FOUND, "No such file or directory: " + dir);
@@ -82,7 +89,7 @@ public final class ReadOnlyIndex implements Closeable {
         Directory directory = null;
         DirectoryReader reader = null;
         try {
-            directory = FSDirectory.open(dir, NoLockFactory.INSTANCE);
+            directory = directoryImpl.open(dir);
             reader = DirectoryReader.open(directory);
             SegmentInfos commit =
                     SegmentInfos.readCommit(directory, reader.getIndexCommit().getSegmentsFileName());
