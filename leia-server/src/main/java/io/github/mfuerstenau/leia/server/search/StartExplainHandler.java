@@ -42,7 +42,7 @@ public final class StartExplainHandler implements MethodHandler<StartExplainPara
 
     @Override
     public JobStarted handle(StartExplainParams params) throws RpcException {
-        ReadOnlyIndex index = GetDocumentHandler.openIndex(currentIndex);
+        ReadOnlyIndex index = currentIndex.readable();
         int docId = params.docId();
         GetDocumentHandler.checkDocId(index, docId);
         Similarity similarity = SearchQueries.similarity(params.similarity());

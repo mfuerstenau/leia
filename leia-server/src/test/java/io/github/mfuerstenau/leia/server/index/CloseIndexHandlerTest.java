@@ -28,7 +28,7 @@ class CloseIndexHandlerTest {
     void closesTheOpenIndex() throws Exception {
         Path dir = writeEmptyIndex(tmp.resolve("index"));
         new OpenIndexHandler(currentIndex).handle(new OpenIndexParams(dir.toString()));
-        ReadOnlyIndex open = currentIndex.get().orElseThrow();
+        ReadOnlyIndex open = currentIndex.readable();
 
         CloseIndexResult result = handler.handle(new CloseIndexParams());
 

@@ -37,7 +37,7 @@ class CommitsTest {
     void listsTheCommitsNewestFirst() throws Exception {
         Path dir = writeIndex();
         try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
-            CommitList list = index.commits();
+            CommitList list = index.commits(0);
 
             assertThat(list.unreadable()).isEmpty();
             assertThat(list.commits())
@@ -57,7 +57,7 @@ class CommitsTest {
     void readsTheSegmentsOfACommit() throws Exception {
         Path dir = writeIndex();
         try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
-            CommitDetails details = index.commit(2).orElseThrow();
+            CommitDetails details = index.commit(0, 2).orElseThrow();
 
             assertThat(details.commit().current()).isTrue();
             assertThat(details.segments()).extracting(Segment::name).containsExactly("_0", "_1");
@@ -87,7 +87,7 @@ class CommitsTest {
     void listsTheFilesOfACommitWithTheirSegmentAndSize() throws Exception {
         Path dir = writeIndex();
         try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
-            CommitDetails details = index.commit(2).orElseThrow();
+            CommitDetails details = index.commit(0, 2).orElseThrow();
 
             assertThat(details.files()).extracting(CommitFile::name).isSorted().contains("segments_2", "_0.cfs");
             assertThat(file(details, "segments_2").segment()).isEmpty();
@@ -106,7 +106,7 @@ class CommitsTest {
     void readsAnOlderCommit() throws Exception {
         Path dir = writeIndex();
         try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
-            CommitDetails details = index.commit(1).orElseThrow();
+            CommitDetails details = index.commit(0, 1).orElseThrow();
 
             assertThat(details.commit().current()).isFalse();
             assertThat(details.segments()).singleElement().satisfies(segment -> {
@@ -127,7 +127,7 @@ class CommitsTest {
                 writer.commit();
             }
 
-            assertThat(index.commits().commits())
+            assertThat(index.commits(0).commits())
                     .extracting(CommitInfo::generation, CommitInfo::current)
                     .containsExactly(tuple(3L, false), tuple(2L, true), tuple(1L, false));
         }
@@ -139,7 +139,7 @@ class CommitsTest {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
             Files.delete(dir.resolve("_0_1.liv"));
 
-            CommitDetails details = index.commit(2).orElseThrow();
+            CommitDetails details = index.commit(0, 2).orElseThrow();
 
             assertThat(file(details, "_0_1.liv").size()).isEmpty();
             assertThat(details.segments().get(0).sizeInBytes()).isEmpty();
@@ -153,14 +153,14 @@ class CommitsTest {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
             Files.writeString(dir.resolve("segments_9"), "not a commit");
 
-            CommitList list = index.commits();
+            CommitList list = index.commits(0);
 
             assertThat(list.commits()).extracting(CommitInfo::generation).containsExactly(2L, 1L);
             assertThat(list.unreadable()).singleElement().satisfies(unreadable -> {
                 assertThat(unreadable.segmentsFile()).isEqualTo("segments_9");
                 assertThat(unreadable.error()).isInstanceOf(IOException.class);
             });
-            assertThatThrownBy(() -> index.commit(9)).isInstanceOf(IOException.class);
+            assertThatThrownBy(() -> index.commit(0, 9)).isInstanceOf(IOException.class);
         }
     }
 
@@ -183,20 +183,20 @@ class CommitsTest {
     @Test
     void anUnknownGenerationIsNotFound() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            assertThat(index.commit(7)).isEmpty();
-            assertThat(index.commit(0)).isEmpty();
-            assertThat(index.commit(-1)).isEmpty();
+            assertThat(index.commit(0, 7)).isEmpty();
+            assertThat(index.commit(0, 0)).isEmpty();
+            assertThat(index.commit(0, -1)).isEmpty();
         }
     }
 
     @Test
     void readsTheCommitOfALucene9Index() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(testIndex("lucene9"))) {
-            CommitInfo current = index.commits().commits().getFirst();
+            CommitInfo current = index.commits(0).commits().getFirst();
             assertThat(current.current()).isTrue();
             assertThat(current.luceneVersion().major).isEqualTo(9);
 
-            CommitDetails details = index.commit(current.generation()).orElseThrow();
+            CommitDetails details = index.commit(0, current.generation()).orElseThrow();
             assertThat(details.segments()).isNotEmpty().allSatisfy(segment -> {
                 assertThat(segment.version().major).isEqualTo(9);
                 assertThat(segment.codec()).startsWith("Lucene9");

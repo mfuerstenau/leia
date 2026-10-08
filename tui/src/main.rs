@@ -23,7 +23,7 @@ use leia::protocol::document::{
 };
 use leia::protocol::index::{
     CloseIndex, CloseIndexParams, DirectoryImpl, GetIndexStats, GetIndexStatsParams, OpenIndex,
-    OpenIndexParams, ReopenIndex, ReopenIndexParams,
+    OpenIndexParams, OpenMode, ReopenIndex, ReopenIndexParams,
 };
 use leia::protocol::job::{CancelJob, JobParams};
 use leia::protocol::search::{GetExplain, GetSearch, StartExplain, StartSearch};
@@ -57,7 +57,12 @@ fn main() -> Result<()> {
 
     // ratatui::run restores the terminal on exit and on panic; dropping the server on a panic
     // shuts it down too.
-    let result = ratatui::run(|terminal| run(terminal, &mut server, &mut app, index_path));
+    let mode = if cli.no_reader {
+        OpenMode::DirectoryOnly
+    } else {
+        OpenMode::Reader
+    };
+    let result = ratatui::run(|terminal| run(terminal, &mut server, &mut app, index_path, mode));
     let closed = if app.has_index() {
         server
             .call::<CloseIndex>(CloseIndexParams {})
@@ -129,12 +134,16 @@ fn run(
     server: &mut Server,
     app: &mut App,
     index_path: Option<String>,
+    mode: OpenMode,
 ) -> Result<()> {
     if let Some(path) = index_path {
-        app.opening(&path);
+        app.opening(&path, mode);
         terminal.draw(|frame| app.draw(frame))?;
-        // The overview is shown at first, so no action follows.
-        open_index(server, app, &path, app.directory())?;
+        // The overview or, without a reader, the commits screen is shown at first.
+        let mut next = open_index(server, app, &path, app.directory(), mode)?;
+        while let Some(action) = next {
+            next = perform(terminal, server, app, action)?;
+        }
     }
     let mut polled: Vec<Poll> = Vec::new();
     let mut first_polls = 0;
@@ -189,10 +198,11 @@ fn perform(
         Action::Open {
             path,
             directory_impl,
+            mode,
         } => {
             // Shows "Opening…" while the server works.
             terminal.draw(|frame| app.draw(frame))?;
-            return open_index(server, app, &path, directory_impl);
+            return open_index(server, app, &path, directory_impl, mode);
         }
         Action::Close => {
             server.call::<CloseIndex>(CloseIndexParams {})?;
@@ -295,14 +305,23 @@ fn perform(
                 Err(error) => app.positions_failed(doc_id, &field, &term, error),
             }
         }
-        Action::LoadCommits => match answered(server.call::<GetCommits>(GetCommitsParams {}))? {
-            Ok(result) => return Ok(app.commits_loaded(result.commits)),
-            Err(error) => app.commits_failed(error),
-        },
-        Action::LoadCommit(generation) => {
-            match answered(server.call::<GetCommit>(GetCommitParams { generation }))? {
-                Ok(result) => app.commit_loaded(generation, result),
-                Err(error) => app.commit_failed(generation, error),
+        Action::LoadCommits(index) => {
+            let params = GetCommitsParams {
+                index: Some(position(index)),
+            };
+            match answered(server.call::<GetCommits>(params))? {
+                Ok(result) => return Ok(app.commits_loaded(index, result)),
+                Err(error) => app.commits_failed(index, error),
+            }
+        }
+        Action::LoadCommit(index, generation) => {
+            let params = GetCommitParams {
+                generation,
+                index: Some(position(index)),
+            };
+            match answered(server.call::<GetCommit>(params))? {
+                Ok(result) => app.commit_loaded(index, generation, result),
+                Err(error) => app.commit_failed(index, generation, error),
             }
         }
         Action::StartSearch { params, cancel } => {
@@ -381,33 +400,52 @@ fn poll_jobs(server: &mut Server, app: &mut App, polls: &[Poll]) -> Result<Vec<A
     Ok(actions)
 }
 
-/// Opens the index and fetches its statistics for the overview. The server's errors are shown
-/// in the UI; a broken connection to the server ends leia. Returns the action that follows, if
-/// any: the first document, if the documents screen is shown.
+/// Opens the index and, with a reader, fetches its statistics for the overview. The server's
+/// errors are shown in the UI; a broken connection to the server ends leia. Returns the action
+/// that follows, if any: what the shown screen has to fetch first.
 fn open_index(
     server: &mut Server,
     app: &mut App,
     path: &str,
     directory_impl: DirectoryImpl,
+    mode: OpenMode,
 ) -> Result<Option<Action>> {
     let opened = server.call::<OpenIndex>(OpenIndexParams {
         path: path.to_owned(),
         directory_impl: Some(directory_impl),
+        mode: Some(mode),
     });
-    if let Err(error) = answered(opened.map_err(with_jar_hint))? {
-        app.open_failed(error);
-        return Ok(None);
+    let result = match opened.map_err(with_jar_hint) {
+        Ok(result) => result,
+        Err(CallError::Rpc(error)) => {
+            // A reader can't open a corrupt index, but its commits may still be readable.
+            let no_reader_helps = matches!(
+                error.code,
+                ErrorCode::CorruptIndex | ErrorCode::MissingCodec
+            );
+            app.open_failed(CallError::Rpc(error).to_string(), no_reader_helps);
+            return Ok(None);
+        }
+        Err(CallError::Transport(error)) => return Err(error),
+    };
+    if result.mode == OpenMode::DirectoryOnly {
+        return Ok(app.opened_without_reader(result));
     }
     match answered(server.call::<GetIndexStats>(GetIndexStatsParams {}))? {
-        Ok(stats) => Ok(app.opened(stats)),
+        Ok(stats) => Ok(app.opened(stats, result.skipped)),
         Err(error) => {
             // Opened, but the overview can't show it: close it rather than keep it open unseen.
             server.call::<CloseIndex>(CloseIndexParams {})?;
             app.closed();
-            app.open_failed(format!("cannot read the index statistics: {error}"));
+            app.open_failed(format!("cannot read the index statistics: {error}"), false);
             Ok(None)
         }
     }
+}
+
+/// The position of an index directory on the wire.
+fn position(index: usize) -> i32 {
+    i32::try_from(index).unwrap_or(i32::MAX)
 }
 
 /// Reopens the index if it changed, and fetches its statistics for the overview (ADR 0019). A
@@ -432,7 +470,7 @@ fn reopen_index(server: &mut Server, app: &mut App) -> Result<Option<Action>> {
             // Reopened, but the overview can't show it: close it rather than keep it open unseen.
             server.call::<CloseIndex>(CloseIndexParams {})?;
             app.closed();
-            app.open_failed(format!("cannot read the index statistics: {error}"));
+            app.open_failed(format!("cannot read the index statistics: {error}"), false);
             Ok(None)
         }
     }

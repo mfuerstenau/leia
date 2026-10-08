@@ -8,11 +8,11 @@ use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::Line;
+use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 
 use crate::input::{Edit, LineInput};
-use crate::protocol::index::DirectoryImpl;
+use crate::protocol::index::{DirectoryImpl, OpenMode};
 
 /// The popup is at most this wide, borders included.
 const MAX_WIDTH: u16 = 100;
@@ -45,6 +45,8 @@ pub struct PathPrompt {
     browsing: Option<(String, usize)>,
     /// The `Directory` to open with; Ctrl+D cycles it.
     directory: DirectoryImpl,
+    /// How to open the path; Ctrl+N switches between with and without a reader (ADR 0021).
+    mode: OpenMode,
 }
 
 impl PathPrompt {
@@ -58,6 +60,7 @@ impl PathPrompt {
             recent: Vec::new(),
             browsing: None,
             directory: DirectoryImpl::default(),
+            mode: OpenMode::default(),
         }
     }
 
@@ -74,6 +77,15 @@ impl PathPrompt {
 
     pub fn directory(&self) -> DirectoryImpl {
         self.directory
+    }
+
+    pub fn with_mode(mut self, mode: OpenMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    pub fn mode(&self) -> OpenMode {
+        self.mode
     }
 
     pub fn input(&self) -> &str {
@@ -95,6 +107,16 @@ impl PathPrompt {
         self.error = Some(error);
     }
 
+    /// Shows `error`, and that opening without a reader may still show the commits (ADR 0021),
+    /// unless this open was without one.
+    pub fn set_error_offering_no_reader(&mut self, error: String) {
+        if self.mode == OpenMode::Reader {
+            self.set_error(format!("{error}\n^N and Enter open it without a reader."));
+        } else {
+            self.set_error(error);
+        }
+    }
+
     pub fn handle_key(&mut self, key: KeyEvent) -> PromptEvent {
         match key.code {
             KeyCode::Enter if !self.input().trim().is_empty() => {
@@ -107,6 +129,13 @@ impl PathPrompt {
             }
             KeyCode::Down => {
                 self.browse(false);
+                return PromptEvent::None;
+            }
+            KeyCode::Char('n') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.mode = match self.mode {
+                    OpenMode::Reader => OpenMode::DirectoryOnly,
+                    OpenMode::DirectoryOnly => OpenMode::Reader,
+                };
                 return PromptEvent::None;
             }
             KeyCode::Char('d') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -184,11 +213,19 @@ impl PathPrompt {
             .min(area.height);
         let popup = area.centered(Constraint::Length(width), Constraint::Length(height));
         frame.render_widget(Clear, popup);
+        let reader = match self.mode {
+            OpenMode::Reader => Span::raw("on"),
+            OpenMode::DirectoryOnly => Span::styled("off", Style::new().fg(Color::Yellow)),
+        };
         let block = Block::bordered().title(" Open index ").title_bottom(
-            Line::from(format!(
-                " ^D directory: {} ",
-                directory_label(self.directory)
-            ))
+            Line::from(vec![
+                Span::raw(" ^N reader: "),
+                reader,
+                Span::raw(format!(
+                    "   ^D directory: {} ",
+                    directory_label(self.directory)
+                )),
+            ])
             .right_aligned(),
         );
         let inner = block.inner(popup);
@@ -593,5 +630,32 @@ mod tests {
 
         assert!(screen.contains("│LAST"), "{screen}");
         assert!(screen.contains("│Enter open"), "{screen}");
+    }
+
+    #[test]
+    fn ctrl_n_switches_the_reader_off_and_on() {
+        let mut prompt = PathPrompt::new("/data/idx", None);
+        assert_eq!(prompt.mode(), OpenMode::Reader);
+        assert!(render(&prompt, 70, 7).contains("^N reader: on"));
+
+        prompt.handle_key(ctrl('n'));
+        assert_eq!(prompt.mode(), OpenMode::DirectoryOnly);
+        assert!(render(&prompt, 70, 7).contains("^N reader: off"));
+        prompt.handle_key(ctrl('n'));
+        assert_eq!(prompt.mode(), OpenMode::Reader);
+    }
+
+    #[test]
+    fn offers_no_reader_only_when_opening_with_one() {
+        let mut prompt = PathPrompt::new("/data/idx", None);
+        prompt.set_error_offering_no_reader("Corrupt index".to_owned());
+        assert_eq!(
+            prompt.error(),
+            Some("Corrupt index\n^N and Enter open it without a reader.")
+        );
+
+        let mut prompt = PathPrompt::new("/data/idx", None).with_mode(OpenMode::DirectoryOnly);
+        prompt.set_error_offering_no_reader("Not readable".to_owned());
+        assert_eq!(prompt.error(), Some("Not readable"));
     }
 }

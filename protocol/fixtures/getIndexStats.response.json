@@ -4,18 +4,27 @@
   "result": {
     "path": "/data/indexes/products",
     "directoryImpl": "MMapDirectory",
-    "segmentsFile": "segments_2",
-    "generation": 2,
-    "version": 7,
     "segmentCount": 1,
     "numDocs": 2,
     "maxDoc": 3,
-    "createdVersionMajor": 9,
-    "commitLuceneVersion": "9.12.3",
-    "minSegmentLuceneVersion": "9.12.3",
-    "userData": {
-      "writer": "leia LegacyIndexWriter"
-    },
+    "indexes": [
+      {
+        "path": "/data/indexes/products",
+        "docBase": 0,
+        "segmentsFile": "segments_2",
+        "generation": 2,
+        "version": 7,
+        "segmentCount": 1,
+        "numDocs": 2,
+        "maxDoc": 3,
+        "createdVersionMajor": 9,
+        "commitLuceneVersion": "9.12.3",
+        "minSegmentLuceneVersion": "9.12.3",
+        "userData": {
+          "writer": "leia LegacyIndexWriter"
+        }
+      }
+    ],
     "fields": [
       {
         "name": "id",

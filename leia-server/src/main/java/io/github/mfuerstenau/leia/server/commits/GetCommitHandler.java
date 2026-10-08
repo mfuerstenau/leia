@@ -2,7 +2,7 @@ package io.github.mfuerstenau.leia.server.commits;
 
 import io.github.mfuerstenau.leia.core.CommitDetails;
 import io.github.mfuerstenau.leia.core.MissingCodecException;
-import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
+import io.github.mfuerstenau.leia.core.OpenedIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
@@ -13,7 +13,6 @@ import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.Segment;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
-import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import jakarta.inject.Inject;
 import java.io.EOFException;
@@ -40,11 +39,12 @@ public final class GetCommitHandler implements MethodHandler<GetCommitParams, Ge
 
     @Override
     public GetCommitResult handle(GetCommitParams params) throws RpcException {
-        ReadOnlyIndex index = GetDocumentHandler.openIndex(currentIndex);
+        OpenedIndex opened = currentIndex.opened();
+        int index = GetCommitsHandler.directory(opened, params.index());
         long generation = params.generation();
         CommitDetails details;
         try {
-            details = index.commit(generation)
+            details = opened.commit(index, generation)
                     .orElseThrow(() -> new RpcException(
                             ErrorCode.COMMIT_NOT_FOUND, "No commit of generation " + generation + " in the index"));
         } catch (MissingCodecException e) {

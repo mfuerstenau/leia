@@ -1,23 +1,23 @@
 package io.github.mfuerstenau.leia.protocol.index;
 
-import java.util.Optional;
+import java.util.List;
+import java.util.OptionalInt;
 
 /**
- * Result of {@code openIndex}: what identifies the opened index. The full statistics come from
- * {@code getIndexStats}.
+ * Result of {@code openIndex}: what identifies the opened indexes (ADR 0021). The full statistics
+ * come from {@code getIndexStats}.
  *
- * @param path the absolute, normalized index directory
- * @param segmentsFile the {@code segments_N} file of the opened commit (the latest one)
- * @param numDocs live documents
- * @param maxDoc documents including deleted ones
- * @param createdVersionMajor the major Lucene version that created the index
- * @param minSegmentLuceneVersion the oldest Lucene version that wrote one of its segments, such as
- *     {@code 9.12.3}; absent if the index has no segments
+ * @param path the absolute, normalized path that was opened
+ * @param mode how it was opened
+ * @param numDocs live documents in all indexes; absent without a reader
+ * @param maxDoc documents in all indexes, including deleted ones; absent without a reader
+ * @param indexes the index directories that were opened, in order; at least one
+ * @param skipped the index directories that were found but left out
  */
 public record OpenIndexResult(
         String path,
-        String segmentsFile,
-        int numDocs,
-        int maxDoc,
-        int createdVersionMajor,
-        Optional<String> minSegmentLuceneVersion) {}
+        OpenMode mode,
+        OptionalInt numDocs,
+        OptionalInt maxDoc,
+        List<IndexEntry> indexes,
+        List<SkippedIndex> skipped) {}

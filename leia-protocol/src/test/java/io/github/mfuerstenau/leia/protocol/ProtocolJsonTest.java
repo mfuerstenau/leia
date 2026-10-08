@@ -4,7 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
-import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
+import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
 import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
 import io.github.mfuerstenau.leia.protocol.version.JavaRuntime;
 import io.github.mfuerstenau.leia.protocol.version.VersionParams;
@@ -142,10 +142,10 @@ class ProtocolJsonTest {
 
     @Test
     void acceptsNullForOptional() {
-        OpenIndexResult result = MAPPER.readValue("""
-                {"path":"/i","segmentsFile":"segments_1","numDocs":0,"maxDoc":0,"createdVersionMajor":10,
+        ReaderInfo result = MAPPER.readValue("""
+                {"docBase":0,"segmentsFile":"segments_1","numDocs":0,"maxDoc":0,"createdVersionMajor":10,
                  "minSegmentLuceneVersion":null}
-                """, OpenIndexResult.class);
+                """, ReaderInfo.class);
 
         assertThat(result.minSegmentLuceneVersion()).isEmpty();
     }

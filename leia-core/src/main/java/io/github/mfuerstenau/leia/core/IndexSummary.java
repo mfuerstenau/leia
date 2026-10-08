@@ -5,9 +5,12 @@ import java.util.Optional;
 import org.apache.lucene.util.Version;
 
 /**
- * What identifies an opened index: where it is, which commit was opened, and which Lucene wrote it.
+ * What identifies an opened index directory: where it is, which commit was opened, and which Lucene
+ * wrote it.
  *
  * @param path the absolute, normalized index directory
+ * @param docBase the document id of its first document in the opened path, which may combine several
+ *     index directories (ADR 0021); 0 for the first
  * @param segmentsFile the {@code segments_N} file of the opened commit
  * @param numDocs live documents
  * @param maxDoc documents including deleted ones
@@ -17,6 +20,7 @@ import org.apache.lucene.util.Version;
  */
 public record IndexSummary(
         Path path,
+        int docBase,
         String segmentsFile,
         int numDocs,
         int maxDoc,

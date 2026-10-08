@@ -27,6 +27,7 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 - [x] ADR 0018: codecs and formats from jars (`--analysis-jar` becomes `--jar`, one loader that also reloads Lucene's codecs, postings, doc values and KNN vectors formats; `lucene-codecs` and `lucene-suggest` bundled; `MISSING_CODEC` (-32014) for a codec or format that isn't loaded, `UNSUPPORTED_INDEX_FORMAT` for one of Lucene's own)
 - [x] ADR 0019: reopening the index (`reopenIndex {}` with `openIfChanged`, `changed` plus the `openIndex` fields; a failed reopen keeps the open index; the TUI's `R` keeps each screen's place)
 - [x] ADR 0020: directory choice and recent paths (`openIndex`' optional `directoryImpl` `FS`/`MMAP`/`NIO`; the TUI's `--directory` and Ctrl+D in the open prompt; the last 10 paths in a state-dir file, Up/Down in the prompt)
+- [x] ADR 0021: several indexes and opening without a reader (indexes below a path without `segments_N` open as one `MultiReader`, failures and field conflicts skipped and listed; `openIndex`' optional `mode` `READER`/`DIRECTORY_ONLY`, `NO_READER`; per-index results and commits)
 - [x] `README.md`: what leia is, build and run instructions
 
 ### Java build (Gradle 9, Java 25)
@@ -101,7 +102,12 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 
 From the read-only checklist in `luke-features.md` §7. Ordered roughly by value. Each area will need its own protocol methods, fixtures and probably an ADR for the cross-cutting parts.
 
-- [ ] Open options: recursive multi-index (`MultiReader`), no-reader mode for corrupt indexes
+- [x] Open options: several indexes below a path (`MultiReader`), and opening without a reader for corrupt indexes (ADR 0021)
+  - a path without `segments_N` opens every index below it (depth-first by name, no symlinks, not below an index, at most 10,000 directories) as one `MultiReader`; one that fails to open or whose fields conflict is skipped and listed (`openIndex.skipped`); fails with the first error only if none opens
+  - `openIndex {mode?: READER | DIRECTORY_ONLY}`: without a reader only `getCommits`/`getCommit` work, everything else fails with `NO_READER` (-32015)
+  - `openIndex`/`reopenIndex` results list `indexes` (each with its `reader` info: `docBase`, `segmentsFile`, counts, versions); `getIndexStats` has the merged counts and fields, and per-commit data in `indexes`; `getCommits`/`getCommit` take `index`; `getCommits` lists `unreadable` commits with the reason
+  - `reopenIndex` reopens each index with `openIfChanged` and shares the unchanged readers
+  - TUI: `--no-reader` and Ctrl+N in the prompt, offered after `CORRUPT_INDEX`/`MISSING_CODEC`; overview lists the indexes and skipped ones; documents say a document's index; commits get an `Indexes` panel and show unreadable commits; screens without a reader say so; tab line marker (`no reader`, `N indexes`)
 - [x] Open options: directory implementation choice and recent paths (ADR 0020)
   - `openIndex {path, directoryImpl?}` with `FS` (absent; `FSDirectory.open`), `MMAP` or `NIO`, each with `NoLockFactory`; the class in use is `getIndexStats`' `directoryImpl`; `reopenIndex` keeps the directory. No third-party `Directory` classes
   - TUI: `--directory fs|mmap|nio` is the default, and Ctrl+D in the open prompt cycles it (shown in the prompt's bottom border) for that open and the next prompts

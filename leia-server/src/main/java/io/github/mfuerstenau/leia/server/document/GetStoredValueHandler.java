@@ -31,7 +31,7 @@ public final class GetStoredValueHandler implements MethodHandler<GetStoredValue
 
     @Override
     public GetStoredValueResult handle(GetStoredValueParams params) throws RpcException {
-        ReadOnlyIndex index = GetDocumentHandler.openIndex(currentIndex);
+        ReadOnlyIndex index = currentIndex.readable();
         int docId = params.docId();
         String field = params.field();
         GetDocumentHandler.checkDocId(index, docId);

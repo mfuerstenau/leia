@@ -13,10 +13,10 @@ import java.util.OptionalLong;
 import java.util.function.Predicate;
 import java.util.stream.StreamSupport;
 import org.apache.lucene.index.BinaryDocValues;
-import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.Fields;
+import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.NumericDocValues;
 import org.apache.lucene.index.PostingsEnum;
@@ -38,7 +38,7 @@ final class DocumentReader {
 
     private DocumentReader() {}
 
-    static IndexDocument document(DirectoryReader reader, FieldInfos fieldInfos, int docId) throws IOException {
+    static IndexDocument document(IndexReader reader, FieldInfos fieldInfos, int docId) throws IOException {
         SegmentDoc segmentDoc = SegmentDoc.of(reader, docId);
         LeafReader leaf = segmentDoc.leaf();
         int doc = segmentDoc.doc();
@@ -127,7 +127,7 @@ final class DocumentReader {
         return Optional.of(new DocValues(field.getDocValuesType(), List.of(), List.copyOf(values)));
     }
 
-    static List<StoredValue> storedValues(DirectoryReader reader, int docId, String field) throws IOException {
+    static List<StoredValue> storedValues(IndexReader reader, int docId, String field) throws IOException {
         SegmentDoc segmentDoc = SegmentDoc.of(reader, docId);
         StoredValues stored = new StoredValues(field::equals);
         segmentDoc.leaf().storedFields().document(segmentDoc.doc(), stored);
@@ -188,7 +188,7 @@ final class DocumentReader {
         }
     }
 
-    static List<TermVectorTerm> termVector(DirectoryReader reader, int docId, String field) throws IOException {
+    static List<TermVectorTerm> termVector(IndexReader reader, int docId, String field) throws IOException {
         SegmentDoc segmentDoc = SegmentDoc.of(reader, docId);
         Terms terms = segmentDoc.leaf().termVectors().get(segmentDoc.doc(), field);
         if (terms == null) {

@@ -2,17 +2,20 @@
 //! table of its fields, and the term counts and top terms of the fields that were scanned.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
+use std::path::Path;
 
 use ratatui::Frame;
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Cell, Paragraph, Row, Table, TableState, Wrap};
 
 use crate::protocol::document::BytesValue;
-use crate::protocol::index::{DocValuesType, GetIndexStatsResult, IndexField, IndexOptions};
+use crate::protocol::index::{
+    DocValuesType, GetIndexStatsResult, IndexCommitStats, IndexField, IndexOptions, SkippedIndex,
+};
 use crate::protocol::terms::{FieldTerms, TopTerm};
 use crate::text::bytes_text;
 
@@ -118,6 +121,8 @@ enum Focus {
 
 pub struct Overview {
     stats: GetIndexStatsResult,
+    /// The index directories that were found below the opened path but left out (ADR 0021).
+    skipped: Vec<SkippedIndex>,
     /// The fields in table order, as indexes into `stats.fields`.
     order: Vec<usize>,
     /// The text of every row's cells in table order, formatted again when a scan or the sort
@@ -140,6 +145,7 @@ impl Overview {
         let selected = (!stats.fields.is_empty()).then_some(0);
         let mut overview = Self {
             stats,
+            skipped: Vec::new(),
             order: Vec::new(),
             field_rows: Vec::new(),
             column_widths: [0; COLUMNS.len()],
@@ -154,11 +160,23 @@ impl Overview {
         overview
     }
 
+    /// Lists the index directories that were found below the opened path but left out.
+    pub fn with_skipped(mut self, skipped: Vec<SkippedIndex>) -> Self {
+        self.skipped = skipped;
+        self
+    }
+
+    /// The statistics shown.
+    pub fn stats(&self) -> &GetIndexStatsResult {
+        &self.stats
+    }
+
     /// The overview of the reopened index (ADR 0019): sorted as before, with the same field
-    /// selected if it is still there. The scans are not kept; their counts are stale.
+    /// selected if it is still there. The scans are not kept; their counts are stale. The
+    /// skipped index directories stay, as a reopen doesn't look for indexes again.
     pub fn reopened(&self, stats: GetIndexStatsResult, top_n: i32) -> Self {
         let selected = self.selected_field().map(|field| field.name.clone());
-        let mut overview = Self::new(stats, top_n);
+        let mut overview = Self::new(stats, top_n).with_skipped(self.skipped.clone());
         overview.sort = self.sort;
         overview.descending = self.descending;
         overview.format_rows();
@@ -264,11 +282,6 @@ impl Overview {
     /// The fields of the index, by field number.
     pub fn fields(&self) -> &[IndexField] {
         &self.stats.fields
-    }
-
-    /// The directory of the index.
-    pub fn path(&self) -> &str {
-        &self.stats.path
     }
 
     /// The field under the selection.
@@ -387,7 +400,7 @@ impl Overview {
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
-        let summary = summary_lines(&self.stats);
+        let summary = summary_lines(&self.stats, &self.skipped);
         let [top, bottom] = Layout::vertical([
             // The lines plus the block's top and bottom border.
             Constraint::Length(summary.len() as u16 + 2),
@@ -597,62 +610,157 @@ fn term_text(term: &TopTerm) -> String {
     bytes_text(&term.term, term.binary)
 }
 
-fn summary_lines(stats: &GetIndexStatsResult) -> Vec<Line<'static>> {
+/// The index panel shows at most this many index directories, and as many skipped ones.
+const SUMMARY_INDEXES: usize = 8;
+
+fn summary_lines(stats: &GetIndexStatsResult, skipped: &[SkippedIndex]) -> Vec<Line<'static>> {
     let deleted = stats.max_doc - stats.num_docs;
     let merged = if stats.segment_count == 1 {
         " (fully merged)"
     } else {
         ""
     };
+    let documents = format!(
+        "{} live, {deleted} deleted, {} max",
+        stats.num_docs, stats.max_doc
+    );
+    let mut lines: Vec<(&str, String)> = vec![
+        ("Path", stats.path.clone()),
+        ("Directory", stats.directory_impl.clone()),
+    ];
+    match stats.indexes.as_slice() {
+        [index] if skipped.is_empty() => lines.extend([
+            (
+                "Commit",
+                format!(
+                    "{} (generation {}, version {})",
+                    index.segments_file, index.generation, index.version
+                ),
+            ),
+            ("Segments", format!("{}{merged}", stats.segment_count)),
+            ("Documents", documents),
+            ("Lucene", lucene(index)),
+            ("User data", user_data(&index.user_data)),
+        ]),
+        indexes => {
+            let count = if skipped.is_empty() {
+                indexes.len().to_string()
+            } else {
+                format!("{} ({} skipped)", indexes.len(), skipped.len())
+            };
+            lines.extend([
+                ("Indexes", count),
+                ("Segments", format!("{}{merged}", stats.segment_count)),
+                ("Documents", documents),
+            ]);
+        }
+    }
+    let mut lines: Vec<Line<'static>> = lines
+        .into_iter()
+        .map(|(label, value)| label_line(label, value))
+        .collect();
+    if stats.indexes.len() > 1 || !skipped.is_empty() {
+        lines.extend(index_lines(stats, skipped));
+    }
+    lines
+}
+
+/// One line per index directory, below the opened path, then one per skipped one with why.
+fn index_lines(stats: &GetIndexStatsResult, skipped: &[SkippedIndex]) -> Vec<Line<'static>> {
+    let names: Vec<String> = stats
+        .indexes
+        .iter()
+        .map(|index| relative(&stats.path, &index.path))
+        .chain(
+            skipped
+                .iter()
+                .map(|index| relative(&stats.path, &index.path)),
+        )
+        .collect();
+    let width = names
+        .iter()
+        .map(|name| name.chars().count())
+        .max()
+        .unwrap_or_default();
+    let mut names = names.into_iter();
+    let mut lines = Vec::new();
+    for (i, index) in stats.indexes.iter().enumerate() {
+        let name = names.next().unwrap_or_default();
+        if i < SUMMARY_INDEXES {
+            lines.push(Line::from(format!(
+                "  {name:<width$}  {}  {} live, {} max  {}",
+                index.segments_file,
+                index.num_docs,
+                index.max_doc,
+                lucene(index)
+            )));
+        }
+    }
+    if stats.indexes.len() > SUMMARY_INDEXES {
+        lines.push(Line::from(format!(
+            "  … and {} more",
+            stats.indexes.len() - SUMMARY_INDEXES
+        )));
+    }
+    for (i, index) in skipped.iter().enumerate() {
+        let name = names.next().unwrap_or_default();
+        if i < SUMMARY_INDEXES {
+            lines.push(Line::styled(
+                format!("  {name:<width$}  skipped: {}", index.message),
+                Style::new().fg(Color::Red),
+            ));
+        }
+    }
+    if skipped.len() > SUMMARY_INDEXES {
+        lines.push(Line::styled(
+            format!("  … and {} more skipped", skipped.len() - SUMMARY_INDEXES),
+            Style::new().fg(Color::Red),
+        ));
+    }
+    lines
+}
+
+/// `path` below `root`, or `path` itself if it isn't below it; `.` for `root` itself.
+pub fn relative(root: &str, path: &str) -> String {
+    match Path::new(path).strip_prefix(root) {
+        Ok(rest) if rest.as_os_str().is_empty() => ".".to_owned(),
+        Ok(rest) => rest.display().to_string(),
+        Err(_) => path.to_owned(),
+    }
+}
+
+fn lucene(index: &IndexCommitStats) -> String {
     let mut lucene = format!(
         "created by {}, commit written by {}",
-        stats.created_version_major, stats.commit_lucene_version
+        index.created_version_major, index.commit_lucene_version
     );
-    if let Some(oldest) = &stats.min_segment_lucene_version {
+    if let Some(oldest) = &index.min_segment_lucene_version {
         lucene.push_str(&format!(", oldest segment by {oldest}"));
     }
-    let user_data = if stats.user_data.is_empty() {
+    lucene
+}
+
+fn user_data(user_data: &BTreeMap<String, String>) -> String {
+    if user_data.is_empty() {
         "-".to_owned()
     } else {
-        stats
-            .user_data
+        user_data
             .iter()
             .map(|(key, value)| format!("{key}={value}"))
             .collect::<Vec<_>>()
             .join(", ")
-    };
-    [
-        ("Path", stats.path.clone()),
-        ("Directory", stats.directory_impl.clone()),
-        (
-            "Commit",
-            format!(
-                "{} (generation {}, version {})",
-                stats.segments_file, stats.generation, stats.version
-            ),
+    }
+}
+
+/// A line of the index panel: the label in bold, padded, then the value.
+pub fn label_line(label: &str, value: String) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(
+            format!("{label:<10} "),
+            Style::new().add_modifier(Modifier::BOLD),
         ),
-        ("Segments", format!("{}{merged}", stats.segment_count)),
-        (
-            "Documents",
-            format!(
-                "{} live, {deleted} deleted, {} max",
-                stats.num_docs, stats.max_doc
-            ),
-        ),
-        ("Lucene", lucene),
-        ("User data", user_data),
-    ]
-    .into_iter()
-    .map(|(label, value)| {
-        Line::from(vec![
-            Span::styled(
-                format!("{label:<10} "),
-                Style::new().add_modifier(Modifier::BOLD),
-            ),
-            Span::raw(value),
-        ])
-    })
-    .collect()
+        Span::raw(value),
+    ])
 }
 
 struct Column {
@@ -877,16 +985,23 @@ mod tests {
         GetIndexStatsResult {
             path: "/data/products".to_owned(),
             directory_impl: "MMapDirectory".to_owned(),
-            segments_file: "segments_2".to_owned(),
-            generation: 2,
-            version: 7,
             segment_count: 1,
             num_docs: 2,
             max_doc: 3,
-            created_version_major: 9,
-            commit_lucene_version: "9.12.3".to_owned(),
-            min_segment_lucene_version: Some("9.12.3".to_owned()),
-            user_data: BTreeMap::from([("writer".to_owned(), "test".to_owned())]),
+            indexes: vec![IndexCommitStats {
+                path: "/data/products".to_owned(),
+                doc_base: 0,
+                segments_file: "segments_2".to_owned(),
+                generation: 2,
+                version: 7,
+                segment_count: 1,
+                num_docs: 2,
+                max_doc: 3,
+                created_version_major: 9,
+                commit_lucene_version: "9.12.3".to_owned(),
+                min_segment_lucene_version: Some("9.12.3".to_owned()),
+                user_data: BTreeMap::from([("writer".to_owned(), "test".to_owned())]),
+            }],
             fields,
         }
     }

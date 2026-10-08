@@ -5,7 +5,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
+import io.github.mfuerstenau.leia.protocol.index.IndexEntry;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
+import io.github.mfuerstenau.leia.protocol.index.OpenMode;
+import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
 import io.github.mfuerstenau.leia.server.RpcException;
@@ -13,7 +16,9 @@ import io.github.mfuerstenau.leia.server.job.Jobs;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.apache.lucene.document.Document;
@@ -54,7 +59,7 @@ class ReopenIndexHandlerTest {
     void keepsAnUnchangedIndexAndItsJobs() throws Exception {
         Path dir = addDocuments(tmp.resolve("index"), 1, 2);
         openHandler.handle(new OpenIndexParams(dir.toString()));
-        ReadOnlyIndex open = currentIndex.get().orElseThrow();
+        ReadOnlyIndex open = currentIndex.readable();
         long jobId = startEndlessJob();
 
         ReopenIndexResult result = handler.handle(new ReopenIndexParams());
@@ -63,11 +68,19 @@ class ReopenIndexHandlerTest {
                 .isEqualTo(new ReopenIndexResult(
                         false,
                         dir.toString(),
-                        "segments_1",
-                        2,
-                        2,
-                        Version.LATEST.major,
-                        Optional.of(Version.LATEST.toString())));
+                        OpenMode.READER,
+                        OptionalInt.of(2),
+                        OptionalInt.of(2),
+                        List.of(new IndexEntry(
+                                dir.toString(),
+                                Optional.of(new ReaderInfo(
+                                        0,
+                                        "segments_1",
+                                        2,
+                                        2,
+                                        Version.LATEST.major,
+                                        Optional.of(Version.LATEST.toString()))))),
+                        List.of()));
         assertThat(currentIndex.get()).containsSame(open);
         assertThat(jobs.cancel(jobId)).as("the job was still running").isTrue();
     }
@@ -76,7 +89,7 @@ class ReopenIndexHandlerTest {
     void replacesAChangedIndexAndStopsTheJobsOfTheOldOne() throws Exception {
         Path dir = addDocuments(tmp.resolve("index"), 1, 2);
         openHandler.handle(new OpenIndexParams(dir.toString()));
-        ReadOnlyIndex old = currentIndex.get().orElseThrow();
+        ReadOnlyIndex old = currentIndex.readable();
         long jobId = startEndlessJob();
         addDocuments(dir, 3, 1);
 
@@ -86,14 +99,22 @@ class ReopenIndexHandlerTest {
                 .isEqualTo(new ReopenIndexResult(
                         true,
                         dir.toString(),
-                        "segments_2",
-                        3,
-                        3,
-                        Version.LATEST.major,
-                        Optional.of(Version.LATEST.toString())));
+                        OpenMode.READER,
+                        OptionalInt.of(3),
+                        OptionalInt.of(3),
+                        List.of(new IndexEntry(
+                                dir.toString(),
+                                Optional.of(new ReaderInfo(
+                                        0,
+                                        "segments_2",
+                                        3,
+                                        3,
+                                        Version.LATEST.major,
+                                        Optional.of(Version.LATEST.toString()))))),
+                        List.of()));
         assertThat(jobs.cancel(jobId)).as("the job was stopped").isFalse();
         assertThat(old.reader().tryIncRef()).as("the old reader is closed").isFalse();
-        ReadOnlyIndex reopened = currentIndex.get().orElseThrow();
+        ReadOnlyIndex reopened = currentIndex.readable();
         assertThat(reopened).isNotSameAs(old);
         assertThat(reopened.document(2).docId()).isEqualTo(2);
     }
@@ -102,7 +123,7 @@ class ReopenIndexHandlerTest {
     void keepsTheIndexWhenTheLatestCommitCantBeRead() throws Exception {
         Path dir = addDocuments(tmp.resolve("index"), 1, 2);
         openHandler.handle(new OpenIndexParams(dir.toString()));
-        ReadOnlyIndex open = currentIndex.get().orElseThrow();
+        ReadOnlyIndex open = currentIndex.readable();
         addDocuments(dir, 3, 1);
         Path segments = dir.resolve("segments_2");
         byte[] bytes = Files.readAllBytes(segments);

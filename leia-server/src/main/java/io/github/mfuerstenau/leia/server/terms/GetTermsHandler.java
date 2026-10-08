@@ -11,7 +11,6 @@ import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
 import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
-import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import jakarta.inject.Inject;
 import java.io.IOException;
@@ -39,7 +38,7 @@ public final class GetTermsHandler implements MethodHandler<GetTermsParams, GetT
         Optional<BytesRef> from = params.from().isPresent()
                 ? Optional.of(TermParams.term(params.from().get()))
                 : Optional.empty();
-        ReadOnlyIndex index = GetDocumentHandler.openIndex(currentIndex);
+        ReadOnlyIndex index = currentIndex.readable();
         String field = params.field();
         TermParams.checkField(index, field);
         try {

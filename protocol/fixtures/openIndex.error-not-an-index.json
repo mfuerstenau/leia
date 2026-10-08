@@ -3,6 +3,6 @@
   "id": 2,
   "error": {
     "code": -32001,
-    "message": "Not a Lucene index (no segments_N file): /data/indexes/products"
+    "message": "No Lucene index in or below /data/indexes/products"
   }
 }

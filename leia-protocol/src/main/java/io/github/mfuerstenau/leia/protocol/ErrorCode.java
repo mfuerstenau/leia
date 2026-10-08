@@ -47,7 +47,9 @@ public enum ErrorCode {
      */
     INVALID_ANALYZER(-32013),
     /** The index names a codec or format that isn't loaded, and that a jar could add (ADR 0018). */
-    MISSING_CODEC(-32014);
+    MISSING_CODEC(-32014),
+    /** The path was opened without a reader (ADR 0021): only its commits can be read. */
+    NO_READER(-32015);
 
     private final int code;
 

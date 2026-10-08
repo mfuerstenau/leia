@@ -32,7 +32,7 @@ public final class GetTermVectorHandler implements MethodHandler<GetTermVectorPa
 
     @Override
     public GetTermVectorResult handle(GetTermVectorParams params) throws RpcException {
-        ReadOnlyIndex index = GetDocumentHandler.openIndex(currentIndex);
+        ReadOnlyIndex index = currentIndex.readable();
         int docId = params.docId();
         String field = params.field();
         GetDocumentHandler.checkDocId(index, docId);

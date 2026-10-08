@@ -17,6 +17,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CancellationException;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.FieldInfo;
@@ -24,6 +26,8 @@ import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.IndexFormatTooNewException;
 import org.apache.lucene.index.IndexFormatTooOldException;
 import org.apache.lucene.index.IndexNotFoundException;
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.MultiReader;
 import org.apache.lucene.index.MultiTerms;
 import org.apache.lucene.index.SegmentInfos;
 import org.apache.lucene.index.Terms;
@@ -38,29 +42,98 @@ import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.PriorityQueue;
 
 /**
- * A Lucene index opened for reading only: a {@link DirectoryReader} on the latest commit, never an
- * {@code IndexWriter}. The directory is one of {@link DirectoryImpl}, which use no locking, so no
+ * A path opened for reading only (ADR 0021): one or more index directories, each with a {@link
+ * DirectoryReader} on its latest commit, read together through one {@link IndexReader}. Never an
+ * {@code IndexWriter}. The directories are one of {@link DirectoryImpl}, which use no locking, so no
  * lock file can be created either (AGENTS.md, hard rule 1).
  */
-public final class ReadOnlyIndex implements Closeable {
+public final class ReadOnlyIndex implements OpenedIndex {
+
+    private static final Logger LOG = Logger.getLogger(ReadOnlyIndex.class.getName());
 
     /** How many terms {@link #fieldTerms} scans between two progress reports. */
     public static final int PROGRESS_INTERVAL = 1024;
 
-    private final Directory directory;
-    private final DirectoryReader reader;
-    private final SegmentInfos commit;
-    private final FieldInfos fieldInfos;
-    private final IndexSummary summary;
-    /** Whether {@link #close} closes the directory: until {@link #reopen} hands it on. */
-    private boolean ownsDirectory = true;
+    private final Path path;
+    private final List<Part> parts;
+    private final List<SkippedIndex> skipped;
+    /** The reader of the only part, or a {@link MultiReader} over the parts' readers. */
+    private final IndexReader reader;
 
-    private ReadOnlyIndex(Directory directory, DirectoryReader reader, SegmentInfos commit, IndexSummary summary) {
-        this.directory = directory;
-        this.reader = reader;
-        this.commit = commit;
+    private final FieldInfos fieldInfos;
+    private final List<IndexSummary> summaries;
+    /** Whether {@link #close} closes the directories: until {@link #reopen} hands them on. */
+    private boolean ownsDirectories = true;
+
+    private boolean closed;
+
+    /**
+     * An index directory with its reader. The reader may be shared with the index that {@link
+     * #reopen} returned, so every index that holds it has a reference of its own, released on close.
+     */
+    private record Part(Path dir, Directory directory, DirectoryReader reader, SegmentInfos commit) {
+
+        static Part open(Path dir, DirectoryImpl directoryImpl) throws IndexOpenException {
+            Directory directory = null;
+            DirectoryReader reader = null;
+            try {
+                directory = directoryImpl.open(dir);
+                reader = DirectoryReader.open(directory);
+                return new Part(dir, directory, reader, readCommit(directory, reader));
+            } catch (IOException e) {
+                IOUtils.closeWhileHandlingException(reader, directory);
+                throw translate(dir, e);
+            } catch (RuntimeException e) {
+                IOUtils.closeWhileHandlingException(reader, directory);
+                throw translate(dir, e);
+            }
+        }
+
+        /** This part with the latest commit, or empty if it is the opened one. */
+        Optional<Part> reopen() throws IndexOpenException {
+            if (!Files.isDirectory(dir)) {
+                throw new IndexOpenException(Reason.NOT_FOUND, "No such directory: " + dir);
+            }
+            DirectoryReader newReader = null;
+            try {
+                newReader = DirectoryReader.openIfChanged(reader);
+                if (newReader == null) {
+                    return Optional.empty();
+                }
+                return Optional.of(new Part(dir, directory, newReader, readCommit(directory, newReader)));
+            } catch (IOException e) {
+                IOUtils.closeWhileHandlingException(newReader);
+                throw translate(dir, e);
+            } catch (RuntimeException e) {
+                IOUtils.closeWhileHandlingException(newReader);
+                throw translate(dir, e);
+            }
+        }
+
+        private static SegmentInfos readCommit(Directory directory, DirectoryReader reader) throws IOException {
+            return SegmentInfos.readCommit(directory, reader.getIndexCommit().getSegmentsFileName());
+        }
+
+        void closeAll() {
+            IOUtils.closeWhileHandlingException(reader, directory);
+        }
+    }
+
+    private ReadOnlyIndex(Path path, List<Part> parts, List<SkippedIndex> skipped) throws IOException {
+        this.path = path;
+        this.parts = List.copyOf(parts);
+        this.skipped = List.copyOf(skipped);
+        this.reader = parts.size() == 1
+                ? parts.getFirst().reader()
+                : new MultiReader(parts.stream().map(Part::reader).toArray(IndexReader[]::new), false);
         this.fieldInfos = FieldInfos.getMergedFieldInfos(reader);
-        this.summary = summary;
+        List<IndexSummary> summaries = new ArrayList<>();
+        int docBase = 0;
+        for (Part part : parts) {
+            summaries.add(summarize(part, docBase));
+            docBase += part.reader().maxDoc();
+        }
+        this.summaries = List.copyOf(summaries);
     }
 
     /**
@@ -73,96 +146,188 @@ public final class ReadOnlyIndex implements Closeable {
     }
 
     /**
-     * Opens the latest commit of the index in {@code path} through {@code directoryImpl} (ADR 0020).
+     * Opens the latest commit of every index of {@code path} through {@code directoryImpl} (ADR 0020,
+     * ADR 0021): the index in {@code path}, or else every index below it. An index below it that fails
+     * to open, or whose fields conflict with those of the indexes before it, is skipped and listed in
+     * {@link #skipped()}.
      *
-     * @throws IndexOpenException if there is no readable index at {@code path}
+     * @throws IndexOpenException if there is no index at or below {@code path}, or none of them opens
      */
     public static ReadOnlyIndex open(Path path, DirectoryImpl directoryImpl) throws IndexOpenException {
-        Path dir = path.toAbsolutePath().normalize();
-        if (!Files.exists(dir)) {
-            throw new IndexOpenException(Reason.NOT_FOUND, "No such file or directory: " + dir);
-        }
-        if (!Files.isDirectory(dir)) {
-            throw new IndexOpenException(Reason.NOT_AN_INDEX, "Not a directory: " + dir);
+        Path root = IndexFinder.root(path);
+        List<Path> dirs = IndexFinder.find(root);
+        if (dirs.size() == 1) {
+            Path dir = dirs.getFirst();
+            Part part;
+            try {
+                part = Part.open(dir, directoryImpl);
+            } catch (IndexOpenException e) {
+                // An index found below the path is named, as it may not be the one expected.
+                throw dir.equals(root) ? e : named(dir, e);
+            }
+            try {
+                return new ReadOnlyIndex(root, List.of(part), List.of());
+            } catch (IOException | RuntimeException e) {
+                part.closeAll();
+                throw translate(part.dir(), e);
+            }
         }
 
-        Directory directory = null;
-        DirectoryReader reader = null;
+        List<Part> parts = new ArrayList<>();
+        List<SkippedIndex> skipped = new ArrayList<>();
+        Optional<IndexOpenException> firstFailure = Optional.empty();
         try {
-            directory = directoryImpl.open(dir);
-            reader = DirectoryReader.open(directory);
-            SegmentInfos commit =
-                    SegmentInfos.readCommit(directory, reader.getIndexCommit().getSegmentsFileName());
-            return new ReadOnlyIndex(directory, reader, commit, summarize(dir, reader, commit));
-        } catch (IOException e) {
-            IOUtils.closeWhileHandlingException(reader, directory);
-            throw translate(dir, e);
-        } catch (RuntimeException e) {
-            IOUtils.closeWhileHandlingException(reader, directory);
-            Optional<MissingCodecException> missing = MissingCodecException.of(e);
-            if (missing.isPresent()) {
-                throw translate(dir, missing.get());
+            for (Path dir : dirs) {
+                try {
+                    parts.add(Part.open(dir, directoryImpl));
+                } catch (IndexOpenException e) {
+                    LOG.log(Level.INFO, () -> "Skipped " + dir + ": " + e.getMessage());
+                    skipped.add(new SkippedIndex(dir, e.getMessage()));
+                    firstFailure = firstFailure.or(() -> Optional.of(named(dir, e)));
+                }
             }
-            throw e;
+            if (parts.isEmpty()) {
+                throw firstFailure.orElseThrow();
+            }
+            List<Part> compatible = compatible(parts, skipped);
+            skipped.sort(Comparator.comparingInt(skippedIndex -> dirs.indexOf(skippedIndex.path())));
+            return new ReadOnlyIndex(root, compatible, skipped);
+        } catch (IOException | RuntimeException e) {
+            parts.forEach(Part::closeAll);
+            throw translate(root, e);
         }
     }
 
     /**
-     * Opens the latest commit of the index again if it differs from the opened one (ADR 0019). The
-     * new index shares the directory and the readers of the segments in both commits. It owns the
-     * directory from then on: closing this index then closes only its reader. This index stays open
-     * and usable until it is closed.
-     *
-     * @return the new index; empty if the latest commit is the opened one
-     * @throws IndexOpenException if the latest commit can't be read; this index is unaffected
-     * @throws IllegalStateException if this index was reopened before
+     * The parts whose fields agree with those of the parts before them. A field may only be indexed
+     * one way in all of them, which {@link FieldInfos#getMergedFieldInfos} checks. The others are
+     * closed and added to {@code skipped}.
      */
-    public Optional<ReadOnlyIndex> reopen() throws IndexOpenException {
-        if (!ownsDirectory) {
-            throw new IllegalStateException("Already reopened: " + summary.path());
+    private static List<Part> compatible(List<Part> parts, List<SkippedIndex> skipped) throws IOException {
+        if (conflict(parts).isEmpty()) {
+            return parts;
         }
-        Path dir = summary.path();
-        if (!Files.isDirectory(dir)) {
-            throw new IndexOpenException(Reason.NOT_FOUND, "No such directory: " + dir);
+        List<Part> accepted = new ArrayList<>();
+        for (Part part : parts) {
+            List<Part> candidates = new ArrayList<>(accepted);
+            candidates.add(part);
+            Optional<String> conflict = conflict(candidates);
+            if (conflict.isEmpty()) {
+                accepted.add(part);
+            } else {
+                LOG.log(Level.INFO, () -> "Skipped " + part.dir() + ": " + conflict.get());
+                skipped.add(new SkippedIndex(
+                        part.dir(), "Its fields conflict with those of the indexes before it: " + conflict.get()));
+                part.closeAll();
+            }
         }
+        return accepted;
+    }
 
-        DirectoryReader newReader = null;
-        try {
-            newReader = DirectoryReader.openIfChanged(reader);
-            if (newReader == null) {
-                return Optional.empty();
-            }
-            SegmentInfos newCommit = SegmentInfos.readCommit(
-                    directory, newReader.getIndexCommit().getSegmentsFileName());
-            ReadOnlyIndex reopened =
-                    new ReadOnlyIndex(directory, newReader, newCommit, summarize(dir, newReader, newCommit));
-            ownsDirectory = false;
-            return Optional.of(reopened);
-        } catch (IOException e) {
-            IOUtils.closeWhileHandlingException(newReader);
-            throw translate(dir, e);
-        } catch (RuntimeException e) {
-            IOUtils.closeWhileHandlingException(newReader);
-            Optional<MissingCodecException> missing = MissingCodecException.of(e);
-            if (missing.isPresent()) {
-                throw translate(dir, missing.get());
-            }
-            throw e;
+    /** Why the fields of {@code parts} can't be merged; empty if they can. */
+    private static Optional<String> conflict(List<Part> parts) throws IOException {
+        if (parts.size() < 2) {
+            return Optional.empty();
+        }
+        try (MultiReader multi =
+                new MultiReader(parts.stream().map(Part::reader).toArray(IndexReader[]::new), false)) {
+            FieldInfos.getMergedFieldInfos(multi);
+            return Optional.empty();
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            return Optional.of(e.getMessage());
         }
     }
 
-    private static IndexSummary summarize(Path dir, DirectoryReader reader, SegmentInfos commit) {
+    /**
+     * Opens the latest commit of each index again if it differs from the opened one (ADR 0019, ADR
+     * 0021). The new index shares the directories, the readers of the indexes that didn't change, and
+     * the readers of the segments in both commits. It owns the directories from then on: closing this
+     * index then closes only its readers. This index stays open and usable until it is closed. Neither
+     * the indexes found nor the skipped ones change.
+     *
+     * @return the new index; empty if every latest commit is the opened one
+     * @throws IndexOpenException if a latest commit can't be read; this index is unaffected
+     * @throws IllegalStateException if this index was reopened before
+     */
+    public Optional<ReadOnlyIndex> reopen() throws IndexOpenException {
+        if (!ownsDirectories) {
+            throw new IllegalStateException("Already reopened: " + path);
+        }
+        List<Part> newParts = new ArrayList<>();
+        List<Part> reopened = new ArrayList<>();
+        for (Part part : parts) {
+            try {
+                Optional<Part> newPart = part.reopen();
+                newPart.ifPresent(reopened::add);
+                newParts.add(newPart.orElse(part));
+            } catch (IndexOpenException e) {
+                reopened.forEach(newPart -> IOUtils.closeWhileHandlingException(newPart.reader()));
+                throw parts.size() == 1 ? e : named(part.dir(), e);
+            }
+        }
+        if (reopened.isEmpty()) {
+            return Optional.empty();
+        }
+
+        List<Part> shared = newParts.stream().filter(parts::contains).toList();
+        shared.forEach(part -> part.reader().incRef());
+        try {
+            ReadOnlyIndex index = new ReadOnlyIndex(path, newParts, skipped);
+            ownsDirectories = false;
+            return Optional.of(index);
+        } catch (IOException | RuntimeException e) {
+            for (Part part : shared) {
+                decRefQuietly(part.reader());
+            }
+            reopened.forEach(part -> IOUtils.closeWhileHandlingException(part.reader()));
+            throw translate(path, e);
+        }
+    }
+
+    private static IndexSummary summarize(Part part, int docBase) {
+        SegmentInfos commit = part.commit();
         return new IndexSummary(
-                dir,
+                part.dir(),
+                docBase,
                 commit.getSegmentsFileName(),
-                reader.numDocs(),
-                reader.maxDoc(),
+                part.reader().numDocs(),
+                part.reader().maxDoc(),
                 commit.getIndexCreatedVersionMajor(),
                 Optional.ofNullable(commit.getMinSegmentLuceneVersion()));
     }
 
+    /** {@code e} with the index directory it is about in front of its message. */
+    private static IndexOpenException named(Path dir, IndexOpenException e) {
+        return new IndexOpenException(e.reason(), dir + ": " + e.getMessage(), e);
+    }
+
+    /** Releases this index's reference to a reader that another index may still hold. */
+    private static void decRefQuietly(IndexReader reader) {
+        try {
+            reader.decRef();
+        } catch (IOException e) {
+            LOG.log(Level.WARNING, e, () -> "Cannot close a reader");
+        }
+    }
+
+    /** Maps a failure while opening {@code dir}, an unexpected one included, to a {@link Reason}. */
+    private static IndexOpenException translate(Path dir, Exception e) {
+        return switch (e) {
+            case IndexOpenException open -> open;
+            case IOException io -> translate(dir, io);
+            case RuntimeException runtime -> {
+                Optional<MissingCodecException> missing = MissingCodecException.of(runtime);
+                if (missing.isPresent()) {
+                    yield translate(dir, missing.get());
+                }
+                throw runtime;
+            }
+            default -> throw new IllegalStateException(e);
+        };
+    }
+
     /** Maps Lucene's exceptions to a {@link Reason}. The order matters: subclasses come first. */
-    private static IndexOpenException translate(Path dir, IOException e) {
+    static IndexOpenException translate(Path dir, IOException e) {
         // Lucene wraps a file that the commit refers to but that is missing in a
         // CorruptIndexException ("Unexpected file read error"); name the file instead.
         Optional<IOException> missingFile = missingFile(e);
@@ -203,13 +368,40 @@ public final class ReadOnlyIndex implements Closeable {
         return Optional.empty();
     }
 
-    public IndexSummary summary() {
-        return summary;
+    @Override
+    public Path path() {
+        return path;
+    }
+
+    @Override
+    public List<Path> directories() {
+        return summaries.stream().map(IndexSummary::path).toList();
+    }
+
+    /** Each index directory with its opened commit, in order; at least one. */
+    public List<IndexSummary> indexes() {
+        return summaries;
+    }
+
+    /** The index directories that were found but left out; empty unless several were found. */
+    public List<SkippedIndex> skipped() {
+        return skipped;
+    }
+
+    /** Live documents in all index directories. */
+    public int numDocs() {
+        return reader.numDocs();
+    }
+
+    /** Documents in all index directories, including deleted ones. */
+    public int maxDoc() {
+        return reader.maxDoc();
     }
 
     /**
-     * Statistics that are cheap to compute: the commit, the merged field infos and the per-segment
-     * postings statistics, which the reader loaded on open. Nothing iterates over terms or documents.
+     * Statistics that are cheap to compute: the commits, the merged field infos and the per-segment
+     * postings statistics, which the readers loaded on open. Nothing iterates over terms or
+     * documents.
      *
      * @throws IOException if reading the postings statistics fails
      */
@@ -219,14 +411,27 @@ public final class ReadOnlyIndex implements Closeable {
             fields.add(fieldStats(field));
         }
         fields.sort(Comparator.comparingInt(FieldStats::number));
+        List<IndexStats.CommitStats> indexes = new ArrayList<>();
+        int segmentCount = 0;
+        for (int i = 0; i < parts.size(); i++) {
+            Part part = parts.get(i);
+            SegmentInfos commit = part.commit();
+            indexes.add(new IndexStats.CommitStats(
+                    summaries.get(i),
+                    commit.getGeneration(),
+                    part.reader().getVersion(),
+                    commit.size(),
+                    commit.getCommitLuceneVersion(),
+                    new TreeMap<>(commit.getUserData())));
+            segmentCount += commit.size();
+        }
         return new IndexStats(
-                summary,
-                directory.getClass().getSimpleName(),
-                commit.getGeneration(),
-                reader.getVersion(),
-                commit.size(),
-                commit.getCommitLuceneVersion(),
-                new TreeMap<>(commit.getUserData()),
+                path,
+                parts.getFirst().directory().getClass().getSimpleName(),
+                segmentCount,
+                reader.numDocs(),
+                reader.maxDoc(),
+                List.copyOf(indexes),
                 List.copyOf(fields));
     }
 
@@ -439,7 +644,8 @@ public final class ReadOnlyIndex implements Closeable {
             throw new IllegalArgumentException(
                     "offset must be from 0 to " + (Integer.MAX_VALUE - limit) + ": " + offset);
         }
-        return Searcher.search(reader, query, similarity, sort, offset, limit, exactTotalHits, fields, progress);
+        return Searcher.search(
+                reader, directoryReaders(), query, similarity, sort, offset, limit, exactTotalHits, fields, progress);
     }
 
     /**
@@ -454,28 +660,26 @@ public final class ReadOnlyIndex implements Closeable {
     public Explanation explain(Query query, Similarity similarity, int docId, ScanProgress progress)
             throws IOException, InvalidQueryException {
         checkDocId(docId);
-        return Searcher.explain(reader, query, similarity, docId, progress);
+        return Searcher.explain(directoryReaders(), query, similarity, docId, progress);
     }
 
-    /**
-     * The commits of the index directory, newest first, read from the directory again: they include
-     * commits written after the index was opened. The opened one is {@link CommitInfo#current()}.
-     *
-     * @throws IOException if the directory can't be listed
-     */
-    public CommitList commits() throws IOException {
-        return CommitReader.commits(directory, commit.getGeneration());
+    @Override
+    public CommitList commits(int index) throws IOException {
+        checkDirectory(index);
+        Part part = parts.get(index);
+        return CommitReader.commits(part.directory(), part.commit().getGeneration());
     }
 
-    /**
-     * One commit of the index directory with its segments and files, read from the directory again.
-     *
-     * @return the commit; empty if the directory has no commit of that generation
-     * @throws IOException if the commit can't be read; a {@link MissingCodecException} if it names a codec
-     *     that isn't loaded
-     */
-    public Optional<CommitDetails> commit(long generation) throws IOException {
-        return CommitReader.commit(directory, generation, commit.getGeneration());
+    @Override
+    public Optional<CommitDetails> commit(int index, long generation) throws IOException {
+        checkDirectory(index);
+        Part part = parts.get(index);
+        return CommitReader.commit(part.directory(), generation, part.commit().getGeneration());
+    }
+
+    /** The readers of the index directories, in order. */
+    private List<DirectoryReader> directoryReaders() {
+        return parts.stream().map(Part::reader).toList();
     }
 
     private void checkField(String field) {
@@ -511,17 +715,36 @@ public final class ReadOnlyIndex implements Closeable {
         }
     }
 
-    /** The reader on the opened commit. It stays valid until this index is closed. */
-    public DirectoryReader reader() {
+    /**
+     * The reader on the opened commits: the only index directory's, or a {@link MultiReader} over
+     * them. It stays valid until this index is closed.
+     */
+    public IndexReader reader() {
         return reader;
     }
 
+    /**
+     * Releases this index's references to the readers, which closes those that no reopened index
+     * shares, and closes the directories unless {@link #reopen} handed them on.
+     */
     @Override
     public void close() throws IOException {
-        if (ownsDirectory) {
-            IOUtils.close(reader, directory);
-        } else {
-            reader.close();
+        if (closed) {
+            return;
         }
+        closed = true;
+        List<Closeable> closeables = new ArrayList<>();
+        if (parts.size() > 1) {
+            closeables.add(reader);
+        }
+        for (Part part : parts) {
+            closeables.add(part.reader()::decRef);
+        }
+        if (ownsDirectories) {
+            for (Part part : parts) {
+                closeables.add(part.directory());
+            }
+        }
+        IOUtils.close(closeables);
     }
 }

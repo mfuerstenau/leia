@@ -44,10 +44,12 @@ pub enum ErrorCode {
     InvalidAnalyzer,
     /// The index names a codec or format that isn't loaded, and that a jar could add (ADR 0018).
     MissingCodec,
+    /// The path was opened without a reader (ADR 0021): only its commits can be read.
+    NoReader,
 }
 
 impl ErrorCode {
-    pub const ALL: [ErrorCode; 20] = [
+    pub const ALL: [ErrorCode; 21] = [
         ErrorCode::ParseError,
         ErrorCode::InvalidRequest,
         ErrorCode::MethodNotFound,
@@ -68,6 +70,7 @@ impl ErrorCode {
         ErrorCode::InvalidQuery,
         ErrorCode::InvalidAnalyzer,
         ErrorCode::MissingCodec,
+        ErrorCode::NoReader,
     ];
 
     pub const fn code(self) -> i32 {
@@ -92,6 +95,7 @@ impl ErrorCode {
             ErrorCode::InvalidQuery => -32012,
             ErrorCode::InvalidAnalyzer => -32013,
             ErrorCode::MissingCodec => -32014,
+            ErrorCode::NoReader => -32015,
         }
     }
 
@@ -118,6 +122,7 @@ impl ErrorCode {
             ErrorCode::InvalidQuery => "INVALID_QUERY",
             ErrorCode::InvalidAnalyzer => "INVALID_ANALYZER",
             ErrorCode::MissingCodec => "MISSING_CODEC",
+            ErrorCode::NoReader => "NO_READER",
         }
     }
 }

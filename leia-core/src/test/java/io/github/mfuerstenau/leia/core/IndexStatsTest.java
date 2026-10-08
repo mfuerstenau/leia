@@ -18,6 +18,7 @@ import org.apache.lucene.document.NumericDocValuesField;
 import org.apache.lucene.document.StoredField;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
+import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.DocValuesType;
 import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.index.IndexWriter;
@@ -43,13 +44,16 @@ class IndexStatsTest {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
             IndexStats stats = index.stats();
 
-            assertThat(stats.summary()).isEqualTo(index.summary());
+            assertThat(stats.path()).isEqualTo(index.path());
+            IndexStats.CommitStats commit = stats.indexes().getFirst();
+            assertThat(commit.summary()).isEqualTo(index.indexes().getFirst());
             assertThat(stats.directoryImpl()).isEqualTo("MMapDirectory");
-            assertThat(stats.generation()).isEqualTo(2);
-            assertThat(stats.version()).isEqualTo(index.reader().getVersion());
+            assertThat(commit.generation()).isEqualTo(2);
+            assertThat(commit.version()).isEqualTo(((DirectoryReader) index.reader()).getVersion());
             assertThat(stats.segmentCount()).isEqualTo(2);
-            assertThat(stats.commitLuceneVersion()).isEqualTo(Version.LATEST);
-            assertThat(stats.userData()).containsExactly(Map.entry("a", "1"), Map.entry("b", "2"));
+            assertThat(commit.segmentCount()).isEqualTo(2);
+            assertThat(commit.commitLuceneVersion()).isEqualTo(Version.LATEST);
+            assertThat(commit.userData()).containsExactly(Map.entry("a", "1"), Map.entry("b", "2"));
             assertThat(stats.deletedDocs()).isEqualTo(1);
             assertThat(stats.fields())
                     .containsExactly(
@@ -94,7 +98,7 @@ class IndexStatsTest {
 
             assertThat(stats.segmentCount()).isZero();
             assertThat(stats.fields()).isEmpty();
-            assertThat(stats.userData()).isEmpty();
+            assertThat(stats.indexes().getFirst().userData()).isEmpty();
             assertThat(stats.deletedDocs()).isZero();
         }
     }
@@ -104,10 +108,11 @@ class IndexStatsTest {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(testIndex("lucene9"))) {
             IndexStats stats = index.stats();
 
-            assertThat(stats.generation()).isEqualTo(2);
+            assertThat(stats.indexes().getFirst().generation()).isEqualTo(2);
             assertThat(stats.segmentCount()).isEqualTo(1);
-            assertThat(stats.commitLuceneVersion().major).isEqualTo(9);
-            assertThat(stats.userData()).containsExactly(Map.entry("writer", "leia LegacyIndexWriter"));
+            assertThat(stats.indexes().getFirst().commitLuceneVersion().major).isEqualTo(9);
+            assertThat(stats.indexes().getFirst().userData())
+                    .containsExactly(Map.entry("writer", "leia LegacyIndexWriter"));
             assertThat(stats.fields())
                     .extracting(FieldStats::name, FieldStats::indexOptions)
                     .containsExactly(

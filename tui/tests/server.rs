@@ -27,7 +27,7 @@ use leia::protocol::document::{
 };
 use leia::protocol::index::{
     CloseIndex, CloseIndexParams, DirectoryImpl, DocValuesType, GetIndexStats, GetIndexStatsParams,
-    IndexOptions, OpenIndex, OpenIndexParams, ReopenIndex, ReopenIndexParams,
+    IndexEntry, IndexOptions, OpenIndex, OpenIndexParams, OpenMode, ReopenIndex, ReopenIndexParams,
 };
 use leia::protocol::job::{CancelJob, JobParams};
 use leia::protocol::search::{
@@ -136,6 +136,7 @@ fn reports_a_missing_codec() {
             .call::<OpenIndex>(OpenIndexParams {
                 path: test_index(name, "testCodecIndexes"),
                 directory_impl: None,
+                mode: None,
             })
             .unwrap_err();
 
@@ -160,19 +161,30 @@ fn opens_indexes_with_codecs_from_a_jar() {
             .call::<OpenIndex>(OpenIndexParams {
                 path: test_index(name, "testCodecIndexes"),
                 directory_impl: None,
+                mode: None,
             })
             .unwrap();
-        assert_eq!(index.max_doc, 3, "{name}");
+        assert_eq!(index.max_doc, Some(3), "{name}");
 
         let document = server
             .call::<GetDocument>(GetDocumentParams { doc_id: 2 })
             .unwrap();
         let rank = document.fields.iter().find(|f| f.name == "rank").unwrap();
         assert!(rank.doc_values.is_some(), "{name}: {rank:?}");
-        let commits = server.call::<GetCommits>(GetCommitsParams {}).unwrap();
+        let commits = server
+            .call::<GetCommits>(GetCommitsParams { index: None })
+            .unwrap();
         assert_eq!(commits.commits.len(), 1, "{name}");
     }
     assert!(server.shutdown(SHUTDOWN_TIMEOUT).unwrap().success());
+}
+
+/// The `segments_N` file of the only index that a reader opened.
+fn segments_file(indexes: &[IndexEntry]) -> &str {
+    let [index] = indexes else {
+        panic!("expected one index: {indexes:?}");
+    };
+    &index.reader.as_ref().unwrap().segments_file
 }
 
 /// A copy of the demo index without its last commit, `segments_4`, which the demo index keeps
@@ -205,23 +217,131 @@ fn reopens_an_index_that_has_a_new_commit() {
         .call::<OpenIndex>(OpenIndexParams {
             path: dir.to_str().unwrap().to_owned(),
             directory_impl: None,
+            mode: None,
         })
         .unwrap();
-    assert_eq!(opened.segments_file, "segments_3");
+    assert_eq!(segments_file(&opened.indexes), "segments_3");
 
     let unchanged = server.call::<ReopenIndex>(ReopenIndexParams {}).unwrap();
     assert!(!unchanged.changed);
-    assert_eq!(unchanged.segments_file, "segments_3");
+    assert_eq!(segments_file(&unchanged.indexes), "segments_3");
 
     std::fs::copy(last_commit, dir.join("segments_4")).unwrap();
     let reopened = server.call::<ReopenIndex>(ReopenIndexParams {}).unwrap();
     assert!(reopened.changed);
-    assert_eq!(reopened.segments_file, "segments_4");
+    assert_eq!(segments_file(&reopened.indexes), "segments_4");
     assert_eq!(reopened.path, opened.path);
     let stats = server
         .call::<GetIndexStats>(GetIndexStatsParams {})
         .unwrap();
-    assert_eq!(stats.generation, 4);
+    assert_eq!(stats.indexes[0].generation, 4);
+
+    server.call::<CloseIndex>(CloseIndexParams {}).unwrap();
+    assert!(server.shutdown(SHUTDOWN_TIMEOUT).unwrap().success());
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Copies the files of the index `from` into `to`, leaving out those `skip` matches.
+fn copy_index(from: &str, to: &Path, skip: impl Fn(&str) -> bool) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap() {
+        let name = entry.unwrap().file_name();
+        let text = name.to_str().unwrap();
+        if text != "write.lock" && !skip(text) {
+            std::fs::copy(Path::new(from).join(&name), to.join(&name)).unwrap();
+        }
+    }
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn opens_several_indexes_and_one_without_a_reader() {
+    let mut server = start();
+    let dir = env::temp_dir().join(format!("leia-multi-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    copy_index(&lucene9_index(), &dir.join("a"), |_| false);
+    copy_index(&lucene9_index(), &dir.join("b/index"), |_| false);
+    // A reader can't open an index without its .si files.
+    copy_index(&lucene9_index(), &dir.join("c"), |name| {
+        name.ends_with(".si")
+    });
+    // The demo index indexes `body` with offsets, the lucene9 index without.
+    copy_index(&test_index("demo", "demoIndex"), &dir.join("d"), |_| false);
+    let path = |sub: &str| dir.join(sub).to_str().unwrap().to_owned();
+
+    let opened = server
+        .call::<OpenIndex>(OpenIndexParams {
+            path: path(""),
+            directory_impl: None,
+            mode: None,
+        })
+        .unwrap();
+    assert_eq!(opened.mode, OpenMode::Reader);
+    let paths: Vec<&str> = opened
+        .indexes
+        .iter()
+        .map(|index| index.path.as_str())
+        .collect();
+    assert_eq!(paths, [path("a"), path("b/index")], "{opened:?}");
+    let second = opened.indexes[1].reader.as_ref().unwrap();
+    assert_eq!(second.doc_base, 3);
+    assert_eq!(opened.max_doc, Some(3 + second.max_doc));
+    let [corrupt, conflicting] = opened.skipped.as_slice() else {
+        panic!("expected two skipped indexes: {opened:?}");
+    };
+    assert_eq!(corrupt.path, path("c"));
+    assert!(corrupt.message.starts_with("Corrupt index"), "{corrupt:?}");
+    assert_eq!(conflicting.path, path("d"));
+    assert!(
+        conflicting
+            .message
+            .starts_with("Its fields conflict with those of the indexes before it"),
+        "{conflicting:?}"
+    );
+
+    let stats = server
+        .call::<GetIndexStats>(GetIndexStatsParams {})
+        .unwrap();
+    assert_eq!(stats.indexes.len(), 2);
+    assert_eq!(stats.max_doc, opened.max_doc.unwrap());
+    let document = server
+        .call::<GetDocument>(GetDocumentParams { doc_id: 3 })
+        .unwrap();
+    assert_eq!(document.doc_id, 3);
+    let commits = server
+        .call::<GetCommits>(GetCommitsParams { index: Some(1) })
+        .unwrap();
+    assert_eq!(commits.commits[0].segments_file, second.segments_file);
+
+    let without_reader = server
+        .call::<OpenIndex>(OpenIndexParams {
+            path: path("c"),
+            directory_impl: None,
+            mode: Some(OpenMode::DirectoryOnly),
+        })
+        .unwrap();
+    assert_eq!(without_reader.mode, OpenMode::DirectoryOnly);
+    assert_eq!(without_reader.max_doc, None);
+    assert_eq!(without_reader.indexes[0].reader, None);
+    let stats = server.call::<GetIndexStats>(GetIndexStatsParams {});
+    assert!(
+        matches!(&stats, Err(CallError::Rpc(error)) if error.code == ErrorCode::NoReader),
+        "{stats:?}"
+    );
+    let commits = server
+        .call::<GetCommits>(GetCommitsParams { index: None })
+        .unwrap();
+    assert!(commits.commits.is_empty(), "{commits:?}");
+    let [unreadable] = commits.unreadable.as_slice() else {
+        panic!("expected one unreadable commit: {commits:?}");
+    };
+    assert_eq!(unreadable.segments_file, "segments_2");
+    assert!(
+        unreadable
+            .message
+            .starts_with("Corrupt index, missing file"),
+        "{unreadable:?}"
+    );
 
     server.call::<CloseIndex>(CloseIndexParams {}).unwrap();
     assert!(server.shutdown(SHUTDOWN_TIMEOUT).unwrap().success());
@@ -238,15 +358,23 @@ fn opens_lucene9_index() {
         .call::<OpenIndex>(OpenIndexParams {
             path: path.clone(),
             directory_impl: None,
+            mode: None,
         })
         .unwrap();
 
     assert_eq!(index.path, path);
-    assert_eq!(index.segments_file, "segments_2");
-    assert_eq!((index.num_docs, index.max_doc), (2, 3));
-    assert_eq!(index.created_version_major, 9);
+    assert_eq!(index.mode, OpenMode::Reader);
+    assert_eq!((index.num_docs, index.max_doc), (Some(2), Some(3)));
+    assert!(index.skipped.is_empty());
+    let [entry] = index.indexes.as_slice() else {
+        panic!("expected one index: {index:?}");
+    };
+    assert_eq!(entry.path, path);
+    let reader = entry.reader.as_ref().unwrap();
+    assert_eq!(reader.segments_file, "segments_2");
+    assert_eq!(reader.created_version_major, 9);
     assert!(
-        index
+        reader
             .min_segment_lucene_version
             .as_deref()
             .is_some_and(|version| version.starts_with("9.")),
@@ -263,6 +391,7 @@ fn reports_missing_index() {
         .call::<OpenIndex>(OpenIndexParams {
             path: "/nonexistent/index".to_owned(),
             directory_impl: None,
+            mode: None,
         })
         .unwrap_err();
 
@@ -285,6 +414,7 @@ fn reports_lucene9_index_stats() {
         .call::<OpenIndex>(OpenIndexParams {
             path: path.clone(),
             directory_impl: None,
+            mode: None,
         })
         .unwrap();
 
@@ -293,17 +423,18 @@ fn reports_lucene9_index_stats() {
         .unwrap();
 
     assert_eq!(stats.path, path);
+    let commit = &stats.indexes[0];
     assert_eq!(
-        (stats.segments_file.as_str(), stats.generation),
+        (commit.segments_file.as_str(), commit.generation),
         ("segments_2", 2)
     );
     assert_eq!(
         (stats.segment_count, stats.num_docs, stats.max_doc),
         (1, 2, 3)
     );
-    assert!(stats.commit_lucene_version.starts_with("9."), "{stats:?}");
+    assert!(commit.commit_lucene_version.starts_with("9."), "{stats:?}");
     assert_eq!(
-        stats.user_data.get("writer").map(String::as_str),
+        commit.user_data.get("writer").map(String::as_str),
         Some("leia LegacyIndexWriter")
     );
     let fields: Vec<_> = stats
@@ -345,6 +476,7 @@ fn opens_through_the_chosen_directory() {
             .call::<OpenIndex>(OpenIndexParams {
                 path: lucene9_index(),
                 directory_impl,
+                mode: None,
             })
             .unwrap();
 
@@ -380,6 +512,7 @@ fn closes_the_open_index() {
         .call::<OpenIndex>(OpenIndexParams {
             path: path.clone(),
             directory_impl: None,
+            mode: None,
         })
         .unwrap();
 
@@ -414,6 +547,7 @@ fn scans_the_terms_of_a_field() {
         .call::<OpenIndex>(OpenIndexParams {
             path: lucene9_index(),
             directory_impl: None,
+            mode: None,
         })
         .unwrap();
 
@@ -461,6 +595,7 @@ fn cancels_a_scan_and_rejects_an_unknown_field() {
         .call::<OpenIndex>(OpenIndexParams {
             path: lucene9_index(),
             directory_impl: None,
+            mode: None,
         })
         .unwrap();
 
@@ -506,6 +641,7 @@ fn reads_a_deleted_document_of_a_lucene9_index() {
         .call::<OpenIndex>(OpenIndexParams {
             path: lucene9_index(),
             directory_impl: None,
+            mode: None,
         })
         .unwrap();
 
@@ -581,6 +717,7 @@ fn browses_the_terms_and_postings_of_a_lucene9_index() {
         .call::<OpenIndex>(OpenIndexParams {
             path: lucene9_index(),
             directory_impl: None,
+            mode: None,
         })
         .unwrap();
     let text = |value: &str| BytesValue {
@@ -668,11 +805,12 @@ fn reads_the_commit_of_a_lucene9_index() {
         .call::<OpenIndex>(OpenIndexParams {
             path: lucene9_index(),
             directory_impl: None,
+            mode: None,
         })
         .unwrap();
 
     let commits = server
-        .call::<GetCommits>(GetCommitsParams {})
+        .call::<GetCommits>(GetCommitsParams { index: None })
         .unwrap()
         .commits;
     // The default deletion policy kept only the last commit.
@@ -693,7 +831,10 @@ fn reads_the_commit_of_a_lucene9_index() {
     );
 
     let details = server
-        .call::<GetCommit>(GetCommitParams { generation: 2 })
+        .call::<GetCommit>(GetCommitParams {
+            generation: 2,
+            index: None,
+        })
         .unwrap();
     assert_eq!(details.commit, *commit);
     let max_doc: i32 = details.segments.iter().map(|segment| segment.max_doc).sum();
@@ -719,7 +860,10 @@ fn reads_the_commit_of_a_lucene9_index() {
     );
 
     let missing = server
-        .call::<GetCommit>(GetCommitParams { generation: 1 })
+        .call::<GetCommit>(GetCommitParams {
+            generation: 1,
+            index: None,
+        })
         .unwrap_err();
     assert!(
         matches!(&missing, CallError::Rpc(e) if e.code == ErrorCode::CommitNotFound),
@@ -735,6 +879,7 @@ fn searches_and_explains_a_lucene9_index() {
         .call::<OpenIndex>(OpenIndexParams {
             path: lucene9_index(),
             directory_impl: None,
+            mode: None,
         })
         .unwrap();
     let query = classic("number AND (1 OR 2 OR 3)");
@@ -911,6 +1056,7 @@ fn searches_for_documents_like_one_of_a_lucene9_index() {
         .call::<OpenIndex>(OpenIndexParams {
             path: lucene9_index(),
             directory_impl: None,
+            mode: None,
         })
         .unwrap();
     let like = |doc_id: i32, fields: &[&str]| SearchQuery {
@@ -1262,6 +1408,7 @@ fn analyzes_without_an_open_index() {
         .call::<OpenIndex>(OpenIndexParams {
             path: lucene9_index(),
             directory_impl: None,
+            mode: None,
         })
         .unwrap();
     let mut query = classic("x");

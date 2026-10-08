@@ -1,0 +1,14 @@
+{
+  "jsonrpc": "2.0",
+  "id": 2,
+  "result": {
+    "path": "/data/indexes/broken",
+    "mode": "DIRECTORY_ONLY",
+    "indexes": [
+      {
+        "path": "/data/indexes/broken"
+      }
+    ],
+    "skipped": []
+  }
+}

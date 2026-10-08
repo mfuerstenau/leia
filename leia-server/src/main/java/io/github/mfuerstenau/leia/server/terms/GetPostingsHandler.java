@@ -10,7 +10,6 @@ import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.Posting;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
-import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import jakarta.inject.Inject;
 import java.io.IOException;
@@ -39,7 +38,7 @@ public final class GetPostingsHandler implements MethodHandler<GetPostingsParams
                     ErrorCode.INVALID_PARAMS, "Invalid params: fromDoc must not be negative, not " + params.fromDoc());
         }
         BytesRef term = TermParams.term(params.term());
-        ReadOnlyIndex index = GetDocumentHandler.openIndex(currentIndex);
+        ReadOnlyIndex index = currentIndex.readable();
         String field = params.field();
         TermParams.checkField(index, field);
         try {

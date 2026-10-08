@@ -1,0 +1,62 @@
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+    "path": "/data/tenants",
+    "directoryImpl": "MMapDirectory",
+    "segmentCount": 3,
+    "numDocs": 7,
+    "maxDoc": 8,
+    "indexes": [
+      {
+        "path": "/data/tenants/acme/index",
+        "docBase": 0,
+        "segmentsFile": "segments_4",
+        "generation": 4,
+        "version": 12,
+        "segmentCount": 2,
+        "numDocs": 5,
+        "maxDoc": 6,
+        "createdVersionMajor": 10,
+        "commitLuceneVersion": "10.5.2",
+        "minSegmentLuceneVersion": "10.5.2",
+        "userData": {}
+      },
+      {
+        "path": "/data/tenants/globex/index",
+        "docBase": 6,
+        "segmentsFile": "segments_1",
+        "generation": 1,
+        "version": 3,
+        "segmentCount": 1,
+        "numDocs": 2,
+        "maxDoc": 2,
+        "createdVersionMajor": 9,
+        "commitLuceneVersion": "9.12.3",
+        "minSegmentLuceneVersion": "9.12.3",
+        "userData": {
+          "writer": "leia LegacyIndexWriter"
+        }
+      }
+    ],
+    "fields": [
+      {
+        "name": "id",
+        "number": 0,
+        "indexOptions": "DOCS",
+        "hasNorms": false,
+        "hasPayloads": false,
+        "hasTermVectors": false,
+        "docValuesType": "NONE",
+        "pointDimensionCount": 0,
+        "pointNumBytes": 0,
+        "vectorDimension": 0,
+        "terms": {
+          "docCount": 3,
+          "sumDocFreq": 3,
+          "sumTotalTermFreq": 3
+        }
+      }
+    ]
+  }
+}

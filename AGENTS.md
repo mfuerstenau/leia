@@ -86,6 +86,8 @@ To talk to the server by hand: `jq -c . protocol/fixtures/version.request.json |
 - `-j, --java <PATH>`: the JVM, given as a `java` executable or a JDK/JRE directory. Default: `$JAVA_HOME/bin/java`, then `java` on `PATH`.
 - `--jar <PATH>` (repeatable): a jar with analysis components, codecs or formats of its own, or a directory of such jars. The TUI checks that the path exists and passes it to the server as `--jar <PATH>`, which loads it at startup (ADR 0016, ADR 0018). `--version` starts the server without them.
 - `--directory <fs|mmap|nio>`: the Lucene `Directory` to open indexes through (ADR 0020). Default: `fs`, which is Lucene's `FSDirectory.open`. The open prompt can change it with Ctrl+D.
+- `--no-reader`: open `INDEX_PATH` without a reader, so that only its commits can be read (ADR 0021). The open prompt does the same with Ctrl+N.
+- `INDEX_PATH` may be a directory with indexes below it, which open as one (ADR 0021).
 - `leia-server.jar` is looked up next to the executable (symlinks resolved). For development, `LEIA_SERVER_JAR=<path>` overrides it.
 - `--version` prints the name, version and build of leia, plus the Java version actually in use. The Java version comes from the server, which needs a `version` RPC method.
 

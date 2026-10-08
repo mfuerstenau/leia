@@ -52,11 +52,12 @@ leia [OPTIONS] [INDEX_PATH]
 
 | Option | Meaning |
 |---|---|
-| `INDEX_PATH` | the index directory to open on start; without one, leia starts with no index open |
+| `INDEX_PATH` | the index directory to open on start, or a directory with indexes below it (see [Several indexes](#several-indexes)); without one, leia starts with no index open |
 | `-j, --java <PATH>` | the JVM, given as a `java` executable or a JDK/JRE directory; default: `$JAVA_HOME/bin/java`, then `java` on `PATH` |
 | `-V, --version` | print the versions of leia, leia-server and the Java in use |
 | `--jar <PATH>` | a jar with analysis components, codecs or formats of its own, or a directory of such jars; can be repeated (see [Jars](#jars)) |
 | `--directory <IMPL>` | the Lucene `Directory` to read indexes through: `fs` (default) lets Lucene choose, which is `MMapDirectory` on 64-bit; `mmap` is `MMapDirectory`, `nio` is `NIOFSDirectory`. `Ctrl+D` in the open prompt changes it |
+| `--no-reader` | open `INDEX_PATH` without a reader, for an index that a reader can't open (see [Without a reader](#without-a-reader)); `Ctrl+N` in the open prompt does the same |
 
 `leia-server.jar` has to be next to the `leia` executable. leia resolves symlinks, so a link to
 `leia` in `~/bin` works.
@@ -67,6 +68,27 @@ leia keeps the last 10 opened index paths for the open prompt in `~/.local/state
 ```sh
 leia --java /opt/jdk-25 /var/lib/solr/products/data/index
 ```
+
+### Several indexes
+
+A path that holds no index itself (no `segments_N` file) opens every index below it as one, like
+Luke's multi-reader mode: documents, terms, search and field statistics cover all of them, with
+document ids running through the indexes in the order they were found (depth-first, by name).
+leia doesn't look below a directory that holds an index, doesn't follow symbolic links, and stops
+after 10,000 directories. An index that fails to open, or whose fields are indexed differently
+from those of the indexes before it, is left out, and the overview lists it with the reason.
+The overview lists each index with its commit, the documents screen says which index a document
+is in, the commits screen has an `Indexes` panel to choose whose commits are shown, and `R`
+reopens the indexes that changed. Indexes added or removed below the path need `o`.
+
+### Without a reader
+
+An index that a reader can't open (a missing or corrupt file, a codec that isn't loaded) can
+still be opened without one: `Ctrl+N` in the open prompt, or `--no-reader`. When an open fails
+with a corrupt index or a missing codec, the prompt offers it. Only the commits screen works
+then: it lists the commits that can be read and, in red, the `segments_N` files that can't, with
+the reason. Overview, documents, terms and search say that they need a reader. The tab line
+shows `no reader`.
 
 ### Jars
 
@@ -113,9 +135,9 @@ is ignored.
 
 | Key | Action |
 |---|---|
-| `o` | open an index: type a path, `Tab` completes directories, `~` is your home directory, `↑` `↓` step through the last 10 opened paths, `Ctrl+D` switches the `Directory` (FS, MMap, NIO), `Enter` opens and `Esc` cancels |
+| `o` | open an index: type a path, `Tab` completes directories, `~` is your home directory, `↑` `↓` step through the last 10 opened paths, `Ctrl+D` switches the `Directory` (FS, MMap, NIO), `Ctrl+N` switches the reader off for this open, `Enter` opens and `Esc` cancels |
 | `c` | close the open index |
-| `R` | reopen the open index, if another process committed to it since: the screens keep their place, and the tab line says `Reopened: segments_N`, `Unchanged: segments_N` or why it failed |
+| `R` | reopen the open index, if another process committed to it since: the screens keep their place, and the tab line says `Reopened: segments_N`, `Unchanged: segments_N` (with several indexes, how many changed) or why it failed |
 | `1` … `6` | switch between the overview, the documents, the terms, the commits, the search and the analysis; only the analysis works without an open index |
 | `Esc` | stop the running term scans, or on the search screen the running search; with none running, quit |
 | `q`, `Ctrl+C` | quit |
@@ -229,13 +251,13 @@ were indexed. `[` and `]` then step through the term's documents.
 
 | Key | Action |
 |---|---|
-| `Tab`, `Shift+Tab` | switch between the commits, the segments of the selected commit and the details |
+| `Tab`, `Shift+Tab` | switch between the indexes (with several), the commits, the segments of the selected commit and the details |
 | `Enter` | on a commit, go to its segments |
 | `r` | read the commits from the directory again |
 | `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the focused list, or scroll the details |
 
 The commits screen lists the commits of the index directory, newest first; `●` marks the one leia
-opened. A directory keeps older commits only if the writer's deletion policy kept them, and it
+opened, and `✗` a `segments_N` file that can't be read, with the reason. A directory keeps older commits only if the writer's deletion policy kept them, and it
 can hold commits written after leia opened the index: `r` reads them again. Below are the
 segments of the selected commit in document id order, and the details of the commit (its user
 data and all its files) or of the selected segment (document range, deletions, versions,

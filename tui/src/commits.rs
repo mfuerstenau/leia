@@ -1,24 +1,29 @@
 //! The commits screen: the commits of the index directory on top and, below, the segments of the
 //! selected commit next to the details of the selected commit or segment (ADR 0009). Both come
-//! from the directory, so `r` reads them again to show commits written since.
+//! from the directory, so `r` reads them again to show commits written since. With several index
+//! directories, a panel above chooses whose commits are shown (ADR 0021).
 
 use std::collections::BTreeMap;
 
 use ratatui::Frame;
 use ratatui::crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState, Wrap};
 
 use crate::overview::{highlight, panel};
-use crate::protocol::commits::{Commit, CommitFile, GetCommitResult, Segment};
+use crate::protocol::commits::{
+    Commit, CommitFile, GetCommitResult, GetCommitsResult, Segment, UnreadableCommit,
+};
 use crate::terms::{moved, number_width};
 use crate::text::{count, escape_control, first_chars};
 use crate::viewer::size;
 
 /// The commits panel shows at most this many rows before it scrolls.
 const COMMIT_ROWS: usize = 6;
+/// The indexes panel shows at most this many rows before it scrolls.
+const INDEX_ROWS: usize = 4;
 const COLUMN_SPACING: u16 = 2;
 /// Keys in the details are padded to the longest one, up to this width.
 const KEY_WIDTH: usize = 28;
@@ -27,28 +32,37 @@ const PAGE: u16 = 10;
 /// What the caller has to fetch for the commits screen.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Request {
-    /// The commits of the directory, reported back with [`Commits::commits_loaded`] or
-    /// [`Commits::commits_failed`].
-    Commits,
-    /// One commit whole, reported back with [`Commits::commit_loaded`] or
-    /// [`Commits::commit_failed`].
-    Commit(i64),
+    /// The commits of the index directory at this position, reported back with
+    /// [`Commits::commits_loaded`] or [`Commits::commits_failed`].
+    Commits(usize),
+    /// One commit of the index directory at this position whole, by generation, reported back
+    /// with [`Commits::commit_loaded`] or [`Commits::commit_failed`].
+    Commit(usize, i64),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Focus {
+    /// Only with several index directories.
+    Indexes,
     Commits,
     Segments,
     Details,
 }
 
 pub struct Commits {
-    /// `None` until the commits are fetched.
-    commits: Option<Result<Vec<Commit>, String>>,
+    /// The index directories as shown: below the opened path.
+    indexes: Vec<String>,
+    /// The index directory whose commits are shown.
+    index_row: usize,
+    index_table: TableState,
+    /// The commits of each index directory; `None` until they are fetched.
+    lists: Vec<Option<Result<Vec<Commit>, String>>>,
+    /// The `segments_N` files of each index directory that could not be read.
+    unreadable: Vec<Vec<UnreadableCommit>>,
     commit_row: usize,
     commit_table: TableState,
-    /// The commits fetched whole, or why they could not be, by generation.
-    details: BTreeMap<i64, Result<GetCommitResult, String>>,
+    /// The commits fetched whole, or why they could not be, by index directory and generation.
+    details: BTreeMap<(usize, i64), Result<GetCommitResult, String>>,
     segment_row: usize,
     segment_table: TableState,
     focus: Focus,
@@ -58,16 +72,15 @@ pub struct Commits {
     details_scroll: u16,
 }
 
-impl Default for Commits {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl Commits {
-    pub fn new() -> Self {
+    /// The commits screen of these index directories, as shown; at least one.
+    pub fn new(indexes: Vec<String>) -> Self {
         Self {
-            commits: None,
+            lists: vec![None; indexes.len()],
+            unreadable: vec![Vec::new(); indexes.len()],
+            indexes,
+            index_row: 0,
+            index_table: TableState::new(),
             commit_row: 0,
             commit_table: TableState::new(),
             details: BTreeMap::new(),
@@ -87,42 +100,86 @@ impl Commits {
     /// The commit list first, then the selected commit whole. A fetch that failed is not
     /// repeated by itself; `r` repeats it.
     fn next_request(&self) -> Option<Request> {
-        let Some(commits) = &self.commits else {
-            return Some(Request::Commits);
+        let index = self.index_row;
+        let Some(commits) = &self.lists[index] else {
+            return Some(Request::Commits(index));
         };
         let generation = commits.as_ref().ok()?.get(self.commit_row)?.generation;
-        (!self.details.contains_key(&generation)).then_some(Request::Commit(generation))
+        (!self.details.contains_key(&(index, generation)))
+            .then_some(Request::Commit(index, generation))
     }
 
-    /// Shows the commits; the selection stays on its commit, or else goes to the opened one.
-    pub fn commits_loaded(&mut self, commits: Vec<Commit>) -> Option<Request> {
-        let selected = self.selected_commit().map(|commit| commit.generation);
-        self.commit_row = selected
-            .and_then(|generation| commits.iter().position(|c| c.generation == generation))
-            .or_else(|| commits.iter().position(|commit| commit.current))
-            .unwrap_or_default();
-        self.commits = Some(Ok(commits));
+    /// The commits of the shown index directory; `None` until they are fetched.
+    fn commits(&self) -> Option<&Result<Vec<Commit>, String>> {
+        self.lists[self.index_row].as_ref()
+    }
+
+    /// Shows the commits of the index directory at `index`, and those that could not be read;
+    /// the selection stays on its commit, or else goes to the opened one.
+    pub fn commits_loaded(&mut self, index: usize, result: GetCommitsResult) -> Option<Request> {
+        let commits = result.commits;
+        self.unreadable[index] = result.unreadable;
+        if index == self.index_row {
+            let selected = self.selected_commit().map(|commit| commit.generation);
+            self.commit_row = selected
+                .and_then(|generation| commits.iter().position(|c| c.generation == generation))
+                .or_else(|| commits.iter().position(|commit| commit.current))
+                .unwrap_or_default();
+        }
+        self.lists[index] = Some(Ok(commits));
         self.next_request()
     }
 
-    pub fn commits_failed(&mut self, error: String) {
-        self.commits = Some(Err(error));
+    pub fn commits_failed(&mut self, index: usize, error: String) {
+        self.lists[index] = Some(Err(error));
     }
 
-    pub fn commit_loaded(&mut self, generation: i64, result: GetCommitResult) {
-        self.details.insert(generation, Ok(result));
+    pub fn commit_loaded(&mut self, index: usize, generation: i64, result: GetCommitResult) {
+        self.details.insert((index, generation), Ok(result));
     }
 
-    pub fn commit_failed(&mut self, generation: i64, error: String) {
-        self.details.insert(generation, Err(error));
+    pub fn commit_failed(&mut self, index: usize, generation: i64, error: String) {
+        self.details.insert((index, generation), Err(error));
     }
 
     fn selected_commit(&self) -> Option<&Commit> {
-        self.commits.as_ref()?.as_ref().ok()?.get(self.commit_row)
+        self.commits()?.as_ref().ok()?.get(self.commit_row)
     }
 
     fn selected_details(&self) -> Option<&Result<GetCommitResult, String>> {
-        self.details.get(&self.selected_commit()?.generation)
+        self.details
+            .get(&(self.index_row, self.selected_commit()?.generation))
+    }
+
+    /// Shows the commits of another index directory, with the opened commit selected.
+    fn select_index(&mut self, row: usize) {
+        if row == self.index_row {
+            return;
+        }
+        self.index_row = row;
+        self.commit_row = match self.commits() {
+            Some(Ok(commits)) => commits
+                .iter()
+                .position(|commit| commit.current)
+                .unwrap_or_default(),
+            _ => 0,
+        };
+        self.segment_row = 0;
+        self.details_scroll = 0;
+    }
+
+    /// The panels that Tab goes through, in order.
+    fn panels(&self) -> &'static [Focus] {
+        if self.indexes.len() > 1 {
+            &[
+                Focus::Indexes,
+                Focus::Commits,
+                Focus::Segments,
+                Focus::Details,
+            ]
+        } else {
+            &[Focus::Commits, Focus::Segments, Focus::Details]
+        }
     }
 
     fn selected_segment(&self) -> Option<&Segment> {
@@ -140,24 +197,27 @@ impl Commits {
             KeyCode::Char('r') => {
                 // The commits stay until the new ones are in, so the selection can stay on its
                 // commit.
-                self.details.clear();
+                let index = self.index_row;
+                self.details.retain(|&(i, _), _| i != index);
                 self.details_scroll = 0;
-                Some(Request::Commits)
+                Some(Request::Commits(index))
             }
-            KeyCode::Tab => {
-                self.focus(match self.focus {
-                    Focus::Commits => Focus::Segments,
-                    Focus::Segments => Focus::Details,
-                    Focus::Details => Focus::Commits,
-                });
+            KeyCode::Tab | KeyCode::BackTab => {
+                let panels = self.panels();
+                let at = panels
+                    .iter()
+                    .position(|&panel| panel == self.focus)
+                    .unwrap_or_default();
+                let next = if key == KeyCode::Tab {
+                    (at + 1) % panels.len()
+                } else {
+                    (at + panels.len() - 1) % panels.len()
+                };
+                self.focus(panels[next]);
                 None
             }
-            KeyCode::BackTab => {
-                self.focus(match self.focus {
-                    Focus::Commits => Focus::Details,
-                    Focus::Segments => Focus::Commits,
-                    Focus::Details => Focus::Segments,
-                });
+            KeyCode::Enter if self.focus == Focus::Indexes => {
+                self.focus(Focus::Commits);
                 None
             }
             KeyCode::Enter if self.focus == Focus::Commits => {
@@ -165,8 +225,13 @@ impl Commits {
                 None
             }
             _ => match self.focus {
+                Focus::Indexes => {
+                    let row = moved(self.index_row, self.indexes.len(), key)?;
+                    self.select_index(row);
+                    self.next_request()
+                }
                 Focus::Commits => {
-                    let len = self.commits.as_ref()?.as_ref().ok()?.len();
+                    let len = self.commits()?.as_ref().ok()?.len();
                     let row = moved(self.commit_row, len, key)?;
                     if row != self.commit_row {
                         self.commit_row = row;
@@ -194,7 +259,7 @@ impl Commits {
 
     fn focus(&mut self, focus: Focus) {
         let segment_details = match focus {
-            Focus::Commits => false,
+            Focus::Indexes | Focus::Commits => false,
             Focus::Segments => true,
             Focus::Details => self.segment_details,
         };
@@ -219,8 +284,20 @@ impl Commits {
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
-        let rows = match &self.commits {
-            Some(Ok(commits)) => commits.len().clamp(1, COMMIT_ROWS),
+        let area = if self.indexes.len() > 1 {
+            let rows = self.indexes.len().min(INDEX_ROWS);
+            // Borders.
+            let [indexes_area, rest] =
+                Layout::vertical([Constraint::Length(rows as u16 + 2), Constraint::Fill(1)])
+                    .areas(area);
+            self.render_indexes(frame, indexes_area);
+            rest
+        } else {
+            area
+        };
+        let unreadable = self.unreadable[self.index_row].len();
+        let rows = match self.commits() {
+            Some(Ok(commits)) => (commits.len() + unreadable).clamp(1, COMMIT_ROWS),
             _ => 1,
         };
         // Borders and the header.
@@ -234,9 +311,24 @@ impl Commits {
         self.render_details(frame, details_area);
     }
 
+    fn render_indexes(&mut self, frame: &mut Frame, area: Rect) {
+        let focused = self.focus == Focus::Indexes;
+        let title = format!(" Indexes ({}) ", self.indexes.len());
+        let rows = self
+            .indexes
+            .iter()
+            .map(|index| Row::new([Cell::from(index.clone())]));
+        self.index_table.select(Some(self.index_row));
+        let table = Table::new(rows, [Constraint::Fill(1)])
+            .row_highlight_style(highlight(focused))
+            .block(panel(title, focused));
+        frame.render_stateful_widget(table, area, &mut self.index_table);
+    }
+
     fn render_commits(&mut self, frame: &mut Frame, area: Rect) {
         let focused = self.focus == Focus::Commits;
-        let commits = match &self.commits {
+        // The list itself, not through `commits()`, which would borrow all of `self`.
+        let commits = match self.lists[self.index_row].as_ref() {
             None => return message(frame, area, " Commits ", focused, "Reading the commits…"),
             Some(Err(error)) => {
                 let text = format!("Cannot list the commits: {error}");
@@ -244,8 +336,17 @@ impl Commits {
             }
             Some(Ok(commits)) => commits,
         };
-        let title = format!(" Commits ({}; ● opened, r reads again) ", commits.len());
-        if commits.is_empty() {
+        let unreadable = &self.unreadable[self.index_row];
+        let title = if unreadable.is_empty() {
+            format!(" Commits ({}; ● opened, r reads again) ", commits.len())
+        } else {
+            format!(
+                " Commits ({}, {} unreadable; ● opened, r reads again) ",
+                commits.len(),
+                unreadable.len()
+            )
+        };
+        if commits.is_empty() && unreadable.is_empty() {
             return message(frame, area, &title, focused, "No readable commit.");
         }
         let header = Row::new([
@@ -271,6 +372,21 @@ impl Commits {
                 Cell::from(user_data(&commit.user_data)),
             ])
         });
+        // Below the commits, where the selection never goes.
+        let unreadable_rows = unreadable.iter().map(|commit| {
+            Row::new([
+                Cell::from("✗"),
+                Cell::from(""),
+                Cell::from(commit.segments_file.clone()),
+                Cell::from(""),
+                Cell::from(""),
+                Cell::from(""),
+                Cell::from(""),
+                Cell::from(format!("unreadable: {}", escape_control(&commit.message))),
+            ])
+            .style(Style::new().fg(Color::Red))
+        });
+        let rows = rows.chain(unreadable_rows);
         let widths = [
             Constraint::Length(1),
             Constraint::Length(number_width(commits.iter().map(|c| c.generation)).min(3)),
@@ -278,6 +394,7 @@ impl Commits {
                 commits
                     .iter()
                     .map(|c| c.segments_file.len())
+                    .chain(unreadable.iter().map(|c| c.segments_file.len()))
                     .max()
                     .unwrap_or_default() as u16,
             ),
@@ -294,7 +411,8 @@ impl Commits {
             ),
             Constraint::Fill(1),
         ];
-        self.commit_table.select(Some(self.commit_row));
+        self.commit_table
+            .select((!commits.is_empty()).then_some(self.commit_row));
         let table = Table::new(rows, widths)
             .header(header)
             .column_spacing(COLUMN_SPACING)
@@ -720,14 +838,21 @@ mod tests {
         }
     }
 
+    fn list(commits: Vec<Commit>) -> GetCommitsResult {
+        GetCommitsResult {
+            commits,
+            unreadable: Vec::new(),
+        }
+    }
+
     /// The commits 4 (opened) and 3, as the server lists them.
     fn loaded() -> Commits {
-        let mut commits = Commits::new();
+        let mut commits = Commits::new(vec!["index".to_owned()]);
         assert_eq!(
-            commits.commits_loaded(vec![commit(4, true), commit(3, false)]),
-            Some(Request::Commit(4))
+            commits.commits_loaded(0, list(vec![commit(4, true), commit(3, false)])),
+            Some(Request::Commit(0, 4))
         );
-        commits.commit_loaded(4, details(4, true));
+        commits.commit_loaded(0, 4, details(4, true));
         commits
     }
 
@@ -749,17 +874,20 @@ mod tests {
 
     #[test]
     fn fetches_the_commits_then_the_selected_one() {
-        let mut commits = Commits::new();
-        assert_eq!(commits.initial_request(), Some(Request::Commits));
+        let mut commits = Commits::new(vec!["index".to_owned()]);
+        assert_eq!(commits.initial_request(), Some(Request::Commits(0)));
         assert_eq!(
-            commits.commits_loaded(vec![commit(4, true), commit(3, false)]),
-            Some(Request::Commit(4))
+            commits.commits_loaded(0, list(vec![commit(4, true), commit(3, false)])),
+            Some(Request::Commit(0, 4))
         );
-        commits.commit_loaded(4, details(4, true));
+        commits.commit_loaded(0, 4, details(4, true));
         assert_eq!(commits.initial_request(), None);
 
-        assert_eq!(commits.handle_key(KeyCode::Down), Some(Request::Commit(3)));
-        commits.commit_failed(3, "gone".to_owned());
+        assert_eq!(
+            commits.handle_key(KeyCode::Down),
+            Some(Request::Commit(0, 3))
+        );
+        commits.commit_failed(0, 3, "gone".to_owned());
         // A failed commit is not fetched again by moving back to it.
         assert_eq!(commits.handle_key(KeyCode::Up), None);
         assert_eq!(commits.handle_key(KeyCode::Down), None);
@@ -767,10 +895,10 @@ mod tests {
 
     #[test]
     fn selects_the_opened_commit_first() {
-        let mut commits = Commits::new();
+        let mut commits = Commits::new(vec!["index".to_owned()]);
         assert_eq!(
-            commits.commits_loaded(vec![commit(5, false), commit(4, true)]),
-            Some(Request::Commit(4))
+            commits.commits_loaded(0, list(vec![commit(5, false), commit(4, true)])),
+            Some(Request::Commit(0, 4))
         );
     }
 
@@ -778,16 +906,19 @@ mod tests {
     fn reads_the_commits_again_and_keeps_the_selection() {
         let mut commits = loaded();
         commits.handle_key(KeyCode::Down);
-        commits.commit_loaded(3, details(3, false));
+        commits.commit_loaded(0, 3, details(3, false));
 
         assert_eq!(
             commits.handle_key(KeyCode::Char('r')),
-            Some(Request::Commits)
+            Some(Request::Commits(0))
         );
         // A newer commit came in; the selection stays on commit 3 and fetches it again.
         assert_eq!(
-            commits.commits_loaded(vec![commit(5, false), commit(4, true), commit(3, false)]),
-            Some(Request::Commit(3))
+            commits.commits_loaded(
+                0,
+                list(vec![commit(5, false), commit(4, true), commit(3, false)])
+            ),
+            Some(Request::Commit(0, 3))
         );
     }
 
@@ -839,7 +970,7 @@ mod tests {
     fn shows_why_a_commit_could_not_be_read() {
         let mut commits = loaded();
         commits.handle_key(KeyCode::Down);
-        commits.commit_failed(3, "Corrupt commit".to_owned());
+        commits.commit_failed(0, 3, "Corrupt commit".to_owned());
 
         let screen = render(&mut commits, 120, 20);
         assert!(
@@ -854,5 +985,57 @@ mod tests {
         assert_eq!(utc_time(1_000_000_000_000), "2001-09-09 01:46:40 UTC");
         assert_eq!(utc_time(951_782_400_000), "2000-02-29 00:00:00 UTC");
         assert_eq!(utc_time(-1000), "1969-12-31 23:59:59 UTC");
+    }
+
+    #[test]
+    fn shows_the_commits_that_could_not_be_read() {
+        let mut commits = Commits::new(vec!["index".to_owned()]);
+        let result = GetCommitsResult {
+            commits: Vec::new(),
+            unreadable: vec![UnreadableCommit {
+                segments_file: "segments_2".to_owned(),
+                message: "Corrupt index, missing file: _0.si".to_owned(),
+            }],
+        };
+        assert_eq!(commits.commits_loaded(0, result), None);
+
+        let screen = render(&mut commits, 120, 24);
+        assert!(
+            screen.contains("Commits (0, 1 unreadable; ● opened, r reads again)"),
+            "{screen}"
+        );
+        assert!(
+            screen.contains("segments_2")
+                && screen.contains("unreadable: Corrupt index, missing file: _0.si"),
+            "{screen}"
+        );
+        // The selection never goes to them.
+        assert_eq!(commits.handle_key(KeyCode::Down), None);
+    }
+
+    #[test]
+    fn shows_the_commits_of_the_selected_index() {
+        let mut commits = Commits::new(vec!["a".to_owned(), "b".to_owned()]);
+        assert_eq!(commits.initial_request(), Some(Request::Commits(0)));
+        commits.commits_loaded(0, list(vec![commit(4, true)]));
+        commits.handle_key(KeyCode::BackTab);
+        assert_eq!(commits.handle_key(KeyCode::Down), Some(Request::Commits(1)));
+        assert_eq!(
+            commits.commits_loaded(1, list(vec![commit(7, false), commit(6, true)])),
+            Some(Request::Commit(1, 6))
+        );
+        commits.commit_loaded(1, 6, details(6, true));
+        let screen = render(&mut commits, 120, 30);
+        assert!(screen.contains("Indexes (2)"), "{screen}");
+        assert!(screen.contains("Segments of segments_6"), "{screen}");
+
+        // Back to the first, whose commit was not fetched yet.
+        assert_eq!(commits.handle_key(KeyCode::Up), Some(Request::Commit(0, 4)));
+        // Tab goes round the four panels, back to the indexes; b has all it needs.
+        for _ in 0..4 {
+            commits.handle_key(KeyCode::Tab);
+        }
+        assert_eq!(commits.handle_key(KeyCode::Down), None);
+        assert!(render(&mut commits, 120, 30).contains("Segments of segments_6"));
     }
 }

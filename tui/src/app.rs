@@ -9,10 +9,10 @@ use std::path::PathBuf;
 
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use ratatui::layout::{Constraint, Layout};
+use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
-use ratatui::widgets::{Block, Paragraph, Tabs};
+use ratatui::widgets::{Block, Paragraph, Tabs, Wrap};
 
 use crate::analysis::{self, Analysis};
 use crate::build_info::{LEIA, java_line, server_line};
@@ -20,13 +20,17 @@ use crate::commits::{self, Commits};
 use crate::documents::{self, Documents, Walk};
 use crate::history::History;
 use crate::overview::{DEFAULT_TOP_TERMS, FieldScan, Overview, step_top_terms};
+use crate::overview::{label_line, relative};
 use crate::prompt::{PathPrompt, PromptEvent, expand_home};
 use crate::protocol::analysis::{AnalyzeParams, AnalyzeResult, GetAnalysisComponentsResult};
-use crate::protocol::commits::{Commit, GetCommitResult};
+use crate::protocol::commits::{GetCommitResult, GetCommitsResult};
 use crate::protocol::document::{
     BytesValue, GetDocumentResult, StoredValue, TermPosition, TermVectorTerm,
 };
-use crate::protocol::index::{DirectoryImpl, GetIndexStatsResult, IndexField, ReopenIndexResult};
+use crate::protocol::index::{
+    DirectoryImpl, GetIndexStatsResult, IndexField, OpenIndexResult, OpenMode, ReopenIndexResult,
+    SkippedIndex,
+};
 use crate::protocol::search::{
     GetExplainResult, GetSearchResult, StartExplainParams, StartSearchParams,
 };
@@ -39,11 +43,12 @@ use crate::terms::{self, Terms};
 #[derive(Debug, PartialEq)]
 pub enum Action {
     Quit,
-    /// Open this index through this `Directory` and fetch its statistics. The prompt shows
-    /// "Opening…" until the outcome is reported.
+    /// Open this index through this `Directory`, with or without a reader, and fetch its
+    /// statistics if it has a reader. The prompt shows "Opening…" until the outcome is reported.
     Open {
         path: String,
         directory_impl: DirectoryImpl,
+        mode: OpenMode,
     },
     /// Close the open index.
     Close,
@@ -100,12 +105,12 @@ pub enum Action {
         field: String,
         term: BytesValue,
     },
-    /// Fetch the commits of the index directory, and report back with [`App::commits_loaded`]
-    /// or [`App::commits_failed`].
-    LoadCommits,
-    /// Fetch a commit whole, and report back with [`App::commit_loaded`] or
-    /// [`App::commit_failed`].
-    LoadCommit(i64),
+    /// Fetch the commits of the index directory at this position, and report back with
+    /// [`App::commits_loaded`] or [`App::commits_failed`].
+    LoadCommits(usize),
+    /// Fetch a commit of the index directory at this position whole, by generation, and report
+    /// back with [`App::commit_loaded`] or [`App::commit_failed`].
+    LoadCommit(usize, i64),
     /// Cancel the jobs in `cancel`, then start this search, and report back with
     /// [`App::search_started`] or [`App::search_failed`].
     StartSearch {
@@ -140,7 +145,7 @@ pub enum Poll {
 }
 
 /// The screens; `1` to `6` switch between them. The first five need an open index, the
-/// analysis screen doesn't.
+/// analysis screen doesn't. Without a reader, only the commits screen shows the index (ADR 0021).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Screen {
     Overview,
@@ -159,6 +164,18 @@ struct RunningScan {
     job_id: Option<i64>,
 }
 
+/// What was opened (ADR 0021).
+struct Opened {
+    /// The absolute path that was opened.
+    path: String,
+    /// Whether it was opened without a reader: only the commits screen works.
+    no_reader: bool,
+    /// The `Directory` it was opened through.
+    directory: DirectoryImpl,
+    /// The index directories, in order; at least one.
+    indexes: Vec<String>,
+}
+
 pub struct App {
     version: VersionResult,
     /// The directory that `~` stands for in the prompt.
@@ -167,6 +184,8 @@ pub struct App {
     history: History,
     /// The `Directory` the next prompt opens with: `--directory`, then the last one chosen.
     directory: DirectoryImpl,
+    /// What is open, if anything. The screens that need a reader are `None` without one.
+    opened: Option<Opened>,
     overview: Option<Overview>,
     documents: Option<Documents>,
     terms: Option<Terms>,
@@ -193,6 +212,8 @@ enum Notice {
     Unchanged(String),
     Reopened(String),
     Failed(String),
+    /// `R` without a reader.
+    NoReader,
 }
 
 impl Notice {
@@ -205,6 +226,7 @@ impl Notice {
                 format!("Reopen failed: {error}"),
                 Style::new().fg(Color::Red),
             ),
+            Self::NoReader => Line::from("No reader to reopen"),
         }
     }
 }
@@ -216,6 +238,7 @@ impl App {
             home,
             history: History::in_memory(),
             directory: DirectoryImpl::default(),
+            opened: None,
             overview: None,
             documents: None,
             terms: None,
@@ -255,27 +278,73 @@ impl App {
     }
 
     pub fn has_index(&self) -> bool {
-        self.overview.is_some()
+        self.opened.is_some()
     }
 
-    /// Shows `path` being opened, for an open that no key started (the command line's path).
-    pub fn opening(&mut self, path: &str) {
-        let mut prompt = self.path_prompt(path);
+    /// Shows `path` being opened with `mode`, for an open that no key started (the command
+    /// line's path).
+    pub fn opening(&mut self, path: &str, mode: OpenMode) {
+        let mut prompt = self.path_prompt(path).with_mode(mode);
         prompt.set_busy();
         self.prompt = Some(prompt);
     }
 
-    /// Shows the new index. The server stopped the jobs of the previous one. Returns what the
-    /// shown screen has to fetch first.
-    pub fn opened(&mut self, stats: GetIndexStatsResult) -> Option<Action> {
+    /// Shows the new index, opened with a reader, and the index directories left out of it. The
+    /// server stopped the jobs of the previous one. Returns what the shown screen has to fetch
+    /// first.
+    pub fn opened(
+        &mut self,
+        stats: GetIndexStatsResult,
+        skipped: Vec<SkippedIndex>,
+    ) -> Option<Action> {
         self.history.add(&stats.path);
-        self.documents = Some(Documents::new(stats.fields.clone(), stats.max_doc));
+        let paths: Vec<String> = stats
+            .indexes
+            .iter()
+            .map(|index| index.path.clone())
+            .collect();
+        let doc_bases = stats.indexes.iter().map(|index| index.doc_base);
+        self.documents = Some(
+            Documents::new(stats.fields.clone(), stats.max_doc)
+                .with_indexes(doc_bases.zip(index_names(&stats.path, &paths)).collect()),
+        );
         self.terms = Some(Terms::new(stats.fields.clone()));
-        self.commits = Some(Commits::new());
+        self.commits = Some(Commits::new(index_names(&stats.path, &paths)));
         let mut search = Search::new(&stats.fields, stats.max_doc);
         search.set_analyzer(self.analysis.settings());
         self.search = Some(search);
-        self.overview = Some(Overview::new(stats, self.top_n));
+        self.opened = Some(Opened {
+            path: stats.path.clone(),
+            no_reader: false,
+            directory: self.directory,
+            indexes: paths,
+        });
+        self.overview = Some(Overview::new(stats, self.top_n).with_skipped(skipped));
+        self.prompt = None;
+        self.forget_scans();
+        self.initial_request()
+    }
+
+    /// Shows the index opened without a reader (ADR 0021): only the commits screen works, and
+    /// it is shown unless the analysis screen is. The server stopped the jobs of the previous
+    /// index. Returns what the shown screen has to fetch first.
+    pub fn opened_without_reader(&mut self, result: OpenIndexResult) -> Option<Action> {
+        self.history.add(&result.path);
+        let paths: Vec<String> = result.indexes.into_iter().map(|index| index.path).collect();
+        self.overview = None;
+        self.documents = None;
+        self.terms = None;
+        self.search = None;
+        self.commits = Some(Commits::new(index_names(&result.path, &paths)));
+        self.opened = Some(Opened {
+            path: result.path,
+            no_reader: true,
+            directory: self.directory,
+            indexes: paths,
+        });
+        if self.screen != Screen::Analysis {
+            self.screen = Screen::Commits;
+        }
         self.prompt = None;
         self.forget_scans();
         self.initial_request()
@@ -286,10 +355,21 @@ impl App {
     /// what the shown screen has to fetch first.
     pub fn reopened(&mut self, stats: GetIndexStatsResult) -> Option<Action> {
         let Some(overview) = &self.overview else {
-            return self.opened(stats);
+            return self.opened(stats, Vec::new());
         };
         let same_fields = schema(overview.fields()) == schema(&stats.fields);
-        self.notice = Some(Notice::Reopened(stats.segments_file.clone()));
+        self.notice = Some(Notice::Reopened(match stats.indexes.as_slice() {
+            [index] => index.segments_file.clone(),
+            indexes => {
+                let old = &overview.stats().indexes;
+                let changed = indexes
+                    .iter()
+                    .zip(old)
+                    .filter(|(new, old)| new.segments_file != old.segments_file)
+                    .count();
+                format!("{changed} of {} indexes", indexes.len())
+            }
+        }));
         self.documents = Some(match &self.documents {
             Some(documents) => documents.reopened(stats.fields.clone(), stats.max_doc),
             None => Documents::new(stats.fields.clone(), stats.max_doc),
@@ -298,7 +378,12 @@ impl App {
             Some(terms) => terms.reopened(stats.fields.clone()),
             None => Terms::new(stats.fields.clone()),
         });
-        self.commits = Some(Commits::new());
+        let paths: Vec<String> = stats
+            .indexes
+            .iter()
+            .map(|index| index.path.clone())
+            .collect();
+        self.commits = Some(Commits::new(index_names(&stats.path, &paths)));
         self.search = Some(match &self.search {
             Some(search) => search.reopened(&stats.fields, stats.max_doc, same_fields),
             None => {
@@ -314,7 +399,14 @@ impl App {
 
     /// The index has no newer commit; everything stays as it is.
     pub fn reopen_unchanged(&mut self, result: &ReopenIndexResult) {
-        self.notice = Some(Notice::Unchanged(result.segments_file.clone()));
+        self.notice = Some(Notice::Unchanged(match result.indexes.as_slice() {
+            [index] => index
+                .reader
+                .as_ref()
+                .map(|reader| reader.segments_file.clone())
+                .unwrap_or_default(),
+            indexes => format!("{} indexes", indexes.len()),
+        }));
     }
 
     /// The open index stays open, and is shown as it was.
@@ -322,18 +414,25 @@ impl App {
         self.notice = Some(Notice::Failed(error));
     }
 
-    /// Shows `error` in the prompt, which keeps the path, so it can be corrected.
-    pub fn open_failed(&mut self, error: String) {
+    /// Shows `error` in the prompt, which keeps the path, so it can be corrected. If
+    /// `no_reader_helps`, it says that opening without a reader may still show the commits (ADR
+    /// 0021).
+    pub fn open_failed(&mut self, error: String, no_reader_helps: bool) {
         if self.prompt.is_none() {
             self.prompt = Some(self.path_prompt(""));
         }
         if let Some(prompt) = &mut self.prompt {
-            prompt.set_error(error);
+            if no_reader_helps {
+                prompt.set_error_offering_no_reader(error);
+            } else {
+                prompt.set_error(error);
+            }
         }
     }
 
     /// The server stopped the jobs of the closed index.
     pub fn closed(&mut self) {
+        self.opened = None;
         self.overview = None;
         self.documents = None;
         self.terms = None;
@@ -562,26 +661,27 @@ impl App {
         }
     }
 
-    /// Shows the commits. Returns the selected commit to fetch whole.
-    pub fn commits_loaded(&mut self, commits: Vec<Commit>) -> Option<Action> {
-        commits_action(self.commits.as_mut()?.commits_loaded(commits))
+    /// Shows the commits of the index directory at `index`. Returns the selected commit to
+    /// fetch whole.
+    pub fn commits_loaded(&mut self, index: usize, result: GetCommitsResult) -> Option<Action> {
+        commits_action(self.commits.as_mut()?.commits_loaded(index, result))
     }
 
-    pub fn commits_failed(&mut self, error: String) {
+    pub fn commits_failed(&mut self, index: usize, error: String) {
         if let Some(commits) = &mut self.commits {
-            commits.commits_failed(error);
+            commits.commits_failed(index, error);
         }
     }
 
-    pub fn commit_loaded(&mut self, generation: i64, result: GetCommitResult) {
+    pub fn commit_loaded(&mut self, index: usize, generation: i64, result: GetCommitResult) {
         if let Some(commits) = &mut self.commits {
-            commits.commit_loaded(generation, result);
+            commits.commit_loaded(index, generation, result);
         }
     }
 
-    pub fn commit_failed(&mut self, generation: i64, error: String) {
+    pub fn commit_failed(&mut self, index: usize, generation: i64, error: String) {
         if let Some(commits) = &mut self.commits {
-            commits.commit_failed(generation, error);
+            commits.commit_failed(index, generation, error);
         }
     }
 
@@ -780,6 +880,7 @@ impl App {
                     Some(Action::Open {
                         path: expand_home(&path, self.home.as_deref()),
                         directory_impl: self.directory,
+                        mode: prompt.mode(),
                     })
                 }
                 PromptEvent::Cancel => {
@@ -829,15 +930,15 @@ impl App {
             },
             KeyCode::Esc if !search_jobs.is_empty() => Some(Action::CancelSearch(search_jobs)),
             KeyCode::Char('q') | KeyCode::Esc => Some(Action::Quit),
-            KeyCode::Char('1') if self.overview.is_some() => {
+            KeyCode::Char('1') if self.has_index() => {
                 self.screen = Screen::Overview;
                 None
             }
-            KeyCode::Char('2') if self.documents.is_some() => {
+            KeyCode::Char('2') if self.has_index() => {
                 self.screen = Screen::Documents;
                 self.initial_request()
             }
-            KeyCode::Char('3') if self.terms.is_some() => {
+            KeyCode::Char('3') if self.has_index() => {
                 self.screen = Screen::Terms;
                 self.initial_request()
             }
@@ -845,7 +946,7 @@ impl App {
                 self.screen = Screen::Commits;
                 self.initial_request()
             }
-            KeyCode::Char('5') if self.search.is_some() => {
+            KeyCode::Char('5') if self.has_index() => {
                 self.screen = Screen::Search;
                 None
             }
@@ -855,14 +956,21 @@ impl App {
             }
             KeyCode::Char('o') => {
                 // Starts from the open index, so a sibling is a Ctrl+W away.
-                let path = self.overview.as_ref().map_or("", Overview::path);
+                let path = self
+                    .opened
+                    .as_ref()
+                    .map_or("", |opened| opened.path.as_str());
                 self.prompt = Some(self.path_prompt(path));
                 None
             }
-            KeyCode::Char('c') if self.overview.is_some() => Some(Action::Close),
+            KeyCode::Char('c') if self.has_index() => Some(Action::Close),
             KeyCode::Char('R') if self.overview.is_some() => {
                 self.notice = Some(Notice::Reopening);
                 Some(Action::Reopen)
+            }
+            KeyCode::Char('R') if self.has_index() => {
+                self.notice = Some(Notice::NoReader);
+                None
             }
             code if self.screen == Screen::Documents => {
                 let request = self.documents.as_mut()?.handle_key(code);
@@ -918,7 +1026,7 @@ impl App {
 
     pub fn draw(&mut self, frame: &mut Frame) {
         // The analysis screen needs no index, so its tab shows without one.
-        let tabs_shown = self.overview.is_some() || self.screen == Screen::Analysis;
+        let tabs_shown = self.has_index() || self.screen == Screen::Analysis;
         let [tabs, body, footer] = Layout::vertical([
             Constraint::Length(u16::from(tabs_shown)),
             Constraint::Fill(1),
@@ -942,7 +1050,7 @@ impl App {
                 self.analysis.render(frame, body);
                 if self.analysis.prompting() {
                     Line::from(self.analysis.keys())
-                } else if overview.is_some() {
+                } else if overview.is_some() || self.opened.is_some() {
                     Line::from(format!(
                         " {cancel}q quit   o open   c close   1-6 screen   {}",
                         self.analysis.keys()
@@ -967,10 +1075,15 @@ impl App {
                     ))
                 }
             }
-            (Some(_), _, _, Some(commits), _, Screen::Commits) => {
+            (overview, _, _, Some(commits), _, Screen::Commits) => {
                 commits.render(frame, body);
+                let reopen = if overview.is_some() {
+                    "R reopen   "
+                } else {
+                    ""
+                };
                 Line::from(format!(
-                    " {cancel}q quit   o open   c close   R reopen   1-6 screen   r read again   ⏎ segments   \
+                    " {cancel}q quit   o open   c close   {reopen}1-6 screen   r read again   ⏎ segments   \
                      Tab panel   ↑↓"
                 ))
             }
@@ -1019,6 +1132,10 @@ impl App {
                     )
                 }
             }
+            (None, _, _, _, _, screen) if let Some(opened) = &self.opened => {
+                render_without_reader(frame, body, opened, screen);
+                Line::from(" q quit   o open   c close   1-6 screen")
+            }
             (None, _, _, _, _, _) => {
                 let lines = vec![
                     Line::from("No index open. Press o to open one, or 6 to try an analyzer."),
@@ -1043,8 +1160,12 @@ impl App {
                 Screen::Search => 4,
                 Screen::Analysis => 5,
             };
-            let tabs = if let Some(notice) = &self.notice {
-                let line = notice.line();
+            let line = match (&self.notice, &self.opened) {
+                (Some(notice), _) => Some(notice.line()),
+                (None, Some(opened)) => marker(opened),
+                (None, None) => None,
+            };
+            let tabs = if let Some(line) = line {
                 let [tabs, notice] =
                     Layout::horizontal([Constraint::Length(TABS_WIDTH), Constraint::Fill(1)])
                         .areas(tabs);
@@ -1105,6 +1226,69 @@ fn schema(fields: &[IndexField]) -> Vec<IndexField> {
         .collect()
 }
 
+/// The names of the index directories as shown: below the opened path.
+fn index_names(path: &str, indexes: &[String]) -> Vec<String> {
+    indexes.iter().map(|index| relative(path, index)).collect()
+}
+
+/// What the tab line says about how the index was opened, if not as usual: without a reader,
+/// or with several index directories.
+fn marker(opened: &Opened) -> Option<Line<'static>> {
+    let count = opened.indexes.len();
+    let text = match (opened.no_reader, count) {
+        (true, 1) => "no reader".to_owned(),
+        (true, _) => format!("no reader, {count} indexes"),
+        (false, 1) => return None,
+        (false, _) => format!("{count} indexes"),
+    };
+    Some(Line::styled(text, Style::new().fg(Color::Yellow)))
+}
+
+/// A screen of an index opened without a reader: the overview says how it was opened, and the
+/// screens that need a reader say so.
+fn render_without_reader(frame: &mut Frame, area: Rect, opened: &Opened, screen: Screen) {
+    let (title, lines) = if screen == Screen::Overview {
+        let mut lines = vec![
+            label_line("Path", opened.path.clone()),
+            label_line("Directory", directory_name(opened.directory).to_owned()),
+            label_line(
+                "Reader",
+                "none: opened without a reader, so only the commits (4) can be read".to_owned(),
+            ),
+        ];
+        if opened.indexes.len() > 1 {
+            lines.push(label_line("Indexes", opened.indexes.len().to_string()));
+            lines.extend(
+                index_names(&opened.path, &opened.indexes)
+                    .into_iter()
+                    .map(|name| Line::from(format!("  {name}"))),
+            );
+        }
+        (" Index ", lines)
+    } else {
+        let lines = vec![Line::from(
+            "This screen needs a reader, and the index was opened without one. The commits \
+             screen (4) works; o opens the index again, Ctrl+N switches the reader on.",
+        )];
+        (" No reader ", lines)
+    };
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .block(Block::bordered().title(title)),
+        area,
+    );
+}
+
+/// How the overview names the `Directory` that was asked for.
+fn directory_name(directory: DirectoryImpl) -> &'static str {
+    match directory {
+        DirectoryImpl::Fs => "FSDirectory.open (Lucene's choice)",
+        DirectoryImpl::Mmap => "MMapDirectory",
+        DirectoryImpl::Nio => "NIOFSDirectory",
+    }
+}
+
 fn analysis_action(request: Option<analysis::Request>) -> Option<Action> {
     match request? {
         analysis::Request::Components => Some(Action::LoadAnalysisComponents),
@@ -1114,8 +1298,8 @@ fn analysis_action(request: Option<analysis::Request>) -> Option<Action> {
 
 fn commits_action(request: Option<commits::Request>) -> Option<Action> {
     match request? {
-        commits::Request::Commits => Some(Action::LoadCommits),
-        commits::Request::Commit(generation) => Some(Action::LoadCommit(generation)),
+        commits::Request::Commits(index) => Some(Action::LoadCommits(index)),
+        commits::Request::Commit(index, generation) => Some(Action::LoadCommit(index, generation)),
     }
 }
 
@@ -1128,8 +1312,12 @@ mod tests {
 
     use super::*;
     use crate::protocol::analysis::{AnalyzeResult, Analyzer};
+    use crate::protocol::commits::Commit;
     use crate::protocol::document::{DocumentField, StoredType, StoredValue};
-    use crate::protocol::index::{DocValuesType, IndexField, IndexOptions, TermStats};
+    use crate::protocol::index::{
+        DocValuesType, IndexCommitStats, IndexEntry, IndexField, IndexOptions, ReaderInfo,
+        TermStats,
+    };
     use crate::protocol::search::{
         Explanation, Hit, SearchQuery, SearchResults, TermQuery, TotalHitsRelation,
     };
@@ -1154,16 +1342,23 @@ mod tests {
         GetIndexStatsResult {
             path: path.to_owned(),
             directory_impl: "MMapDirectory".to_owned(),
-            segments_file: "segments_1".to_owned(),
-            generation: 1,
-            version: 1,
             segment_count: 0,
             num_docs: 0,
             max_doc: 0,
-            created_version_major: 10,
-            commit_lucene_version: "10.5.2".to_owned(),
-            min_segment_lucene_version: None,
-            user_data: BTreeMap::new(),
+            indexes: vec![IndexCommitStats {
+                path: path.to_owned(),
+                doc_base: 0,
+                segments_file: "segments_1".to_owned(),
+                generation: 1,
+                version: 1,
+                segment_count: 0,
+                num_docs: 0,
+                max_doc: 0,
+                created_version_major: 10,
+                commit_lucene_version: "10.5.2".to_owned(),
+                min_segment_lucene_version: None,
+                user_data: BTreeMap::new(),
+            }],
             fields: Vec::new(),
         }
     }
@@ -1195,14 +1390,17 @@ mod tests {
     /// An index with the fields `id` and `body`, which have postings, and `rank`, which has none.
     fn app_with_fields() -> App {
         let mut app = App::new(version(), None);
-        app.opened(GetIndexStatsResult {
-            fields: vec![
-                field("id", 0, true),
-                field("body", 1, true),
-                field("rank", 2, false),
-            ],
-            ..stats("/data/idx")
-        });
+        app.opened(
+            GetIndexStatsResult {
+                fields: vec![
+                    field("id", 0, true),
+                    field("body", 1, true),
+                    field("rank", 2, false),
+                ],
+                ..stats("/data/idx")
+            },
+            Vec::new(),
+        );
         app
     }
 
@@ -1286,10 +1484,13 @@ mod tests {
 
         // An index opened now parses with it, and keeps the analysis screen shown.
         assert_eq!(
-            app.opened(GetIndexStatsResult {
-                fields: vec![field("body", 0, true)],
-                ..stats("/data/idx")
-            }),
+            app.opened(
+                GetIndexStatsResult {
+                    fields: vec![field("body", 0, true)],
+                    ..stats("/data/idx")
+                },
+                Vec::new()
+            ),
             None
         );
         assert!(render(&mut app).contains("1-6 screen"));
@@ -1306,14 +1507,15 @@ mod tests {
         Some(Action::Open {
             path: path.to_owned(),
             directory_impl: DirectoryImpl::Fs,
+            mode: OpenMode::Reader,
         })
     }
 
     #[test]
     fn the_prompt_offers_the_opened_paths() {
         let mut app = App::new(version(), None);
-        app.opened(stats("/data/a"));
-        app.opened(stats("/data/b"));
+        app.opened(stats("/data/a"), Vec::new());
+        app.opened(stats("/data/b"), Vec::new());
 
         app.handle_key(key(KeyCode::Char('o')));
         app.handle_key(key(KeyCode::Up));
@@ -1335,9 +1537,10 @@ mod tests {
             Some(Action::Open {
                 path: "/data/idx".to_owned(),
                 directory_impl: DirectoryImpl::Mmap,
+                mode: OpenMode::Reader,
             })
         );
-        app.open_failed("No such file or directory: /data/idx".to_owned());
+        app.open_failed("No such file or directory: /data/idx".to_owned(), false);
         assert!(render(&mut app).contains("directory: MMap"));
         app.handle_key(key(KeyCode::Esc));
         assert_eq!(app.directory(), DirectoryImpl::Mmap);
@@ -1356,7 +1559,7 @@ mod tests {
 
         assert_eq!(app.handle_key(key(KeyCode::Enter)), open("/data/idx"));
         assert!(render(&mut app).contains("Opening…"));
-        app.opened(stats("/data/idx"));
+        app.opened(stats("/data/idx"), Vec::new());
 
         let screen = render(&mut app);
         assert!(app.has_index());
@@ -1367,12 +1570,12 @@ mod tests {
     #[test]
     fn a_failed_open_keeps_the_prompt_and_the_previous_index() {
         let mut app = App::new(version(), None);
-        app.opened(stats("/data/first"));
+        app.opened(stats("/data/first"), Vec::new());
         app.handle_key(key(KeyCode::Char('o')));
         typed(&mut app, "x");
 
         assert_eq!(app.handle_key(key(KeyCode::Enter)), open("/data/firstx"));
-        app.open_failed("No such file or directory: /data/firstx".to_owned());
+        app.open_failed("No such file or directory: /data/firstx".to_owned(), false);
 
         let screen = render(&mut app);
         assert!(screen.contains("No such file or directory"), "{screen}");
@@ -1387,8 +1590,8 @@ mod tests {
     fn a_failed_open_from_the_command_line_shows_the_path() {
         let mut app = App::new(version(), None);
 
-        app.opening("/data/missing");
-        app.open_failed("No such file or directory: /data/missing".to_owned());
+        app.opening("/data/missing", OpenMode::Reader);
+        app.open_failed("No such file or directory: /data/missing".to_owned(), false);
 
         let screen = render(&mut app);
         assert!(screen.contains("│/data/missing"), "{screen}");
@@ -1412,7 +1615,7 @@ mod tests {
         let mut app = App::new(version(), None);
         assert_eq!(app.handle_key(key(KeyCode::Char('c'))), None);
 
-        app.opened(stats("/data/idx"));
+        app.opened(stats("/data/idx"), Vec::new());
         assert_eq!(app.handle_key(key(KeyCode::Char('c'))), Some(Action::Close));
         app.closed();
         assert!(!app.has_index());
@@ -1438,7 +1641,7 @@ mod tests {
     #[test]
     fn the_prompt_starts_from_the_open_index() {
         let mut app = App::new(version(), None);
-        app.opened(stats("/data/idx"));
+        app.opened(stats("/data/idx"), Vec::new());
         app.handle_key(key(KeyCode::Char('o')));
 
         assert_eq!(app.handle_key(key(KeyCode::Enter)), open("/data/idx"));
@@ -1548,11 +1751,14 @@ mod tests {
         assert_eq!(app.handle_key(key(KeyCode::Enter)), start("id"));
 
         app.handle_key(key(KeyCode::Char('+')));
-        app.opened(stats("/data/other"));
-        app.opened(GetIndexStatsResult {
-            fields: vec![field("id", 0, true)],
-            ..stats("/data/idx")
-        });
+        app.opened(stats("/data/other"), Vec::new());
+        app.opened(
+            GetIndexStatsResult {
+                fields: vec![field("id", 0, true)],
+                ..stats("/data/idx")
+            },
+            Vec::new(),
+        );
         assert_eq!(
             app.handle_key(key(KeyCode::Enter)),
             Some(Action::StartScan {
@@ -1583,12 +1789,15 @@ mod tests {
 
     fn app_with_documents() -> App {
         let mut app = App::new(version(), None);
-        app.opened(GetIndexStatsResult {
-            num_docs: 3,
-            max_doc: 3,
-            fields: vec![field("id", 0, true)],
-            ..stats("/data/idx")
-        });
+        app.opened(
+            GetIndexStatsResult {
+                num_docs: 3,
+                max_doc: 3,
+                fields: vec![field("id", 0, true)],
+                ..stats("/data/idx")
+            },
+            Vec::new(),
+        );
         app
     }
 
@@ -1693,13 +1902,16 @@ mod tests {
         app.document_loaded(document(0));
 
         assert_eq!(
-            app.opened(GetIndexStatsResult {
-                max_doc: 1,
-                ..stats("/data/other")
-            }),
+            app.opened(
+                GetIndexStatsResult {
+                    max_doc: 1,
+                    ..stats("/data/other")
+                },
+                Vec::new()
+            ),
             Some(Action::LoadDocument(0))
         );
-        assert_eq!(app.opened(stats("/data/empty")), None);
+        assert_eq!(app.opened(stats("/data/empty"), Vec::new()), None);
     }
 
     #[test]
@@ -1740,7 +1952,7 @@ mod tests {
         app.handle_key(key(KeyCode::Char('a')));
         app.scan_started(4);
 
-        app.opened(stats("/data/other"));
+        app.opened(stats("/data/other"), Vec::new());
 
         assert_eq!(app.polls(), Vec::new());
         assert_eq!(app.scan_progress(done("id", 1)), None);
@@ -1751,11 +1963,21 @@ mod tests {
         ReopenIndexResult {
             changed,
             path: "/data/idx".to_owned(),
-            segments_file: "segments_1".to_owned(),
-            num_docs: 0,
-            max_doc: 0,
-            created_version_major: 10,
-            min_segment_lucene_version: None,
+            mode: OpenMode::Reader,
+            num_docs: Some(0),
+            max_doc: Some(0),
+            indexes: vec![IndexEntry {
+                path: "/data/idx".to_owned(),
+                reader: Some(ReaderInfo {
+                    doc_base: 0,
+                    segments_file: "segments_1".to_owned(),
+                    num_docs: 0,
+                    max_doc: 0,
+                    created_version_major: 10,
+                    min_segment_lucene_version: None,
+                }),
+            }],
+            skipped: Vec::new(),
         }
     }
 
@@ -1779,11 +2001,169 @@ mod tests {
         assert!(!render(&mut app).contains("Unchanged"));
 
         app.handle_key(key(KeyCode::Char('R')));
-        app.reopened(GetIndexStatsResult {
-            segments_file: "segments_2".to_owned(),
-            ..stats("/data/idx")
-        });
+        let mut changed = stats("/data/idx");
+        changed.indexes[0].segments_file = "segments_2".to_owned();
+        app.reopened(changed);
         assert!(render(&mut app).contains("Reopened: segments_2"));
+    }
+
+    /// Two index directories below `/data`, `a` with 2 documents and `b` with 3.
+    fn multi_stats() -> GetIndexStatsResult {
+        let one = stats("/data").indexes.remove(0);
+        GetIndexStatsResult {
+            num_docs: 5,
+            max_doc: 5,
+            fields: vec![field("id", 0, true)],
+            indexes: vec![
+                IndexCommitStats {
+                    path: "/data/a".to_owned(),
+                    num_docs: 2,
+                    max_doc: 2,
+                    ..one.clone()
+                },
+                IndexCommitStats {
+                    path: "/data/b".to_owned(),
+                    doc_base: 2,
+                    num_docs: 3,
+                    max_doc: 3,
+                    ..one
+                },
+            ],
+            ..stats("/data")
+        }
+    }
+
+    #[test]
+    fn opens_several_indexes() {
+        let mut app = App::new(version(), None);
+        let skipped = vec![SkippedIndex {
+            path: "/data/c".to_owned(),
+            message: "Corrupt index".to_owned(),
+        }];
+        app.opened(multi_stats(), skipped);
+
+        let screen = render(&mut app);
+        assert!(screen.contains("2 indexes"), "{screen}");
+        assert!(screen.contains("Indexes    2 (1 skipped)"), "{screen}");
+        assert!(screen.contains("c  skipped: Corrupt index"), "{screen}");
+
+        assert_eq!(
+            app.handle_key(key(KeyCode::Char('4'))),
+            Some(Action::LoadCommits(0))
+        );
+        assert!(render(&mut app).contains("Indexes (2)"));
+        app.commits_loaded(0, list(vec![commit(1, true)]));
+        // From the commits back to the indexes.
+        app.handle_key(key(KeyCode::BackTab));
+        assert_eq!(
+            app.handle_key(key(KeyCode::Down)),
+            Some(Action::LoadCommits(1))
+        );
+        assert_eq!(
+            app.commits_loaded(1, list(vec![commit(3, true)])),
+            Some(Action::LoadCommit(1, 3))
+        );
+    }
+
+    #[test]
+    fn the_documents_screen_says_which_index_a_document_is_in() {
+        let mut app = App::new(version(), None);
+        app.opened(multi_stats(), Vec::new());
+        app.handle_key(key(KeyCode::Char('2')));
+        app.document_loaded(document(0));
+        assert!(render(&mut app).contains("#0 of 0–4   in a"));
+    }
+
+    #[test]
+    fn reopening_several_indexes_says_how_many_changed() {
+        let mut app = App::new(version(), None);
+        app.opened(multi_stats(), Vec::new());
+        app.handle_key(key(KeyCode::Char('R')));
+        let mut changed = multi_stats();
+        changed.indexes[1].segments_file = "segments_2".to_owned();
+        app.reopened(changed);
+        assert!(render(&mut app).contains("Reopened: 1 of 2 indexes"));
+
+        let mut result = reopen_result(false);
+        result.indexes.push(result.indexes[0].clone());
+        app.reopen_unchanged(&result);
+        assert!(render(&mut app).contains("Unchanged: 2 indexes"));
+    }
+
+    fn opened_without_reader(app: &mut App) -> Option<Action> {
+        app.opened_without_reader(OpenIndexResult {
+            path: "/data/broken".to_owned(),
+            mode: OpenMode::DirectoryOnly,
+            num_docs: None,
+            max_doc: None,
+            indexes: vec![IndexEntry {
+                path: "/data/broken".to_owned(),
+                reader: None,
+            }],
+            skipped: Vec::new(),
+        })
+    }
+
+    #[test]
+    fn without_a_reader_only_the_commits_screen_works() {
+        let mut app = app_with_documents();
+        app.handle_key(key(KeyCode::Char('2')));
+
+        assert_eq!(
+            opened_without_reader(&mut app),
+            Some(Action::LoadCommits(0))
+        );
+        let screen = render(&mut app);
+        assert!(screen.contains("no reader"), "{screen}");
+        assert!(!screen.contains("R reopen"), "{screen}");
+
+        app.handle_key(key(KeyCode::Char('2')));
+        assert!(render(&mut app).contains("This screen needs a reader"));
+        assert_eq!(app.handle_key(key(KeyCode::Char('R'))), None);
+        assert!(render(&mut app).contains("No reader to reopen"));
+        app.handle_key(key(KeyCode::Char('1')));
+        let screen = render(&mut app);
+        assert!(screen.contains("Reader     none"), "{screen}");
+
+        assert_eq!(app.handle_key(key(KeyCode::Char('c'))), Some(Action::Close));
+        app.closed();
+        assert!(!app.has_index());
+    }
+
+    #[test]
+    fn opening_without_a_reader_keeps_the_analysis_screen() {
+        let mut app = App::new(version(), None);
+        app.handle_key(key(KeyCode::Char('6')));
+        opened_without_reader(&mut app);
+        assert!(render(&mut app).contains("Analyzer"));
+    }
+
+    #[test]
+    fn opens_without_a_reader_from_the_prompt() {
+        let mut app = App::new(version(), None);
+        app.handle_key(key(KeyCode::Char('o')));
+        typed(&mut app, "/data/broken");
+        app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::CONTROL));
+        assert_eq!(
+            app.handle_key(key(KeyCode::Enter)),
+            Some(Action::Open {
+                path: "/data/broken".to_owned(),
+                directory_impl: DirectoryImpl::Fs,
+                mode: OpenMode::DirectoryOnly,
+            })
+        );
+    }
+
+    #[test]
+    fn a_corrupt_index_offers_to_open_it_without_a_reader() {
+        let mut app = App::new(version(), None);
+        app.opening("/data/broken", OpenMode::Reader);
+        app.open_failed("Corrupt index".to_owned(), true);
+        let screen = render(&mut app);
+        assert!(
+            screen.contains("^N and Enter open it without a reader."),
+            "{screen}"
+        );
     }
 
     #[test]
@@ -2003,10 +2383,13 @@ mod tests {
         let mut app = app_on_terms();
 
         assert_eq!(
-            app.opened(GetIndexStatsResult {
-                fields: vec![field("title", 0, true)],
-                ..stats("/data/other")
-            }),
+            app.opened(
+                GetIndexStatsResult {
+                    fields: vec![field("title", 0, true)],
+                    ..stats("/data/other")
+                },
+                Vec::new()
+            ),
             Some(Action::LoadTerms {
                 field: "title".to_owned(),
                 from: None,
@@ -2060,6 +2443,13 @@ mod tests {
         assert!(render(&mut app).contains("id from 2 (/ seeks)"));
     }
 
+    fn list(commits: Vec<Commit>) -> GetCommitsResult {
+        GetCommitsResult {
+            commits,
+            unreadable: Vec::new(),
+        }
+    }
+
     fn commit(generation: i64, current: bool) -> Commit {
         Commit {
             generation,
@@ -2080,13 +2470,14 @@ mod tests {
 
         assert_eq!(
             app.handle_key(key(KeyCode::Char('4'))),
-            Some(Action::LoadCommits)
+            Some(Action::LoadCommits(0))
         );
         assert_eq!(
-            app.commits_loaded(vec![commit(2, true), commit(1, false)]),
-            Some(Action::LoadCommit(2))
+            app.commits_loaded(0, list(vec![commit(2, true), commit(1, false)])),
+            Some(Action::LoadCommit(0, 2))
         );
         app.commit_loaded(
+            0,
             2,
             GetCommitResult {
                 commit: commit(2, true),
@@ -2101,11 +2492,11 @@ mod tests {
 
         assert_eq!(
             app.handle_key(key(KeyCode::Down)),
-            Some(Action::LoadCommit(1))
+            Some(Action::LoadCommit(0, 1))
         );
         assert_eq!(
             app.handle_key(key(KeyCode::Char('r'))),
-            Some(Action::LoadCommits)
+            Some(Action::LoadCommits(0))
         );
     }
 
@@ -2113,10 +2504,13 @@ mod tests {
     fn opening_another_index_on_the_commits_screen_fetches_its_commits() {
         let mut app = app_with_fields();
         app.handle_key(key(KeyCode::Char('4')));
-        app.commits_failed("unreadable".to_owned());
+        app.commits_failed(0, "unreadable".to_owned());
         assert!(render(&mut app).contains("Cannot list the commits: unreadable"));
 
-        assert_eq!(app.opened(stats("/data/other")), Some(Action::LoadCommits));
+        assert_eq!(
+            app.opened(stats("/data/other"), Vec::new()),
+            Some(Action::LoadCommits(0))
+        );
     }
 
     /// The search screen of [`app_with_fields`] after `query` was submitted, as job 1.
@@ -2222,11 +2616,14 @@ mod tests {
     #[test]
     fn m_on_a_document_searches_for_documents_like_it() {
         let mut app = App::new(version(), None);
-        app.opened(GetIndexStatsResult {
-            fields: vec![field("id", 0, true), field("body", 1, true)],
-            max_doc: 3,
-            ..stats("/data/idx")
-        });
+        app.opened(
+            GetIndexStatsResult {
+                fields: vec![field("id", 0, true), field("body", 1, true)],
+                max_doc: 3,
+                ..stats("/data/idx")
+            },
+            Vec::new(),
+        );
         assert_eq!(
             app.handle_key(key(KeyCode::Char('2'))),
             Some(Action::LoadDocument(0))

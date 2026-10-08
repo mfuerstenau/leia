@@ -1,26 +1,27 @@
 package io.github.mfuerstenau.leia.protocol.index;
 
-import java.util.Optional;
+import java.util.List;
+import java.util.OptionalInt;
 
 /**
- * Result of {@code reopenIndex} (ADR 0019): whether the index changed, and what identifies it now,
- * as in {@link OpenIndexResult}. The full statistics come from {@code getIndexStats}.
+ * Result of {@code reopenIndex} (ADR 0019, ADR 0021): whether an index changed, and what identifies
+ * the indexes now, as in {@link OpenIndexResult}. The full statistics come from {@code
+ * getIndexStats}.
  *
- * @param changed whether the latest commit differs from the one that was open, which is then
- *     replaced; if not, nothing happened
- * @param path the absolute, normalized index directory
- * @param segmentsFile the {@code segments_N} file of the open commit
- * @param numDocs live documents
- * @param maxDoc documents including deleted ones
- * @param createdVersionMajor the major Lucene version that created the index
- * @param minSegmentLuceneVersion the oldest Lucene version that wrote one of its segments, such as
- *     {@code 9.12.3}; absent if the index has no segments
+ * @param changed whether the latest commit of an index differs from the one that was open; the
+ *     indexes are then replaced. If not, nothing happened
+ * @param path the absolute, normalized path that was opened
+ * @param mode how it was opened, always {@link OpenMode#READER}
+ * @param numDocs live documents in all indexes
+ * @param maxDoc documents in all indexes, including deleted ones
+ * @param indexes the index directories that are open, in order; at least one
+ * @param skipped the index directories that were left out when the path was opened
  */
 public record ReopenIndexResult(
         boolean changed,
         String path,
-        String segmentsFile,
-        int numDocs,
-        int maxDoc,
-        int createdVersionMajor,
-        Optional<String> minSegmentLuceneVersion) {}
+        OpenMode mode,
+        OptionalInt numDocs,
+        OptionalInt maxDoc,
+        List<IndexEntry> indexes,
+        List<SkippedIndex> skipped) {}

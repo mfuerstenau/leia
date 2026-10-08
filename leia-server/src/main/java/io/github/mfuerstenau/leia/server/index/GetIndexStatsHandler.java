@@ -10,6 +10,7 @@ import io.github.mfuerstenau.leia.protocol.RpcMethod;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
+import io.github.mfuerstenau.leia.protocol.index.IndexCommitStats;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
@@ -36,8 +37,7 @@ public final class GetIndexStatsHandler implements MethodHandler<GetIndexStatsPa
 
     @Override
     public GetIndexStatsResult handle(GetIndexStatsParams params) throws RpcException {
-        ReadOnlyIndex index =
-                currentIndex.get().orElseThrow(() -> new RpcException(ErrorCode.NO_INDEX_OPEN, "No index is open"));
+        ReadOnlyIndex index = currentIndex.readable();
         try {
             return toResult(index.stats());
         } catch (IOException e) {
@@ -47,21 +47,31 @@ public final class GetIndexStatsHandler implements MethodHandler<GetIndexStatsPa
     }
 
     private static GetIndexStatsResult toResult(IndexStats stats) {
-        IndexSummary summary = stats.summary();
         return new GetIndexStatsResult(
-                summary.path().toString(),
+                stats.path().toString(),
                 stats.directoryImpl(),
-                summary.segmentsFile(),
-                stats.generation(),
-                stats.version(),
                 stats.segmentCount(),
+                stats.numDocs(),
+                stats.maxDoc(),
+                stats.indexes().stream().map(GetIndexStatsHandler::toCommit).toList(),
+                stats.fields().stream().map(GetIndexStatsHandler::toField).toList());
+    }
+
+    private static IndexCommitStats toCommit(IndexStats.CommitStats commit) {
+        IndexSummary summary = commit.summary();
+        return new IndexCommitStats(
+                summary.path().toString(),
+                summary.docBase(),
+                summary.segmentsFile(),
+                commit.generation(),
+                commit.version(),
+                commit.segmentCount(),
                 summary.numDocs(),
                 summary.maxDoc(),
                 summary.createdVersionMajor(),
-                stats.commitLuceneVersion().toString(),
+                commit.commitLuceneVersion().toString(),
                 summary.minSegmentLuceneVersion().map(Version::toString),
-                stats.userData(),
-                stats.fields().stream().map(GetIndexStatsHandler::toField).toList());
+                commit.userData());
     }
 
     private static IndexField toField(FieldStats field) {

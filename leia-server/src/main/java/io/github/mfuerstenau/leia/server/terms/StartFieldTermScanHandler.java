@@ -46,8 +46,7 @@ public final class StartFieldTermScanHandler implements MethodHandler<StartField
                     "Invalid params: topN must be between 0 and " + StartFieldTermScanParams.MAX_TOP_N + ", not "
                             + topN);
         }
-        ReadOnlyIndex index =
-                currentIndex.get().orElseThrow(() -> new RpcException(ErrorCode.NO_INDEX_OPEN, "No index is open"));
+        ReadOnlyIndex index = currentIndex.readable();
         String field = params.field();
         if (!index.hasField(field)) {
             throw new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + field + "' in the index");

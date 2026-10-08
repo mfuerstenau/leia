@@ -20,6 +20,7 @@ import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.StringField;
+import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.NoMergePolicy;
@@ -41,9 +42,9 @@ class ReadOnlyIndexTest {
         Path dir = writeIndex(tmp.resolve("index"), 3, "2");
 
         try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
-            assertThat(index.summary())
-                    .isEqualTo(new IndexSummary(
-                            dir, "segments_2", 2, 3, Version.LATEST.major, Optional.of(Version.LATEST)));
+            assertThat(index.indexes())
+                    .containsExactly(new IndexSummary(
+                            dir, 0, "segments_2", 2, 3, Version.LATEST.major, Optional.of(Version.LATEST)));
             assertThat(index.reader().numDocs()).isEqualTo(2);
         }
     }
@@ -53,21 +54,22 @@ class ReadOnlyIndexTest {
         Path dir = writeIndex(tmp.resolve("index"), 0, null);
 
         try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
-            assertThat(index.summary().numDocs()).isZero();
-            assertThat(index.summary().minSegmentLuceneVersion()).isEmpty();
+            assertThat(index.indexes().getFirst().numDocs()).isZero();
+            assertThat(index.indexes().getFirst().minSegmentLuceneVersion()).isEmpty();
         }
     }
 
     @Test
     void opensLucene9Index() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(testIndex("lucene9"))) {
-            IndexSummary summary = index.summary();
+            IndexSummary summary = index.indexes().getFirst();
             assertThat(summary.createdVersionMajor()).isEqualTo(9);
             assertThat(summary.minSegmentLuceneVersion())
                     .hasValueSatisfying(version -> assertThat(version.major).isEqualTo(9));
             assertThat(summary.numDocs()).isEqualTo(2);
             assertThat(summary.maxDoc()).isEqualTo(3);
-            assertThat(index.reader().getIndexCommit().getUserData()).containsEntry("writer", "leia LegacyIndexWriter");
+            assertThat(((DirectoryReader) index.reader()).getIndexCommit().getUserData())
+                    .containsEntry("writer", "leia LegacyIndexWriter");
         }
     }
 
@@ -170,7 +172,7 @@ class ReadOnlyIndexTest {
         Path relative = Path.of("").toAbsolutePath().relativize(dir.resolve("../index"));
 
         try (ReadOnlyIndex index = ReadOnlyIndex.open(relative)) {
-            assertThat(index.summary().path()).isEqualTo(dir);
+            assertThat(index.path()).isEqualTo(dir);
         }
     }
 
@@ -192,7 +194,7 @@ class ReadOnlyIndexTest {
     void rejectsDirectoryWithoutIndex() throws IOException {
         Path dir = Files.createDirectory(tmp.resolve("empty"));
 
-        assertOpenFails(dir, Reason.NOT_AN_INDEX, "Not a Lucene index (no segments_N file): " + dir);
+        assertOpenFails(dir, Reason.NOT_AN_INDEX, "No Lucene index in or below " + dir);
     }
 
     @Test
@@ -249,9 +251,9 @@ class ReadOnlyIndexTest {
 
         ReadOnlyIndex reopened = index.reopen().orElseThrow();
         try (reopened) {
-            assertThat(reopened.summary())
-                    .isEqualTo(new IndexSummary(
-                            dir, "segments_2", 4, 4, Version.LATEST.major, Optional.of(Version.LATEST)));
+            assertThat(reopened.indexes())
+                    .containsExactly(new IndexSummary(
+                            dir, 0, "segments_2", 4, 4, Version.LATEST.major, Optional.of(Version.LATEST)));
             assertThat(reopened.reader().leaves()).hasSize(2);
             assertThat(reopened.reader()
                             .leaves()
@@ -265,7 +267,7 @@ class ReadOnlyIndexTest {
                             .reader()
                             .getCoreCacheHelper()
                             .getKey());
-            assertThat(index.summary().maxDoc())
+            assertThat(index.indexes().getFirst().maxDoc())
                     .as("the old index is unchanged")
                     .isEqualTo(2);
             assertThat(index.document(1).docId()).isEqualTo(1);

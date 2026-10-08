@@ -18,16 +18,32 @@ impl RpcMethod for GetCommits {
     type Result = GetCommitsResult;
 }
 
-/// Params of `getCommits`: none, it lists the commits of the open index's directory.
+/// Params of `getCommits`: it lists the commits of an index directory of the open path.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct GetCommitsParams {}
+pub struct GetCommitsParams {
+    /// The position of the index directory in `openIndex`' `indexes` (ADR 0021); `None` means 0.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index: Option<i32>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GetCommitsResult {
     /// The readable commits, newest first.
     pub commits: Vec<Commit>,
+    /// The `segments_N` files that could not be read, and why (ADR 0021).
+    pub unreadable: Vec<UnreadableCommit>,
+}
+
+/// A `segments_N` file of the index directory that could not be read (ADR 0021).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UnreadableCommit {
+    /// Its name.
+    pub segments_file: String,
+    /// Why it could not be read.
+    pub message: String,
 }
 
 /// A commit of the index directory, as `segments_N` describes it.
@@ -72,6 +88,9 @@ impl RpcMethod for GetCommit {
 pub struct GetCommitParams {
     /// The generation of the commit, the `N` in `segments_N`.
     pub generation: i64,
+    /// The position of the index directory in `openIndex`' `indexes` (ADR 0021); `None` means 0.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub index: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

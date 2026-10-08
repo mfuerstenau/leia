@@ -194,6 +194,9 @@ pub struct Documents {
     viewer: Option<Viewer>,
     /// The delimiters the viewer last split values at, for the next viewer.
     delimiters: Delimiters,
+    /// With several index directories, the document id each starts at and its name as shown,
+    /// in order (ADR 0021); empty with one.
+    indexes: Vec<(i32, String)>,
 }
 
 impl Documents {
@@ -221,7 +224,27 @@ impl Documents {
             select_field: None,
             viewer: None,
             delimiters: Delimiters::default(),
+            indexes: Vec::new(),
         }
+    }
+
+    /// Shows which index directory a document is in: each with the document id it starts at and
+    /// its name, in order. With one, nothing is shown.
+    pub fn with_indexes(mut self, indexes: Vec<(i32, String)>) -> Self {
+        self.indexes = if indexes.len() > 1 {
+            indexes
+        } else {
+            Vec::new()
+        };
+        self
+    }
+
+    /// The name of the index directory that `doc_id` is in, with several of them.
+    fn index_of(&self, doc_id: i32) -> Option<&str> {
+        let at = self
+            .indexes
+            .partition_point(|(doc_base, _)| *doc_base <= doc_id);
+        Some(self.indexes.get(at.checked_sub(1)?)?.1.as_str())
     }
 
     /// The screen for the reopened index (ADR 0019): the same document id, clamped to the new
@@ -229,6 +252,7 @@ impl Documents {
     /// fetched again; walks through term docs or hits end.
     pub fn reopened(&self, fields: Vec<IndexField>, max_doc: i32) -> Self {
         let mut documents = Self::new(fields, max_doc);
+        documents.indexes = self.indexes.clone();
         documents.doc_id = self.doc_id.min(max_doc - 1).max(0);
         documents.select_field = self.selected_field().map(|field| field.name.clone());
         documents.hide_empty = self.hide_empty;
@@ -623,6 +647,12 @@ impl Documents {
             Style::new().add_modifier(Modifier::BOLD),
         )];
         spans.push(Span::raw(format!(" of 0–{}", self.max_doc - 1)));
+        if let Some(index) = self.index_of(self.doc_id) {
+            spans.push(Span::raw(format!(
+                "   in {}",
+                first_chars(&escape_control(index), 60)
+            )));
+        }
         if let Some(error) = &self.error {
             spans.push(Span::raw(format!("   Cannot read it: {error}")));
         } else if self.document.as_ref().is_some_and(|doc| doc.deleted) {

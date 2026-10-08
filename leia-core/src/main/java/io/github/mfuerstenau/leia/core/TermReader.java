@@ -5,9 +5,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
-import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.IndexOptions;
+import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.MultiBits;
 import org.apache.lucene.index.MultiTerms;
 import org.apache.lucene.index.PostingsEnum;
@@ -25,7 +25,7 @@ final class TermReader {
 
     private TermReader() {}
 
-    static TermPage terms(DirectoryReader reader, String field, Optional<BytesRef> from, int limit) throws IOException {
+    static TermPage terms(IndexReader reader, String field, Optional<BytesRef> from, int limit) throws IOException {
         Terms terms = MultiTerms.getTerms(reader, field);
         if (terms == null) {
             return new TermPage(List.of(), Optional.empty());
@@ -45,8 +45,8 @@ final class TermReader {
         return new TermPage(List.copyOf(entries), Optional.ofNullable(term).map(BytesRef::deepCopyOf));
     }
 
-    static Optional<PostingsPage> postings(
-            DirectoryReader reader, FieldInfo field, BytesRef term, int fromDoc, int limit) throws IOException {
+    static Optional<PostingsPage> postings(IndexReader reader, FieldInfo field, BytesRef term, int fromDoc, int limit)
+            throws IOException {
         Terms terms = MultiTerms.getTerms(reader, field.getName());
         if (terms == null) {
             return Optional.empty();
@@ -76,7 +76,7 @@ final class TermReader {
     }
 
     /** Read from the document's segment, like the rest of a document (ADR 0006). */
-    static Optional<List<TermPosition>> positions(DirectoryReader reader, int docId, String field, BytesRef term)
+    static Optional<List<TermPosition>> positions(IndexReader reader, int docId, String field, BytesRef term)
             throws IOException {
         SegmentDoc segmentDoc = SegmentDoc.of(reader, docId);
         Terms terms = segmentDoc.leaf().terms(field);

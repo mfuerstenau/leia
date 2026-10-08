@@ -44,8 +44,8 @@ class ExtensionJarsTest {
         ExtensionJars.load(List.of(CODEC_JAR));
 
         try (ReadOnlyIndex index = ReadOnlyIndex.open(testIndex("custom-codec"))) {
-            assertThat(index.summary().maxDoc()).isEqualTo(3);
-            assertThat(index.commits().unreadable()).isEmpty();
+            assertThat(index.indexes().getFirst().maxDoc()).isEqualTo(3);
+            assertThat(index.commits(0).unreadable()).isEmpty();
         }
         try (ReadOnlyIndex index = ReadOnlyIndex.open(testIndex("custom-formats"))) {
             LeafReader leaf = index.reader().leaves().getFirst().reader();

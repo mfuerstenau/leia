@@ -10,6 +10,7 @@ import io.github.mfuerstenau.leia.protocol.Response;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
+import io.github.mfuerstenau.leia.protocol.index.IndexCommitStats;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
@@ -27,6 +28,7 @@ import org.apache.lucene.document.Field;
 import org.apache.lucene.document.NumericDocValuesField;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
+import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.store.FSDirectory;
@@ -55,16 +57,22 @@ class GetIndexStatsHandlerTest {
                 .isEqualTo(new GetIndexStatsResult(
                         dir.toString(),
                         "MMapDirectory",
-                        "segments_1",
-                        1,
-                        currentIndex.get().orElseThrow().reader().getVersion(),
                         1,
                         2,
                         2,
-                        Version.LATEST.major,
-                        Version.LATEST.toString(),
-                        Optional.of(Version.LATEST.toString()),
-                        Map.of("source", "test"),
+                        List.of(new IndexCommitStats(
+                                dir.toString(),
+                                0,
+                                "segments_1",
+                                1,
+                                ((DirectoryReader) currentIndex.readable().reader()).getVersion(),
+                                1,
+                                2,
+                                2,
+                                Version.LATEST.major,
+                                Version.LATEST.toString(),
+                                Optional.of(Version.LATEST.toString()),
+                                Map.of("source", "test"))),
                         List.of(
                                 new IndexField(
                                         "id",

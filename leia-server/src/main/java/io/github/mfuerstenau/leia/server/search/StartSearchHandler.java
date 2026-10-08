@@ -63,7 +63,7 @@ public final class StartSearchHandler implements MethodHandler<StartSearchParams
                     "Invalid params: offset must be between 0 and " + (StartSearchParams.MAX_WINDOW - limit)
                             + " for a limit of " + limit + ", not " + offset);
         }
-        ReadOnlyIndex index = GetDocumentHandler.openIndex(currentIndex);
+        ReadOnlyIndex index = currentIndex.readable();
         Optional<Set<String>> fields = params.fields().map(Set::copyOf);
         if (fields.isPresent()) {
             for (String field : fields.get()) {

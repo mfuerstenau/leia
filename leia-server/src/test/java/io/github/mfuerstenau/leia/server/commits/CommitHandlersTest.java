@@ -2,7 +2,10 @@ package io.github.mfuerstenau.leia.server.commits;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
+import io.github.mfuerstenau.leia.core.DirectoryImpl;
+import io.github.mfuerstenau.leia.core.DirectoryOnlyIndex;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.commits.Commit;
@@ -10,6 +13,7 @@ import io.github.mfuerstenau.leia.protocol.commits.CommitFile;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
+import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.commits.Segment;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
@@ -19,6 +23,7 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.StringField;
@@ -96,6 +101,67 @@ class CommitHandlersTest {
                 .containsExactly(2L, 1L);
         assertFails(() -> getCommit.handle(new GetCommitParams(8)), ErrorCode.UNSUPPORTED_INDEX_FORMAT);
         assertFails(() -> getCommit.handle(new GetCommitParams(9)), ErrorCode.CORRUPT_INDEX);
+    }
+
+    @Test
+    void readsTheCommitsOfTheChosenIndex() throws Exception {
+        Path dir = openIndex();
+        Path second = Files.createDirectories(tmp.resolve("second"));
+        try (FSDirectory directory = FSDirectory.open(second);
+                IndexWriter writer = new IndexWriter(directory, new IndexWriterConfig())) {
+            writer.addDocument(doc("9"));
+            writer.commit();
+        }
+        currentIndex.replace(ReadOnlyIndex.open(tmp));
+
+        assertThat(getCommits.handle(new GetCommitsParams(OptionalInt.of(0))).commits())
+                .extracting(Commit::generation)
+                .containsExactly(2L, 1L);
+        assertThat(getCommits.handle(new GetCommitsParams(OptionalInt.of(1))).commits())
+                .extracting(Commit::generation)
+                .containsExactly(1L);
+        assertThat(getCommit
+                        .handle(new GetCommitParams(1, OptionalInt.of(1)))
+                        .commit()
+                        .maxDoc())
+                .isEqualTo(1);
+        assertThat(currentIndex.opened().directories()).containsExactly(dir, second);
+        assertThatThrownBy(() -> getCommits.handle(new GetCommitsParams(OptionalInt.of(2))))
+                .isInstanceOfSatisfying(
+                        RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.INVALID_PARAMS))
+                .hasMessage("Invalid params: no index 2; there are 2");
+        assertFails(() -> getCommit.handle(new GetCommitParams(1, OptionalInt.of(-1))), ErrorCode.INVALID_PARAMS);
+    }
+
+    @Test
+    void readsTheCommitsWithoutAReader() throws Exception {
+        Path dir = openIndex();
+        currentIndex.replace(DirectoryOnlyIndex.open(dir, DirectoryImpl.FS));
+
+        assertThat(getCommits.handle(new GetCommitsParams()).commits())
+                .extracting(Commit::generation, Commit::current)
+                .containsExactly(tuple(2L, false), tuple(1L, false));
+        assertThat(getCommit.handle(new GetCommitParams(2)).segments()).hasSize(2);
+    }
+
+    @Test
+    void listsTheCommitsThatCantBeRead() throws Exception {
+        Path dir = openIndex();
+        try (var files = Files.list(dir)) {
+            for (Path si :
+                    files.filter(file -> file.toString().endsWith("_1.si")).toList()) {
+                Files.delete(si);
+            }
+        }
+        currentIndex.replace(DirectoryOnlyIndex.open(dir, DirectoryImpl.FS));
+
+        GetCommitsResult result = getCommits.handle(new GetCommitsParams());
+
+        assertThat(result.commits()).extracting(Commit::generation).containsExactly(1L);
+        assertThat(result.unreadable()).singleElement().satisfies(unreadable -> {
+            assertThat(unreadable.segmentsFile()).isEqualTo("segments_2");
+            assertThat(unreadable.message()).startsWith("Corrupt index, missing file: ");
+        });
     }
 
     @Test

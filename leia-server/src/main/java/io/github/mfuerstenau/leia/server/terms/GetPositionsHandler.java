@@ -35,7 +35,7 @@ public final class GetPositionsHandler implements MethodHandler<GetPositionsPara
     @Override
     public GetPositionsResult handle(GetPositionsParams params) throws RpcException {
         BytesRef term = TermParams.term(params.term());
-        ReadOnlyIndex index = GetDocumentHandler.openIndex(currentIndex);
+        ReadOnlyIndex index = currentIndex.readable();
         int docId = params.docId();
         String field = params.field();
         GetDocumentHandler.checkDocId(index, docId);

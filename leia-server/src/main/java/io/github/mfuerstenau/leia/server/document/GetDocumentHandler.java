@@ -39,7 +39,7 @@ public final class GetDocumentHandler implements MethodHandler<GetDocumentParams
 
     @Override
     public GetDocumentResult handle(GetDocumentParams params) throws RpcException {
-        ReadOnlyIndex index = openIndex(currentIndex);
+        ReadOnlyIndex index = currentIndex.readable();
         int docId = params.docId();
         checkDocId(index, docId);
         try {
@@ -50,16 +50,10 @@ public final class GetDocumentHandler implements MethodHandler<GetDocumentParams
         }
     }
 
-    public static ReadOnlyIndex openIndex(CurrentIndex currentIndex) throws RpcException {
-        return currentIndex.get().orElseThrow(() -> new RpcException(ErrorCode.NO_INDEX_OPEN, "No index is open"));
-    }
-
     public static void checkDocId(ReadOnlyIndex index, int docId) throws RpcException {
         if (!index.hasDocId(docId)) {
             throw new RpcException(
-                    ErrorCode.DOC_NOT_FOUND,
-                    "No document " + docId + " in the index: maxDoc is "
-                            + index.summary().maxDoc());
+                    ErrorCode.DOC_NOT_FOUND, "No document " + docId + " in the index: maxDoc is " + index.maxDoc());
         }
     }
 

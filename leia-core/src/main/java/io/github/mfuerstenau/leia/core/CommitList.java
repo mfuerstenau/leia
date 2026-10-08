@@ -1,6 +1,7 @@
 package io.github.mfuerstenau.leia.core;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.List;
 
 /**
@@ -12,5 +13,12 @@ import java.util.List;
 public record CommitList(List<CommitInfo> commits, List<Unreadable> unreadable) {
 
     /** A {@code segments_N} file that could not be read. */
-    public record Unreadable(String segmentsFile, IOException error) {}
+    public record Unreadable(String segmentsFile, IOException error) {
+
+        /** Why it could not be read, as opening an index would say: a missing file, a corrupt one, … */
+        public String message() {
+            // The path only shows in "not an index", which reading a segments_N file never is.
+            return ReadOnlyIndex.translate(Path.of(segmentsFile), error).getMessage();
+        }
+    }
 }

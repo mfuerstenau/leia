@@ -38,7 +38,12 @@ pub struct Cli {
     )]
     pub directory: DirectoryImpl,
 
-    /// Lucene index directory to open.
+    /// Open INDEX_PATH without a reader, for an index that a reader can't open: only its commits
+    /// can be read. Ctrl+N in the open prompt does the same.
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub no_reader: bool,
+
+    /// Lucene index directory to open, or a directory with indexes below it.
     pub index_path: Option<PathBuf>,
 }
 
@@ -107,5 +112,13 @@ mod tests {
             .unwrap();
         assert_eq!(cli.jars, [PathBuf::from("icu"), PathBuf::from("my.jar")]);
         assert_eq!(cli.index_path, Some(PathBuf::from("/data/index")));
+    }
+
+    #[test]
+    fn parses_no_reader() {
+        assert!(!Cli::try_parse_from(["leia"]).unwrap().no_reader);
+        let cli = Cli::try_parse_from(["leia", "--no-reader", "/data/idx"]).unwrap();
+        assert!(cli.no_reader);
+        assert_eq!(cli.index_path, Some(PathBuf::from("/data/idx")));
     }
 }

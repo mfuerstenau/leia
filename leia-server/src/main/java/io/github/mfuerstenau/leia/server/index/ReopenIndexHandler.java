@@ -1,19 +1,18 @@
 package io.github.mfuerstenau.leia.server.index;
 
 import io.github.mfuerstenau.leia.core.IndexOpenException;
-import io.github.mfuerstenau.leia.core.IndexSummary;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
-import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
+import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
 import jakarta.inject.Inject;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.logging.Logger;
-import org.apache.lucene.util.Version;
 
 /**
  * {@code reopenIndex}: opens the latest commit of the {@link CurrentIndex} again and makes it the
@@ -37,8 +36,7 @@ public final class ReopenIndexHandler implements MethodHandler<ReopenIndexParams
 
     @Override
     public ReopenIndexResult handle(ReopenIndexParams params) throws RpcException {
-        ReadOnlyIndex index =
-                currentIndex.get().orElseThrow(() -> new RpcException(ErrorCode.NO_INDEX_OPEN, "No index is open"));
+        ReadOnlyIndex index = currentIndex.readable();
         Optional<ReadOnlyIndex> reopened;
         try {
             reopened = index.reopen();
@@ -46,25 +44,22 @@ public final class ReopenIndexHandler implements MethodHandler<ReopenIndexParams
             throw new RpcException(OpenIndexHandler.errorCode(e.reason()), e.getMessage(), e);
         }
         if (reopened.isEmpty()) {
-            LOG.fine(() -> "Unchanged " + index.summary().path() + " ("
-                    + index.summary().segmentsFile() + ")");
-            return toResult(false, index.summary());
+            LOG.fine(() -> "Unchanged " + index.path() + " (" + OpenIndexHandler.describe(index) + ")");
+            return toResult(false, index);
         }
         currentIndex.replace(reopened.get());
-        IndexSummary summary = reopened.get().summary();
-        LOG.info(() ->
-                "Reopened " + summary.path() + " (" + summary.segmentsFile() + ", " + summary.maxDoc() + " docs)");
-        return toResult(true, summary);
+        LOG.info(() -> "Reopened " + index.path() + " (" + OpenIndexHandler.describe(reopened.get()) + ")");
+        return toResult(true, reopened.get());
     }
 
-    private static ReopenIndexResult toResult(boolean changed, IndexSummary summary) {
+    private static ReopenIndexResult toResult(boolean changed, ReadOnlyIndex index) {
         return new ReopenIndexResult(
                 changed,
-                summary.path().toString(),
-                summary.segmentsFile(),
-                summary.numDocs(),
-                summary.maxDoc(),
-                summary.createdVersionMajor(),
-                summary.minSegmentLuceneVersion().map(Version::toString));
+                index.path().toString(),
+                OpenMode.READER,
+                OptionalInt.of(index.numDocs()),
+                OptionalInt.of(index.maxDoc()),
+                OpenIndexHandler.entries(index),
+                OpenIndexHandler.skipped(index));
     }
 }

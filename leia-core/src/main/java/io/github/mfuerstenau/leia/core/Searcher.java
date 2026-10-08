@@ -15,7 +15,9 @@ import java.util.concurrent.CancellationException;
 import java.util.function.Predicate;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.ExitableDirectoryReader;
+import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReaderContext;
+import org.apache.lucene.index.MultiReader;
 import org.apache.lucene.index.QueryTimeout;
 import org.apache.lucene.index.StoredFields;
 import org.apache.lucene.search.Collector;
@@ -36,7 +38,7 @@ import org.apache.lucene.search.similarities.Similarity;
 
 /**
  * Runs searches and explains them, cooperatively cancellable (ADR 0010). Each call searches with a
- * new {@link IndexSearcher} over an {@link ExitableDirectoryReader}, whose {@link QueryTimeout} asks
+ * new {@link IndexSearcher} over {@link ExitableDirectoryReader}s, whose {@link QueryTimeout} asks
  * the caller's {@link ScanProgress} whether to go on: it is checked while rewriting, enumerating
  * terms and collecting hits. The searcher scores with the caller's {@link Similarity} (ADR 0012).
  */
@@ -48,7 +50,8 @@ final class Searcher {
     private Searcher() {}
 
     static SearchResults search(
-            DirectoryReader reader,
+            IndexReader reader,
+            List<DirectoryReader> directoryReaders,
             Query query,
             Similarity similarity,
             Optional<Sort> sort,
@@ -59,7 +62,7 @@ final class Searcher {
             ScanProgress progress)
             throws IOException, InvalidQueryException {
         Cancellation cancellation = new Cancellation(progress);
-        IndexSearcher searcher = searcher(reader, similarity, cancellation);
+        IndexSearcher searcher = searcher(directoryReaders, similarity, cancellation);
         long start = System.nanoTime();
         try {
             cancellation.searched(0);
@@ -95,10 +98,14 @@ final class Searcher {
     }
 
     static Explanation explain(
-            DirectoryReader reader, Query query, Similarity similarity, int docId, ScanProgress progress)
+            List<DirectoryReader> directoryReaders,
+            Query query,
+            Similarity similarity,
+            int docId,
+            ScanProgress progress)
             throws IOException, InvalidQueryException {
         Cancellation cancellation = new Cancellation(progress);
-        IndexSearcher searcher = searcher(reader, similarity, cancellation);
+        IndexSearcher searcher = searcher(directoryReaders, similarity, cancellation);
         try {
             Explanation explanation = searcher.explain(query, docId);
             cancellation.check();
@@ -110,10 +117,22 @@ final class Searcher {
         }
     }
 
-    private static IndexSearcher searcher(DirectoryReader reader, Similarity similarity, Cancellation cancellation)
+    /**
+     * A searcher over {@code directoryReaders}, each wrapped in an {@link ExitableDirectoryReader}, and
+     * combined in a {@link MultiReader} if there are several (ADR 0021). Its document ids are those of
+     * the index's reader, which combines them in the same order.
+     */
+    private static IndexSearcher searcher(
+            List<DirectoryReader> directoryReaders, Similarity similarity, Cancellation cancellation)
             throws IOException {
-        // Never closed: closing the wrapper would close the index's reader.
-        IndexSearcher searcher = new IndexSearcher(ExitableDirectoryReader.wrap(reader, cancellation));
+        IndexReader[] exitable = new IndexReader[directoryReaders.size()];
+        for (int i = 0; i < exitable.length; i++) {
+            exitable[i] = ExitableDirectoryReader.wrap(directoryReaders.get(i), cancellation);
+        }
+        // Never closed: closing a wrapper would close the index's reader. The MultiReader holds no
+        // reference that closing would release, as it only adds references to the wrappers.
+        IndexSearcher searcher =
+                new IndexSearcher(exitable.length == 1 ? exitable[0] : new MultiReader(exitable, false));
         searcher.setTimeout(cancellation);
         searcher.setSimilarity(similarity);
         // No query cache: a repeated search shows what it really costs.
@@ -121,7 +140,7 @@ final class Searcher {
         return searcher;
     }
 
-    private static List<Hit> hits(DirectoryReader reader, ScoreDoc[] page, Optional<Set<String>> fields)
+    private static List<Hit> hits(IndexReader reader, ScoreDoc[] page, Optional<Set<String>> fields)
             throws IOException {
         StoredFields storedFields = reader.storedFields();
         Predicate<String> wanted = fields.isPresent() ? fields.get()::contains : _ -> true;

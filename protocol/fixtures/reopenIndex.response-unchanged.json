@@ -4,9 +4,21 @@
   "result": {
     "changed": false,
     "path": "/data/indexes/empty",
-    "segmentsFile": "segments_1",
+    "mode": "READER",
     "numDocs": 0,
     "maxDoc": 0,
-    "createdVersionMajor": 10
+    "indexes": [
+      {
+        "path": "/data/indexes/empty",
+        "reader": {
+          "docBase": 0,
+          "segmentsFile": "segments_1",
+          "numDocs": 0,
+          "maxDoc": 0,
+          "createdVersionMajor": 10
+        }
+      }
+    ],
+    "skipped": []
   }
 }

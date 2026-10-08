@@ -25,6 +25,6 @@ public final class CloseIndexHandler implements MethodHandler<CloseIndexParams, 
     @Override
     public CloseIndexResult handle(CloseIndexParams params) {
         return new CloseIndexResult(
-                currentIndex.close().map(index -> index.summary().path().toString()));
+                currentIndex.close().map(index -> index.path().toString()));
     }
 }
