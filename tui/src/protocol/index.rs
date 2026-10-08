@@ -45,6 +45,47 @@ pub struct OpenIndexResult {
     pub min_segment_lucene_version: Option<String>,
 }
 
+/// `reopenIndex`: opens the latest commit of the open index again, if it differs from the open
+/// one (ADR 0019). The segments that didn't change are shared. If it changed, the new commit
+/// becomes the open index, and the jobs of the old one are stopped; if not, nothing happens. Fails
+/// with `NO_INDEX_OPEN`, or with the errors of `openIndex`; the open index then stays open.
+pub enum ReopenIndex {}
+
+impl RpcMethod for ReopenIndex {
+    const NAME: &'static str = "reopenIndex";
+    type Params = ReopenIndexParams;
+    type Result = ReopenIndexResult;
+}
+
+/// Params of `reopenIndex`: none, it reopens the open index.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReopenIndexParams {}
+
+/// Whether the index changed, and what identifies it now, as in [`OpenIndexResult`]. The full
+/// statistics come from `getIndexStats`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReopenIndexResult {
+    /// Whether the latest commit differs from the one that was open, which is then replaced; if
+    /// not, nothing happened.
+    pub changed: bool,
+    /// The absolute, normalized index directory.
+    pub path: String,
+    /// The `segments_N` file of the open commit.
+    pub segments_file: String,
+    /// Live documents.
+    pub num_docs: i32,
+    /// Documents including deleted ones.
+    pub max_doc: i32,
+    /// The major Lucene version that created the index.
+    pub created_version_major: i32,
+    /// The oldest Lucene version that wrote one of its segments, such as `9.12.3`; `None` if the
+    /// index has no segments.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_segment_lucene_version: Option<String>,
+}
+
 /// `closeIndex`: closes the open index, if any. Closing when no index is open is not an error;
 /// the result then has no path.
 pub enum CloseIndex {}

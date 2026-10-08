@@ -25,6 +25,7 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 - [x] ADR 0016: analysis jars (no analysis module bundled; `leia --analysis-jar <jar|dir>`, repeatable, passed to the server, which loads the jars once at startup through a child `URLClassLoader` and reloads Lucene's factory lists; presets and resource files go through that loader; a jar that can't be loaded stops the server with exit status 1; no protocol change; `:leia-server:analysisModules` fetches Lucene's modules)
 - [x] ADR 0017: stop words and stem exclusions for presets (`preset` gains `stopwords?` and `stemExclusion?`, each a `WordSet` of `words` or `file`; the constructor goes by Lucene's convention, `(CharArraySet)` and `(CharArraySet, CharArraySet)`, with the default stop words filled in for stem exclusions alone; `getAnalysisComponents` gives each preset's `stopwords`/`stemExclusion` as `NONE`/`OPTIONAL`/`REQUIRED`; a `(CharArraySet)` constructor makes a preset too, which adds `StopAnalyzer`)
 - [x] ADR 0018: codecs and formats from jars (`--analysis-jar` becomes `--jar`, one loader that also reloads Lucene's codecs, postings, doc values and KNN vectors formats; `lucene-codecs` and `lucene-suggest` bundled; `MISSING_CODEC` (-32014) for a codec or format that isn't loaded, `UNSUPPORTED_INDEX_FORMAT` for one of Lucene's own)
+- [x] ADR 0019: reopening the index (`reopenIndex {}` with `openIfChanged`, `changed` plus the `openIndex` fields; a failed reopen keeps the open index; the TUI's `R` keeps each screen's place)
 - [x] `README.md`: what leia is, build and run instructions
 
 ### Java build (Gradle 9, Java 25)
@@ -99,7 +100,12 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 
 From the read-only checklist in `luke-features.md` §7. Ordered roughly by value. Each area will need its own protocol methods, fixtures and probably an ADR for the cross-cutting parts.
 
-- [ ] Open options: directory implementation choice, recursive multi-index (`MultiReader`), no-reader mode for corrupt indexes, reopen, recent-path history
+- [ ] Open options: directory implementation choice, recursive multi-index (`MultiReader`), no-reader mode for corrupt indexes, recent-path history
+- [x] Open options: reopen (ADR 0019)
+  - `reopenIndex {}` → `{changed, path, segmentsFile, numDocs, maxDoc, createdVersionMajor, minSegmentLuceneVersion?}`: `DirectoryReader.openIfChanged`, so unchanged segments are shared; unchanged → nothing happens, the jobs keep running; changed → the new reader becomes the open index, the old one's jobs stop and its reader closes (the directory is handed on); `NO_INDEX_OPEN`, or `openIndex`'s errors with the open index kept
+  - TUI: `R` on every screen (listed on the overview and the commits screen); the tab line says "Reopening…", "Unchanged: segments_N", "Reopened: segments_N" or "Reopen failed: …" until the next key
+  - a changed index keeps: the screen, the overview's sort and selected field, the document id (clamped) with its selected field, hidden empty fields, number format and delimiters, the terms screen's field and column, the search screen's query line, mode, field, operator, exact count and analyzer (its parser, MLT, scoring and hit field settings if the fields are the same, ignoring their postings statistics); term scans are forgotten, and nothing is searched again by itself
+  - tests: core (unchanged, changed with shared segments, once only, directory gone, corrupt new commit), server handler, real server (a copy of the demo index without `segments_4`, which is then added)
 - [x] Overview: field/term-count table, top-N terms per field
   - `startFieldTermScan {field, topN}` / `getFieldTermScan {jobId}`: one pass over the merged `TermsEnum` counts the unique terms and keeps the top N by docFreq (ties in term order); binary terms go over the wire as hex. Lazy: a scan runs only on request
   - TUI: "Terms" column, top-terms panel (next to the fields from 130 columns, below them otherwise), `Enter` scans the selected field, `a` all fields one after another, `Esc` cancels, `Tab` switches the panel; the total shows in the fields title once every field is counted

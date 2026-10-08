@@ -13,6 +13,7 @@ import io.github.mfuerstenau.leia.server.document.GetTermVectorHandler;
 import io.github.mfuerstenau.leia.server.index.CloseIndexHandler;
 import io.github.mfuerstenau.leia.server.index.GetIndexStatsHandler;
 import io.github.mfuerstenau.leia.server.index.OpenIndexHandler;
+import io.github.mfuerstenau.leia.server.index.ReopenIndexHandler;
 import io.github.mfuerstenau.leia.server.job.CancelJobHandler;
 import io.github.mfuerstenau.leia.server.search.GetExplainHandler;
 import io.github.mfuerstenau.leia.server.search.GetSearchHandler;
@@ -36,6 +37,10 @@ interface HandlerModule {
     @Binds
     @IntoSet
     MethodHandler<?, ?> openIndex(OpenIndexHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> reopenIndex(ReopenIndexHandler handler);
 
     @Binds
     @IntoSet

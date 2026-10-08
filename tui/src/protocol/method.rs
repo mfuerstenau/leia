@@ -6,7 +6,7 @@ use serde::de::DeserializeOwned;
 use super::analysis::{Analyze, GetAnalysisComponents};
 use super::commits::{GetCommit, GetCommits};
 use super::document::{GetDocument, GetStoredValue, GetTermVector};
-use super::index::{CloseIndex, GetIndexStats, OpenIndex};
+use super::index::{CloseIndex, GetIndexStats, OpenIndex, ReopenIndex};
 use super::job::CancelJob;
 use super::search::{GetExplain, GetSearch, StartExplain, StartSearch};
 use super::terms::{GetFieldTermScan, GetPositions, GetPostings, GetTerms, StartFieldTermScan};
@@ -23,6 +23,7 @@ pub trait RpcMethod {
 pub const METHOD_NAMES: &[&str] = &[
     Version::NAME,
     OpenIndex::NAME,
+    ReopenIndex::NAME,
     GetIndexStats::NAME,
     CloseIndex::NAME,
     StartFieldTermScan::NAME,

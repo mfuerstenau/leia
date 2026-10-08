@@ -224,6 +224,19 @@ impl Documents {
         }
     }
 
+    /// The screen for the reopened index (ADR 0019): the same document id, clamped to the new
+    /// `max_doc`, with the same field selected, and values shown as before. The document is
+    /// fetched again; walks through term docs or hits end.
+    pub fn reopened(&self, fields: Vec<IndexField>, max_doc: i32) -> Self {
+        let mut documents = Self::new(fields, max_doc);
+        documents.doc_id = self.doc_id.min(max_doc - 1).max(0);
+        documents.select_field = self.selected_field().map(|field| field.name.clone());
+        documents.hide_empty = self.hide_empty;
+        documents.numbers = self.numbers;
+        documents.delimiters = self.delimiters.clone();
+        documents
+    }
+
     /// The first document to fetch when the screen is shown, if nothing was fetched yet.
     pub fn initial_request(&self) -> Option<Request> {
         (self.document.is_none() && self.error.is_none() && self.max_doc > 0)
@@ -1323,6 +1336,32 @@ mod tests {
         assert!(!screen.contains("extra"), "{screen}");
         // The hidden field's selection falls back to the first row.
         assert_eq!(documents.selected_field().unwrap().name, "id");
+    }
+
+    #[test]
+    fn reopening_keeps_the_document_its_selected_field_and_how_values_show() {
+        let mut documents = documents();
+        documents.loaded(document(3, false));
+        documents.handle_key(KeyCode::Down);
+        documents.handle_key(KeyCode::Down);
+        documents.handle_key(KeyCode::Char('e'));
+        documents.handle_key(KeyCode::Char('x'));
+        assert_eq!(documents.selected_field().unwrap().name, "rank");
+
+        let mut reopened = documents.reopened(vec![schema("id", 0), schema("rank", 1)], 10);
+
+        assert_eq!(reopened.initial_request(), Some(Request::Document(3)));
+        reopened.loaded(document(3, false));
+        assert_eq!(reopened.selected_field().unwrap().name, "rank");
+        assert!(reopened.hide_empty);
+        assert_eq!(reopened.numbers, documents.numbers);
+        assert_ne!(reopened.numbers, NumberFormat::Long);
+        assert_eq!(
+            documents
+                .reopened(vec![schema("id", 0)], 2)
+                .initial_request(),
+            Some(Request::Document(1))
+        );
     }
 
     #[test]

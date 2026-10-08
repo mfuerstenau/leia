@@ -1,0 +1,12 @@
+{
+  "jsonrpc": "2.0",
+  "id": 5,
+  "result": {
+    "changed": false,
+    "path": "/data/indexes/empty",
+    "segmentsFile": "segments_1",
+    "numDocs": 0,
+    "maxDoc": 0,
+    "createdVersionMajor": 10
+  }
+}

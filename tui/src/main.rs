@@ -22,6 +22,7 @@ use leia::protocol::document::{
 };
 use leia::protocol::index::{
     CloseIndex, CloseIndexParams, GetIndexStats, GetIndexStatsParams, OpenIndex, OpenIndexParams,
+    ReopenIndex, ReopenIndexParams,
 };
 use leia::protocol::job::{CancelJob, JobParams};
 use leia::protocol::search::{GetExplain, GetSearch, StartExplain, StartSearch};
@@ -187,6 +188,11 @@ fn perform(
         Action::Close => {
             server.call::<CloseIndex>(CloseIndexParams {})?;
             app.closed();
+        }
+        Action::Reopen => {
+            // Shows "Reopening…" while the server works.
+            terminal.draw(|frame| app.draw(frame))?;
+            return reopen_index(server, app);
         }
         Action::StartScan { field, top_n } => {
             let started =
@@ -381,6 +387,34 @@ fn open_index(server: &mut Server, app: &mut App, path: &str) -> Result<Option<A
         Ok(stats) => Ok(app.opened(stats)),
         Err(error) => {
             // Opened, but the overview can't show it: close it rather than keep it open unseen.
+            server.call::<CloseIndex>(CloseIndexParams {})?;
+            app.closed();
+            app.open_failed(format!("cannot read the index statistics: {error}"));
+            Ok(None)
+        }
+    }
+}
+
+/// Reopens the index if it changed, and fetches its statistics for the overview (ADR 0019). A
+/// failed reopen leaves the open index open, and only says why. Returns the action that follows,
+/// if any: what the shown screen has to fetch first.
+fn reopen_index(server: &mut Server, app: &mut App) -> Result<Option<Action>> {
+    let reopened = server.call::<ReopenIndex>(ReopenIndexParams {});
+    let result = match answered(reopened.map_err(with_jar_hint))? {
+        Ok(result) => result,
+        Err(error) => {
+            app.reopen_failed(error);
+            return Ok(None);
+        }
+    };
+    if !result.changed {
+        app.reopen_unchanged(&result);
+        return Ok(None);
+    }
+    match answered(server.call::<GetIndexStats>(GetIndexStatsParams {}))? {
+        Ok(stats) => Ok(app.reopened(stats)),
+        Err(error) => {
+            // Reopened, but the overview can't show it: close it rather than keep it open unseen.
             server.call::<CloseIndex>(CloseIndexParams {})?;
             app.closed();
             app.open_failed(format!("cannot read the index statistics: {error}"));

@@ -13,7 +13,7 @@ use serde_json::Value;
 use super::analysis::{Analyze, GetAnalysisComponents};
 use super::commits::{GetCommit, GetCommits};
 use super::document::{GetDocument, GetStoredValue, GetTermVector};
-use super::index::{CloseIndex, GetIndexStats, OpenIndex};
+use super::index::{CloseIndex, GetIndexStats, OpenIndex, ReopenIndex};
 use super::job::CancelJob;
 use super::search::{GetExplain, GetSearch, StartExplain, StartSearch};
 use super::terms::{GetFieldTermScan, GetPositions, GetPostings, GetTerms, StartFieldTermScan};
@@ -147,6 +147,7 @@ fn check(fixture: &Fixture, json: &str) -> Result<(), String> {
         OpenIndex::NAME => check_method::<OpenIndex>(fixture, json),
         GetIndexStats::NAME => check_method::<GetIndexStats>(fixture, json),
         CloseIndex::NAME => check_method::<CloseIndex>(fixture, json),
+        ReopenIndex::NAME => check_method::<ReopenIndex>(fixture, json),
         StartFieldTermScan::NAME => check_method::<StartFieldTermScan>(fixture, json),
         GetFieldTermScan::NAME => check_method::<GetFieldTermScan>(fixture, json),
         CancelJob::NAME => check_method::<CancelJob>(fixture, json),

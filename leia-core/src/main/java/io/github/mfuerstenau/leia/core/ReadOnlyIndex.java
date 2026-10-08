@@ -54,6 +54,8 @@ public final class ReadOnlyIndex implements Closeable {
     private final SegmentInfos commit;
     private final FieldInfos fieldInfos;
     private final IndexSummary summary;
+    /** Whether {@link #close} closes the directory: until {@link #reopen} hands it on. */
+    private boolean ownsDirectory = true;
 
     private ReadOnlyIndex(Directory directory, DirectoryReader reader, SegmentInfos commit, IndexSummary summary) {
         this.directory = directory;
@@ -90,6 +92,50 @@ public final class ReadOnlyIndex implements Closeable {
             throw translate(dir, e);
         } catch (RuntimeException e) {
             IOUtils.closeWhileHandlingException(reader, directory);
+            Optional<MissingCodecException> missing = MissingCodecException.of(e);
+            if (missing.isPresent()) {
+                throw translate(dir, missing.get());
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * Opens the latest commit of the index again if it differs from the opened one (ADR 0019). The
+     * new index shares the directory and the readers of the segments in both commits. It owns the
+     * directory from then on: closing this index then closes only its reader. This index stays open
+     * and usable until it is closed.
+     *
+     * @return the new index; empty if the latest commit is the opened one
+     * @throws IndexOpenException if the latest commit can't be read; this index is unaffected
+     * @throws IllegalStateException if this index was reopened before
+     */
+    public Optional<ReadOnlyIndex> reopen() throws IndexOpenException {
+        if (!ownsDirectory) {
+            throw new IllegalStateException("Already reopened: " + summary.path());
+        }
+        Path dir = summary.path();
+        if (!Files.isDirectory(dir)) {
+            throw new IndexOpenException(Reason.NOT_FOUND, "No such directory: " + dir);
+        }
+
+        DirectoryReader newReader = null;
+        try {
+            newReader = DirectoryReader.openIfChanged(reader);
+            if (newReader == null) {
+                return Optional.empty();
+            }
+            SegmentInfos newCommit = SegmentInfos.readCommit(
+                    directory, newReader.getIndexCommit().getSegmentsFileName());
+            ReadOnlyIndex reopened =
+                    new ReadOnlyIndex(directory, newReader, newCommit, summarize(dir, newReader, newCommit));
+            ownsDirectory = false;
+            return Optional.of(reopened);
+        } catch (IOException e) {
+            IOUtils.closeWhileHandlingException(newReader);
+            throw translate(dir, e);
+        } catch (RuntimeException e) {
+            IOUtils.closeWhileHandlingException(newReader);
             Optional<MissingCodecException> missing = MissingCodecException.of(e);
             if (missing.isPresent()) {
                 throw translate(dir, missing.get());
@@ -465,6 +511,10 @@ public final class ReadOnlyIndex implements Closeable {
 
     @Override
     public void close() throws IOException {
-        IOUtils.close(reader, directory);
+        if (ownsDirectory) {
+            IOUtils.close(reader, directory);
+        } else {
+            reader.close();
+        }
     }
 }

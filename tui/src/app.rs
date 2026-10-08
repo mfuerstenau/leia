@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Paragraph, Tabs};
 
@@ -25,7 +25,7 @@ use crate::protocol::commits::{Commit, GetCommitResult};
 use crate::protocol::document::{
     BytesValue, GetDocumentResult, StoredValue, TermPosition, TermVectorTerm,
 };
-use crate::protocol::index::GetIndexStatsResult;
+use crate::protocol::index::{GetIndexStatsResult, IndexField, ReopenIndexResult};
 use crate::protocol::search::{
     GetExplainResult, GetSearchResult, StartExplainParams, StartSearchParams,
 };
@@ -43,6 +43,9 @@ pub enum Action {
     Open(String),
     /// Close the open index.
     Close,
+    /// Reopen the open index if it changed, and report back with [`App::reopened`],
+    /// [`App::reopen_unchanged`] or [`App::reopen_failed`] (ADR 0019).
+    Reopen,
     /// Start the term scan of this field for its top `top_n` terms, and report back with
     /// [`App::scan_started`] or [`App::scan_failed`].
     StartScan {
@@ -171,6 +174,31 @@ pub struct App {
     queue: VecDeque<String>,
     /// How many top terms a scan asks for; kept when another index is opened.
     top_n: i32,
+    /// What the last reopen came to, on the tab line until the next key.
+    notice: Option<Notice>,
+}
+
+/// What the tab line says about the last reopen.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Notice {
+    Reopening,
+    Unchanged(String),
+    Reopened(String),
+    Failed(String),
+}
+
+impl Notice {
+    fn line(&self) -> Line<'_> {
+        match self {
+            Self::Reopening => Line::from("Reopening…"),
+            Self::Unchanged(segments_file) => Line::from(format!("Unchanged: {segments_file}")),
+            Self::Reopened(segments_file) => Line::from(format!("Reopened: {segments_file}")),
+            Self::Failed(error) => Line::styled(
+                format!("Reopen failed: {error}"),
+                Style::new().fg(Color::Red),
+            ),
+        }
+    }
 }
 
 impl App {
@@ -189,6 +217,7 @@ impl App {
             scan: None,
             queue: VecDeque::new(),
             top_n: DEFAULT_TOP_TERMS,
+            notice: None,
         }
     }
 
@@ -216,6 +245,47 @@ impl App {
         self.prompt = None;
         self.forget_scans();
         self.initial_request()
+    }
+
+    /// Shows the reopened index (ADR 0019) where the user was: the screens are new, as after
+    /// opening it, but keep their place. The server stopped the jobs of the old index. Returns
+    /// what the shown screen has to fetch first.
+    pub fn reopened(&mut self, stats: GetIndexStatsResult) -> Option<Action> {
+        let Some(overview) = &self.overview else {
+            return self.opened(stats);
+        };
+        let same_fields = schema(overview.fields()) == schema(&stats.fields);
+        self.notice = Some(Notice::Reopened(stats.segments_file.clone()));
+        self.documents = Some(match &self.documents {
+            Some(documents) => documents.reopened(stats.fields.clone(), stats.max_doc),
+            None => Documents::new(stats.fields.clone(), stats.max_doc),
+        });
+        self.terms = Some(match &self.terms {
+            Some(terms) => terms.reopened(stats.fields.clone()),
+            None => Terms::new(stats.fields.clone()),
+        });
+        self.commits = Some(Commits::new());
+        self.search = Some(match &self.search {
+            Some(search) => search.reopened(&stats.fields, stats.max_doc, same_fields),
+            None => {
+                let mut search = Search::new(&stats.fields, stats.max_doc);
+                search.set_analyzer(self.analysis.settings());
+                search
+            }
+        });
+        self.overview = Some(overview.reopened(stats, self.top_n));
+        self.forget_scans();
+        self.initial_request()
+    }
+
+    /// The index has no newer commit; everything stays as it is.
+    pub fn reopen_unchanged(&mut self, result: &ReopenIndexResult) {
+        self.notice = Some(Notice::Unchanged(result.segments_file.clone()));
+    }
+
+    /// The open index stays open, and is shown as it was.
+    pub fn reopen_failed(&mut self, error: String) {
+        self.notice = Some(Notice::Failed(error));
     }
 
     /// Shows `error` in the prompt, which keeps the path, so it can be corrected.
@@ -664,6 +734,7 @@ impl App {
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
             return Some(Action::Quit);
         }
+        self.notice = None;
         if let Some(prompt) = &mut self.prompt {
             return match prompt.handle_key(key) {
                 PromptEvent::Submit(path) => {
@@ -748,6 +819,10 @@ impl App {
                 None
             }
             KeyCode::Char('c') if self.overview.is_some() => Some(Action::Close),
+            KeyCode::Char('R') if self.overview.is_some() => {
+                self.notice = Some(Notice::Reopening);
+                Some(Action::Reopen)
+            }
             code if self.screen == Screen::Documents => {
                 let request = self.documents.as_mut()?.handle_key(code);
                 self.documents_request(request)
@@ -854,7 +929,7 @@ impl App {
             (Some(_), _, _, Some(commits), _, Screen::Commits) => {
                 commits.render(frame, body);
                 Line::from(format!(
-                    " {cancel}q quit   o open   c close   1-6 screen   r read again   ⏎ segments   \
+                    " {cancel}q quit   o open   c close   R reopen   1-6 screen   r read again   ⏎ segments   \
                      Tab panel   ↑↓"
                 ))
             }
@@ -888,17 +963,17 @@ impl App {
                 overview.render(frame, body);
                 if self.scan.is_some() {
                     Line::from(
-                        " Esc cancel scan   q quit   o open   c close   1-6 screen   s/S sort   \
+                        " Esc cancel scan   q quit   o open   c close   R reopen   1-6 screen   s/S sort   \
                          Tab panel   ↑↓",
                     )
                 } else if overview.selected_top_term().is_some() {
                     Line::from(
-                        " q quit   o open   c close   1-6 screen   ⏎ term's docs   / search term   \
+                        " q quit   o open   c close   R reopen   1-6 screen   ⏎ term's docs   / search term   \
                          +/- top N   s/S sort   Tab panel   ↑↓",
                     )
                 } else {
                     Line::from(
-                        " q quit   o open   c close   1-6 screen   ⏎ terms   a all terms   \
+                        " q quit   o open   c close   R reopen   1-6 screen   ⏎ terms   a all terms   \
                          +/- top N   s/S sort   Tab panel   ↑↓",
                     )
                 }
@@ -927,17 +1002,20 @@ impl App {
                 Screen::Search => 4,
                 Screen::Analysis => 5,
             };
+            let tabs = if let Some(notice) = &self.notice {
+                let line = notice.line();
+                let [tabs, notice] =
+                    Layout::horizontal([Constraint::Length(TABS_WIDTH), Constraint::Fill(1)])
+                        .areas(tabs);
+                frame.render_widget(line.right_aligned(), notice);
+                tabs
+            } else {
+                tabs
+            };
             frame.render_widget(
-                Tabs::new([
-                    "1 Overview",
-                    "2 Documents",
-                    "3 Terms",
-                    "4 Commits",
-                    "5 Search",
-                    "6 Analysis",
-                ])
-                .select(selected)
-                .highlight_style(Style::new().add_modifier(Modifier::REVERSED)),
+                Tabs::new(TAB_TITLES)
+                    .select(selected)
+                    .highlight_style(Style::new().add_modifier(Modifier::REVERSED)),
                 tabs,
             );
         }
@@ -951,6 +1029,39 @@ impl App {
             prompt.render(frame, body);
         }
     }
+}
+
+const TAB_TITLES: [&str; 6] = [
+    "1 Overview",
+    "2 Documents",
+    "3 Terms",
+    "4 Commits",
+    "5 Search",
+    "6 Analysis",
+];
+
+/// How wide the tabs are: each title with a space on either side, and a divider between two.
+/// The notice takes the rest of the line.
+const TABS_WIDTH: u16 = {
+    let mut width = TAB_TITLES.len() - 1;
+    let mut i = 0;
+    while i < TAB_TITLES.len() {
+        width += TAB_TITLES[i].len() + 2;
+        i += 1;
+    }
+    width as u16
+};
+
+/// What the screens build on from each field: everything but the postings statistics, which
+/// change with the documents.
+fn schema(fields: &[IndexField]) -> Vec<IndexField> {
+    fields
+        .iter()
+        .map(|field| IndexField {
+            terms: None,
+            ..field.clone()
+        })
+        .collect()
 }
 
 fn analysis_action(request: Option<analysis::Request>) -> Option<Action> {
@@ -1562,6 +1673,148 @@ mod tests {
         assert_eq!(app.polls(), Vec::new());
         assert_eq!(app.scan_progress(done("id", 1)), None);
         assert_eq!(app.handle_key(key(KeyCode::Esc)), Some(Action::Quit));
+    }
+
+    fn reopen_result(changed: bool) -> ReopenIndexResult {
+        ReopenIndexResult {
+            changed,
+            path: "/data/idx".to_owned(),
+            segments_file: "segments_1".to_owned(),
+            num_docs: 0,
+            max_doc: 0,
+            created_version_major: 10,
+            min_segment_lucene_version: None,
+        }
+    }
+
+    #[test]
+    fn r_reopens_and_the_tab_line_says_what_came_of_it() {
+        let mut app = App::new(version(), None);
+        assert_eq!(app.handle_key(key(KeyCode::Char('R'))), None);
+        let mut app = app_with_fields();
+        assert!(render(&mut app).contains("R reopen"));
+
+        assert_eq!(
+            app.handle_key(key(KeyCode::Char('R'))),
+            Some(Action::Reopen)
+        );
+        assert!(render(&mut app).contains("Reopening…"));
+        app.reopen_unchanged(&reopen_result(false));
+        assert!(render(&mut app).contains("Unchanged: segments_1"));
+
+        // The next key clears it.
+        app.handle_key(key(KeyCode::Down));
+        assert!(!render(&mut app).contains("Unchanged"));
+
+        app.handle_key(key(KeyCode::Char('R')));
+        app.reopened(GetIndexStatsResult {
+            segments_file: "segments_2".to_owned(),
+            ..stats("/data/idx")
+        });
+        assert!(render(&mut app).contains("Reopened: segments_2"));
+    }
+
+    #[test]
+    fn a_failed_reopen_keeps_the_index_and_says_why() {
+        let mut app = app_with_documents();
+        app.handle_key(key(KeyCode::Char('2')));
+        app.document_loaded(document(1));
+        app.handle_key(key(KeyCode::Char('R')));
+
+        app.reopen_failed("Corrupt index".to_owned());
+
+        let screen = render(&mut app);
+        assert!(screen.contains("Reopen failed: Corrupt index"), "{screen}");
+        assert!(screen.contains("doc-1"), "{screen}");
+    }
+
+    #[test]
+    fn reopening_keeps_the_scan_of_an_unchanged_index_and_forgets_it_otherwise() {
+        let mut app = app_with_fields();
+        app.handle_key(key(KeyCode::Char('a')));
+        app.scan_started(4);
+        app.handle_key(key(KeyCode::Char('R')));
+
+        app.reopen_unchanged(&reopen_result(false));
+        assert_eq!(app.polls().len(), 1);
+
+        app.reopened(stats("/data/idx"));
+        assert_eq!(app.polls(), Vec::new());
+    }
+
+    #[test]
+    fn reopening_keeps_the_document_shown_within_the_new_max_doc() {
+        let mut app = app_with_documents();
+        app.handle_key(key(KeyCode::Char('2')));
+        app.document_loaded(document(2));
+        let with_docs = |max_doc| GetIndexStatsResult {
+            max_doc,
+            fields: vec![field("id", 0, true)],
+            ..stats("/data/idx")
+        };
+
+        assert_eq!(app.reopened(with_docs(5)), Some(Action::LoadDocument(2)));
+        assert_eq!(app.reopened(with_docs(2)), Some(Action::LoadDocument(1)));
+        assert_eq!(app.reopened(with_docs(0)), None);
+    }
+
+    #[test]
+    fn reopening_keeps_the_field_of_the_terms_screen() {
+        let mut app = app_with_fields();
+        app.handle_key(key(KeyCode::Char('3')));
+        assert_eq!(
+            app.handle_key(key(KeyCode::Down)),
+            Some(Action::LoadTerms {
+                field: "body".to_owned(),
+                from: None,
+                more: false,
+            })
+        );
+
+        assert_eq!(
+            app.reopened(GetIndexStatsResult {
+                fields: vec![
+                    field("title", 0, true),
+                    field("id", 1, true),
+                    field("body", 2, true),
+                ],
+                ..stats("/data/idx")
+            }),
+            Some(Action::LoadTerms {
+                field: "body".to_owned(),
+                from: None,
+                more: false,
+            })
+        );
+    }
+
+    #[test]
+    fn reopening_keeps_the_query_of_the_search_screen_without_running_it() {
+        let mut app = app_with_fields();
+        app.handle_key(key(KeyCode::Char('5')));
+        app.handle_key(key(KeyCode::Char('/')));
+        typed(&mut app, "red");
+        let Some(Action::StartSearch { .. }) = app.handle_key(key(KeyCode::Enter)) else {
+            panic!("Enter searches");
+        };
+
+        // `title` would be the default field of a new search screen.
+        assert_eq!(
+            app.reopened(GetIndexStatsResult {
+                fields: vec![field("title", 0, true), field("id", 1, true)],
+                ..stats("/data/idx")
+            }),
+            None
+        );
+
+        assert_eq!(app.polls(), Vec::new());
+        app.handle_key(key(KeyCode::Char('/')));
+        let Some(Action::StartSearch { params, .. }) = app.handle_key(key(KeyCode::Enter)) else {
+            panic!("Enter searches");
+        };
+        let classic = params.query.classic.unwrap();
+        assert_eq!(classic.expression, "red");
+        assert_eq!(classic.default_field, "id");
     }
 
     fn text(value: &str) -> BytesValue {

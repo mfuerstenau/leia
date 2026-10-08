@@ -111,6 +111,7 @@ is ignored.
 |---|---|
 | `o` | open an index: type a path, `Tab` completes directories, `~` is your home directory, `Enter` opens and `Esc` cancels |
 | `c` | close the open index |
+| `R` | reopen the open index, if another process committed to it since: the screens keep their place, and the tab line says `Reopened: segments_N`, `Unchanged: segments_N` or why it failed |
 | `1` … `6` | switch between the overview, the documents, the terms, the commits, the search and the analysis; only the analysis works without an open index |
 | `Esc` | stop the running term scans, or on the search screen the running search; with none running, quit |
 | `q`, `Ctrl+C` | quit |

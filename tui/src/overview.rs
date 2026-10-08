@@ -154,6 +154,27 @@ impl Overview {
         overview
     }
 
+    /// The overview of the reopened index (ADR 0019): sorted as before, with the same field
+    /// selected if it is still there. The scans are not kept; their counts are stale.
+    pub fn reopened(&self, stats: GetIndexStatsResult, top_n: i32) -> Self {
+        let selected = self.selected_field().map(|field| field.name.clone());
+        let mut overview = Self::new(stats, top_n);
+        overview.sort = self.sort;
+        overview.descending = self.descending;
+        overview.format_rows();
+        let fields = &overview.stats.fields;
+        let row = selected
+            .and_then(|name| {
+                overview
+                    .order
+                    .iter()
+                    .position(|&index| fields[index].name == name)
+            })
+            .or((!fields.is_empty()).then_some(0));
+        overview.fields.select(row);
+        overview
+    }
+
     /// Sorts the rows and formats their cells. The selection stays on its field.
     fn format_rows(&mut self) {
         let selected = self.selected_index();
@@ -238,6 +259,11 @@ impl Overview {
     /// cut short.
     pub fn set_top_n(&mut self, top_n: i32) {
         self.top_n = top_n;
+    }
+
+    /// The fields of the index, by field number.
+    pub fn fields(&self) -> &[IndexField] {
+        &self.stats.fields
     }
 
     /// The directory of the index.
@@ -1215,6 +1241,36 @@ mod tests {
 
         assert_eq!(overview.fields.selected(), Some(0));
         assert_eq!(overview.selected_field().unwrap().name, "a");
+    }
+
+    #[test]
+    fn reopening_keeps_the_sort_and_the_selected_field_but_not_the_scans() {
+        let mut overview = Overview::new(
+            stats(vec![indexed("b", 0), indexed("a", 1), indexed("c", 2)]),
+            50,
+        );
+        done(&mut overview, "a", 3);
+        // Sorted by name, the selection stays on `b`, in the second row.
+        overview.handle_key(KeyCode::Char('s'));
+        assert_eq!(overview.selected_field().unwrap().name, "b");
+
+        let reopened = overview.reopened(
+            stats(vec![
+                indexed("c", 0),
+                indexed("b", 1),
+                indexed("a", 2),
+                indexed("d", 3),
+            ]),
+            20,
+        );
+
+        assert_eq!(names(&reopened), ["a", "b", "c", "d"]);
+        assert_eq!(reopened.selected_field().unwrap().name, "b");
+        assert!(reopened.scan("a").is_none());
+
+        // A field that is gone leaves the selection on the first row.
+        let reopened = reopened.reopened(stats(vec![indexed("x", 0), indexed("a", 1)]), 20);
+        assert_eq!(reopened.selected_field().unwrap().name, "a");
     }
 
     #[test]

@@ -20,6 +20,8 @@ import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
+import io.github.mfuerstenau.leia.protocol.index.ReopenIndexParams;
+import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
 import io.github.mfuerstenau.leia.protocol.job.CancelJobResult;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
@@ -53,6 +55,15 @@ public final class Methods {
      */
     public static final RpcMethod<OpenIndexParams, OpenIndexResult> OPEN_INDEX =
             new RpcMethod<>("openIndex", OpenIndexParams.class, OpenIndexResult.class);
+
+    /**
+     * Opens the latest commit of the open index again, if it differs from the open one (ADR 0019).
+     * The segments that didn't change are shared. If it changed, the new commit becomes the open
+     * index, and the jobs of the old one are stopped; if not, nothing happens. Fails with {@code
+     * NO_INDEX_OPEN}, or with the errors of {@code openIndex}; the open index then stays open.
+     */
+    public static final RpcMethod<ReopenIndexParams, ReopenIndexResult> REOPEN_INDEX =
+            new RpcMethod<>("reopenIndex", ReopenIndexParams.class, ReopenIndexResult.class);
 
     /**
      * Statistics of the open index that are cheap to compute: the commit and every field, without
@@ -216,6 +227,7 @@ public final class Methods {
     public static final List<RpcMethod<?, ?>> ALL = List.of(
             VERSION,
             OPEN_INDEX,
+            REOPEN_INDEX,
             GET_INDEX_STATS,
             CLOSE_INDEX,
             START_FIELD_TERM_SCAN,

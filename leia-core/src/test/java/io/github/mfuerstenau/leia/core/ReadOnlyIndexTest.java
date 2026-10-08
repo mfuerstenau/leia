@@ -197,6 +197,103 @@ class ReadOnlyIndexTest {
         }
     }
 
+    @Test
+    void reopensNothingIfTheIndexIsUnchanged() throws Exception {
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex(tmp.resolve("index"), 2, null))) {
+            assertThat(index.reopen()).isEmpty();
+            assertThat(index.reopen()).as("still owns its directory").isEmpty();
+        }
+    }
+
+    @Test
+    void reopensTheLatestCommitAndKeepsTheUnchangedSegments() throws Exception {
+        Path dir = writeIndex(tmp.resolve("index"), 2, null);
+        ReadOnlyIndex index = ReadOnlyIndex.open(dir);
+        addDocuments(dir, 3, 2);
+        Map<String, FileTime> written = snapshot(dir);
+
+        ReadOnlyIndex reopened = index.reopen().orElseThrow();
+        try (reopened) {
+            assertThat(reopened.summary())
+                    .isEqualTo(new IndexSummary(
+                            dir, "segments_2", 4, 4, Version.LATEST.major, Optional.of(Version.LATEST)));
+            assertThat(reopened.reader().leaves()).hasSize(2);
+            assertThat(reopened.reader()
+                            .leaves()
+                            .getFirst()
+                            .reader()
+                            .getCoreCacheHelper()
+                            .getKey())
+                    .isSameAs(index.reader()
+                            .leaves()
+                            .getFirst()
+                            .reader()
+                            .getCoreCacheHelper()
+                            .getKey());
+            assertThat(index.summary().maxDoc())
+                    .as("the old index is unchanged")
+                    .isEqualTo(2);
+            assertThat(index.document(1).docId()).isEqualTo(1);
+
+            index.close();
+
+            assertThat(index.reader().tryIncRef()).isFalse();
+            assertThat(reopened.stats().segmentCount())
+                    .as("the directory is still open")
+                    .isEqualTo(2);
+            assertThat(reopened.document(3).docId()).isEqualTo(3);
+            assertThat(snapshot(dir)).isEqualTo(written);
+        }
+    }
+
+    @Test
+    void reopensOnlyOnce() throws Exception {
+        Path dir = writeIndex(tmp.resolve("index"), 1, null);
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
+            addDocuments(dir, 2, 1);
+            index.reopen().orElseThrow().close();
+
+            assertThatThrownBy(index::reopen)
+                    .isInstanceOf(IllegalStateException.class)
+                    .hasMessage("Already reopened: " + dir);
+        }
+    }
+
+    @Test
+    void keepsTheIndexIfTheDirectoryIsGone() throws Exception {
+        Path dir = writeIndex(tmp.resolve("index"), 2, null);
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
+            Path moved = Files.move(dir, tmp.resolve("moved"));
+
+            assertReopenFails(index, Reason.NOT_FOUND, "No such directory: " + dir);
+            Files.move(moved, dir);
+            assertThat(index.reopen()).isEmpty();
+        }
+    }
+
+    @Test
+    void keepsTheIndexIfTheLatestCommitIsCorrupt() throws Exception {
+        Path dir = writeIndex(tmp.resolve("index"), 2, null);
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
+            addDocuments(dir, 3, 1);
+            Path segments = dir.resolve("segments_2");
+            byte[] bytes = Files.readAllBytes(segments);
+            bytes[bytes.length / 2] ^= 0x5A;
+            Files.write(segments, bytes);
+
+            assertReopenFails(index, Reason.CORRUPT, "Corrupt index");
+            assertThat(index.document(1).docId()).isEqualTo(1);
+            assertThat(index.stats().segmentCount()).isEqualTo(1);
+        }
+    }
+
+    private static void assertReopenFails(ReadOnlyIndex index, Reason reason, String messagePrefix) {
+        assertThatThrownBy(index::reopen)
+                .isInstanceOfSatisfying(
+                        IndexOpenException.class, e -> assertThat(e.reason()).isEqualTo(reason))
+                .hasMessageStartingWith(messagePrefix);
+    }
+
     private static void assertOpenFails(Path path, Reason reason, String messagePrefix) {
         assertThatThrownBy(() -> ReadOnlyIndex.open(path))
                 .isInstanceOfSatisfying(
@@ -223,6 +320,23 @@ class ReadOnlyIndexTest {
             }
         }
         return dir;
+    }
+
+    /** Adds and commits {@code docs} documents with ids from {@code firstId} on, in a segment of their own. */
+    private static void addDocuments(Path dir, int firstId, int docs) throws IOException {
+        try (FSDirectory directory = FSDirectory.open(dir);
+                IndexWriter writer = new IndexWriter(
+                        directory,
+                        new IndexWriterConfig()
+                                .setOpenMode(IndexWriterConfig.OpenMode.APPEND)
+                                .setMergePolicy(NoMergePolicy.INSTANCE))) {
+            for (int i = firstId; i < firstId + docs; i++) {
+                Document doc = new Document();
+                doc.add(new StringField("id", Integer.toString(i), Field.Store.YES));
+                writer.addDocument(doc);
+            }
+            writer.commit();
+        }
     }
 
     private static Path copy(Path source, Path target) throws IOException {

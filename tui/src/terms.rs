@@ -162,6 +162,21 @@ impl Terms {
         }
     }
 
+    /// The screen for the reopened index (ADR 0019): the same field, if it still has postings,
+    /// and the same column. Its terms are fetched again from the first one.
+    pub fn reopened(&self, fields: Vec<IndexField>) -> Self {
+        let mut terms = Self::new(fields);
+        if let Some(field) = self.selected_field() {
+            terms.field_row = terms
+                .fields
+                .iter()
+                .position(|f| f.name == field.name)
+                .unwrap_or_default();
+        }
+        terms.focus = self.focus;
+        terms
+    }
+
     /// What to fetch when the screen is shown.
     pub fn initial_request(&mut self) -> Option<Request> {
         self.next_request()

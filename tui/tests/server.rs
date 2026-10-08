@@ -27,7 +27,7 @@ use leia::protocol::document::{
 };
 use leia::protocol::index::{
     CloseIndex, CloseIndexParams, DocValuesType, GetIndexStats, GetIndexStatsParams, IndexOptions,
-    OpenIndex, OpenIndexParams,
+    OpenIndex, OpenIndexParams, ReopenIndex, ReopenIndexParams,
 };
 use leia::protocol::job::{CancelJob, JobParams};
 use leia::protocol::search::{
@@ -171,6 +171,58 @@ fn opens_indexes_with_codecs_from_a_jar() {
         assert_eq!(commits.commits.len(), 1, "{name}");
     }
     assert!(server.shutdown(SHUTDOWN_TIMEOUT).unwrap().success());
+}
+
+/// A copy of the demo index without its last commit, `segments_4`, which the demo index keeps
+/// with all the files of the earlier ones (`./gradlew :leia-core:demoIndex`).
+fn demo_index_before_its_last_commit(dir: &Path) -> PathBuf {
+    let demo = PathBuf::from(test_index("demo", "demoIndex"));
+    let _ = std::fs::remove_dir_all(dir);
+    std::fs::create_dir_all(dir).unwrap();
+    for entry in std::fs::read_dir(&demo).unwrap() {
+        let name = entry.unwrap().file_name();
+        if name != "segments_4" && name != "write.lock" {
+            std::fs::copy(demo.join(&name), dir.join(&name)).unwrap();
+        }
+    }
+    demo.join("segments_4")
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn reopens_an_index_that_has_a_new_commit() {
+    let mut server = start();
+    let not_open = server.call::<ReopenIndex>(ReopenIndexParams {});
+    assert!(
+        matches!(&not_open, Err(CallError::Rpc(error)) if error.code == ErrorCode::NoIndexOpen),
+        "{not_open:?}"
+    );
+    let dir = env::temp_dir().join(format!("leia-reopen-{}", std::process::id()));
+    let last_commit = demo_index_before_its_last_commit(&dir);
+    let opened = server
+        .call::<OpenIndex>(OpenIndexParams {
+            path: dir.to_str().unwrap().to_owned(),
+        })
+        .unwrap();
+    assert_eq!(opened.segments_file, "segments_3");
+
+    let unchanged = server.call::<ReopenIndex>(ReopenIndexParams {}).unwrap();
+    assert!(!unchanged.changed);
+    assert_eq!(unchanged.segments_file, "segments_3");
+
+    std::fs::copy(last_commit, dir.join("segments_4")).unwrap();
+    let reopened = server.call::<ReopenIndex>(ReopenIndexParams {}).unwrap();
+    assert!(reopened.changed);
+    assert_eq!(reopened.segments_file, "segments_4");
+    assert_eq!(reopened.path, opened.path);
+    let stats = server
+        .call::<GetIndexStats>(GetIndexStatsParams {})
+        .unwrap();
+    assert_eq!(stats.generation, 4);
+
+    server.call::<CloseIndex>(CloseIndexParams {}).unwrap();
+    assert!(server.shutdown(SHUTDOWN_TIMEOUT).unwrap().success());
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]

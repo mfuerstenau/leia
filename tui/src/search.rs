@@ -210,6 +210,32 @@ impl Search {
         }
     }
 
+    /// The screen for the reopened index (ADR 0019): the same query line, mode, field, operator,
+    /// exact count and analyzer, without hits; a search is not run again by itself. The parser,
+    /// More-Like-This, scoring and hit field settings are kept if `same_fields`, otherwise they
+    /// start over for the new fields.
+    pub fn reopened(&self, fields: &[IndexField], max_doc: i32, same_fields: bool) -> Self {
+        let mut search = Self::new(fields, max_doc);
+        if let Some(field) = self.fields.get(self.field)
+            && let Some(row) = search.fields.iter().position(|f| f == field)
+        {
+            search.field = row;
+        }
+        search.mode = self.mode;
+        search.operator = self.operator;
+        search.exact = self.exact;
+        search.input = self.input.clone();
+        search.binary = self.binary;
+        search.analyzer = self.analyzer.clone();
+        if same_fields {
+            search.parser = self.parser.clone();
+            search.like = self.like.clone();
+            search.scoring = self.scoring.clone();
+            search.hit_fields = self.hit_fields.clone();
+        }
+        search
+    }
+
     /// From now on, queries are analyzed with `analyzer`; the shown hits stay as they are.
     pub fn set_analyzer(&mut self, analyzer: &AnalyzerSettings) {
         self.analyzer = analyzer.clone();
