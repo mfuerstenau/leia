@@ -46,6 +46,12 @@ pub enum Event {
     },
     /// Put this text on the clipboard.
     Copy(String),
+    /// Analyze the shown value's text on the analysis screen.
+    Analyze {
+        doc_id: i32,
+        field: String,
+        text: String,
+    },
     Close,
 }
 
@@ -503,7 +509,7 @@ impl Viewer {
             " type a delimiter   Tab/↑↓ other delimiter   ⏎ apply   Esc cancel"
         } else {
             " Esc close   ←/→ value   t text   h hex   J json   d delimited   y copy   \
-             ↑↓ PgUp/PgDn Home/End"
+             a analyze   ↑↓ PgUp/PgDn Home/End"
         }
     }
 
@@ -536,6 +542,13 @@ impl Viewer {
             KeyCode::Char('J') => self.toggle_mode(Mode::Json),
             KeyCode::Char('d') => self.form = Some(DelimiterForm::new(&self.delimiters)),
             KeyCode::Char('y') => return self.copy(),
+            KeyCode::Char('a') => {
+                return Some(Event::Analyze {
+                    doc_id: self.doc_id,
+                    field: self.field.clone(),
+                    text: self.values[self.current].content.text().into_owned(),
+                });
+            }
             KeyCode::Down | KeyCode::Char('j') => self.scroll = self.scroll.saturating_add(1),
             KeyCode::Up | KeyCode::Char('k') => self.scroll = self.scroll.saturating_sub(1),
             KeyCode::PageDown | KeyCode::Char(' ') => {

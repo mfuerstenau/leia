@@ -15,7 +15,7 @@ use ratatui::widgets::{Block, Cell, Clear, Paragraph, Row, Table, TableState, Wr
 
 use crate::overview::{doc_values, highlight, panel, postings};
 use crate::protocol::document::{
-    BytesValue, DocValues, DocumentField, GetDocumentResult, StoredValue, TermPosition,
+    BytesValue, DocValues, DocumentField, GetDocumentResult, StoredType, StoredValue, TermPosition,
     TermVectorTerm,
 };
 use crate::protocol::index::{IndexField, IndexOptions};
@@ -77,6 +77,12 @@ pub enum Request {
     Copy(String),
     /// Search for documents like this one on the search screen (ADR 0013).
     MoreLikeThis(i32),
+    /// Analyze a value of the document on the analysis screen (ADR 0014).
+    Analyze {
+        doc_id: i32,
+        field: String,
+        text: String,
+    },
 }
 
 /// How the raw numbers of numeric doc values are shown. The index doesn't record what they
@@ -441,10 +447,26 @@ impl Documents {
         fetch.and_then(viewer_request)
     }
 
+    /// The selected field's first stored text, for the analysis screen; the viewer analyzes any
+    /// other value.
+    fn analyze(&self) -> Option<Request> {
+        let field = self.selected_field()?;
+        let value = field.stored.iter().find(|value| match value.kind {
+            StoredType::String => true,
+            StoredType::Binary => !value.binary,
+            _ => false,
+        })?;
+        Some(Request::Analyze {
+            doc_id: self.doc_id,
+            field: field.name.clone(),
+            text: value.value.clone(),
+        })
+    }
+
     /// Goes to another document with ←/→, the `i` prompt, or `[`/`]` through the documents of
     /// the hit's term; loads the selected field's term vector with Enter, views its values with
-    /// `v`, cycles the number format with `x`, hides empty fields with `e`, searches for documents
-    /// like this one with `m`, switches the focus with Tab, and moves the selection or scrolls the
+    /// `v`, analyzes its stored text with `a`, cycles the number format with `x`, hides empty
+    /// fields with `e`, searches for documents like this one with `m`, switches the focus with Tab, and moves the selection or scrolls the
     /// details.
     pub fn handle_key(&mut self, key: KeyCode) -> Option<Request> {
         if let Some(viewer) = &mut self.viewer {
@@ -487,6 +509,7 @@ impl Documents {
                 });
             }
             KeyCode::Char('v') => return self.view(),
+            KeyCode::Char('a') => return self.analyze(),
             KeyCode::Char('m') if self.max_doc > 0 => {
                 return Some(Request::MoreLikeThis(self.doc_id));
             }
@@ -725,6 +748,15 @@ fn viewer_request(event: viewer::Event) -> Option<Request> {
             index,
         }),
         viewer::Event::Copy(text) => Some(Request::Copy(text)),
+        viewer::Event::Analyze {
+            doc_id,
+            field,
+            text,
+        } => Some(Request::Analyze {
+            doc_id,
+            field,
+            text,
+        }),
         viewer::Event::Close => None,
     }
 }
@@ -1415,6 +1447,52 @@ mod tests {
         documents.handle_key(KeyCode::Down);
         let screen = render(&mut documents, 140, 30);
         assert!(screen.contains("Norm        3 → length 3"), "{screen}");
+    }
+
+    #[test]
+    fn analyzes_the_first_stored_text_of_the_selected_field() {
+        let mut documents = documents();
+        let mut doc = document(2, false);
+        // A number and a hex binary are passed over.
+        doc.fields[1].stored.insert(
+            0,
+            StoredValue {
+                kind: StoredType::Long,
+                value: "7".to_owned(),
+                ..string("")
+            },
+        );
+        doc.fields[1].stored.insert(
+            1,
+            StoredValue {
+                kind: StoredType::Binary,
+                value: "ff00".to_owned(),
+                binary: true,
+                full_length: None,
+            },
+        );
+        documents.loaded(doc);
+        documents.handle_key(KeyCode::Down);
+        assert_eq!(
+            documents.handle_key(KeyCode::Char('a')),
+            Some(Request::Analyze {
+                doc_id: 2,
+                field: "body".to_owned(),
+                text: "red blue\nred".to_owned(),
+            })
+        );
+        // rank has no stored value; the viewer analyzes its doc values.
+        documents.handle_key(KeyCode::Down);
+        assert_eq!(documents.handle_key(KeyCode::Char('a')), None);
+        documents.handle_key(KeyCode::Char('v'));
+        assert_eq!(
+            documents.handle_key(KeyCode::Char('a')),
+            Some(Request::Analyze {
+                doc_id: 2,
+                field: "rank".to_owned(),
+                text: "-1".to_owned(),
+            })
+        );
     }
 
     #[test]

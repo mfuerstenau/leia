@@ -162,6 +162,52 @@ class AnalyzersTest {
     }
 
     @Test
+    void listsThePresetAnalyzersSortedBySimpleName() {
+        List<Available> analyzers = Analyzers.components().analyzers();
+
+        assertThat(analyzers)
+                .contains(
+                        new Available("EnglishAnalyzer", "org.apache.lucene.analysis.en.EnglishAnalyzer"),
+                        new Available("StandardAnalyzer", "org.apache.lucene.analysis.standard.StandardAnalyzer"),
+                        new Available("WhitespaceAnalyzer", "org.apache.lucene.analysis.core.WhitespaceAnalyzer"));
+        assertThat(analyzers)
+                .extracting(Available::name)
+                // Abstract, without a no-argument constructor, or built by a builder.
+                .doesNotContain(
+                        "Analyzer",
+                        "StopwordAnalyzerBase",
+                        "PerFieldAnalyzerWrapper",
+                        "LimitTokenCountAnalyzer",
+                        "CustomAnalyzer")
+                .isSortedAccordingTo(String.CASE_INSENSITIVE_ORDER);
+    }
+
+    @Test
+    void aPresetIsOneStageNamedByItsClass() throws Exception {
+        TextAnalysis analysis = analyze(
+                new AnalyzerSpec.Preset("org.apache.lucene.analysis.en.EnglishAnalyzer"), "The running foxes", 100);
+
+        assertThat(analysis.charFilters()).isEmpty();
+        assertThat(analysis.stages()).singleElement().satisfies(stage -> {
+            assertThat(stage.name()).isEqualTo("EnglishAnalyzer");
+            // Stop words and the Porter stemmer.
+            assertThat(stage.tokens()).extracting(Token::term).containsExactly("run", "fox");
+            assertThat(stage.tokens()).extracting(Token::position).containsExactly(1, 2);
+        });
+    }
+
+    @Test
+    void onlyAListedClassIsAPreset() {
+        assertThatThrownBy(() -> Analyzers.build(new AnalyzerSpec.Preset("java.lang.Thread")))
+                .isInstanceOf(InvalidAnalyzerException.class)
+                .hasMessage("no preset analyzer 'java.lang.Thread'");
+        assertThatThrownBy(() -> Analyzers.build(
+                        new AnalyzerSpec.Preset("org.apache.lucene.analysis.miscellaneous.PerFieldAnalyzerWrapper")))
+                .isInstanceOf(InvalidAnalyzerException.class)
+                .hasMessageStartingWith("no preset analyzer");
+    }
+
+    @Test
     void componentNamesIgnoreCase() throws Exception {
         var spec =
                 custom(List.of(), new Component("Whitespace", Map.of()), List.of(new Component("LowerCase", Map.of())));

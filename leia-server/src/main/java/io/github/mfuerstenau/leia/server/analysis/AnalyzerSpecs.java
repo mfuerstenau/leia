@@ -12,8 +12,9 @@ import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Stream;
 
-/** Builds the Lucene analyzer for an {@link Analyzer} of a request (ADR 0014). */
+/** Builds the Lucene analyzer for an {@link Analyzer} of a request (ADR 0014, ADR 0015). */
 public final class AnalyzerSpecs {
 
     private AnalyzerSpecs() {}
@@ -33,12 +34,19 @@ public final class AnalyzerSpecs {
     }
 
     private static AnalyzerSpec spec(Analyzer analyzer) throws RpcException, InvalidAnalyzerException {
-        if (analyzer.standard().isPresent() == analyzer.custom().isPresent()) {
+        long present = Stream.of(analyzer.standard(), analyzer.preset(), analyzer.custom())
+                .filter(Optional::isPresent)
+                .count();
+        if (present != 1) {
             throw new RpcException(
-                    ErrorCode.INVALID_PARAMS, "Invalid params: the analyzer needs exactly one of standard and custom");
+                    ErrorCode.INVALID_PARAMS,
+                    "Invalid params: the analyzer needs exactly one of standard, preset and custom");
         }
         if (analyzer.standard().isPresent()) {
             return new AnalyzerSpec.Standard();
+        }
+        if (analyzer.preset().isPresent()) {
+            return new AnalyzerSpec.Preset(analyzer.preset().orElseThrow().className());
         }
         CustomAnalyzer custom = analyzer.custom().orElseThrow();
         return new AnalyzerSpec.Custom(

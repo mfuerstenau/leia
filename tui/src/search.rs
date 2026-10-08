@@ -1018,8 +1018,8 @@ impl Search {
 
 impl Search {
     /// The parser options that differ from Lucene's defaults, the point types of the standard
-    /// parser or the More-Like-This limits, a similarity other than Lucene's default, a custom
-    /// analyzer, and the stored fields per hit unless they are all of them.
+    /// parser or the More-Like-This limits, a similarity other than Lucene's default, an analyzer
+    /// other than the standard one, and the stored fields per hit unless they are all of them.
     fn parser_lines(&self) -> Vec<Line<'static>> {
         let mut lines = Vec::new();
         if let Some(similarity) = self.scoring.similarity_text() {
@@ -1028,7 +1028,7 @@ impl Search {
         if let Some(fields) = self.hit_fields.text() {
             lines.push(Line::from(format!("Fields     {fields}")));
         }
-        if self.mode != Mode::Term && self.analyzer.is_custom() {
+        if self.mode != Mode::Term && !self.analyzer.is_standard() {
             lines.push(Line::from(format!("Analyzer   {}", self.analyzer.text())));
         }
         match self.mode {

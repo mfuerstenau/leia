@@ -306,10 +306,10 @@ fn perform(
         }
         Action::Analyze(params) => {
             let text = params.text.clone();
-            match answered(server.call::<Analyze>(params))? {
+            return Ok(match answered(server.call::<Analyze>(params))? {
                 Ok(result) => app.analyzed(text, result),
                 Err(error) => app.analyze_failed(error),
-            }
+            });
         }
     }
     Ok(None)

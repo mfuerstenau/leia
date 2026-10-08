@@ -2,6 +2,11 @@
   "jsonrpc": "2.0",
   "id": 30,
   "result": {
+    "analyzers": [
+      {"name": "EnglishAnalyzer", "className": "org.apache.lucene.analysis.en.EnglishAnalyzer"},
+      {"name": "StandardAnalyzer", "className": "org.apache.lucene.analysis.standard.StandardAnalyzer"},
+      {"name": "WhitespaceAnalyzer", "className": "org.apache.lucene.analysis.core.WhitespaceAnalyzer"}
+    ],
     "charFilters": [
       {"name": "htmlStrip", "className": "org.apache.lucene.analysis.charfilter.HTMLStripCharFilterFactory"},
       {"name": "mapping", "className": "org.apache.lucene.analysis.charfilter.MappingCharFilterFactory"}

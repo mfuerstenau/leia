@@ -297,6 +297,15 @@ impl App {
                 index,
             }),
             documents::Request::Copy(text) => Some(Action::Copy(text)),
+            documents::Request::Analyze {
+                doc_id,
+                field,
+                text,
+            } => {
+                self.screen = Screen::Analysis;
+                let label = format!("doc {doc_id} · {field}");
+                analysis_action(self.analysis.analyze_value(label, &text))
+            }
             documents::Request::MoreLikeThis(doc_id) => {
                 let request = self.search.as_mut()?.more_like_this(doc_id);
                 self.screen = Screen::Search;
@@ -521,16 +530,19 @@ impl App {
     }
 
     /// Shows what the analyzer made of `text`. An analyzer that the builder applied is now the
-    /// current one, which the search screen parses with from now on.
-    pub fn analyzed(&mut self, text: String, result: AnalyzeResult) {
+    /// current one, which the search screen parses with from now on. Returns the components to
+    /// fetch if there are none yet, as when `a` on the documents screen opened the screen.
+    pub fn analyzed(&mut self, text: String, result: AnalyzeResult) -> Option<Action> {
         self.analysis.analyzed(text, result);
         if let Some(search) = &mut self.search {
             search.set_analyzer(self.analysis.settings());
         }
+        analysis_action(self.analysis.initial_request())
     }
 
-    pub fn analyze_failed(&mut self, error: String) {
+    pub fn analyze_failed(&mut self, error: String) -> Option<Action> {
         self.analysis.analyze_failed(error);
+        analysis_action(self.analysis.initial_request())
     }
 
     fn forget_scans(&mut self) {
@@ -857,7 +869,7 @@ impl App {
                     Some(viewer) => Line::from(viewer.keys()),
                     None => Line::from(format!(
                         " {cancel}q quit   o open   c close   1-6 screen   ←→ doc   {steps}i go to   \
-                         ⏎ term vector   v view   x numbers   e empty   m similar   Tab panel   ↑↓"
+                         ⏎ term vector   v view   a analyze   x numbers   e empty   m similar   Tab panel   ↑↓"
                     )),
                 }
             }
@@ -963,7 +975,7 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
-    use crate::protocol::analysis::AnalyzeResult;
+    use crate::protocol::analysis::{AnalyzeResult, Analyzer};
     use crate::protocol::document::{DocumentField, StoredType, StoredValue};
     use crate::protocol::index::{DocValuesType, IndexField, IndexOptions, TermStats};
     use crate::protocol::search::{
@@ -1111,13 +1123,13 @@ mod tests {
 
         // b builds a custom analyzer, which the server tries first.
         assert_eq!(app.handle_key(key(KeyCode::Char('b'))), None);
-        assert_eq!(app.handle_key(key(KeyCode::Char(' '))), None);
+        assert_eq!(app.handle_key(key(KeyCode::Left)), None);
         let Some(Action::Analyze(params)) = app.handle_key(key(KeyCode::Enter)) else {
             panic!("applying the analyzer analyzes");
         };
         let custom = params.analyzer.clone();
         assert!(custom.custom.is_some());
-        app.analyzed(params.text, AnalyzeResult::default());
+        assert_eq!(app.analyzed(params.text, AnalyzeResult::default()), None);
         assert!(render(&mut app).contains("standard › lowercase"));
 
         // An index opened now parses with it, and keeps the analysis screen shown.
@@ -1419,6 +1431,36 @@ mod tests {
         assert_eq!(app.handle_key(key(KeyCode::Char('1'))), None);
         assert!(render(&mut app).contains("Path       /data/idx"));
         assert_eq!(app.handle_key(key(KeyCode::Char('2'))), None);
+    }
+
+    #[test]
+    fn analyzes_a_stored_value_on_the_analysis_screen() {
+        let mut app = app_with_documents();
+        app.handle_key(key(KeyCode::Char('2')));
+        app.document_loaded(document(1));
+        assert!(render(&mut app).contains("a analyze"));
+
+        let Some(Action::Analyze(params)) = app.handle_key(key(KeyCode::Char('a'))) else {
+            panic!("a analyzes the stored value");
+        };
+        assert_eq!(params.text, "doc-1");
+        assert_eq!(params.analyzer, Analyzer::default());
+        // The screen came without its components, which follow the analysis.
+        assert_eq!(
+            app.analyzed(params.text, AnalyzeResult::default()),
+            Some(Action::LoadAnalysisComponents)
+        );
+        let screen = render(&mut app);
+        assert!(screen.contains("6 Analysis"), "{screen}");
+        assert!(screen.contains("Text · doc 1 · id"), "{screen}");
+
+        // So does the viewer, for the value it shows.
+        app.handle_key(key(KeyCode::Char('2')));
+        app.handle_key(key(KeyCode::Char('v')));
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char('a'))),
+            Some(Action::Analyze(params)) if params.text == "doc-1"
+        ));
     }
 
     #[test]

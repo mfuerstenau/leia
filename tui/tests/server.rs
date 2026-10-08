@@ -15,7 +15,7 @@ use leia::java::find_java;
 use leia::protocol::ErrorCode;
 use leia::protocol::analysis::{
     AnalysisComponent, Analyze, AnalyzeParams, Analyzer, CustomAnalyzer, GetAnalysisComponents,
-    GetAnalysisComponentsParams,
+    GetAnalysisComponentsParams, PresetAnalyzer,
 };
 use leia::protocol::commits::{GetCommit, GetCommitParams, GetCommits, GetCommitsParams};
 use leia::protocol::document::{
@@ -882,6 +882,7 @@ fn analyzes_without_an_open_index() {
 
     let custom = Analyzer {
         standard: None,
+        preset: None,
         custom: Some(CustomAnalyzer {
             char_filters: vec![component("htmlStrip", &[])],
             tokenizer: component("whitespace", &[]),
@@ -910,8 +911,36 @@ fn analyzes_without_an_open_index() {
     assert_eq!(terms, ["fox", "run"]);
     assert_eq!(result.stages[3].tokens[0].position, 1);
 
+    // A preset from the list, by class name (ADR 0015).
+    let english = components
+        .analyzers
+        .iter()
+        .find(|a| a.name == "EnglishAnalyzer")
+        .unwrap();
+    let preset = server
+        .call::<Analyze>(AnalyzeParams {
+            analyzer: Analyzer {
+                standard: None,
+                preset: Some(PresetAnalyzer {
+                    class_name: english.class_name.clone(),
+                }),
+                custom: None,
+            },
+            text: "The Foxes running".to_owned(),
+        })
+        .unwrap();
+    assert_eq!(preset.stages.len(), 1);
+    assert_eq!(preset.stages[0].name, "EnglishAnalyzer");
+    let terms: Vec<&str> = preset.stages[0]
+        .tokens
+        .iter()
+        .map(|t| t.term.as_str())
+        .collect();
+    assert_eq!(terms, ["fox", "run"]);
+
     let broken = Analyzer {
         standard: None,
+        preset: None,
         custom: Some(CustomAnalyzer {
             char_filters: Vec::new(),
             tokenizer: component("nope", &[]),

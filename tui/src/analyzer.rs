@@ -1,7 +1,8 @@
 //! The current analyzer (ADR 0014): the analysis screen tries it, and the search screen parses
-//! queries and analyzes More-Like-This text with it. It is Lucene's `StandardAnalyzer`, or a custom
-//! analyzer of char filters, a tokenizer and token filters, each with its parameters, and a config
-//! directory for resource files. The popup builds it.
+//! queries and analyzes More-Like-This text with it. It is Lucene's `StandardAnalyzer`, a preset
+//! analyzer by class name (ADR 0015), or a custom analyzer of char filters, a tokenizer and token
+//! filters, each with its parameters, and a config directory for resource files. The popup builds
+//! it.
 
 use std::collections::BTreeMap;
 
@@ -15,27 +16,60 @@ use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use crate::form::{FormEvent, dim, render_popup};
 use crate::input::{Edit, LineInput, word_start};
 use crate::protocol::analysis::{
-    AnalysisComponent, Analyzer, AvailableComponent, CustomAnalyzer, GetAnalysisComponentsResult,
+    AnalysisComponent, Analyzer, CustomAnalyzer, GetAnalysisComponentsResult, PresetAnalyzer,
 };
 use crate::text::escape_control;
 
 /// How wide the popups are at most.
 const WIDTH: u16 = 76;
 
-/// The current analyzer. A custom chain is kept while the standard analyzer is chosen, so that
-/// switching back finds it again.
+/// The preset that the popup starts with.
+const DEFAULT_PRESET: &str = "org.apache.lucene.analysis.en.EnglishAnalyzer";
+
+/// Which alternative of the analyzer is chosen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Standard,
+    Preset,
+    Custom,
+}
+
+impl Kind {
+    fn name(self) -> &'static str {
+        match self {
+            Kind::Standard => "standard",
+            Kind::Preset => "preset",
+            Kind::Custom => "custom",
+        }
+    }
+
+    /// The next kind, or the previous one.
+    fn cycled(self, forward: bool) -> Self {
+        match (self, forward) {
+            (Kind::Standard, true) | (Kind::Custom, false) => Kind::Preset,
+            (Kind::Preset, true) | (Kind::Standard, false) => Kind::Custom,
+            (Kind::Custom, true) | (Kind::Preset, false) => Kind::Standard,
+        }
+    }
+}
+
+/// The current analyzer. The preset and the custom chain are kept while another kind is chosen,
+/// so that switching back finds them again.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AnalyzerSettings {
-    custom: bool,
+    kind: Kind,
+    /// The preset's class name.
+    preset: String,
     chain: CustomAnalyzer,
 }
 
 impl Default for AnalyzerSettings {
-    /// The standard analyzer, and a custom chain that does what it does: the standard tokenizer,
-    /// then lowercase.
+    /// The standard analyzer; `EnglishAnalyzer` as the preset; and a custom chain that does what
+    /// the standard analyzer does: the standard tokenizer, then lowercase.
     fn default() -> Self {
         Self {
-            custom: false,
+            kind: Kind::Standard,
+            preset: DEFAULT_PRESET.to_owned(),
             chain: CustomAnalyzer {
                 char_filters: Vec::new(),
                 tokenizer: component("standard"),
@@ -49,25 +83,39 @@ impl Default for AnalyzerSettings {
 impl AnalyzerSettings {
     /// The analyzer as a request sends it.
     pub fn analyzer(&self) -> Analyzer {
-        if self.custom {
-            Analyzer {
+        match self.kind {
+            Kind::Standard => Analyzer::default(),
+            Kind::Preset => Analyzer {
                 standard: None,
+                preset: Some(PresetAnalyzer {
+                    class_name: self.preset.clone(),
+                }),
+                custom: None,
+            },
+            Kind::Custom => Analyzer {
+                standard: None,
+                preset: None,
                 custom: Some(self.chain.clone()),
-            }
-        } else {
-            Analyzer::default()
+            },
         }
     }
 
-    pub fn is_custom(&self) -> bool {
-        self.custom
+    pub fn is_standard(&self) -> bool {
+        self.kind == Kind::Standard
     }
 
-    /// The analyzer on one line: `standard analyzer`, or the chain, such as `htmlStrip › standard
-    /// › lowercase › stop(ignoreCase=true)`, and its config directory.
+    pub fn is_custom(&self) -> bool {
+        self.kind == Kind::Custom
+    }
+
+    /// The analyzer on one line: `standard analyzer`, the preset's simple class name, such as
+    /// `EnglishAnalyzer`, or the chain, such as `htmlStrip › standard › lowercase ›
+    /// stop(ignoreCase=true)`, and its config directory.
     pub fn text(&self) -> String {
-        if !self.custom {
-            return "standard analyzer".to_owned();
+        match self.kind {
+            Kind::Standard => return "standard analyzer".to_owned(),
+            Kind::Preset => return escape_control(simple_name(&self.preset)),
+            Kind::Custom => {}
         }
         let chain = &self.chain;
         let mut text = chain
@@ -83,6 +131,18 @@ impl AnalyzerSettings {
         }
         text
     }
+}
+
+/// The class name without its package.
+fn simple_name(class_name: &str) -> &str {
+    class_name.rsplit('.').next().unwrap_or(class_name)
+}
+
+/// The package of a class name; empty for none.
+fn package(class_name: &str) -> &str {
+    class_name
+        .rsplit_once('.')
+        .map_or("", |(package, _)| package)
 }
 
 fn component(name: &str) -> AnalysisComponent {
@@ -132,20 +192,37 @@ impl Section {
         }
     }
 
-    fn available(self, components: &GetAnalysisComponentsResult) -> &[AvailableComponent] {
-        match self {
+    /// The names of the section's components, and their class names.
+    fn available(self, components: &GetAnalysisComponentsResult) -> Vec<Choice> {
+        let available = match self {
             Section::CharFilters => &components.char_filters,
             Section::Tokenizer => &components.tokenizers,
             Section::TokenFilters => &components.token_filters,
-        }
+        };
+        available
+            .iter()
+            .map(|component| Choice {
+                name: component.name.clone(),
+                class_name: component.class_name.clone(),
+            })
+            .collect()
     }
+}
+
+/// What the picker offers: a component by its SPI name, or a preset by its simple class name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Choice {
+    name: String,
+    class_name: String,
 }
 
 /// One selectable line of the popup.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Row {
-    /// Standard or custom.
+    /// Standard, preset or custom.
     Kind,
+    /// The preset's class.
+    Preset,
     ConfigDir,
     /// A component: its section and its index there (0 for the tokenizer).
     Component(Section, usize),
@@ -162,11 +239,17 @@ enum Target {
     Insert(usize),
 }
 
-/// The list of components to pick from, filtered as you type.
+/// What a picker picks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Pick {
+    Component(Section, Target),
+    Preset,
+}
+
+/// The list of components or presets to pick from, filtered as you type.
 #[derive(Debug)]
 struct Picker {
-    section: Section,
-    target: Target,
+    pick: Pick,
     filter: LineInput,
     selected: usize,
 }
@@ -201,7 +284,8 @@ enum Editing {
 #[derive(Debug)]
 pub struct AnalyzerForm {
     draft: AnalyzerSettings,
-    /// What a custom analyzer can be built from; `None` while it is not loaded.
+    /// The presets, and what a custom analyzer can be built from; `None` while they are not
+    /// loaded.
     components: Option<GetAnalysisComponentsResult>,
     selected: usize,
     editing: Editing,
@@ -234,8 +318,13 @@ impl AnalyzerForm {
 
     fn rows(&self) -> Vec<Row> {
         let mut rows = vec![Row::Kind];
-        if !self.draft.custom {
-            return rows;
+        match self.draft.kind {
+            Kind::Standard => return rows,
+            Kind::Preset => {
+                rows.push(Row::Preset);
+                return rows;
+            }
+            Kind::Custom => {}
         }
         rows.push(Row::ConfigDir);
         let chain = &self.draft.chain;
@@ -290,8 +379,8 @@ impl AnalyzerForm {
     }
 
     /// While a picker or a line input is open, it takes the keys. Otherwise ↑↓ select a row;
-    /// Space or → changes it (standard or custom, the config directory, another component, a
-    /// parameter); `a` adds a filter after the selected one, `p` a parameter to the selected
+    /// Space or → changes it (standard, preset or custom, ← the other way round; the preset, the
+    /// config directory, another component, a parameter); `a` adds a filter after the selected one, `p` a parameter to the selected
     /// component, `d` deletes, `K`/`J` move a filter up or down; Enter applies, Esc cancels.
     pub fn handle_key(&mut self, key: KeyEvent) -> FormEvent<AnalyzerSettings> {
         match &mut self.editing {
@@ -317,9 +406,8 @@ impl AnalyzerForm {
             KeyCode::PageDown => self.selected = (self.selected + 10).min(last),
             KeyCode::Home | KeyCode::Char('g') => self.selected = 0,
             KeyCode::End | KeyCode::Char('G') => self.selected = last,
-            KeyCode::Char(' ') | KeyCode::Right | KeyCode::Left | KeyCode::Char('l') => {
-                self.change(row);
-            }
+            KeyCode::Char(' ') | KeyCode::Right | KeyCode::Char('l') => self.change(row, true),
+            KeyCode::Left | KeyCode::Char('h') => self.change(row, false),
             KeyCode::Char('a') => self.add_after(row),
             KeyCode::Char('p') => {
                 if let Row::Component(section, index) | Row::Param(section, index, _) = row {
@@ -338,12 +426,13 @@ impl AnalyzerForm {
         FormEvent::None
     }
 
-    fn change(&mut self, row: Row) {
+    fn change(&mut self, row: Row, forward: bool) {
         match row {
             Row::Kind => {
-                self.draft.custom = !self.draft.custom;
+                self.draft.kind = self.draft.kind.cycled(forward);
                 self.error = None;
             }
+            Row::Preset => self.open_picker(Pick::Preset),
             Row::ConfigDir => self.edit_text(TextTarget::ConfigDir),
             Row::Component(section, index) => self.pick(section, Target::Replace(index)),
             Row::Param(section, index, param) => {
@@ -372,15 +461,18 @@ impl AnalyzerForm {
             {
                 self.pick(section, Target::Insert(index + 1));
             }
-            Row::Add(_) => self.change(row),
+            Row::Add(_) => self.change(row, true),
             _ => {}
         }
     }
 
     fn pick(&mut self, section: Section, target: Target) {
+        self.open_picker(Pick::Component(section, target));
+    }
+
+    fn open_picker(&mut self, pick: Pick) {
         self.editing = Editing::Pick(Picker {
-            section,
-            target,
+            pick,
             filter: LineInput::new(""),
             selected: 0,
         });
@@ -429,7 +521,7 @@ impl AnalyzerForm {
                 }
                 self.selected = self.selected.min(self.rows().len() - 1);
             }
-            Row::Kind | Row::Add(_) => return,
+            Row::Kind | Row::Preset | Row::Add(_) => return,
         }
         self.error = None;
     }
@@ -457,21 +549,32 @@ impl AnalyzerForm {
         self.error = None;
     }
 
-    /// The components of the picker's section that contain the filter, ignoring case.
-    fn matches(&self, picker: &Picker) -> Vec<AvailableComponent> {
+    /// The presets, or the components of the picker's section, whose name contains the filter,
+    /// ignoring case.
+    fn matches(&self, picker: &Picker) -> Vec<Choice> {
         let filter = picker.filter.text().to_lowercase();
-        self.components
-            .as_ref()
-            .map(|components| picker.section.available(components))
-            .unwrap_or_default()
-            .iter()
-            .filter(|component| component.name.to_lowercase().contains(&filter))
-            .cloned()
+        let Some(components) = &self.components else {
+            return Vec::new();
+        };
+        let choices = match picker.pick {
+            Pick::Component(section, _) => section.available(components),
+            Pick::Preset => components
+                .analyzers
+                .iter()
+                .map(|analyzer| Choice {
+                    name: analyzer.name.clone(),
+                    class_name: analyzer.class_name.clone(),
+                })
+                .collect(),
+        };
+        choices
+            .into_iter()
+            .filter(|choice| choice.name.to_lowercase().contains(&filter))
             .collect()
     }
 
-    /// ↑↓ select, typing filters, Enter takes the selected component (or the typed name if none
-    /// matches), Esc goes back.
+    /// ↑↓ select, typing filters, Enter takes the selected component or preset (or the typed
+    /// name, or class name, if none matches), Esc goes back.
     fn pick_key(&mut self, key: KeyEvent) {
         let Editing::Pick(picker) = &self.editing else {
             return;
@@ -488,16 +591,25 @@ impl AnalyzerForm {
             KeyCode::PageUp => picker.selected = picker.selected.saturating_sub(10),
             KeyCode::PageDown => picker.selected = (picker.selected + 10).min(last),
             KeyCode::Enter => {
-                let name = match matches.get(picker.selected.min(last)) {
-                    Some(component) => component.name.clone(),
-                    None => picker.filter.text().trim().to_owned(),
-                };
+                let pick = picker.pick;
+                let chosen = matches
+                    .get(picker.selected.min(last))
+                    .map(|choice| match pick {
+                        Pick::Component(..) => choice.name.clone(),
+                        Pick::Preset => choice.class_name.clone(),
+                    });
+                let name = chosen.unwrap_or_else(|| picker.filter.text().trim().to_owned());
                 if name.is_empty() {
                     return;
                 }
-                let (section, target) = (picker.section, picker.target);
                 self.editing = Editing::None;
-                self.put(section, target, name);
+                match pick {
+                    Pick::Component(section, target) => self.put(section, target, name),
+                    Pick::Preset => {
+                        self.draft.preset = name;
+                        self.error = None;
+                    }
+                }
             }
             _ => {
                 if picker.filter.handle_key(key, word_start) == Edit::Changed {
@@ -617,11 +729,14 @@ impl AnalyzerForm {
         match &self.editing {
             Editing::Pick(_) => " type to filter   ↑↓ select   ⏎ take   Esc back",
             Editing::Text(_) => " ⏎ take   Esc back   ←→ Ctrl+A/E/U/K/W edit",
-            Editing::None if self.draft.custom => {
-                " ␣ change   a add filter   p add parameter   d delete   K/J move   ⏎ apply   \
-                 Esc cancel   ↑↓"
-            }
-            Editing::None => " ␣ standard/custom   ⏎ apply   Esc cancel",
+            Editing::None => match self.draft.kind {
+                Kind::Custom => {
+                    " ␣ change   a add filter   p add parameter   d delete   K/J move   ⏎ apply   \
+                     Esc cancel   ↑↓"
+                }
+                Kind::Preset => " ␣ change   ←→ standard/preset/custom   ⏎ apply   Esc cancel   ↑↓",
+                Kind::Standard => " ␣/←→ standard/preset/custom   ⏎ apply   Esc cancel",
+            },
         }
     }
 
@@ -650,15 +765,28 @@ impl AnalyzerForm {
                 line
             });
         }
-        if !self.draft.custom {
+        let notes: &[&str] = match self.draft.kind {
+            Kind::Standard => &[
+                "Lucene's StandardAnalyzer: the standard tokenizer, then lowercase.",
+                "Space switches to a preset analyzer, such as EnglishAnalyzer, or to a custom \
+                 analyzer of your own chain.",
+            ],
+            Kind::Preset => &[
+                "One of Lucene's analyzers, by class name, with its default settings and stop \
+                 words.",
+            ],
+            Kind::Custom => &[],
+        };
+        if !notes.is_empty() {
             lines.push(Line::from(""));
-            lines.push(
-                Line::from("Lucene's StandardAnalyzer: the standard tokenizer, then lowercase.")
-                    .style(dim()),
-            );
-            lines.push(
-                Line::from("Space switches to a custom analyzer of your own chain.").style(dim()),
-            );
+            let width = usize::from(area.width.min(WIDTH).saturating_sub(2));
+            for note in notes {
+                lines.extend(
+                    wrap_words(note, width)
+                        .into_iter()
+                        .map(|line| Line::from(line).style(dim())),
+                );
+            }
         }
         if let Some(error) = &self.error {
             lines.push(Line::from(""));
@@ -678,14 +806,14 @@ impl AnalyzerForm {
 
     fn row_line(&self, row: Row) -> Line<'static> {
         match row {
-            Row::Kind => Line::from(format!(
-                "Analyzer       {}",
-                if self.draft.custom {
-                    "custom"
-                } else {
-                    "standard"
-                }
-            )),
+            Row::Kind => Line::from(format!("Analyzer       {}", self.draft.kind.name())),
+            Row::Preset => Line::from(vec![
+                Span::raw(format!(
+                    "Class          {}  ",
+                    escape_control(simple_name(&self.draft.preset))
+                )),
+                Span::styled(escape_control(package(&self.draft.preset)), dim()),
+            ]),
             Row::ConfigDir => match &self.draft.chain.config_dir {
                 Some(dir) => Line::from(format!("Config dir     {}", escape_control(dir))),
                 None => Line::from(vec![
@@ -719,24 +847,30 @@ impl AnalyzerForm {
             Line::from(format!("Filter: {}", picker.filter.text())),
             Line::from(""),
         ];
+        let typed = match picker.pick {
+            Pick::Component(..) => "name",
+            Pick::Preset => "class name",
+        };
         if self.components.is_none() {
             lines.push(
-                Line::from("The components are not loaded; Enter takes the typed name.")
-                    .style(dim()),
+                Line::from(format!(
+                    "The components are not loaded; Enter takes the typed {typed}."
+                ))
+                .style(dim()),
             );
         } else if matches.is_empty() {
-            lines.push(Line::from("No match; Enter takes the typed name.").style(dim()));
+            lines
+                .push(Line::from(format!("No match; Enter takes the typed {typed}.")).style(dim()));
         }
-        for (i, component) in matches.iter().enumerate() {
-            let class = component
-                .class_name
-                .rsplit('.')
-                .next()
-                .unwrap_or_default()
-                .to_owned();
+        for (i, choice) in matches.iter().enumerate() {
+            // A component's factory class, or a preset's package.
+            let detail = match picker.pick {
+                Pick::Component(..) => simple_name(&choice.class_name),
+                Pick::Preset => package(&choice.class_name),
+            };
             let line = Line::from(vec![
-                Span::raw(format!("{:<28} ", escape_control(&component.name))),
-                Span::styled(class, dim()),
+                Span::raw(format!("{:<28} ", escape_control(&choice.name))),
+                Span::styled(escape_control(detail), dim()),
             ]);
             lines.push(if i == selected {
                 line.style(Style::new().add_modifier(Modifier::REVERSED))
@@ -744,7 +878,10 @@ impl AnalyzerForm {
                 line
             });
         }
-        let title = format!(" Pick a {} ", picker.section.noun());
+        let title = match picker.pick {
+            Pick::Component(section, _) => format!(" Pick a {} ", section.noun()),
+            Pick::Preset => " Pick a preset analyzer ".to_owned(),
+        };
         render_popup(frame, area, &title, lines, selected + 2, WIDTH - 8);
     }
 }
@@ -819,6 +956,7 @@ mod tests {
     use ratatui::crossterm::event::KeyModifiers;
 
     use super::*;
+    use crate::protocol::analysis::{AvailableAnalyzer, AvailableComponent};
 
     fn key(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::NONE)
@@ -846,15 +984,23 @@ mod tests {
 
     fn components() -> GetAnalysisComponentsResult {
         GetAnalysisComponentsResult {
+            analyzers: ["EnglishAnalyzer", "GermanAnalyzer", "WhitespaceAnalyzer"]
+                .iter()
+                .map(|name| AvailableAnalyzer {
+                    name: (*name).to_owned(),
+                    class_name: format!("org.apache.lucene.analysis.x.{name}"),
+                })
+                .collect(),
             char_filters: available(&["htmlStrip", "mapping"]),
             tokenizers: available(&["keyword", "standard", "whitespace"]),
             token_filters: available(&["asciiFolding", "lowercase", "stop", "stemmerOverride"]),
         }
     }
 
+    /// ← cycles back from standard to custom.
     fn custom_form() -> AnalyzerForm {
         let mut form = AnalyzerForm::new(&AnalyzerSettings::default(), Some(components()));
-        press(&mut form, KeyCode::Char(' '));
+        press(&mut form, KeyCode::Left);
         form
     }
 
@@ -874,7 +1020,7 @@ mod tests {
     }
 
     #[test]
-    fn space_switches_to_the_custom_chain_of_the_standard_analyzer() {
+    fn left_switches_to_the_custom_chain_of_the_standard_analyzer() {
         let mut form = custom_form();
         let settings = applied(&mut form);
         assert!(settings.is_custom());
@@ -932,7 +1078,7 @@ mod tests {
     #[test]
     fn takes_a_typed_name_that_is_not_listed() {
         let mut form = AnalyzerForm::new(&AnalyzerSettings::default(), None);
-        press(&mut form, KeyCode::Char(' '));
+        press(&mut form, KeyCode::Left);
         press(&mut form, KeyCode::End);
         press(&mut form, KeyCode::Up);
         // The tokenizer row: Space picks another.
@@ -1033,9 +1179,60 @@ mod tests {
         press(&mut form, KeyCode::Char(' '));
         let standard = applied(&mut form);
         assert_eq!(standard.analyzer(), Analyzer::default());
-        press(&mut form, KeyCode::Char(' '));
+        press(&mut form, KeyCode::Left);
         assert_eq!(applied(&mut form).text(), "standard › lowercase › stop");
         assert_eq!(press(&mut form, KeyCode::Esc), FormEvent::Cancel);
+    }
+
+    #[test]
+    fn picks_a_preset_by_its_simple_name() {
+        let mut form = AnalyzerForm::new(&AnalyzerSettings::default(), Some(components()));
+        press(&mut form, KeyCode::Char(' '));
+        let settings = applied(&mut form);
+        assert_eq!(settings.text(), "EnglishAnalyzer");
+        assert!(!settings.is_standard() && !settings.is_custom());
+        assert_eq!(
+            settings.analyzer(),
+            Analyzer {
+                standard: None,
+                preset: Some(PresetAnalyzer {
+                    class_name: DEFAULT_PRESET.to_owned()
+                }),
+                custom: None,
+            }
+        );
+
+        // The class row opens the list; the filter matches the simple name.
+        press(&mut form, KeyCode::Down);
+        press(&mut form, KeyCode::Char(' '));
+        typed(&mut form, "MAN");
+        let screen = render(&form);
+        assert!(screen.contains("Pick a preset analyzer"), "{screen}");
+        assert!(screen.contains("org.apache.lucene.analysis.x"), "{screen}");
+        assert!(!screen.contains("Whitespace"), "{screen}");
+        press(&mut form, KeyCode::Enter);
+        let settings = applied(&mut form);
+        assert_eq!(settings.text(), "GermanAnalyzer");
+        assert_eq!(
+            settings.analyzer().preset.unwrap().class_name,
+            "org.apache.lucene.analysis.x.GermanAnalyzer"
+        );
+        assert!(
+            render(&form).contains("Class          GermanAnalyzer  org.apache.lucene.analysis.x")
+        );
+
+        // A class name that is not listed is taken as typed.
+        press(&mut form, KeyCode::Char(' '));
+        typed(&mut form, "com.example.MyAnalyzer");
+        press(&mut form, KeyCode::Enter);
+        assert_eq!(applied(&mut form).text(), "MyAnalyzer");
+
+        // The preset is kept while another kind is chosen.
+        press(&mut form, KeyCode::Home);
+        press(&mut form, KeyCode::Right);
+        assert!(applied(&mut form).is_custom());
+        press(&mut form, KeyCode::Left);
+        assert_eq!(applied(&mut form).text(), "MyAnalyzer");
     }
 
     #[test]
@@ -1045,16 +1242,20 @@ mod tests {
         assert_eq!(wrap_words("", 3), [""]);
     }
 
-    #[test]
-    fn renders_the_chain_and_the_error() {
-        let mut form = custom_form();
-        form.set_error("Invalid analyzer: no token filter 'nope'".to_owned());
+    fn render(form: &AnalyzerForm) -> String {
         let mut terminal =
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(80, 24)).unwrap();
         terminal
             .draw(|frame| form.render(frame, frame.area()))
             .unwrap();
-        let screen = format!("{}", terminal.backend());
+        format!("{}", terminal.backend())
+    }
+
+    #[test]
+    fn renders_the_chain_and_the_error() {
+        let mut form = custom_form();
+        form.set_error("Invalid analyzer: no token filter 'nope'".to_owned());
+        let screen = render(&form);
         for text in [
             "Analyzer       custom",
             "Config dir     none",

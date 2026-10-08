@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 34,
+  "method": "analyze",
+  "params": {
+    "analyzer": {"preset": {"className": "org.apache.lucene.analysis.en.EnglishAnalyzer"}},
+    "text": "The running foxes"
+  }
+}

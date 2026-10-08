@@ -8,13 +8,25 @@ import java.util.Optional;
 import org.apache.lucene.analysis.Analyzer;
 
 /**
- * What {@link Analyzers#build} makes an {@link Analyzer} from (ADR 0014): {@code StandardAnalyzer}
- * or a {@code CustomAnalyzer}.
+ * What {@link Analyzers#build} makes an {@link Analyzer} from (ADR 0014): {@code StandardAnalyzer},
+ * a preset analyzer by class name (ADR 0015) or a {@code CustomAnalyzer}.
  */
 public sealed interface AnalyzerSpec {
 
     /** Lucene's {@code StandardAnalyzer}. */
     record Standard() implements AnalyzerSpec {}
+
+    /**
+     * An analyzer created with its public no-argument constructor (ADR 0015).
+     *
+     * @param className the class's fully qualified name, one that {@link Analyzers#components} lists
+     */
+    record Preset(String className) implements AnalyzerSpec {
+
+        public Preset {
+            Objects.requireNonNull(className);
+        }
+    }
 
     /**
      * A {@code CustomAnalyzer}: char filters, one tokenizer, then token filters.

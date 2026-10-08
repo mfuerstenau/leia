@@ -49,9 +49,13 @@ public final class Analyzers {
 
     private Analyzers() {}
 
-    /** The char filters, tokenizers and token filters on the classpath. */
+    /**
+     * The preset analyzers, char filters, tokenizers and token filters on the classpath. The first
+     * call reads the analysis jars for the presets.
+     */
     public static AnalysisComponents components() {
         return new AnalysisComponents(
+                PresetAnalyzers.list(),
                 available(CharFilterFactory.availableCharFilters(), CharFilterFactory::lookupClass),
                 available(TokenizerFactory.availableTokenizers(), TokenizerFactory::lookupClass),
                 available(TokenFilterFactory.availableTokenFilters(), TokenFilterFactory::lookupClass));
@@ -61,12 +65,14 @@ public final class Analyzers {
      * A new analyzer for {@code spec}, which the caller closes. A custom analyzer reads its resource
      * files now.
      *
-     * @throws InvalidAnalyzerException for an unknown component, an unknown or bad parameter, a config
-     *     directory that is not a directory, or a resource file that can't be read or parsed
+     * @throws InvalidAnalyzerException for a preset that is not listed or fails to construct, an
+     *     unknown component, an unknown or bad parameter, a config directory that is not a
+     *     directory, or a resource file that can't be read or parsed
      */
     public static Analyzer build(AnalyzerSpec spec) throws InvalidAnalyzerException {
         return switch (spec) {
             case AnalyzerSpec.Standard _ -> new StandardAnalyzer();
+            case AnalyzerSpec.Preset preset -> PresetAnalyzers.create(preset.className());
             case AnalyzerSpec.Custom custom -> custom(custom);
         };
     }

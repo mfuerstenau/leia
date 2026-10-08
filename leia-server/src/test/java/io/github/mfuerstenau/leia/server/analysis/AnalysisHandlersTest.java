@@ -10,11 +10,13 @@ import io.github.mfuerstenau.leia.protocol.analysis.AnalysisComponent;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeParams;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeResult;
 import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.AvailableAnalyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.AvailableComponent;
 import io.github.mfuerstenau.leia.protocol.analysis.CharFilterStep;
 import io.github.mfuerstenau.leia.protocol.analysis.CustomAnalyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsParams;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsResult;
+import io.github.mfuerstenau.leia.protocol.analysis.PresetAnalyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.StandardAnalyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.Token;
 import io.github.mfuerstenau.leia.protocol.analysis.TokenAttribute;
@@ -33,7 +35,8 @@ import org.junit.jupiter.api.io.TempDir;
 /** {@code getAnalysisComponents} and {@code analyze}. Neither needs an open index. */
 class AnalysisHandlersTest {
 
-    private static final Analyzer STANDARD = new Analyzer(Optional.of(new StandardAnalyzer()), Optional.empty());
+    private static final Analyzer STANDARD =
+            new Analyzer(Optional.of(new StandardAnalyzer()), Optional.empty(), Optional.empty());
 
     @TempDir
     Path tmp;
@@ -50,6 +53,24 @@ class AnalysisHandlersTest {
                 .contains(new AvailableComponent(
                         "standard", "org.apache.lucene.analysis.standard.StandardTokenizerFactory"));
         assertThat(result.tokenFilters()).extracting(AvailableComponent::name).contains("lowercase", "stop");
+        assertThat(result.analyzers())
+                .contains(new AvailableAnalyzer("EnglishAnalyzer", "org.apache.lucene.analysis.en.EnglishAnalyzer"));
+    }
+
+    @Test
+    void analyzesWithAPreset() throws Exception {
+        AnalyzeResult result = analyze.handle(
+                new AnalyzeParams(preset("org.apache.lucene.analysis.en.EnglishAnalyzer"), "The running foxes"));
+
+        assertThat(result.charFilters()).isEmpty();
+        assertThat(result.stages()).singleElement().satisfies(stage -> {
+            assertThat(stage.name()).isEqualTo("EnglishAnalyzer");
+            assertThat(stage.tokens()).extracting(Token::term).containsExactly("run", "fox");
+        });
+        assertFails(
+                () -> analyze.handle(new AnalyzeParams(preset("java.lang.Thread"), "x")), ErrorCode.INVALID_ANALYZER);
+        var both = new Analyzer(STANDARD.standard(), preset("java.lang.Thread").preset(), Optional.empty());
+        assertFails(() -> analyze.handle(new AnalyzeParams(both, "x")), ErrorCode.INVALID_PARAMS);
     }
 
     @Test
@@ -103,11 +124,13 @@ class AnalysisHandlersTest {
 
         var both = new Analyzer(
                 STANDARD.standard(),
+                Optional.empty(),
                 custom(List.of(), component("whitespace"), List.of(), Optional.empty())
                         .custom());
         assertFails(() -> analyze.handle(new AnalyzeParams(both, "x")), ErrorCode.INVALID_PARAMS);
         assertFails(
-                () -> analyze.handle(new AnalyzeParams(new Analyzer(Optional.empty(), Optional.empty()), "x")),
+                () -> analyze.handle(
+                        new AnalyzeParams(new Analyzer(Optional.empty(), Optional.empty(), Optional.empty()), "x")),
                 ErrorCode.INVALID_PARAMS);
     }
 
@@ -135,6 +158,10 @@ class AnalysisHandlersTest {
         assertFails(() -> analyze.handle(new AnalyzeParams(badParam, "x")), ErrorCode.INVALID_ANALYZER);
     }
 
+    private static Analyzer preset(String className) {
+        return new Analyzer(Optional.empty(), Optional.of(new PresetAnalyzer(className)), Optional.empty());
+    }
+
     private static AnalysisComponent component(String name) {
         return new AnalysisComponent(name, Map.of());
     }
@@ -145,7 +172,9 @@ class AnalysisHandlersTest {
             List<AnalysisComponent> tokenFilters,
             Optional<String> configDir) {
         return new Analyzer(
-                Optional.empty(), Optional.of(new CustomAnalyzer(charFilters, tokenizer, tokenFilters, configDir)));
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(new CustomAnalyzer(charFilters, tokenizer, tokenFilters, configDir)));
     }
 
     private static void assertFails(ThrowingCallable call, ErrorCode code) {

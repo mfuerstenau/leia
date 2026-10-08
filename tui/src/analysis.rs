@@ -1,7 +1,8 @@
 //! The analysis screen (ADR 0014): the current analyzer, a text line, and what the analyzer makes
 //! of the text, step by step: the text after each char filter, and the tokens after the tokenizer
 //! and each token filter, with every attribute of the selected token. It works without an open
-//! index. `b` builds the analyzer, which the search screen then parses and likes with.
+//! index. `b` builds the analyzer, which the search screen then parses and likes with. `a` on the
+//! documents screen brings a stored value here.
 
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent};
@@ -50,6 +51,13 @@ struct Shown {
     result: AnalyzeResult,
 }
 
+/// Where the text came from, such as a stored value; shown while the text line holds it.
+#[derive(Debug)]
+struct Origin {
+    text: String,
+    label: String,
+}
+
 /// A step of the analysis: the text after a char filter, or the tokens after a stage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Step {
@@ -61,6 +69,7 @@ pub struct Analysis {
     settings: AnalyzerSettings,
     components: Option<Result<GetAnalysisComponentsResult, String>>,
     input: LineInput,
+    origin: Option<Origin>,
     editing: bool,
     form: Option<AnalyzerForm>,
     /// The analyzer that the form applied, while the server tries it.
@@ -86,6 +95,7 @@ impl Analysis {
             settings: AnalyzerSettings::default(),
             components: None,
             input: LineInput::new(""),
+            origin: None,
             editing: false,
             form: None,
             trying: None,
@@ -146,6 +156,25 @@ impl Analysis {
             (Some(_), Some(form)) => form.set_error(error),
             _ => self.outcome = Some(Err(error)),
         }
+    }
+
+    /// Analyzes a value from elsewhere, such as a document's stored value, with the current
+    /// analyzer; `label` says where it is from. A value longer than the server takes is cut to
+    /// its start.
+    pub fn analyze_value(&mut self, label: String, text: &str) -> Option<Request> {
+        let (text, cut) = within_limit(text);
+        let label = if cut {
+            format!("{label} · first {MAX_TEXT_LENGTH} characters")
+        } else {
+            label
+        };
+        self.input.set(text.to_owned());
+        self.origin = Some(Origin {
+            text: text.to_owned(),
+            label,
+        });
+        self.editing = false;
+        self.analyze(&self.settings)
     }
 
     /// The analysis of the text line with `settings`.
@@ -321,8 +350,11 @@ impl Analysis {
             None => {
                 frame.render_widget(
                     Paragraph::new(vec![
-                        Line::from("Press / to type a text, then Enter to analyze it.")
-                            .style(dim()),
+                        Line::from(
+                            "Press / to type a text, then Enter to analyze it, or a on the \
+                             documents screen for a stored value.",
+                        )
+                        .style(dim()),
                         Line::from(
                             "Each step shows what the analyzer has made of it so far, and each \
                              token every attribute.",
@@ -379,7 +411,13 @@ impl Analysis {
     }
 
     fn render_text(&self, frame: &mut Frame, area: Rect) {
-        let block = panel(" Text ".to_owned(), self.editing);
+        let title = match &self.origin {
+            Some(origin) if origin.text == self.input.text() => {
+                format!(" Text · {} ", escape_control(&origin.label))
+            }
+            _ => " Text ".to_owned(),
+        };
+        let block = panel(title, self.editing);
         let inner = block.inner(area);
         frame.render_widget(block, area);
         if self.editing {
@@ -598,6 +636,18 @@ fn too_long(text: &str) -> bool {
     text.encode_utf16().count() > MAX_TEXT_LENGTH
 }
 
+/// The start of `text` that the server takes, cut between two characters, and whether it is cut.
+fn within_limit(text: &str) -> (&str, bool) {
+    let mut units = 0;
+    for (i, c) in text.char_indices() {
+        units += c.len_utf16();
+        if units > MAX_TEXT_LENGTH {
+            return (&text[..i], true);
+        }
+    }
+    (text, false)
+}
+
 #[cfg(test)]
 mod tests {
     use ratatui::Terminal;
@@ -736,8 +786,8 @@ mod tests {
     fn an_applied_analyzer_becomes_current_once_the_server_took_it() {
         let mut analysis = Analysis::new();
         press(&mut analysis, KeyCode::Char('b'));
-        // Switch to the custom chain and apply.
-        press(&mut analysis, KeyCode::Char(' '));
+        // ← switches to the custom chain; Enter applies it.
+        press(&mut analysis, KeyCode::Left);
         let Some(Request::Analyze(params)) = press(&mut analysis, KeyCode::Enter) else {
             panic!("expected an analysis");
         };
@@ -763,6 +813,39 @@ mod tests {
         assert_eq!(press(&mut analysis, KeyCode::Esc), None);
         assert!(!analysis.prompting());
         assert!(analysis.settings().is_custom());
+    }
+
+    #[test]
+    fn analyzes_a_value_from_elsewhere_cut_to_what_the_server_takes() {
+        let mut analysis = Analysis::new();
+        assert_eq!(
+            analysis.analyze_value("doc 3 · body".to_owned(), "The Fox"),
+            Some(Request::Analyze(AnalyzeParams {
+                analyzer: Analyzer::default(),
+                text: "The Fox".to_owned(),
+            }))
+        );
+        analysis.analyzed("The Fox".to_owned(), result());
+        assert!(render(&mut analysis, 100).contains("Text · doc 3 · body"));
+
+        // Once edited, the text is no longer the value.
+        press(&mut analysis, KeyCode::Char('/'));
+        typed(&mut analysis, "!");
+        assert!(!render(&mut analysis, 100).contains("doc 3"));
+
+        // A surrogate pair counts two, and is not split.
+        let long = format!("{}🦊", "a".repeat(MAX_TEXT_LENGTH - 1));
+        let Some(Request::Analyze(params)) =
+            analysis.analyze_value("doc 4 · body".to_owned(), &long)
+        else {
+            panic!("expected an analysis");
+        };
+        assert_eq!(params.text, "a".repeat(MAX_TEXT_LENGTH - 1));
+        assert!(!analysis.prompting());
+        assert!(render(&mut analysis, 120).contains(&format!(
+            "doc 4 · body · first {MAX_TEXT_LENGTH} characters"
+        )));
+        assert_eq!(within_limit("🦊"), ("🦊", false));
     }
 
     #[test]

@@ -7,6 +7,8 @@ import java.util.Optional;
  * builds it for the request.
  *
  * @param standard Lucene's {@code StandardAnalyzer}
+ * @param preset an analyzer by class name, such as {@code EnglishAnalyzer} (ADR 0015)
  * @param custom a {@code CustomAnalyzer} of char filters, a tokenizer and token filters
  */
-public record Analyzer(Optional<StandardAnalyzer> standard, Optional<CustomAnalyzer> custom) {}
+public record Analyzer(
+        Optional<StandardAnalyzer> standard, Optional<PresetAnalyzer> preset, Optional<CustomAnalyzer> custom) {}

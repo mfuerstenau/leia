@@ -7,8 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use super::method::RpcMethod;
 
-/// `getAnalysisComponents`: the char filters, tokenizers and token filters that a custom analyzer
-/// can be built from (ADR 0014). Needs no open index.
+/// `getAnalysisComponents`: the analyzers that a preset can name (ADR 0015), and the char
+/// filters, tokenizers and token filters that a custom analyzer can be built from (ADR 0014).
+/// Needs no open index.
 pub enum GetAnalysisComponents {}
 
 impl RpcMethod for GetAnalysisComponents {
@@ -34,14 +35,25 @@ impl RpcMethod for Analyze {
 #[serde(deny_unknown_fields)]
 pub struct GetAnalysisComponentsParams {}
 
-/// Result of `getAnalysisComponents`: what a custom analyzer can be built from, each sorted by
-/// name, ignoring case.
+/// Result of `getAnalysisComponents`: the analyzers that a preset can name, and what a custom
+/// analyzer can be built from, each sorted by name, ignoring case.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GetAnalysisComponentsResult {
+    pub analyzers: Vec<AvailableAnalyzer>,
     pub char_filters: Vec<AvailableComponent>,
     pub tokenizers: Vec<AvailableComponent>,
     pub token_filters: Vec<AvailableComponent>,
+}
+
+/// An analyzer that a preset can name (ADR 0015).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AvailableAnalyzer {
+    /// The simple class name, such as `EnglishAnalyzer`.
+    pub name: String,
+    /// The fully qualified class name, which [`PresetAnalyzer`] takes.
+    pub class_name: String,
 }
 
 /// A factory that a custom analyzer can name.
@@ -62,6 +74,9 @@ pub struct Analyzer {
     /// Lucene's `StandardAnalyzer`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub standard: Option<StandardAnalyzer>,
+    /// An analyzer by class name, such as `EnglishAnalyzer` (ADR 0015).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preset: Option<PresetAnalyzer>,
     /// A `CustomAnalyzer` of char filters, a tokenizer and token filters.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub custom: Option<CustomAnalyzer>,
@@ -72,6 +87,7 @@ impl Default for Analyzer {
     fn default() -> Self {
         Self {
             standard: Some(StandardAnalyzer {}),
+            preset: None,
             custom: None,
         }
     }
@@ -81,6 +97,14 @@ impl Default for Analyzer {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StandardAnalyzer {}
+
+/// An analyzer created by class name with its public no-argument constructor (ADR 0015).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PresetAnalyzer {
+    /// The fully qualified class name, one that `getAnalysisComponents` lists in `analyzers`.
+    pub class_name: String,
+}
 
 /// A `CustomAnalyzer`: the text goes through the char filters, the tokenizer and the token
 /// filters, in that order.
