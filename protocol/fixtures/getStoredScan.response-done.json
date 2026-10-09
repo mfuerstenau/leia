@@ -1,0 +1,38 @@
+{
+  "jsonrpc": "2.0",
+  "id": 53,
+  "result": {
+    "scannedDocs": 500,
+    "matchedValues": 4,
+    "hitCount": 4,
+    "hits": [
+      {
+        "docId": 42,
+        "deleted": false,
+        "field": "_source",
+        "valueIndex": 0,
+        "length": 110592,
+        "matchCount": 3001,
+        "spans": [
+          {"start": 2, "end": 9},
+          {"start": 105, "end": 112}
+        ],
+        "snippet": {
+          "start": 0,
+          "text": "{\"name\":\"Café ☕ lamp\",\"history\":[{\"name\":"
+        }
+      }
+    ],
+    "result": {
+      "scannedDocs": 500,
+      "matchedDocs": 3,
+      "matchedValues": 4,
+      "hitsTruncated": false,
+      "timedOutValues": 1,
+      "timedOut": [
+        {"docId": 7, "field": "odd_text", "valueIndex": 0}
+      ],
+      "tookMillis": 840
+    }
+  }
+}

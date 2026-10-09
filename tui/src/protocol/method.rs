@@ -10,7 +10,9 @@ use super::document::{GetDocument, GetStoredValue, GetTermVector};
 use super::index::{CloseIndex, GetIndexStats, OpenIndex, ReopenIndex};
 use super::jars::{AddJars, GetJars};
 use super::job::CancelJob;
-use super::search::{GetExplain, GetSearch, StartExplain, StartSearch};
+use super::search::{
+    GetExplain, GetSearch, GetStoredScan, StartExplain, StartSearch, StartStoredScan,
+};
 use super::terms::{
     GetExportTerms, GetFieldTermScan, GetPositions, GetPostings, GetTerms, StartExportTerms,
     StartFieldTermScan,
@@ -46,6 +48,8 @@ pub const METHOD_NAMES: &[&str] = &[
     GetSearch::NAME,
     StartExplain::NAME,
     GetExplain::NAME,
+    StartStoredScan::NAME,
+    GetStoredScan::NAME,
     GetAnalysisComponents::NAME,
     Analyze::NAME,
     StartCheckIndex::NAME,

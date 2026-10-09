@@ -17,7 +17,9 @@ use super::document::{GetDocument, GetStoredValue, GetTermVector};
 use super::index::{CloseIndex, GetIndexStats, OpenIndex, ReopenIndex};
 use super::jars::{AddJars, GetJars};
 use super::job::CancelJob;
-use super::search::{GetExplain, GetSearch, StartExplain, StartSearch};
+use super::search::{
+    GetExplain, GetSearch, GetStoredScan, StartExplain, StartSearch, StartStoredScan,
+};
 use super::terms::{
     GetExportTerms, GetFieldTermScan, GetPositions, GetPostings, GetTerms, StartExportTerms,
     StartFieldTermScan,
@@ -168,6 +170,8 @@ fn check(fixture: &Fixture, json: &str) -> Result<(), String> {
         GetSearch::NAME => check_method::<GetSearch>(fixture, json),
         StartExplain::NAME => check_method::<StartExplain>(fixture, json),
         GetExplain::NAME => check_method::<GetExplain>(fixture, json),
+        StartStoredScan::NAME => check_method::<StartStoredScan>(fixture, json),
+        GetStoredScan::NAME => check_method::<GetStoredScan>(fixture, json),
         GetAnalysisComponents::NAME => check_method::<GetAnalysisComponents>(fixture, json),
         Analyze::NAME => check_method::<Analyze>(fixture, json),
         StartCheckIndex::NAME => check_method::<StartCheckIndex>(fixture, json),

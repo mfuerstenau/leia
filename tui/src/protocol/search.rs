@@ -523,6 +523,142 @@ pub struct Explanation {
     pub details: Vec<Explanation>,
 }
 
+/// `startStoredScan`: starts a job that looks for a regular expression in the stored values of
+/// every document of the open index (ADR 0027): text values, and binary values that are UTF-8.
+/// Fails with `NO_INDEX_OPEN`, `NO_READER`, `INVALID_QUERY` if the pattern doesn't compile, or
+/// `FIELD_NOT_FOUND` for an unknown field.
+pub enum StartStoredScan {}
+
+impl RpcMethod for StartStoredScan {
+    const NAME: &'static str = "startStoredScan";
+    type Params = StartStoredScanParams;
+    type Result = JobStarted;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StartStoredScanParams {
+    /// A Java regular expression, found anywhere in a value (`Matcher.find`); flags such as `(?s)`
+    /// can be given inline.
+    pub pattern: String,
+    /// Whether case doesn't matter, Unicode case included.
+    pub case_insensitive: bool,
+    /// The stored fields to scan; `None` for all of them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fields: Option<Vec<String>>,
+    /// Whether to scan deleted documents too.
+    pub include_deleted: bool,
+}
+
+/// The most hits a scan keeps; it counts the matching values after them.
+pub const MAX_STORED_SCAN_HITS: i32 = 10_000;
+
+/// `getStoredScan`: the hits of a scan of the stored values from a given hit on, and its outcome
+/// once it is done (ADR 0027). The outcome is handed out once, with the last hits; afterwards the
+/// job is gone (`JOB_NOT_FOUND`). Fails with `INVALID_PARAMS` for a negative `from_hit`.
+pub enum GetStoredScan {}
+
+impl RpcMethod for GetStoredScan {
+    const NAME: &'static str = "getStoredScan";
+    type Params = GetStoredScanParams;
+    type Result = GetStoredScanResult;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetStoredScanParams {
+    /// The job, as returned by `startStoredScan`.
+    pub job_id: i64,
+    /// The first hit to return: the number of hits the caller has.
+    pub from_hit: i32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetStoredScanResult {
+    /// The document ids gone through so far, of maxDoc.
+    pub scanned_docs: i64,
+    /// Values in which the pattern was found so far, also those after the kept hits.
+    pub matched_values: i64,
+    /// The hits kept so far, at most [`MAX_STORED_SCAN_HITS`].
+    pub hit_count: i32,
+    /// The hits from `from_hit` on; all of them once the outcome is there.
+    pub hits: Vec<StoredScanHit>,
+    /// The outcome; `None` while the scan is running.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<StoredScanResult>,
+}
+
+/// A stored value in which the pattern of a scan was found. Positions are UTF-8 byte offsets into
+/// the whole value, as lengths are in ADR 0008.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StoredScanHit {
+    pub doc_id: i32,
+    /// Whether the document is deleted.
+    pub deleted: bool,
+    pub field: String,
+    /// The value's position among the document's stored values in the field, as `getStoredValue`
+    /// takes it.
+    pub value_index: i32,
+    /// The value's length in bytes.
+    pub length: i32,
+    /// How many matches the value has.
+    pub match_count: i32,
+    /// The first 100 matches, in order.
+    pub spans: Vec<MatchSpan>,
+    /// The value around the first match.
+    pub snippet: Snippet,
+}
+
+/// Where a match is in a stored value, in UTF-8 bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct MatchSpan {
+    /// The offset of the match's first byte.
+    pub start: i32,
+    /// The offset after the match's last byte; `start` for an empty match.
+    pub end: i32,
+}
+
+/// A part of a stored value around its first match, cut between two characters.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Snippet {
+    /// The UTF-8 byte offset in the value where `text` starts.
+    pub start: i32,
+    pub text: String,
+}
+
+/// The outcome of a scan of the stored values.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StoredScanResult {
+    /// The document ids gone through: maxDoc, deleted documents included even when they were
+    /// skipped.
+    pub scanned_docs: i32,
+    /// Documents with at least one value in which the pattern was found.
+    pub matched_docs: i32,
+    /// Values in which the pattern was found.
+    pub matched_values: i64,
+    /// Whether more values matched than the scan kept as hits.
+    pub hits_truncated: bool,
+    /// Values that were skipped because matching them took too long.
+    pub timed_out_values: i64,
+    /// The first 100 of those.
+    pub timed_out: Vec<ValueRef>,
+    pub took_millis: i64,
+}
+
+/// A stored value: of a document, in a field, at a position among the field's values.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ValueRef {
+    pub doc_id: i32,
+    pub field: String,
+    pub value_index: i32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

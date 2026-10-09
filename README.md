@@ -29,6 +29,8 @@ because Lucene 10 can't read them.
   sorted by score, document id or up to two doc values fields (with the value of a multi-valued
   field and the place of missing values); the hits with their scores, sort values and
   chosen stored fields, exact or approximate hit counts, and an explanation of how a hit scores.
+  A regular expression over the stored values finds what was never indexed or was analyzed
+  away, with the matches highlighted.
 - **Analysis:** the standard analyzer, one of Lucene's analyzers by class name (such as
   `EnglishAnalyzer`), or a custom one built from Lucene's char filters, tokenizers and token filters
   with their parameters and a config directory for resource files. More analyzers and components
@@ -225,6 +227,7 @@ field's terms.
 | Key | Action |
 |---|---|
 | `←` `→` / `p` `n` | previous or next value |
+| `m` `M` | next or previous match, for a value opened from the regex scan |
 | `t` | show the text |
 | `h` | switch between the text and a hex dump |
 | `J` | switch between the text and pretty-printed JSON |
@@ -298,7 +301,7 @@ shows as missing. The documents and terms screens always show the opened commit.
 | Key | Action |
 |---|---|
 | `/` | edit the query, or for More-Like-This the document id; `Enter` searches, `Esc` leaves the line, and `←` `→`, `Ctrl+A` `E` `U` `K` `W` edit |
-| `m` | switch between classic query syntax, standard query syntax, a single term and More-Like-This |
+| `m` | switch between classic query syntax, standard query syntax, a single term, More-Like-This and a regex over stored values |
 | `p` | set the parser options, and for the standard syntax the type of each point field; for More-Like-This, its fields and limits; `Enter` applies, `Esc` cancels |
 | `s` | set the similarity (BM25 with `k1` and `b`, classic TF-IDF or boolean) and the sort; `Enter` applies, `Esc` cancels |
 | `l` | choose the stored fields each hit shows; `Space` shows or hides one, `a` all, `n` none |
@@ -306,7 +309,10 @@ shows as missing. The documents and terms screens always show the opened commit.
 | `a` | combine clauses without an operator with OR or AND |
 | `t` | count every hit, or stop counting after 1000 |
 | `x` | explain how the selected hit scores |
+| `i` | regex: ignore case, or match it |
+| `d` | regex: scan deleted documents too, or not |
 | `Enter` | show the selected hit's document on the documents screen |
+| `v` | regex: view the selected value with its matches highlighted |
 | `Tab` | switch between the hits and the details |
 | `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the hits, or scroll the details |
 
@@ -359,6 +365,19 @@ the parsed and the rewritten query, or after `x` the explanation of the selected
 computes it; parts that don't match are dimmed. Searches and explanations run in the server, so
 `Esc` stops a slow one, such as a fuzzy query on a large index. A numeric range in classic syntax
 doesn't match point fields: use the standard syntax.
+
+The regex mode reads every document's stored fields, those chosen with `l` or all of them, and
+looks for a Java regular expression anywhere in each text value and each binary value that is
+UTF-8, such as Elasticsearch's `_source` (ADR 0027). It finds what no query can: values that were
+never indexed, or whose terms the analyzer changed. Flags go inline, such as `(?s)` for `.` over
+line breaks. Every document is read, so on a large index the scan is slow; the hits come in while
+it runs, and `Esc` stops it with the hits found so far. Each hit is one value: its document (`✗`
+if deleted), its field and position, the number of matches, and the text around the first match
+with the matches highlighted. The first 10,000 values are listed; the counts are of all of them.
+Matching one value may take at most a second, against patterns that backtrack without end such as
+`(.*a){20}b`; a value that takes longer is skipped, and the details panel lists it. `v` opens the
+value in the viewer with its first 100 matches highlighted, `m` and `M` jump between them, and
+`[` and `]` on the documents screen step through the documents of the hits.
 
 #### Check
 

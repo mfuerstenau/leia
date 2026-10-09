@@ -10,6 +10,7 @@ import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -19,6 +20,7 @@ import java.util.TreeMap;
 import java.util.concurrent.CancellationException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.FieldInfo;
@@ -703,6 +705,37 @@ public final class ReadOnlyIndex implements OpenedIndex {
             throws IOException, InvalidQueryException {
         checkDocId(docId);
         return Searcher.explain(directoryReaders(), query, similarity, docId, progress);
+    }
+
+    /**
+     * Looks for {@code pattern} in the stored values of every document (ADR 0027), in document id
+     * order, and passes the values in which it was found to {@code listener}. {@code progress}
+     * receives the document ids gone through and can stop the scan by throwing a {@link
+     * CancellationException}.
+     *
+     * @param fields the stored fields to scan; empty for all of them
+     * @param includeDeleted whether to scan deleted documents too
+     * @param maxHits how many hits to pass on; later matches are only counted
+     * @param valueTimeLimit how long matching one value may take before it is skipped
+     * @throws IllegalArgumentException if a field doesn't exist, or {@code maxHits} is negative
+     * @throws IOException if reading a document fails
+     */
+    public StoredScan.Summary storedScan(
+            Pattern pattern,
+            Optional<Set<String>> fields,
+            boolean includeDeleted,
+            int maxHits,
+            Duration valueTimeLimit,
+            StoredScan.Listener listener,
+            ScanProgress progress)
+            throws IOException {
+        if (fields.isPresent()) {
+            fields.get().forEach(this::checkField);
+        }
+        if (maxHits < 0) {
+            throw new IllegalArgumentException("maxHits must not be negative: " + maxHits);
+        }
+        return StoredScan.scan(reader, pattern, fields, includeDeleted, maxHits, valueTimeLimit, listener, progress);
     }
 
     @Override

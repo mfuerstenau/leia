@@ -1,7 +1,11 @@
 //! How text from the index is shown: control characters escaped, so that they can't break the
 //! layout, and byte strings that are not UTF-8 as `0x` and their hex.
 
+use ratatui::style::{Color, Style};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+
+/// A match of a pattern in a value: the regex scan's snippets and the viewer (ADR 0027).
+pub const MATCH: Style = Style::new().fg(Color::Black).bg(Color::Yellow);
 
 /// `text` with control characters, line breaks included, escaped.
 pub fn escape_control(text: &str) -> String {

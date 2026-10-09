@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "id": 51,
+  "method": "startStoredScan",
+  "params": {
+    "pattern": "^$",
+    "caseInsensitive": false,
+    "includeDeleted": true
+  }
+}

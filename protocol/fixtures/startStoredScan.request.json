@@ -1,0 +1,11 @@
+{
+  "jsonrpc": "2.0",
+  "id": 50,
+  "method": "startStoredScan",
+  "params": {
+    "pattern": "sku\\d{4}",
+    "caseInsensitive": true,
+    "fields": ["body", "_source"],
+    "includeDeleted": false
+  }
+}

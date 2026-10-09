@@ -38,10 +38,11 @@ use leia::protocol::jars::{AddJars, AddJarsParams, GetJars, GetJarsParams};
 use leia::protocol::job::{CancelJob, JobParams};
 use leia::protocol::search::{
     Bm25Similarity, ClassicQuery, ClassicSimilarity, DateResolution, DocSort, FieldSort,
-    GetExplain, GetSearch, MAX_FUZZY_EDITS, MoreLikeThisQuery, ParserOptions, PointField,
-    PointType, QueryOperator, ScoreSort, SearchQuery, Similarity, SortKey, SortMissing,
-    SortSelector, SortType, StandardQuery, StartExplain, StartExplainParams, StartSearch,
-    StartSearchParams, TotalHitsRelation,
+    GetExplain, GetSearch, GetStoredScan, GetStoredScanParams, MAX_FUZZY_EDITS, MoreLikeThisQuery,
+    ParserOptions, PointField, PointType, QueryOperator, ScoreSort, SearchQuery, Similarity,
+    SortKey, SortMissing, SortSelector, SortType, StandardQuery, StartExplain, StartExplainParams,
+    StartSearch, StartSearchParams, StartStoredScan, StartStoredScanParams, StoredScanHit,
+    StoredScanResult, TotalHitsRelation,
 };
 use leia::protocol::terms::{
     ExportTermsResult, FieldTerms, GetExportTerms, GetFieldTermScan, GetPositions,
@@ -1833,6 +1834,91 @@ fn analyzes_without_an_open_index() {
         .unwrap_err();
     assert!(
         matches!(&error, CallError::Rpc(e) if e.code == ErrorCode::InvalidAnalyzer),
+        "{error:?}"
+    );
+}
+
+/// Scans the stored values as the TUI does, collecting the hits, until the outcome is there.
+fn await_stored_scan(
+    server: &mut Server,
+    params: StartStoredScanParams,
+) -> (Vec<StoredScanHit>, StoredScanResult) {
+    let job = server.call::<StartStoredScan>(params).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut hits = Vec::new();
+    loop {
+        let poll = server
+            .call::<GetStoredScan>(GetStoredScanParams {
+                job_id: job.job_id,
+                from_hit: i32::try_from(hits.len()).unwrap(),
+            })
+            .unwrap();
+        hits.extend(poll.hits);
+        assert_eq!(usize::try_from(poll.hit_count).unwrap(), hits.len());
+        if let Some(result) = poll.result {
+            return (hits, result);
+        }
+        assert!(Instant::now() < deadline, "the scan did not finish");
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn scans_the_stored_values_of_the_demo_index() {
+    let mut server = start();
+    server
+        .call::<OpenIndex>(OpenIndexParams {
+            path: test_index("demo", "demoIndex"),
+            directory_impl: None,
+            mode: None,
+        })
+        .unwrap();
+    let scan = |pattern: &str, fields: &[&str], include_deleted: bool| StartStoredScanParams {
+        pattern: pattern.to_owned(),
+        case_insensitive: false,
+        fields: Some(fields.iter().map(|&field| field.to_owned()).collect()),
+        include_deleted,
+    };
+
+    let (hits, result) = await_stored_scan(&mut server, scan("sku\\d{4}", &["body"], false));
+    assert!(!hits.is_empty());
+    assert_eq!(result.scanned_docs, 500);
+    assert_eq!(result.matched_values, i64::try_from(hits.len()).unwrap());
+    assert!(hits.iter().all(|hit| !hit.deleted && hit.field == "body"));
+    // The spans are byte offsets into the whole value, which getStoredValue returns.
+    let hit = &hits[0];
+    let value = server
+        .call::<GetStoredValue>(GetStoredValueParams {
+            doc_id: hit.doc_id,
+            field: hit.field.clone(),
+            index: hit.value_index,
+        })
+        .unwrap();
+    let span = hit.spans[0];
+    let matched = &value.value.value[span.start as usize..span.end as usize];
+    assert!(
+        matched.starts_with("sku") && matched.len() == 7,
+        "{matched}"
+    );
+
+    // `deleted_only` is only in document 74, which is deleted.
+    let (live, _) = await_stored_scan(&mut server, scan(".", &["deleted_only"], false));
+    assert!(live.is_empty());
+    let (deleted, _) = await_stored_scan(&mut server, scan(".", &["deleted_only"], true));
+    assert_eq!(
+        deleted
+            .iter()
+            .map(|hit| (hit.doc_id, hit.deleted))
+            .collect::<Vec<_>>(),
+        [(74, true)]
+    );
+
+    let error = server
+        .call::<StartStoredScan>(scan("(sku", &["body"], false))
+        .unwrap_err();
+    assert!(
+        matches!(&error, CallError::Rpc(e) if e.code == ErrorCode::InvalidQuery),
         "{error:?}"
     );
 }

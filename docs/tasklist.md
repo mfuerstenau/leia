@@ -8,10 +8,6 @@ From the read-only checklist in `luke-features.md` §7. Ordered roughly by value
 
 - [ ] Search: a date resolution per field (ADR 0026 has one for all fields)
 - [ ] Search: chosen MLT terms as data (`{field, term, tf, docFreq, score}`), like-text instead of a document (the analyzer is in place since ADR 0014), MLT word lengths / stop words (left out of ADR 0013)
-- [ ] Search: regex over stored values — a brute-force scan of every document's stored fields with a Java regex (`find`, not whole-value match), for values that were never indexed or were analyzed away; slow by design, so it is a job (rule 7) with progress (documents read of maxDoc) and `cancelJob`
-  - `regex {pattern, fields?, caseInsensitive, includeDeleted}` as a further query alternative, or its own `startStoredScan`/`getStoredScan`; `INVALID_QUERY` with the position for a bad pattern; a cap on hits, and on matching time per value against catastrophic backtracking
-  - hits: doc id, field, value index and the match spans, so the TUI can highlight them; `STRING` values, and `BINARY` ones that are UTF-8; partial results visible while the scan runs
-  - TUI: `m` cycles to "regex (stored values)" on the search screen, the field popup limits the fields; `Enter` opens the document, `v` the value in the viewer
 - [ ] Analysis: `PerFieldAnalyzerWrapper`, `QueryAutoStopWordAnalyzer` (needs an `IndexReader`), the collation analyzers (need a `Collator`) and `JapaneseCompletionAnalyzer` (left out of ADR 0023)
 - [ ] Open options: Elasticsearch/OpenSearch indexes (left out of ADR 0018): their codecs need the server's `lib/`, which has its own `lucene-*.jar` of another version; skipping those jars, or saying which ones clash, untested without an installation
 - [ ] Commits: per-field postings, doc values and KNN vectors formats (from each segment's field infos; ADR 0009 leaves them out)

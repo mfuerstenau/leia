@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 50,
+  "error": {
+    "code": -32012,
+    "message": "Invalid query: Unclosed group at index 6"
+  }
+}

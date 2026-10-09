@@ -34,8 +34,11 @@ import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
+import io.github.mfuerstenau.leia.protocol.search.GetStoredScanParams;
+import io.github.mfuerstenau.leia.protocol.search.GetStoredScanResult;
 import io.github.mfuerstenau.leia.protocol.search.StartExplainParams;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
+import io.github.mfuerstenau.leia.protocol.search.StartStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetExportTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetPositionsParams;
@@ -216,6 +219,23 @@ public final class Methods {
             new RpcMethod<>("getExplain", JobParams.class, GetExplainResult.class);
 
     /**
+     * Starts a job that looks for a regular expression in the stored values of every document of the
+     * open index (ADR 0027): text values, and binary values that are UTF-8. Fails with {@code
+     * NO_INDEX_OPEN}, {@code NO_READER}, {@code INVALID_QUERY} if the pattern doesn't compile, or
+     * {@code FIELD_NOT_FOUND} for an unknown field.
+     */
+    public static final RpcMethod<StartStoredScanParams, JobStarted> START_STORED_SCAN =
+            new RpcMethod<>("startStoredScan", StartStoredScanParams.class, JobStarted.class);
+
+    /**
+     * The hits of a scan of the stored values from a given hit on, and its outcome once it is done
+     * (ADR 0027). The outcome is handed out once, with the last hits; afterwards the job is gone
+     * ({@code JOB_NOT_FOUND}). Fails with {@code INVALID_PARAMS} for a negative {@code fromHit}.
+     */
+    public static final RpcMethod<GetStoredScanParams, GetStoredScanResult> GET_STORED_SCAN =
+            new RpcMethod<>("getStoredScan", GetStoredScanParams.class, GetStoredScanResult.class);
+
+    /**
      * The char filters, tokenizers and token filters that a custom analyzer can be built from (ADR
      * 0014). Needs no open index.
      */
@@ -302,6 +322,8 @@ public final class Methods {
             GET_SEARCH,
             START_EXPLAIN,
             GET_EXPLAIN,
+            START_STORED_SCAN,
+            GET_STORED_SCAN,
             GET_ANALYSIS_COMPONENTS,
             ANALYZE,
             START_CHECK_INDEX,

@@ -119,3 +119,9 @@ The analysis screen (`6`) needs no index, but these go with the demo index's tex
 - A config directory with `syn.txt` (`wifi, wireless network`) and `synonymGraph` with
   `synonyms=syn.txt`: `fast wifi router` gives `wireless` and `network` at positions 1 and 2, and
   `wifi` in italics, stacked on `wireless` and spanning `1–2`; `router` moves to position 3.
+- Regex over stored values (`m` four times), `sku\d{4}`: 980 values in 486 documents, in `body`,
+  `tagged` and `note`, each with its matches highlighted. `"event":` finds one value, the 108 KiB
+  `_source` of doc 42, with 3000 matches: `v` opens it with the first 100 highlighted, and `m`/`M`
+  jump between them. `DELETED` with `i` (ignore case) and `d` (deleted documents too): doc 74's
+  `deleted_only`, marked `✗`. `(.*.){30}x` with `l` limited to `odd_text` takes over a second on
+  doc 7, which is skipped and listed as timed out.

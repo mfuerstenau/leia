@@ -28,6 +28,7 @@ pub mod protocol;
 pub mod scoring;
 pub mod search;
 pub mod server;
+pub mod stored_scan;
 pub mod terms;
 pub mod text;
 pub mod viewer;

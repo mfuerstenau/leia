@@ -39,7 +39,8 @@ use crate::protocol::index::{
 };
 use crate::protocol::jars::{AddJarsParams, AddJarsResult};
 use crate::protocol::search::{
-    GetExplainResult, GetSearchResult, StartExplainParams, StartSearchParams,
+    GetExplainResult, GetSearchResult, GetStoredScanResult, StartExplainParams, StartSearchParams,
+    StartStoredScanParams,
 };
 use crate::protocol::terms::{
     GetExportTermsResult, GetFieldTermScanResult, GetPostingsResult, GetTermsResult,
@@ -134,7 +135,13 @@ pub enum Action {
         params: StartExplainParams,
         cancel: Vec<i64>,
     },
-    /// Cancel these search and explanation jobs, and report back with
+    /// Cancel the jobs in `cancel`, then start this scan of the stored values, and report back
+    /// with [`App::stored_scan_started`] or [`App::stored_scan_failed`] (ADR 0027).
+    StartStoredScan {
+        params: StartStoredScanParams,
+        cancel: Vec<i64>,
+    },
+    /// Cancel these search, explanation and scan jobs, and report back with
     /// [`App::search_cancelled`].
     CancelSearch(Vec<i64>),
     /// Fetch what custom analyzers can be built from, and report back with
@@ -169,6 +176,9 @@ pub enum Poll {
     Search(i64),
     /// Report back with [`App::explain_progress`] or [`App::explain_failed`].
     Explain(i64),
+    /// Ask for the hits from [`App::stored_scan_from_hit`] on, and report back with
+    /// [`App::stored_scan_progress`] or [`App::stored_scan_failed`].
+    StoredScan(i64),
     /// Ask for the lines from [`App::check_from_line`] on, and report back with
     /// [`App::check_progress`] or [`App::check_failed`].
     Check(i64),
@@ -576,11 +586,27 @@ impl App {
             search::Request::Explain { params, cancel } => {
                 Some(Action::StartExplain { params, cancel })
             }
+            search::Request::StoredScan { params, cancel } => {
+                Some(Action::StartStoredScan { params, cancel })
+            }
             search::Request::Cancel(jobs) => Some(Action::CancelSearch(jobs)),
             search::Request::Document(doc_id) => {
                 self.documents.as_mut()?.show_search_hit();
                 self.screen = Screen::Documents;
                 Some(Action::LoadDocument(doc_id))
+            }
+            search::Request::View {
+                doc_id,
+                field,
+                index,
+                spans,
+                match_count,
+            } => {
+                let documents = self.documents.as_mut()?;
+                documents.show_search_hit();
+                self.screen = Screen::Documents;
+                let request = documents.view_matches(doc_id, field, index, spans, match_count);
+                self.documents_request(request)
             }
         }
     }
@@ -684,7 +710,9 @@ impl App {
     pub fn document_loaded(&mut self, document: GetDocumentResult) -> Option<Action> {
         let documents = self.documents.as_mut()?;
         documents.loaded(document);
-        let request = documents.positions_request();
+        let request = documents
+            .positions_request()
+            .or_else(|| documents.open_pending_view());
         self.documents_request(request)
     }
 
@@ -822,7 +850,31 @@ impl App {
         }
     }
 
-    /// Forgets the cancelled search and explanation jobs.
+    pub fn stored_scan_started(&mut self, job_id: i64) {
+        if let Some(search) = &mut self.search {
+            search.stored_scan_started(job_id);
+        }
+    }
+
+    /// The first hit the next poll of the regex scan asks for.
+    pub fn stored_scan_from_hit(&self) -> i32 {
+        self.search.as_ref().map_or(0, Search::stored_scan_from_hit)
+    }
+
+    /// Adds the hits of the regex scan that came in, and its outcome once it is there.
+    pub fn stored_scan_progress(&mut self, result: GetStoredScanResult) {
+        if let Some(search) = &mut self.search {
+            search.stored_scan_progress(result);
+        }
+    }
+
+    pub fn stored_scan_failed(&mut self, error: String) {
+        if let Some(search) = &mut self.search {
+            search.stored_scan_failed(error);
+        }
+    }
+
+    /// Forgets the cancelled search, explanation and scan jobs.
     pub fn search_cancelled(&mut self) {
         if let Some(search) = &mut self.search {
             search.cancelled();
@@ -909,7 +961,7 @@ impl App {
         self.scan.as_ref().and_then(|scan| scan.job_id)
     }
 
-    /// The jobs to poll: the running scan, search, explanation, check and export.
+    /// The jobs to poll: the running term scan, search, explanation, regex scan, check and export.
     pub fn polls(&self) -> Vec<Poll> {
         let search = self.search.as_ref();
         self.scan_job()
@@ -917,6 +969,11 @@ impl App {
             .into_iter()
             .chain(search.and_then(Search::search_job).map(Poll::Search))
             .chain(search.and_then(Search::explain_job).map(Poll::Explain))
+            .chain(
+                search
+                    .and_then(Search::stored_scan_job)
+                    .map(Poll::StoredScan),
+            )
             .chain(self.check.as_ref().and_then(Check::job).map(Poll::Check))
             .chain(self.export_job().map(Poll::Export))
             .collect()
@@ -1670,7 +1727,8 @@ mod tests {
         TermStats,
     };
     use crate::protocol::search::{
-        Explanation, Hit, SearchQuery, SearchResults, TermQuery, TotalHitsRelation,
+        Explanation, Hit, MatchSpan, SearchQuery, SearchResults, Snippet, StoredScanHit, TermQuery,
+        TotalHitsRelation,
     };
     use crate::protocol::terms::{
         ExportTermsResult, FieldTerms, Posting, TermDelimiter, TermEntry, TopTerm,
@@ -2991,6 +3049,60 @@ mod tests {
                 took_millis: 1,
             }),
         }
+    }
+
+    #[test]
+    fn a_regex_scan_is_polled_from_its_last_hit_and_opens_a_value() {
+        let mut app = app_with_fields();
+        app.handle_key(key(KeyCode::Char('5')));
+        for _ in 0..4 {
+            assert_eq!(app.handle_key(key(KeyCode::Char('m'))), None);
+        }
+        app.handle_key(key(KeyCode::Char('/')));
+        typed(&mut app, "q+");
+        let Some(Action::StartStoredScan { params, cancel }) = app.handle_key(key(KeyCode::Enter))
+        else {
+            panic!("Enter scans");
+        };
+        assert_eq!(params.pattern, "q+");
+        assert!(cancel.is_empty());
+        app.stored_scan_started(3);
+        assert_eq!(app.polls(), vec![Poll::StoredScan(3)]);
+        assert_eq!(app.stored_scan_from_hit(), 0);
+
+        let hit = StoredScanHit {
+            doc_id: 2,
+            deleted: false,
+            field: "body".to_owned(),
+            value_index: 0,
+            length: 2,
+            match_count: 1,
+            spans: vec![MatchSpan { start: 0, end: 2 }],
+            snippet: Snippet {
+                start: 0,
+                text: "qq".to_owned(),
+            },
+        };
+        app.stored_scan_progress(GetStoredScanResult {
+            scanned_docs: 1,
+            matched_values: 1,
+            hit_count: 1,
+            hits: vec![hit],
+            result: None,
+        });
+        assert_eq!(app.stored_scan_from_hit(), 1);
+        assert_eq!(
+            app.handle_key(key(KeyCode::Esc)),
+            Some(Action::CancelSearch(vec![3]))
+        );
+        app.search_cancelled();
+        assert_eq!(app.polls(), vec![]);
+
+        assert_eq!(
+            app.handle_key(key(KeyCode::Char('v'))),
+            Some(Action::LoadDocument(2))
+        );
+        assert!(render(&mut app).contains("2 Documents"));
     }
 
     #[test]

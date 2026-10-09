@@ -1,0 +1,42 @@
+{
+  "jsonrpc": "2.0",
+  "id": 52,
+  "result": {
+    "scannedDocs": 128,
+    "matchedValues": 3,
+    "hitCount": 3,
+    "hits": [
+      {
+        "docId": 12,
+        "deleted": false,
+        "field": "body",
+        "valueIndex": 0,
+        "length": 412,
+        "matchCount": 2,
+        "spans": [
+          {"start": 57, "end": 64},
+          {"start": 301, "end": 308}
+        ],
+        "snippet": {
+          "start": 17,
+          "text": "the quiet lamp glows sku1234 over a table of oak and brass, warm in the evening light"
+        }
+      },
+      {
+        "docId": 37,
+        "deleted": true,
+        "field": "body",
+        "valueIndex": 0,
+        "length": 7,
+        "matchCount": 1,
+        "spans": [
+          {"start": 0, "end": 7}
+        ],
+        "snippet": {
+          "start": 0,
+          "text": "sku0042"
+        }
+      }
+    ]
+  }
+}

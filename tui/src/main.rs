@@ -31,7 +31,10 @@ use leia::protocol::index::{
 };
 use leia::protocol::jars::{AddJars, GetJars, GetJarsParams};
 use leia::protocol::job::{CancelJob, JobParams};
-use leia::protocol::search::{GetExplain, GetSearch, StartExplain, StartSearch};
+use leia::protocol::search::{
+    GetExplain, GetSearch, GetStoredScan, GetStoredScanParams, StartExplain, StartSearch,
+    StartStoredScan,
+};
 use leia::protocol::terms::{
     GetExportTerms, GetFieldTermScan, GetPositions, GetPositionsParams, GetPostings,
     GetPostingsParams, GetTerms, GetTermsParams, StartExportTerms, StartFieldTermScan,
@@ -362,6 +365,13 @@ fn perform(
                 Err(error) => app.explain_failed(error),
             }
         }
+        Action::StartStoredScan { params, cancel } => {
+            cancel_jobs(server, cancel)?;
+            match answered(server.call::<StartStoredScan>(params))? {
+                Ok(job) => app.stored_scan_started(job.job_id),
+                Err(error) => app.stored_scan_failed(error),
+            }
+        }
         Action::CancelSearch(jobs) => {
             cancel_jobs(server, jobs)?;
             app.search_cancelled();
@@ -450,6 +460,17 @@ fn poll_jobs(server: &mut Server, app: &mut App, polls: &[Poll]) -> Result<Vec<A
                 match answered(server.call::<GetExplain>(JobParams { job_id }))? {
                     Ok(result) => app.explain_progress(result),
                     Err(error) => app.explain_failed(error),
+                }
+                None
+            }
+            Poll::StoredScan(job_id) => {
+                let params = GetStoredScanParams {
+                    job_id,
+                    from_hit: app.stored_scan_from_hit(),
+                };
+                match answered(server.call::<GetStoredScan>(params))? {
+                    Ok(result) => app.stored_scan_progress(result),
+                    Err(error) => app.stored_scan_failed(error),
                 }
                 None
             }

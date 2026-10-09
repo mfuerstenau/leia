@@ -19,6 +19,7 @@ use crate::protocol::document::{
     TermVectorTerm,
 };
 use crate::protocol::index::{IndexField, IndexOptions};
+use crate::protocol::search::MatchSpan;
 use crate::terms::TermHit;
 use crate::text::{bytes_text, count, escape_control, first_chars};
 use crate::viewer::{self, Delimiters, Viewer, cut_size, size, stored_type};
@@ -147,6 +148,16 @@ enum TermVector {
     Failed(String),
 }
 
+/// A stored value to view with its matches once its document is in (ADR 0027).
+#[derive(Debug)]
+struct PendingView {
+    doc_id: i32,
+    field: String,
+    index: i32,
+    spans: Vec<MatchSpan>,
+    match_count: i32,
+}
+
 /// What the navigation keys move.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Focus {
@@ -192,6 +203,8 @@ pub struct Documents {
     select_field: Option<String>,
     /// The values of the selected field, viewed over the whole screen.
     viewer: Option<Viewer>,
+    /// The value the viewer opens on once its document is in.
+    pending_view: Option<PendingView>,
     /// The delimiters the viewer last split values at, for the next viewer.
     delimiters: Delimiters,
     /// With several index directories, the document id each starts at and its name as shown,
@@ -223,6 +236,7 @@ impl Documents {
             positions: None,
             select_field: None,
             viewer: None,
+            pending_view: None,
             delimiters: Delimiters::default(),
             indexes: Vec::new(),
         }
@@ -282,6 +296,60 @@ impl Documents {
         self.hit = None;
         self.search_hits = true;
         self.positions = None;
+    }
+
+    /// Views a stored value of `doc_id` with its matches highlighted, as the regex scan of the
+    /// search screen asks for: at once if the document is shown, otherwise once it is loaded.
+    /// Returns the document to fetch, or the whole value if it is cut.
+    pub fn view_matches(
+        &mut self,
+        doc_id: i32,
+        field: String,
+        index: i32,
+        spans: Vec<MatchSpan>,
+        match_count: i32,
+    ) -> Option<Request> {
+        self.select_field = Some(field.clone());
+        self.pending_view = Some(PendingView {
+            doc_id,
+            field,
+            index,
+            spans,
+            match_count,
+        });
+        if self.shows(doc_id) {
+            let field = self.select_field.take();
+            self.update_rows(field);
+            self.open_pending_view()
+        } else {
+            Some(Request::Document(doc_id))
+        }
+    }
+
+    /// Opens the viewer on the value that [`Documents::view_matches`] asked for, if the shown
+    /// document is its document. Returns the fetch of the whole value, if it is cut.
+    pub fn open_pending_view(&mut self) -> Option<Request> {
+        let pending = self.pending_view.take()?;
+        if !self.shows(pending.doc_id) {
+            return None;
+        }
+        let selected = self.selected_field()?;
+        if selected.name != pending.field {
+            return None;
+        }
+        let values = self.viewer_values(selected);
+        self.close_viewer();
+        let (viewer, fetch) = Viewer::with_matches(
+            pending.doc_id,
+            pending.field,
+            values,
+            self.delimiters.clone(),
+            pending.index,
+            &pending.spans,
+            pending.match_count,
+        );
+        self.viewer = Some(viewer);
+        fetch.and_then(viewer_request)
     }
 
     /// What `[`/`]` step through, if anything.
@@ -454,6 +522,22 @@ impl Documents {
     /// Opens the viewer on the selected field's stored values and doc values, if it has any.
     fn view(&mut self) -> Option<Request> {
         let field = self.selected_field()?;
+        let values = self.viewer_values(field);
+        if values.is_empty() {
+            return None;
+        }
+        let (viewer, fetch) = Viewer::new(
+            self.doc_id,
+            field.name.clone(),
+            values,
+            self.delimiters.clone(),
+        );
+        self.viewer = Some(viewer);
+        fetch.and_then(viewer_request)
+    }
+
+    /// A field's stored values and doc values, as the viewer shows them.
+    fn viewer_values(&self, field: &DocumentField) -> Vec<viewer::Value> {
         let mut values: Vec<viewer::Value> = field
             .stored
             .iter()
@@ -471,17 +555,7 @@ impl Documents {
                     .map(|value| viewer::Value::doc_value(kind, value)),
             );
         }
-        if values.is_empty() {
-            return None;
-        }
-        let (viewer, fetch) = Viewer::new(
-            self.doc_id,
-            field.name.clone(),
-            values,
-            self.delimiters.clone(),
-        );
-        self.viewer = Some(viewer);
-        fetch.and_then(viewer_request)
+        values
     }
 
     /// The selected field's first stored text, for the analysis screen; the viewer analyzes any
@@ -1628,6 +1702,57 @@ mod tests {
         documents.handle_key(KeyCode::Char('v'));
         documents.handle_key(KeyCode::Char('d'));
         assert!(render(&mut documents, 100, 20).contains("Items      -c▏"));
+    }
+
+    #[test]
+    fn views_a_value_with_its_matches_once_the_document_is_in() {
+        let mut documents = documents();
+        documents.loaded(document(0, false));
+        let spans = vec![MatchSpan { start: 0, end: 3 }];
+
+        assert_eq!(
+            documents.view_matches(2, "body".to_owned(), 1, spans.clone(), 1),
+            Some(Request::Document(2))
+        );
+        assert!(documents.viewer().is_none());
+        let mut doc = document(2, false);
+        doc.fields[1].stored[1].full_length = Some(70_000);
+        documents.loaded(doc);
+        // The cut value is fetched whole.
+        assert_eq!(
+            documents.open_pending_view(),
+            Some(Request::StoredValue {
+                doc_id: 2,
+                field: "body".to_owned(),
+                index: 1,
+            })
+        );
+        let screen = render(&mut documents, 100, 20);
+        assert!(screen.contains("body · 2 of 2"), "{screen}");
+        assert!(documents.viewer().unwrap().keys().contains("m/M"));
+        // Only once.
+        assert_eq!(documents.open_pending_view(), None);
+    }
+
+    #[test]
+    fn views_a_value_of_the_shown_document_at_once() {
+        let mut documents = documents();
+        documents.loaded(document(2, false));
+
+        assert_eq!(
+            documents.view_matches(
+                2,
+                "body".to_owned(),
+                0,
+                vec![MatchSpan { start: 4, end: 8 }],
+                1
+            ),
+            None
+        );
+
+        let screen = render(&mut documents, 100, 20);
+        assert!(screen.contains("body · 1 of 2"), "{screen}");
+        assert!(screen.contains("match 1 of 1"), "{screen}");
     }
 
     #[test]

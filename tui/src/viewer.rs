@@ -1,6 +1,8 @@
 //! The value viewer: the values of one field of a document, one at a time, over the whole
 //! documents screen, as text, as a hex dump, as pretty-printed JSON, or split at a delimiter. A
-//! stored value that `getDocument` cut (ADR 0008) is fetched whole when it is shown.
+//! stored value that `getDocument` cut (ADR 0008) is fetched whole when it is shown. A value from
+//! the regex scan shows its matches highlighted in the text mode, and `m`/`M` jump between them
+//! (ADR 0027).
 
 use std::borrow::Cow;
 
@@ -14,7 +16,8 @@ use serde::de::IgnoredAny;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::protocol::document::{BytesValue, MAX_VALUE_LENGTH, StoredType, StoredValue};
-use crate::text::escape_control;
+use crate::protocol::search::MatchSpan;
+use crate::text::{MATCH, escape_control};
 
 /// Spaces a tab is shown as.
 const TAB: &str = "    ";
@@ -213,6 +216,10 @@ pub struct Value {
     fetching: bool,
     /// Why the whole value could not be fetched.
     error: Option<String>,
+    /// Matches of a pattern, as UTF-8 byte ranges of the whole value, in order.
+    matches: Vec<(usize, usize)>,
+    /// How many matches the value has; more than `matches` if not all are known.
+    match_count: usize,
 }
 
 impl Value {
@@ -242,6 +249,8 @@ impl Value {
             full_length: value.full_length,
             fetching: false,
             error: None,
+            matches: Vec::new(),
+            match_count: 0,
         }
     }
 
@@ -264,6 +273,8 @@ impl Value {
             full_length: None,
             fetching: false,
             error: None,
+            matches: Vec::new(),
+            match_count: 0,
         }
     }
 
@@ -344,6 +355,47 @@ impl Formatted {
         }
     }
 
+    /// `text` with `matches`, UTF-8 byte ranges in order, highlighted. A match that is not
+    /// within the text, or not between characters, is left out; one over a line break is
+    /// highlighted on both lines.
+    fn highlighted(text: &str, matches: &[(usize, usize)]) -> Self {
+        let mut lines = Vec::new();
+        let mut matches = matches.iter().peekable();
+        let mut line_start = 0;
+        for line in text.split('\n') {
+            let shown = line.strip_suffix('\r').unwrap_or(line);
+            let end = line_start + shown.len();
+            let mut segments: Segments = Vec::new();
+            let mut pos = line_start;
+            // Matches that end before this line are done.
+            while matches.next_if(|&&(_, to)| to <= line_start).is_some() {}
+            for &(from, to) in matches.clone() {
+                if from >= end {
+                    break;
+                }
+                let (from, to) = (from.max(pos), to.min(end));
+                if to <= from || !text.is_char_boundary(from) || !text.is_char_boundary(to) {
+                    continue;
+                }
+                if from > pos {
+                    segments.push((Style::new(), text[pos..from].to_owned()));
+                }
+                segments.push((MATCH, text[from..to].to_owned()));
+                pos = to;
+            }
+            if pos < end || segments.is_empty() {
+                segments.push((Style::new(), text[pos..end].to_owned()));
+            }
+            lines.push(segments);
+            line_start += line.len() + 1;
+        }
+        Self {
+            lines,
+            detail: None,
+            notice: None,
+        }
+    }
+
     /// The lines as plain text, as they are copied.
     fn plain(&self) -> String {
         let lines: Vec<String> = self
@@ -360,6 +412,8 @@ impl Formatted {
 struct Wrapped {
     width: usize,
     lines: Vec<Line<'static>>,
+    /// The row each highlighted match starts on, in order.
+    match_rows: Vec<usize>,
     detail: Option<String>,
     notice: Option<String>,
 }
@@ -415,6 +469,10 @@ pub struct Viewer {
     wrapped: Option<Wrapped>,
     /// What the last key did, such as copying; cleared by the next key.
     message: Option<String>,
+    /// The match `m`/`M` last jumped to.
+    match_index: usize,
+    /// Whether the next render scrolls to the match at `match_index`.
+    to_match: bool,
 }
 
 impl Viewer {
@@ -445,6 +503,55 @@ impl Viewer {
             page: 10,
             wrapped: None,
             message: None,
+            match_index: 0,
+            to_match: false,
+        };
+        let fetch = viewer.fetch();
+        (viewer, fetch)
+    }
+
+    /// Views `values` from the stored value with this index on, as text with `spans`
+    /// highlighted, scrolled to the first of them. `match_count` counts all matches of the value,
+    /// also those after `spans`. Returns the viewer and the fetch of the value, if it is cut.
+    pub fn with_matches(
+        doc_id: i32,
+        field: String,
+        mut values: Vec<Value>,
+        delimiters: Delimiters,
+        index: i32,
+        spans: &[MatchSpan],
+        match_count: i32,
+    ) -> (Self, Option<Event>) {
+        let current = values
+            .iter()
+            .position(|value| value.source == Source::Stored(index))
+            .unwrap_or_default();
+        if let Some(value) = values.get_mut(current) {
+            value.matches = spans
+                .iter()
+                .filter_map(|span| {
+                    Some((
+                        usize::try_from(span.start).ok()?,
+                        usize::try_from(span.end).ok()?,
+                    ))
+                })
+                .collect();
+            value.match_count = usize::try_from(match_count).unwrap_or_default();
+        }
+        let mut viewer = Self {
+            doc_id,
+            field,
+            values,
+            current,
+            mode: Mode::Text,
+            delimiters,
+            form: None,
+            scroll: 0,
+            page: 10,
+            wrapped: None,
+            message: None,
+            match_index: 0,
+            to_match: true,
         };
         let fetch = viewer.fetch();
         (viewer, fetch)
@@ -507,6 +614,9 @@ impl Viewer {
     pub fn keys(&self) -> &'static str {
         if self.form.is_some() {
             " type a delimiter   Tab/↑↓ other delimiter   ⏎ apply   Esc cancel"
+        } else if !self.values[self.current].matches.is_empty() {
+            " Esc close   m/M next/previous match   ←/→ value   t text   h hex   J json   \
+             d delimited   y copy   a analyze   ↑↓ PgUp/PgDn Home/End"
         } else {
             " Esc close   ←/→ value   t text   h hex   J json   d delimited   y copy   \
              a analyze   ↑↓ PgUp/PgDn Home/End"
@@ -536,6 +646,18 @@ impl Viewer {
             KeyCode::Right | KeyCode::Char('n') if self.current + 1 < self.values.len() => {
                 self.show(self.current + 1);
                 return self.fetch();
+            }
+            KeyCode::Char('m' | 'M') if !self.values[self.current].matches.is_empty() => {
+                let last = self.values[self.current].matches.len() - 1;
+                self.match_index = if key == KeyCode::Char('m') {
+                    (self.match_index + 1).min(last)
+                } else {
+                    self.match_index.saturating_sub(1)
+                };
+                if self.mode != Mode::Text {
+                    self.set_mode(Mode::Text);
+                }
+                self.to_match = true;
             }
             KeyCode::Char('t') => self.set_mode(Mode::Text),
             KeyCode::Char('h') => self.toggle_mode(Mode::Hex),
@@ -637,6 +759,23 @@ impl Viewer {
         } else {
             self.wrapped(usize::from(inner.width)).lines.len()
         };
+        if self.to_match && self.mode == Mode::Text {
+            let value = &self.values[self.current];
+            let row = self
+                .wrapped
+                .as_ref()
+                .and_then(|wrapped| wrapped.match_rows.get(self.match_index).copied());
+            match row {
+                // Two rows of context above the match.
+                Some(row) => {
+                    self.scroll = row.saturating_sub(2);
+                    self.to_match = false;
+                }
+                // The match is past the cut: once the whole value is in.
+                None if value.full_length.is_some() && value.error.is_none() => {}
+                None => self.to_match = false,
+            }
+        }
         self.scroll = self.scroll.min(rows.saturating_sub(height));
         let shown = self.scroll..rows.min(self.scroll + height);
 
@@ -662,6 +801,19 @@ impl Viewer {
             )
         } else if let Some(notice) = wrapped.and_then(|w| w.notice.as_ref()) {
             notice.clone()
+        } else if !value.matches.is_empty() {
+            let marked = value.matches.len();
+            let more = if value.match_count > marked {
+                format!(" ({marked} of {} marked)", value.match_count)
+            } else {
+                String::new()
+            };
+            let hidden = if self.mode == Mode::Text {
+                ""
+            } else {
+                "; t shows them"
+            };
+            format!("match {} of {marked}{more}{hidden}", self.match_index + 1)
         } else {
             String::new()
         };
@@ -692,18 +844,21 @@ impl Viewer {
     /// needed.
     fn wrapped(&mut self, width: usize) -> &Wrapped {
         if self.wrapped.as_ref().is_none_or(|w| w.width != width) {
-            let formatted = format(
-                &self.values[self.current].content,
-                self.mode,
-                &self.delimiters,
-            );
+            let value = &self.values[self.current];
+            let formatted = if self.mode == Mode::Text && !value.matches.is_empty() {
+                Formatted::highlighted(&value.content.text(), &value.matches)
+            } else {
+                format(&value.content, self.mode, &self.delimiters)
+            };
             let mut lines = Vec::new();
+            let mut match_rows = Vec::new();
             for line in &formatted.lines {
-                wrap(line, width, &mut lines);
+                wrap_marking(line, width, &mut lines, &mut match_rows);
             }
             self.wrapped = Some(Wrapped {
                 width,
                 lines,
+                match_rows,
                 detail: formatted.detail,
                 notice: formatted.notice,
             });
@@ -948,12 +1103,24 @@ fn delimited(text: &str, split: &Split) -> Formatted {
 
 /// Appends `line` to `out` as lines no wider than `width`: tabs as spaces, control characters
 /// escaped.
+#[cfg(test)]
 fn wrap(line: &[(Style, String)], width: usize, out: &mut Vec<Line<'static>>) {
+    wrap_marking(line, width, out, &mut Vec::new());
+}
+
+/// As `wrap`, and appends the row each highlighted match starts on to `match_rows`.
+fn wrap_marking(
+    line: &[(Style, String)],
+    width: usize,
+    out: &mut Vec<Line<'static>>,
+    match_rows: &mut Vec<usize>,
+) {
     let width = width.max(1);
     let mut spans: Vec<Span<'static>> = Vec::new();
     let mut current = String::new();
     let mut used = 0;
     for (style, text) in line {
+        let mut first = *style == MATCH;
         for c in text.chars() {
             let shown: Cow<str> = if c == '\t' {
                 Cow::Borrowed(TAB)
@@ -970,6 +1137,9 @@ fn wrap(line: &[(Style, String)], width: usize, out: &mut Vec<Line<'static>>) {
                     }
                     out.push(Line::from(std::mem::take(&mut spans)));
                     used = 0;
+                }
+                if std::mem::take(&mut first) {
+                    match_rows.push(out.len());
                 }
                 current.push(c);
                 used += w;
@@ -1079,6 +1249,118 @@ mod tests {
         let (viewer, fetch) = Viewer::new(4, "body".to_owned(), values, Delimiters::default());
         assert_eq!(fetch, None);
         viewer
+    }
+
+    #[test]
+    fn highlights_matches_through_tabs_control_characters_and_line_breaks() {
+        // "red" at 2..5, "re\u{1}d" at 6..10, and one over the line break at 4..7.
+        let text = "a\tred\nre\u{1}d x";
+        let formatted = Formatted::highlighted(text, &[(2, 5), (6, 10)]);
+        let mut lines = Vec::new();
+        let mut rows = Vec::new();
+        for line in &formatted.lines {
+            wrap_marking(line, 40, &mut lines, &mut rows);
+        }
+
+        let marked: Vec<Vec<(String, bool)>> = lines
+            .iter()
+            .map(|line| {
+                line.spans
+                    .iter()
+                    .map(|span| (span.content.to_string(), span.style == MATCH))
+                    .collect()
+            })
+            .collect();
+        assert_eq!(
+            marked,
+            [
+                vec![("a    ".to_owned(), false), ("red".to_owned(), true)],
+                vec![("re\\u{1}d".to_owned(), true), (" x".to_owned(), false)],
+            ]
+        );
+        assert_eq!(rows, [0, 1]);
+
+        let over = Formatted::highlighted("ab\ncd", &[(1, 4)]);
+        assert_eq!(
+            over.lines,
+            [
+                vec![(Style::new(), "a".to_owned()), (MATCH, "b".to_owned())],
+                vec![(MATCH, "c".to_owned()), (Style::new(), "d".to_owned())],
+            ]
+        );
+        // Out of range or inside a character: left out.
+        let odd = Formatted::highlighted("äx", &[(1, 2), (5, 9)]);
+        assert_eq!(odd.lines, [vec![(Style::new(), "äx".to_owned())]]);
+    }
+
+    #[test]
+    fn opens_on_the_value_with_matches_and_jumps_between_them() {
+        let long: String = (1..=30)
+            .map(|i| {
+                if i == 20 || i == 26 {
+                    "a red line"
+                } else {
+                    "line"
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        let start = long.find("red").unwrap() as i32;
+        let second = long.rfind("red").unwrap() as i32;
+        let (mut viewer, fetch) = Viewer::with_matches(
+            4,
+            "body".to_owned(),
+            vec![
+                Value::stored(0, &text("{\"json\": true}")),
+                Value::stored(1, &text(&long)),
+            ],
+            Delimiters::default(),
+            1,
+            &[
+                MatchSpan {
+                    start,
+                    end: start + 3,
+                },
+                MatchSpan {
+                    start: second,
+                    end: second + 3,
+                },
+            ],
+            5,
+        );
+        assert_eq!(fetch, None);
+        assert_eq!(viewer.mode(), Mode::Text);
+        assert!(viewer.keys().contains("m/M next/previous match"));
+
+        let screen = render(&mut viewer, 70, 8);
+        assert!(screen.contains("body · 2 of 2"), "{screen}");
+        // Two rows of context above the first match, on row 20.
+        assert!(screen.contains("rows 18–23 of 30"), "{screen}");
+        assert!(screen.contains("match 1 of 2 (2 of 5 marked)"), "{screen}");
+
+        viewer.handle_key(KeyCode::Char('m'));
+        let screen = render(&mut viewer, 70, 8);
+        assert!(screen.contains("rows 24–29 of 30"), "{screen}");
+        assert!(screen.contains("match 2 of 2"), "{screen}");
+        // The last match stays the last.
+        viewer.handle_key(KeyCode::Char('m'));
+        viewer.handle_key(KeyCode::Char('M'));
+        let screen = render(&mut viewer, 70, 8);
+        assert!(screen.contains("rows 18–23 of 30"), "{screen}");
+
+        // From another mode, m comes back to the text.
+        viewer.handle_key(KeyCode::Char('h'));
+        viewer.handle_key(KeyCode::Char('m'));
+        assert_eq!(viewer.mode(), Mode::Text);
+    }
+
+    #[test]
+    fn values_without_matches_have_no_match_keys() {
+        let mut viewer = viewer(vec![Value::stored(0, &text("red"))]);
+
+        assert!(!viewer.keys().contains("match"));
+        assert_eq!(viewer.handle_key(KeyCode::Char('m')), None);
+        assert!(!render(&mut viewer, 40, 6).contains("match"));
     }
 
     #[test]

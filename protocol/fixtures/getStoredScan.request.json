@@ -1,0 +1,9 @@
+{
+  "jsonrpc": "2.0",
+  "id": 52,
+  "method": "getStoredScan",
+  "params": {
+    "jobId": 21,
+    "fromHit": 1
+  }
+}

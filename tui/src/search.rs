@@ -4,7 +4,8 @@
 //! on a hit shows its document on the documents screen, where `[`/`]` step through the hits.
 //! Popups set the query parser options (point types included), the More-Like-This settings, the
 //! similarity and the sort, and the stored fields per hit. The parsers and More-Like-This analyze
-//! with the analysis screen's analyzer.
+//! with the analysis screen's analyzer. A fifth mode scans the stored values with a regular
+//! expression ([`StoredScan`], ADR 0027).
 
 use ratatui::Frame;
 use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
@@ -23,11 +24,12 @@ use crate::parser_options::{OptionsForm, ParserSettings};
 use crate::protocol::document::{BytesValue, StoredValue};
 use crate::protocol::index::{IndexField, IndexOptions};
 use crate::protocol::search::{
-    ClassicQuery, Explanation, GetExplainResult, GetSearchResult, Hit, MAX_WINDOW, QueryOperator,
-    SearchQuery, SearchResults, SortValue, StandardQuery, StartExplainParams, StartSearchParams,
-    TermQuery, TotalHitsRelation,
+    ClassicQuery, Explanation, GetExplainResult, GetSearchResult, GetStoredScanResult, Hit,
+    MAX_WINDOW, MatchSpan, QueryOperator, SearchQuery, SearchResults, SortValue, StandardQuery,
+    StartExplainParams, StartSearchParams, StartStoredScanParams, TermQuery, TotalHitsRelation,
 };
 use crate::scoring::{ScoringForm, ScoringSettings};
+use crate::stored_scan::StoredScan;
 use crate::terms::{moved, number_width, tail_row};
 use crate::text::{bytes_text, escape_control};
 
@@ -55,10 +57,25 @@ pub enum Request {
         params: StartExplainParams,
         cancel: Vec<i64>,
     },
+    /// Cancel the jobs in `cancel`, then start this scan of the stored values and report back
+    /// with [`Search::stored_scan_started`] or [`Search::stored_scan_failed`].
+    StoredScan {
+        params: StartStoredScanParams,
+        cancel: Vec<i64>,
+    },
     /// Cancel these jobs, and report back with [`Search::cancelled`].
     Cancel(Vec<i64>),
     /// Show this document on the documents screen.
     Document(i32),
+    /// Show this stored value of a document in the viewer of the documents screen, with its
+    /// matches highlighted.
+    View {
+        doc_id: i32,
+        field: String,
+        index: i32,
+        spans: Vec<MatchSpan>,
+        match_count: i32,
+    },
 }
 
 /// How the query line is read.
@@ -72,6 +89,8 @@ enum Mode {
     Term,
     /// Documents like the document whose id the line holds (More-Like-This).
     Like,
+    /// A regular expression over the stored values of every document (ADR 0027).
+    Regex,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -151,6 +170,12 @@ pub struct Search {
     /// The popup that takes the keys, while it is open.
     form: Option<Popup>,
     exact: bool,
+    /// Whether the regex scan ignores case.
+    case_insensitive: bool,
+    /// Whether the regex scan reads deleted documents too.
+    include_deleted: bool,
+    /// The last regex scan, while the mode is [`Mode::Regex`].
+    scan: Option<StoredScan>,
     input: LineInput,
     /// Whether the input holds a binary term in hex, as the overview's top terms bring it. An
     /// edit makes it text again.
@@ -197,6 +222,9 @@ impl Search {
             analyzer: AnalyzerSettings::default(),
             form: None,
             exact: false,
+            case_insensitive: false,
+            include_deleted: false,
+            scan: None,
             input: LineInput::new(""),
             binary: false,
             editing: false,
@@ -224,6 +252,8 @@ impl Search {
         search.mode = self.mode;
         search.operator = self.operator;
         search.exact = self.exact;
+        search.case_insensitive = self.case_insensitive;
+        search.include_deleted = self.include_deleted;
         search.input = self.input.clone();
         search.binary = self.binary;
         search.analyzer = self.analyzer.clone();
@@ -259,11 +289,41 @@ impl Search {
             .job_id
     }
 
+    /// The regex scan job to poll, while one runs.
+    pub fn stored_scan_job(&self) -> Option<i64> {
+        self.scan.as_ref()?.job()
+    }
+
+    /// The first hit the next poll of the regex scan asks for.
+    pub fn stored_scan_from_hit(&self) -> i32 {
+        self.scan.as_ref().map_or(0, StoredScan::from_hit)
+    }
+
+    pub fn stored_scan_started(&mut self, job_id: i64) {
+        if let Some(scan) = &mut self.scan {
+            scan.started(job_id);
+        }
+    }
+
+    pub fn stored_scan_progress(&mut self, result: GetStoredScanResult) {
+        if let Some(scan) = &mut self.scan {
+            scan.progress(result);
+        }
+    }
+
+    /// Shows why the regex scan could not start or failed.
+    pub fn stored_scan_failed(&mut self, error: String) {
+        if let Some(scan) = &mut self.scan {
+            scan.failed(error);
+        }
+    }
+
     /// The jobs that Esc stops.
     pub fn jobs(&self) -> Vec<i64> {
         self.search_job()
             .into_iter()
             .chain(self.explain_job())
+            .chain(self.stored_scan_job())
             .collect()
     }
 
@@ -339,11 +399,15 @@ impl Search {
                 ),
                 ..SearchQuery::default()
             },
+            Mode::Regex => return None,
         })
     }
 
     /// Starts a search for the query line, stopping the jobs of the previous one.
     fn submit(&mut self) -> Option<Request> {
+        if self.mode == Mode::Regex {
+            return self.submit_scan();
+        }
         let params = StartSearchParams {
             query: self.query()?,
             similarity: self.scoring.similarity(),
@@ -371,28 +435,64 @@ impl Search {
         Some(Request::Search { params, cancel })
     }
 
-    /// Searches again once a setting changed, if a query was submitted.
+    /// Starts a regex scan for the query line, stopping the jobs of the previous one; `None`
+    /// while the line is empty.
+    fn submit_scan(&mut self) -> Option<Request> {
+        let pattern = self.input.text();
+        if pattern.is_empty() {
+            return None;
+        }
+        let params = StartStoredScanParams {
+            pattern: pattern.to_owned(),
+            case_insensitive: self.case_insensitive,
+            fields: self.hit_fields.param(),
+            include_deleted: self.include_deleted,
+        };
+        let cancel = self.jobs();
+        self.scan = Some(StoredScan::new(params.clone()));
+        self.details_scroll = 0;
+        Some(Request::StoredScan { params, cancel })
+    }
+
+    /// Searches or scans again once a setting changed, if a query was submitted.
     fn resubmit(&mut self) -> Option<Request> {
-        self.submitted.as_ref()?;
+        if self.mode == Mode::Regex {
+            self.scan.as_ref()?;
+        } else {
+            self.submitted.as_ref()?;
+        }
         self.submit()
     }
 
     /// Searches again in another mode; forgets the hits, and stops their jobs, if the line is no
-    /// query in that mode, so that they don't pass for its hits.
+    /// query in that mode, so that they don't pass for its hits. Into or out of the regex mode,
+    /// nothing runs by itself: a scan reads every document.
     fn switch_mode(&mut self, mode: Mode) -> Option<Request> {
+        let regex = self.mode == Mode::Regex || mode == Mode::Regex;
         self.mode = mode;
+        if regex {
+            let cancel = self.jobs();
+            self.scan = None;
+            self.forget_hits();
+            return (!cancel.is_empty()).then_some(Request::Cancel(cancel));
+        }
         self.submitted.as_ref()?;
         if self.query().is_some() {
             return self.submit();
         }
         let cancel = self.jobs();
+        self.forget_hits();
+        (!cancel.is_empty()).then_some(Request::Cancel(cancel))
+    }
+
+    /// Forgets the submitted search, its hits and its explanation.
+    fn forget_hits(&mut self) {
         self.submitted = None;
         self.running = None;
         self.explain = None;
         self.step_pending = false;
         self.table = TableState::new();
         self.details_scroll = 0;
-        (!cancel.is_empty()).then_some(Request::Cancel(cancel))
     }
 
     fn hit_list(&self) -> Option<&HitList> {
@@ -496,8 +596,12 @@ impl Search {
         }
     }
 
-    /// Forgets the stopped jobs: a first page that was not in yet becomes an error.
+    /// Forgets the stopped jobs: a first page that was not in yet becomes an error, a regex scan
+    /// keeps the hits it has.
     pub fn cancelled(&mut self) {
+        if let Some(scan) = &mut self.scan {
+            scan.cancelled();
+        }
         if self.running.is_some() {
             self.search_failed("Cancelled.".to_owned());
         }
@@ -562,6 +666,9 @@ impl Search {
     /// Selects the previous or next hit and shows its document, for `[`/`]` on the documents
     /// screen. Past the last hit, the next page is fetched first, if there is one.
     pub fn step(&mut self, forward: bool) -> Option<Request> {
+        if self.mode == Mode::Regex {
+            return self.scan.as_mut()?.step(forward).map(Request::Document);
+        }
         let len = self.hit_list()?.hits.len();
         let selected = self.table.selected().unwrap_or_default();
         let row = if forward {
@@ -626,6 +733,11 @@ impl Search {
             }
             return None;
         }
+        if self.mode == Mode::Regex
+            && let Some(request) = self.regex_key(key.code)
+        {
+            return request;
+        }
         match key.code {
             KeyCode::Char('/') if !self.fields.is_empty() => self.editing = true,
             KeyCode::Char('m') => {
@@ -633,7 +745,8 @@ impl Search {
                     Mode::Classic => Mode::Standard,
                     Mode::Standard => Mode::Term,
                     Mode::Term => Mode::Like,
-                    Mode::Like => Mode::Classic,
+                    Mode::Like => Mode::Regex,
+                    Mode::Regex => Mode::Classic,
                 });
             }
             KeyCode::Char('p') if self.mode == Mode::Like => {
@@ -693,6 +806,51 @@ impl Search {
         None
     }
 
+    /// The keys of the regex mode: `/` edits the pattern, `i` switches case-insensitivity, `d`
+    /// whether deleted documents are scanned, Enter shows the selected hit's document, `v` its
+    /// value with the matches, and the navigation keys move through the hits. The parser,
+    /// scoring, field, operator, count and explain keys do nothing. `None` for the keys the
+    /// other modes share: `m`, `l` and Tab.
+    fn regex_key(&mut self, key: KeyCode) -> Option<Option<Request>> {
+        Some(match key {
+            KeyCode::Char('/') => {
+                self.editing = true;
+                None
+            }
+            KeyCode::Char('i') => {
+                self.case_insensitive = !self.case_insensitive;
+                self.resubmit()
+            }
+            KeyCode::Char('d') => {
+                self.include_deleted = !self.include_deleted;
+                self.resubmit()
+            }
+            KeyCode::Char('p' | 's' | 'f' | 'F' | 'a' | 't' | 'x') => None,
+            KeyCode::Enter => self
+                .scan
+                .as_ref()?
+                .selected()
+                .map(|hit| Request::Document(hit.doc_id)),
+            KeyCode::Char('v') => {
+                let hit = self.scan.as_ref()?.selected()?;
+                Some(Request::View {
+                    doc_id: hit.doc_id,
+                    field: hit.field.clone(),
+                    index: hit.value_index,
+                    spans: hit.spans.clone(),
+                    match_count: hit.match_count,
+                })
+            }
+            code if self.focus == Focus::Hits => {
+                if !self.scan.as_mut()?.move_selection(code) {
+                    return None;
+                }
+                None
+            }
+            _ => return None,
+        })
+    }
+
     fn scroll_details(&mut self, key: KeyCode) {
         let scroll = &mut self.details_scroll;
         match key {
@@ -714,6 +872,10 @@ impl Search {
             Some(Popup::Scoring(_)) => ScoringForm::keys(),
             Some(Popup::Fields(_)) => FieldsForm::keys(),
             None if self.editing => " ⏎ search   Esc done   ←→ Ctrl+A/E/U/K/W edit",
+            None if self.mode == Mode::Regex => {
+                "/ pattern   m mode   l fields   i case   d deleted   ⏎ open doc   v view value   \
+                 Tab panel   ↑↓"
+            }
             None if self.mode == Mode::Like => {
                 "/ doc id   m mode   p/s/l settings   t count   x explain   ⏎ open doc   Tab panel   ↑↓"
             }
@@ -729,7 +891,7 @@ impl Search {
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
-        if self.fields.is_empty() {
+        if self.fields.is_empty() && self.mode != Mode::Regex {
             frame.render_widget(
                 Paragraph::new("No field has postings, so there is nothing to search.")
                     .wrap(Wrap { trim: false })
@@ -757,7 +919,11 @@ impl Search {
     }
 
     fn render_query(&self, frame: &mut Frame, area: Rect) {
-        let field = escape_control(&self.fields[self.field]);
+        let field = self
+            .fields
+            .get(self.field)
+            .map(|field| escape_control(field))
+            .unwrap_or_default();
         let count = if self.exact {
             "exact count"
         } else {
@@ -782,6 +948,20 @@ impl Search {
                 " More like this document · {} · {count} ",
                 self.like.fields_text()
             ),
+            Mode::Regex => {
+                let fields = self.hit_fields.text().unwrap_or_else(|| "all".to_owned());
+                let case = if self.case_insensitive {
+                    "ignore case"
+                } else {
+                    "match case"
+                };
+                let deleted = if self.include_deleted {
+                    " · deleted docs too"
+                } else {
+                    ""
+                };
+                format!(" Regex over stored values · fields {fields} · {case}{deleted} ")
+            }
         };
         let block = panel(title, self.editing);
         let inner = block.inner(area);
@@ -791,10 +971,10 @@ impl Search {
             frame.render_widget(Line::from(shown.to_owned()), inner);
             frame.set_cursor_position((inner.x + cursor_x, inner.y));
         } else if self.input.text().is_empty() {
-            let hint = if self.mode == Mode::Like {
-                "Press / to type a document id, or m on the documents screen."
-            } else {
-                "Press / to type a query."
+            let hint = match self.mode {
+                Mode::Like => "Press / to type a document id, or m on the documents screen.",
+                Mode::Regex => "Press / to type a regular expression.",
+                _ => "Press / to type a query.",
             };
             frame.render_widget(Line::from(hint).style(dim()), inner);
         } else {
@@ -804,6 +984,13 @@ impl Search {
 
     fn render_hits(&mut self, frame: &mut Frame, area: Rect) {
         let focused = self.focus == Focus::Hits && !self.editing;
+        if self.mode == Mode::Regex {
+            match &mut self.scan {
+                Some(scan) => scan.render(frame, area, focused, self.max_doc),
+                None => frame.render_widget(panel(" Hits ".to_owned(), focused), area),
+            }
+            return;
+        }
         let searching = self.running.as_ref().map(|running| {
             let percent = if self.max_doc > 0 {
                 running.docs_searched * 100 / i64::from(self.max_doc)
@@ -934,6 +1121,7 @@ impl Search {
                     }
                 },
             ),
+            None if self.mode == Mode::Regex => (" Scan ".to_owned(), self.scan_lines()),
             None => (" Query ".to_owned(), self.query_lines()),
         };
         let height = area.height.saturating_sub(2);
@@ -950,6 +1138,23 @@ impl Search {
                 .block(panel(title, focused)),
             area,
         );
+    }
+
+    /// The regex scan, or how it works.
+    fn scan_lines(&self) -> Vec<Line<'static>> {
+        if let Some(scan) = &self.scan {
+            return scan.detail_lines();
+        }
+        [
+            "A Java regular expression, found anywhere in each stored text value and in each",
+            "binary value that is UTF-8, for example:",
+            "  sku\\d{4}  (?i)lamp  \"name\":\\s*\"[^\"]*\"  (?s)begin.*end  ^$",
+            "Every document is read, which is slow on a large index: Esc stops the scan.",
+            "i ignores case · d scans deleted documents too · l chooses the fields",
+        ]
+        .into_iter()
+        .map(|line| Line::from(line).style(dim()))
+        .collect()
     }
 
     /// The parsed and rewritten query, or how to write one.
@@ -970,6 +1175,7 @@ impl Search {
                 Mode::Term => vec![Line::from(
                     "The line is one term of the field, as it is: nothing is analyzed or split.",
                 )],
+                Mode::Regex => Vec::new(),
                 Mode::Like => vec![
                     Line::from(
                         "More like this: the line is a document id. Its terms come from each",
@@ -1033,6 +1239,7 @@ impl Search {
     fn settings_line(&self) -> Line<'static> {
         let popups = match self.mode {
             Mode::Term => "s similarity and sort · l stored fields per hit",
+            Mode::Regex => "l fields to scan",
             Mode::Like => "p more like this · s similarity and sort · l stored fields per hit",
             Mode::Classic | Mode::Standard => {
                 "p parser options · s similarity and sort · l stored fields per hit"
@@ -1058,7 +1265,7 @@ impl Search {
             lines.push(Line::from(format!("Analyzer   {}", self.analyzer.text())));
         }
         match self.mode {
-            Mode::Term => return lines,
+            Mode::Term | Mode::Regex => return lines,
             Mode::Like => {
                 lines.push(Line::from(format!(
                     "Like       {}",
@@ -1211,7 +1418,8 @@ mod tests {
     use crate::protocol::index::{DocValuesType, TermStats};
     use crate::protocol::search::{
         Bm25Similarity, ClassicSimilarity, FieldSort, HitField, MoreLikeThisQuery, ParserOptions,
-        PointField, PointType, Similarity, SortKey, SortMissing, SortSelector, SortType,
+        PointField, PointType, Similarity, Snippet, SortKey, SortMissing, SortSelector, SortType,
+        StoredScanHit, StoredScanResult,
     };
 
     fn bm25() -> Similarity {
@@ -1377,6 +1585,176 @@ mod tests {
         search.search_started(1);
         search.search_progress(results(0..count, total_hits));
         search
+    }
+
+    /// The search screen in regex mode, with `pattern` submitted.
+    fn regex(pattern: &str) -> (Search, StartStoredScanParams) {
+        let mut search = search();
+        for _ in 0..4 {
+            assert_eq!(press(&mut search, KeyCode::Char('m')), None);
+        }
+        press(&mut search, KeyCode::Char('/'));
+        typed(&mut search, pattern);
+        let Some(Request::StoredScan { params, cancel }) = press(&mut search, KeyCode::Enter)
+        else {
+            panic!("Enter scans");
+        };
+        assert!(cancel.is_empty());
+        (search, params)
+    }
+
+    fn scan_hit(doc_id: i32, field: &str) -> StoredScanHit {
+        StoredScanHit {
+            doc_id,
+            deleted: doc_id == 37,
+            field: field.to_owned(),
+            value_index: 1,
+            length: 12,
+            match_count: 1,
+            spans: vec![MatchSpan { start: 4, end: 7 }],
+            snippet: Snippet {
+                start: 0,
+                text: "the red lamp".to_owned(),
+            },
+        }
+    }
+
+    fn scan_poll(hits: Vec<StoredScanHit>, done: bool) -> GetStoredScanResult {
+        GetStoredScanResult {
+            scanned_docs: 250,
+            matched_values: 2,
+            hit_count: 2,
+            hits,
+            result: done.then(|| StoredScanResult {
+                scanned_docs: 500,
+                matched_docs: 2,
+                matched_values: 2,
+                hits_truncated: false,
+                timed_out_values: 0,
+                timed_out: vec![],
+                took_millis: 9,
+            }),
+        }
+    }
+
+    #[test]
+    fn regex_mode_scans_the_stored_values() {
+        let (mut search, params) = regex("re+d (x)");
+
+        assert_eq!(
+            params,
+            StartStoredScanParams {
+                pattern: "re+d (x)".to_owned(),
+                case_insensitive: false,
+                fields: None,
+                include_deleted: false,
+            }
+        );
+        search.stored_scan_started(6);
+        assert_eq!(search.stored_scan_job(), Some(6));
+        assert_eq!(search.jobs(), vec![6]);
+        search.stored_scan_progress(scan_poll(vec![scan_hit(3, "body")], false));
+        assert_eq!(search.stored_scan_from_hit(), 1);
+        let screen = render(&mut search);
+        assert!(screen.contains("Regex over stored values · fields all · match case"));
+        assert!(
+            screen.contains("2 values · scanning… 50% of 500 docs"),
+            "{screen}"
+        );
+        assert!(screen.contains("the red lamp"));
+
+        search.stored_scan_progress(scan_poll(vec![scan_hit(37, "title")], true));
+        assert_eq!(search.stored_scan_job(), None);
+        let screen = render(&mut search);
+        assert!(screen.contains("2 values in 2 docs in 9 ms"), "{screen}");
+        assert!(screen.contains("37✗"), "{screen}");
+    }
+
+    #[test]
+    fn regex_mode_settings_scan_again_and_other_keys_do_nothing() {
+        let (mut search, _) = regex("red");
+        search.stored_scan_started(6);
+
+        let Some(Request::StoredScan { params, cancel }) = press(&mut search, KeyCode::Char('i'))
+        else {
+            panic!("i scans again");
+        };
+        assert!(params.case_insensitive);
+        assert_eq!(cancel, vec![6]);
+        let Some(Request::StoredScan { params, .. }) = press(&mut search, KeyCode::Char('d'))
+        else {
+            panic!("d scans again");
+        };
+        assert!(params.include_deleted);
+        for c in ['p', 's', 'f', 'F', 'a', 't', 'x'] {
+            assert_eq!(press(&mut search, KeyCode::Char(c)), None, "{c}");
+            assert!(search.form.is_none(), "{c}");
+        }
+        assert!(render(&mut search).contains("ignore case · deleted docs too"));
+    }
+
+    #[test]
+    fn regex_hits_open_their_document_and_value() {
+        let (mut search, _) = regex("red");
+        search.stored_scan_started(6);
+        search.stored_scan_progress(scan_poll(
+            vec![
+                scan_hit(3, "body"),
+                scan_hit(3, "title"),
+                scan_hit(8, "body"),
+            ],
+            true,
+        ));
+
+        assert_eq!(
+            press(&mut search, KeyCode::Enter),
+            Some(Request::Document(3))
+        );
+        press(&mut search, KeyCode::Down);
+        assert_eq!(
+            press(&mut search, KeyCode::Char('v')),
+            Some(Request::View {
+                doc_id: 3,
+                field: "title".to_owned(),
+                index: 1,
+                spans: vec![MatchSpan { start: 4, end: 7 }],
+                match_count: 1,
+            })
+        );
+        assert_eq!(search.step(true), Some(Request::Document(8)));
+        assert_eq!(search.step(true), None);
+    }
+
+    #[test]
+    fn leaving_regex_mode_stops_the_scan() {
+        let (mut search, _) = regex("red");
+        search.stored_scan_started(6);
+
+        assert_eq!(
+            press(&mut search, KeyCode::Char('m')),
+            Some(Request::Cancel(vec![6]))
+        );
+        assert_eq!(search.mode, Mode::Classic);
+        assert!(search.scan.is_none());
+        // Back in regex mode, nothing runs by itself.
+        for _ in 0..4 {
+            assert_eq!(press(&mut search, KeyCode::Char('m')), None);
+        }
+        assert!(search.scan.is_none());
+    }
+
+    #[test]
+    fn a_stopped_scan_keeps_its_hits() {
+        let (mut search, _) = regex("red");
+        search.stored_scan_started(6);
+        search.stored_scan_progress(scan_poll(vec![scan_hit(3, "body")], false));
+
+        search.cancelled();
+
+        assert_eq!(search.jobs(), Vec::<i64>::new());
+        let screen = render(&mut search);
+        assert!(screen.contains("2 values so far · stopped"), "{screen}");
+        assert!(screen.contains("the red lamp"));
     }
 
     #[test]

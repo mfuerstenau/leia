@@ -217,3 +217,6 @@ Finished items, moved here from `docs/tasklist.md` (the open work queue).
   - JSON objects and arrays open in this mode, and so does a cut value that starts with `{` or `[`
 - [x] Value viewer: delimited data, line by line, with a definable delimiter; optionally pretty-formats delimited key/value data, with a definable key/value delimiter (`d`; TUI only)
   - a form asks for the item and key/value delimiters, with escapes (`\t`, `\n`, `\xHH`, `\u{H…}`, …); items are numbered, or keys aligned (up to 32 columns); the delimiters are kept for the next viewer
+- [x] Search: regex over stored values (ADR 0027): `startStoredScan {pattern, caseInsensitive, fields?, includeDeleted}` / `getStoredScan {jobId, fromHit}`, its own job instead of a query alternative
+  - a Java regex `find` over text values and UTF-8 binary values; hits per value with UTF-8 byte spans (first 100), match count and a snippet; the first 10,000 hits kept, the counts exact; 1 s per value, then skipped and listed (first 100)
+  - TUI: `m` cycles to the regex mode; `/` pattern, `i` ignore case, `d` deleted documents, `l` fields; hits stream in, `Esc` keeps them; `Enter` opens the document, `[`/`]` step through the hits' documents, `v` opens the value with its matches highlighted and `m`/`M` jump between them
