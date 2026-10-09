@@ -99,7 +99,8 @@ To talk to the server by hand: `jq -c . protocol/fixtures/version.request.json |
 
 ## Project workflow
 
-- `docs/tasklist.md` is the work queue.
+- `docs/tasklist.md` is the work queue. When an item lands, move it to `docs/tasklist-done.md` (the archive).
 - Significant decisions become numbered ADRs in `docs/adr/`.
 - After a unit of work, append an entry to `docs/SESSION-SUMMARIES.md`. The `/session-summary` skill writes it, and `/catch-up` reads it.
 - Don't commit unless asked.
+- End each task with a proposed commit message of at most 4 lines, without a `Co-Authored-By` trailer.
