@@ -14,8 +14,15 @@ import org.apache.lucene.util.BytesRef;
  * @param totalHits how many documents match: exactly, or at least this many if counting stopped
  * @param hits the hits of the page, best first
  * @param took how long the search took
+ * @param moreLikeThisTerms for a More-Like-This query, the terms it chose, best first (ADR 0028)
  */
-public record SearchResults(String query, String rewrittenQuery, TotalHits totalHits, List<Hit> hits, Duration took) {
+public record SearchResults(
+        String query,
+        String rewrittenQuery,
+        TotalHits totalHits,
+        List<Hit> hits,
+        Duration took,
+        Optional<List<LikeTerm>> moreLikeThisTerms) {
 
     /**
      * A matching document.
@@ -53,4 +60,16 @@ public record SearchResults(String query, String rewrittenQuery, TotalHits total
      * @param values the values, in the order they were added
      */
     public record HitField(String name, List<IndexDocument.StoredValue> values) {}
+
+    /**
+     * A term that More-Like-This chose, with the numbers it chose it by (ADR 0028).
+     *
+     * @param field the field of the term
+     * @param term the term, as {@code MoreLikeThis} has it: a term vector's bytes decoded as UTF-8
+     * @param tf how often the term occurs in the source document or text
+     * @param docFreq how many documents have the term, deleted ones included
+     * @param idf {@code ClassicSimilarity}'s inverse document frequency of the term in the field
+     * @param score {@code tf × idf}, which ranks the terms
+     */
+    public record LikeTerm(String field, String term, int tf, int docFreq, float idf, float score) {}
 }

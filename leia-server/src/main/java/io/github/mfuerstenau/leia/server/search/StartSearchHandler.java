@@ -9,6 +9,7 @@ import io.github.mfuerstenau.leia.protocol.RpcMethod;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.HitField;
+import io.github.mfuerstenau.leia.protocol.search.LikeTerm;
 import io.github.mfuerstenau.leia.protocol.search.SearchResults;
 import io.github.mfuerstenau.leia.protocol.search.SortValue;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
@@ -118,7 +119,12 @@ public final class StartSearchHandler implements MethodHandler<StartSearchParams
                     case GREATER_THAN_OR_EQUAL_TO -> TotalHitsRelation.GREATER_THAN_OR_EQUAL_TO;
                 },
                 results.hits().stream().map(StartSearchHandler::toHit).toList(),
-                results.took().toMillis());
+                results.took().toMillis(),
+                results.moreLikeThisTerms()
+                        .map(terms -> terms.stream()
+                                .map(term -> new LikeTerm(
+                                        term.field(), term.term(), term.tf(), term.docFreq(), term.idf(), term.score()))
+                                .toList()));
     }
 
     private static Hit toHit(io.github.mfuerstenau.leia.core.SearchResults.Hit hit) {

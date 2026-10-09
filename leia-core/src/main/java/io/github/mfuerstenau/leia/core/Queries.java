@@ -132,7 +132,18 @@ public final class Queries {
      *     caller closes it once the search is done
      */
     public static Query moreLikeThis(int docId, MoreLikeThisOptions options, Analyzer analyzer) {
-        return new MoreLikeDocumentQuery(docId, options, analyzer);
+        return new MoreLikeQuery(new MoreLikeQuery.Source.Doc(docId), options, analyzer);
+    }
+
+    /**
+     * A query for documents like {@code text}, built with Lucene's {@code MoreLikeThis} once the query
+     * is rewritten, which happens inside the search (ADR 0028). The text is analyzed for each of the
+     * fields, and their terms compete for the query's places.
+     *
+     * @param analyzer analyzes the text (ADR 0014); the caller closes it once the search is done
+     */
+    public static Query moreLikeText(String text, MoreLikeThisOptions options, Analyzer analyzer) {
+        return new MoreLikeQuery(new MoreLikeQuery.Source.Text(text), options, analyzer);
     }
 
     /**

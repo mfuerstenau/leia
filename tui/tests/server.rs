@@ -1243,9 +1243,10 @@ fn searches_for_documents_like_one_of_a_lucene9_index() {
             mode: None,
         })
         .unwrap();
-    let like = |doc_id: i32, fields: &[&str]| SearchQuery {
+    let like_query = |doc_id: Option<i32>, text: Option<&str>, fields: &[&str]| SearchQuery {
         more_like_this: Some(MoreLikeThisQuery {
             doc_id,
+            text: text.map(str::to_owned),
             fields: fields.iter().map(|field| (*field).to_owned()).collect(),
             min_term_freq: 1,
             min_doc_freq: 2,
@@ -1253,9 +1254,13 @@ fn searches_for_documents_like_one_of_a_lucene9_index() {
             max_query_terms: 25,
             boost: false,
             analyzer: Analyzer::default(),
+            min_word_len: 0,
+            max_word_len: None,
+            stop_words: Vec::new(),
         }),
         ..SearchQuery::default()
     };
+    let like = |doc_id: i32, fields: &[&str]| like_query(Some(doc_id), None, fields);
     let params = |query: SearchQuery| StartSearchParams {
         query,
         similarity: bm25(),
@@ -1266,20 +1271,22 @@ fn searches_for_documents_like_one_of_a_lucene9_index() {
         fields: None,
     };
 
-    let job = server
-        .call::<StartSearch>(params(like(0, &["body"])))
-        .unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
-    let results = loop {
-        let poll = server
-            .call::<GetSearch>(JobParams { job_id: job.job_id })
-            .unwrap();
-        if let Some(results) = poll.results {
-            break results;
+    let mut search = |query: SearchQuery| {
+        let job = server.call::<StartSearch>(params(query)).unwrap();
+        loop {
+            let poll = server
+                .call::<GetSearch>(JobParams { job_id: job.job_id })
+                .unwrap();
+            if let Some(results) = poll.results {
+                break results;
+            }
+            assert!(Instant::now() < deadline, "the search did not finish");
+            thread::sleep(Duration::from_millis(10));
         }
-        assert!(Instant::now() < deadline, "the search did not finish");
-        thread::sleep(Duration::from_millis(10));
     };
+    let results = search(like(0, &["body"]));
+    let text = search(like_query(None, Some("Number DOCUMENT number"), &["body"]));
 
     // "document number 1": the stored text is analyzed, and "1" occurs in only one document.
     assert_eq!(
@@ -1293,6 +1300,32 @@ fn searches_for_documents_like_one_of_a_lucene9_index() {
     let mut docs: Vec<i32> = results.hits.iter().map(|hit| hit.doc_id).collect();
     docs.sort_unstable();
     assert_eq!(docs, [0, 2]);
+    let chosen: Vec<&str> = results
+        .more_like_this_terms
+        .iter()
+        .flatten()
+        .map(|term| term.term.as_str())
+        .collect();
+    assert_eq!(chosen.len(), 2);
+
+    // Like a text: "number" occurs twice in it, so it comes first.
+    assert_eq!(
+        text.query,
+        "like(text \"Number DOCUMENT number\", fields [body], minTermFreq 1, minDocFreq 2, \
+         maxQueryTerms 25)"
+    );
+    let terms = text.more_like_this_terms.expect("the chosen terms");
+    let words: Vec<(&str, i32)> = terms
+        .iter()
+        .map(|term| (term.term.as_str(), term.tf))
+        .collect();
+    assert_eq!(words, [("number", 2), ("document", 1)]);
+    assert!(
+        terms
+            .iter()
+            .all(|term| term.field == "body" && term.doc_freq >= 2)
+    );
+    assert!(!text.hits.is_empty());
 
     let job = server
         .call::<StartExplain>(StartExplainParams {

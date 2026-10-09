@@ -1,6 +1,6 @@
 # ADR 0013 — More-Like-This
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by ADR 0028 (like-text, the chosen terms as data, word lengths and stop words)
 - **Date:** 2026-10-06
 
 ## Context

@@ -12,7 +12,10 @@
         "maxDocFreq": 100,
         "maxQueryTerms": 5,
         "boost": true,
-        "analyzer": {"standard": {}}
+        "analyzer": {"standard": {}},
+        "minWordLen": 2,
+        "maxWordLen": 20,
+        "stopWords": ["the", "with"]
       }
     },
     "similarity": {"bm25": {"k1": 1.2, "b": 0.75}},

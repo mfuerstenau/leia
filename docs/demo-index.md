@@ -119,7 +119,12 @@ The analysis screen (`6`) needs no index, but these go with the demo index's tex
 - A config directory with `syn.txt` (`wifi, wireless network`) and `synonymGraph` with
   `synonyms=syn.txt`: `fast wifi router` gives `wireless` and `network` at positions 1 and 2, and
   `wifi` in italics, stacked on `wireless` and spanning `1–2`; `router` moves to position 3.
-- Regex over stored values (`m` four times), `sku\d{4}`: 980 values in 486 documents, in `body`,
+- More-Like-This for a text (`m` four times), `A vintage leather wallet with a wooden table`:
+  with Lucene's defaults only `a` occurs twice, so the query is `a` in four fields, as the term
+  table shows. With `p`, a min term freq of 1 and the stop words `a with`: `vintage`, `wooden`,
+  `wallet`, `table` and `leather`, in `title` first, where they are rarest. A min word length of 7
+  leaves only `vintage` and `leather`.
+- Regex over stored values (`m` five times), `sku\d{4}`: 980 values in 486 documents, in `body`,
   `tagged` and `note`, each with its matches highlighted. `"event":` finds one value, the 108 KiB
   `_source` of doc 42, with 3000 matches: `v` opens it with the first 100 highlighted, and `m`/`M`
   jump between them. `DELETED` with `i` (ignore case) and `d` (deleted documents too): doc 74's

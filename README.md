@@ -25,7 +25,7 @@ because Lucene 10 can't read them.
   documents, deletions, versions, codec and codec formats, diagnostics, attributes and files with
   their sizes.
 - **Search:** a query in Lucene's classic or standard syntax, a single term, or the documents like
-  a given one (More-Like-This), with the parsers' options and ranges on point fields, scored with BM25, classic TF-IDF or boolean similarity and
+  a given one or like a text (More-Like-This, with the terms it chose), with the parsers' options and ranges on point fields, scored with BM25, classic TF-IDF or boolean similarity and
   sorted by score, document id or up to two doc values fields (with the value of a multi-valued
   field and the place of missing values); the hits with their scores, sort values and
   chosen stored fields, exact or approximate hit counts, and an explanation of how a hit scores.
@@ -300,9 +300,9 @@ shows as missing. The documents and terms screens always show the opened commit.
 
 | Key | Action |
 |---|---|
-| `/` | edit the query, or for More-Like-This the document id; `Enter` searches, `Esc` leaves the line, and `←` `→`, `Ctrl+A` `E` `U` `K` `W` edit |
-| `m` | switch between classic query syntax, standard query syntax, a single term, More-Like-This and a regex over stored values |
-| `p` | set the parser options, and for the standard syntax the type of each point field; for More-Like-This, its fields and limits; `Enter` applies, `Esc` cancels |
+| `/` | edit the query, or for More-Like-This the document id or the text; `Enter` searches, `Esc` leaves the line, and `←` `→`, `Ctrl+A` `E` `U` `K` `W` edit |
+| `m` | switch between classic query syntax, standard query syntax, a single term, More-Like-This for a document, More-Like-This for a text and a regex over stored values |
+| `p` | set the parser options, and for the standard syntax the type of each point field; for More-Like-This, its fields, limits, word lengths and stop words; `Enter` applies, `Esc` cancels |
 | `s` | set the similarity (BM25 with `k1` and `b`, classic TF-IDF or boolean) and the sort; `Enter` applies, `Esc` cancels |
 | `l` | choose the stored fields each hit shows; `Space` shows or hides one, `a` all, `n` none |
 | `f` `F` | step through the fields with postings: the default field of a query, or the field of a term |
@@ -339,9 +339,17 @@ analyzed with the analyzer of the analysis screen, and keeps the best of them by
 fields (at first those with positions) and the limits, which start from Lucene's defaults: a term
 must occur at least twice in the document and in at least 5 documents, and the query keeps the
 best 25 terms. With "boost", each term is weighted by its score. The rewritten query lists the
-terms, weakest first. The source document matches its own terms and is marked `◆`; a deleted
-source can be used too, but is no hit. If no term passes the limits, nothing matches, and the
-details panel says so.
+terms, weakest first. The details panel also lists them best first, with the numbers MLT chose
+them by: the score (tf × idf), how often the term occurs in the source (tf) and in how many
+documents (df), and its field. The source document matches its own terms and is marked `◆`; a
+deleted source can be used too, but is no hit. If no term passes the limits, nothing matches, and
+the details panel says so.
+
+The next mode, More-Like-This for a text, takes its terms from the text the line holds: each chosen
+field analyzes it, and the best terms of all fields make the query, with the same limits (ADR 0028).
+In the same popup, a min or max word length and stop words leave words out. They apply to the terms
+as analyzed, so with the standard analyzer a stop word is written in lowercase, and the lengths
+count UTF-16 units, as Lucene does.
 
 `s` sets what scores the hits and how they are ordered. The similarity also scores the
 explanations, so an explanation always adds up to the score shown. "Discount overlaps" is not offered:

@@ -26,6 +26,7 @@ import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.analysis.AnalyzerSpecs;
 import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
+import java.nio.charset.StandardCharsets;
 import java.time.DateTimeException;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -35,6 +36,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Stream;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.document.DateTools;
@@ -236,7 +238,22 @@ final class SearchQueries {
     }
 
     private static AnalyzedQuery moreLikeThis(ReadOnlyIndex index, MoreLikeThisQuery like) throws RpcException {
-        GetDocumentHandler.checkDocId(index, like.docId());
+        if (like.docId().isPresent() == like.text().isPresent()) {
+            throw new RpcException(
+                    ErrorCode.INVALID_PARAMS, "Invalid params: moreLikeThis needs exactly one of docId and text");
+        }
+        if (like.docId().isPresent()) {
+            GetDocumentHandler.checkDocId(index, like.docId().getAsInt());
+        }
+        if (like.text().isPresent()) {
+            int length = like.text().get().getBytes(StandardCharsets.UTF_8).length;
+            if (length > MoreLikeThisQuery.MAX_TEXT_LENGTH) {
+                throw new RpcException(
+                        ErrorCode.INVALID_PARAMS,
+                        "Invalid params: the text has " + length + " bytes, more than "
+                                + MoreLikeThisQuery.MAX_TEXT_LENGTH);
+            }
+        }
         for (String name : like.fields()) {
             FieldInfo field = index.fieldInfo(name)
                     .orElseThrow(
@@ -255,12 +272,18 @@ final class SearchQueries {
                     like.minDocFreq(),
                     like.maxDocFreq(),
                     like.maxQueryTerms(),
-                    like.boost());
+                    like.boost(),
+                    like.minWordLen(),
+                    like.maxWordLen(),
+                    Set.copyOf(like.stopWords()));
         } catch (IllegalArgumentException e) {
             throw invalidParams(e);
         }
         Analyzer analyzer = AnalyzerSpecs.build(like.analyzer());
-        return new AnalyzedQuery(Queries.moreLikeThis(like.docId(), options, analyzer), Optional.of(analyzer));
+        Query query = like.docId().isPresent()
+                ? Queries.moreLikeThis(like.docId().getAsInt(), options, analyzer)
+                : Queries.moreLikeText(like.text().orElseThrow(), options, analyzer);
+        return new AnalyzedQuery(query, Optional.of(analyzer));
     }
 
     private static ParserOptions options(

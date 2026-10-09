@@ -220,3 +220,7 @@ Finished items, moved here from `docs/tasklist.md` (the open work queue).
 - [x] Search: regex over stored values (ADR 0027): `startStoredScan {pattern, caseInsensitive, fields?, includeDeleted}` / `getStoredScan {jobId, fromHit}`, its own job instead of a query alternative
   - a Java regex `find` over text values and UTF-8 binary values; hits per value with UTF-8 byte spans (first 100), match count and a snippet; the first 10,000 hits kept, the counts exact; 1 s per value, then skipped and listed (first 100)
   - TUI: `m` cycles to the regex mode; `/` pattern, `i` ignore case, `d` deleted documents, `l` fields; hits stream in, `Esc` keeps them; `Enter` opens the document, `[`/`]` step through the hits' documents, `v` opens the value with its matches highlighted and `m`/`M` jump between them
+- [x] Search: More-Like-This for a text, the chosen terms as data, word lengths and stop words (ADR 0028)
+  - `moreLikeThis` takes exactly one of `docId` and `text` (at most 64 KiB), plus `minWordLen`, `maxWordLen?` and `stopWords`; the text is analyzed for each chosen field, and the fields share one queue
+  - `SearchResults.moreLikeThisTerms`: `{field, term, tf, docFreq, idf, score}` best first, rebuilt by `LikeTerms` with Lucene's rules for the clauses Lucene chose; with `boost`, the clause boosts are the scores over the weakest
+  - TUI: `m` cycles to a like-text mode; the `p` popup gets min/max word length and stop words; both MLT modes show the term table in the details panel

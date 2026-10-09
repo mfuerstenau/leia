@@ -3047,6 +3047,7 @@ mod tests {
                     })
                     .collect(),
                 took_millis: 1,
+                more_like_this_terms: None,
             }),
         }
     }
@@ -3055,7 +3056,7 @@ mod tests {
     fn a_regex_scan_is_polled_from_its_last_hit_and_opens_a_value() {
         let mut app = app_with_fields();
         app.handle_key(key(KeyCode::Char('5')));
-        for _ in 0..4 {
+        for _ in 0..5 {
             assert_eq!(app.handle_key(key(KeyCode::Char('m'))), None);
         }
         app.handle_key(key(KeyCode::Char('/')));
@@ -3191,7 +3192,7 @@ mod tests {
         };
         assert!(cancel.is_empty());
         let like = params.query.more_like_this.expect("a More-Like-This query");
-        assert_eq!(like.doc_id, 0);
+        assert_eq!(like.doc_id, Some(0));
         // No field has positions: the first indexed one.
         assert_eq!(like.fields, ["id"]);
         assert!(render(&mut app).contains("More like this document · field id"));

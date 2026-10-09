@@ -67,14 +67,19 @@ pub struct SearchQuery {
     pub more_like_this: Option<MoreLikeThisQuery>,
 }
 
-/// Documents like one document of the index, by the terms that Lucene's `MoreLikeThis` picks from
-/// it (ADR 0013). A field's terms come from the document's term vector, or else from its stored
-/// strings, analyzed with `analyzer` (ADR 0014).
+/// Documents like one document of the index, or like a text, by the terms that Lucene's
+/// `MoreLikeThis` picks from it (ADR 0013, ADR 0028). Exactly one of `doc_id` and `text` is
+/// present. A document's terms come, per field, from its term vector, or else from its stored
+/// strings, analyzed with `analyzer` (ADR 0014); a text is analyzed for each field.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct MoreLikeThisQuery {
     /// The source document, from 0 to maxDoc - 1; it may be deleted.
-    pub doc_id: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc_id: Option<i32>,
+    /// The source text, at most [`MAX_LIKE_TEXT_LENGTH`] bytes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
     /// The indexed fields to take terms from, at least one and none twice.
     pub fields: Vec<String>,
     /// Terms that occur fewer times in the document are left out (Lucene: 2).
@@ -88,12 +93,23 @@ pub struct MoreLikeThisQuery {
     pub max_query_terms: i32,
     /// Whether each term is boosted by its score, relative to the weakest term's.
     pub boost: bool,
-    /// Analyzes the stored strings of fields without a term vector.
+    /// Analyzes the text, or the stored strings of fields without a term vector.
     pub analyzer: Analyzer,
+    /// Terms shorter than this, in UTF-16 units, are left out; 0 for no limit.
+    pub min_word_len: i32,
+    /// Terms longer than this, in UTF-16 units, are left out; `None` for no limit, else at least
+    /// 1 and at least `min_word_len`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_word_len: Option<i32>,
+    /// Terms that are left out, compared exactly with the analyzed terms.
+    pub stop_words: Vec<String>,
 }
 
 /// The largest `max_query_terms` the server accepts: Lucene's maximum clause count.
 pub const MAX_QUERY_TERMS: i32 = 1024;
+
+/// The longest like-text the server accepts, in bytes of UTF-8.
+pub const MAX_LIKE_TEXT_LENGTH: usize = 65_536;
 
 /// What scores the hits, as one of several alternatives: exactly one is present (ADR 0012).
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
@@ -415,6 +431,28 @@ pub struct SearchResults {
     pub hits: Vec<Hit>,
     /// How long the search took, in milliseconds.
     pub took_millis: i64,
+    /// For a More-Like-This query only, the terms it chose, best first (ADR 0028).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub more_like_this_terms: Option<Vec<LikeTerm>>,
+}
+
+/// A term that More-Like-This chose, with the numbers it chose it by (ADR 0028).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LikeTerm {
+    /// The field of the term.
+    pub field: String,
+    /// The term as `MoreLikeThis` has it, a string: a term vector's bytes are decoded as UTF-8.
+    pub term: String,
+    /// How often the term occurs in the source document or text.
+    pub tf: i32,
+    /// How many documents have the term, deleted ones included.
+    pub doc_freq: i32,
+    /// `ClassicSimilarity`'s inverse document frequency of the term in the field: a Java `float`,
+    /// which an `f64` holds exactly.
+    pub idf: f64,
+    /// `tf × idf`, which ranks the terms: a Java `float` as well.
+    pub score: f64,
 }
 
 /// The longest stored value, in bytes, that a hit has whole; longer text and bytes are cut.

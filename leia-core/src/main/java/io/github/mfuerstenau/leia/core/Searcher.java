@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.core;
 
 import io.github.mfuerstenau.leia.core.SearchResults.Hit;
 import io.github.mfuerstenau.leia.core.SearchResults.HitField;
+import io.github.mfuerstenau.leia.core.SearchResults.LikeTerm;
 import io.github.mfuerstenau.leia.core.SearchResults.SortValue;
 import java.io.IOException;
 import java.time.Duration;
@@ -70,7 +71,15 @@ final class Searcher {
         long start = System.nanoTime();
         try {
             cancellation.searched(0);
-            Query rewritten = searcher.rewrite(query);
+            Query toRewrite = query;
+            Optional<List<LikeTerm>> likeTerms = Optional.empty();
+            if (query instanceof MoreLikeQuery like) {
+                // Built once, and explained before the rewrite merges a lone clause or drops a ^1.0.
+                IndexReader exitable = searcher.getIndexReader();
+                toRewrite = like.build(exitable);
+                likeTerms = Optional.of(LikeTerms.of(exitable, like, toRewrite, () -> cancellation.searched(0)));
+            }
+            Query rewritten = searcher.rewrite(toRewrite);
             int numHits = offset + limit;
             int threshold = exactTotalHits ? Integer.MAX_VALUE : TOTAL_HITS_THRESHOLD;
             TopDocs top = sort.isPresent()
@@ -93,7 +102,12 @@ final class Searcher {
             cancellation.searched(reader.maxDoc());
             Duration took = Duration.ofNanos(System.nanoTime() - start);
             return new SearchResults(
-                    query.toString(), rewritten.toString(), top.totalHits, hits(reader, page, sort, fields), took);
+                    query.toString(),
+                    rewritten.toString(),
+                    top.totalHits,
+                    hits(reader, page, sort, fields),
+                    took,
+                    likeTerms);
         } catch (ExitableDirectoryReader.ExitingReaderException e) {
             throw cancellation.stopped(e);
         } catch (IndexSearcher.TooManyClauses e) {

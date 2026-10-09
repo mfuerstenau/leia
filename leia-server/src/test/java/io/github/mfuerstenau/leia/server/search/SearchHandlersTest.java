@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.server.search;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
@@ -27,6 +28,7 @@ import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.HitField;
+import io.github.mfuerstenau.leia.protocol.search.LikeTerm;
 import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
 import io.github.mfuerstenau.leia.protocol.search.ParserOptions;
 import io.github.mfuerstenau.leia.protocol.search.PointField;
@@ -446,6 +448,100 @@ class SearchHandlersTest {
     }
 
     @Test
+    void searchesForDocumentsLikeATextAndGivesTheChosenTerms() throws Exception {
+        openIndex();
+        SearchQuery like = moreLikeText("Red red, blue and green", 0, OptionalInt.empty(), List.of("blue"));
+
+        SearchResults results = search(params(like, 0, 10, Optional.empty()));
+
+        assertThat(results.query())
+                .isEqualTo("like(text \"Red red, blue and green\", fields [body], minTermFreq 1, minDocFreq 1, "
+                        + "maxQueryTerms 25, stopWords [blue])");
+        // "and" and "green" are in no document, and "blue" is a stop word.
+        assertThat(results.moreLikeThisTerms().orElseThrow())
+                .extracting(LikeTerm::field, LikeTerm::term, LikeTerm::tf, LikeTerm::docFreq)
+                .containsExactly(tuple("body", "red", 2, 2));
+        LikeTerm red = results.moreLikeThisTerms().orElseThrow().getFirst();
+        assertThat(red.score()).isEqualTo(red.tf() * red.idf());
+        assertThat(results.hits()).extracting(Hit::docId).containsExactlyInAnyOrder(0, 2);
+
+        Explanation explanation = explain(new StartExplainParams(like, BM25, 2));
+        assertThat(Float.parseFloat(explanation.value()))
+                .isEqualTo(results.hits().stream()
+                        .filter(hit -> hit.docId() == 2)
+                        .findFirst()
+                        .orElseThrow()
+                        .score());
+
+        // Like a document gives the terms too, other queries don't.
+        assertThat(search(params(moreLikeThis(0, List.of("body"), 25), 0, 10, Optional.empty()))
+                        .moreLikeThisTerms()
+                        .orElseThrow())
+                .extracting(LikeTerm::term)
+                .containsExactly("red");
+        assertThat(search(params(term("body", new BytesValue("red", false)), 0, 10, Optional.empty()))
+                        .moreLikeThisTerms())
+                .isEmpty();
+    }
+
+    @Test
+    void checksTheMoreLikeTextParams() throws Exception {
+        openIndex();
+        var neither = moreLikeThis(new MoreLikeThisQuery(
+                OptionalInt.empty(),
+                Optional.empty(),
+                List.of("body"),
+                1,
+                1,
+                OptionalInt.empty(),
+                25,
+                false,
+                STANDARD,
+                0,
+                OptionalInt.empty(),
+                List.of()));
+        var both = moreLikeThis(new MoreLikeThisQuery(
+                OptionalInt.of(99),
+                Optional.of("red"),
+                List.of("body"),
+                1,
+                1,
+                OptionalInt.empty(),
+                25,
+                false,
+                STANDARD,
+                0,
+                OptionalInt.empty(),
+                List.of()));
+        for (SearchQuery invalid : List.of(neither, both)) {
+            assertThatThrownBy(() -> startSearch.handle(params(invalid, 0, 10, Optional.empty())))
+                    .isInstanceOfSatisfying(
+                            RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.INVALID_PARAMS))
+                    .hasMessageContaining("exactly one of docId and text");
+        }
+        // 65,536 bytes of UTF-8 are fine, one more is not: ä has two.
+        String longest = "ä".repeat(MoreLikeThisQuery.MAX_TEXT_LENGTH / 2);
+        assertThat(search(params(moreLikeText(longest, 0, OptionalInt.empty(), List.of()), 0, 10, Optional.empty()))
+                        .hits())
+                .isEmpty();
+        assertThatThrownBy(() -> startSearch.handle(params(
+                        moreLikeText(longest + "x", 0, OptionalInt.empty(), List.of()), 0, 10, Optional.empty())))
+                .isInstanceOfSatisfying(
+                        RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.INVALID_PARAMS))
+                .hasMessageContaining("65537 bytes");
+        for (SearchQuery invalid : List.of(
+                moreLikeText("red", -1, OptionalInt.empty(), List.of()),
+                moreLikeText("red", 0, OptionalInt.of(0), List.of()),
+                moreLikeText("red", 5, OptionalInt.of(4), List.of()))) {
+            assertFails(() -> startSearch.handle(params(invalid, 0, 10, Optional.empty())), ErrorCode.INVALID_PARAMS);
+        }
+        // A word length shorter than "red" leaves it out.
+        assertThat(search(params(moreLikeText("red", 0, OptionalInt.of(2), List.of()), 0, 10, Optional.empty()))
+                        .moreLikeThisTerms())
+                .contains(List.of());
+    }
+
+    @Test
     void checksTheMoreLikeThisParams() throws Exception {
         openIndex();
 
@@ -660,12 +756,40 @@ class SearchHandlersTest {
     }
 
     private static SearchQuery moreLikeThis(int docId, List<String> fields, int maxQueryTerms, Analyzer analyzer) {
-        return new SearchQuery(
+        return moreLikeThis(new MoreLikeThisQuery(
+                OptionalInt.of(docId),
                 Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                Optional.of(new MoreLikeThisQuery(
-                        docId, fields, 1, 1, OptionalInt.empty(), maxQueryTerms, false, analyzer)));
+                fields,
+                1,
+                1,
+                OptionalInt.empty(),
+                maxQueryTerms,
+                false,
+                analyzer,
+                0,
+                OptionalInt.empty(),
+                List.of()));
+    }
+
+    private static SearchQuery moreLikeText(
+            String text, int minWordLen, OptionalInt maxWordLen, List<String> stopWords) {
+        return moreLikeThis(new MoreLikeThisQuery(
+                OptionalInt.empty(),
+                Optional.of(text),
+                List.of("body"),
+                1,
+                1,
+                OptionalInt.empty(),
+                25,
+                false,
+                STANDARD,
+                minWordLen,
+                maxWordLen,
+                stopWords));
+    }
+
+    private static SearchQuery moreLikeThis(MoreLikeThisQuery like) {
+        return new SearchQuery(Optional.empty(), Optional.empty(), Optional.empty(), Optional.of(like));
     }
 
     private static Analyzer whitespace() {

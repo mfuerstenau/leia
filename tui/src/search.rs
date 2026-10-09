@@ -18,15 +18,16 @@ use crate::analyzer::AnalyzerSettings;
 use crate::form::FormEvent;
 use crate::hit_fields::{FieldsForm, HitFields};
 use crate::input::{Edit, LineInput, word_start};
-use crate::more_like_this::{LikeForm, LikeSettings};
+use crate::more_like_this::{LikeForm, LikeSettings, LikeSource};
 use crate::overview::{highlight, panel};
 use crate::parser_options::{OptionsForm, ParserSettings};
 use crate::protocol::document::{BytesValue, StoredValue};
 use crate::protocol::index::{IndexField, IndexOptions};
 use crate::protocol::search::{
     ClassicQuery, Explanation, GetExplainResult, GetSearchResult, GetStoredScanResult, Hit,
-    MAX_WINDOW, MatchSpan, QueryOperator, SearchQuery, SearchResults, SortValue, StandardQuery,
-    StartExplainParams, StartSearchParams, StartStoredScanParams, TermQuery, TotalHitsRelation,
+    LikeTerm, MAX_WINDOW, MatchSpan, QueryOperator, SearchQuery, SearchResults, SortValue,
+    StandardQuery, StartExplainParams, StartSearchParams, StartStoredScanParams, TermQuery,
+    TotalHitsRelation,
 };
 use crate::scoring::{ScoringForm, ScoringSettings};
 use crate::stored_scan::StoredScan;
@@ -89,6 +90,8 @@ enum Mode {
     Term,
     /// Documents like the document whose id the line holds (More-Like-This).
     Like,
+    /// Documents like the text the line holds (More-Like-This, ADR 0028).
+    LikeText,
     /// A regular expression over the stored values of every document (ADR 0027).
     Regex,
 }
@@ -117,6 +120,8 @@ struct HitList {
     relation: TotalHitsRelation,
     took_millis: i64,
     hits: Vec<Hit>,
+    /// The terms a More-Like-This query chose, best first.
+    more_like_this_terms: Option<Vec<LikeTerm>>,
     /// Whether more hits may follow: the last page was full.
     more: bool,
     /// Why the last page could not be fetched; no more pages are fetched then.
@@ -393,9 +398,16 @@ impl Search {
                 ..SearchQuery::default()
             },
             Mode::Like => SearchQuery {
+                more_like_this: Some(self.like.query(
+                    LikeSource::Doc(text.trim().parse().ok()?),
+                    self.analyzer.analyzer(),
+                )?),
+                ..SearchQuery::default()
+            },
+            Mode::LikeText => SearchQuery {
                 more_like_this: Some(
                     self.like
-                        .query(text.trim().parse().ok()?, self.analyzer.analyzer())?,
+                        .query(LikeSource::Text(text.to_owned()), self.analyzer.analyzer())?,
                 ),
                 ..SearchQuery::default()
             },
@@ -688,7 +700,8 @@ impl Search {
 
     /// Edits the query line while it is open (Enter searches, Esc closes it), or a popup (Enter
     /// applies and searches again, Esc cancels). Otherwise `/` opens the line, `m` cycles classic
-    /// syntax, standard syntax, a term and More-Like-This, `p` opens the parser options or the
+    /// syntax, standard syntax, a term, More-Like-This for a document or a text, and a regex over
+    /// stored values, `p` opens the parser options or the
     /// More-Like-This settings, `s` the similarity and the sort, `l` the stored fields per hit,
     /// `f`/`F` step the field, `a` switches between OR and AND, `t` between an exact and an
     /// approximate count, `x` explains the selected hit, Enter shows its document, and Tab
@@ -697,7 +710,7 @@ impl Search {
         if let Some(form) = &mut self.form {
             let changed = match form {
                 Popup::Parser(form) => applied(form.handle_key(key), &mut self.parser),
-                Popup::Like(form) => applied(form.handle_key(key.code), &mut self.like),
+                Popup::Like(form) => applied(form.handle_key(key), &mut self.like),
                 Popup::Scoring(form) => applied(form.handle_key(key.code), &mut self.scoring),
                 Popup::Fields(form) => applied(form.handle_key(key.code), &mut self.hit_fields),
             };
@@ -745,11 +758,12 @@ impl Search {
                     Mode::Classic => Mode::Standard,
                     Mode::Standard => Mode::Term,
                     Mode::Term => Mode::Like,
-                    Mode::Like => Mode::Regex,
+                    Mode::Like => Mode::LikeText,
+                    Mode::LikeText => Mode::Regex,
                     Mode::Regex => Mode::Classic,
                 });
             }
-            KeyCode::Char('p') if self.mode == Mode::Like => {
+            KeyCode::Char('p') if matches!(self.mode, Mode::Like | Mode::LikeText) => {
                 self.form = Some(Popup::Like(LikeForm::new(&self.like)));
             }
             KeyCode::Char('p') if self.mode != Mode::Term => {
@@ -763,7 +777,7 @@ impl Search {
                 self.form = Some(Popup::Fields(FieldsForm::new(&self.hit_fields)));
             }
             KeyCode::Char('f') | KeyCode::Char('F')
-                if !self.fields.is_empty() && self.mode != Mode::Like =>
+                if !self.fields.is_empty() && !matches!(self.mode, Mode::Like | Mode::LikeText) =>
             {
                 let len = self.fields.len();
                 self.field = if key.code == KeyCode::Char('f') {
@@ -868,7 +882,7 @@ impl Search {
     pub fn keys(&self) -> &'static str {
         match &self.form {
             Some(Popup::Parser(form)) => form.keys(),
-            Some(Popup::Like(_)) => LikeForm::keys(),
+            Some(Popup::Like(form)) => form.keys(),
             Some(Popup::Scoring(_)) => ScoringForm::keys(),
             Some(Popup::Fields(_)) => FieldsForm::keys(),
             None if self.editing => " ⏎ search   Esc done   ←→ Ctrl+A/E/U/K/W edit",
@@ -878,6 +892,9 @@ impl Search {
             }
             None if self.mode == Mode::Like => {
                 "/ doc id   m mode   p/s/l settings   t count   x explain   ⏎ open doc   Tab panel   ↑↓"
+            }
+            None if self.mode == Mode::LikeText => {
+                "/ text   m mode   p/s/l settings   t count   x explain   ⏎ open doc   Tab panel   ↑↓"
             }
             None if self.mode != Mode::Term => {
                 "/ query   m mode   p/s/l settings   f/F field   a AND/OR   t count   x explain   \
@@ -948,6 +965,10 @@ impl Search {
                 " More like this document · {} · {count} ",
                 self.like.fields_text()
             ),
+            Mode::LikeText => format!(
+                " More like this text · {} · {count} ",
+                self.like.fields_text()
+            ),
             Mode::Regex => {
                 let fields = self.hit_fields.text().unwrap_or_else(|| "all".to_owned());
                 let case = if self.case_insensitive {
@@ -973,6 +994,7 @@ impl Search {
         } else if self.input.text().is_empty() {
             let hint = match self.mode {
                 Mode::Like => "Press / to type a document id, or m on the documents screen.",
+                Mode::LikeText => "Press / to type a text to find documents like it.",
                 Mode::Regex => "Press / to type a regular expression.",
                 _ => "Press / to type a query.",
             };
@@ -1052,7 +1074,7 @@ impl Search {
             .query
             .more_like_this
             .as_ref()
-            .map(|like| like.doc_id);
+            .and_then(|like| like.doc_id);
         let mut rows: Vec<Row> = list
             .hits
             .iter()
@@ -1187,6 +1209,15 @@ impl Search {
                         "analyzer of the analysis screen (6). p chooses the fields and the limits.",
                     ),
                 ],
+                Mode::LikeText => vec![
+                    Line::from(
+                        "More like this: the line is a text. Each chosen field analyzes it with the",
+                    ),
+                    Line::from(
+                        "analyzer of the analysis screen (6), and the best terms of all fields make",
+                    ),
+                    Line::from("the query. p chooses the fields and the limits."),
+                ],
             }
             .into_iter()
             .map(|line| line.style(dim()))
@@ -1210,19 +1241,30 @@ impl Search {
             .as_ref()
             .and_then(|submitted| submitted.params.query.more_like_this.as_ref());
         if let Some(like) = source {
+            if let Some(terms) = &list.more_like_this_terms
+                && !terms.is_empty()
+            {
+                lines.extend(like_term_lines(terms));
+                lines.push(Line::from(""));
+            }
+            let doc_id = like.doc_id;
             if list.rewritten_query.starts_with("MatchNoDocsQuery") {
                 lines.push(
-                    Line::from(
+                    Line::from(if doc_id.is_some() {
                         "No term of the document passed the limits (p), or its fields have \
-                         neither a term vector nor stored text.",
-                    )
+                         neither a term vector nor stored text."
+                    } else {
+                        "No term of the text passed the limits (p), or none is in the chosen \
+                         fields."
+                    })
                     .style(dim()),
                 );
-            } else if list.hits.iter().any(|hit| hit.doc_id == like.doc_id) {
+            } else if let Some(doc_id) = doc_id
+                && list.hits.iter().any(|hit| hit.doc_id == doc_id)
+            {
                 lines.push(
                     Line::from(format!(
-                        "{SOURCE_MARK} marks document {}, the source.",
-                        like.doc_id
+                        "{SOURCE_MARK} marks document {doc_id}, the source."
                     ))
                     .style(dim()),
                 );
@@ -1240,7 +1282,9 @@ impl Search {
         let popups = match self.mode {
             Mode::Term => "s similarity and sort · l stored fields per hit",
             Mode::Regex => "l fields to scan",
-            Mode::Like => "p more like this · s similarity and sort · l stored fields per hit",
+            Mode::Like | Mode::LikeText => {
+                "p more like this · s similarity and sort · l stored fields per hit"
+            }
             Mode::Classic | Mode::Standard => {
                 "p parser options · s similarity and sort · l stored fields per hit"
             }
@@ -1266,7 +1310,7 @@ impl Search {
         }
         match self.mode {
             Mode::Term | Mode::Regex => return lines,
-            Mode::Like => {
+            Mode::Like | Mode::LikeText => {
                 lines.push(Line::from(format!(
                     "Like       {}",
                     self.like.limits_text()
@@ -1289,6 +1333,40 @@ impl Search {
     }
 }
 
+/// The terms a More-Like-This query chose, best first, as a table: score, term frequency in the
+/// source, document frequency, field and term (ADR 0028).
+fn like_term_lines(terms: &[LikeTerm]) -> Vec<Line<'static>> {
+    let tf_width = number_width(terms.iter().map(|term| i64::from(term.tf))) as usize;
+    let df_width = number_width(terms.iter().map(|term| i64::from(term.doc_freq))) as usize;
+    let fields: Vec<String> = terms
+        .iter()
+        .map(|term| escape_control(&term.field))
+        .collect();
+    let field_width = fields
+        .iter()
+        .map(|field| field.chars().count())
+        .max()
+        .unwrap_or_default()
+        .max("field".len());
+    let mut lines = vec![
+        Line::from(format!(
+            "Terms      {:>9}  {:>tf_width$}  {:>df_width$}  {:<field_width$}  term",
+            "score", "tf", "df", "field"
+        ))
+        .style(dim()),
+    ];
+    lines.extend(terms.iter().zip(fields).map(|(term, field)| {
+        Line::from(format!(
+            "           {:>9.4}  {:>tf_width$}  {:>df_width$}  {field:<field_width$}  {}",
+            term.score,
+            term.tf,
+            term.doc_freq,
+            escape_control(&term.term)
+        ))
+    }));
+    lines
+}
+
 impl HitList {
     fn new(results: SearchResults, more: bool) -> Self {
         Self {
@@ -1298,6 +1376,7 @@ impl HitList {
             relation: results.total_hits_relation,
             took_millis: results.took_millis,
             hits: results.hits,
+            more_like_this_terms: results.more_like_this_terms,
             more,
             error: None,
         }
@@ -1555,12 +1634,16 @@ mod tests {
                 total_hits_relation: TotalHitsRelation::EqualTo,
                 hits: docs.map(hit).collect(),
                 took_millis: 3,
+                more_like_this_terms: None,
             }),
         }
     }
 
     fn render(search: &mut Search) -> String {
-        let (width, height) = (100, 24);
+        render_sized(search, 100, 24)
+    }
+
+    fn render_sized(search: &mut Search, width: u16, height: u16) -> String {
         let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
         terminal
             .draw(|frame| search.render(frame, frame.area()))
@@ -1590,7 +1673,7 @@ mod tests {
     /// The search screen in regex mode, with `pattern` submitted.
     fn regex(pattern: &str) -> (Search, StartStoredScanParams) {
         let mut search = search();
-        for _ in 0..4 {
+        for _ in 0..5 {
             assert_eq!(press(&mut search, KeyCode::Char('m')), None);
         }
         press(&mut search, KeyCode::Char('/'));
@@ -1737,7 +1820,7 @@ mod tests {
         assert_eq!(search.mode, Mode::Classic);
         assert!(search.scan.is_none());
         // Back in regex mode, nothing runs by itself.
-        for _ in 0..4 {
+        for _ in 0..5 {
             assert_eq!(press(&mut search, KeyCode::Char('m')), None);
         }
         assert!(search.scan.is_none());
@@ -1947,7 +2030,8 @@ mod tests {
 
     fn like(doc_id: i32) -> MoreLikeThisQuery {
         MoreLikeThisQuery {
-            doc_id,
+            doc_id: Some(doc_id),
+            text: None,
             fields: vec!["title".to_owned(), "body".to_owned()],
             min_term_freq: 2,
             min_doc_freq: 5,
@@ -1955,7 +2039,83 @@ mod tests {
             max_query_terms: 25,
             boost: false,
             analyzer: Analyzer::default(),
+            min_word_len: 0,
+            max_word_len: None,
+            stop_words: Vec::new(),
         }
+    }
+
+    fn like_term(field: &str, term: &str, tf: i32, doc_freq: i32, score: f64) -> LikeTerm {
+        LikeTerm {
+            field: field.to_owned(),
+            term: term.to_owned(),
+            tf,
+            doc_freq,
+            idf: score / f64::from(tf),
+            score,
+        }
+    }
+
+    #[test]
+    fn like_text_mode_takes_the_line_as_a_text_and_shows_the_chosen_terms() {
+        let mut search = search();
+        for _ in 0..4 {
+            assert_eq!(press(&mut search, KeyCode::Char('m')), None);
+        }
+        let screen = render(&mut search);
+        assert!(screen.contains("More like this text · fields title · body · count to 1000"));
+        assert!(screen.contains("Press / to type a text"));
+        assert!(search.keys().starts_with("/ text"));
+
+        press(&mut search, KeyCode::Char('/'));
+        // Anything goes into the line, unlike a document id.
+        typed(&mut search, "Red lamp 42");
+        let Some(Request::Search { params, .. }) = press(&mut search, KeyCode::Enter) else {
+            panic!("Enter searches");
+        };
+        assert_eq!(
+            params.query.more_like_this,
+            Some(MoreLikeThisQuery {
+                doc_id: None,
+                text: Some("Red lamp 42".to_owned()),
+                ..like(0)
+            })
+        );
+        // The popup is the same as for a document; f/F don't step a field.
+        assert_eq!(press(&mut search, KeyCode::Char('f')), None);
+        assert_eq!(press(&mut search, KeyCode::Char('p')), None);
+        assert!(search.keys().contains("a/n all/no fields"));
+        press(&mut search, KeyCode::Esc);
+
+        search.search_started(1);
+        let mut page = results(2..4, 2);
+        if let Some(results) = &mut page.results {
+            results.query = "like(text \"Red lamp 42\", …)".to_owned();
+            results.more_like_this_terms = Some(vec![
+                like_term("title", "lamp", 1, 19, 4.218876),
+                like_term("body", "red\u{7}", 12, 1234, 2.5),
+            ]);
+        }
+        search.search_progress(page);
+        let screen = render_sized(&mut search, 100, 40);
+        assert!(
+            screen.contains("Terms          score    tf    df  field  term"),
+            "{screen}"
+        );
+        assert!(
+            screen.contains("              4.2189     1    19  title  lamp"),
+            "{screen}"
+        );
+        assert!(
+            screen.contains("              2.5000    12  1234  body   red\\u{7}"),
+            "{screen}"
+        );
+        // A text has no source among the hits.
+        assert!(!screen.contains("◆"));
+
+        // m goes on to the regex mode, which runs nothing by itself: the search is done.
+        assert_eq!(press(&mut search, KeyCode::Char('m')), None);
+        assert_eq!(search.mode, Mode::Regex);
     }
 
     #[test]
@@ -2029,6 +2189,7 @@ mod tests {
                 total_hits_relation: TotalHitsRelation::EqualTo,
                 hits: vec![],
                 took_millis: 1,
+                more_like_this_terms: Some(Vec::new()),
             }),
         });
         assert!(render(&mut search).contains("No term of the document passed the limits"));
