@@ -12,7 +12,10 @@
           "allowLeadingWildcard": false,
           "phraseSlop": 0,
           "fuzzyPrefixLength": 0,
-          "enablePositionIncrements": true
+          "enablePositionIncrements": true,
+          "dateResolution": "DAY",
+          "locale": "en-US",
+          "timeZone": "UTC"
         },
         "fuzzyMaxEdits": 2,
         "splitOnWhitespace": false,

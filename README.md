@@ -318,7 +318,11 @@ point field's values, which the index doesn't record: leia guesses INT for 4 byt
 and `p` corrects the guess to FLOAT or DOUBLE, or leaves a field to text. The details panel lists
 the types in use. In the same popup are the parser options: leading wildcards, phrase slop, fuzzy
 prefix length and position increments for both parsers, and fuzzy max edits, whitespace splitting
-and auto-generated phrases for the classic one. A term query searches the field for
+and auto-generated phrases for the classic one. For date ranges written with `DateTools`, such as
+`published:[1/1/26 TO 1/31/26]`, the popup sets the date resolution, the locale the dates are
+written in (`en-US`, `de-DE`) and the time zone they are read in (`UTC`, `Europe/Berlin`). Without
+a resolution, the bounds stay text. Without a time zone, they are read in the server JVM's zone,
+as Lucene does (ADR 0026). A term query searches the field for
 the line exactly as typed, `:` and spaces included, without analysis. A changed setting searches
 again.
 

@@ -303,7 +303,7 @@ impl Search {
                     expression: text.to_owned(),
                     default_field: field,
                     default_operator: self.operator,
-                    options: parser.options,
+                    options: parser.options.clone(),
                     fuzzy_max_edits: parser.fuzzy_max_edits,
                     split_on_whitespace: parser.split_on_whitespace,
                     auto_generate_phrase_queries: parser.auto_generate_phrase_queries,
@@ -316,7 +316,7 @@ impl Search {
                     expression: text.to_owned(),
                     default_field: field,
                     default_operator: self.operator,
-                    options: parser.options,
+                    options: parser.options.clone(),
                     points: parser.point_fields(),
                     analyzer: self.analyzer.analyzer(),
                 }),
@@ -589,7 +589,7 @@ impl Search {
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<Request> {
         if let Some(form) = &mut self.form {
             let changed = match form {
-                Popup::Parser(form) => applied(form.handle_key(key.code), &mut self.parser),
+                Popup::Parser(form) => applied(form.handle_key(key), &mut self.parser),
                 Popup::Like(form) => applied(form.handle_key(key.code), &mut self.like),
                 Popup::Scoring(form) => applied(form.handle_key(key.code), &mut self.scoring),
                 Popup::Fields(form) => applied(form.handle_key(key.code), &mut self.hit_fields),
@@ -709,7 +709,7 @@ impl Search {
     /// The keys for the footer.
     pub fn keys(&self) -> &'static str {
         match &self.form {
-            Some(Popup::Parser(_)) => OptionsForm::keys(),
+            Some(Popup::Parser(form)) => form.keys(),
             Some(Popup::Like(_)) => LikeForm::keys(),
             Some(Popup::Scoring(_)) => ScoringForm::keys(),
             Some(Popup::Fields(_)) => FieldsForm::keys(),

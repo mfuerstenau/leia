@@ -4,20 +4,26 @@ import java.text.NumberFormat;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TimeZone;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.queryparser.classic.ParseException;
 import org.apache.lucene.queryparser.classic.QueryParser;
 import org.apache.lucene.queryparser.flexible.core.QueryNodeException;
+import org.apache.lucene.queryparser.flexible.core.processors.QueryNodeProcessorPipeline;
 import org.apache.lucene.queryparser.flexible.standard.StandardQueryParser;
 import org.apache.lucene.queryparser.flexible.standard.config.PointsConfig;
 import org.apache.lucene.queryparser.flexible.standard.config.StandardQueryConfigHandler;
+import org.apache.lucene.queryparser.flexible.standard.processors.TermRangeQueryNodeProcessor;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.util.BytesRef;
 
-/** Builds the queries that {@link ReadOnlyIndex#search} runs (ADR 0010, ADR 0011, ADR 0013, ADR 0014). */
+/**
+ * Builds the queries that {@link ReadOnlyIndex#search} runs (ADR 0010, ADR 0011, ADR 0013, ADR 0014,
+ * ADR 0026).
+ */
 public final class Queries {
 
     /** How a query parser combines clauses without an operator. */
@@ -40,7 +46,7 @@ public final class Queries {
             String expression, String defaultField, ParserOptions options, ClassicOptions classic, Analyzer analyzer)
             throws InvalidQueryException {
         try {
-            QueryParser parser = new QueryParser(defaultField, analyzer);
+            QueryParser parser = new DateRangeQueryParser(defaultField, analyzer);
             parser.setDefaultOperator(
                     switch (options.defaultOperator()) {
                         case OR -> QueryParser.Operator.OR;
@@ -50,6 +56,9 @@ public final class Queries {
             parser.setPhraseSlop(options.phraseSlop());
             parser.setFuzzyPrefixLength(options.fuzzyPrefixLength());
             parser.setEnablePositionIncrements(options.enablePositionIncrements());
+            options.dateResolution().ifPresent(parser::setDateResolution);
+            options.locale().ifPresent(parser::setLocale);
+            options.timeZone().map(TimeZone::getTimeZone).ifPresent(parser::setTimeZone);
             parser.setFuzzyMinSim(classic.fuzzyMaxEdits());
             // In this order: the parser refuses auto-generated phrases while it doesn't split.
             parser.setSplitOnWhitespace(classic.splitOnWhitespace());
@@ -82,6 +91,7 @@ public final class Queries {
             throws InvalidQueryException {
         try {
             StandardQueryParser parser = new StandardQueryParser(analyzer);
+            readDatesInTheParsersZone(parser);
             parser.setDefaultOperator(
                     switch (options.defaultOperator()) {
                         case OR -> StandardQueryConfigHandler.Operator.OR;
@@ -91,6 +101,9 @@ public final class Queries {
             parser.setPhraseSlop(options.phraseSlop());
             parser.setFuzzyPrefixLength(options.fuzzyPrefixLength());
             parser.setEnablePositionIncrements(options.enablePositionIncrements());
+            options.dateResolution().ifPresent(parser::setDateResolution);
+            options.locale().ifPresent(parser::setLocale);
+            options.timeZone().map(TimeZone::getTimeZone).ifPresent(parser::setTimeZone);
             Map<String, PointsConfig> configs = new HashMap<>();
             points.forEach((field, type) -> configs.put(field, new PointsConfig(numberFormat(type), type.type())));
             parser.setPointsConfigMap(configs);
@@ -120,6 +133,24 @@ public final class Queries {
      */
     public static Query moreLikeThis(int docId, MoreLikeThisOptions options, Analyzer analyzer) {
         return new MoreLikeDocumentQuery(docId, options, analyzer);
+    }
+
+    /**
+     * Replaces the standard parser's processor of term ranges with one that reads dates in the
+     * parser's time zone (ADR 0026).
+     *
+     * @throws IllegalStateException if the parser has no such processor, which only another Lucene
+     *     version could cause
+     */
+    private static void readDatesInTheParsersZone(StandardQueryParser parser) {
+        var pipeline = (QueryNodeProcessorPipeline) parser.getQueryNodeProcessor();
+        for (int i = 0; i < pipeline.size(); i++) {
+            if (pipeline.get(i).getClass() == TermRangeQueryNodeProcessor.class) {
+                pipeline.set(i, new DateRangeQueryNodeProcessor());
+                return;
+            }
+        }
+        throw new IllegalStateException("The standard query parser has no TermRangeQueryNodeProcessor");
     }
 
     /** Whole numbers for integer types and decimals for the others, as Luke reads them. */

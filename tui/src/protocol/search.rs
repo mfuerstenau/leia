@@ -262,7 +262,7 @@ pub struct StandardQuery {
 }
 
 /// The options that the classic and the standard query parser share (ADR 0011).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ParserOptions {
     /// Whether a term may start with `*` or `?`.
@@ -273,6 +273,18 @@ pub struct ParserOptions {
     pub fuzzy_prefix_length: i32,
     /// Whether phrases keep the gaps that the analyzer leaves.
     pub enable_position_increments: bool,
+    /// The resolution that range bounds which are dates are turned into terms with, for every
+    /// field; `None` leaves the bounds as text (ADR 0026).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub date_resolution: Option<DateResolution>,
+    /// The BCP 47 tag of the locale that range bounds are read as dates in, such as `en-US`;
+    /// `None` for the server JVM's default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locale: Option<String>,
+    /// The time zone that range bounds are read as dates in, such as `UTC`, `Europe/Berlin` or
+    /// `+02:00`; `None` for the server JVM's default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_zone: Option<String>,
 }
 
 impl Default for ParserOptions {
@@ -283,6 +295,49 @@ impl Default for ParserOptions {
             phrase_slop: 0,
             fuzzy_prefix_length: 0,
             enable_position_increments: true,
+            date_resolution: None,
+            locale: None,
+            time_zone: None,
+        }
+    }
+}
+
+/// How precisely the dates of a range were indexed, as Lucene's `DateTools.Resolution`
+/// (ADR 0026).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum DateResolution {
+    Year,
+    Month,
+    Day,
+    Hour,
+    Minute,
+    Second,
+    Millisecond,
+}
+
+impl DateResolution {
+    /// Every resolution, the coarsest first.
+    pub const ALL: [DateResolution; 7] = [
+        DateResolution::Year,
+        DateResolution::Month,
+        DateResolution::Day,
+        DateResolution::Hour,
+        DateResolution::Minute,
+        DateResolution::Second,
+        DateResolution::Millisecond,
+    ];
+
+    /// The name on the wire.
+    pub fn name(self) -> &'static str {
+        match self {
+            DateResolution::Year => "YEAR",
+            DateResolution::Month => "MONTH",
+            DateResolution::Day => "DAY",
+            DateResolution::Hour => "HOUR",
+            DateResolution::Minute => "MINUTE",
+            DateResolution::Second => "SECOND",
+            DateResolution::Millisecond => "MILLISECOND",
         }
     }
 }

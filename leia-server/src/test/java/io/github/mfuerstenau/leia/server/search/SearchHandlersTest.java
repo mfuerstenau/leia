@@ -19,6 +19,7 @@ import io.github.mfuerstenau.leia.protocol.search.Bm25Similarity;
 import io.github.mfuerstenau.leia.protocol.search.BooleanSimilarity;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
 import io.github.mfuerstenau.leia.protocol.search.ClassicSimilarity;
+import io.github.mfuerstenau.leia.protocol.search.DateResolution;
 import io.github.mfuerstenau.leia.protocol.search.DocSort;
 import io.github.mfuerstenau.leia.protocol.search.Explanation;
 import io.github.mfuerstenau.leia.protocol.search.FieldSort;
@@ -79,7 +80,7 @@ class SearchHandlersTest {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
     private static final String LONG_BODY = "red " + "x".repeat(300);
-    private static final ParserOptions DEFAULTS = new ParserOptions(false, 0, 0, true);
+    private static final ParserOptions DEFAULTS = options(false, 0, 0, true);
     private static final Analyzer STANDARD = new Analyzer(
             Optional.of(new StandardAnalyzer()),
             Optional.empty(),
@@ -225,7 +226,7 @@ class SearchHandlersTest {
     @Test
     void appliesTheParserOptions() throws Exception {
         openIndex();
-        ParserOptions options = new ParserOptions(true, 2, 1, true);
+        ParserOptions options = options(true, 2, 1, true);
 
         SearchResults classic =
                 search(params(classic("*ed \"red x\" blu~", options, 1, false, false), 0, 10, Optional.empty()));
@@ -240,11 +241,49 @@ class SearchHandlersTest {
         openIndex();
 
         for (SearchQuery query : List.of(
-                classic("red", new ParserOptions(false, -1, 0, true), 2, false, false),
-                standard("red", new ParserOptions(false, 0, -1, true), List.of()),
+                classic("red", options(false, -1, 0, true), 2, false, false),
+                standard("red", options(false, 0, -1, true), List.of()),
                 classic("red", DEFAULTS, 3, false, false),
                 classic("red", DEFAULTS, 2, false, true))) {
             assertFails(() -> startSearch.handle(params(query, 0, 10, Optional.empty())), ErrorCode.INVALID_PARAMS);
+        }
+    }
+
+    @Test
+    void readsRangeBoundsAsDates() throws Exception {
+        openIndex();
+        ParserOptions dates = dates(Optional.of(DateResolution.DAY), Optional.of("en-US"), Optional.of("UTC"));
+
+        assertThat(search(params(
+                                classic("published:[1/1/26 TO 1/31/26]", dates, 2, false, false),
+                                0,
+                                10,
+                                Optional.empty()))
+                        .query())
+                .isEqualTo("published:[20260101 TO 20260131]");
+        ParserOptions berlin =
+                dates(Optional.of(DateResolution.DAY), Optional.of("de-DE"), Optional.of("Europe/Berlin"));
+        assertThat(search(params(
+                                standard("published:[01.01.26 TO 31.01.26]", berlin, List.of()),
+                                0,
+                                10,
+                                Optional.empty()))
+                        .query())
+                .isEqualTo("published:[20251231 TO 20260131]");
+    }
+
+    @Test
+    void rejectsBadLocalesAndTimeZones() throws Exception {
+        openIndex();
+
+        for (ParserOptions options : List.of(
+                dates(Optional.empty(), Optional.of("en_US"), Optional.empty()),
+                dates(Optional.empty(), Optional.of(" "), Optional.empty()),
+                dates(Optional.empty(), Optional.empty(), Optional.of("Mars/Olympus")),
+                dates(Optional.empty(), Optional.empty(), Optional.of("")))) {
+            assertFails(
+                    () -> startSearch.handle(params(classic("red", options, 2, false, false), 0, 10, Optional.empty())),
+                    ErrorCode.INVALID_PARAMS);
         }
     }
 
@@ -544,6 +583,24 @@ class SearchHandlersTest {
 
         assertFails(() -> getExplain.handle(new JobParams(jobId)), ErrorCode.JOB_NOT_FOUND);
         assertThat(awaitSearch(jobId).results()).isPresent();
+    }
+
+    private static ParserOptions options(
+            boolean allowLeadingWildcard, int phraseSlop, int fuzzyPrefixLength, boolean enablePositionIncrements) {
+        return new ParserOptions(
+                allowLeadingWildcard,
+                phraseSlop,
+                fuzzyPrefixLength,
+                enablePositionIncrements,
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty());
+    }
+
+    /** Lucene's defaults, with these date settings. */
+    private static ParserOptions dates(
+            Optional<DateResolution> dateResolution, Optional<String> locale, Optional<String> timeZone) {
+        return new ParserOptions(false, 0, 0, true, dateResolution, locale, timeZone);
     }
 
     private static SearchQuery classic(String expression) {

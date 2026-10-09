@@ -37,11 +37,11 @@ use leia::protocol::index::{
 use leia::protocol::jars::{AddJars, AddJarsParams, GetJars, GetJarsParams};
 use leia::protocol::job::{CancelJob, JobParams};
 use leia::protocol::search::{
-    Bm25Similarity, ClassicQuery, ClassicSimilarity, DocSort, FieldSort, GetExplain, GetSearch,
-    MAX_FUZZY_EDITS, MoreLikeThisQuery, ParserOptions, PointField, PointType, QueryOperator,
-    ScoreSort, SearchQuery, Similarity, SortKey, SortMissing, SortSelector, SortType,
-    StandardQuery, StartExplain, StartExplainParams, StartSearch, StartSearchParams,
-    TotalHitsRelation,
+    Bm25Similarity, ClassicQuery, ClassicSimilarity, DateResolution, DocSort, FieldSort,
+    GetExplain, GetSearch, MAX_FUZZY_EDITS, MoreLikeThisQuery, ParserOptions, PointField,
+    PointType, QueryOperator, ScoreSort, SearchQuery, Similarity, SortKey, SortMissing,
+    SortSelector, SortType, StandardQuery, StartExplain, StartExplainParams, StartSearch,
+    StartSearchParams, TotalHitsRelation,
 };
 use leia::protocol::terms::{
     ExportTermsResult, FieldTerms, GetExportTerms, GetFieldTermScan, GetPositions,
@@ -1326,6 +1326,80 @@ fn searches_for_documents_like_one_of_a_lucene9_index() {
         matches!(&unknown, CallError::Rpc(e) if e.code == ErrorCode::FieldNotFound),
         "{unknown:?}"
     );
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn searches_date_ranges_of_the_demo_index() {
+    let mut server = start();
+    server
+        .call::<OpenIndex>(OpenIndexParams {
+            path: test_index("demo", "demoIndex"),
+            directory_impl: None,
+            mode: None,
+        })
+        .unwrap();
+    let mut search = |query: SearchQuery| {
+        let job = server
+            .call::<StartSearch>(StartSearchParams {
+                query,
+                similarity: bm25(),
+                sort: Vec::new(),
+                offset: 0,
+                limit: 10,
+                exact_total_hits: true,
+                fields: None,
+            })
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let poll = server
+                .call::<GetSearch>(JobParams { job_id: job.job_id })
+                .unwrap();
+            if let Some(results) = poll.results {
+                break results;
+            }
+            assert!(Instant::now() < deadline, "the search did not finish");
+            thread::sleep(Duration::from_millis(10));
+        }
+    };
+    let dates = |expression: &str, options: ParserOptions| {
+        let mut query = classic(expression);
+        query.classic.as_mut().unwrap().options = options;
+        query
+    };
+    let january_in_utc = ParserOptions {
+        date_resolution: Some(DateResolution::Day),
+        locale: Some("en-US".to_owned()),
+        time_zone: Some("UTC".to_owned()),
+        ..ParserOptions::default()
+    };
+
+    // `published` is the day of `timestamp` in UTC, as `DateTools` writes it.
+    let published = search(dates("published:[1/1/26 TO 1/31/26]", january_in_utc));
+    assert_eq!(published.query, "published:[20260101 TO 20260131]");
+    let timestamps = search(SearchQuery {
+        standard: Some(StandardQuery {
+            expression: "timestamp:[1767225600000 TO 1769903999999]".to_owned(),
+            default_field: "body".to_owned(),
+            default_operator: QueryOperator::Or,
+            options: ParserOptions::default(),
+            points: vec![PointField {
+                field: "timestamp".to_owned(),
+                point_type: PointType::Long,
+            }],
+            analyzer: Analyzer::default(),
+        }),
+        ..SearchQuery::default()
+    });
+    assert!(published.total_hits > 0);
+    assert_eq!(published.total_hits, timestamps.total_hits);
+    // Without a resolution, the bounds are text, which no day matches.
+    let text = search(dates(
+        "published:[1/1/26 TO 1/31/26]",
+        ParserOptions::default(),
+    ));
+    assert_eq!(text.total_hits, 0);
 }
 
 fn bm25() -> Similarity {

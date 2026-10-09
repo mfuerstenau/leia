@@ -39,6 +39,7 @@ their own indexes and the Lucene 9 and 8 indexes from `LegacyIndexWriter`.
 | `quantity` | int point + stored int + numeric doc values, some negative |
 | `rating` | float point + stored float + float doc values (float bits) |
 | `timestamp` | long point + stored long + sorted numeric doc values (epoch millis in 2026) |
+| `published` | keyword, stored: the day of `timestamp` in UTC as `DateTools` writes it (`20260131`), for date ranges |
 | `scores` | sorted numeric doc values, 1–4 values from -100 to 100 |
 | `weight` | sorted numeric doc values as sortable double bits (`x` decodes them) |
 | `location` | lat/lon point + lat/lon doc values |
@@ -91,6 +92,12 @@ their own indexes and the Lucene 9 and 8 indexes from `LegacyIndexWriter`.
   whose largest score is 100 come first, in id order (doc 64 first). Sort by `tags` with missing
   first: about a hundred documents without tags (`–`) come first, ascending or descending; with
   missing last, they come last either way.
+- `published:[1/1/26 TO 1/31/26]`, with `p` setting the date resolution to DAY, the locale to
+  `en-US` and the time zone to `UTC`: 49 hits, the bounds become `[20260101 TO 20260131]`, the same
+  documents as `timestamp:[1767225600000 TO 1769903999999]` in standard syntax. Without a
+  resolution, the bounds stay text: no hits. With `de-DE`, `[01.01.26 TO 31.01.26]` reads the same.
+  `[2/1/26 TO 2/28/26]` has 44 hits in UTC; with the time zone cleared, a JVM in Berlin reads
+  midnight as the day before in UTC, so the range starts at `20260131`: 46 hits.
 - `title:lamp` with `s` sorting by the score, worst first: the longest titles come first.
 - `title:lamp` with `s` set to classic TF-IDF: doc 51 scores 2.4358, and `x` shows the
   `ClassicSimilarity` explanation with the same value. Boolean scores every hit 1.

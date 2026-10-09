@@ -20,6 +20,7 @@ import org.apache.lucene.analysis.standard.StandardTokenizer;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 import org.apache.lucene.analysis.tokenattributes.PayloadAttribute;
 import org.apache.lucene.document.BinaryDocValuesField;
+import org.apache.lucene.document.DateTools;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.DoubleDocValuesField;
 import org.apache.lucene.document.DoublePoint;
@@ -278,6 +279,9 @@ public final class DemoIndexWriter {
         doc.add(new LongPoint("timestamp", timestamp));
         doc.add(new StoredField("timestamp", timestamp));
         doc.add(new SortedNumericDocValuesField("timestamp", timestamp));
+        // The day of the timestamp in UTC, as DateTools writes it: for date ranges (ADR 0026).
+        doc.add(new StringField(
+                "published", DateTools.timeToString(timestamp, DateTools.Resolution.DAY), Field.Store.YES));
         for (int n = 0; n < 1 + random.nextInt(4); n++) {
             doc.add(new SortedNumericDocValuesField("scores", random.nextInt(201) - 100));
         }

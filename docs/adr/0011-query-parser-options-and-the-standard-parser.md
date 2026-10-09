@@ -1,6 +1,6 @@
 # ADR 0011 — Query parser options and the standard query parser
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by ADR 0026 (date resolution, locale and time zone for date ranges)
 - **Date:** 2026-10-06
 
 ## Context

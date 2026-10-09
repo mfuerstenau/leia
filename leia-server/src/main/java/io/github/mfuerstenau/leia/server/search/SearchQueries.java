@@ -26,13 +26,18 @@ import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.analysis.AnalyzerSpecs;
 import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
+import java.time.DateTimeException;
+import java.time.ZoneId;
 import java.util.ArrayList;
+import java.util.IllformedLocaleException;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
 import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.document.DateTools;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.search.Query;
@@ -270,9 +275,38 @@ final class SearchQueries {
                     options.allowLeadingWildcard(),
                     options.phraseSlop(),
                     options.fuzzyPrefixLength(),
-                    options.enablePositionIncrements());
+                    options.enablePositionIncrements(),
+                    options.dateResolution().map(resolution -> DateTools.Resolution.valueOf(resolution.name())),
+                    options.locale().map(SearchQueries::locale),
+                    options.timeZone().map(SearchQueries::timeZone));
         } catch (IllegalArgumentException e) {
             throw invalidParams(e);
+        }
+    }
+
+    /** @throws IllegalArgumentException if {@code tag} is not a BCP 47 language tag */
+    private static Locale locale(String tag) {
+        try {
+            if (tag.isBlank()) {
+                throw new IllformedLocaleException("blank");
+            }
+            return new Locale.Builder().setLanguageTag(tag).build();
+        } catch (IllformedLocaleException e) {
+            throw new IllegalArgumentException("'" + tag + "' is not a BCP 47 language tag, such as en-US", e);
+        }
+    }
+
+    /**
+     * Not {@code TimeZone.getTimeZone(String)}, which takes an unknown id for GMT.
+     *
+     * @throws IllegalArgumentException if {@code id} is not a time zone
+     */
+    private static ZoneId timeZone(String id) {
+        try {
+            return ZoneId.of(id);
+        } catch (DateTimeException e) {
+            throw new IllegalArgumentException(
+                    "'" + id + "' is not a time zone, such as UTC, Europe/Berlin or +02:00", e);
         }
     }
 

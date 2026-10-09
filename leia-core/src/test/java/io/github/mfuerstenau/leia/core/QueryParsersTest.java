@@ -7,19 +7,25 @@ import io.github.mfuerstenau.leia.core.Queries.Operator;
 import io.github.mfuerstenau.leia.core.SearchResults.Hit;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.ZoneId;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.document.DateTools;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.DoublePoint;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.FloatPoint;
 import org.apache.lucene.document.IntPoint;
 import org.apache.lucene.document.LongPoint;
+import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.queryparser.classic.QueryParser;
+import org.apache.lucene.queryparser.flexible.standard.StandardQueryParser;
 import org.apache.lucene.search.FuzzyQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.similarities.Similarity;
@@ -172,6 +178,102 @@ class QueryParsersTest {
         }
     }
 
+    @Test
+    void rangeBoundsBecomeDatesWithAResolution() throws Exception {
+        ParserOptions day = dates(DateTools.Resolution.DAY, Locale.US, "UTC");
+
+        for (Parser parser : Parser.values()) {
+            assertThat(parser.parse("published:[1/1/26 TO 1/31/26]", day))
+                    .hasToString("published:[20260101 TO 20260131]");
+            // An exclusive upper bound is the start of its day, an inclusive one its end.
+            assertThat(parser.parse("published:{1/1/26 TO 1/31/26}", day))
+                    .hasToString("published:{20260101 TO 20260131}");
+            assertThat(parser.parse("published:[* TO 1/31/26]", day)).hasToString("published:[* TO 20260131]");
+            assertThat(parser.parse("published:[1/1/26 TO 1/1/26]", dates(DateTools.Resolution.HOUR, Locale.US, "UTC")))
+                    .hasToString("published:[2026010100 TO 2026010123]");
+            // Without a resolution, the bounds stay text.
+            assertThat(parser.parse(
+                            "published:[1/1/26 TO 1/31/26]",
+                            DEFAULTS.withDates(
+                                    Optional.empty(), Optional.of(Locale.US), Optional.of(ZoneId.of("UTC")))))
+                    .hasToString("published:[1/1/26 TO 1/31/26]");
+        }
+    }
+
+    @Test
+    void rangeBoundsAreReadInTheLocale() throws Exception {
+        ParserOptions german = dates(DateTools.Resolution.DAY, Locale.GERMANY, "UTC");
+        ParserOptions american = dates(DateTools.Resolution.DAY, Locale.US, "UTC");
+
+        for (Parser parser : Parser.values()) {
+            assertThat(parser.parse("published:[01.01.26 TO 31.01.26]", german))
+                    .hasToString("published:[20260101 TO 20260131]");
+            assertThat(parser.parse("published:[01.01.26 TO 31.01.26]", american))
+                    .hasToString("published:[01.01.26 TO 31.01.26]");
+        }
+    }
+
+    @Test
+    void rangeBoundsAreReadInTheTimeZoneWhateverTheJvmsIs() throws Exception {
+        // DateTools writes GMT: midnight in Berlin is the day before, the end of a day in New York the day after.
+        for (Parser parser : Parser.values()) {
+            assertThat(parser.parse(
+                            "published:[1/1/26 TO 1/31/26]",
+                            dates(DateTools.Resolution.DAY, Locale.US, "Europe/Berlin")))
+                    .hasToString("published:[20251231 TO 20260131]");
+            assertThat(parser.parse(
+                            "published:[1/1/26 TO 1/31/26]",
+                            dates(DateTools.Resolution.DAY, Locale.US, "America/New_York")))
+                    .hasToString("published:[20260101 TO 20260201]");
+        }
+    }
+
+    @Test
+    void withoutATimeZoneDatesAreReadAsLuceneReadsThem() throws Exception {
+        ParserOptions options =
+                DEFAULTS.withDates(Optional.of(DateTools.Resolution.MINUTE), Optional.of(Locale.US), Optional.empty());
+        String expression = "published:[1/1/26 TO 1/31/26] OR published:{1/1/26 TO 1/2/26}";
+
+        QueryParser classic = new QueryParser("body", ANALYZER);
+        classic.setDateResolution(DateTools.Resolution.MINUTE);
+        classic.setLocale(Locale.US);
+        assertThat(classic(expression, options)).isEqualTo(classic.parse(expression));
+        StandardQueryParser standard = new StandardQueryParser(ANALYZER);
+        standard.setDateResolution(DateTools.Resolution.MINUTE);
+        standard.setLocale(Locale.US);
+        assertThat(standard(expression, options, Map.of())).isEqualTo(standard.parse(expression, "body"));
+    }
+
+    @Test
+    void dateRangesMatchDateToolsTerms() throws Exception {
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
+            ParserOptions day = dates(DateTools.Resolution.DAY, Locale.US, "UTC");
+            for (Parser parser : Parser.values()) {
+                assertThat(docs(index, parser.parse("published:[1/1/26 TO 1/31/26]", day)))
+                        .containsExactly(1);
+                assertThat(docs(index, parser.parse("published:[12/31/25 TO 2/1/26]", day)))
+                        .containsExactly(0, 1, 2);
+            }
+        }
+    }
+
+    /** Both query parsers, without point fields. */
+    private enum Parser {
+        CLASSIC,
+        STANDARD;
+
+        Query parse(String expression, ParserOptions options) throws InvalidQueryException {
+            return switch (this) {
+                case CLASSIC -> classic(expression, options);
+                case STANDARD -> standard(expression, options, Map.of());
+            };
+        }
+    }
+
+    private static ParserOptions dates(DateTools.Resolution resolution, Locale locale, String zone) {
+        return DEFAULTS.withDates(Optional.of(resolution), Optional.of(locale), Optional.of(ZoneId.of(zone)));
+    }
+
     private static Query classic(String expression, ParserOptions options) throws InvalidQueryException {
         return Queries.classic(expression, "body", options, ClassicOptions.DEFAULTS, ANALYZER);
     }
@@ -192,20 +294,25 @@ class QueryParsersTest {
                 .toList();
     }
 
-    /** Three documents with a point of each type: quantity 1, 2, 3; price -1.5, 9.99, 100.5; … */
+    /**
+     * Three documents with a point of each type: quantity 1, 2, 3; price -1.5, 9.99, 100.5; …; and a
+     * {@code DateTools} day: published 2025-12-31, 2026-01-31, 2026-02-01.
+     */
     private Path writeIndex() throws IOException {
         Path dir = tmp.resolve("points");
         try (FSDirectory directory = FSDirectory.open(dir);
                 IndexWriter writer = new IndexWriter(directory, new IndexWriterConfig())) {
-            writer.addDocument(doc("a fox", 1, 1000L, 1.5f, -1.5));
-            writer.addDocument(doc("a dog", 2, 2000L, 2.5f, 9.99));
-            writer.addDocument(doc("a fox and a dog", 3, 3000L, 3.5f, 100.5));
+            writer.addDocument(doc("a fox", 1, 1000L, 1.5f, -1.5, "20251231"));
+            writer.addDocument(doc("a dog", 2, 2000L, 2.5f, 9.99, "20260131"));
+            writer.addDocument(doc("a fox and a dog", 3, 3000L, 3.5f, 100.5, "20260201"));
         }
         return dir;
     }
 
-    private static Document doc(String body, int quantity, long timestamp, float rating, double price) {
+    private static Document doc(
+            String body, int quantity, long timestamp, float rating, double price, String published) {
         Document doc = new Document();
+        doc.add(new StringField("published", published, Field.Store.NO));
         doc.add(new TextField("body", body, Field.Store.NO));
         doc.add(new IntPoint("quantity", quantity));
         doc.add(new LongPoint("timestamp", timestamp));
