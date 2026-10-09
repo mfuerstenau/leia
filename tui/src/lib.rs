@@ -19,6 +19,7 @@ pub mod hit_fields;
 pub mod input;
 pub mod jars;
 pub mod java;
+pub mod logo;
 pub mod more_like_this;
 pub mod overview;
 pub mod parser_options;

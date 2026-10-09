@@ -13,6 +13,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, BorderType, Cell, Paragraph, Row, Table, TableState, Wrap};
 use unicode_width::UnicodeWidthStr;
 
+use crate::logo;
 use crate::protocol::document::BytesValue;
 use crate::protocol::index::{
     DocValuesType, GetIndexStatsResult, IndexCommitStats, IndexField, IndexOptions, SkippedIndex,
@@ -42,6 +43,9 @@ pub fn step_top_terms(top_n: i32, up: bool) -> i32 {
 const SIDE_BY_SIDE_WIDTH: u16 = 130;
 /// The width of the terms panel next to the fields.
 const TERMS_PANEL_WIDTH: u16 = 46;
+/// From this height on, the logo is at the right of the index summary, which grows to its height,
+/// if the summary still fits next to it.
+const LOGO_HEIGHT: u16 = 30;
 
 /// Where a field's term scan is.
 #[derive(Debug)]
@@ -402,17 +406,42 @@ impl Overview {
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         // Inside the block's left and right border.
-        let summary = summary_lines(&self.stats, &self.skipped, area.width.saturating_sub(2));
+        let inner_width = area.width.saturating_sub(2);
+        let summary = summary_lines(&self.stats, &self.skipped, inner_width);
+        let about = logo::about_lines();
+        // The logo with leia's version and a column on either side, if the summary still fits.
+        let logo_width = logo::width_beside(&about) + 2;
+        let with_logo = area.height >= LOGO_HEIGHT
+            && summary
+                .iter()
+                .all(|line| line.width() + usize::from(logo_width) <= usize::from(inner_width));
+        let rows = if with_logo {
+            (summary.len() as u16).max(logo::HEIGHT)
+        } else {
+            summary.len() as u16
+        };
         let [top, bottom] = Layout::vertical([
             // The lines plus the block's top and bottom border.
-            Constraint::Length(summary.len() as u16 + 2),
+            Constraint::Length(rows + 2),
             Constraint::Fill(1),
         ])
         .areas(area);
-        frame.render_widget(
-            Paragraph::new(summary).block(Block::bordered().title(" Index ")),
-            top,
-        );
+        let block = Block::bordered().title(" Index ");
+        let inner = block.inner(top);
+        frame.render_widget(block, top);
+        if with_logo {
+            let [text, _, logo_area, _] = Layout::horizontal([
+                Constraint::Fill(1),
+                Constraint::Length(1),
+                Constraint::Length(logo_width - 2),
+                Constraint::Length(1),
+            ])
+            .areas(inner);
+            frame.render_widget(Paragraph::new(summary), text);
+            logo::render_beside(frame, logo_area, about);
+        } else {
+            frame.render_widget(Paragraph::new(summary), inner);
+        }
 
         let [fields_area, terms_area] = if bottom.width >= SIDE_BY_SIDE_WIDTH {
             Layout::horizontal([Constraint::Fill(1), Constraint::Length(TERMS_PANEL_WIDTH)])
@@ -965,6 +994,7 @@ mod tests {
     use ratatui::backend::TestBackend;
 
     use super::*;
+    use crate::build_info::LEIA;
     use crate::protocol::index::TermStats;
 
     fn indexed(name: &str, number: i32) -> IndexField {
@@ -1059,6 +1089,36 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    #[test]
+    fn shows_the_logo_next_to_the_summary_where_it_fits() {
+        let mut overview = Overview::new(stats(vec![field("id", 0)]), 50);
+
+        let screen = render(&mut overview, 140, 30);
+        let lines: Vec<&str> = screen.lines().collect();
+        // The summary grows to the logo's height: border, 8 rows, border.
+        assert!(lines[0].contains(" Index "), "{screen}");
+        assert!(
+            lines[1].contains("Path") && lines[1].contains('▄'),
+            "{screen}"
+        );
+        assert!(lines[8].contains('▀'), "{screen}");
+        assert!(lines[9].starts_with('└'), "{screen}");
+        // leia's name, version and build next to it.
+        assert!(
+            lines[3].contains(&format!("leia {}", LEIA.version)),
+            "{screen}"
+        );
+        assert!(
+            lines[4].contains(&format!("build {}", LEIA.commit)),
+            "{screen}"
+        );
+        assert!(lines[5].contains(LEIA.commit_time), "{screen}");
+
+        // Not where the summary wouldn't fit next to it, nor on a short screen.
+        assert!(!render(&mut overview, 60, 30).contains('▀'));
+        assert!(!render(&mut overview, 140, 29).contains('▀'));
     }
 
     #[test]

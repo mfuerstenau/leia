@@ -16,13 +16,14 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Paragraph, Tabs, Wrap};
 
 use crate::analysis::{self, Analysis};
-use crate::build_info::{LEIA, java_line, server_line};
+use crate::build_info::{java_line, server_line};
 use crate::check::{self, Check};
 use crate::commits::{self, Commits};
 use crate::documents::{self, Documents, Walk};
 use crate::export::{ExportEvent, ExportPrompt};
 use crate::history::History;
 use crate::jars::{DefaultJars, JarsEvent, JarsPopup};
+use crate::logo;
 use crate::overview::{DEFAULT_TOP_TERMS, FieldScan, Overview, step_top_terms};
 use crate::overview::{label_line, relative};
 use crate::prompt::{PathPrompt, PromptEvent, expand_home};
@@ -1444,20 +1445,26 @@ impl App {
                 Line::from(" q quit   o open   c close   1-7 screen")
             }
             (None, _, _, _, _, _) => {
-                let lines = vec![
+                let mut lines = logo::about_lines();
+                lines.extend([
+                    Line::from(""),
+                    Line::from(server_line(&self.version)),
+                    Line::from(java_line(&self.version.java)),
+                    Line::from(""),
                     Line::from(
                         "No index open. Press o to open one, 6 to try an analyzer, or X to add \
                          jars.",
                     ),
-                    Line::from(""),
-                    Line::from(LEIA.line()),
-                    Line::from(server_line(&self.version)),
-                    Line::from(java_line(&self.version.java)),
-                ];
-                frame.render_widget(
-                    Paragraph::new(lines).block(Block::bordered().title(" leia ")),
-                    body,
-                );
+                ]);
+                let block = Block::bordered().title(" leia ");
+                let inner = block.inner(body);
+                frame.render_widget(block, body);
+                // The logo only where it leaves room for the text.
+                if inner.height >= logo::HEIGHT && inner.width >= logo::WIDTH + 2 + 40 {
+                    logo::render_beside(frame, inner, lines);
+                } else {
+                    frame.render_widget(Paragraph::new(lines), inner);
+                }
                 Line::from(" q quit   o open   6 analysis   X jars")
             }
         };
@@ -1518,11 +1525,6 @@ impl App {
             }
             _ => keys,
         };
-        let build = Line::from(format!("{} ", LEIA.line())).right_aligned();
-        // The build only if it fits next to the keys.
-        if keys.width() + 2 + build.width() <= usize::from(footer.width) {
-            frame.render_widget(build, footer);
-        }
         frame.render_widget(keys, footer);
         if let Some(prompt) = &self.export_prompt {
             prompt.render(frame, body);
@@ -1994,6 +1996,19 @@ mod tests {
         assert!(app.has_index());
         assert!(screen.contains("/data/idx"), "{screen}");
         assert!(!screen.contains("Open index"), "{screen}");
+    }
+
+    #[test]
+    fn shows_the_logo_without_an_index_where_it_fits() {
+        let mut app = App::new(version(), None);
+        let screen = render(&mut app);
+        assert!(screen.contains('▀'), "{screen}");
+        assert!(screen.contains("leia-server 1 (abc, t)"), "{screen}");
+
+        let mut terminal = Terminal::new(TestBackend::new(50, 20)).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        let narrow = terminal.backend().buffer();
+        assert!(narrow.content().iter().all(|cell| cell.symbol() != "▀"));
     }
 
     #[test]
