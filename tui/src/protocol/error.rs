@@ -49,10 +49,13 @@ pub enum ErrorCode {
     /// A file can't be written (ADR 0022): it lies in an index directory, its directory doesn't
     /// exist, it exists, or writing it failed.
     OutputNotWritable,
+    /// Jars can't be added (ADR 0024): a path is neither a jar nor a directory with jars, or their
+    /// factories, codecs or formats can't be loaded, such as for a missing dependency.
+    InvalidJar,
 }
 
 impl ErrorCode {
-    pub const ALL: [ErrorCode; 22] = [
+    pub const ALL: [ErrorCode; 23] = [
         ErrorCode::ParseError,
         ErrorCode::InvalidRequest,
         ErrorCode::MethodNotFound,
@@ -75,6 +78,7 @@ impl ErrorCode {
         ErrorCode::MissingCodec,
         ErrorCode::NoReader,
         ErrorCode::OutputNotWritable,
+        ErrorCode::InvalidJar,
     ];
 
     pub const fn code(self) -> i32 {
@@ -101,6 +105,7 @@ impl ErrorCode {
             ErrorCode::MissingCodec => -32014,
             ErrorCode::NoReader => -32015,
             ErrorCode::OutputNotWritable => -32016,
+            ErrorCode::InvalidJar => -32017,
         }
     }
 
@@ -129,6 +134,7 @@ impl ErrorCode {
             ErrorCode::MissingCodec => "MISSING_CODEC",
             ErrorCode::NoReader => "NO_READER",
             ErrorCode::OutputNotWritable => "OUTPUT_NOT_WRITABLE",
+            ErrorCode::InvalidJar => "INVALID_JAR",
         }
     }
 }

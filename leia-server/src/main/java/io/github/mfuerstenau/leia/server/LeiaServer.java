@@ -56,7 +56,7 @@ public final class LeiaServer {
             return;
         }
         // For libraries in the jars that load through the context class loader; threads
-        // started later, such as the job threads, inherit it.
+        // started later, such as the job threads, inherit it. addJars sets it again (ADR 0024).
         Thread.currentThread().setContextClassLoader(ExtensionJars.classLoader());
 
         BufferedReader in = new BufferedReader(new InputStreamReader(System.in, StandardCharsets.UTF_8));

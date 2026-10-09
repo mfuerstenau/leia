@@ -301,6 +301,16 @@ pub fn expand_home(path: &str, home: Option<&Path>) -> String {
 /// is completed with a trailing separator; several are completed to their common prefix and
 /// returned as candidates. Hidden directories only match a component that starts with `.`.
 pub fn complete(input: &str, home: Option<&Path>) -> (String, Vec<String>) {
+    complete_with_files(input, home, |_| false)
+}
+
+/// Completes as [`complete`] does, and to the files whose name `file` accepts too. A file that is
+/// the one match is completed without a separator.
+pub fn complete_with_files(
+    input: &str,
+    home: Option<&Path>,
+    file: impl Fn(&str) -> bool,
+) -> (String, Vec<String>) {
     if input == "~" && home.is_some() {
         return (format!("~{MAIN_SEPARATOR}"), Vec::new());
     }
@@ -314,21 +324,32 @@ pub fn complete(input: &str, home: Option<&Path>) -> (String, Vec<String>) {
     let Ok(entries) = fs::read_dir(&listed) else {
         return (input.to_owned(), Vec::new());
     };
-    let mut names: Vec<String> = entries
+    // Each name with whether it is a directory.
+    let mut matches: Vec<(String, bool)> = entries
         .filter_map(Result::ok)
-        // `Path::is_dir` follows symlinks, so a link to an index directory counts.
-        .filter(|entry| entry.path().is_dir())
-        .filter_map(|entry| entry.file_name().into_string().ok())
-        .filter(|name| {
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            // `Path::is_dir` follows symlinks, so a link to an index directory counts.
+            let path = entry.path();
+            if path.is_dir() {
+                Some((name, true))
+            } else if path.is_file() && file(&name) {
+                Some((name, false))
+            } else {
+                None
+            }
+        })
+        .filter(|(name, _)| {
             name.starts_with(prefix) && (prefix.starts_with('.') || !name.starts_with('.'))
         })
         .collect();
-    names.sort();
-    match names.as_slice() {
+    matches.sort();
+    match matches.as_slice() {
         [] => (input.to_owned(), Vec::new()),
-        [only] => (format!("{dir}{only}{MAIN_SEPARATOR}"), Vec::new()),
-        [first, rest @ ..] => {
-            let common = rest.iter().fold(first.as_str(), |common, name| {
+        [(only, true)] => (format!("{dir}{only}{MAIN_SEPARATOR}"), Vec::new()),
+        [(only, false)] => (format!("{dir}{only}"), Vec::new()),
+        [(first, _), rest @ ..] => {
+            let common = rest.iter().fold(first.as_str(), |common, (name, _)| {
                 let len = common
                     .char_indices()
                     .zip(name.chars())
@@ -336,6 +357,7 @@ pub fn complete(input: &str, home: Option<&Path>) -> (String, Vec<String>) {
                     .map_or(common.len().min(name.len()), |((i, _), _)| i);
                 &common[..len]
             });
+            let names = matches.iter().map(|(name, _)| name.clone()).collect();
             (format!("{dir}{common}"), names)
         }
     }

@@ -1,6 +1,6 @@
 # ADR 0018 — Codecs and formats from jars
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by ADR 0024 (the jars can also be added at runtime)
 - **Date:** 2026-10-07
 - **Amends:** ADR 0016 (the flag is renamed, and the jars also add codecs)
 

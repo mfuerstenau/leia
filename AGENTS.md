@@ -85,6 +85,7 @@ To talk to the server by hand: `jq -c . protocol/fixtures/version.request.json |
 - `leia [OPTIONS] [INDEX_PATH]`
 - `-j, --java <PATH>`: the JVM, given as a `java` executable or a JDK/JRE directory. Default: `$JAVA_HOME/bin/java`, then `java` on `PATH`.
 - `--jar <PATH>` (repeatable): a jar with analysis components, codecs or formats of its own, or a directory of such jars. The TUI checks that the path exists and passes it to the server as `--jar <PATH>`, which loads it at startup (ADR 0016, ADR 0018). `--version` starts the server without them.
+- `--no-default-jars`: don't load the jars of the default folder, `$XDG_CONFIG_HOME/leia/jars` (`~/.config/leia/jars`) or `%APPDATA%\leia\jars` on Windows. Without it, the TUI passes the folder to the server as one more `--jar` after the others, if it has a jar in it (ADR 0024). `X` adds more jars at runtime through `addJars`.
 - `--directory <fs|mmap|nio>`: the Lucene `Directory` to open indexes through (ADR 0020). Default: `fs`, which is Lucene's `FSDirectory.open`. The open prompt can change it with Ctrl+D.
 - `--no-reader`: open `INDEX_PATH` without a reader, so that only its commits can be read and its indexes checked (ADR 0021, ADR 0022). The open prompt does the same with Ctrl+N.
 - `INDEX_PATH` may be a directory with indexes below it, which open as one (ADR 0021).

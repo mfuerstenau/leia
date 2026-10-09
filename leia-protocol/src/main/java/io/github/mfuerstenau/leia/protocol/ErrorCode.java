@@ -54,7 +54,12 @@ public enum ErrorCode {
      * A file can't be written (ADR 0022): it lies in an index directory, its directory doesn't exist,
      * it exists, or writing it failed.
      */
-    OUTPUT_NOT_WRITABLE(-32016);
+    OUTPUT_NOT_WRITABLE(-32016),
+    /**
+     * Jars can't be added (ADR 0024): a path is neither a jar nor a directory with jars, or their
+     * factories, codecs or formats can't be loaded, such as for a missing dependency.
+     */
+    INVALID_JAR(-32017);
 
     private final int code;
 

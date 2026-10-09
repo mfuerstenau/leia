@@ -25,6 +25,10 @@ import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
+import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
+import io.github.mfuerstenau.leia.protocol.jars.AddJarsResult;
+import io.github.mfuerstenau.leia.protocol.jars.GetJarsParams;
+import io.github.mfuerstenau.leia.protocol.jars.GetJarsResult;
 import io.github.mfuerstenau.leia.protocol.job.CancelJobResult;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
@@ -263,6 +267,20 @@ public final class Methods {
     public static final RpcMethod<JobParams, GetExportTermsResult> GET_EXPORT_TERMS =
             new RpcMethod<>("getExportTerms", JobParams.class, GetExportTermsResult.class);
 
+    /**
+     * Loads more jars with analysis components, codecs or formats, as {@code --jar} does at startup,
+     * and says what they added (ADR 0024). A jar that is already loaded isn't loaded again. Needs no
+     * open index. Fails with {@code INVALID_PARAMS} for no paths, or {@code INVALID_JAR} if a path is
+     * neither a jar nor a directory with jars, or the jars' factories, codecs or formats can't be
+     * loaded; nothing is loaded then.
+     */
+    public static final RpcMethod<AddJarsParams, AddJarsResult> ADD_JARS =
+            new RpcMethod<>("addJars", AddJarsParams.class, AddJarsResult.class);
+
+    /** The loaded jars, in the order they were loaded (ADR 0024). Needs no open index. */
+    public static final RpcMethod<GetJarsParams, GetJarsResult> GET_JARS =
+            new RpcMethod<>("getJars", GetJarsParams.class, GetJarsResult.class);
+
     public static final List<RpcMethod<?, ?>> ALL = List.of(
             VERSION,
             OPEN_INDEX,
@@ -289,7 +307,9 @@ public final class Methods {
             START_CHECK_INDEX,
             GET_CHECK_INDEX,
             START_EXPORT_TERMS,
-            GET_EXPORT_TERMS);
+            GET_EXPORT_TERMS,
+            ADD_JARS,
+            GET_JARS);
 
     private Methods() {}
 

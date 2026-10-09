@@ -17,6 +17,7 @@ pub mod form;
 pub mod history;
 pub mod hit_fields;
 pub mod input;
+pub mod jars;
 pub mod java;
 pub mod more_like_this;
 pub mod overview;

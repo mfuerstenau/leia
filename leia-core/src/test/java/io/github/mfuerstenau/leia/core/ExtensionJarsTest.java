@@ -9,13 +9,18 @@ import io.github.mfuerstenau.leia.core.AnalysisComponents.AvailableAnalyzer;
 import io.github.mfuerstenau.leia.core.AnalyzerSpec.Component;
 import io.github.mfuerstenau.leia.core.TextAnalysis.Token;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.jar.JarEntry;
+import java.util.jar.JarOutputStream;
 import java.util.stream.Stream;
 import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.TokenFilterFactory;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.NumericDocValues;
 import org.junit.jupiter.api.Tag;
@@ -23,8 +28,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Loads Lucene's phonetic and stempel modules as analysis jars (ADR 0016), and the test codec jar
- * (ADR 0018). Lucene's lists of
+ * Loads Lucene's phonetic and stempel modules as analysis jars (ADR 0016), the test codec jar
+ * (ADR 0018) and jars made by the tests (ADR 0024). Lucene's lists of
  * factories, codecs and formats only grow, so this runs in a JVM of its own (the {@code jarsTest} task).
  */
 @Tag("jars")
@@ -35,6 +40,9 @@ class ExtensionJarsTest {
 
     /** A codec and one format of each kind; the custom-codec and custom-formats indexes need it. */
     private static final Path CODEC_JAR = Path.of(System.getProperty("leia.test.codec.jar"));
+
+    /** Where the tests write the jars they make. */
+    private static final Path MADE_JARS = Path.of("build", "tmp", "jarsTest", "made-jars");
 
     @TempDir
     Path tmp;
@@ -149,6 +157,82 @@ class ExtensionJarsTest {
     @Test
     void noPathsLoadNothing() throws Exception {
         assertThat(ExtensionJars.load(List.of())).isEmpty();
+    }
+
+    @Test
+    void aJarThatFailsLeavesNoNamesBehind() throws Exception {
+        // The token filter would be reloaded before the codec fails.
+        Path broken = jar(
+                "broken.jar",
+                Map.of(
+                        "META-INF/services/org.apache.lucene.analysis.TokenFilterFactory",
+                        (JarTestFilterFactory.Other.class.getName() + "\n").getBytes(StandardCharsets.UTF_8),
+                        "META-INF/services/org.apache.lucene.codecs.Codec",
+                        "does.not.Exist\n".getBytes(StandardCharsets.UTF_8)));
+
+        assertThatThrownBy(() -> ExtensionJars.add(List.of(broken)))
+                .isInstanceOf(ExtensionJarException.class)
+                .hasMessageStartingWith("cannot load the codecs and formats: ")
+                .hasMessageContaining("does.not.Exist");
+
+        assertThat(TokenFilterFactory.availableTokenFilters()).doesNotContain(JarTestFilterFactory.Other.NAME);
+        assertThat(ExtensionJars.jars()).doesNotContain(broken);
+    }
+
+    @Test
+    void addingSaysWhatTheJarsAddedAndLoadsAJarOnce() throws Exception {
+        Path jar = jar(
+                "added.jar",
+                Map.of(
+                        "META-INF/services/org.apache.lucene.analysis.TokenFilterFactory",
+                        (JarTestFilterFactory.class.getName() + "\n").getBytes(StandardCharsets.UTF_8),
+                        JarTestAnalyzer.class.getName().replace('.', '/') + ".class",
+                        classFile(JarTestAnalyzer.class)));
+
+        AddedJars added = ExtensionJars.add(List.of(jar, jar.getParent()));
+
+        assertThat(added.jars()).containsExactly(jar);
+        assertThat(added.alreadyLoaded()).isEmpty();
+        assertThat(added.added())
+                .isEqualTo(new JarComponents(
+                        List.of(JarTestAnalyzer.class.getName()),
+                        List.of(),
+                        List.of(),
+                        List.of(JarTestFilterFactory.NAME),
+                        List.of(),
+                        List.of(),
+                        List.of(),
+                        List.of()));
+        assertThat(ExtensionJars.jars()).endsWith(jar);
+        assertThat(TokenFilterFactory.lookupClass(JarTestFilterFactory.NAME)).isEqualTo(JarTestFilterFactory.class);
+
+        AddedJars again = ExtensionJars.add(List.of(jar.getParent().resolve(".").resolve("added.jar")));
+
+        assertThat(again).isEqualTo(new AddedJars(List.of(), List.of(jar), JarComponents.NONE));
+    }
+
+    /**
+     * A jar made by the test, alone in a directory. It outlives the test, unlike {@link #tmp}:
+     * Lucene reads the service files of every loaded jar again on each later load.
+     */
+    private static Path jar(String name, Map<String, byte[]> entries) throws IOException {
+        Path jar = Files.createDirectories(MADE_JARS.resolve(name.replace(".jar", "")))
+                .resolve(name)
+                .toAbsolutePath();
+        try (JarOutputStream out = new JarOutputStream(Files.newOutputStream(jar))) {
+            for (Map.Entry<String, byte[]> entry : entries.entrySet()) {
+                out.putNextEntry(new JarEntry(entry.getKey()));
+                out.write(entry.getValue());
+                out.closeEntry();
+            }
+        }
+        return jar;
+    }
+
+    private static byte[] classFile(Class<?> type) throws IOException {
+        try (InputStream in = type.getResourceAsStream(type.getSimpleName() + ".class")) {
+            return in.readAllBytes();
+        }
     }
 
     private static Path stempelJar() throws IOException {

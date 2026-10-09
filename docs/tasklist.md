@@ -28,7 +28,9 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 - [x] ADR 0019: reopening the index (`reopenIndex {}` with `openIfChanged`, `changed` plus the `openIndex` fields; a failed reopen keeps the open index; the TUI's `R` keeps each screen's place)
 - [x] ADR 0020: directory choice and recent paths (`openIndex`' optional `directoryImpl` `FS`/`MMAP`/`NIO`; the TUI's `--directory` and Ctrl+D in the open prompt; the last 10 paths in a state-dir file, Up/Down in the prompt)
 - [x] ADR 0021: several indexes and opening without a reader (indexes below a path without `segments_N` open as one `MultiReader`, failures and field conflicts skipped and listed; `openIndex`' optional `mode` `READER`/`DIRECTORY_ONLY`, `NO_READER`; per-index results and commits)
+- [x] ADR 0022: check index and export terms (`startCheckIndex`/`getCheckIndex` with streamed output, with or without a reader; `startExportTerms`/`getExportTerms` in Luke's format; `OUTPUT_NOT_WRITABLE`)
 - [x] ADR 0023: analyzer wrappers and preset options (`Analyzer`'s `shingles?` and `limitTokenCount?` around any alternative, in that order; `preset`'s `maxTokenLength?`, `stemOverride?`, `japanese?` and `korean?`; `AvailableAnalyzer`'s `options`; Kuromoji and Nori by reflection)
+- [x] ADR 0024: jars at runtime and a default folder (`addJars {paths}` → the new jars, `alreadyLoaded` and the added names per kind, all or nothing through a dry run; `getJars`; `INVALID_JAR`; the TUI's default folder, `--no-default-jars` and the jars popup on `X`)
 - [x] `README.md`: what leia is, build and run instructions
 
 ### Java build (Gradle 9, Java 25)
@@ -196,7 +198,7 @@ From the read-only checklist in `luke-features.md` §7. Ordered roughly by value
   - core `WrappedAnalyzer` (a `DelegatingAnalyzerWrapper`) closes the wrappers and the analyzer; `KuromojiNori`; `:leia-core:testAnalysisJars` adds Kuromoji and Nori
   - TUI: the `b` popup has *Wrappers* rows for every kind (shingles: size `2-3`, separator and filler as typed, unigrams yes/no/only without shingles; token limit: max tokens, consume all) and rows for the options a preset takes (token length, stem overrides as `word=stem`/`-`/`@file`, user dictionary, mode, stop tags, unknown words); picking a preset drops options it doesn't take; the steps panel widens to fit the wrappers' names
 - [ ] Analysis: `PerFieldAnalyzerWrapper`, `QueryAutoStopWordAnalyzer` (needs an `IndexReader`), the collation analyzers (need a `Collator`) and `JapaneseCompletionAnalyzer` (left out of ADR 0023)
-- [ ] Analysis: adding jars at runtime, and a default folder for them (left out of ADR 0016)
+- [x] Analysis: adding jars at runtime, and a default folder for them (ADR 0024)
 - [x] Open options: codecs, postings, doc values and vector formats from jars, so that indexes with custom codecs open (ADR 0018)
   - `--jar <PATH>` (was `--analysis-jar`) on the TUI and the server; `ExtensionJars` (was `AnalysisJars`) reloads the three factory lists and the four codec lists from one loader; a failing reload stops the server
   - bundled: `lucene-codecs` (SimpleText, BlockTreeOrds, FST50, UniformSplit, …) and `lucene-suggest` (the `Completion*` postings formats), +0.7 MB

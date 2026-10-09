@@ -34,6 +34,7 @@ use leia::protocol::index::{
     CloseIndex, CloseIndexParams, DirectoryImpl, DocValuesType, GetIndexStats, GetIndexStatsParams,
     IndexEntry, IndexOptions, OpenIndex, OpenIndexParams, OpenMode, ReopenIndex, ReopenIndexParams,
 };
+use leia::protocol::jars::{AddJars, AddJarsParams, GetJars, GetJarsParams};
 use leia::protocol::job::{CancelJob, JobParams};
 use leia::protocol::search::{
     Bm25Similarity, ClassicQuery, ClassicSimilarity, GetExplain, GetSearch, MAX_FUZZY_EDITS,
@@ -182,6 +183,125 @@ fn opens_indexes_with_codecs_from_a_jar() {
             .unwrap();
         assert_eq!(commits.commits.len(), 1, "{name}");
     }
+    assert!(server.shutdown(SHUTDOWN_TIMEOUT).unwrap().success());
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn adds_jars_while_running() {
+    let mut server = start_with(&[test_analysis_jars("phonetic")]);
+    let started = server.call::<GetJars>(GetJarsParams {}).unwrap().jars;
+    assert_eq!(started.len(), 2, "{started:?}");
+    let open = |server: &mut Server| {
+        server.call::<OpenIndex>(OpenIndexParams {
+            path: test_index("custom-codec", "testCodecIndexes"),
+            directory_impl: None,
+            mode: None,
+        })
+    };
+    let Err(CallError::Rpc(error)) = open(&mut server) else {
+        panic!("opens without the codec");
+    };
+    assert_eq!(error.code, ErrorCode::MissingCodec);
+
+    let codec_jar = test_codec_jar().to_str().unwrap().to_owned();
+    let added = server
+        .call::<AddJars>(AddJarsParams {
+            paths: vec![codec_jar.clone()],
+        })
+        .unwrap();
+
+    assert_eq!(added.jars.len(), 1);
+    assert!(added.jars[0].ends_with("leia-test-codec.jar"), "{added:?}");
+    assert!(added.already_loaded.is_empty());
+    assert_eq!(added.added.codecs, ["LeiaTest"]);
+    assert_eq!(added.added.postings_formats, ["LeiaTestPostings"]);
+    assert_eq!(added.added.doc_values_formats.len(), 1, "{added:?}");
+    assert_eq!(added.added.knn_vectors_formats.len(), 1, "{added:?}");
+    assert!(added.added.token_filters.is_empty());
+    assert_eq!(open(&mut server).unwrap().max_doc, Some(3));
+
+    // Loaded jars aren't loaded again.
+    let again = server
+        .call::<AddJars>(AddJarsParams {
+            paths: vec![
+                codec_jar,
+                test_analysis_jars("phonetic").to_str().unwrap().to_owned(),
+            ],
+        })
+        .unwrap();
+    assert!(again.jars.is_empty());
+    assert_eq!(again.already_loaded.len(), 3);
+
+    // A jar's analyzers become presets, and analyze with the jar's resources.
+    let stempel = server
+        .call::<AddJars>(AddJarsParams {
+            paths: vec![test_analysis_jars("stempel").to_str().unwrap().to_owned()],
+        })
+        .unwrap();
+    assert!(
+        stempel
+            .added
+            .analyzers
+            .contains(&"org.apache.lucene.analysis.pl.PolishAnalyzer".to_owned()),
+        "{stempel:?}"
+    );
+    let terms = analyzed(
+        &mut server,
+        preset(PresetAnalyzer {
+            class_name: "org.apache.lucene.analysis.pl.PolishAnalyzer".to_owned(),
+            ..Default::default()
+        }),
+        "kot i pies",
+    );
+    assert_eq!(terms, ["kot", "pies"]);
+
+    let Err(CallError::Rpc(error)) = server.call::<AddJars>(AddJarsParams {
+        paths: vec!["/no/such.jar".to_owned()],
+    }) else {
+        panic!("adds a jar that doesn't exist");
+    };
+    assert_eq!(error.code, ErrorCode::InvalidJar);
+    assert_eq!(
+        error.message,
+        "Cannot add the jars: no such jar or directory: /no/such.jar"
+    );
+    let jars = server.call::<GetJars>(GetJarsParams {}).unwrap().jars;
+    assert_eq!(jars.len(), 3 + stempel.jars.len());
+    assert_eq!(jars[..2], started[..]);
+    assert!(server.shutdown(SHUTDOWN_TIMEOUT).unwrap().success());
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn a_loaded_jar_that_is_gone_stops_adding() {
+    let dir = env::temp_dir().join(format!("leia-gone-jar-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let copy = dir.join("leia-test-codec.jar");
+    std::fs::copy(test_codec_jar(), &copy).unwrap();
+    let mut server = start_with(std::slice::from_ref(&copy));
+    // Answered once the jars are loaded.
+    let jars = server.call::<GetJars>(GetJarsParams {}).unwrap().jars;
+    assert_eq!(jars.len(), 1);
+    std::fs::remove_file(&copy).unwrap();
+
+    let added = server.call::<AddJars>(AddJarsParams {
+        paths: vec![test_analysis_jars("stempel").to_str().unwrap().to_owned()],
+    });
+
+    let Err(CallError::Rpc(error)) = added else {
+        panic!("adds a jar after a loaded one is gone: {added:?}");
+    };
+    assert_eq!(error.code, ErrorCode::InvalidJar);
+    assert!(
+        error.message.starts_with(&format!(
+            "Cannot add the jars: the jar {} was loaded before and is gone",
+            copy.display()
+        )),
+        "{}",
+        error.message
+    );
+    let _ = std::fs::remove_dir_all(&dir);
     assert!(server.shutdown(SHUTDOWN_TIMEOUT).unwrap().success());
 }
 

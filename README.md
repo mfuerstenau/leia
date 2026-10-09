@@ -60,6 +60,7 @@ leia [OPTIONS] [INDEX_PATH]
 | `-j, --java <PATH>` | the JVM, given as a `java` executable or a JDK/JRE directory; default: `$JAVA_HOME/bin/java`, then `java` on `PATH` |
 | `-V, --version` | print the versions of leia, leia-server and the Java in use |
 | `--jar <PATH>` | a jar with analysis components, codecs or formats of its own, or a directory of such jars; can be repeated (see [Jars](#jars)) |
+| `--no-default-jars` | don't load the jars of the default folder (see [Jars](#jars)) |
 | `--directory <IMPL>` | the Lucene `Directory` to read indexes through: `fs` (default) lets Lucene choose, which is `MMapDirectory` on 64-bit; `mmap` is `MMapDirectory`, `nio` is `NIOFSDirectory`. `Ctrl+D` in the open prompt changes it |
 | `--no-reader` | open `INDEX_PATH` without a reader, for an index that a reader can't open (see [Without a reader](#without-a-reader)); `Ctrl+N` in the open prompt does the same |
 
@@ -98,7 +99,8 @@ broken. Overview, documents, terms and search say that they need a reader. The t
 ### Jars
 
 `--jar` adds jars with analysis components, codecs or formats of their own. A directory stands for
-the jars directly in it.
+the jars directly in it. `X` adds more while leia runs (see below), and the jars in the default
+folder are loaded at every start.
 
 **Codecs and formats.** leia opens indexes written with the codecs and formats of `lucene-core`,
 `lucene-backward-codecs`, `lucene-codecs` (such as `SimpleText`), `lucene-suggest` (the
@@ -132,16 +134,28 @@ leia --jar leia-server/build/analysis-modules/kuromoji \
      --jar leia-server/build/analysis-modules/icu /data/index
 ```
 
-The jars are loaded when leia starts. If one can't be loaded, for instance because a dependency is
+**Loading.** The jars of `--jar` are loaded when leia starts, then those of the default folder:
+`~/.config/leia/jars` (`$XDG_CONFIG_HOME/leia/jars` if that is set), or `%APPDATA%\leia\jars` on
+Windows. leia doesn't create the folder; put the jars you always want there.
+`--no-default-jars` leaves it out. If a jar can't be loaded, for instance because a dependency is
 missing, leia says why and doesn't start. A factory, codec or format whose name is already taken
-is ignored.
+is ignored, so `--jar` wins over the default folder.
+
+**Adding jars while leia runs.** `X` opens the jars popup on any screen. It shows the default
+folder and the loaded jars, and takes the path of a jar or a directory of jars: `Tab` completes
+directories and `.jar` files, and `Enter` loads it and says what it added, such as presets, token
+filters or codecs. A jar that fails to load leaves nothing behind, and a jar that is already loaded
+isn't loaded again. When an index fails to open because it needs a codec, `Esc`, `X` to add the
+jar, then `o` brings back the path to open it again. Jars can't be unloaded. A loaded jar must stay
+where it is: if it is deleted or replaced, no more jars can be added until leia is restarted.
 
 ### Keys
 
 | Key | Action |
 |---|---|
-| `o` | open an index: type a path, `Tab` completes directories, `~` is your home directory, `↑` `↓` step through the last 10 opened paths, `Ctrl+D` switches the `Directory` (FS, MMap, NIO), `Ctrl+N` switches the reader off for this open, `Enter` opens and `Esc` cancels |
+| `o` | open an index: type a path, `Tab` completes directories, `~` is your home directory, `↑` `↓` step through the last 10 opened paths, `Ctrl+D` switches the `Directory` (FS, MMap, NIO), `Ctrl+N` switches the reader off for this open, `Enter` opens and `Esc` cancels; after a failed open, the next `o` starts from that path |
 | `c` | close the open index |
+| `X` | list the loaded jars and add more (see [Jars](#jars)) |
 | `R` | reopen the open index, if another process committed to it since: the screens keep their place, and the tab line says `Reopened: segments_N`, `Unchanged: segments_N` (with several indexes, how many changed) or why it failed |
 | `1` … `7` | switch between the overview, the documents, the terms, the commits, the search, the analysis and the check; only the analysis works without an open index |
 | `Esc` | stop the running term scans, then a running export, or on the search and check screens the running search or check; with none running, quit |

@@ -8,6 +8,7 @@ use super::check::{GetCheckIndex, StartCheckIndex};
 use super::commits::{GetCommit, GetCommits};
 use super::document::{GetDocument, GetStoredValue, GetTermVector};
 use super::index::{CloseIndex, GetIndexStats, OpenIndex, ReopenIndex};
+use super::jars::{AddJars, GetJars};
 use super::job::CancelJob;
 use super::search::{GetExplain, GetSearch, StartExplain, StartSearch};
 use super::terms::{
@@ -51,4 +52,6 @@ pub const METHOD_NAMES: &[&str] = &[
     GetCheckIndex::NAME,
     StartExportTerms::NAME,
     GetExportTerms::NAME,
+    AddJars::NAME,
+    GetJars::NAME,
 ];

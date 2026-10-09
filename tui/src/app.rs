@@ -2,8 +2,8 @@
 //! [`App::handle_key`] returns an [`Action`], the caller makes the RPC calls and reports back with
 //! [`App::opened`], [`App::open_failed`], [`App::closed`], and the `scan_*`, `document_*`,
 //! `stored_value_*`, `term_vector_*`, `terms_*`, `postings_*`, `positions_*`, `commits_*`,
-//! `commit_*`, `search_*`, `explain_*`, `components_*`, `analy*`, `check_*` or `export_*`
-//! methods.
+//! `commit_*`, `search_*`, `explain_*`, `components_*`, `analy*`, `check_*`, `export_*` or
+//! `*jars*` methods.
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -22,6 +22,7 @@ use crate::commits::{self, Commits};
 use crate::documents::{self, Documents, Walk};
 use crate::export::{ExportEvent, ExportPrompt};
 use crate::history::History;
+use crate::jars::{DefaultJars, JarsEvent, JarsPopup};
 use crate::overview::{DEFAULT_TOP_TERMS, FieldScan, Overview, step_top_terms};
 use crate::overview::{label_line, relative};
 use crate::prompt::{PathPrompt, PromptEvent, expand_home};
@@ -35,6 +36,7 @@ use crate::protocol::index::{
     DirectoryImpl, GetIndexStatsResult, IndexField, OpenIndexResult, OpenMode, ReopenIndexResult,
     SkippedIndex,
 };
+use crate::protocol::jars::{AddJarsParams, AddJarsResult};
 use crate::protocol::search::{
     GetExplainResult, GetSearchResult, StartExplainParams, StartSearchParams,
 };
@@ -149,6 +151,12 @@ pub enum Action {
     StartExport(StartExportTermsParams),
     /// Cancel this export job, and report back with [`App::export_cancelled`].
     CancelExport(i64),
+    /// Fetch the loaded jars, and report back with [`App::jars_loaded`] or [`App::jars_failed`]
+    /// (ADR 0024).
+    LoadJars,
+    /// Add these jars, and report back with [`App::jars_added`] or [`App::add_jars_failed`]. The
+    /// popup shows "Loading…" until the outcome is reported.
+    AddJars(AddJarsParams),
 }
 
 /// A running job to poll.
@@ -242,6 +250,13 @@ pub struct App {
     top_n: i32,
     /// What the last reopen came to, on the tab line until the next key.
     notice: Option<Notice>,
+    /// The default jar folder, and whether its jars were loaded (ADR 0024).
+    default_jars: DefaultJars,
+    /// The jars popup, while it is open.
+    jars: Option<JarsPopup>,
+    /// The path of a prompt that was closed after it failed to open it: the next prompt starts
+    /// from it, so that it can be tried again once a jar is added (ADR 0024).
+    failed_path: Option<String>,
 }
 
 /// What the tab line says about the last reopen, or the footer about the last export, until the
@@ -312,7 +327,16 @@ impl App {
             queue: VecDeque::new(),
             top_n: DEFAULT_TOP_TERMS,
             notice: None,
+            default_jars: DefaultJars::default(),
+            jars: None,
+            failed_path: None,
         }
+    }
+
+    /// The jars popup shows the default folder, and marks the jars that came from it.
+    pub fn with_default_jars(mut self, default_jars: DefaultJars) -> Self {
+        self.default_jars = default_jars;
+        self
     }
 
     /// Keeps the recently opened paths in `history` instead of in memory.
@@ -830,6 +854,34 @@ impl App {
         self.analysis.components_failed(error);
     }
 
+    pub fn jars_loaded(&mut self, jars: Vec<String>) {
+        if let Some(popup) = &mut self.jars {
+            popup.jars_loaded(jars);
+        }
+    }
+
+    pub fn jars_failed(&mut self, error: String) {
+        if let Some(popup) = &mut self.jars {
+            popup.jars_failed(error);
+        }
+    }
+
+    /// Shows what the jars added. Returns the analysis components to fetch again if new jars
+    /// were loaded and the components had been fetched: the jars may have added some.
+    pub fn jars_added(&mut self, result: AddJarsResult) -> Option<Action> {
+        let loaded = !result.jars.is_empty();
+        if let Some(popup) = &mut self.jars {
+            popup.added(result);
+        }
+        (loaded && self.analysis.has_components()).then_some(Action::LoadAnalysisComponents)
+    }
+
+    pub fn add_jars_failed(&mut self, error: String) {
+        if let Some(popup) = &mut self.jars {
+            popup.add_failed(error);
+        }
+    }
+
     /// Shows what the analyzer made of `text`. An analyzer that the builder applied is now the
     /// current one, which the search screen parses with from now on. Returns the components to
     /// fetch if there are none yet, as when `a` on the documents screen opened the screen.
@@ -1051,6 +1103,21 @@ impl App {
             return Some(Action::Quit);
         }
         self.notice = None;
+        if let Some(popup) = &mut self.jars {
+            return match popup.handle_key(key) {
+                JarsEvent::Submit(path) => {
+                    popup.set_busy();
+                    Some(Action::AddJars(AddJarsParams {
+                        paths: vec![expand_home(&path, self.home.as_deref())],
+                    }))
+                }
+                JarsEvent::Close => {
+                    self.jars = None;
+                    None
+                }
+                JarsEvent::None => None,
+            };
+        }
         if let Some(prompt) = &mut self.prompt {
             return match prompt.handle_key(key) {
                 PromptEvent::Submit(path) => {
@@ -1063,7 +1130,11 @@ impl App {
                     })
                 }
                 PromptEvent::Cancel => {
-                    self.prompt = None;
+                    self.failed_path = self
+                        .prompt
+                        .take()
+                        .filter(|prompt| prompt.error().is_some())
+                        .map(|prompt| prompt.input().to_owned());
                     None
                 }
                 PromptEvent::None => None,
@@ -1167,13 +1238,20 @@ impl App {
                 None
             }
             KeyCode::Char('o') => {
-                // Starts from the open index, so a sibling is a Ctrl+W away.
-                let path = self
-                    .opened
-                    .as_ref()
-                    .map_or("", |opened| opened.path.as_str());
+                // Starts from the path that failed to open, then from the open index, so a sibling
+                // is a Ctrl+W away.
+                let failed = self.failed_path.take();
+                let path = failed.as_deref().unwrap_or_else(|| {
+                    self.opened
+                        .as_ref()
+                        .map_or("", |opened| opened.path.as_str())
+                });
                 self.prompt = Some(self.path_prompt(path));
                 None
+            }
+            KeyCode::Char('X') => {
+                self.jars = Some(JarsPopup::new(self.default_jars.clone(), self.home.clone()));
+                Some(Action::LoadJars)
             }
             KeyCode::Char('c') if self.has_index() => Some(Action::Close),
             KeyCode::Char('R') if self.overview.is_some() => {
@@ -1367,7 +1445,10 @@ impl App {
             }
             (None, _, _, _, _, _) => {
                 let lines = vec![
-                    Line::from("No index open. Press o to open one, or 6 to try an analyzer."),
+                    Line::from(
+                        "No index open. Press o to open one, 6 to try an analyzer, or X to add \
+                         jars.",
+                    ),
                     Line::from(""),
                     Line::from(LEIA.line()),
                     Line::from(server_line(&self.version)),
@@ -1377,7 +1458,7 @@ impl App {
                     Paragraph::new(lines).block(Block::bordered().title(" leia ")),
                     body,
                 );
-                Line::from(" q quit   o open   6 analysis")
+                Line::from(" q quit   o open   6 analysis   X jars")
             }
         };
         if tabs_shown {
@@ -1448,6 +1529,9 @@ impl App {
         }
         if let Some(prompt) = &self.prompt {
             prompt.render(frame, body);
+        }
+        if let Some(popup) = &mut self.jars {
+            popup.render(frame, body);
         }
     }
 }
@@ -1719,6 +1803,84 @@ mod tests {
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    #[test]
+    fn x_opens_the_jars_popup_from_any_screen_and_adds_jars() {
+        let mut app =
+            App::new(version(), Some(PathBuf::from("/home/me"))).with_default_jars(DefaultJars {
+                dir: Some(PathBuf::from("/home/me/.config/leia/jars")),
+                state: crate::jars::DefaultJarsState::Loaded,
+            });
+        assert!(render(&mut app).contains("X jars"));
+        app.handle_key(key(KeyCode::Char('6')));
+        app.components_loaded(GetAnalysisComponentsResult::default());
+
+        assert_eq!(
+            app.handle_key(key(KeyCode::Char('X'))),
+            Some(Action::LoadJars)
+        );
+        app.jars_loaded(vec!["/home/me/.config/leia/jars/mine.jar".to_owned()]);
+        let screen = render(&mut app);
+        assert!(screen.contains("mine.jar  default folder"), "{screen}");
+        // The popup takes the keys.
+        assert_eq!(app.handle_key(key(KeyCode::Char('q'))), None);
+        app.handle_key(key(KeyCode::Backspace));
+        for c in "~/kuromoji".chars() {
+            app.handle_key(key(KeyCode::Char(c)));
+        }
+
+        assert_eq!(
+            app.handle_key(key(KeyCode::Enter)),
+            Some(Action::AddJars(AddJarsParams {
+                paths: vec!["/home/me/kuromoji".to_owned()]
+            }))
+        );
+        // The analysis components are fetched again only if the jars were loaded.
+        assert_eq!(app.jars_added(AddJarsResult::default()), None);
+        let result = AddJarsResult {
+            jars: vec!["/home/me/kuromoji/lucene-analysis-kuromoji.jar".to_owned()],
+            ..AddJarsResult::default()
+        };
+        assert_eq!(app.jars_added(result), Some(Action::LoadAnalysisComponents));
+        assert!(render(&mut app).contains("Loaded: 2 jars"));
+        app.add_jars_failed("Cannot add the jars: not a jar: /x".to_owned());
+        assert!(render(&mut app).contains("not a jar: /x"));
+
+        assert_eq!(app.handle_key(key(KeyCode::Esc)), None);
+        assert!(!render(&mut app).contains("Default folder"));
+        assert_eq!(app.handle_key(key(KeyCode::Char('q'))), Some(Action::Quit));
+    }
+
+    #[test]
+    fn the_next_prompt_starts_from_a_path_that_failed_to_open() {
+        let mut app = App::new(version(), None);
+        app.handle_key(key(KeyCode::Char('o')));
+        for c in "/data/es".chars() {
+            app.handle_key(key(KeyCode::Char(c)));
+        }
+        app.handle_key(key(KeyCode::Enter));
+        app.open_failed("Missing codec".to_owned(), false);
+        app.handle_key(key(KeyCode::Esc));
+
+        app.handle_key(key(KeyCode::Char('o')));
+        assert!(render(&mut app).contains("/data/es"));
+        // Only once, and not after a prompt that was cancelled without a failure.
+        app.handle_key(key(KeyCode::Esc));
+        app.handle_key(key(KeyCode::Char('o')));
+        assert!(!render(&mut app).contains("/data/es"));
+    }
+
+    #[test]
+    fn jars_added_before_the_analysis_screen_was_shown_fetch_nothing() {
+        let mut app = App::new(version(), None);
+        app.handle_key(key(KeyCode::Char('X')));
+        let result = AddJarsResult {
+            jars: vec!["/a.jar".to_owned()],
+            ..AddJarsResult::default()
+        };
+
+        assert_eq!(app.jars_added(result), None);
     }
 
     #[test]

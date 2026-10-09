@@ -15,6 +15,7 @@ use super::check::{GetCheckIndex, StartCheckIndex};
 use super::commits::{GetCommit, GetCommits};
 use super::document::{GetDocument, GetStoredValue, GetTermVector};
 use super::index::{CloseIndex, GetIndexStats, OpenIndex, ReopenIndex};
+use super::jars::{AddJars, GetJars};
 use super::job::CancelJob;
 use super::search::{GetExplain, GetSearch, StartExplain, StartSearch};
 use super::terms::{
@@ -173,6 +174,8 @@ fn check(fixture: &Fixture, json: &str) -> Result<(), String> {
         GetCheckIndex::NAME => check_method::<GetCheckIndex>(fixture, json),
         StartExportTerms::NAME => check_method::<StartExportTerms>(fixture, json),
         GetExportTerms::NAME => check_method::<GetExportTerms>(fixture, json),
+        AddJars::NAME => check_method::<AddJars>(fixture, json),
+        GetJars::NAME => check_method::<GetJars>(fixture, json),
         other => Err(format!("no method {other:?} in METHOD_NAMES")),
     }
 }

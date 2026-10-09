@@ -13,6 +13,7 @@ use leia::cli::Cli;
 use leia::client::CallError;
 use leia::clipboard::osc52;
 use leia::history::{self, History};
+use leia::jars::{self, DefaultJars};
 use leia::java::find_java;
 use leia::protocol::ErrorCode;
 use leia::protocol::analysis::{Analyze, GetAnalysisComponents, GetAnalysisComponentsParams};
@@ -28,6 +29,7 @@ use leia::protocol::index::{
     CloseIndex, CloseIndexParams, DirectoryImpl, GetIndexStats, GetIndexStatsParams, OpenIndex,
     OpenIndexParams, OpenMode, ReopenIndex, ReopenIndexParams,
 };
+use leia::protocol::jars::{AddJars, GetJars, GetJarsParams};
 use leia::protocol::job::{CancelJob, JobParams};
 use leia::protocol::search::{GetExplain, GetSearch, StartExplain, StartSearch};
 use leia::protocol::terms::{
@@ -48,14 +50,20 @@ fn main() -> Result<()> {
     }
     let index_path = cli.index_path.as_deref().map(utf8_path).transpose()?;
     check_jars(&cli.jars)?;
+    let home = env::home_dir();
+    // The default folder's jars come after those of `--jar`, which win a clash of names
+    // (ADR 0024).
+    let default_jars = DefaultJars::find(jars::default_dir(home.as_deref()), cli.no_default_jars);
+    let mut server_jars = cli.jars.clone();
+    server_jars.extend(default_jars.loaded_dir().map(Path::to_path_buf));
 
     // Start the server before taking over the terminal, so that startup errors are printed
     // normally.
-    let (mut server, version) = start_server(&cli, &cli.jars)?;
-    let home = env::home_dir();
+    let (mut server, version) = start_server(&cli, &server_jars, default_jars.loaded_dir())?;
     let history =
         history::default_file(home.as_deref()).map_or_else(History::in_memory, History::load);
     let mut app = App::new(version, home)
+        .with_default_jars(default_jars)
         .with_history(history)
         .with_directory(cli.directory)
         .with_cwd(env::current_dir().ok());
@@ -98,7 +106,7 @@ fn print_version(cli: &Cli) -> Result<()> {
     let mut out = io::stdout().lock();
     writeln!(out, "{}", LEIA.line())?;
     out.flush()?;
-    let (mut server, version) = start_server(cli, &[])?;
+    let (mut server, version) = start_server(cli, &[], None)?;
     writeln!(out, "{}", server_line(&version))?;
     writeln!(out, "{}", java_line(&version.java))?;
     server
@@ -107,21 +115,32 @@ fn print_version(cli: &Cli) -> Result<()> {
     Ok(())
 }
 
-/// Finds the JVM and the jar, starts the server with the jars of `--jar` and checks that it
-/// answers `version`.
-fn start_server(cli: &Cli, jars: &[PathBuf]) -> Result<(Server, VersionResult)> {
+/// Finds the JVM and the jar, starts the server with the jars of `--jar` and the default folder
+/// (`default_dir`, if its jars are loaded) and checks that it answers `version`.
+fn start_server(
+    cli: &Cli,
+    jars: &[PathBuf],
+    default_dir: Option<&Path>,
+) -> Result<(Server, VersionResult)> {
     let java = find_java(cli.java.as_deref(), env::var_os("JAVA_HOME").as_deref())?;
     let jar = find_server_jar(env::var_os(SERVER_JAR_ENV).as_deref())?;
     let mut server = Server::spawn(&java.executable, &jar, jars)
         .with_context(|| format!("no usable JVM: {java}; choose one with --java or JAVA_HOME"))?;
     let version = server.call::<Version>(VersionParams {}).with_context(|| {
-        if jars.is_empty() {
-            format!("leia-server did not start with {java}; it needs Java 25 or newer (see --java)")
-        } else {
-            format!(
+        match (jars.is_empty(), default_dir) {
+            (true, _) => format!(
+                "leia-server did not start with {java}; it needs Java 25 or newer (see --java)"
+            ),
+            (false, None) => format!(
                 "leia-server did not start with {java}; it needs Java 25 or newer (see --java) \
                  and jars it can load (see --jar)"
-            )
+            ),
+            (false, Some(dir)) => format!(
+                "leia-server did not start with {java}; it needs Java 25 or newer (see --java) \
+                 and jars it can load (see --jar), including those in the default folder {} \
+                 (see --no-default-jars)",
+                dir.display()
+            ),
         }
     })?;
     Ok((server, version))
@@ -384,6 +403,18 @@ fn perform(
             server.call::<CancelJob>(JobParams { job_id })?;
             app.export_cancelled();
         }
+        Action::LoadJars => match answered(server.call::<GetJars>(GetJarsParams {}))? {
+            Ok(result) => app.jars_loaded(result.jars),
+            Err(error) => app.jars_failed(error),
+        },
+        Action::AddJars(params) => {
+            // Shows "Loading…" while the server loads the jars.
+            terminal.draw(|frame| app.draw(frame))?;
+            match answered(server.call::<AddJars>(params))? {
+                Ok(result) => return Ok(app.jars_added(result)),
+                Err(error) => app.add_jars_failed(error),
+            }
+        }
     }
     Ok(None)
 }
@@ -522,13 +553,14 @@ fn reopen_index(server: &mut Server, app: &mut App) -> Result<Option<Action>> {
     }
 }
 
-/// A codec or format that isn't loaded can come from a jar that leia is started with (ADR 0018).
+/// A codec or format that isn't loaded can come from a jar that X adds or leia is started with
+/// (ADR 0018, ADR 0024).
 fn with_jar_hint(error: CallError) -> CallError {
     match error {
         CallError::Rpc(mut error) if error.code == ErrorCode::MissingCodec => {
             error
                 .message
-                .push_str("; start leia with --jar and a jar that has it");
+                .push_str("; add a jar that has it with X, or start leia with --jar");
             CallError::Rpc(error)
         }
         error => error,
@@ -567,8 +599,8 @@ mod tests {
 
         assert_eq!(
             error.to_string(),
-            "Missing codec: the index needs the codec 'X', which isn't loaded; start leia with \
-             --jar and a jar that has it (MISSING_CODEC -32014)"
+            "Missing codec: the index needs the codec 'X', which isn't loaded; add a jar that \
+             has it with X, or start leia with --jar (MISSING_CODEC -32014)"
         );
     }
 

@@ -13,6 +13,7 @@ pub mod document;
 mod envelope;
 mod error;
 pub mod index;
+pub mod jars;
 pub mod job;
 mod method;
 pub mod search;

@@ -1,6 +1,6 @@
 # ADR 0016 — Analysis jars
 
-- **Status:** Accepted, amended by ADR 0018 (`--analysis-jar` is now `--jar`, and the jars also add codecs and formats)
+- **Status:** Accepted, amended by ADR 0018 (`--analysis-jar` is now `--jar`, and the jars also add codecs and formats) and ADR 0024 (jars can be added at runtime, and a default folder is loaded at startup)
 - **Date:** 2026-10-07
 
 ## Context

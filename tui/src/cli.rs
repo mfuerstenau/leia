@@ -23,9 +23,15 @@ pub struct Cli {
 
     /// A jar with analysis components (char filters, tokenizers, token filters, analyzers),
     /// codecs or formats of its own, such as one of Lucene's analysis modules, or a directory of
-    /// such jars. Can be repeated.
+    /// such jars. Can be repeated. X adds more while leia runs.
     #[arg(long = "jar", value_name = "PATH")]
     pub jars: Vec<PathBuf>,
+
+    /// Don't load the jars of the default folder: `$XDG_CONFIG_HOME/leia/jars`
+    /// (`~/.config/leia/jars`) on Linux, `%APPDATA%\leia\jars` on Windows. Without this flag,
+    /// they are loaded after those of `--jar`.
+    #[arg(long, action = ArgAction::SetTrue)]
+    pub no_default_jars: bool,
 
     /// The Lucene `Directory` to read indexes through: `fs` lets Lucene choose (`MMapDirectory`
     /// on 64-bit), `mmap` is `MMapDirectory`, `nio` is `NIOFSDirectory`. Ctrl+D in the open

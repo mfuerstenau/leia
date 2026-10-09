@@ -122,6 +122,11 @@ impl Analysis {
         self.components.is_none().then_some(Request::Components)
     }
 
+    /// Whether the components were fetched, or failed to be.
+    pub fn has_components(&self) -> bool {
+        self.components.is_some()
+    }
+
     pub fn components_loaded(&mut self, components: GetAnalysisComponentsResult) {
         if let Some(form) = &mut self.form {
             form.set_components(components.clone());
