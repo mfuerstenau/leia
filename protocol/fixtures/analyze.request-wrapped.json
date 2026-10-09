@@ -1,0 +1,23 @@
+{
+  "jsonrpc": "2.0",
+  "id": 36,
+  "method": "analyze",
+  "params": {
+    "analyzer": {
+      "preset": {
+        "className": "org.apache.lucene.analysis.standard.StandardAnalyzer",
+        "maxTokenLength": 10
+      },
+      "shingles": {
+        "minShingleSize": 2,
+        "maxShingleSize": 3,
+        "tokenSeparator": " ",
+        "outputUnigrams": true,
+        "outputUnigramsIfNoShingles": false,
+        "fillerToken": "_"
+      },
+      "limitTokenCount": {"maxTokenCount": 10000, "consumeAllTokens": false}
+    },
+    "text": "The quick brown fox"
+  }
+}

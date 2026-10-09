@@ -376,8 +376,11 @@ impl Analysis {
                 );
             }
             Some(Ok(_)) => {
+                // The names, the counts, the borders and a column to spare.
+                let steps_width = u16::try_from(self.step_name_width() + 10).unwrap_or(u16::MAX);
                 let [steps_area, rest] =
-                    Layout::horizontal([Constraint::Length(26), Constraint::Fill(1)]).areas(body);
+                    Layout::horizontal([Constraint::Length(steps_width), Constraint::Fill(1)])
+                        .areas(body);
                 self.render_steps(frame, steps_area);
                 if area.width >= WIDE {
                     let [tokens_area, details_area] =
@@ -438,7 +441,30 @@ impl Analysis {
         }
     }
 
+    /// How wide the step names are: as wide as the longest, from 16 to 23 columns, so that
+    /// Lucene's wrappers, such as `LimitTokenCountAnalyzer`, fit (ADR 0023).
+    fn step_name_width(&self) -> usize {
+        let Some(shown) = self.shown() else {
+            return 16;
+        };
+        let result = &shown.result;
+        result
+            .char_filters
+            .iter()
+            .map(|step| escape_control(&step.name).chars().count())
+            .chain(
+                result
+                    .stages
+                    .iter()
+                    .map(|stage| escape_control(&stage.name).chars().count()),
+            )
+            .max()
+            .unwrap_or(0)
+            .clamp(16, 23)
+    }
+
     fn render_steps(&mut self, frame: &mut Frame, area: Rect) {
+        let width = self.step_name_width();
         let focused = self.focus == Focus::Steps && !self.prompting();
         let Some(shown) = self.shown() else {
             return;
@@ -449,7 +475,7 @@ impl Analysis {
             .iter()
             .map(|step| {
                 ListItem::new(Line::from(vec![
-                    Span::raw(format!("{:<16.16} ", escape_control(&step.name))),
+                    Span::raw(format!("{:<width$.width$} ", escape_control(&step.name))),
                     Span::styled(format!("{:>6}", "text"), dim()),
                 ]))
             })
@@ -460,7 +486,10 @@ impl Analysis {
             } else {
                 stage.tokens.len().to_string()
             };
-            ListItem::new(format!("{:<16.16} {count:>6}", escape_control(&stage.name)))
+            ListItem::new(format!(
+                "{:<width$.width$} {count:>6}",
+                escape_control(&stage.name)
+            ))
         }));
         let list = List::new(items)
             .highlight_style(highlight(focused))

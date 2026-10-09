@@ -1,0 +1,19 @@
+{
+  "jsonrpc": "2.0",
+  "id": 39,
+  "method": "analyze",
+  "params": {
+    "analyzer": {
+      "preset": {
+        "className": "org.apache.lucene.analysis.ja.JapaneseAnalyzer",
+        "stopwords": {"words": []},
+        "japanese": {
+          "userDictionary": "/etc/leia/analysis/userdict_ja.txt",
+          "mode": "NORMAL",
+          "stopTags": {"words": ["助詞-格助詞-一般"]}
+        }
+      }
+    },
+    "text": "関西国際空港に行った"
+  }
+}

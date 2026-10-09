@@ -5,11 +5,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalInt;
 import org.apache.lucene.analysis.Analyzer;
 
 /**
  * What {@link Analyzers#build} makes an {@link Analyzer} from (ADR 0014): {@code StandardAnalyzer},
- * a preset analyzer by class name (ADR 0015) or a {@code CustomAnalyzer}.
+ * a preset analyzer by class name (ADR 0015) or a {@code CustomAnalyzer}, each of which can be
+ * wrapped in shingles and a token limit (ADR 0023).
  */
 public sealed interface AnalyzerSpec {
 
@@ -18,19 +20,46 @@ public sealed interface AnalyzerSpec {
 
     /**
      * An analyzer created by class name (ADR 0015), with its default settings and, if given, stop
-     * words and stem exclusions of its own (ADR 0017).
+     * words and stem exclusions of its own (ADR 0017), and the options it takes (ADR 0023).
      *
      * @param className the class's fully qualified name, one that {@link Analyzers#components} lists
      * @param stopwords the stop words; empty for the analyzer's default ones
      * @param stemExclusion the words kept from stemming; empty for none
+     * @param maxTokenLength the longest token; empty for the analyzer's default
+     * @param stemOverride the words whose stem is given; empty for the analyzer's default ones
+     * @param japanese the options of Kuromoji's {@code JapaneseAnalyzer}; empty for its defaults
+     * @param korean the options of Nori's {@code KoreanAnalyzer}; empty for its defaults
      */
-    record Preset(String className, Optional<WordSet> stopwords, Optional<WordSet> stemExclusion)
+    record Preset(
+            String className,
+            Optional<WordSet> stopwords,
+            Optional<WordSet> stemExclusion,
+            OptionalInt maxTokenLength,
+            Optional<StemDictionary> stemOverride,
+            Optional<Japanese> japanese,
+            Optional<Korean> korean)
             implements AnalyzerSpec {
 
         public Preset {
             Objects.requireNonNull(className);
             Objects.requireNonNull(stopwords);
             Objects.requireNonNull(stemExclusion);
+            Objects.requireNonNull(maxTokenLength);
+            Objects.requireNonNull(stemOverride);
+            Objects.requireNonNull(japanese);
+            Objects.requireNonNull(korean);
+        }
+
+        /** The analyzer with these word sets, and no other options. */
+        public Preset(String className, Optional<WordSet> stopwords, Optional<WordSet> stemExclusion) {
+            this(
+                    className,
+                    stopwords,
+                    stemExclusion,
+                    OptionalInt.empty(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.empty());
         }
 
         /** The analyzer with its default stop words and no stem exclusions. */
@@ -62,6 +91,85 @@ public sealed interface AnalyzerSpec {
     }
 
     /**
+     * The stem override dictionary of a preset (ADR 0023): each word is stemmed to the given stem.
+     */
+    sealed interface StemDictionary {
+
+        /** The words and their stems; none for an empty dictionary. */
+        record Entries(Map<String, String> entries) implements StemDictionary {
+
+            public Entries {
+                entries = Map.copyOf(entries);
+            }
+        }
+
+        /**
+         * A dictionary file: UTF-8, {@code word<TAB>stem} per line, and blank lines and lines
+         * starting with {@code #} are skipped.
+         */
+        record File(Path path) implements StemDictionary {
+
+            public File {
+                Objects.requireNonNull(path);
+            }
+        }
+    }
+
+    /**
+     * The options of Kuromoji's {@code JapaneseAnalyzer} (ADR 0023); each is the analyzer's default
+     * when empty.
+     *
+     * @param userDictionary a user dictionary file in Kuromoji's CSV format, UTF-8
+     * @param mode the tokenizer's mode
+     * @param stopTags the parts of speech that are removed, such as {@code 助詞-格助詞-一般}
+     */
+    record Japanese(Optional<Path> userDictionary, Optional<JapaneseMode> mode, Optional<WordSet> stopTags) {
+
+        public Japanese {
+            Objects.requireNonNull(userDictionary);
+            Objects.requireNonNull(mode);
+            Objects.requireNonNull(stopTags);
+        }
+    }
+
+    /** {@code JapaneseTokenizer.Mode}. */
+    enum JapaneseMode {
+        NORMAL,
+        SEARCH,
+        EXTENDED
+    }
+
+    /**
+     * The options of Nori's {@code KoreanAnalyzer} (ADR 0023); each is the analyzer's default when
+     * empty.
+     *
+     * @param userDictionary a user dictionary file in Nori's format, UTF-8
+     * @param decompoundMode what happens to compound words
+     * @param stopTags the parts of speech that are removed, as {@code POS.Tag} names such as {@code JX}
+     * @param outputUnknownUnigrams whether unknown words are also split into unigrams
+     */
+    record Korean(
+            Optional<Path> userDictionary,
+            Optional<KoreanDecompoundMode> decompoundMode,
+            Optional<WordSet> stopTags,
+            Optional<Boolean> outputUnknownUnigrams) {
+
+        public Korean {
+            Objects.requireNonNull(userDictionary);
+            Objects.requireNonNull(decompoundMode);
+            Objects.requireNonNull(stopTags);
+            Objects.requireNonNull(outputUnknownUnigrams);
+        }
+    }
+
+    /** {@code KoreanTokenizer.DecompoundMode}. */
+    enum KoreanDecompoundMode {
+        NONE,
+        DISCARD,
+        MIXED
+    }
+
+    /**
      * A {@code CustomAnalyzer}: char filters, one tokenizer, then token filters.
      *
      * @param configDir the directory that resource files are read from before the classpath; empty
@@ -78,6 +186,55 @@ public sealed interface AnalyzerSpec {
             Objects.requireNonNull(configDir);
         }
     }
+
+    /**
+     * An analyzer wrapped by Lucene's {@code ShingleAnalyzerWrapper}, then by its {@code
+     * LimitTokenCountAnalyzer} (ADR 0023); at least one of them is present.
+     *
+     * @param analyzer what is wrapped
+     */
+    record Wrapped(AnalyzerSpec analyzer, Optional<Shingles> shingles, Optional<LimitTokenCount> limitTokenCount)
+            implements AnalyzerSpec {
+
+        public Wrapped {
+            Objects.requireNonNull(analyzer);
+            Objects.requireNonNull(shingles);
+            Objects.requireNonNull(limitTokenCount);
+        }
+    }
+
+    /**
+     * The arguments of Lucene's {@code ShingleAnalyzerWrapper}: word n-grams of the analyzer's
+     * tokens.
+     *
+     * @param minShingleSize the fewest tokens in a shingle, at least 2
+     * @param maxShingleSize the most tokens in a shingle, at least {@code minShingleSize}
+     * @param tokenSeparator what goes between the tokens of a shingle
+     * @param outputUnigrams whether the tokens themselves are kept
+     * @param outputUnigramsIfNoShingles whether the tokens are kept when there are no shingles
+     * @param fillerToken what stands for a removed token, such as a stop word
+     */
+    record Shingles(
+            int minShingleSize,
+            int maxShingleSize,
+            String tokenSeparator,
+            boolean outputUnigrams,
+            boolean outputUnigramsIfNoShingles,
+            String fillerToken) {
+
+        public Shingles {
+            Objects.requireNonNull(tokenSeparator);
+            Objects.requireNonNull(fillerToken);
+        }
+    }
+
+    /**
+     * The arguments of Lucene's {@code LimitTokenCountAnalyzer}.
+     *
+     * @param maxTokenCount the most tokens, at least 1
+     * @param consumeAllTokens whether the analyzer's stream is read to its end after the last token
+     */
+    record LimitTokenCount(int maxTokenCount, boolean consumeAllTokens) {}
 
     /**
      * A char filter, tokenizer or token filter.

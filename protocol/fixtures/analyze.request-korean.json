@@ -1,0 +1,19 @@
+{
+  "jsonrpc": "2.0",
+  "id": 40,
+  "method": "analyze",
+  "params": {
+    "analyzer": {
+      "preset": {
+        "className": "org.apache.lucene.analysis.ko.KoreanAnalyzer",
+        "korean": {
+          "userDictionary": "/etc/leia/analysis/userdict_ko.txt",
+          "decompoundMode": "MIXED",
+          "stopTags": {"file": "/etc/leia/analysis/stoptags_ko.txt"},
+          "outputUnknownUnigrams": true
+        }
+      }
+    },
+    "text": "백두산"
+  }
+}

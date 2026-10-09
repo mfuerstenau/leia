@@ -2,6 +2,8 @@ package io.github.mfuerstenau.leia.core;
 
 import io.github.mfuerstenau.leia.core.AnalysisComponents.Available;
 import io.github.mfuerstenau.leia.core.AnalyzerSpec.Component;
+import io.github.mfuerstenau.leia.core.AnalyzerSpec.LimitTokenCount;
+import io.github.mfuerstenau.leia.core.AnalyzerSpec.Shingles;
 import io.github.mfuerstenau.leia.core.TextAnalysis.CharFilterStep;
 import io.github.mfuerstenau.leia.core.TextAnalysis.Token;
 import io.github.mfuerstenau.leia.core.TextAnalysis.TokenAttribute;
@@ -25,6 +27,8 @@ import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.Tokenizer;
 import org.apache.lucene.analysis.TokenizerFactory;
 import org.apache.lucene.analysis.custom.CustomAnalyzer;
+import org.apache.lucene.analysis.miscellaneous.LimitTokenCountAnalyzer;
+import org.apache.lucene.analysis.shingle.ShingleAnalyzerWrapper;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 import org.apache.lucene.analysis.tokenattributes.OffsetAttribute;
@@ -78,17 +82,73 @@ public final class Analyzers {
             case AnalyzerSpec.Standard _ -> new StandardAnalyzer();
             case AnalyzerSpec.Preset preset -> PresetAnalyzers.create(preset);
             case AnalyzerSpec.Custom custom -> custom(custom);
+            case AnalyzerSpec.Wrapped wrapped -> wrapped(wrapped);
         };
+    }
+
+    /** The analyzer in Lucene's shingle wrapper, then in its token limit (ADR 0023). */
+    private static Analyzer wrapped(AnalyzerSpec.Wrapped spec) throws InvalidAnalyzerException {
+        // Checked first, so that nothing is built for nothing.
+        if (spec.shingles().isPresent()) {
+            Shingles shingles = spec.shingles().orElseThrow();
+            if (shingles.minShingleSize() < 2) {
+                throw new InvalidAnalyzerException(
+                        "shingles: the minimum size must be at least 2, not " + shingles.minShingleSize(), null);
+            }
+            if (shingles.maxShingleSize() < shingles.minShingleSize()) {
+                throw new InvalidAnalyzerException(
+                        "shingles: the maximum size must be at least the minimum size, " + shingles.minShingleSize()
+                                + ", not " + shingles.maxShingleSize(),
+                        null);
+            }
+        }
+        if (spec.limitTokenCount().isPresent()
+                && spec.limitTokenCount().orElseThrow().maxTokenCount() < 1) {
+            throw new InvalidAnalyzerException(
+                    "token limit: the maximum token count must be at least 1, not "
+                            + spec.limitTokenCount().orElseThrow().maxTokenCount(),
+                    null);
+        }
+        Analyzer base = build(spec.analyzer());
+        List<Analyzer> wrappers = new ArrayList<>(2);
+        Analyzer wrapped = base;
+        if (spec.shingles().isPresent()) {
+            Shingles shingles = spec.shingles().orElseThrow();
+            wrapped = new ShingleAnalyzerWrapper(
+                    wrapped,
+                    shingles.minShingleSize(),
+                    shingles.maxShingleSize(),
+                    shingles.tokenSeparator(),
+                    shingles.outputUnigrams(),
+                    shingles.outputUnigramsIfNoShingles(),
+                    shingles.fillerToken());
+            wrappers.add(wrapped);
+        }
+        if (spec.limitTokenCount().isPresent()) {
+            LimitTokenCount limit = spec.limitTokenCount().orElseThrow();
+            wrapped = new LimitTokenCountAnalyzer(wrapped, limit.maxTokenCount(), limit.consumeAllTokens());
+            wrappers.add(wrapped);
+        }
+        return wrappers.isEmpty() ? base : new WrappedAnalyzer(base, wrappers);
     }
 
     /**
      * What {@code analyzer} makes of {@code text}. A {@link CustomAnalyzer} is shown step by step:
-     * each stage runs the chain again from the start, up to its component. Any other analyzer has one
-     * stage, named by its class.
+     * each stage runs the chain again from the start, up to its component. A wrapped analyzer is
+     * shown as the analyzer, then one stage per wrapper, named by its class (ADR 0023). Any other
+     * analyzer has one stage, named by its class.
      *
      * @param maxTokens the most tokens a stage has; it stops there and is marked truncated
      */
     public static TextAnalysis analyze(Analyzer analyzer, String text, int maxTokens) throws IOException {
+        if (analyzer instanceof WrappedAnalyzer wrapped) {
+            TextAnalysis base = analyze(wrapped.base(), text, maxTokens);
+            List<TokenStage> stages = new ArrayList<>(base.stages());
+            for (Analyzer wrapper : wrapped.wrappers()) {
+                stages.add(stage(wrapper.getClass().getSimpleName(), wrapper.tokenStream("", text), maxTokens));
+            }
+            return new TextAnalysis(base.charFilters(), stages);
+        }
         if (!(analyzer instanceof CustomAnalyzer custom)) {
             TokenStage stage = stage(analyzer.getClass().getSimpleName(), analyzer.tokenStream("", text), maxTokens);
             return new TextAnalysis(List.of(), List.of(stage));

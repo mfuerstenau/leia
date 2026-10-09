@@ -89,7 +89,8 @@ class ExtensionJarsTest {
                         "PolishAnalyzer",
                         "org.apache.lucene.analysis.pl.PolishAnalyzer",
                         WordSetSupport.OPTIONAL,
-                        WordSetSupport.OPTIONAL));
+                        WordSetSupport.OPTIONAL,
+                        List.of()));
         TextAnalysis analysis =
                 analyze(new AnalyzerSpec.Preset("org.apache.lucene.analysis.pl.PolishAnalyzer"), "kot i pies");
         // The stop words and the stemmer table are resources of the jar.

@@ -374,7 +374,18 @@ component, `d` deletes, and `K` `J` move a filter up or down. A preset that take
 `EnglishAnalyzer`, has stop words and stem exclusions of its own: words separated by spaces or
 commas, `-` for no words (no stop words at all), or `@` and a word list file (UTF-8, one word per
 line, `#` for comments); blank or `d` goes back to the analyzer's default stop words, or to no
-stem exclusions. `StopAnalyzer` needs stop words. The custom chain starts as the
+stem exclusions. `StopAnalyzer` needs stop words. A preset can also have options of its own:
+- a token length (`StandardAnalyzer`, `ClassicAnalyzer`, `UAX29URLEmailAnalyzer`, `WhitespaceAnalyzer`);
+- stem overrides (`DutchAnalyzer`): `word=stem` pairs, `-` for none, or `@` and a file of
+  `word<TAB>stem` lines;
+- for Kuromoji's `JapaneseAnalyzer`, a user dictionary file, the mode and the stop tags;
+- for Nori's `KoreanAnalyzer`, a user dictionary file, the decompound mode, the stop tags (part of
+  speech names such as `JX`) and whether unknown words are split into unigrams.
+
+`Space` cycles a mode, and `d` goes back to the default. Under *Wrappers*, any analyzer can be
+wrapped in shingles (Lucene's `ShingleAnalyzerWrapper`: the size as `2-3`, the separator, whether
+the tokens are kept, and the filler) and then in a token limit (`LimitTokenCountAnalyzer`). `Space`
+turns either on or off, and each is one more step after the analyzer's own. The custom chain starts as the
 standard tokenizer and lowercase, which is what the `StandardAnalyzer` does. Resource files, such
 as `words` of `stop` or `synonyms` of `synonymGraph`, are read from the config directory first and
 then from the classpath and the jars, which have Lucene's own word lists. The server builds the analyzer before

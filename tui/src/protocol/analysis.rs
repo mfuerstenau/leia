@@ -58,6 +58,22 @@ pub struct AvailableAnalyzer {
     pub stopwords: WordSetSupport,
     /// Whether it takes stem exclusions; never [`WordSetSupport::Required`].
     pub stem_exclusion: WordSetSupport,
+    /// What else it takes (ADR 0023), in the enum's order.
+    pub options: Vec<PresetOption>,
+}
+
+/// What a preset analyzer takes besides its word sets (ADR 0023).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum PresetOption {
+    /// [`PresetAnalyzer::max_token_length`].
+    MaxTokenLength,
+    /// [`PresetAnalyzer::stem_override`].
+    StemOverride,
+    /// [`PresetAnalyzer::japanese`].
+    Japanese,
+    /// [`PresetAnalyzer::korean`].
+    Korean,
 }
 
 /// Whether a preset analyzer takes stop words or stem exclusions (ADR 0017).
@@ -82,8 +98,9 @@ pub struct AvailableComponent {
     pub class_name: String,
 }
 
-/// An analyzer, as one of several alternatives: exactly one is present (ADR 0014). The server
-/// builds it for the request.
+/// An analyzer, as one of several alternatives: exactly one of `standard`, `preset` and `custom`
+/// is present (ADR 0014). Any of them can be wrapped in shingles, then in a token limit (ADR
+/// 0023). The server builds it for the request.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Analyzer {
@@ -96,6 +113,12 @@ pub struct Analyzer {
     /// A `CustomAnalyzer` of char filters, a tokenizer and token filters.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub custom: Option<CustomAnalyzer>,
+    /// The analyzer in Lucene's `ShingleAnalyzerWrapper`; `None` for none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub shingles: Option<Shingles>,
+    /// The analyzer, with its shingles, in Lucene's `LimitTokenCountAnalyzer`; `None` for none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit_token_count: Option<LimitTokenCount>,
 }
 
 impl Default for Analyzer {
@@ -105,8 +128,52 @@ impl Default for Analyzer {
             standard: Some(StandardAnalyzer {}),
             preset: None,
             custom: None,
+            shingles: None,
+            limit_token_count: None,
         }
     }
+}
+
+/// Lucene's `ShingleAnalyzerWrapper` around an analyzer: word n-grams of its tokens (ADR 0023).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct Shingles {
+    /// The fewest tokens in a shingle, at least 2.
+    pub min_shingle_size: i32,
+    /// The most tokens in a shingle, at least `min_shingle_size`.
+    pub max_shingle_size: i32,
+    /// What goes between the tokens of a shingle.
+    pub token_separator: String,
+    /// Whether the tokens themselves are kept.
+    pub output_unigrams: bool,
+    /// Whether the tokens are kept when there are no shingles.
+    pub output_unigrams_if_no_shingles: bool,
+    /// What stands for a removed token, such as a stop word.
+    pub filler_token: String,
+}
+
+impl Default for Shingles {
+    /// Lucene's defaults.
+    fn default() -> Self {
+        Self {
+            min_shingle_size: 2,
+            max_shingle_size: 2,
+            token_separator: " ".to_owned(),
+            output_unigrams: true,
+            output_unigrams_if_no_shingles: false,
+            filler_token: "_".to_owned(),
+        }
+    }
+}
+
+/// Lucene's `LimitTokenCountAnalyzer` around an analyzer (ADR 0023).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LimitTokenCount {
+    /// The most tokens, at least 1.
+    pub max_token_count: i32,
+    /// Whether the analyzer's stream is read to its end after the last token.
+    pub consume_all_tokens: bool,
 }
 
 /// Lucene's `StandardAnalyzer`; it has no parameters.
@@ -115,8 +182,8 @@ impl Default for Analyzer {
 pub struct StandardAnalyzer {}
 
 /// An analyzer created by class name (ADR 0015), with its default settings and, if given, stop
-/// words and stem exclusions of its own (ADR 0017).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// words and stem exclusions of its own (ADR 0017), and the options it takes (ADR 0023).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PresetAnalyzer {
     /// The fully qualified class name, one that `getAnalysisComponents` lists in `analyzers`.
@@ -127,6 +194,93 @@ pub struct PresetAnalyzer {
     /// The words kept from stemming; `None` for none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub stem_exclusion: Option<WordSet>,
+    /// The longest token, from 1 to [`MAX_TOKEN_LENGTH`]; `None` for the analyzer's default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_token_length: Option<i32>,
+    /// The words whose stem is given; `None` for the analyzer's default ones.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stem_override: Option<StemDictionary>,
+    /// The options of Kuromoji's `JapaneseAnalyzer`; `None` for its defaults.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub japanese: Option<JapaneseOptions>,
+    /// The options of Nori's `KoreanAnalyzer`; `None` for its defaults.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub korean: Option<KoreanOptions>,
+}
+
+/// The longest token a preset's `max_token_length` may be: `StandardTokenizer.MAX_TOKEN_LENGTH_LIMIT`.
+pub const MAX_TOKEN_LENGTH: i32 = 1024 * 1024;
+
+/// A preset's stem override dictionary, as one of two alternatives: exactly one is present (ADR
+/// 0023). It is case-sensitive.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StemDictionary {
+    /// Each word and its stem; empty for no overrides.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entries: Option<BTreeMap<String, String>>,
+    /// A dictionary file that the server reads: UTF-8, `word<TAB>stem` per line, and blank lines
+    /// and lines starting with `#` are skipped.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub file: Option<String>,
+}
+
+/// The options of Kuromoji's `JapaneseAnalyzer` (ADR 0023); each is the analyzer's default when
+/// `None`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct JapaneseOptions {
+    /// A user dictionary file in Kuromoji's CSV format, UTF-8.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_dictionary: Option<String>,
+    /// The tokenizer's mode; `SEARCH` by default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mode: Option<JapaneseMode>,
+    /// The parts of speech that are removed, such as `助詞-格助詞-一般`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_tags: Option<WordSet>,
+}
+
+/// Kuromoji's `JapaneseTokenizer.Mode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum JapaneseMode {
+    /// Ordinary segmentation, without decompounding.
+    Normal,
+    /// Segmentation for search: long compounds are also split into their parts.
+    Search,
+    /// Like `SEARCH`, and unknown words are split into unigrams.
+    Extended,
+}
+
+/// The options of Nori's `KoreanAnalyzer` (ADR 0023); each is the analyzer's default when `None`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct KoreanOptions {
+    /// A user dictionary file in Nori's format, UTF-8.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_dictionary: Option<String>,
+    /// What happens to compound words; `DISCARD` by default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decompound_mode: Option<KoreanDecompoundMode>,
+    /// The parts of speech that are removed, as `POS.Tag` names such as `JX`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_tags: Option<WordSet>,
+    /// Whether unknown words are split into unigrams; `false` by default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output_unknown_unigrams: Option<bool>,
+}
+
+/// Nori's `KoreanTokenizer.DecompoundMode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum KoreanDecompoundMode {
+    /// Compounds are kept whole.
+    None,
+    /// Compounds are split, and the compound is dropped.
+    Discard,
+    /// Compounds are split, and the compound is kept too.
+    Mixed,
 }
 
 /// The stop words or stem exclusions of a preset, as one of two alternatives: exactly one is

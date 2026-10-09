@@ -4,28 +4,53 @@
   "result": {
     "analyzers": [
       {
+        "name": "DutchAnalyzer",
+        "className": "org.apache.lucene.analysis.nl.DutchAnalyzer",
+        "stopwords": "OPTIONAL",
+        "stemExclusion": "OPTIONAL",
+        "options": ["STEM_OVERRIDE"]
+      },
+      {
         "name": "EnglishAnalyzer",
         "className": "org.apache.lucene.analysis.en.EnglishAnalyzer",
         "stopwords": "OPTIONAL",
-        "stemExclusion": "OPTIONAL"
+        "stemExclusion": "OPTIONAL",
+        "options": []
+      },
+      {
+        "name": "JapaneseAnalyzer",
+        "className": "org.apache.lucene.analysis.ja.JapaneseAnalyzer",
+        "stopwords": "OPTIONAL",
+        "stemExclusion": "NONE",
+        "options": ["JAPANESE"]
+      },
+      {
+        "name": "KoreanAnalyzer",
+        "className": "org.apache.lucene.analysis.ko.KoreanAnalyzer",
+        "stopwords": "NONE",
+        "stemExclusion": "NONE",
+        "options": ["KOREAN"]
       },
       {
         "name": "StandardAnalyzer",
         "className": "org.apache.lucene.analysis.standard.StandardAnalyzer",
         "stopwords": "OPTIONAL",
-        "stemExclusion": "NONE"
+        "stemExclusion": "NONE",
+        "options": ["MAX_TOKEN_LENGTH"]
       },
       {
         "name": "StopAnalyzer",
         "className": "org.apache.lucene.analysis.core.StopAnalyzer",
         "stopwords": "REQUIRED",
-        "stemExclusion": "NONE"
+        "stemExclusion": "NONE",
+        "options": []
       },
       {
         "name": "WhitespaceAnalyzer",
         "className": "org.apache.lucene.analysis.core.WhitespaceAnalyzer",
         "stopwords": "NONE",
-        "stemExclusion": "NONE"
+        "stemExclusion": "NONE",
+        "options": ["MAX_TOKEN_LENGTH"]
       }
     ],
     "charFilters": [

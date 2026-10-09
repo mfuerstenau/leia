@@ -8,14 +8,15 @@ import io.github.mfuerstenau.leia.protocol.analysis.AvailableAnalyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.AvailableComponent;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsParams;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsResult;
+import io.github.mfuerstenau.leia.protocol.analysis.PresetOption;
 import io.github.mfuerstenau.leia.protocol.analysis.WordSetSupport;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import jakarta.inject.Inject;
 import java.util.List;
 
 /**
- * {@code getAnalysisComponents}: the preset analyzers and the word sets they take (ADR 0015, ADR
- * 0017), and what a custom analyzer can be built from (ADR 0014).
+ * {@code getAnalysisComponents}: the preset analyzers, and the word sets and options they take (ADR
+ * 0015, ADR 0017, ADR 0023), and what a custom analyzer can be built from (ADR 0014).
  */
 public final class GetAnalysisComponentsHandler
         implements MethodHandler<GetAnalysisComponentsParams, GetAnalysisComponentsResult> {
@@ -37,7 +38,10 @@ public final class GetAnalysisComponentsHandler
                                 analyzer.name(),
                                 analyzer.className(),
                                 support(analyzer.stopwords()),
-                                support(analyzer.stemExclusion())))
+                                support(analyzer.stemExclusion()),
+                                analyzer.options().stream()
+                                        .map(GetAnalysisComponentsHandler::option)
+                                        .toList()))
                         .toList(),
                 available(components.charFilters()),
                 available(components.tokenizers()),
@@ -49,6 +53,15 @@ public final class GetAnalysisComponentsHandler
             case NONE -> WordSetSupport.NONE;
             case OPTIONAL -> WordSetSupport.OPTIONAL;
             case REQUIRED -> WordSetSupport.REQUIRED;
+        };
+    }
+
+    private static PresetOption option(io.github.mfuerstenau.leia.core.PresetOption option) {
+        return switch (option) {
+            case MAX_TOKEN_LENGTH -> PresetOption.MAX_TOKEN_LENGTH;
+            case STEM_OVERRIDE -> PresetOption.STEM_OVERRIDE;
+            case JAPANESE -> PresetOption.JAPANESE;
+            case KOREAN -> PresetOption.KOREAN;
         };
     }
 

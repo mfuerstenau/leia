@@ -1,8 +1,10 @@
 //! The current analyzer (ADR 0014): the analysis screen tries it, and the search screen parses
 //! queries and analyzes More-Like-This text with it. It is Lucene's `StandardAnalyzer`, a preset
 //! analyzer by class name (ADR 0015) with stop words and stem exclusions of its own if it takes
-//! them (ADR 0017), or a custom analyzer of char filters, a tokenizer and token filters, each with
-//! its parameters, and a config directory for resource files. The popup builds it.
+//! them (ADR 0017) and the options it takes (ADR 0023), or a custom analyzer of char filters, a
+//! tokenizer and token filters, each with its parameters, and a config directory for resource
+//! files. Any of them can be wrapped in shingles, then in a token limit (ADR 0023). The popup
+//! builds it.
 
 use std::collections::BTreeMap;
 
@@ -16,8 +18,10 @@ use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 use crate::form::{FormEvent, dim, render_popup};
 use crate::input::{Edit, LineInput, word_start};
 use crate::protocol::analysis::{
-    AnalysisComponent, Analyzer, CustomAnalyzer, GetAnalysisComponentsResult, PresetAnalyzer,
-    WordSet, WordSetSupport,
+    AnalysisComponent, Analyzer, AvailableAnalyzer, CustomAnalyzer, GetAnalysisComponentsResult,
+    JapaneseMode, JapaneseOptions, KoreanDecompoundMode, KoreanOptions, LimitTokenCount,
+    MAX_TOKEN_LENGTH, PresetAnalyzer, PresetOption, Shingles, StemDictionary, WordSet,
+    WordSetSupport,
 };
 use crate::text::{escape_control, wrap};
 
@@ -26,6 +30,16 @@ const WIDTH: u16 = 76;
 
 /// The preset that the popup starts with.
 const DEFAULT_PRESET: &str = "org.apache.lucene.analysis.en.EnglishAnalyzer";
+
+/// Kuromoji's and Nori's analyzers, which take options of their own (ADR 0023).
+const JAPANESE_ANALYZER: &str = "org.apache.lucene.analysis.ja.JapaneseAnalyzer";
+const KOREAN_ANALYZER: &str = "org.apache.lucene.analysis.ko.KoreanAnalyzer";
+
+/// The token limit that turning it on starts with: the old `IndexWriter` field length.
+const DEFAULT_MAX_TOKEN_COUNT: i32 = 10_000;
+
+/// How wide the labels of the rows are.
+const LABEL: usize = 16;
 
 /// Which alternative of the analyzer is chosen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,6 +93,44 @@ impl WordSetKind {
     }
 }
 
+/// Kuromoji's or Nori's analyzer, for the options that both have (ADR 0023).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Language {
+    Japanese,
+    Korean,
+}
+
+/// A row of the shingles (ADR 0023).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ShingleField {
+    /// The fewest and the most tokens in a shingle.
+    Size,
+    Separator,
+    /// Whether the tokens are kept: always, never, or when there are no shingles.
+    Unigrams,
+    Filler,
+}
+
+impl ShingleField {
+    const ALL: [ShingleField; 4] = [
+        ShingleField::Size,
+        ShingleField::Separator,
+        ShingleField::Unigrams,
+        ShingleField::Filler,
+    ];
+}
+
+/// A row of the token limit (ADR 0023).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LimitField {
+    MaxTokens,
+    ConsumeAll,
+}
+
+impl LimitField {
+    const ALL: [LimitField; 2] = [LimitField::MaxTokens, LimitField::ConsumeAll];
+}
+
 /// The current analyzer. The preset and the custom chain are kept while another kind is chosen,
 /// so that switching back finds them again.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,7 +142,18 @@ pub struct AnalyzerSettings {
     stopwords: Option<WordSet>,
     /// The preset's stem exclusions; `None` for none.
     stem_exclusion: Option<WordSet>,
+    /// The preset's longest token; `None` for its default.
+    max_token_length: Option<i32>,
+    /// The preset's stem overrides; `None` for its default ones.
+    stem_override: Option<StemDictionary>,
+    /// `JapaneseAnalyzer`'s options; sent only when one is set.
+    japanese: JapaneseOptions,
+    /// `KoreanAnalyzer`'s options; sent only when one is set.
+    korean: KoreanOptions,
     chain: CustomAnalyzer,
+    /// Wrap any kind; `None` for none.
+    shingles: Option<Shingles>,
+    limit_token_count: Option<LimitTokenCount>,
 }
 
 impl Default for AnalyzerSettings {
@@ -102,12 +165,18 @@ impl Default for AnalyzerSettings {
             preset: DEFAULT_PRESET.to_owned(),
             stopwords: None,
             stem_exclusion: None,
+            max_token_length: None,
+            stem_override: None,
+            japanese: JapaneseOptions::default(),
+            korean: KoreanOptions::default(),
             chain: CustomAnalyzer {
                 char_filters: Vec::new(),
                 tokenizer: component("standard"),
                 token_filters: vec![component("lowercase")],
                 config_dir: None,
             },
+            shingles: None,
+            limit_token_count: None,
         }
     }
 }
@@ -115,27 +184,35 @@ impl Default for AnalyzerSettings {
 impl AnalyzerSettings {
     /// The analyzer as a request sends it.
     pub fn analyzer(&self) -> Analyzer {
+        let mut analyzer = Analyzer {
+            standard: None,
+            preset: None,
+            custom: None,
+            shingles: self.shingles.clone(),
+            limit_token_count: self.limit_token_count,
+        };
         match self.kind {
-            Kind::Standard => Analyzer::default(),
-            Kind::Preset => Analyzer {
-                standard: None,
-                preset: Some(PresetAnalyzer {
+            Kind::Standard => analyzer.standard = Analyzer::default().standard,
+            Kind::Preset => {
+                analyzer.preset = Some(PresetAnalyzer {
                     class_name: self.preset.clone(),
                     stopwords: self.stopwords.clone(),
                     stem_exclusion: self.stem_exclusion.clone(),
-                }),
-                custom: None,
-            },
-            Kind::Custom => Analyzer {
-                standard: None,
-                preset: None,
-                custom: Some(self.chain.clone()),
-            },
+                    max_token_length: self.max_token_length,
+                    stem_override: self.stem_override.clone(),
+                    japanese: (self.japanese != JapaneseOptions::default())
+                        .then(|| self.japanese.clone()),
+                    korean: (self.korean != KoreanOptions::default()).then(|| self.korean.clone()),
+                });
+            }
+            Kind::Custom => analyzer.custom = Some(self.chain.clone()),
         }
+        analyzer
     }
 
+    /// Whether this is the default: the standard analyzer, without wrappers.
     pub fn is_standard(&self) -> bool {
-        self.kind == Kind::Standard
+        self.kind == Kind::Standard && self.shingles.is_none() && self.limit_token_count.is_none()
     }
 
     pub fn is_custom(&self) -> bool {
@@ -156,23 +233,94 @@ impl AnalyzerSettings {
         }
     }
 
-    /// The analyzer on one line: `standard analyzer`, the preset's simple class name and its word
-    /// sets, such as `EnglishAnalyzer · stop words none`, or the chain, such as `htmlStrip ›
-    /// standard › lowercase › stop(ignoreCase=true)`, and its config directory.
-    pub fn text(&self) -> String {
-        match self.kind {
-            Kind::Standard => return "standard analyzer".to_owned(),
-            Kind::Preset => {
-                let mut text = escape_control(simple_name(&self.preset));
-                for kind in WordSetKind::ALL {
-                    if let Some(set) = self.word_set(kind) {
-                        text.push_str(&format!(" · {} {}", kind.noun(), word_set_text(set)));
-                    }
-                }
-                return text;
-            }
-            Kind::Custom => {}
+    fn user_dictionary(&self, language: Language) -> Option<&String> {
+        match language {
+            Language::Japanese => self.japanese.user_dictionary.as_ref(),
+            Language::Korean => self.korean.user_dictionary.as_ref(),
         }
+    }
+
+    fn user_dictionary_mut(&mut self, language: Language) -> &mut Option<String> {
+        match language {
+            Language::Japanese => &mut self.japanese.user_dictionary,
+            Language::Korean => &mut self.korean.user_dictionary,
+        }
+    }
+
+    fn stop_tags(&self, language: Language) -> Option<&WordSet> {
+        match language {
+            Language::Japanese => self.japanese.stop_tags.as_ref(),
+            Language::Korean => self.korean.stop_tags.as_ref(),
+        }
+    }
+
+    fn stop_tags_mut(&mut self, language: Language) -> &mut Option<WordSet> {
+        match language {
+            Language::Japanese => &mut self.japanese.stop_tags,
+            Language::Korean => &mut self.korean.stop_tags,
+        }
+    }
+
+    /// The analyzer on one line: `standard analyzer`, the preset's simple class name with its word
+    /// sets and options, such as `EnglishAnalyzer · stop words none`, or the chain, such as
+    /// `htmlStrip › standard › lowercase › stop(ignoreCase=true)`, and its config directory; then
+    /// the wrappers, such as `· shingles 2–3 · at most 10000 tokens`.
+    pub fn text(&self) -> String {
+        let mut text = match self.kind {
+            Kind::Standard => "standard analyzer".to_owned(),
+            Kind::Preset => self.preset_text(),
+            Kind::Custom => self.chain_text(),
+        };
+        if let Some(shingles) = &self.shingles {
+            text.push_str(&format!(" · shingles {}", shingle_size_text(shingles)));
+        }
+        if let Some(limit) = &self.limit_token_count {
+            text.push_str(&format!(" · at most {} tokens", limit.max_token_count));
+        }
+        text
+    }
+
+    fn preset_text(&self) -> String {
+        let mut text = escape_control(simple_name(&self.preset));
+        for kind in WordSetKind::ALL {
+            if let Some(set) = self.word_set(kind) {
+                text.push_str(&format!(" · {} {}", kind.noun(), word_set_text(set)));
+            }
+        }
+        if let Some(length) = self.max_token_length {
+            text.push_str(&format!(" · token length {length}"));
+        }
+        if let Some(dictionary) = &self.stem_override {
+            text.push_str(&format!(
+                " · stem overrides {}",
+                stem_dictionary_text(dictionary)
+            ));
+        }
+        for language in [Language::Japanese, Language::Korean] {
+            if let Some(path) = self.user_dictionary(language) {
+                text.push_str(&format!(" · user dictionary {}", escape_control(path)));
+            }
+            if language == Language::Japanese
+                && let Some(mode) = self.japanese.mode
+            {
+                text.push_str(&format!(" · mode {}", japanese_mode_name(mode)));
+            }
+            if language == Language::Korean
+                && let Some(mode) = self.korean.decompound_mode
+            {
+                text.push_str(&format!(" · decompound {}", decompound_mode_name(mode)));
+            }
+            if let Some(tags) = self.stop_tags(language) {
+                text.push_str(&format!(" · stop tags {}", word_set_text(tags)));
+            }
+        }
+        if let Some(split) = self.korean.output_unknown_unigrams {
+            text.push_str(&format!(" · unknown words {}", unknown_words_text(split)));
+        }
+        text
+    }
+
+    fn chain_text(&self) -> String {
         let chain = &self.chain;
         let mut text = chain
             .char_filters
@@ -240,6 +388,193 @@ fn parse_word_set(text: &str) -> Result<Option<WordSet>, String> {
         .map(str::to_owned)
         .collect();
     Ok(Some(WordSet::words(words)))
+}
+
+/// The overrides as `word → stem`, separated by commas; `none` for none; or `file` and the path.
+fn stem_dictionary_text(dictionary: &StemDictionary) -> String {
+    match (&dictionary.entries, &dictionary.file) {
+        (Some(entries), _) if entries.is_empty() => "none".to_owned(),
+        (Some(entries), _) => entries
+            .iter()
+            .map(|(word, stem)| format!("{} → {}", escape_control(word), escape_control(stem)))
+            .collect::<Vec<_>>()
+            .join(", "),
+        (None, Some(file)) => format!("file {}", escape_control(file)),
+        (None, None) => String::new(),
+    }
+}
+
+/// The text that edits stem overrides: `word=stem` pairs, `-` for none, `@` and the path for a
+/// file, or blank for the default.
+fn stem_dictionary_input(dictionary: Option<&StemDictionary>) -> String {
+    match dictionary {
+        None => String::new(),
+        Some(StemDictionary {
+            entries: Some(entries),
+            ..
+        }) if entries.is_empty() => "-".to_owned(),
+        Some(StemDictionary {
+            entries: Some(entries),
+            ..
+        }) => entries
+            .iter()
+            .map(|(word, stem)| format!("{word}={stem}"))
+            .collect::<Vec<_>>()
+            .join(", "),
+        Some(StemDictionary {
+            file: Some(file), ..
+        }) => format!("@{file}"),
+        Some(_) => String::new(),
+    }
+}
+
+/// Stem overrides from their text (see [`stem_dictionary_input`]): pairs are separated by commas
+/// or white space.
+fn parse_stem_dictionary(text: &str) -> Result<Option<StemDictionary>, String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return Ok(None);
+    }
+    if text == "-" {
+        return Ok(Some(StemDictionary {
+            entries: Some(BTreeMap::new()),
+            file: None,
+        }));
+    }
+    if let Some(path) = text.strip_prefix('@') {
+        let path = path.trim();
+        if path.is_empty() {
+            return Err("Write the dictionary file's path after @.".to_owned());
+        }
+        return Ok(Some(StemDictionary {
+            entries: None,
+            file: Some(path.to_owned()),
+        }));
+    }
+    let mut entries = BTreeMap::new();
+    for pair in text
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|pair| !pair.is_empty())
+    {
+        match pair.split_once('=') {
+            Some((word, stem)) if !word.is_empty() && !stem.is_empty() => {
+                entries.insert(word.to_owned(), stem.to_owned());
+            }
+            _ => return Err("Write each override as word=stem.".to_owned()),
+        }
+    }
+    Ok(Some(StemDictionary {
+        entries: Some(entries),
+        file: None,
+    }))
+}
+
+/// A whole number from `min` to `max`; `None` for a blank text.
+fn parse_number(text: &str, min: i32, max: i32) -> Result<Option<i32>, String> {
+    if text.is_empty() {
+        return Ok(None);
+    }
+    match text.parse::<i32>() {
+        Ok(number) if (min..=max).contains(&number) => Ok(Some(number)),
+        _ => Err(format!("Write a whole number from {min} to {max}.")),
+    }
+}
+
+/// The shingle size as `min-max`, or one number if they are the same; `None` for a blank text.
+fn parse_shingle_size(text: &str) -> Result<Option<(i32, i32)>, String> {
+    if text.is_empty() {
+        return Ok(None);
+    }
+    let error = || "Write the size as min-max, such as 2-3, both at least 2.".to_owned();
+    let (min, max) = match text.split_once(['-', '–']) {
+        Some((min, max)) => (min.trim(), max.trim()),
+        None => (text, text),
+    };
+    let min = parse_number(min, 2, i32::MAX).map_err(|_| error())?;
+    let max = parse_number(max, 2, i32::MAX).map_err(|_| error())?;
+    match (min, max) {
+        (Some(min), Some(max)) if min <= max => Ok(Some((min, max))),
+        _ => Err(error()),
+    }
+}
+
+/// `2`, or `2–3` for a range.
+fn shingle_size_text(shingles: &Shingles) -> String {
+    if shingles.min_shingle_size == shingles.max_shingle_size {
+        shingles.min_shingle_size.to_string()
+    } else {
+        format!(
+            "{}–{}",
+            shingles.min_shingle_size, shingles.max_shingle_size
+        )
+    }
+}
+
+/// When the shingles keep the tokens themselves.
+fn unigrams_text(shingles: &Shingles) -> &'static str {
+    match (
+        shingles.output_unigrams,
+        shingles.output_unigrams_if_no_shingles,
+    ) {
+        (true, _) => "yes",
+        (false, false) => "no",
+        (false, true) => "only if there are no shingles",
+    }
+}
+
+/// A text as typed, in quotes, so that blanks show.
+fn quoted(text: &str) -> String {
+    format!("\"{}\"", escape_control(text))
+}
+
+fn japanese_mode_name(mode: JapaneseMode) -> &'static str {
+    match mode {
+        JapaneseMode::Normal => "normal",
+        JapaneseMode::Search => "search",
+        JapaneseMode::Extended => "extended",
+    }
+}
+
+fn decompound_mode_name(mode: KoreanDecompoundMode) -> &'static str {
+    match mode {
+        KoreanDecompoundMode::None => "none",
+        KoreanDecompoundMode::Discard => "discard",
+        KoreanDecompoundMode::Mixed => "mixed",
+    }
+}
+
+fn unknown_words_text(split: bool) -> &'static str {
+    if split {
+        "split into unigrams"
+    } else {
+        "kept whole"
+    }
+}
+
+/// The value after `current` in `values`, or the one before it, round and round.
+fn cycled<T: Copy + PartialEq>(values: &[T], current: T, forward: bool) -> T {
+    let index = values
+        .iter()
+        .position(|value| *value == current)
+        .unwrap_or(0);
+    let len = values.len();
+    values[if forward {
+        (index + 1) % len
+    } else {
+        (index + len - 1) % len
+    }]
+}
+
+/// A row's label, padded, then its value, or the default dimmed.
+fn value_line(label: &str, value: Option<String>, default: &str) -> Line<'static> {
+    let label = format!("{label:<LABEL$}");
+    match value {
+        Some(value) => Line::from(format!("{label}{value}")),
+        None => Line::from(vec![
+            Span::raw(label),
+            Span::styled(default.to_owned(), dim()),
+        ]),
+    }
 }
 
 /// The class name without its package.
@@ -334,6 +669,14 @@ enum Row {
     Preset,
     /// A preset's stop words or stem exclusions.
     WordSet(WordSetKind),
+    /// A preset's options (ADR 0023).
+    MaxTokenLength,
+    StemOverride,
+    UserDictionary(Language),
+    JapaneseMode,
+    DecompoundMode,
+    StopTags(Language),
+    UnknownWords,
     ConfigDir,
     /// A component: its section and its index there (0 for the tokenizer).
     Component(Section, usize),
@@ -341,6 +684,11 @@ enum Row {
     Param(Section, usize, usize),
     /// Adds a char filter or token filter at the end.
     Add(Section),
+    /// The wrappers, on or off, and their fields while on (ADR 0023).
+    Shingles,
+    Shingle(ShingleField),
+    TokenLimit,
+    Limit(LimitField),
 }
 
 /// Where a picked component goes.
@@ -370,6 +718,14 @@ struct Picker {
 enum TextTarget {
     ConfigDir,
     WordSet(WordSetKind),
+    MaxTokenLength,
+    StemOverride,
+    UserDictionary(Language),
+    StopTags(Language),
+    ShingleSize,
+    ShingleSeparator,
+    ShingleFiller,
+    MaxTokenCount,
     /// A parameter of a component as `name=value`; `key` is the one it replaces, if any.
     Param {
         section: Section,
@@ -431,7 +787,7 @@ impl AnalyzerForm {
     fn rows(&self) -> Vec<Row> {
         let mut rows = vec![Row::Kind];
         match self.draft.kind {
-            Kind::Standard => return rows,
+            Kind::Standard => {}
             Kind::Preset => {
                 rows.push(Row::Preset);
                 rows.extend(
@@ -440,10 +796,42 @@ impl AnalyzerForm {
                         .filter(|kind| self.support(*kind) != Some(WordSetSupport::None))
                         .map(Row::WordSet),
                 );
-                return rows;
+                if self.takes(PresetOption::MaxTokenLength) {
+                    rows.push(Row::MaxTokenLength);
+                }
+                if self.takes(PresetOption::StemOverride) {
+                    rows.push(Row::StemOverride);
+                }
+                if self.takes(PresetOption::Japanese) {
+                    rows.extend([
+                        Row::UserDictionary(Language::Japanese),
+                        Row::JapaneseMode,
+                        Row::StopTags(Language::Japanese),
+                    ]);
+                }
+                if self.takes(PresetOption::Korean) {
+                    rows.extend([
+                        Row::UserDictionary(Language::Korean),
+                        Row::DecompoundMode,
+                        Row::StopTags(Language::Korean),
+                        Row::UnknownWords,
+                    ]);
+                }
             }
-            Kind::Custom => {}
+            Kind::Custom => self.chain_rows(&mut rows),
         }
+        rows.push(Row::Shingles);
+        if self.draft.shingles.is_some() {
+            rows.extend(ShingleField::ALL.map(Row::Shingle));
+        }
+        rows.push(Row::TokenLimit);
+        if self.draft.limit_token_count.is_some() {
+            rows.extend(LimitField::ALL.map(Row::Limit));
+        }
+        rows
+    }
+
+    fn chain_rows(&self, rows: &mut Vec<Row>) {
         rows.push(Row::ConfigDir);
         let chain = &self.draft.chain;
         for (section, components) in [
@@ -461,22 +849,40 @@ impl AnalyzerForm {
                 rows.push(Row::Add(section));
             }
         }
-        rows
+    }
+
+    /// The draft's preset as listed; `None` while the presets are not loaded, or for a preset
+    /// that is not listed.
+    fn listed_preset(&self) -> Option<&AvailableAnalyzer> {
+        self.components
+            .as_ref()?
+            .analyzers
+            .iter()
+            .find(|analyzer| analyzer.class_name == self.draft.preset)
     }
 
     /// Whether the draft's preset takes the word set; `None` while the presets are not loaded, or
     /// for a preset that is not listed.
     fn support(&self, kind: WordSetKind) -> Option<WordSetSupport> {
-        let preset = self
-            .components
-            .as_ref()?
-            .analyzers
-            .iter()
-            .find(|analyzer| analyzer.class_name == self.draft.preset)?;
+        let preset = self.listed_preset()?;
         Some(match kind {
             WordSetKind::Stopwords => preset.stopwords,
             WordSetKind::StemExclusion => preset.stem_exclusion,
         })
+    }
+
+    /// Whether the draft's preset takes the option. Without the list, the server judges: every
+    /// preset may take the token length and stem overrides, and Kuromoji's and Nori's analyzers,
+    /// by class name, their options.
+    fn takes(&self, option: PresetOption) -> bool {
+        match self.listed_preset() {
+            Some(preset) => preset.options.contains(&option),
+            None => match option {
+                PresetOption::Japanese => self.draft.preset == JAPANESE_ANALYZER,
+                PresetOption::Korean => self.draft.preset == KOREAN_ANALYZER,
+                PresetOption::MaxTokenLength | PresetOption::StemOverride => true,
+            },
+        }
     }
 
     fn select(&mut self, row: Row) {
@@ -513,9 +919,10 @@ impl AnalyzerForm {
 
     /// While a picker or a line input is open, it takes the keys. Otherwise ↑↓ select a row;
     /// Space or → changes it (standard, preset or custom, ← the other way round; the preset, a
-    /// word set, the config directory, another component, a parameter); `a` adds a filter after
-    /// the selected one, `p` a parameter to the selected component, `d` deletes (a word set goes
-    /// back to its default), `K`/`J` move a filter up or down; Enter applies, Esc cancels.
+    /// word set, an option, the config directory, another component, a parameter; a wrapper on or
+    /// off); `a` adds a filter after the selected one, `p` a parameter to the selected component,
+    /// `d` deletes (a word set or an option goes back to its default, a wrapper off), `K`/`J`
+    /// move a filter up or down; Enter applies, Esc cancels.
     pub fn handle_key(&mut self, key: KeyEvent) -> FormEvent<AnalyzerSettings> {
         match &mut self.editing {
             Editing::Pick(_) => {
@@ -585,6 +992,87 @@ impl AnalyzerForm {
                 let end = self.list_mut(section).map_or(0, |list| list.len());
                 self.pick(section, Target::Insert(end));
             }
+            Row::MaxTokenLength => self.edit_text(TextTarget::MaxTokenLength),
+            Row::StemOverride => self.edit_text(TextTarget::StemOverride),
+            Row::UserDictionary(language) => self.edit_text(TextTarget::UserDictionary(language)),
+            Row::StopTags(language) => self.edit_text(TextTarget::StopTags(language)),
+            Row::JapaneseMode => {
+                let modes = [
+                    None,
+                    Some(JapaneseMode::Normal),
+                    Some(JapaneseMode::Search),
+                    Some(JapaneseMode::Extended),
+                ];
+                self.draft.japanese.mode = cycled(&modes, self.draft.japanese.mode, forward);
+                self.error = None;
+            }
+            Row::DecompoundMode => {
+                let modes = [
+                    None,
+                    Some(KoreanDecompoundMode::None),
+                    Some(KoreanDecompoundMode::Discard),
+                    Some(KoreanDecompoundMode::Mixed),
+                ];
+                let korean = &mut self.draft.korean;
+                korean.decompound_mode = cycled(&modes, korean.decompound_mode, forward);
+                self.error = None;
+            }
+            Row::UnknownWords => {
+                let korean = &mut self.draft.korean;
+                korean.output_unknown_unigrams = cycled(
+                    &[None, Some(true), Some(false)],
+                    korean.output_unknown_unigrams,
+                    forward,
+                );
+                self.error = None;
+            }
+            Row::Shingles => {
+                self.draft.shingles = match self.draft.shingles {
+                    Some(_) => None,
+                    None => Some(Shingles::default()),
+                };
+                self.error = None;
+            }
+            Row::Shingle(field) => match field {
+                ShingleField::Size => self.edit_text(TextTarget::ShingleSize),
+                ShingleField::Separator => self.edit_text(TextTarget::ShingleSeparator),
+                ShingleField::Filler => self.edit_text(TextTarget::ShingleFiller),
+                ShingleField::Unigrams => {
+                    if let Some(shingles) = &mut self.draft.shingles {
+                        // Always, never, or only without shingles.
+                        let unigrams = [(true, false), (false, false), (false, true)];
+                        (
+                            shingles.output_unigrams,
+                            shingles.output_unigrams_if_no_shingles,
+                        ) = cycled(
+                            &unigrams,
+                            (
+                                shingles.output_unigrams,
+                                shingles.output_unigrams_if_no_shingles,
+                            ),
+                            forward,
+                        );
+                        self.error = None;
+                    }
+                }
+            },
+            Row::TokenLimit => {
+                self.draft.limit_token_count = match self.draft.limit_token_count {
+                    Some(_) => None,
+                    None => Some(LimitTokenCount {
+                        max_token_count: DEFAULT_MAX_TOKEN_COUNT,
+                        consume_all_tokens: false,
+                    }),
+                };
+                self.error = None;
+            }
+            Row::Limit(LimitField::MaxTokens) => self.edit_text(TextTarget::MaxTokenCount),
+            Row::Limit(LimitField::ConsumeAll) => {
+                if let Some(limit) = &mut self.draft.limit_token_count {
+                    limit.consume_all_tokens = !limit.consume_all_tokens;
+                    self.error = None;
+                }
+            }
         }
     }
 
@@ -630,6 +1118,50 @@ impl AnalyzerForm {
                 format!("{key}={value}")
             }
             TextTarget::Param { key: None, .. } => String::new(),
+            TextTarget::MaxTokenLength => self
+                .draft
+                .max_token_length
+                .map(|length| length.to_string())
+                .unwrap_or_default(),
+            TextTarget::StemOverride => stem_dictionary_input(self.draft.stem_override.as_ref()),
+            TextTarget::UserDictionary(language) => self
+                .draft
+                .user_dictionary(*language)
+                .cloned()
+                .unwrap_or_default(),
+            TextTarget::StopTags(language) => word_set_input(self.draft.stop_tags(*language)),
+            TextTarget::ShingleSize => self
+                .draft
+                .shingles
+                .as_ref()
+                .map(|shingles| {
+                    if shingles.min_shingle_size == shingles.max_shingle_size {
+                        shingles.min_shingle_size.to_string()
+                    } else {
+                        format!(
+                            "{}-{}",
+                            shingles.min_shingle_size, shingles.max_shingle_size
+                        )
+                    }
+                })
+                .unwrap_or_default(),
+            TextTarget::ShingleSeparator => self
+                .draft
+                .shingles
+                .as_ref()
+                .map(|shingles| shingles.token_separator.clone())
+                .unwrap_or_default(),
+            TextTarget::ShingleFiller => self
+                .draft
+                .shingles
+                .as_ref()
+                .map(|shingles| shingles.filler_token.clone())
+                .unwrap_or_default(),
+            TextTarget::MaxTokenCount => self
+                .draft
+                .limit_token_count
+                .map(|limit| limit.max_token_count.to_string())
+                .unwrap_or_default(),
         };
         self.editing = Editing::Text(TextEdit {
             target,
@@ -657,6 +1189,50 @@ impl AnalyzerForm {
                     component.params.remove(&key);
                 }
                 self.selected = self.selected.min(self.rows().len() - 1);
+            }
+            Row::MaxTokenLength => self.draft.max_token_length = None,
+            Row::StemOverride => self.draft.stem_override = None,
+            Row::UserDictionary(language) => *self.draft.user_dictionary_mut(language) = None,
+            Row::StopTags(language) => *self.draft.stop_tags_mut(language) = None,
+            Row::JapaneseMode => self.draft.japanese.mode = None,
+            Row::DecompoundMode => self.draft.korean.decompound_mode = None,
+            Row::UnknownWords => self.draft.korean.output_unknown_unigrams = None,
+            Row::Shingles => {
+                self.draft.shingles = None;
+                self.selected = self.selected.min(self.rows().len() - 1);
+            }
+            Row::Shingle(field) => {
+                // Back to Lucene's default.
+                let default = Shingles::default();
+                let Some(shingles) = &mut self.draft.shingles else {
+                    return;
+                };
+                match field {
+                    ShingleField::Size => {
+                        shingles.min_shingle_size = default.min_shingle_size;
+                        shingles.max_shingle_size = default.max_shingle_size;
+                    }
+                    ShingleField::Separator => shingles.token_separator = default.token_separator,
+                    ShingleField::Unigrams => {
+                        shingles.output_unigrams = default.output_unigrams;
+                        shingles.output_unigrams_if_no_shingles =
+                            default.output_unigrams_if_no_shingles;
+                    }
+                    ShingleField::Filler => shingles.filler_token = default.filler_token,
+                }
+            }
+            Row::TokenLimit => {
+                self.draft.limit_token_count = None;
+                self.selected = self.selected.min(self.rows().len() - 1);
+            }
+            Row::Limit(field) => {
+                let Some(limit) = &mut self.draft.limit_token_count else {
+                    return;
+                };
+                match field {
+                    LimitField::MaxTokens => limit.max_token_count = DEFAULT_MAX_TOKEN_COUNT,
+                    LimitField::ConsumeAll => limit.consume_all_tokens = false,
+                }
             }
             Row::Kind | Row::Preset | Row::Add(_) => return,
         }
@@ -744,11 +1320,23 @@ impl AnalyzerForm {
                     Pick::Component(section, target) => self.put(section, target, name),
                     Pick::Preset => {
                         self.draft.preset = name;
-                        // A set that the new preset doesn't take would fail.
+                        // A set or an option that the new preset doesn't take would fail.
                         for kind in WordSetKind::ALL {
                             if self.support(kind) == Some(WordSetSupport::None) {
                                 *self.draft.word_set_mut(kind) = None;
                             }
+                        }
+                        if !self.takes(PresetOption::MaxTokenLength) {
+                            self.draft.max_token_length = None;
+                        }
+                        if !self.takes(PresetOption::StemOverride) {
+                            self.draft.stem_override = None;
+                        }
+                        if !self.takes(PresetOption::Japanese) {
+                            self.draft.japanese = JapaneseOptions::default();
+                        }
+                        if !self.takes(PresetOption::Korean) {
+                            self.draft.korean = KoreanOptions::default();
                         }
                         self.error = None;
                     }
@@ -822,10 +1410,12 @@ impl AnalyzerForm {
         }
     }
 
-    /// Applies an edited text: a config directory (none if blank), a word set (the default if
-    /// blank), or a parameter as `name=value` (removed if blank).
-    fn take_text(&mut self, target: TextTarget, text: &str) -> Result<(), String> {
-        let text = text.trim();
+    /// Applies an edited text: a config directory or a user dictionary (none if blank), a word
+    /// set, stop tags, stem overrides or the token length (the default if blank), a shingle size
+    /// or token count (the default if blank), a shingle separator or filler (as typed), or a
+    /// parameter as `name=value` (removed if blank).
+    fn take_text(&mut self, target: TextTarget, typed: &str) -> Result<(), String> {
+        let text = typed.trim();
         let (section, index, old) = match target {
             TextTarget::ConfigDir => {
                 self.draft.chain.config_dir = (!text.is_empty()).then(|| text.to_owned());
@@ -833,6 +1423,52 @@ impl AnalyzerForm {
             }
             TextTarget::WordSet(kind) => {
                 *self.draft.word_set_mut(kind) = parse_word_set(text)?;
+                return Ok(());
+            }
+            TextTarget::MaxTokenLength => {
+                self.draft.max_token_length = parse_number(text, 1, MAX_TOKEN_LENGTH)?;
+                return Ok(());
+            }
+            TextTarget::StemOverride => {
+                self.draft.stem_override = parse_stem_dictionary(text)?;
+                return Ok(());
+            }
+            TextTarget::UserDictionary(language) => {
+                *self.draft.user_dictionary_mut(language) =
+                    (!text.is_empty()).then(|| text.to_owned());
+                return Ok(());
+            }
+            TextTarget::StopTags(language) => {
+                *self.draft.stop_tags_mut(language) = parse_word_set(text)?;
+                return Ok(());
+            }
+            TextTarget::ShingleSize => {
+                let default = Shingles::default();
+                let (min, max) = parse_shingle_size(text)?
+                    .unwrap_or((default.min_shingle_size, default.max_shingle_size));
+                if let Some(shingles) = &mut self.draft.shingles {
+                    shingles.min_shingle_size = min;
+                    shingles.max_shingle_size = max;
+                }
+                return Ok(());
+            }
+            TextTarget::ShingleSeparator => {
+                if let Some(shingles) = &mut self.draft.shingles {
+                    shingles.token_separator = typed.to_owned();
+                }
+                return Ok(());
+            }
+            TextTarget::ShingleFiller => {
+                if let Some(shingles) = &mut self.draft.shingles {
+                    shingles.filler_token = typed.to_owned();
+                }
+                return Ok(());
+            }
+            TextTarget::MaxTokenCount => {
+                let count = parse_number(text, 1, i32::MAX)?.unwrap_or(DEFAULT_MAX_TOKEN_COUNT);
+                if let Some(limit) = &mut self.draft.limit_token_count {
+                    limit.max_token_count = count;
+                }
                 return Ok(());
             }
             TextTarget::Param {
@@ -884,7 +1520,9 @@ impl AnalyzerForm {
                 Kind::Preset => {
                     " ␣ change   d default   ←→ standard/preset/custom   ⏎ apply   Esc cancel   ↑↓"
                 }
-                Kind::Standard => " ␣/←→ standard/preset/custom   ⏎ apply   Esc cancel",
+                Kind::Standard => {
+                    " ␣ change   ←→ standard/preset/custom   d off   ⏎ apply   Esc cancel   ↑↓"
+                }
             },
         }
     }
@@ -894,15 +1532,19 @@ impl AnalyzerForm {
         let selected = self.selected.min(rows.len() - 1);
         let mut lines = Vec::new();
         let mut selected_line = 0;
-        let mut section = None;
+        let mut last_heading = None;
         for (i, row) in rows.iter().enumerate() {
-            if let Row::Component(s, _) | Row::Add(s) = row
-                && section != Some(*s)
+            let heading = match row {
+                Row::Component(section, _) | Row::Add(section) => Some(section.heading()),
+                Row::Shingles => Some("Wrappers"),
+                _ => None,
+            };
+            if let Some(heading) = heading
+                && last_heading != Some(heading)
             {
-                section = Some(*s);
+                last_heading = Some(heading);
                 lines.push(Line::from(""));
-                lines
-                    .push(Line::from(s.heading()).style(Style::new().add_modifier(Modifier::BOLD)));
+                lines.push(Line::from(heading).style(Style::new().add_modifier(Modifier::BOLD)));
             }
             if i == selected {
                 selected_line = lines.len();
@@ -914,24 +1556,36 @@ impl AnalyzerForm {
                 line
             });
         }
-        let notes: &[&str] = match self.draft.kind {
-            Kind::Standard => &[
+        let mut notes: Vec<&str> = match self.draft.kind {
+            Kind::Standard => vec![
                 "Lucene's StandardAnalyzer: the standard tokenizer, then lowercase.",
                 "Space switches to a preset analyzer, such as EnglishAnalyzer, or to a custom \
                  analyzer of your own chain.",
             ],
-            Kind::Preset => &[
+            Kind::Preset => vec![
                 "One of Lucene's analyzers, by class name, with its default settings.",
                 "Stop words and stem exclusions, for an analyzer that takes them: words separated \
                  by spaces or commas, - for no words, or @ and a word list file (UTF-8, one word \
                  per line, # for comments).",
             ],
-            Kind::Custom => &[],
+            Kind::Custom => Vec::new(),
         };
+        if rows.contains(&Row::StemOverride) {
+            notes.push(
+                "Stem overrides: word=stem pairs, - for none, or @ and a file of word<TAB>stem \
+                 lines.",
+            );
+        }
+        if rows.iter().any(|row| matches!(row, Row::StopTags(_))) {
+            notes.push(
+                "Stop tags like stop words. A user dictionary is a file in Kuromoji's or Nori's \
+                 own format.",
+            );
+        }
         if !notes.is_empty() {
             lines.push(Line::from(""));
             let width = usize::from(area.width.min(WIDTH).saturating_sub(2));
-            for note in notes {
+            for note in &notes {
                 lines.extend(
                     wrap(note, width, usize::MAX)
                         .into_iter()
@@ -981,6 +1635,92 @@ impl AnalyzerForm {
                         Line::from(vec![Span::raw(label), Span::styled(text, style)])
                     }
                 }
+            }
+            Row::MaxTokenLength => value_line(
+                "Token length",
+                self.draft.max_token_length.map(|length| length.to_string()),
+                "default: the analyzer's own",
+            ),
+            Row::StemOverride => value_line(
+                "Stem overrides",
+                self.draft.stem_override.as_ref().map(stem_dictionary_text),
+                "default: the analyzer's own",
+            ),
+            Row::UserDictionary(language) => value_line(
+                "User dictionary",
+                self.draft
+                    .user_dictionary(language)
+                    .map(|path| escape_control(path)),
+                "none",
+            ),
+            Row::JapaneseMode => value_line(
+                "Mode",
+                self.draft
+                    .japanese
+                    .mode
+                    .map(|mode| japanese_mode_name(mode).to_owned()),
+                "default: search",
+            ),
+            Row::DecompoundMode => value_line(
+                "Decompound",
+                self.draft
+                    .korean
+                    .decompound_mode
+                    .map(|mode| decompound_mode_name(mode).to_owned()),
+                "default: discard",
+            ),
+            Row::StopTags(language) => value_line(
+                "Stop tags",
+                self.draft.stop_tags(language).map(word_set_text),
+                "default: the analyzer's own",
+            ),
+            Row::UnknownWords => value_line(
+                "Unknown words",
+                self.draft
+                    .korean
+                    .output_unknown_unigrams
+                    .map(|split| unknown_words_text(split).to_owned()),
+                "default: kept whole",
+            ),
+            Row::Shingles => value_line(
+                "Shingles",
+                self.draft.shingles.as_ref().map(|_| "on".to_owned()),
+                "off",
+            ),
+            Row::Shingle(field) => {
+                let Some(shingles) = &self.draft.shingles else {
+                    return Line::from("");
+                };
+                let (label, value) = match field {
+                    ShingleField::Size => ("  size", shingle_size_text(shingles)),
+                    ShingleField::Separator => ("  separator", quoted(&shingles.token_separator)),
+                    ShingleField::Unigrams => ("  unigrams", unigrams_text(shingles).to_owned()),
+                    ShingleField::Filler => ("  filler", quoted(&shingles.filler_token)),
+                };
+                value_line(label, Some(value), "")
+            }
+            Row::TokenLimit => value_line(
+                "Token limit",
+                self.draft.limit_token_count.map(|_| "on".to_owned()),
+                "off",
+            ),
+            Row::Limit(field) => {
+                let Some(limit) = &self.draft.limit_token_count else {
+                    return Line::from("");
+                };
+                let (label, value) = match field {
+                    LimitField::MaxTokens => ("  max tokens", limit.max_token_count.to_string()),
+                    LimitField::ConsumeAll => (
+                        "  consume all",
+                        if limit.consume_all_tokens {
+                            "yes"
+                        } else {
+                            "no"
+                        }
+                        .to_owned(),
+                    ),
+                };
+                value_line(label, Some(value), "")
             }
             Row::ConfigDir => match &self.draft.chain.config_dir {
                 Some(dir) => Line::from(format!("Config dir      {}", escape_control(dir))),
@@ -1065,6 +1805,18 @@ fn render_text(frame: &mut Frame, area: Rect, edit: &TextEdit) {
             " Stem exclusions: words, or @file (blank for none) "
         }
         TextTarget::Param { .. } => " Parameter: name=value (blank removes it) ",
+        TextTarget::MaxTokenLength => " Token length: 1 to 1048576 (blank for the default) ",
+        TextTarget::StemOverride => {
+            " Stem overrides: word=stem …, - for none, or @file (blank for the default) "
+        }
+        TextTarget::UserDictionary(_) => " User dictionary file (blank for none) ",
+        TextTarget::StopTags(_) => {
+            " Stop tags: tags, - for none, or @file (blank for the default) "
+        }
+        TextTarget::ShingleSize => " Shingle size: min-max, such as 2-3 (blank for 2) ",
+        TextTarget::ShingleSeparator => " Token separator, as typed ",
+        TextTarget::ShingleFiller => " Filler token, as typed ",
+        TextTarget::MaxTokenCount => " Max tokens (blank for 10000) ",
     };
     let width = area.width.min(WIDTH - 4);
     let height = if edit.error.is_some() { 4 } else { 3 }.min(area.height);
@@ -1141,6 +1893,9 @@ mod tests {
                     WordSetSupport::None,
                     WordSetSupport::None,
                 ),
+                ("DutchAnalyzer", Optional, Optional),
+                ("JapaneseAnalyzer", Optional, WordSetSupport::None),
+                ("KoreanAnalyzer", WordSetSupport::None, WordSetSupport::None),
             ]
             .into_iter()
             .map(|(name, stopwords, stem_exclusion)| AvailableAnalyzer {
@@ -1148,6 +1903,13 @@ mod tests {
                 class_name: format!("org.apache.lucene.analysis.x.{name}"),
                 stopwords,
                 stem_exclusion,
+                options: match name {
+                    "StandardAnalyzer" | "WhitespaceAnalyzer" => vec![PresetOption::MaxTokenLength],
+                    "DutchAnalyzer" => vec![PresetOption::StemOverride],
+                    "JapaneseAnalyzer" => vec![PresetOption::Japanese],
+                    "KoreanAnalyzer" => vec![PresetOption::Korean],
+                    _ => Vec::new(),
+                },
             })
             .collect(),
             char_filters: available(&["htmlStrip", "mapping"]),
@@ -1193,8 +1955,8 @@ mod tests {
     #[test]
     fn adds_filters_from_the_filtered_list() {
         let mut form = custom_form();
-        // Kind, config dir, + char filter, standard, lowercase, + token filter.
-        press(&mut form, KeyCode::End);
+        // Kind, config dir, + char filter, standard, lowercase, + token filter, then the wrappers.
+        form.select(Row::Add(Section::TokenFilters));
         press(&mut form, KeyCode::Char(' '));
         typed(&mut form, "st");
         // "stop" and "stemmerOverride" match; ↓ selects the second.
@@ -1238,7 +2000,7 @@ mod tests {
     fn takes_a_typed_name_that_is_not_listed() {
         let mut form = AnalyzerForm::new(&AnalyzerSettings::default(), None);
         press(&mut form, KeyCode::Left);
-        press(&mut form, KeyCode::End);
+        form.select(Row::Add(Section::TokenFilters));
         press(&mut form, KeyCode::Up);
         // The tokenizer row: Space picks another.
         press(&mut form, KeyCode::Up);
@@ -1252,7 +2014,7 @@ mod tests {
     fn edits_parameters_as_name_value() {
         let mut form = custom_form();
         // The lowercase filter.
-        press(&mut form, KeyCode::End);
+        form.select(Row::Add(Section::TokenFilters));
         press(&mut form, KeyCode::Up);
         press(&mut form, KeyCode::Char('p'));
         typed(&mut form, "nope");
@@ -1277,7 +2039,7 @@ mod tests {
         assert_eq!(applied(&mut form).text(), "standard › lowercase(b=2)");
 
         // d deletes the selected parameter.
-        press(&mut form, KeyCode::End);
+        form.select(Row::Add(Section::TokenFilters));
         press(&mut form, KeyCode::Up);
         press(&mut form, KeyCode::Char('d'));
         assert_eq!(applied(&mut form).text(), "standard › lowercase");
@@ -1286,7 +2048,7 @@ mod tests {
     #[test]
     fn deletes_and_moves_filters_but_keeps_the_tokenizer() {
         let mut form = custom_form();
-        press(&mut form, KeyCode::End);
+        form.select(Row::Add(Section::TokenFilters));
         press(&mut form, KeyCode::Char(' '));
         typed(&mut form, "stop");
         press(&mut form, KeyCode::Enter);
@@ -1330,7 +2092,7 @@ mod tests {
     #[test]
     fn keeps_the_chain_while_the_standard_analyzer_is_chosen() {
         let mut form = custom_form();
-        press(&mut form, KeyCode::End);
+        form.select(Row::Add(Section::TokenFilters));
         press(&mut form, KeyCode::Char(' '));
         typed(&mut form, "stop");
         press(&mut form, KeyCode::Enter);
@@ -1358,8 +2120,11 @@ mod tests {
                     class_name: DEFAULT_PRESET.to_owned(),
                     stopwords: None,
                     stem_exclusion: None,
+                    ..Default::default()
                 }),
                 custom: None,
+                shingles: None,
+                limit_token_count: None,
             }
         );
 
@@ -1420,7 +2185,14 @@ mod tests {
         let mut form = preset_form();
         assert_eq!(
             form.rows(),
-            [Row::Kind, Row::Preset, STOPWORDS, STEM_EXCLUSION]
+            [
+                Row::Kind,
+                Row::Preset,
+                STOPWORDS,
+                STEM_EXCLUSION,
+                Row::Shingles,
+                Row::TokenLimit
+            ]
         );
 
         edit(&mut form, STOPWORDS, "-");
@@ -1477,6 +2249,7 @@ mod tests {
                 class_name: "org.apache.lucene.analysis.x.EnglishAnalyzer".to_owned(),
                 stopwords: None,
                 stem_exclusion: None,
+                ..Default::default()
             }
         );
         assert!(render(&form).contains("Stop words      default: the analyzer's own"));
@@ -1493,7 +2266,16 @@ mod tests {
         press(&mut form, KeyCode::Char(' '));
         typed(&mut form, "Stop");
         press(&mut form, KeyCode::Enter);
-        assert_eq!(form.rows(), [Row::Kind, Row::Preset, STOPWORDS]);
+        assert_eq!(
+            form.rows(),
+            [
+                Row::Kind,
+                Row::Preset,
+                STOPWORDS,
+                Row::Shingles,
+                Row::TokenLimit
+            ]
+        );
         assert_eq!(applied(&mut form).text(), "StopAnalyzer · stop words a");
         form.select(STOPWORDS);
         press(&mut form, KeyCode::Char('d'));
@@ -1503,18 +2285,36 @@ mod tests {
             "{screen}"
         );
 
-        // WhitespaceAnalyzer takes neither.
+        // WhitespaceAnalyzer takes neither, but the token length.
         form.select(Row::Preset);
         press(&mut form, KeyCode::Char(' '));
         typed(&mut form, "White");
         press(&mut form, KeyCode::Enter);
-        assert_eq!(form.rows(), [Row::Kind, Row::Preset]);
+        assert_eq!(
+            form.rows(),
+            [
+                Row::Kind,
+                Row::Preset,
+                Row::MaxTokenLength,
+                Row::Shingles,
+                Row::TokenLimit
+            ]
+        );
 
-        // Without the list, both rows are there, and the server judges.
+        // Without the list, the rows that any preset may have are there, and the server judges.
         let form = AnalyzerForm::new(&applied(&mut form), None);
         assert_eq!(
             form.rows(),
-            [Row::Kind, Row::Preset, STOPWORDS, STEM_EXCLUSION]
+            [
+                Row::Kind,
+                Row::Preset,
+                STOPWORDS,
+                STEM_EXCLUSION,
+                Row::MaxTokenLength,
+                Row::StemOverride,
+                Row::Shingles,
+                Row::TokenLimit
+            ]
         );
     }
 
@@ -1542,6 +2342,273 @@ mod tests {
                 parse_word_set(&word_set_input(Some(&set))),
                 Ok(Some(set.clone()))
             );
+        }
+    }
+
+    /// The form with the preset of this simple name, picked from the list.
+    fn preset_named(name: &str) -> AnalyzerForm {
+        let mut form = preset_form();
+        form.select(Row::Preset);
+        press(&mut form, KeyCode::Char(' '));
+        typed(&mut form, name);
+        press(&mut form, KeyCode::Enter);
+        form
+    }
+
+    #[test]
+    fn wraps_any_analyzer_in_shingles_and_a_token_limit() {
+        let mut form = AnalyzerForm::new(&AnalyzerSettings::default(), Some(components()));
+        assert_eq!(form.rows(), [Row::Kind, Row::Shingles, Row::TokenLimit]);
+        let screen = render(&form);
+        assert!(screen.contains("Wrappers"), "{screen}");
+        assert!(screen.contains("Shingles        off"), "{screen}");
+
+        form.select(Row::Shingles);
+        press(&mut form, KeyCode::Char(' '));
+        assert_eq!(
+            form.rows(),
+            [
+                Row::Kind,
+                Row::Shingles,
+                Row::Shingle(ShingleField::Size),
+                Row::Shingle(ShingleField::Separator),
+                Row::Shingle(ShingleField::Unigrams),
+                Row::Shingle(ShingleField::Filler),
+                Row::TokenLimit
+            ]
+        );
+        let settings = applied(&mut form);
+        assert!(!settings.is_standard());
+        assert_eq!(settings.text(), "standard analyzer · shingles 2");
+        assert_eq!(settings.analyzer().shingles, Some(Shingles::default()));
+        assert_eq!(settings.analyzer().standard, Analyzer::default().standard);
+
+        edit(&mut form, Row::Shingle(ShingleField::Size), "2-3");
+        // The separator and the filler are taken as typed.
+        edit(&mut form, Row::Shingle(ShingleField::Separator), " ");
+        edit(&mut form, Row::Shingle(ShingleField::Filler), "");
+        form.select(Row::Shingle(ShingleField::Unigrams));
+        press(&mut form, KeyCode::Char(' '));
+        let screen = render(&form);
+        assert!(screen.contains("  separator     \" \""), "{screen}");
+        assert!(screen.contains("  unigrams      no"), "{screen}");
+        let shingles = applied(&mut form).analyzer().shingles.unwrap();
+        assert_eq!(
+            shingles,
+            Shingles {
+                min_shingle_size: 2,
+                max_shingle_size: 3,
+                token_separator: " ".to_owned(),
+                output_unigrams: false,
+                output_unigrams_if_no_shingles: false,
+                filler_token: String::new(),
+            }
+        );
+        // Only without shingles, then always again.
+        press(&mut form, KeyCode::Char(' '));
+        assert!(render(&form).contains("only if there are no shingles"));
+        press(&mut form, KeyCode::Char(' '));
+        assert!(
+            applied(&mut form)
+                .analyzer()
+                .shingles
+                .unwrap()
+                .output_unigrams
+        );
+
+        // A size below 2 is refused.
+        edit(&mut form, Row::Shingle(ShingleField::Size), "1-2");
+        assert!(matches!(&form.editing, Editing::Text(edit) if edit.error.is_some()));
+        press(&mut form, KeyCode::Esc);
+
+        form.select(Row::TokenLimit);
+        press(&mut form, KeyCode::Char(' '));
+        edit(&mut form, Row::Limit(LimitField::MaxTokens), "5");
+        form.select(Row::Limit(LimitField::ConsumeAll));
+        press(&mut form, KeyCode::Char(' '));
+        let settings = applied(&mut form);
+        assert_eq!(
+            settings.text(),
+            "standard analyzer · shingles 2–3 · at most 5 tokens"
+        );
+        assert_eq!(
+            settings.analyzer().limit_token_count,
+            Some(LimitTokenCount {
+                max_token_count: 5,
+                consume_all_tokens: true,
+            })
+        );
+
+        // They wrap a custom analyzer too, and d turns them off.
+        form.select(Row::Kind);
+        press(&mut form, KeyCode::Left);
+        assert!(applied(&mut form).analyzer().shingles.is_some());
+        form.select(Row::Shingles);
+        press(&mut form, KeyCode::Char('d'));
+        form.select(Row::TokenLimit);
+        press(&mut form, KeyCode::Char('d'));
+        let settings = applied(&mut form);
+        assert_eq!(settings.text(), "standard › lowercase");
+        assert_eq!(settings.analyzer().limit_token_count, None);
+    }
+
+    #[test]
+    fn edits_a_presets_token_length_and_stem_overrides() {
+        let mut form = preset_named("Dutch");
+        assert!(form.rows().contains(&Row::StemOverride));
+        assert!(!form.rows().contains(&Row::MaxTokenLength));
+
+        edit(
+            &mut form,
+            Row::StemOverride,
+            "fietsen=rijwiel, kinderen=kind",
+        );
+        let settings = applied(&mut form);
+        assert_eq!(
+            settings.text(),
+            "DutchAnalyzer · stem overrides fietsen → rijwiel, kinderen → kind"
+        );
+        let entries = settings.analyzer().preset.unwrap().stem_override.unwrap();
+        assert_eq!(
+            entries.entries.unwrap(),
+            BTreeMap::from([
+                ("fietsen".to_owned(), "rijwiel".to_owned()),
+                ("kinderen".to_owned(), "kind".to_owned())
+            ])
+        );
+        edit(&mut form, Row::StemOverride, "fietsen");
+        assert!(matches!(&form.editing, Editing::Text(edit) if edit.error.is_some()));
+        press(&mut form, KeyCode::Esc);
+        edit(&mut form, Row::StemOverride, "@/etc/stemdict.txt");
+        assert_eq!(
+            applied(&mut form).text(),
+            "DutchAnalyzer · stem overrides file /etc/stemdict.txt"
+        );
+
+        // A preset that doesn't take them drops them.
+        let mut form = AnalyzerForm::new(&applied(&mut form), Some(components()));
+        form.select(Row::Preset);
+        press(&mut form, KeyCode::Char(' '));
+        typed(&mut form, "White");
+        press(&mut form, KeyCode::Enter);
+        edit(&mut form, Row::MaxTokenLength, "0");
+        assert!(matches!(&form.editing, Editing::Text(edit) if edit.error.is_some()));
+        press(&mut form, KeyCode::Esc);
+        edit(&mut form, Row::MaxTokenLength, "255");
+        let settings = applied(&mut form);
+        assert_eq!(settings.text(), "WhitespaceAnalyzer · token length 255");
+        let preset = settings.analyzer().preset.unwrap();
+        assert_eq!(preset.max_token_length, Some(255));
+        assert_eq!(preset.stem_override, None);
+        assert!(render(&form).contains("Token length    255"));
+    }
+
+    #[test]
+    fn edits_kuromojis_and_noris_options() {
+        let mut form = preset_named("Japanese");
+        assert_eq!(
+            form.rows()[..6],
+            [
+                Row::Kind,
+                Row::Preset,
+                STOPWORDS,
+                Row::UserDictionary(Language::Japanese),
+                Row::JapaneseMode,
+                Row::StopTags(Language::Japanese),
+            ]
+        );
+        assert!(render(&form).contains("Mode            default: search"));
+        // Nothing set sends no options.
+        assert_eq!(applied(&mut form).analyzer().preset.unwrap().japanese, None);
+
+        edit(
+            &mut form,
+            Row::UserDictionary(Language::Japanese),
+            "/x/userdict.txt",
+        );
+        form.select(Row::JapaneseMode);
+        press(&mut form, KeyCode::Char(' '));
+        edit(&mut form, Row::StopTags(Language::Japanese), "-");
+        let settings = applied(&mut form);
+        assert_eq!(
+            settings.text(),
+            "JapaneseAnalyzer · user dictionary /x/userdict.txt · mode normal · stop tags none"
+        );
+        assert_eq!(
+            settings.analyzer().preset.unwrap().japanese,
+            Some(JapaneseOptions {
+                user_dictionary: Some("/x/userdict.txt".to_owned()),
+                mode: Some(JapaneseMode::Normal),
+                stop_tags: Some(WordSet::words(Vec::new())),
+            })
+        );
+        // ← cycles back to the default.
+        form.select(Row::JapaneseMode);
+        press(&mut form, KeyCode::Left);
+        assert_eq!(form.draft.japanese.mode, None);
+
+        // Korean drops the Japanese options.
+        let mut form = AnalyzerForm::new(&applied(&mut form), Some(components()));
+        form.select(Row::Preset);
+        press(&mut form, KeyCode::Char(' '));
+        typed(&mut form, "Korean");
+        press(&mut form, KeyCode::Enter);
+        assert_eq!(form.draft.japanese, JapaneseOptions::default());
+        form.select(Row::DecompoundMode);
+        press(&mut form, KeyCode::Left);
+        form.select(Row::UnknownWords);
+        press(&mut form, KeyCode::Char(' '));
+        edit(&mut form, Row::StopTags(Language::Korean), "JX NNP");
+        let settings = applied(&mut form);
+        assert_eq!(
+            settings.text(),
+            "KoreanAnalyzer · decompound mixed · stop tags JX, NNP · unknown words split into unigrams"
+        );
+        assert_eq!(
+            settings.analyzer().preset.unwrap().korean,
+            Some(KoreanOptions {
+                user_dictionary: None,
+                decompound_mode: Some(KoreanDecompoundMode::Mixed),
+                stop_tags: Some(WordSet::words(vec!["JX".to_owned(), "NNP".to_owned()])),
+                output_unknown_unigrams: Some(true),
+            })
+        );
+
+        // Without the list, the class name says which options there are.
+        let settings = AnalyzerSettings {
+            kind: Kind::Preset,
+            preset: JAPANESE_ANALYZER.to_owned(),
+            ..Default::default()
+        };
+        let form = AnalyzerForm::new(&settings, None);
+        assert!(form.rows().contains(&Row::JapaneseMode));
+        assert!(!form.rows().contains(&Row::DecompoundMode));
+    }
+
+    #[test]
+    fn parses_stem_overrides_and_shingle_sizes() {
+        assert_eq!(parse_stem_dictionary(" "), Ok(None));
+        assert_eq!(
+            parse_stem_dictionary("-").unwrap().unwrap().entries,
+            Some(BTreeMap::new())
+        );
+        assert!(parse_stem_dictionary("a=").is_err());
+        assert!(parse_stem_dictionary("=b").is_err());
+        assert!(parse_stem_dictionary("@").is_err());
+        for text in ["a=b, c=d", "@/x", "-"] {
+            let dictionary = parse_stem_dictionary(text).unwrap();
+            assert_eq!(
+                parse_stem_dictionary(&stem_dictionary_input(dictionary.as_ref())),
+                Ok(dictionary)
+            );
+        }
+
+        assert_eq!(parse_shingle_size(""), Ok(None));
+        assert_eq!(parse_shingle_size("3"), Ok(Some((3, 3))));
+        assert_eq!(parse_shingle_size("2 - 4"), Ok(Some((2, 4))));
+        assert_eq!(parse_shingle_size("2–4"), Ok(Some((2, 4))));
+        for bad in ["1", "3-2", "x", "2-", "2-3-4"] {
+            assert!(parse_shingle_size(bad).is_err(), "{bad}");
         }
     }
 

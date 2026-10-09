@@ -17,7 +17,9 @@ use leia::java::find_java;
 use leia::protocol::ErrorCode;
 use leia::protocol::analysis::{
     AnalysisComponent, Analyze, AnalyzeParams, Analyzer, CustomAnalyzer, GetAnalysisComponents,
-    GetAnalysisComponentsParams, PresetAnalyzer, WordSet, WordSetSupport,
+    GetAnalysisComponentsParams, JapaneseMode, JapaneseOptions, KoreanDecompoundMode,
+    KoreanOptions, LimitTokenCount, PresetAnalyzer, PresetOption, Shingles, WordSet,
+    WordSetSupport,
 };
 use leia::protocol::check::{
     CheckIndexResult, GetCheckIndex, GetCheckIndexParams, StartCheckIndex, StartCheckIndexParams,
@@ -1203,8 +1205,11 @@ fn analyzes_with_analysis_jars() {
                     class_name: polish.class_name.clone(),
                     stopwords: None,
                     stem_exclusion: None,
+                    ..Default::default()
                 }),
                 custom: None,
+                shingles: None,
+                limit_token_count: None,
             },
             text: "kot i pies".to_owned(),
         })
@@ -1215,6 +1220,140 @@ fn analyzes_with_analysis_jars() {
         .map(|t| t.term.as_str())
         .collect();
     assert_eq!(terms, ["kot", "pies"]);
+    assert!(server.shutdown(SHUTDOWN_TIMEOUT).unwrap().success());
+}
+
+/// The terms of the last stage.
+fn analyzed(server: &mut Server, analyzer: Analyzer, text: &str) -> Vec<String> {
+    let result = server
+        .call::<Analyze>(AnalyzeParams {
+            analyzer,
+            text: text.to_owned(),
+        })
+        .unwrap();
+    result
+        .stages
+        .last()
+        .unwrap()
+        .tokens
+        .iter()
+        .map(|t| t.term.clone())
+        .collect()
+}
+
+fn preset(preset: PresetAnalyzer) -> Analyzer {
+    Analyzer {
+        standard: None,
+        preset: Some(preset),
+        custom: None,
+        shingles: None,
+        limit_token_count: None,
+    }
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn analyzes_with_wrappers_and_preset_options() {
+    let mut server = start_with(&[test_analysis_jars("kuromoji"), test_analysis_jars("nori")]);
+
+    let components = server
+        .call::<GetAnalysisComponents>(GetAnalysisComponentsParams {})
+        .unwrap();
+    let options = |name: &str| {
+        let analyzer = components
+            .analyzers
+            .iter()
+            .find(|a| a.name == name)
+            .unwrap();
+        (analyzer.stopwords, analyzer.options.clone())
+    };
+    assert_eq!(
+        options("JapaneseAnalyzer"),
+        (WordSetSupport::Optional, vec![PresetOption::Japanese])
+    );
+    assert_eq!(
+        options("KoreanAnalyzer"),
+        (WordSetSupport::None, vec![PresetOption::Korean])
+    );
+    assert_eq!(
+        options("StandardAnalyzer").1,
+        [PresetOption::MaxTokenLength]
+    );
+    assert_eq!(options("DutchAnalyzer").1, [PresetOption::StemOverride]);
+
+    let japanese = PresetAnalyzer {
+        class_name: "org.apache.lucene.analysis.ja.JapaneseAnalyzer".to_owned(),
+        japanese: Some(JapaneseOptions {
+            mode: Some(JapaneseMode::Normal),
+            ..JapaneseOptions::default()
+        }),
+        ..PresetAnalyzer::default()
+    };
+    assert_eq!(
+        analyzed(&mut server, preset(japanese), "関西国際空港に行った"),
+        ["関西国際空港", "行く"]
+    );
+
+    let mut korean = PresetAnalyzer {
+        class_name: "org.apache.lucene.analysis.ko.KoreanAnalyzer".to_owned(),
+        korean: Some(KoreanOptions {
+            decompound_mode: Some(KoreanDecompoundMode::Mixed),
+            ..KoreanOptions::default()
+        }),
+        ..PresetAnalyzer::default()
+    };
+    assert_eq!(
+        analyzed(&mut server, preset(korean.clone()), "백두산"),
+        ["백두산", "백두", "산"]
+    );
+    korean.korean.as_mut().unwrap().stop_tags = Some(WordSet::words(vec!["NOPE".to_owned()]));
+    let error = server
+        .call::<Analyze>(AnalyzeParams {
+            analyzer: preset(korean),
+            text: "백두산".to_owned(),
+        })
+        .unwrap_err();
+    assert!(
+        matches!(&error, CallError::Rpc(e) if e.code == ErrorCode::InvalidAnalyzer
+            && e.message == "Invalid analyzer: stop tags: no part of speech 'NOPE'"),
+        "{error:?}"
+    );
+
+    // The longest token, then shingles of the pieces, then the first two tokens.
+    let standard = PresetAnalyzer {
+        class_name: "org.apache.lucene.analysis.standard.StandardAnalyzer".to_owned(),
+        max_token_length: Some(3),
+        ..PresetAnalyzer::default()
+    };
+    let wrapped = Analyzer {
+        shingles: Some(Shingles::default()),
+        limit_token_count: Some(LimitTokenCount {
+            max_token_count: 2,
+            consume_all_tokens: false,
+        }),
+        ..preset(standard)
+    };
+    let result = server
+        .call::<Analyze>(AnalyzeParams {
+            analyzer: wrapped,
+            text: "abcdef".to_owned(),
+        })
+        .unwrap();
+    let stages: Vec<&str> = result.stages.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(
+        stages,
+        [
+            "StandardAnalyzer",
+            "ShingleAnalyzerWrapper",
+            "LimitTokenCountAnalyzer"
+        ]
+    );
+    let terms: Vec<&str> = result.stages[2]
+        .tokens
+        .iter()
+        .map(|t| t.term.as_str())
+        .collect();
+    assert_eq!(terms, ["abc", "abc def"]);
     assert!(server.shutdown(SHUTDOWN_TIMEOUT).unwrap().success());
 }
 
@@ -1290,6 +1429,8 @@ fn analyzes_without_an_open_index() {
             ],
             config_dir: None,
         }),
+        shingles: None,
+        limit_token_count: None,
     };
     let result = server
         .call::<Analyze>(AnalyzeParams {
@@ -1322,8 +1463,11 @@ fn analyzes_without_an_open_index() {
                     class_name: english.class_name.clone(),
                     stopwords: None,
                     stem_exclusion: None,
+                    ..Default::default()
                 }),
                 custom: None,
+                shingles: None,
+                limit_token_count: None,
             },
             text: "The Foxes running".to_owned(),
         })
@@ -1348,8 +1492,11 @@ fn analyzes_without_an_open_index() {
                     class_name: english.class_name.clone(),
                     stopwords: Some(WordSet::words(vec!["foxes".to_owned()])),
                     stem_exclusion: Some(WordSet::words(vec!["running".to_owned()])),
+                    ..Default::default()
                 }),
                 custom: None,
+                shingles: None,
+                limit_token_count: None,
             },
             text: "The Foxes running".to_owned(),
         })
@@ -1374,8 +1521,11 @@ fn analyzes_without_an_open_index() {
                     class_name: stop.class_name.clone(),
                     stopwords: None,
                     stem_exclusion: None,
+                    ..Default::default()
                 }),
                 custom: None,
+                shingles: None,
+                limit_token_count: None,
             },
             text: "x".to_owned(),
         })
@@ -1395,6 +1545,8 @@ fn analyzes_without_an_open_index() {
             token_filters: Vec::new(),
             config_dir: None,
         }),
+        shingles: None,
+        limit_token_count: None,
     };
     let error = server
         .call::<Analyze>(AnalyzeParams {

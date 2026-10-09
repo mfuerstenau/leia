@@ -16,8 +16,11 @@ import io.github.mfuerstenau.leia.protocol.analysis.CharFilterStep;
 import io.github.mfuerstenau.leia.protocol.analysis.CustomAnalyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsParams;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsResult;
+import io.github.mfuerstenau.leia.protocol.analysis.LimitTokenCount;
 import io.github.mfuerstenau.leia.protocol.analysis.PresetAnalyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.Shingles;
 import io.github.mfuerstenau.leia.protocol.analysis.StandardAnalyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.StemDictionary;
 import io.github.mfuerstenau.leia.protocol.analysis.Token;
 import io.github.mfuerstenau.leia.protocol.analysis.TokenAttribute;
 import io.github.mfuerstenau.leia.protocol.analysis.TokenStage;
@@ -30,6 +33,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -37,8 +41,12 @@ import org.junit.jupiter.api.io.TempDir;
 /** {@code getAnalysisComponents} and {@code analyze}. Neither needs an open index. */
 class AnalysisHandlersTest {
 
-    private static final Analyzer STANDARD =
-            new Analyzer(Optional.of(new StandardAnalyzer()), Optional.empty(), Optional.empty());
+    private static final Analyzer STANDARD = new Analyzer(
+            Optional.of(new StandardAnalyzer()),
+            Optional.empty(),
+            Optional.empty(),
+            Optional.empty(),
+            Optional.empty());
 
     @TempDir
     Path tmp;
@@ -61,12 +69,14 @@ class AnalysisHandlersTest {
                                 "EnglishAnalyzer",
                                 "org.apache.lucene.analysis.en.EnglishAnalyzer",
                                 WordSetSupport.OPTIONAL,
-                                WordSetSupport.OPTIONAL),
+                                WordSetSupport.OPTIONAL,
+                                List.of()),
                         new AvailableAnalyzer(
                                 "StopAnalyzer",
                                 "org.apache.lucene.analysis.core.StopAnalyzer",
                                 WordSetSupport.REQUIRED,
-                                WordSetSupport.NONE));
+                                WordSetSupport.NONE,
+                                List.of()));
     }
 
     @Test
@@ -81,7 +91,12 @@ class AnalysisHandlersTest {
         });
         assertFails(
                 () -> analyze.handle(new AnalyzeParams(preset("java.lang.Thread"), "x")), ErrorCode.INVALID_ANALYZER);
-        var both = new Analyzer(STANDARD.standard(), preset("java.lang.Thread").preset(), Optional.empty());
+        var both = new Analyzer(
+                STANDARD.standard(),
+                preset("java.lang.Thread").preset(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty());
         assertFails(() -> analyze.handle(new AnalyzeParams(both, "x")), ErrorCode.INVALID_PARAMS);
     }
 
@@ -99,6 +114,65 @@ class AnalysisHandlersTest {
                 .singleElement()
                 .satisfies(stage ->
                         assertThat(stage.tokens()).extracting(Token::term).containsExactly("the", "running"));
+    }
+
+    @Test
+    void analyzesWithWrappersAndPresetOptions() throws Exception {
+        var standard = new PresetAnalyzer(
+                "org.apache.lucene.analysis.standard.StandardAnalyzer",
+                Optional.empty(),
+                Optional.empty(),
+                OptionalInt.of(3),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty());
+        var analyzer = new Analyzer(
+                Optional.empty(),
+                Optional.of(standard),
+                Optional.empty(),
+                Optional.of(new Shingles(2, 2, "+", false, false, "_")),
+                Optional.of(new LimitTokenCount(1, false)));
+
+        AnalyzeResult result = analyze.handle(new AnalyzeParams(analyzer, "abcdef"));
+
+        assertThat(result.stages())
+                .extracting(TokenStage::name)
+                .containsExactly("StandardAnalyzer", "ShingleAnalyzerWrapper", "LimitTokenCountAnalyzer");
+        assertThat(result.stages().get(0).tokens()).extracting(Token::term).containsExactly("abc", "def");
+        assertThat(result.stages().get(2).tokens()).extracting(Token::term).containsExactly("abc+def");
+
+        var badShingles = new Analyzer(
+                STANDARD.standard(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(new Shingles(1, 2, " ", true, false, "_")),
+                Optional.empty());
+        assertFails(() -> analyze.handle(new AnalyzeParams(badShingles, "x")), ErrorCode.INVALID_ANALYZER);
+    }
+
+    @Test
+    void checksAStemDictionary() throws Exception {
+        String dutch = "org.apache.lucene.analysis.nl.DutchAnalyzer";
+        var entries =
+                stemOverride(dutch, new StemDictionary(Optional.of(Map.of("fietsen", "rijwiel")), Optional.empty()));
+        assertThat(analyze.handle(new AnalyzeParams(entries, "de fietsen"))
+                        .stages()
+                        .getFirst()
+                        .tokens())
+                .extracting(Token::term)
+                .containsExactly("rijwiel");
+
+        var both = stemOverride(dutch, new StemDictionary(Optional.of(Map.of()), Optional.of("stemdict.txt")));
+        assertFails(() -> analyze.handle(new AnalyzeParams(both, "x")), ErrorCode.INVALID_PARAMS);
+        var neither = stemOverride(dutch, new StemDictionary(Optional.empty(), Optional.empty()));
+        assertFails(() -> analyze.handle(new AnalyzeParams(neither, "x")), ErrorCode.INVALID_PARAMS);
+        var english = stemOverride(
+                "org.apache.lucene.analysis.en.EnglishAnalyzer",
+                new StemDictionary(Optional.of(Map.of()), Optional.empty()));
+        assertThatThrownBy(() -> analyze.handle(new AnalyzeParams(english, "x")))
+                .isInstanceOfSatisfying(
+                        RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.INVALID_ANALYZER))
+                .hasMessage("Invalid analyzer: EnglishAnalyzer takes no stem overrides");
     }
 
     @Test
@@ -178,11 +252,19 @@ class AnalysisHandlersTest {
                 STANDARD.standard(),
                 Optional.empty(),
                 custom(List.of(), component("whitespace"), List.of(), Optional.empty())
-                        .custom());
+                        .custom(),
+                Optional.empty(),
+                Optional.empty());
         assertFails(() -> analyze.handle(new AnalyzeParams(both, "x")), ErrorCode.INVALID_PARAMS);
         assertFails(
-                () -> analyze.handle(
-                        new AnalyzeParams(new Analyzer(Optional.empty(), Optional.empty(), Optional.empty()), "x")),
+                () -> analyze.handle(new AnalyzeParams(
+                        new Analyzer(
+                                Optional.empty(),
+                                Optional.empty(),
+                                Optional.empty(),
+                                Optional.empty(),
+                                Optional.empty()),
+                        "x")),
                 ErrorCode.INVALID_PARAMS);
     }
 
@@ -217,7 +299,32 @@ class AnalysisHandlersTest {
     private static Analyzer preset(String className, Optional<WordSet> stopwords, Optional<WordSet> stemExclusion) {
         return new Analyzer(
                 Optional.empty(),
-                Optional.of(new PresetAnalyzer(className, stopwords, stemExclusion)),
+                Optional.of(new PresetAnalyzer(
+                        className,
+                        stopwords,
+                        stemExclusion,
+                        OptionalInt.empty(),
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.empty())),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty());
+    }
+
+    private static Analyzer stemOverride(String className, StemDictionary dictionary) {
+        return new Analyzer(
+                Optional.empty(),
+                Optional.of(new PresetAnalyzer(
+                        className,
+                        Optional.empty(),
+                        Optional.empty(),
+                        OptionalInt.empty(),
+                        Optional.of(dictionary),
+                        Optional.empty(),
+                        Optional.empty())),
+                Optional.empty(),
+                Optional.empty(),
                 Optional.empty());
     }
 
@@ -241,7 +348,9 @@ class AnalysisHandlersTest {
         return new Analyzer(
                 Optional.empty(),
                 Optional.empty(),
-                Optional.of(new CustomAnalyzer(charFilters, tokenizer, tokenFilters, configDir)));
+                Optional.of(new CustomAnalyzer(charFilters, tokenizer, tokenFilters, configDir)),
+                Optional.empty(),
+                Optional.empty());
     }
 
     private static void assertFails(ThrowingCallable call, ErrorCode code) {

@@ -100,11 +100,17 @@ tasks.withType<Test>().configureEach {
     }
 }
 
-// Analysis jars (ADR 0016): two small Lucene modules that leia doesn't bundle, each with its
-// dependencies in a directory of its own under build/test-analysis-jars. Loading them, or the test
-// codec jar, changes Lucene's global lists of factories, codecs and formats, so the tests that do
-// run in a JVM of their own (jarsTest). The real-server tests in tui/ use these directories too.
-val testAnalysisModules = mapOf("phonetic" to libs.lucene.analysis.phonetic, "stempel" to libs.lucene.analysis.stempel)
+// Analysis jars (ADR 0016): Lucene modules that leia doesn't bundle, each with its dependencies in a
+// directory of its own under build/test-analysis-jars: two small ones, and Kuromoji and Nori for the
+// options of their analyzers (ADR 0023). Loading them, or the test codec jar, changes Lucene's
+// global lists of factories, codecs and formats, so the tests that do run in a JVM of their own
+// (jarsTest). The real-server tests in tui/ use these directories too.
+val testAnalysisModules = mapOf(
+    "phonetic" to libs.lucene.analysis.phonetic,
+    "stempel" to libs.lucene.analysis.stempel,
+    "kuromoji" to libs.lucene.analysis.kuromoji,
+    "nori" to libs.lucene.analysis.nori,
+)
 val testAnalysisJarsDir = layout.buildDirectory.dir("test-analysis-jars")
 
 val testAnalysisModuleJars = testAnalysisModules.mapValues { (name, library) ->

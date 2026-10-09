@@ -75,8 +75,12 @@ class SearchHandlersTest {
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
     private static final String LONG_BODY = "red " + "x".repeat(300);
     private static final ParserOptions DEFAULTS = new ParserOptions(false, 0, 0, true);
-    private static final Analyzer STANDARD =
-            new Analyzer(Optional.of(new StandardAnalyzer()), Optional.empty(), Optional.empty());
+    private static final Analyzer STANDARD = new Analyzer(
+            Optional.of(new StandardAnalyzer()),
+            Optional.empty(),
+            Optional.empty(),
+            Optional.empty(),
+            Optional.empty());
     private static final Similarity BM25 =
             new Similarity(Optional.of(new Bm25Similarity(1.2f, 0.75f)), Optional.empty(), Optional.empty());
     private static final Similarity BOOLEAN =
@@ -470,9 +474,11 @@ class SearchHandlersTest {
                 Optional.empty(),
                 Optional.empty(),
                 Optional.of(new CustomAnalyzer(
-                        List.of(), new AnalysisComponent("nope", Map.of()), List.of(), Optional.empty())));
-        var both =
-                new Analyzer(STANDARD.standard(), Optional.empty(), whitespace().custom());
+                        List.of(), new AnalysisComponent("nope", Map.of()), List.of(), Optional.empty())),
+                Optional.empty(),
+                Optional.empty());
+        var both = new Analyzer(
+                STANDARD.standard(), Optional.empty(), whitespace().custom(), Optional.empty(), Optional.empty());
 
         assertFails(
                 () -> startSearch.handle(params(classic("red", broken), 0, 10, Optional.empty())),
@@ -567,7 +573,9 @@ class SearchHandlersTest {
                 Optional.empty(),
                 Optional.empty(),
                 Optional.of(new CustomAnalyzer(
-                        List.of(), new AnalysisComponent("whitespace", Map.of()), List.of(), Optional.empty())));
+                        List.of(), new AnalysisComponent("whitespace", Map.of()), List.of(), Optional.empty())),
+                Optional.empty(),
+                Optional.empty());
     }
 
     private static StartSearchParams params(SearchQuery query, int offset, int limit, Optional<List<String>> fields) {

@@ -23,6 +23,9 @@ lucene-suggest = { module = "org.apache.lucene:lucene-suggest", version.ref = "l
 # Analysis modules that are not bundled, only for testing analysis jars (ADR 0016)
 lucene-analysis-phonetic = { module = "org.apache.lucene:lucene-analysis-phonetic", version.ref = "lucene" }
 lucene-analysis-stempel = { module = "org.apache.lucene:lucene-analysis-stempel", version.ref = "lucene" }
+# Kuromoji and Nori, for the options of their analyzers (ADR 0023)
+lucene-analysis-kuromoji = { module = "org.apache.lucene:lucene-analysis-kuromoji", version.ref = "lucene" }
+lucene-analysis-nori = { module = "org.apache.lucene:lucene-analysis-nori", version.ref = "lucene" }
 lucene9-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene9" }
 lucene8-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene8" }
 dagger = { module = "com.google.dagger:dagger", version.ref = "dagger" }

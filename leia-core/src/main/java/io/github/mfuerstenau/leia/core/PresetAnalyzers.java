@@ -1,7 +1,10 @@
 package io.github.mfuerstenau.leia.core;
 
 import io.github.mfuerstenau.leia.core.AnalysisComponents.AvailableAnalyzer;
+import io.github.mfuerstenau.leia.core.AnalyzerSpec.Japanese;
+import io.github.mfuerstenau.leia.core.AnalyzerSpec.StemDictionary;
 import io.github.mfuerstenau.leia.core.AnalyzerSpec.WordSet;
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.Reader;
 import java.io.UncheckedIOException;
@@ -19,6 +22,7 @@ import java.nio.file.Path;
 import java.security.CodeSource;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -33,6 +37,7 @@ import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipFile;
 import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.CharArrayMap;
 import org.apache.lucene.analysis.CharArraySet;
 import org.apache.lucene.analysis.CharFilterFactory;
 import org.apache.lucene.analysis.StopwordAnalyzerBase;
@@ -45,13 +50,20 @@ import org.apache.lucene.analysis.WordlistLoader;
  * classes with a public no-argument or stop words constructor in the jars that analysis comes from,
  * the extension jars included (ADR 0016). By Lucene's convention, a constructor that takes one
  * {@link CharArraySet} takes the stop words, and one that takes two takes the stop words and the
- * stem exclusions (ADR 0017).
+ * stem exclusions (ADR 0017); one that also takes a {@link CharArrayMap} takes a stem override
+ * dictionary, and a public {@code setMaxTokenLength(int)} sets the longest token (ADR 0023).
  */
 final class PresetAnalyzers {
 
     private static final Logger LOG = Logger.getLogger(PresetAnalyzers.class.getName());
 
     private static final String SUFFIX = ".class";
+
+    /** The one analyzer whose {@code (int)} constructor takes the longest token (ADR 0023). */
+    private static final String WHITESPACE = "org.apache.lucene.analysis.core.WhitespaceAnalyzer";
+
+    /** The longest token that Lucene's tokenizers take: {@code StandardTokenizer.MAX_TOKEN_LENGTH_LIMIT}. */
+    static final int MAX_TOKEN_LENGTH = 1024 * 1024;
 
     private PresetAnalyzers() {}
 
@@ -60,8 +72,14 @@ final class PresetAnalyzers {
 
     /**
      * A preset's class and its constructors: without arguments, with the stop words, and with the
-     * stop words and the stem exclusions; at least one of the first two is present.
+     * stop words and the stem exclusions; at least one of the first two is present. Then what sets
+     * its options (ADR 0023).
      *
+     * @param stemOverride with the stop words, the stem exclusions and a stem override dictionary
+     * @param japanese Kuromoji's {@code JapaneseAnalyzer} with its options and the stop words
+     * @param korean Nori's {@code KoreanAnalyzer} with its options
+     * @param maxTokenLength {@code WhitespaceAnalyzer(int)}
+     * @param maxTokenLengthSetter the public {@code setMaxTokenLength(int)}
      * @param defaultStopSet the static {@code getDefaultStopSet()}, for an analyzer that is not a
      *     {@link StopwordAnalyzerBase}
      */
@@ -70,6 +88,11 @@ final class PresetAnalyzers {
             Optional<Constructor<? extends Analyzer>> noArguments,
             Optional<Constructor<? extends Analyzer>> stopwords,
             Optional<Constructor<? extends Analyzer>> stopwordsAndStemExclusion,
+            Optional<Constructor<? extends Analyzer>> stemOverride,
+            Optional<Constructor<? extends Analyzer>> japanese,
+            Optional<Constructor<? extends Analyzer>> korean,
+            Optional<Constructor<? extends Analyzer>> maxTokenLength,
+            Optional<Method> maxTokenLengthSetter,
             Optional<Method> defaultStopSet) {
 
         String name() {
@@ -78,9 +101,27 @@ final class PresetAnalyzers {
 
         WordSetSupport stopwordSupport() {
             if (stopwords.isEmpty()) {
-                return WordSetSupport.NONE;
+                // JapaneseAnalyzer takes them only with its options.
+                return japanese.isPresent() && hasDefaultStopwords() ? WordSetSupport.OPTIONAL : WordSetSupport.NONE;
             }
             return noArguments.isPresent() ? WordSetSupport.OPTIONAL : WordSetSupport.REQUIRED;
+        }
+
+        List<PresetOption> options() {
+            List<PresetOption> options = new ArrayList<>();
+            if (maxTokenLength.isPresent() || maxTokenLengthSetter.isPresent()) {
+                options.add(PresetOption.MAX_TOKEN_LENGTH);
+            }
+            if (stemOverride.isPresent() && hasDefaultStopwords()) {
+                options.add(PresetOption.STEM_OVERRIDE);
+            }
+            if (japanese.isPresent() && hasDefaultStopwords()) {
+                options.add(PresetOption.JAPANESE);
+            }
+            if (korean.isPresent()) {
+                options.add(PresetOption.KOREAN);
+            }
+            return options;
         }
 
         WordSetSupport stemExclusionSupport() {
@@ -114,25 +155,80 @@ final class PresetAnalyzers {
                         preset.name(),
                         preset.type().getName(),
                         preset.stopwordSupport(),
-                        preset.stemExclusionSupport()))
+                        preset.stemExclusionSupport(),
+                        preset.options()))
                 .sorted(Comparator.comparing(AvailableAnalyzer::name, String.CASE_INSENSITIVE_ORDER)
                         .thenComparing(AvailableAnalyzer::className))
                 .toList();
     }
 
     /**
-     * A new analyzer for {@code spec}, of a listed class. With stem exclusions but no stop words, it
-     * gets its default stop words.
+     * A new analyzer for {@code spec}, of a listed class. With stem exclusions or a stem override
+     * dictionary but no stop words, it gets its default stop words.
      *
-     * @throws InvalidAnalyzerException if the class is not listed, doesn't take a set it is given,
-     *     needs stop words that are not given, a word list file can't be read, or the constructor
-     *     fails
+     * @throws InvalidAnalyzerException if the class is not listed, doesn't take a set or an option
+     *     it is given, needs stop words that are not given, an option is out of range, a file can't
+     *     be read, or the constructor fails
      */
     static Analyzer create(AnalyzerSpec.Preset spec) throws InvalidAnalyzerException {
         Preset preset = presets().get(spec.className());
         if (preset == null) {
             throw new InvalidAnalyzerException("no preset analyzer '" + spec.className() + "'", null);
         }
+        check(preset, spec);
+        Optional<CharArraySet> stopwords = spec.stopwords().isPresent()
+                ? Optional.of(read("stop words", spec.stopwords().orElseThrow()))
+                : Optional.empty();
+        Optional<CharArraySet> stemExclusion = spec.stemExclusion().isPresent()
+                ? Optional.of(read("stem exclusions", spec.stemExclusion().orElseThrow()))
+                : Optional.empty();
+        Analyzer analyzer;
+        if (preset.japanese().isPresent()
+                && (stopwords.isPresent() || spec.japanese().isPresent())) {
+            Constructor<? extends Analyzer> constructor = preset.japanese().orElseThrow();
+            Japanese options =
+                    spec.japanese().orElse(new Japanese(Optional.empty(), Optional.empty(), Optional.empty()));
+            CharArraySet set = stopwords.isPresent() ? stopwords.orElseThrow() : defaultStopwords(preset);
+            analyzer = construct(preset, constructor, KuromojiNori.japaneseArguments(constructor, set, options));
+        } else if (spec.korean().isPresent()) {
+            Constructor<? extends Analyzer> constructor = preset.korean().orElseThrow();
+            analyzer = construct(
+                    preset,
+                    constructor,
+                    KuromojiNori.koreanArguments(constructor, spec.korean().orElseThrow()));
+        } else if (spec.stemOverride().isPresent()) {
+            CharArrayMap<String> dictionary = read(spec.stemOverride().orElseThrow());
+            analyzer = construct(
+                    preset,
+                    preset.stemOverride().orElseThrow(),
+                    stopwords.isPresent() ? stopwords.orElseThrow() : defaultStopwords(preset),
+                    stemExclusion.orElse(CharArraySet.EMPTY_SET),
+                    dictionary);
+        } else if (stemExclusion.isPresent()) {
+            analyzer = construct(
+                    preset,
+                    preset.stopwordsAndStemExclusion().orElseThrow(),
+                    stopwords.isPresent() ? stopwords.orElseThrow() : defaultStopwords(preset),
+                    stemExclusion.orElseThrow());
+        } else if (stopwords.isPresent()) {
+            analyzer = construct(preset, preset.stopwords().orElseThrow(), stopwords.orElseThrow());
+        } else if (spec.maxTokenLength().isPresent() && preset.maxTokenLength().isPresent()) {
+            return construct(
+                    preset,
+                    preset.maxTokenLength().orElseThrow(),
+                    spec.maxTokenLength().getAsInt());
+        } else {
+            analyzer = construct(preset, preset.noArguments().orElseThrow());
+        }
+        if (spec.maxTokenLength().isPresent()) {
+            setMaxTokenLength(preset, analyzer, spec.maxTokenLength().getAsInt());
+        }
+        return analyzer;
+    }
+
+    /** Whether the preset takes what {@code spec} gives it, and the values are in range. */
+    private static void check(Preset preset, AnalyzerSpec.Preset spec) throws InvalidAnalyzerException {
+        List<PresetOption> options = preset.options();
         if (spec.stopwords().isPresent() && preset.stopwordSupport() == WordSetSupport.NONE) {
             throw new InvalidAnalyzerException(preset.name() + " takes no stop words", null);
         }
@@ -142,22 +238,38 @@ final class PresetAnalyzers {
         if (spec.stopwords().isEmpty() && preset.stopwordSupport() == WordSetSupport.REQUIRED) {
             throw new InvalidAnalyzerException(preset.name() + " needs stop words", null);
         }
-        Optional<CharArraySet> stopwords = spec.stopwords().isPresent()
-                ? Optional.of(read("stop words", spec.stopwords().orElseThrow()))
-                : Optional.empty();
-        if (spec.stemExclusion().isPresent()) {
-            CharArraySet stemExclusion =
-                    read("stem exclusions", spec.stemExclusion().orElseThrow());
-            return construct(
-                    preset,
-                    preset.stopwordsAndStemExclusion().orElseThrow(),
-                    stopwords.isPresent() ? stopwords.orElseThrow() : defaultStopwords(preset),
-                    stemExclusion);
+        if (spec.maxTokenLength().isPresent() && !options.contains(PresetOption.MAX_TOKEN_LENGTH)) {
+            throw new InvalidAnalyzerException(preset.name() + " takes no max token length", null);
         }
-        if (stopwords.isPresent()) {
-            return construct(preset, preset.stopwords().orElseThrow(), stopwords.orElseThrow());
+        if (spec.stemOverride().isPresent() && !options.contains(PresetOption.STEM_OVERRIDE)) {
+            throw new InvalidAnalyzerException(preset.name() + " takes no stem overrides", null);
         }
-        return construct(preset, preset.noArguments().orElseThrow());
+        if (spec.japanese().isPresent() && !options.contains(PresetOption.JAPANESE)) {
+            throw new InvalidAnalyzerException(preset.name() + " takes no Japanese options", null);
+        }
+        if (spec.korean().isPresent() && !options.contains(PresetOption.KOREAN)) {
+            throw new InvalidAnalyzerException(preset.name() + " takes no Korean options", null);
+        }
+        if (spec.maxTokenLength().isPresent()) {
+            int length = spec.maxTokenLength().getAsInt();
+            if (length < 1 || length > MAX_TOKEN_LENGTH) {
+                throw new InvalidAnalyzerException(
+                        "max token length: must be from 1 to " + MAX_TOKEN_LENGTH + ", not " + length, null);
+            }
+        }
+    }
+
+    private static void setMaxTokenLength(Preset preset, Analyzer analyzer, int length)
+            throws InvalidAnalyzerException {
+        try {
+            preset.maxTokenLengthSetter().orElseThrow().invoke(analyzer, length);
+        } catch (InvocationTargetException e) {
+            analyzer.close();
+            throw failed(preset, e.getCause());
+        } catch (ReflectiveOperationException | LinkageError e) {
+            analyzer.close();
+            throw new InvalidAnalyzerException(preset.name() + ": " + e, e);
+        }
     }
 
     /** What the preset uses without stop words of its own. */
@@ -194,22 +306,81 @@ final class PresetAnalyzers {
     }
 
     /** The words of {@code set}, case-sensitive as Lucene loads them; {@code what} names the set. */
-    private static CharArraySet read(String what, WordSet set) throws InvalidAnalyzerException {
+    static CharArraySet read(String what, WordSet set) throws InvalidAnalyzerException {
         return switch (set) {
             case WordSet.Words words -> new CharArraySet(words.words(), false);
-            case WordSet.File file -> {
-                Path path = file.path();
-                try (Reader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
-                    yield WordlistLoader.getWordSet(reader);
-                } catch (NoSuchFileException e) {
-                    throw new InvalidAnalyzerException(what + ": no file " + path, e);
-                } catch (AccessDeniedException e) {
-                    throw new InvalidAnalyzerException(what + ": cannot read " + path, e);
-                } catch (CharacterCodingException e) {
-                    throw new InvalidAnalyzerException(what + ": " + path + " is not UTF-8", e);
-                } catch (IOException | UncheckedIOException e) {
-                    throw new InvalidAnalyzerException(what + ": " + path + ": " + e.getMessage(), e);
-                }
+            case WordSet.File file -> readFile(what, file.path(), WordlistLoader::getWordSet);
+        };
+    }
+
+    /**
+     * The stem override dictionary, case-sensitive as Lucene loads it: the entries, or a file of
+     * {@code word<TAB>stem} lines read as {@code StemmerOverrideFilterFactory} reads it.
+     */
+    private static CharArrayMap<String> read(StemDictionary dictionary) throws InvalidAnalyzerException {
+        String what = "stem overrides";
+        Map<String, String> entries = switch (dictionary) {
+            case StemDictionary.Entries given -> given.entries();
+            case StemDictionary.File file ->
+                readFile(what, file.path(), reader -> {
+                    Map<String, String> lines = new LinkedHashMap<>();
+                    for (String line : new BufferedReader(reader).lines().toList()) {
+                        String trimmed = line.strip();
+                        if (trimmed.isEmpty() || trimmed.startsWith("#")) {
+                            continue;
+                        }
+                        String[] entry = trimmed.split("\t", 2);
+                        if (entry.length != 2) {
+                            throw new InvalidAnalyzerException(
+                                    what + ": " + file.path() + ": '" + trimmed + "' is not word<TAB>stem", null);
+                        }
+                        lines.put(entry[0], entry[1]);
+                    }
+                    return lines;
+                });
+        };
+        CharArrayMap<String> map = new CharArrayMap<>(entries.size(), false);
+        for (Map.Entry<String, String> entry : entries.entrySet()) {
+            if (entry.getKey().isEmpty() || entry.getValue().isEmpty()) {
+                throw new InvalidAnalyzerException(
+                        what + ": an empty word or stem in '" + entry.getKey() + "' → '" + entry.getValue() + "'",
+                        null);
+            }
+            map.put(entry.getKey(), entry.getValue());
+        }
+        return map;
+    }
+
+    /** Reads a file. */
+    interface FileReader<T> {
+        T read(Reader reader) throws Exception;
+    }
+
+    /**
+     * What {@code read} makes of the UTF-8 file at {@code path}; {@code what} names it in the
+     * message of a file that can't be read or decoded, or that {@code read} fails on.
+     */
+    static <T> T readFile(String what, Path path, FileReader<T> read) throws InvalidAnalyzerException {
+        try (Reader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
+            return read.read(reader);
+        } catch (InvalidAnalyzerException e) {
+            throw e;
+        } catch (Exception e) {
+            throw unreadable(what, path, e);
+        }
+    }
+
+    private static InvalidAnalyzerException unreadable(String what, Path path, Throwable e) {
+        return switch (e) {
+            case InvocationTargetException invocation
+            when invocation.getCause() != null -> unreadable(what, path, invocation.getCause());
+            case UncheckedIOException unchecked -> unreadable(what, path, unchecked.getCause());
+            case NoSuchFileException _ -> new InvalidAnalyzerException(what + ": no file " + path, e);
+            case AccessDeniedException _ -> new InvalidAnalyzerException(what + ": cannot read " + path, e);
+            case CharacterCodingException _ -> new InvalidAnalyzerException(what + ": " + path + " is not UTF-8", e);
+            default -> {
+                String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+                yield new InvalidAnalyzerException(what + ": " + path + ": " + message, e);
             }
         };
     }
@@ -317,7 +488,22 @@ final class PresetAnalyzers {
                 noArguments,
                 stopwords,
                 constructor(analyzer, CharArraySet.class, CharArraySet.class),
+                constructor(analyzer, CharArraySet.class, CharArraySet.class, CharArrayMap.class),
+                KuromojiNori.japaneseConstructor(analyzer),
+                KuromojiNori.koreanConstructor(analyzer),
+                className.equals(WHITESPACE) ? constructor(analyzer, int.class) : Optional.empty(),
+                maxTokenLengthSetter(analyzer),
                 defaultStopSet(analyzer)));
+    }
+
+    /** The public {@code setMaxTokenLength(int)}, if there is one. */
+    private static Optional<Method> maxTokenLengthSetter(Class<? extends Analyzer> type) {
+        try {
+            Method method = type.getMethod("setMaxTokenLength", int.class);
+            return Modifier.isStatic(method.getModifiers()) ? Optional.empty() : Optional.of(method);
+        } catch (NoSuchMethodException | LinkageError e) {
+            return Optional.empty();
+        }
     }
 
     /** The public constructor with these parameters, if there is one. */
