@@ -26,7 +26,8 @@ because Lucene 10 can't read them.
   their sizes.
 - **Search:** a query in Lucene's classic or standard syntax, a single term, or the documents like
   a given one (More-Like-This), with the parsers' options and ranges on point fields, scored with BM25, classic TF-IDF or boolean similarity and
-  sorted by score or by up to two doc values fields; the hits with their scores, sort values and
+  sorted by score, document id or up to two doc values fields (with the value of a multi-valued
+  field and the place of missing values); the hits with their scores, sort values and
   chosen stored fields, exact or approximate hit counts, and an explanation of how a hit scores.
 - **Analysis:** the standard analyzer, one of Lucene's analyzers by class name (such as
   `EnglishAnalyzer`), or a custom one built from Lucene's char filters, tokenizers and token filters
@@ -334,14 +335,17 @@ details panel says so.
 
 `s` sets what scores the hits and how they are ordered. The similarity also scores the
 explanations, so an explanation always adds up to the score shown. "Discount overlaps" is not offered:
-Lucene only reads it while indexing. The hits are sorted by score, or by up to two fields with
-numeric, sorted or sorted set doc values, each ascending or descending. A sorted hit keeps its score
-and shows the values it was sorted by (`–` for a document without a value). Numeric doc values
+Lucene only reads it while indexing. The hits are sorted by score, or by up to two levels, each
+by the score (best or worst first), the document id or a field with numeric, sorted or sorted set
+doc values, ascending or descending. A sorted hit keeps its score and shows the values it was
+sorted by (`–` for a document without a value, even where Lucene sorted it as 0). Numeric doc values
 are read as LONG unless you choose INT, FLOAT or DOUBLE, since the index doesn't record the type:
 LONG orders Lucene's own number fields right, and raw double or float bits
 (`DoubleDocValuesField`) need DOUBLE or FLOAT. A wrong type orders the hits wrongly but never fails.
-Lucene's defaults apply to multi-valued fields (the smallest value) and to documents without a value
-(0 for numbers, first for strings).
+A multi-valued field sorts by its smallest value unless you choose the largest, or for sorted set
+doc values the middle one (the smaller or larger of two). Documents without a value go where
+Lucene puts them (as 0 for numbers, first for ascending strings) unless you choose first or last,
+which means first or last in the order shown, ascending or descending.
 
 The hits come 100 at a time, the next ones once the selection reaches the last row, up to
 the first 10,000. Each hit shows its stored fields, all of them or those chosen with `l`, with long

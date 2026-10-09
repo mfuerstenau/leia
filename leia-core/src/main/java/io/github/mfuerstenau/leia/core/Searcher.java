@@ -14,11 +14,13 @@ import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.function.Predicate;
 import org.apache.lucene.index.DirectoryReader;
+import org.apache.lucene.index.DocValues;
 import org.apache.lucene.index.ExitableDirectoryReader;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.MultiReader;
 import org.apache.lucene.index.QueryTimeout;
+import org.apache.lucene.index.ReaderUtil;
 import org.apache.lucene.index.StoredFields;
 import org.apache.lucene.search.Collector;
 import org.apache.lucene.search.CollectorManager;
@@ -30,6 +32,8 @@ import org.apache.lucene.search.LeafCollector;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.Sort;
+import org.apache.lucene.search.SortField;
+import org.apache.lucene.search.SortedNumericSortField;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.TopFieldCollector;
 import org.apache.lucene.search.TopFieldCollectorManager;
@@ -89,7 +93,7 @@ final class Searcher {
             cancellation.searched(reader.maxDoc());
             Duration took = Duration.ofNanos(System.nanoTime() - start);
             return new SearchResults(
-                    query.toString(), rewritten.toString(), top.totalHits, hits(reader, page, fields), took);
+                    query.toString(), rewritten.toString(), top.totalHits, hits(reader, page, sort, fields), took);
         } catch (ExitableDirectoryReader.ExitingReaderException e) {
             throw cancellation.stopped(e);
         } catch (IndexSearcher.TooManyClauses e) {
@@ -140,10 +144,11 @@ final class Searcher {
         return searcher;
     }
 
-    private static List<Hit> hits(IndexReader reader, ScoreDoc[] page, Optional<Set<String>> fields)
-            throws IOException {
+    private static List<Hit> hits(
+            IndexReader reader, ScoreDoc[] page, Optional<Sort> sort, Optional<Set<String>> fields) throws IOException {
         StoredFields storedFields = reader.storedFields();
         Predicate<String> wanted = fields.isPresent() ? fields.get()::contains : _ -> true;
+        SortField[] sortFields = sort.map(Sort::getSort).orElse(new SortField[0]);
         List<Hit> hits = new ArrayList<>(page.length);
         for (ScoreDoc scoreDoc : page) {
             DocumentReader.StoredValues stored = new DocumentReader.StoredValues(wanted);
@@ -151,12 +156,38 @@ final class Searcher {
             List<HitField> hitFields = stored.values.entrySet().stream()
                     .map(entry -> new HitField(entry.getKey(), List.copyOf(entry.getValue())))
                     .toList();
-            List<SortValue> sortValues = scoreDoc instanceof FieldDoc fieldDoc
-                    ? Arrays.stream(fieldDoc.fields).map(SortValue::of).toList()
-                    : List.of();
-            hits.add(new Hit(scoreDoc.doc, scoreDoc.score, sortValues, hitFields));
+            List<SortValue> sortValues = new ArrayList<>(sortFields.length);
+            if (scoreDoc instanceof FieldDoc fieldDoc) {
+                for (int i = 0; i < sortFields.length; i++) {
+                    sortValues.add(
+                            numeric(sortFields[i]) && !hasNumber(reader, sortFields[i].getField(), scoreDoc.doc)
+                                    ? SortValue.of(null)
+                                    : SortValue.of(fieldDoc.fields[i]));
+                }
+            }
+            hits.add(new Hit(scoreDoc.doc, scoreDoc.score, List.copyOf(sortValues), hitFields));
         }
         return List.copyOf(hits);
+    }
+
+    /** Whether {@code sortField} sorts by numeric doc values, whose missing value Lucene fills in. */
+    private static boolean numeric(SortField sortField) {
+        return sortField instanceof SortedNumericSortField
+                || (sortField.getField() != null
+                        && switch (sortField.getType()) {
+                            case INT, LONG, FLOAT, DOUBLE -> true;
+                            default -> false;
+                        });
+    }
+
+    /**
+     * Whether the document has a value in the numeric or sorted numeric doc values of {@code field},
+     * so that its sort value is not the missing value that Lucene put in its place (ADR 0025).
+     */
+    private static boolean hasNumber(IndexReader reader, String field, int docId) throws IOException {
+        List<LeafReaderContext> leaves = reader.leaves();
+        LeafReaderContext leaf = leaves.get(ReaderUtil.subIndex(docId, leaves));
+        return DocValues.getSortedNumeric(leaf.reader(), field).advanceExact(docId - leaf.docBase);
     }
 
     /**

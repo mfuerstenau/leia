@@ -56,12 +56,11 @@ class SimilarityAndSortTest {
 
             List<Hit> hits = search(index, BM25, sort(index, "n", SortType.LONG, false), 0);
 
-            // Document 2 has no value and sorts as 0, Lucene's default.
+            // Document 2 has no value and sorts as 0, Lucene's default, but shows no value.
             assertThat(hits).extracting(Hit::docId).containsExactly(1, 2, 0, 3);
             assertThat(hits)
                     .extracting(Hit::sortValues)
-                    .containsExactly(
-                            List.of(number(-2L)), List.of(number(0L)), List.of(number(5L)), List.of(number(10L)));
+                    .containsExactly(List.of(number(-2L)), List.of(none()), List.of(number(5L)), List.of(number(10L)));
             // Sorted hits have the scores that the same search by score gives them.
             assertThat(hits).allSatisfy(hit -> assertThat(hit.score()).isEqualTo(scores.get(hit.docId())));
             assertThat(search(index, BM25, sort(index, "n", SortType.LONG, true), 0))
@@ -115,10 +114,7 @@ class SimilarityAndSortTest {
             assertThat(sorted)
                     .extracting(Hit::sortValues)
                     .containsExactly(
-                            List.of(new SortValue(Optional.empty(), Optional.empty())),
-                            List.of(term("apple")),
-                            List.of(term("banana")),
-                            List.of(term("cherry")));
+                            List.of(none()), List.of(term("apple")), List.of(term("banana")), List.of(term("cherry")));
 
             // A sorted set sorts by its smallest term.
             List<Hit> sets = search(index, BM25, sort(index, "ss", SortType.STRING, false), 0);
@@ -141,6 +137,109 @@ class SimilarityAndSortTest {
             assertThat(hits.getFirst().sortValues()).containsExactly(term("a"), number(5L));
             SearchResults page = index.search(query(), BM25, sort, 1, 2, true, Optional.empty(), ScanProgress.NONE);
             assertThat(page.hits()).extracting(Hit::docId).containsExactly(2, 3);
+        }
+    }
+
+    @Test
+    void selectsTheValueOfMultiValuedFields() throws Exception {
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
+            // sn: 0 {3, 9}, 1 {1}, 2 none (as 0), 3 {-4, 20}.
+            List<Hit> largest = search(index, BM25, sort(index, "sn", SortType.LONG, false, SortSelector.MAX), 0);
+            assertThat(largest).extracting(Hit::docId).containsExactly(2, 1, 0, 3);
+            assertThat(largest)
+                    .extracting(Hit::sortValues)
+                    .containsExactly(List.of(none()), List.of(number(1L)), List.of(number(9L)), List.of(number(20L)));
+
+            // ss: 0 {b, x}, 1 {c}, 2 none (first), 3 {a, z}.
+            assertThat(search(index, BM25, sort(index, "ss", SortType.STRING, false, SortSelector.MAX), 0))
+                    .extracting(Hit::docId)
+                    .containsExactly(2, 1, 0, 3);
+            List<Hit> middleMin =
+                    search(index, BM25, sort(index, "ss", SortType.STRING, false, SortSelector.MIDDLE_MIN), 0);
+            assertThat(middleMin).extracting(Hit::docId).containsExactly(2, 3, 0, 1);
+            assertThat(middleMin.get(1).sortValues()).containsExactly(term("a"));
+            List<Hit> middleMax =
+                    search(index, BM25, sort(index, "ss", SortType.STRING, false, SortSelector.MIDDLE_MAX), 0);
+            assertThat(middleMax).extracting(Hit::docId).containsExactly(2, 1, 0, 3);
+            assertThat(middleMax.get(2).sortValues()).containsExactly(term("x"));
+        }
+    }
+
+    @Test
+    void putsMissingValuesFirstOrLastInTheOrderShown() throws Exception {
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
+            // n: 0 → 5, 1 → -2, 2 none, 3 → 10; s: 0 banana, 1 apple, 2 none, 3 cherry.
+            assertThat(docIds(index, "n", SortType.LONG, false, SortMissing.LAST))
+                    .containsExactly(1, 0, 3, 2);
+            assertThat(docIds(index, "n", SortType.LONG, true, SortMissing.LAST))
+                    .containsExactly(3, 0, 1, 2);
+            assertThat(docIds(index, "n", SortType.INT, false, SortMissing.FIRST))
+                    .containsExactly(2, 1, 0, 3);
+            assertThat(docIds(index, "n", SortType.LONG, true, SortMissing.FIRST))
+                    .containsExactly(2, 3, 0, 1);
+            assertThat(docIds(index, "d", SortType.DOUBLE, true, SortMissing.LAST))
+                    .containsExactly(1, 0, 3, 2);
+            assertThat(docIds(index, "sn", SortType.FLOAT, true, SortMissing.FIRST))
+                    .containsExactly(2, 0, 1, 3);
+            assertThat(docIds(index, "s", SortType.STRING, false, SortMissing.LAST))
+                    .containsExactly(1, 0, 3, 2);
+            assertThat(docIds(index, "s", SortType.STRING, true, SortMissing.LAST))
+                    .containsExactly(3, 0, 1, 2);
+            assertThat(docIds(index, "s", SortType.STRING, true, SortMissing.FIRST))
+                    .containsExactly(2, 3, 0, 1);
+            assertThat(docIds(index, "ss", SortType.STRING, true, SortMissing.DEFAULT))
+                    .containsExactly(1, 0, 3, 2);
+            // A missing value shows as none, whatever Lucene sorted it as.
+            assertThat(search(index, BM25, sort(index, "n", SortType.LONG, true, SortMissing.LAST), 0)
+                            .getLast()
+                            .sortValues())
+                    .containsExactly(none());
+        }
+    }
+
+    @Test
+    void sortsByScoreAndDocumentId() throws Exception {
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
+            List<Hit> lowestFirst = search(index, BM25, Optional.of(new Sort(SortType.score(true))), 0);
+            assertThat(lowestFirst).extracting(Hit::score).isSorted();
+            assertThat(lowestFirst.getFirst().score())
+                    .isLessThan(lowestFirst.getLast().score());
+            assertThat(lowestFirst)
+                    .allSatisfy(hit -> assertThat(hit.sortValues()).containsExactly(number(hit.score())));
+
+            List<Hit> highestId = search(index, BM25, Optional.of(new Sort(SortType.doc(true))), 0);
+            assertThat(highestId).extracting(Hit::docId).containsExactly(3, 2, 1, 0);
+            assertThat(highestId.getFirst().sortValues()).containsExactly(number(3));
+
+            // The group, then the score, best first: the shorter "a fox" beats "the quick fox".
+            FieldTypes fields = new FieldTypes(index);
+            List<Hit> grouped = search(
+                    index,
+                    BM25,
+                    Optional.of(new Sort(SortType.STRING.sortField(fields.get("group"), false), SortType.score(false))),
+                    0);
+            assertThat(grouped).extracting(Hit::docId).containsExactly(2, 0, 1, 3);
+        }
+    }
+
+    @Test
+    void rejectsSelectorsThatTheDocValuesDontHave() throws Exception {
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
+            FieldTypes fields = new FieldTypes(index);
+
+            assertThatThrownBy(() ->
+                            SortType.LONG.sortField(fields.get("n"), false, SortSelector.MAX, SortMissing.DEFAULT))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("the field 'n' has single-valued NUMERIC doc values, which can't select MAX");
+            assertThatThrownBy(() -> SortType.STRING.sortField(
+                            fields.get("s"), false, SortSelector.MIDDLE_MIN, SortMissing.DEFAULT))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("the field 's' has single-valued SORTED doc values, which can't select MIDDLE_MIN");
+            assertThatThrownBy(() -> SortType.LONG.sortField(
+                            fields.get("sn"), false, SortSelector.MIDDLE_MAX, SortMissing.DEFAULT))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage(
+                            "the field 'sn' has multi-valued numeric SORTED_NUMERIC doc values, which can't select MIDDLE_MAX");
         }
     }
 
@@ -220,6 +319,30 @@ class SimilarityAndSortTest {
     private static Optional<Sort> sort(ReadOnlyIndex index, String field, SortType type, boolean reverse) {
         SortField sortField = type.sortField(new FieldTypes(index).get(field), reverse);
         return Optional.of(new Sort(sortField));
+    }
+
+    private static Optional<Sort> sort(
+            ReadOnlyIndex index, String field, SortType type, boolean reverse, SortSelector selector) {
+        return Optional.of(
+                new Sort(type.sortField(new FieldTypes(index).get(field), reverse, selector, SortMissing.DEFAULT)));
+    }
+
+    private static Optional<Sort> sort(
+            ReadOnlyIndex index, String field, SortType type, boolean reverse, SortMissing missing) {
+        return Optional.of(
+                new Sort(type.sortField(new FieldTypes(index).get(field), reverse, SortSelector.MIN, missing)));
+    }
+
+    private static List<Integer> docIds(
+            ReadOnlyIndex index, String field, SortType type, boolean reverse, SortMissing missing)
+            throws IOException, InvalidQueryException {
+        return search(index, BM25, sort(index, field, type, reverse, missing), 0).stream()
+                .map(Hit::docId)
+                .toList();
+    }
+
+    private static SortValue none() {
+        return new SortValue(Optional.empty(), Optional.empty());
     }
 
     private static SortValue number(Number number) {

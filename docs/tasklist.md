@@ -8,7 +8,6 @@ From the read-only checklist in `luke-features.md` §7. Ordered roughly by value
 
 - [ ] Search: date resolution, locale and time zone for date ranges (left out of ADR 0011 until there is a `DateTools` index to try them on)
 - [ ] Search: chosen MLT terms as data (`{field, term, tf, docFreq, score}`), like-text instead of a document (the analyzer is in place since ADR 0014), MLT word lengths / stop words (left out of ADR 0013)
-- [ ] Search: `SCORE`/`DOC` sort keys, sort selectors (`MAX`, middle) and missing values (left out of ADR 0012)
 - [ ] Search: regex over stored values — a brute-force scan of every document's stored fields with a Java regex (`find`, not whole-value match), for values that were never indexed or were analyzed away; slow by design, so it is a job (rule 7) with progress (documents read of maxDoc) and `cancelJob`
   - `regex {pattern, fields?, caseInsensitive, includeDeleted}` as a further query alternative, or its own `startStoredScan`/`getStoredScan`; `INVALID_QUERY` with the position for a bad pattern; a cap on hits, and on matching time per value against catastrophic backtracking
   - hits: doc id, field, value index and the match spans, so the TUI can highlight them; `STRING` values, and `BINARY` ones that are UTF-8; partial results visible while the scan runs

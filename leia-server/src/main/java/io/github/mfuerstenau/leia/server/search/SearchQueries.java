@@ -8,9 +8,12 @@ import io.github.mfuerstenau.leia.core.PointType;
 import io.github.mfuerstenau.leia.core.Queries;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.core.Similarities;
+import io.github.mfuerstenau.leia.core.SortMissing;
+import io.github.mfuerstenau.leia.core.SortSelector;
 import io.github.mfuerstenau.leia.core.SortType;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
+import io.github.mfuerstenau.leia.protocol.search.FieldSort;
 import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
 import io.github.mfuerstenau.leia.protocol.search.PointField;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
@@ -38,7 +41,7 @@ import org.apache.lucene.search.SortField;
 
 /**
  * Turns the query, the similarity and the sort of {@code startSearch} and {@code startExplain} into
- * their Lucene counterparts (ADR 0010, ADR 0011, ADR 0012, ADR 0013, ADR 0014).
+ * their Lucene counterparts (ADR 0010 to ADR 0014, ADR 0025).
  */
 final class SearchQueries {
 
@@ -126,8 +129,9 @@ final class SearchQueries {
     /**
      * The Lucene sort for {@code keys}; empty for no keys, which sorts by score.
      *
-     * @throws RpcException {@code FIELD_NOT_FOUND} for an unknown field, {@code INVALID_PARAMS} for
-     *     a field without doc values that sort as the key's type
+     * @throws RpcException {@code INVALID_PARAMS} unless each key has exactly one alternative, or for
+     *     a field without doc values that sort as the key's type or with the key's selector; {@code
+     *     FIELD_NOT_FOUND} for an unknown field
      */
     static Optional<Sort> sort(ReadOnlyIndex index, List<SortKey> keys) throws RpcException {
         if (keys.isEmpty()) {
@@ -135,16 +139,39 @@ final class SearchQueries {
         }
         List<SortField> fields = new ArrayList<>(keys.size());
         for (SortKey key : keys) {
-            FieldInfo field = index.fieldInfo(key.field())
-                    .orElseThrow(() ->
-                            new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + key.field() + "' in the index"));
-            try {
-                fields.add(SortType.valueOf(key.type().name()).sortField(field, key.reverse()));
-            } catch (IllegalArgumentException e) {
-                throw invalidParams(e);
+            long present = Stream.of(key.field(), key.score(), key.doc())
+                    .filter(alternative -> alternative.isPresent())
+                    .count();
+            if (present != 1) {
+                throw new RpcException(
+                        ErrorCode.INVALID_PARAMS,
+                        "Invalid params: a sort key needs exactly one of field, score and doc");
+            }
+            if (key.score().isPresent()) {
+                fields.add(SortType.score(key.score().get().reverse()));
+            } else if (key.doc().isPresent()) {
+                fields.add(SortType.doc(key.doc().get().reverse()));
+            } else {
+                fields.add(fieldSort(index, key.field().orElseThrow()));
             }
         }
         return Optional.of(new Sort(fields.toArray(SortField[]::new)));
+    }
+
+    private static SortField fieldSort(ReadOnlyIndex index, FieldSort sort) throws RpcException {
+        FieldInfo field = index.fieldInfo(sort.field())
+                .orElseThrow(() ->
+                        new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + sort.field() + "' in the index"));
+        try {
+            return SortType.valueOf(sort.type().name())
+                    .sortField(
+                            field,
+                            sort.reverse(),
+                            SortSelector.valueOf(sort.selector().name()),
+                            SortMissing.valueOf(sort.missing().name()));
+        } catch (IllegalArgumentException e) {
+            throw invalidParams(e);
+        }
     }
 
     private static Query classic(ReadOnlyIndex index, ClassicQuery classic) throws RpcException, InvalidQueryException {

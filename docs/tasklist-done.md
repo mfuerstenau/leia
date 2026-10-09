@@ -31,6 +31,7 @@ Finished items, moved here from `docs/tasklist.md` (the open work queue).
 - [x] ADR 0022: check index and export terms (`startCheckIndex`/`getCheckIndex` with streamed output, with or without a reader; `startExportTerms`/`getExportTerms` in Luke's format; `OUTPUT_NOT_WRITABLE`)
 - [x] ADR 0023: analyzer wrappers and preset options (`Analyzer`'s `shingles?` and `limitTokenCount?` around any alternative, in that order; `preset`'s `maxTokenLength?`, `stemOverride?`, `japanese?` and `korean?`; `AvailableAnalyzer`'s `options`; Kuromoji and Nori by reflection)
 - [x] ADR 0024: jars at runtime and a default folder (`addJars {paths}` → the new jars, `alreadyLoaded` and the added names per kind, all or nothing through a dry run; `getJars`; `INVALID_JAR`; the TUI's default folder, `--no-default-jars` and the jars popup on `X`)
+- [x] ADR 0025: sort keys, selectors and missing values (`SortKey` as alternatives `field {field, type, reverse, selector, missing}` / `score {reverse}` / `doc {reverse}`; selectors checked against the doc values type; `FIRST`/`LAST` in the order shown; a missing number has no sort value)
 - [x] `README.md`: what leia is, build and run instructions
 
 ### Java build (Gradle 9, Java 25)
@@ -162,6 +163,10 @@ Finished items, moved here from `docs/tasklist.md` (the open work queue).
   - `moreLikeThis {docId, fields, minTermFreq, minDocFreq, maxDocFreq?, maxQueryTerms, boost}` on `startSearch` and `startExplain`: `DOC_NOT_FOUND` for the document (deleted ones allowed), `FIELD_NOT_FOUND`/`INVALID_PARAMS` for unknown, unindexed or repeated fields, `INVALID_PARAMS` for numbers out of range (`maxQueryTerms` 1–1024)
   - core: `MoreLikeDocumentQuery` rewrites to Lucene's `MoreLikeThis` query from the searcher's (exitable) reader, so the build runs in the job and can be cancelled; `query` shows the settings, `rewrittenQuery` the chosen terms (weakest first, with boosts); no terms → `MatchNoDocsQuery`
   - TUI: `m` cycles to "more like this" (the line is a document id, digits only), `p` opens the fields-and-limits popup (Lucene's defaults, fields with positions chosen), `◆` marks the source among the hits; `m` on the documents screen starts it for the shown document
+- [x] Search: `SCORE`/`DOC` sort keys, sort selectors and missing values (ADR 0025)
+  - `SortKey {field?, score?, doc?}`; `FieldSort` adds `selector` (`MIN`/`MAX`/`MIDDLE_MIN`/`MIDDLE_MAX`, checked: single-valued `MIN` only, sorted numeric `MIN`/`MAX`) and `missing` (`DEFAULT`/`FIRST`/`LAST`, in the order shown: core picks the type's lowest or highest value by `reverse`)
+  - a numeric hit without a value has no sort value (checked with `advanceExact` for the page's hits) instead of the substituted 0
+  - TUI: a level cycles nothing → score → document id → fields; value and missing rows for fields; "best first"/"worst first" for the score
 - [x] Analysis: custom analyzer builder (char filters, tokenizer, filters with params, config dir), token attributes, step by step, and the analyzer for search and More-Like-This (ADR 0014)
   - `getAnalysisComponents {}`: the char filters, tokenizers and token filters as `{name, className}`; `analyze {analyzer, text}`: the text after each char filter, and per tokenizer and token filter the tokens (`term`, `position`, increment, length, offsets, `type`, and every other attribute as `{attribute, key, value}`), `truncated` past 10,000; `INVALID_ANALYZER` (-32013) with the failing component and Lucene's message
   - `ClassicQuery`, `StandardQuery` and `MoreLikeThisQuery` take a required `analyzer`; the handler builds it, the search job closes it

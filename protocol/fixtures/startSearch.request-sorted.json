@@ -14,8 +14,10 @@
     },
     "similarity": {"bm25": {"k1": 1.2, "b": 0.75}},
     "sort": [
-      {"field": "tags", "type": "STRING", "reverse": false},
-      {"field": "price", "type": "DOUBLE", "reverse": true}
+      {"field": {"field": "tags", "type": "STRING", "reverse": false, "selector": "MAX", "missing": "LAST"}},
+      {"field": {"field": "price", "type": "DOUBLE", "reverse": true, "selector": "MIN", "missing": "DEFAULT"}},
+      {"score": {"reverse": false}},
+      {"doc": {"reverse": true}}
     ],
     "offset": 4,
     "limit": 3,

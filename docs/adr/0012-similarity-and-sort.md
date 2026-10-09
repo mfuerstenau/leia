@@ -1,6 +1,6 @@
 # ADR 0012 — Similarity and sort
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by ADR 0025 (sort keys by score and document id, selectors, and missing values first or last)
 - **Date:** 2026-10-06
 
 ## Context

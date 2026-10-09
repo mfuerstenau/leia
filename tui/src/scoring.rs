@@ -1,6 +1,7 @@
-//! The similarity and the sort of the search screen (ADR 0012), and the popup that edits them:
-//! BM25 with its `k1` and `b`, classic TF-IDF or boolean, and up to two sort levels on fields with
-//! doc values.
+//! The similarity and the sort of the search screen (ADR 0012, ADR 0025), and the popup that
+//! edits them: BM25 with its `k1` and `b`, classic TF-IDF or boolean, and up to two sort levels,
+//! each by the score, the document id or a field with doc values, with a selector for
+//! multi-valued fields and a place for documents without a value.
 
 use ratatui::Frame;
 use ratatui::crossterm::event::KeyCode;
@@ -10,7 +11,8 @@ use ratatui::text::{Line, Span};
 use crate::form::{FormEvent, dim, render_popup, row, type_digit};
 use crate::protocol::index::{DocValuesType, IndexField};
 use crate::protocol::search::{
-    Bm25Similarity, BooleanSimilarity, ClassicSimilarity, Similarity, SortKey, SortType,
+    Bm25Similarity, BooleanSimilarity, ClassicSimilarity, DocSort, FieldSort, ScoreSort,
+    Similarity, SortKey, SortMissing, SortSelector, SortType,
 };
 use crate::text::escape_control;
 
@@ -35,16 +37,51 @@ pub enum SimilarityKind {
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SortableField {
     name: String,
-    /// Numeric or sorted numeric doc values; otherwise sorted or sorted set.
-    numeric: bool,
+    /// Numeric, sorted numeric, sorted or sorted set.
+    doc_values: DocValuesType,
 }
 
-/// One sort level: a field of [`ScoringSettings::fields`] and how to read it.
+impl SortableField {
+    /// Numeric or sorted numeric doc values; otherwise sorted or sorted set.
+    fn numeric(&self) -> bool {
+        matches!(
+            self.doc_values,
+            DocValuesType::Numeric | DocValuesType::SortedNumeric
+        )
+    }
+
+    /// The selectors its doc values take: only `Min` for single-valued ones.
+    fn selectors(&self) -> &'static [SortSelector] {
+        match self.doc_values {
+            DocValuesType::SortedNumeric => &[SortSelector::Min, SortSelector::Max],
+            DocValuesType::SortedSet => &[
+                SortSelector::Min,
+                SortSelector::Max,
+                SortSelector::MiddleMin,
+                SortSelector::MiddleMax,
+            ],
+            _ => &[SortSelector::Min],
+        }
+    }
+}
+
+/// What a sort level sorts by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Target {
+    Score,
+    Doc,
+    /// A field of [`ScoringSettings::fields`].
+    Field(usize),
+}
+
+/// One sort level: what it sorts by and, for a field, how to read it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SortLevel {
-    field: usize,
+    target: Target,
     sort_type: SortType,
     reverse: bool,
+    selector: SortSelector,
+    missing: SortMissing,
 }
 
 /// The similarity and the sort, as the search screen sends them.
@@ -64,16 +101,15 @@ impl ScoringSettings {
     pub fn new(fields: &[IndexField]) -> Self {
         let fields = fields
             .iter()
-            .filter_map(|field| {
-                let numeric = match field.doc_values_type {
-                    DocValuesType::Numeric | DocValuesType::SortedNumeric => true,
-                    DocValuesType::Sorted | DocValuesType::SortedSet => false,
-                    DocValuesType::None | DocValuesType::Binary => return None,
-                };
-                Some(SortableField {
-                    name: field.name.clone(),
-                    numeric,
-                })
+            .filter(|field| {
+                !matches!(
+                    field.doc_values_type,
+                    DocValuesType::None | DocValuesType::Binary
+                )
+            })
+            .map(|field| SortableField {
+                name: field.name.clone(),
+                doc_values: field.doc_values_type,
             })
             .collect();
         Self {
@@ -110,10 +146,29 @@ impl ScoringSettings {
         self.levels
             .iter()
             .flatten()
-            .map(|level| SortKey {
-                field: self.fields[level.field].name.clone(),
-                sort_type: level.sort_type,
-                reverse: level.reverse,
+            .map(|level| match level.target {
+                Target::Score => SortKey {
+                    score: Some(ScoreSort {
+                        reverse: level.reverse,
+                    }),
+                    ..SortKey::default()
+                },
+                Target::Doc => SortKey {
+                    doc: Some(DocSort {
+                        reverse: level.reverse,
+                    }),
+                    ..SortKey::default()
+                },
+                Target::Field(field) => SortKey {
+                    field: Some(FieldSort {
+                        field: self.fields[field].name.clone(),
+                        sort_type: level.sort_type,
+                        reverse: level.reverse,
+                        selector: level.selector,
+                        missing: level.missing,
+                    }),
+                    ..SortKey::default()
+                },
             })
             .collect()
     }
@@ -132,26 +187,36 @@ impl ScoringSettings {
         }
     }
 
-    /// The sort levels, such as `tags ↑ · price DOUBLE ↓`; `None` to sort by score. A string
-    /// sort and the guessed `LONG` leave the type out.
+    /// The sort levels, such as `tags MAX last ↑ · price DOUBLE ↓ · score`; `None` to sort by
+    /// score. A string sort and the guessed `LONG` leave the type out, `MIN` and Lucene's missing
+    /// values are left out too. The score comes best first, or `↑` for the worst first.
     pub fn sort_text(&self) -> Option<String> {
         let levels: Vec<String> = self
             .levels
             .iter()
             .flatten()
             .map(|level| {
-                let field = &self.fields[level.field];
                 let arrow = if level.reverse { "↓" } else { "↑" };
-                match level.sort_type {
-                    SortType::String | SortType::Long => {
-                        format!("{} {arrow}", escape_control(&field.name))
-                    }
-                    other => format!(
-                        "{} {} {arrow}",
-                        escape_control(&field.name),
-                        type_name(other)
-                    ),
+                let field = match level.target {
+                    Target::Score if level.reverse => return "score ↑".to_owned(),
+                    Target::Score => return "score".to_owned(),
+                    Target::Doc => return format!("doc {arrow}"),
+                    Target::Field(field) => &self.fields[field],
+                };
+                let mut parts = vec![escape_control(&field.name)];
+                if !matches!(level.sort_type, SortType::String | SortType::Long) {
+                    parts.push(type_name(level.sort_type).to_owned());
                 }
+                if level.selector != SortSelector::Min {
+                    parts.push(selector_name(level.selector).to_owned());
+                }
+                match level.missing {
+                    SortMissing::Default => {}
+                    SortMissing::First => parts.push("first".to_owned()),
+                    SortMissing::Last => parts.push("last".to_owned()),
+                }
+                parts.push(arrow.to_owned());
+                parts.join(" ")
             })
             .collect();
         (!levels.is_empty()).then(|| levels.join(" · "))
@@ -164,8 +229,11 @@ enum Row {
     Similarity,
     K1,
     B,
-    Field(usize),
+    /// What a level sorts by.
+    Target(usize),
     Type(usize),
+    Selector(usize),
+    Missing(usize),
     Order(usize),
 }
 
@@ -184,22 +252,30 @@ impl ScoringForm {
         }
     }
 
-    /// `k1` and `b` for BM25 only; a level's type and order once it has a field, and the second
-    /// level once the first has one.
+    /// `k1` and `b` for BM25 only; a level's order once it sorts by something, its type and
+    /// missing values for a field, its selector for a multi-valued field, and the second level
+    /// once the first sorts by something.
     fn rows(&self) -> Vec<Row> {
         let mut rows = vec![Row::Similarity];
         if self.draft.kind == SimilarityKind::Bm25 {
             rows.extend([Row::K1, Row::B]);
         }
-        if self.draft.fields.is_empty() {
-            return rows;
-        }
         for level in 0..LEVELS {
-            rows.push(Row::Field(level));
-            if self.draft.levels[level].is_none() {
+            rows.push(Row::Target(level));
+            let Some(sort) = self.draft.levels[level] else {
                 break;
+            };
+            if let Target::Field(field) = sort.target {
+                let field = &self.draft.fields[field];
+                if field.numeric() {
+                    rows.push(Row::Type(level));
+                }
+                if field.selectors().len() > 1 {
+                    rows.push(Row::Selector(level));
+                }
+                rows.push(Row::Missing(level));
             }
-            rows.extend([Row::Type(level), Row::Order(level)]);
+            rows.push(Row::Order(level));
         }
         rows
     }
@@ -261,30 +337,34 @@ impl ScoringForm {
                 ];
                 draft.kind = kinds[cycled(&kinds, draft.kind, step)];
             }
-            Row::Field(level) => {
-                // No field, then each sortable field; a new field starts from its guessed type.
-                let choices: Vec<Option<usize>> = std::iter::once(None)
-                    .chain((0..draft.fields.len()).map(Some))
+            Row::Target(level) => {
+                // Nothing, the score, the document id, then each sortable field; a new field
+                // starts from its guessed type, its smallest value and Lucene's missing values.
+                let choices: Vec<Option<Target>> = [None, Some(Target::Score), Some(Target::Doc)]
+                    .into_iter()
+                    .chain((0..draft.fields.len()).map(|field| Some(Target::Field(field))))
                     .collect();
-                let current = draft.levels[level].map(|level| level.field);
-                let field = choices[cycled(&choices, current, step)];
+                let current = draft.levels[level].map(|level| level.target);
+                let target = choices[cycled(&choices, current, step)];
                 let reverse = draft.levels[level].is_some_and(|level| level.reverse);
-                draft.levels[level] = field.map(|field| SortLevel {
-                    field,
-                    sort_type: if draft.fields[field].numeric {
-                        SortType::Long
-                    } else {
-                        SortType::String
+                draft.levels[level] = target.map(|target| SortLevel {
+                    target,
+                    sort_type: match target {
+                        Target::Field(field) if !draft.fields[field].numeric() => SortType::String,
+                        _ => SortType::Long,
                     },
                     reverse,
+                    selector: SortSelector::Min,
+                    missing: SortMissing::Default,
                 });
-                if field.is_none() {
+                if target.is_none() {
                     draft.levels[level..].fill(None);
                 }
             }
             Row::Type(level) => {
                 if let Some(sort) = &mut draft.levels[level]
-                    && draft.fields[sort.field].numeric
+                    && let Target::Field(field) = sort.target
+                    && draft.fields[field].numeric()
                 {
                     let types = [
                         SortType::Int,
@@ -293,6 +373,20 @@ impl ScoringForm {
                         SortType::Double,
                     ];
                     sort.sort_type = types[cycled(&types, sort.sort_type, step)];
+                }
+            }
+            Row::Selector(level) => {
+                if let Some(sort) = &mut draft.levels[level]
+                    && let Target::Field(field) = sort.target
+                {
+                    let selectors = draft.fields[field].selectors();
+                    sort.selector = selectors[cycled(selectors, sort.selector, step)];
+                }
+            }
+            Row::Missing(level) => {
+                if let Some(sort) = &mut draft.levels[level] {
+                    let choices = [SortMissing::Default, SortMissing::First, SortMissing::Last];
+                    sort.missing = choices[cycled(&choices, sort.missing, step)];
                 }
             }
             Row::Order(level) => {
@@ -316,7 +410,7 @@ impl ScoringForm {
         let mut lines: Vec<Line> = Vec::new();
         let mut selected_line = 0;
         for (i, row_kind) in rows.iter().enumerate() {
-            if *row_kind == Row::Field(0) {
+            if *row_kind == Row::Target(0) {
                 lines.push(Line::from(""));
             }
             let (label, value) = match *row_kind {
@@ -331,11 +425,15 @@ impl ScoringForm {
                 ),
                 Row::K1 => ("  k1".to_owned(), hundredths(draft.k1)),
                 Row::B => ("  b".to_owned(), hundredths(draft.b)),
-                Row::Field(level) => (
+                Row::Target(level) => (
                     if level == 0 { "Sort by" } else { "Then by" }.to_owned(),
-                    draft.levels[level].map_or("score".to_owned(), |sort| {
-                        escape_control(&draft.fields[sort.field].name)
-                    }),
+                    match draft.levels[level].map(|sort| sort.target) {
+                        None if level == 0 => "best score (default)".to_owned(),
+                        None => "nothing".to_owned(),
+                        Some(Target::Score) => "score".to_owned(),
+                        Some(Target::Doc) => "document id".to_owned(),
+                        Some(Target::Field(field)) => escape_control(&draft.fields[field].name),
+                    },
                 ),
                 Row::Type(level) => (
                     "  read as".to_owned(),
@@ -343,12 +441,33 @@ impl ScoringForm {
                         .map_or("", |sort| type_name(sort.sort_type))
                         .to_owned(),
                 ),
+                Row::Selector(level) => (
+                    "  value".to_owned(),
+                    draft.levels[level]
+                        .map_or("", |sort| selector_name(sort.selector))
+                        .to_owned(),
+                ),
+                Row::Missing(level) => (
+                    "  missing".to_owned(),
+                    match draft.levels[level].map(|sort| sort.missing) {
+                        Some(SortMissing::First) => "first",
+                        Some(SortMissing::Last) => "last",
+                        _ => "Lucene's default",
+                    }
+                    .to_owned(),
+                ),
                 Row::Order(level) => (
                     "  order".to_owned(),
-                    if draft.levels[level].is_some_and(|sort| sort.reverse) {
-                        "descending"
-                    } else {
-                        "ascending"
+                    match draft.levels[level] {
+                        Some(sort) if sort.target == Target::Score => {
+                            if sort.reverse {
+                                "worst first"
+                            } else {
+                                "best first"
+                            }
+                        }
+                        Some(sort) if sort.reverse => "descending",
+                        _ => "ascending",
                     }
                     .to_owned(),
                 ),
@@ -361,10 +480,12 @@ impl ScoringForm {
         if draft.fields.is_empty() {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
-                "No field has doc values to sort by",
+                "No field has doc values: score or document id only",
                 dim(),
             )));
-        } else if draft.levels[0].is_some_and(|sort| draft.fields[sort.field].numeric) {
+        } else if draft.levels.iter().flatten().any(
+            |sort| matches!(sort.target, Target::Field(field) if draft.fields[field].numeric()),
+        ) {
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "Number types, guessed: the index doesn't say",
@@ -394,6 +515,15 @@ fn cycled<T: PartialEq>(choices: &[T], current: T, step: i32) -> usize {
 /// Hundredths as a decimal with two places: `120` is `1.20`.
 fn hundredths(n: i32) -> String {
     format!("{}.{:02}", n / 100, n % 100)
+}
+
+fn selector_name(selector: SortSelector) -> &'static str {
+    match selector {
+        SortSelector::Min => "MIN",
+        SortSelector::Max => "MAX",
+        SortSelector::MiddleMin => "MIDDLE_MIN",
+        SortSelector::MiddleMax => "MIDDLE_MAX",
+    }
 }
 
 fn type_name(sort_type: SortType) -> &'static str {
@@ -427,7 +557,8 @@ mod tests {
         }
     }
 
-    /// `body` (no doc values), `checksum` (binary), `price` (numeric), `tags` (sorted set).
+    /// `body` (no doc values), `checksum` (binary), `price` (numeric), `tags` (sorted set): the
+    /// sortable fields are `price` and `tags`.
     fn settings() -> ScoringSettings {
         ScoringSettings::new(&[
             field("body", DocValuesType::None),
@@ -501,7 +632,7 @@ mod tests {
     fn classic_and_boolean_have_no_parameters() {
         let mut form = ScoringForm::new(&settings());
         press(&mut form, &[KeyCode::Char(' ')]);
-        assert_eq!(form.rows()[1], Row::Field(0));
+        assert_eq!(form.rows()[1], Row::Target(0));
         assert_eq!(form.draft.similarity().classic, Some(ClassicSimilarity {}));
         press(&mut form, &[KeyCode::Char(' ')]);
         assert_eq!(form.draft.similarity().boolean, Some(BooleanSimilarity {}));
@@ -514,14 +645,87 @@ mod tests {
     #[test]
     fn sorts_by_up_to_two_fields_with_guessed_types() {
         let mut form = ScoringForm::new(&settings());
-        // Similarity, k1, b, then "Sort by": price, guessed LONG, read as DOUBLE, descending.
+        // Similarity, k1, b, then "Sort by": score, doc, then price, guessed LONG, read as DOUBLE,
+        // missing values last, descending.
         press(&mut form, &[KeyCode::Down, KeyCode::Down, KeyCode::Down]);
         assert_eq!(form.rows().len(), 4);
-        press(&mut form, &[KeyCode::Right]);
-        assert_eq!(form.rows().len(), 7);
+        press(&mut form, &[KeyCode::Right, KeyCode::Right, KeyCode::Right]);
+        // A single-valued number: no selector.
+        assert_eq!(
+            form.rows()[4..],
+            [Row::Type(0), Row::Missing(0), Row::Order(0), Row::Target(1)]
+        );
         press(
             &mut form,
             &[
+                KeyCode::Down,
+                KeyCode::Right,
+                KeyCode::Right,
+                KeyCode::Down,
+                KeyCode::Left,
+                KeyCode::Down,
+                KeyCode::Char(' '),
+            ],
+        );
+        // "Then by": tags, a string, so its type doesn't show; by its largest value.
+        press(
+            &mut form,
+            &[
+                KeyCode::Down,
+                KeyCode::Right,
+                KeyCode::Right,
+                KeyCode::Right,
+                KeyCode::Right,
+            ],
+        );
+        assert_eq!(
+            form.rows()[8..],
+            [Row::Selector(1), Row::Missing(1), Row::Order(1)]
+        );
+        press(&mut form, &[KeyCode::Down, KeyCode::Right]);
+        let settings = applied(form);
+        assert_eq!(
+            settings.sort_keys(),
+            vec![
+                SortKey {
+                    field: Some(FieldSort {
+                        field: "price".to_owned(),
+                        sort_type: SortType::Double,
+                        reverse: true,
+                        selector: SortSelector::Min,
+                        missing: SortMissing::Last,
+                    }),
+                    ..SortKey::default()
+                },
+                SortKey {
+                    field: Some(FieldSort {
+                        field: "tags".to_owned(),
+                        sort_type: SortType::String,
+                        reverse: false,
+                        selector: SortSelector::Max,
+                        missing: SortMissing::Default,
+                    }),
+                    ..SortKey::default()
+                },
+            ]
+        );
+        assert_eq!(
+            settings.sort_text().as_deref(),
+            Some("price DOUBLE last ↓ · tags MAX ↑")
+        );
+    }
+
+    #[test]
+    fn sorts_by_the_score_and_the_document_id() {
+        let mut form = ScoringForm::new(&settings());
+        // Sort by the score, worst first, then by the document id, descending.
+        press(
+            &mut form,
+            &[
+                KeyCode::End,
+                KeyCode::Right,
+                KeyCode::Down,
+                KeyCode::Char(' '),
                 KeyCode::Down,
                 KeyCode::Right,
                 KeyCode::Right,
@@ -529,37 +733,21 @@ mod tests {
                 KeyCode::Char(' '),
             ],
         );
-        // "Then by": tags, a string; its type doesn't cycle.
-        press(
-            &mut form,
-            &[
-                KeyCode::Down,
-                KeyCode::Right,
-                KeyCode::Right,
-                KeyCode::Down,
-                KeyCode::Right,
-            ],
-        );
         let settings = applied(form);
         assert_eq!(
             settings.sort_keys(),
             vec![
                 SortKey {
-                    field: "price".to_owned(),
-                    sort_type: SortType::Double,
-                    reverse: true,
+                    score: Some(ScoreSort { reverse: true }),
+                    ..SortKey::default()
                 },
                 SortKey {
-                    field: "tags".to_owned(),
-                    sort_type: SortType::String,
-                    reverse: false,
+                    doc: Some(DocSort { reverse: true }),
+                    ..SortKey::default()
                 },
             ]
         );
-        assert_eq!(
-            settings.sort_text().as_deref(),
-            Some("price DOUBLE ↓ · tags ↑")
-        );
+        assert_eq!(settings.sort_text().as_deref(), Some("score ↑ · doc ↓"));
     }
 
     #[test]
@@ -580,9 +768,20 @@ mod tests {
     }
 
     #[test]
-    fn an_index_without_doc_values_only_scores() {
+    fn an_index_without_doc_values_sorts_by_score_or_id() {
         let settings = ScoringSettings::new(&[field("body", DocValuesType::None)]);
-        let form = ScoringForm::new(&settings);
-        assert_eq!(form.rows(), vec![Row::Similarity, Row::K1, Row::B]);
+        let mut form = ScoringForm::new(&settings);
+        assert_eq!(
+            form.rows(),
+            vec![Row::Similarity, Row::K1, Row::B, Row::Target(0)]
+        );
+        // The score, the document id, and back to nothing.
+        press(&mut form, &[KeyCode::End, KeyCode::Right, KeyCode::Right]);
+        assert_eq!(
+            form.draft.levels[0].map(|level| level.target),
+            Some(Target::Doc)
+        );
+        press(&mut form, &[KeyCode::Left, KeyCode::Left]);
+        assert_eq!(form.draft.levels[0], None);
     }
 }

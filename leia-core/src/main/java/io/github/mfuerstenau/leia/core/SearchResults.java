@@ -22,16 +22,16 @@ public record SearchResults(String query, String rewrittenQuery, TotalHits total
      *
      * @param docId the document id in the whole index
      * @param score the document's score for the query, also when the hits are sorted by fields
-     * @param sortValues the values the hit was sorted by, one per sort field; empty when the hits
-     *     are sorted by score
+     * @param sortValues the values the hit was sorted by, one per sort field; empty without a sort
      * @param fields the document's stored values in the fields asked for, in the order of each
      *     field's first value
      */
     public record Hit(int docId, float score, List<SortValue> sortValues, List<HitField> fields) {}
 
     /**
-     * The value a hit was sorted by in one sort field (ADR 0012): a number, or a term of a {@code
-     * STRING} sort. Neither is present for a document without a value in a {@code STRING} sort.
+     * The value a hit was sorted by in one sort field (ADR 0012, ADR 0025): a number (of a numeric
+     * field, a score or a document id), or a term of a {@code STRING} sort. Neither is present for a
+     * document without a value in a field sort.
      */
     public record SortValue(Optional<Number> number, Optional<BytesRef> term) {
 

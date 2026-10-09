@@ -19,7 +19,9 @@ import io.github.mfuerstenau.leia.protocol.search.Bm25Similarity;
 import io.github.mfuerstenau.leia.protocol.search.BooleanSimilarity;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
 import io.github.mfuerstenau.leia.protocol.search.ClassicSimilarity;
+import io.github.mfuerstenau.leia.protocol.search.DocSort;
 import io.github.mfuerstenau.leia.protocol.search.Explanation;
+import io.github.mfuerstenau.leia.protocol.search.FieldSort;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
@@ -29,10 +31,13 @@ import io.github.mfuerstenau.leia.protocol.search.ParserOptions;
 import io.github.mfuerstenau.leia.protocol.search.PointField;
 import io.github.mfuerstenau.leia.protocol.search.PointType;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
+import io.github.mfuerstenau.leia.protocol.search.ScoreSort;
 import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
 import io.github.mfuerstenau.leia.protocol.search.SearchResults;
 import io.github.mfuerstenau.leia.protocol.search.Similarity;
 import io.github.mfuerstenau.leia.protocol.search.SortKey;
+import io.github.mfuerstenau.leia.protocol.search.SortMissing;
+import io.github.mfuerstenau.leia.protocol.search.SortSelector;
 import io.github.mfuerstenau.leia.protocol.search.SortType;
 import io.github.mfuerstenau.leia.protocol.search.SortValue;
 import io.github.mfuerstenau.leia.protocol.search.StandardQuery;
@@ -293,8 +298,8 @@ class SearchHandlersTest {
         openIndex();
         SearchResults byScore = search(params(classic("red"), 0, 10, Optional.of(List.of())));
 
-        SearchResults byColor = search(sorted(classic("red"), new SortKey("color", SortType.STRING, false)));
-        SearchResults byRank = search(sorted(classic("red"), new SortKey("rank", SortType.LONG, false)));
+        SearchResults byColor = search(sorted(classic("red"), fieldKey("color", SortType.STRING, false)));
+        SearchResults byRank = search(sorted(classic("red"), fieldKey("rank", SortType.LONG, false)));
 
         assertThat(byScore.hits()).extracting(Hit::docId).containsExactly(0, 2);
         assertThat(byScore.hits())
@@ -318,16 +323,54 @@ class SearchHandlersTest {
         openIndex();
 
         assertFails(
-                () -> startSearch.handle(sorted(classic("red"), new SortKey("nothing", SortType.LONG, false))),
+                () -> startSearch.handle(sorted(classic("red"), fieldKey("nothing", SortType.LONG, false))),
                 ErrorCode.FIELD_NOT_FOUND);
-        assertThatThrownBy(
-                        () -> startSearch.handle(sorted(classic("red"), new SortKey("body", SortType.STRING, false))))
+        assertThatThrownBy(() -> startSearch.handle(sorted(classic("red"), fieldKey("body", SortType.STRING, false))))
                 .isInstanceOfSatisfying(
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.INVALID_PARAMS))
                 .hasMessage("Invalid params: the field 'body' has no doc values to sort by");
         assertFails(
-                () -> startSearch.handle(sorted(classic("red"), new SortKey("rank", SortType.STRING, false))),
+                () -> startSearch.handle(sorted(classic("red"), fieldKey("rank", SortType.STRING, false))),
                 ErrorCode.INVALID_PARAMS);
+        assertThatThrownBy(() -> startSearch.handle(sorted(
+                        classic("red"),
+                        new SortKey(
+                                Optional.of(new FieldSort(
+                                        "rank", SortType.LONG, false, SortSelector.MAX, SortMissing.DEFAULT)),
+                                Optional.empty(),
+                                Optional.empty()))))
+                .isInstanceOfSatisfying(
+                        RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.INVALID_PARAMS))
+                .hasMessage("Invalid params: the field 'rank' has single-valued NUMERIC doc values, which can't"
+                        + " select MAX");
+        assertFails(
+                () -> startSearch.handle(sorted(
+                        classic("red"),
+                        new SortKey(
+                                Optional.empty(), Optional.of(new ScoreSort(false)), Optional.of(new DocSort(false))))),
+                ErrorCode.INVALID_PARAMS);
+        assertFails(
+                () -> startSearch.handle(
+                        sorted(classic("red"), new SortKey(Optional.empty(), Optional.empty(), Optional.empty()))),
+                ErrorCode.INVALID_PARAMS);
+    }
+
+    @Test
+    void sortsByScoreAndDocumentId() throws Exception {
+        openIndex();
+
+        SearchResults lowestFirst = search(sorted(
+                classic("red"), new SortKey(Optional.empty(), Optional.of(new ScoreSort(true)), Optional.empty())));
+        SearchResults highestId = search(sorted(
+                classic("red"), new SortKey(Optional.empty(), Optional.empty(), Optional.of(new DocSort(true)))));
+
+        assertThat(lowestFirst.hits()).extracting(Hit::docId).containsExactly(2, 0);
+        assertThat(lowestFirst.hits().getFirst().sortValues())
+                .containsExactly(new SortValue(
+                        Optional.of(Float.toString(lowestFirst.hits().getFirst().score())), Optional.empty()));
+        assertThat(highestId.hits()).extracting(Hit::docId).containsExactly(2, 0);
+        assertThat(highestId.hits().getFirst().sortValues())
+                .containsExactly(new SortValue(Optional.of("2"), Optional.empty()));
     }
 
     @Test
@@ -580,6 +623,13 @@ class SearchHandlersTest {
 
     private static StartSearchParams params(SearchQuery query, int offset, int limit, Optional<List<String>> fields) {
         return new StartSearchParams(query, BM25, List.of(), offset, limit, true, fields);
+    }
+
+    private static SortKey fieldKey(String field, SortType type, boolean reverse) {
+        return new SortKey(
+                Optional.of(new FieldSort(field, type, reverse, SortSelector.MIN, SortMissing.DEFAULT)),
+                Optional.empty(),
+                Optional.empty());
     }
 
     private static StartSearchParams sorted(SearchQuery query, SortKey... sort) {

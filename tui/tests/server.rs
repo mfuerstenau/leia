@@ -37,10 +37,11 @@ use leia::protocol::index::{
 use leia::protocol::jars::{AddJars, AddJarsParams, GetJars, GetJarsParams};
 use leia::protocol::job::{CancelJob, JobParams};
 use leia::protocol::search::{
-    Bm25Similarity, ClassicQuery, ClassicSimilarity, GetExplain, GetSearch, MAX_FUZZY_EDITS,
-    MoreLikeThisQuery, ParserOptions, PointField, PointType, QueryOperator, SearchQuery,
-    Similarity, SortKey, SortType, StandardQuery, StartExplain, StartExplainParams, StartSearch,
-    StartSearchParams, TotalHitsRelation,
+    Bm25Similarity, ClassicQuery, ClassicSimilarity, DocSort, FieldSort, GetExplain, GetSearch,
+    MAX_FUZZY_EDITS, MoreLikeThisQuery, ParserOptions, PointField, PointType, QueryOperator,
+    ScoreSort, SearchQuery, Similarity, SortKey, SortMissing, SortSelector, SortType,
+    StandardQuery, StartExplain, StartExplainParams, StartSearch, StartSearchParams,
+    TotalHitsRelation,
 };
 use leia::protocol::terms::{
     ExportTermsResult, FieldTerms, GetExportTerms, GetFieldTermScan, GetPositions,
@@ -1157,9 +1158,14 @@ fn searches_and_explains_a_lucene9_index() {
             query: classic("number"),
             similarity: bm25(),
             sort: vec![SortKey {
-                field: "id".to_owned(),
-                sort_type: SortType::String,
-                reverse: false,
+                field: Some(FieldSort {
+                    field: "id".to_owned(),
+                    sort_type: SortType::String,
+                    reverse: false,
+                    selector: SortSelector::Min,
+                    missing: SortMissing::Default,
+                }),
+                ..SortKey::default()
             }],
             offset: 0,
             limit: 10,
@@ -1171,6 +1177,57 @@ fn searches_and_explains_a_lucene9_index() {
         matches!(&unsortable, CallError::Rpc(e) if e.code == ErrorCode::InvalidParams
             && e.message.contains("no doc values")),
         "{unsortable:?}"
+    );
+    // The document id and the score need no doc values (ADR 0025).
+    let job = server
+        .call::<StartSearch>(StartSearchParams {
+            query: classic("number"),
+            similarity: bm25(),
+            sort: vec![
+                SortKey {
+                    doc: Some(DocSort { reverse: true }),
+                    ..SortKey::default()
+                },
+                SortKey {
+                    score: Some(ScoreSort { reverse: false }),
+                    ..SortKey::default()
+                },
+            ],
+            offset: 0,
+            limit: 10,
+            exact_total_hits: true,
+            fields: None,
+        })
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let results = loop {
+        let poll = server
+            .call::<GetSearch>(JobParams { job_id: job.job_id })
+            .unwrap();
+        if let Some(results) = poll.results {
+            break results;
+        }
+        assert!(Instant::now() < deadline, "the search did not finish");
+        thread::sleep(Duration::from_millis(10));
+    };
+    let ids: Vec<i32> = results.hits.iter().map(|hit| hit.doc_id).collect();
+    let mut descending = ids.clone();
+    descending.sort_unstable_by(|a, b| b.cmp(a));
+    assert!(ids.len() > 1, "{ids:?}");
+    assert_eq!(ids, descending);
+    let first = &results.hits[0];
+    assert_eq!(
+        first.sort_values[0].number.as_deref(),
+        Some(first.doc_id.to_string().as_str())
+    );
+    assert_eq!(
+        first.sort_values[1]
+            .number
+            .as_ref()
+            .unwrap()
+            .parse::<f64>()
+            .unwrap(),
+        first.score
     );
 }
 

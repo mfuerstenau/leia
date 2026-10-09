@@ -1210,8 +1210,8 @@ mod tests {
     use crate::protocol::document::StoredType;
     use crate::protocol::index::{DocValuesType, TermStats};
     use crate::protocol::search::{
-        Bm25Similarity, ClassicSimilarity, HitField, MoreLikeThisQuery, ParserOptions, PointField,
-        PointType, Similarity, SortKey, SortType,
+        Bm25Similarity, ClassicSimilarity, FieldSort, HitField, MoreLikeThisQuery, ParserOptions,
+        PointField, PointType, Similarity, SortKey, SortMissing, SortSelector, SortType,
     };
 
     fn bm25() -> Similarity {
@@ -1870,8 +1870,16 @@ mod tests {
         assert_eq!(press(&mut search, KeyCode::Char('s')), None);
         assert!(search.prompting());
         assert!(render(&mut search).contains("Similarity and sort"));
-        // Similarity, k1, b, then "Sort by": price, read as LONG.
-        for code in [KeyCode::Down, KeyCode::Down, KeyCode::Down, KeyCode::Right] {
+        // Similarity, k1, b, then "Sort by": past the score and the document id to price, read
+        // as LONG.
+        for code in [
+            KeyCode::Down,
+            KeyCode::Down,
+            KeyCode::Down,
+            KeyCode::Right,
+            KeyCode::Right,
+            KeyCode::Right,
+        ] {
             assert_eq!(press(&mut search, code), None);
         }
         let Some(Request::Search { params, .. }) = press(&mut search, KeyCode::Enter) else {
@@ -1880,9 +1888,14 @@ mod tests {
         assert_eq!(
             params.sort,
             vec![SortKey {
-                field: "price".to_owned(),
-                sort_type: SortType::Long,
-                reverse: false,
+                field: Some(FieldSort {
+                    field: "price".to_owned(),
+                    sort_type: SortType::Long,
+                    reverse: false,
+                    selector: SortSelector::Min,
+                    missing: SortMissing::Default,
+                }),
+                ..SortKey::default()
             }]
         );
         assert_eq!(params.similarity, bm25());

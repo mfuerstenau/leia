@@ -1,10 +1,13 @@
 package io.github.mfuerstenau.leia.protocol.search;
 
+import java.util.Optional;
+
 /**
- * One level of the order of the hits (ADR 0012).
+ * One level of the order of the hits, as one of several alternatives: exactly one is present (ADR
+ * 0012, ADR 0025).
  *
- * @param field a field with doc values other than {@code BINARY}
- * @param type how the field's doc values are read
- * @param reverse whether the largest value comes first
+ * @param field by a field's doc values
+ * @param score by the score
+ * @param doc by the document id
  */
-public record SortKey(String field, SortType type, boolean reverse) {}
+public record SortKey(Optional<FieldSort> field, Optional<ScoreSort> score, Optional<DocSort> doc) {}

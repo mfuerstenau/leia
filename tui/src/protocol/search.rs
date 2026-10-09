@@ -131,16 +131,79 @@ pub struct ClassicSimilarity {}
 #[serde(deny_unknown_fields)]
 pub struct BooleanSimilarity {}
 
-/// One level of the order of the hits (ADR 0012).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// One level of the order of the hits, as one of several alternatives: exactly one is present
+/// (ADR 0012, ADR 0025).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SortKey {
+    /// By a field's doc values.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub field: Option<FieldSort>,
+    /// By the score.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub score: Option<ScoreSort>,
+    /// By the document id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc: Option<DocSort>,
+}
+
+/// A sort by a field's doc values (ADR 0012, ADR 0025).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FieldSort {
     /// A field with doc values other than `BINARY`.
     pub field: String,
     #[serde(rename = "type")]
     pub sort_type: SortType,
     /// Whether the largest value comes first.
     pub reverse: bool,
+    /// Which value of a multi-valued field a document sorts by; `Min` for a single-valued one.
+    pub selector: SortSelector,
+    /// Where documents without a value go.
+    pub missing: SortMissing,
+}
+
+/// A sort by the score (ADR 0025).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScoreSort {
+    /// Whether the lowest score comes first; otherwise the highest does.
+    pub reverse: bool,
+}
+
+/// A sort by the document id (ADR 0025).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DocSort {
+    /// Whether the highest id comes first.
+    pub reverse: bool,
+}
+
+/// Which value of a multi-valued field a document sorts by (ADR 0025). Single-valued doc values
+/// take `Min` only, sorted numeric ones `Min` or `Max`, and sorted set ones any of them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SortSelector {
+    /// The smallest value: Lucene's default.
+    Min,
+    /// The largest value.
+    Max,
+    /// The middle value, or the smaller of the two middle values.
+    MiddleMin,
+    /// The middle value, or the larger of the two middle values.
+    MiddleMax,
+}
+
+/// Where documents without a value go in a field sort (ADR 0025).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SortMissing {
+    /// Lucene's default: as 0 in a numeric sort, first in an ascending `String` sort.
+    Default,
+    /// First in the order shown, also when it is reversed.
+    First,
+    /// Last in the order shown, also when it is reversed.
+    Last,
 }
 
 /// How a field's doc values are read to sort by them: numeric doc values as `Int`, `Long`,
@@ -336,12 +399,13 @@ pub struct HitField {
     pub values: Vec<StoredValue>,
 }
 
-/// The value a hit was sorted by in one sort key (ADR 0012). At most one is present; neither is
-/// for a document without a value in a `String` sort.
+/// The value a hit was sorted by in one sort key (ADR 0012, ADR 0025). At most one is present;
+/// neither is for a document without a value in a field sort.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SortValue {
-    /// The number of a numeric sort, as Java writes it.
+    /// The number of a numeric field sort, the score of a score sort or the id of a doc sort, as
+    /// Java writes it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub number: Option<String>,
     /// The term of a `String` sort, as text or hex.

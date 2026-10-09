@@ -87,6 +87,11 @@ their own indexes and the Lucene 9 and 8 indexes from `LegacyIndexWriter`.
   by `tags`: hits without tags show `–`. Read as LONG, `price` orders by its raw double bits, which
   for these positive prices is the same order with odd numbers; read as INT, it orders by their
   low 32 bits, which is nonsense, but no error.
+- `*:*`, then `s`: sort by `scores`, value MAX, descending, then by document id: the documents
+  whose largest score is 100 come first, in id order (doc 64 first). Sort by `tags` with missing
+  first: about a hundred documents without tags (`–`) come first, ascending or descending; with
+  missing last, they come last either way.
+- `title:lamp` with `s` sorting by the score, worst first: the longest titles come first.
 - `title:lamp` with `s` set to classic TF-IDF: doc 51 scores 2.4358, and `x` shows the
   `ClassicSimilarity` explanation with the same value. Boolean scores every hit 1.
 - `body:the`: 471 hits. `Enter` on the first, then `]` a hundred times on the documents screen:
