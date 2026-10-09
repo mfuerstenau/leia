@@ -191,9 +191,11 @@ final class DocumentReader {
     static List<TermVectorTerm> termVector(IndexReader reader, int docId, String field) throws IOException {
         SegmentDoc segmentDoc = SegmentDoc.of(reader, docId);
         Terms terms = segmentDoc.leaf().termVectors().get(segmentDoc.doc(), field);
-        if (terms == null) {
-            return List.of();
-        }
+        return terms != null ? terms(terms) : List.of();
+    }
+
+    /** The terms of a term vector, in term order, with their occurrences. */
+    static List<TermVectorTerm> terms(Terms terms) throws IOException {
         boolean hasPositions = terms.hasPositions();
         boolean hasOffsets = terms.hasOffsets();
         List<TermVectorTerm> result = new ArrayList<>();

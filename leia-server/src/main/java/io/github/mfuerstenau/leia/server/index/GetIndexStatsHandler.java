@@ -90,7 +90,7 @@ public final class GetIndexStatsHandler implements MethodHandler<GetIndexStatsPa
                         .map(terms -> new TermStats(terms.docCount(), terms.sumDocFreq(), terms.sumTotalTermFreq())));
     }
 
-    static IndexOptions indexOptions(org.apache.lucene.index.IndexOptions options) {
+    public static IndexOptions indexOptions(org.apache.lucene.index.IndexOptions options) {
         return switch (options) {
             case NONE -> IndexOptions.NONE;
             case DOCS -> IndexOptions.DOCS;

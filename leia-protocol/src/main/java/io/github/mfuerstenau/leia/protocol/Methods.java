@@ -13,10 +13,12 @@ import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
+import io.github.mfuerstenau.leia.protocol.document.GetReconstructResult;
 import io.github.mfuerstenau.leia.protocol.document.GetStoredValueParams;
 import io.github.mfuerstenau.leia.protocol.document.GetStoredValueResult;
 import io.github.mfuerstenau.leia.protocol.document.GetTermVectorParams;
 import io.github.mfuerstenau.leia.protocol.document.GetTermVectorResult;
+import io.github.mfuerstenau.leia.protocol.document.StartReconstructParams;
 import io.github.mfuerstenau.leia.protocol.index.CloseIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.CloseIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
@@ -138,6 +140,23 @@ public final class Methods {
      */
     public static final RpcMethod<GetTermVectorParams, GetTermVectorResult> GET_TERM_VECTOR =
             new RpcMethod<>("getTermVector", GetTermVectorParams.class, GetTermVectorResult.class);
+
+    /**
+     * Starts a job that rebuilds the terms a document was indexed with, per field (ADR 0029): from
+     * its term vector where that holds all that the postings hold, else from the postings of every
+     * term of the field in the document's segment. Fails with {@code NO_INDEX_OPEN}, {@code
+     * NO_READER}, {@code DOC_NOT_FOUND}, {@code FIELD_NOT_FOUND}, or {@code INVALID_PARAMS} for a
+     * field that isn't indexed.
+     */
+    public static final RpcMethod<StartReconstructParams, JobStarted> START_RECONSTRUCT =
+            new RpcMethod<>("startReconstruct", StartReconstructParams.class, JobStarted.class);
+
+    /**
+     * The progress of a reconstruction, and its outcome once it is done (ADR 0029). The outcome is
+     * handed out once; afterwards the job is gone ({@code JOB_NOT_FOUND}).
+     */
+    public static final RpcMethod<JobParams, GetReconstructResult> GET_RECONSTRUCT =
+            new RpcMethod<>("getReconstruct", JobParams.class, GetReconstructResult.class);
 
     /**
      * A page of the terms of a field, in term order, from a given term on (ADR 0007). A field without
@@ -313,6 +332,8 @@ public final class Methods {
             GET_DOCUMENT,
             GET_STORED_VALUE,
             GET_TERM_VECTOR,
+            START_RECONSTRUCT,
+            GET_RECONSTRUCT,
             GET_TERMS,
             GET_POSTINGS,
             GET_POSITIONS,

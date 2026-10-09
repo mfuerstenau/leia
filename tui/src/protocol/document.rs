@@ -2,7 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::index::DocValuesType;
+use super::index::{DocValuesType, IndexOptions};
+use super::job::{JobParams, JobStarted};
 use super::method::RpcMethod;
 
 /// `getDocument`: what a document of the open index holds in every field: norm, stored values,
@@ -169,7 +170,8 @@ pub struct GetTermVectorResult {
     pub terms: Vec<TermVectorTerm>,
 }
 
-/// One term of a term vector.
+/// One term of a document in a field, from its term vector or rebuilt from the postings (ADR
+/// 0029).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct TermVectorTerm {
@@ -177,11 +179,93 @@ pub struct TermVectorTerm {
     pub term: String,
     /// Whether the term's bytes are not valid UTF-8, so `term` holds them as hex.
     pub binary: bool,
-    /// How often the term occurs in the field of the document.
+    /// How often the term occurs in the field of the document; 1 from postings without freqs.
     pub freq: i32,
     /// One entry per occurrence, in order; empty if the term vector has neither positions nor
-    /// offsets.
+    /// offsets, or the postings have no positions.
     pub positions: Vec<TermPosition>,
+}
+
+/// `startReconstruct`: starts a job that rebuilds the terms a document was indexed with, per field
+/// (ADR 0029): from its term vector where that holds all that the postings hold, else from the
+/// postings of every term of the field in the document's segment. Fails with `NO_INDEX_OPEN`,
+/// `NO_READER`, `DOC_NOT_FOUND`, `FIELD_NOT_FOUND`, or `INVALID_PARAMS` for a field that isn't
+/// indexed.
+pub enum StartReconstruct {}
+
+impl RpcMethod for StartReconstruct {
+    const NAME: &'static str = "startReconstruct";
+    type Params = StartReconstructParams;
+    type Result = JobStarted;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StartReconstructParams {
+    /// The document id, from 0 to maxDoc - 1; a deleted document is rebuilt too.
+    pub doc_id: i32,
+    /// The indexed fields to rebuild, in this order; `None` for every indexed field, in field
+    /// number order.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fields: Option<Vec<String>>,
+}
+
+/// `getReconstruct`: the progress of a reconstruction, and its outcome once it is done. The
+/// outcome is handed out once; afterwards the job is gone (`JOB_NOT_FOUND`).
+pub enum GetReconstruct {}
+
+impl RpcMethod for GetReconstruct {
+    const NAME: &'static str = "getReconstruct";
+    type Params = JobParams;
+    type Result = GetReconstructResult;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GetReconstructResult {
+    /// The terms gone through so far.
+    pub scanned_terms: i64,
+    /// The terms the job goes through: those of the fields it rebuilds from the postings, in the
+    /// document's segment; `None` if the segment doesn't know.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total_terms: Option<i64>,
+    /// The outcome; `None` while the job is running.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<ReconstructResult>,
+}
+
+/// The outcome of `startReconstruct`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReconstructResult {
+    /// The fields in the order they were asked for.
+    pub fields: Vec<ReconstructedField>,
+    /// How long the job took.
+    pub took_millis: i64,
+}
+
+/// The terms a document was indexed with in a field.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReconstructedField {
+    pub field: String,
+    /// What the postings of the field hold in the document's segment; `None` if the segment
+    /// doesn't have the field.
+    pub index_options: IndexOptions,
+    /// Where the terms come from.
+    pub source: ReconstructSource,
+    /// The terms in term order, with their occurrences in the document.
+    pub terms: Vec<TermVectorTerm>,
+}
+
+/// Where the terms of a [`ReconstructedField`] come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ReconstructSource {
+    /// The document's term vector, which holds all that the postings hold.
+    TermVector,
+    /// The postings of every term of the field in the document's segment.
+    Postings,
 }
 
 /// One occurrence of a term in a document, from a term vector or from the postings.

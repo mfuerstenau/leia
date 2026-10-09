@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 60,
+  "error": {
+    "code": -32602,
+    "message": "Invalid params: the field 'checksum' is not indexed, so it has no terms to rebuild"
+  }
+}

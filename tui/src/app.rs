@@ -31,7 +31,8 @@ use crate::protocol::analysis::{AnalyzeParams, AnalyzeResult, GetAnalysisCompone
 use crate::protocol::check::GetCheckIndexResult;
 use crate::protocol::commits::{GetCommitResult, GetCommitsResult};
 use crate::protocol::document::{
-    BytesValue, GetDocumentResult, StoredValue, TermPosition, TermVectorTerm,
+    BytesValue, GetDocumentResult, GetReconstructResult, StartReconstructParams, StoredValue,
+    TermPosition, TermVectorTerm,
 };
 use crate::protocol::index::{
     DirectoryImpl, GetIndexStatsResult, IndexField, OpenIndexResult, OpenMode, ReopenIndexResult,
@@ -75,9 +76,12 @@ pub enum Action {
     },
     /// Cancel this scan job, and report back with [`App::scan_cancelled`].
     CancelScan(i64),
-    /// Fetch this document, and report back with [`App::document_loaded`] or
-    /// [`App::document_failed`].
-    LoadDocument(i32),
+    /// Cancel the jobs in `cancel`, then fetch this document, and report back with
+    /// [`App::document_loaded`] or [`App::document_failed`].
+    LoadDocument {
+        doc_id: i32,
+        cancel: Vec<i64>,
+    },
     /// Fetch a stored value of a document whole, and report back with
     /// [`App::stored_value_loaded`] or [`App::stored_value_failed`].
     LoadStoredValue {
@@ -87,6 +91,15 @@ pub enum Action {
     },
     /// Put this text on the clipboard.
     Copy(String),
+    /// Cancel the jobs in `cancel`, then start rebuilding the terms a document was indexed with,
+    /// and report back with [`App::reconstruct_started`] or [`App::reconstruct_failed`] (ADR
+    /// 0029).
+    StartReconstruct {
+        params: StartReconstructParams,
+        cancel: Vec<i64>,
+    },
+    /// Cancel this rebuild job, and report back with [`App::reconstruct_cancelled`].
+    CancelReconstruct(i64),
     /// Fetch the term vector of a field of a document, and report back with
     /// [`App::term_vector_loaded`] or [`App::term_vector_failed`].
     LoadTermVector {
@@ -184,6 +197,8 @@ pub enum Poll {
     Check(i64),
     /// Report back with [`App::export_progress`] or [`App::export_failed`].
     Export(i64),
+    /// Report back with [`App::reconstruct_progress`] or [`App::reconstruct_failed`].
+    Reconstruct(i64),
 }
 
 /// The screens; `1` to `7` switch between them. All but the analysis screen need an open index.
@@ -593,7 +608,7 @@ impl App {
             search::Request::Document(doc_id) => {
                 self.documents.as_mut()?.show_search_hit();
                 self.screen = Screen::Documents;
-                Some(Action::LoadDocument(doc_id))
+                self.load_document(doc_id)
             }
             search::Request::View {
                 doc_id,
@@ -611,9 +626,32 @@ impl App {
         }
     }
 
+    /// Fetches a document for the documents screen, which stops rebuilding a field of the shown
+    /// one.
+    fn load_document(&self, doc_id: i32) -> Option<Action> {
+        let cancel = self
+            .documents
+            .as_ref()
+            .and_then(Documents::reconstruct_job)
+            .into_iter()
+            .collect();
+        Some(Action::LoadDocument { doc_id, cancel })
+    }
+
     fn documents_request(&mut self, request: Option<documents::Request>) -> Option<Action> {
         match request? {
-            documents::Request::Document(doc_id) => Some(Action::LoadDocument(doc_id)),
+            documents::Request::Document(doc_id) => self.load_document(doc_id),
+            documents::Request::Reconstruct {
+                doc_id,
+                field,
+                cancel,
+            } => Some(Action::StartReconstruct {
+                params: StartReconstructParams {
+                    doc_id,
+                    fields: Some(vec![field]),
+                },
+                cancel,
+            }),
             documents::Request::TermVector { doc_id, field } => {
                 Some(Action::LoadTermVector { doc_id, field })
             }
@@ -689,7 +727,7 @@ impl App {
                 let doc_id = hit.doc_id;
                 self.documents.as_mut()?.show_hit(hit);
                 self.screen = Screen::Documents;
-                Some(Action::LoadDocument(doc_id))
+                self.load_document(doc_id)
             }
             terms::Request::Export(field) => {
                 if self.export.is_some() {
@@ -749,6 +787,30 @@ impl App {
     pub fn term_vector_failed(&mut self, doc_id: i32, field: &str, error: String) {
         if let Some(documents) = &mut self.documents {
             documents.term_vector_failed(doc_id, field, error);
+        }
+    }
+
+    pub fn reconstruct_started(&mut self, job_id: i64) {
+        if let Some(documents) = &mut self.documents {
+            documents.reconstruct_started(job_id);
+        }
+    }
+
+    pub fn reconstruct_progress(&mut self, result: GetReconstructResult) {
+        if let Some(documents) = &mut self.documents {
+            documents.reconstruct_progress(result);
+        }
+    }
+
+    pub fn reconstruct_failed(&mut self, error: String) {
+        if let Some(documents) = &mut self.documents {
+            documents.reconstruct_failed(error);
+        }
+    }
+
+    pub fn reconstruct_cancelled(&mut self) {
+        if let Some(documents) = &mut self.documents {
+            documents.reconstruct_cancelled();
         }
     }
 
@@ -961,7 +1023,8 @@ impl App {
         self.scan.as_ref().and_then(|scan| scan.job_id)
     }
 
-    /// The jobs to poll: the running term scan, search, explanation, regex scan, check and export.
+    /// The jobs to poll: the running term scan, search, explanation, regex scan, check, export
+    /// and rebuild of a field.
     pub fn polls(&self) -> Vec<Poll> {
         let search = self.search.as_ref();
         self.scan_job()
@@ -976,6 +1039,12 @@ impl App {
             )
             .chain(self.check.as_ref().and_then(Check::job).map(Poll::Check))
             .chain(self.export_job().map(Poll::Export))
+            .chain(
+                self.documents
+                    .as_ref()
+                    .and_then(Documents::reconstruct_job)
+                    .map(Poll::Reconstruct),
+            )
             .collect()
     }
 
@@ -1241,6 +1310,10 @@ impl App {
         };
         let checking =
             self.screen == Screen::Check && self.check.as_ref().is_some_and(Check::running);
+        let rebuilding = match (&self.documents, self.screen) {
+            (Some(documents), Screen::Documents) => documents.reconstruct_job(),
+            _ => None,
+        };
         match key.code {
             // Esc stops the scans first, then the export, then the shown screen's jobs, and quits
             // only when there are none.
@@ -1259,6 +1332,9 @@ impl App {
                 }
             },
             KeyCode::Esc if !search_jobs.is_empty() => Some(Action::CancelSearch(search_jobs)),
+            KeyCode::Esc if let Some(job_id) = rebuilding => {
+                Some(Action::CancelReconstruct(job_id))
+            }
             KeyCode::Esc if checking => match self.check.as_ref().and_then(Check::job) {
                 Some(job_id) => Some(Action::CancelCheck(job_id)),
                 None => {
@@ -1459,11 +1535,17 @@ impl App {
                     Some(Walk::SearchHits) => "[ ] hits   ",
                     None => "",
                 };
+                let cancel = if cancel.is_empty() && documents.reconstruct_job().is_some() {
+                    "Esc stop rebuild   "
+                } else {
+                    cancel
+                };
                 match documents.viewer() {
                     Some(viewer) => Line::from(viewer.keys()),
                     None => Line::from(format!(
                         " {cancel}q quit   o open   c close   1-7 screen   ←→ doc   {steps}i go to   \
-                         ⏎ term vector   v view   a analyze   x numbers   e empty   m similar   Tab panel   ↑↓"
+                         ⏎ term vector   v view   a analyze   x numbers   e empty   m similar   r rebuild   \
+                         Tab panel   ↑↓"
                     )),
                 }
             }
@@ -1721,7 +1803,10 @@ mod tests {
     use super::*;
     use crate::protocol::analysis::{AnalyzeResult, Analyzer};
     use crate::protocol::commits::Commit;
-    use crate::protocol::document::{DocumentField, StoredType, StoredValue};
+    use crate::protocol::document::{
+        DocumentField, ReconstructResult, ReconstructSource, ReconstructedField, StoredType,
+        StoredValue,
+    };
     use crate::protocol::index::{
         DocValuesType, IndexCommitStats, IndexEntry, IndexField, IndexOptions, ReaderInfo,
         TermStats,
@@ -2289,6 +2374,14 @@ mod tests {
         }
     }
 
+    /// Fetching a document, with no job to stop first.
+    fn load(doc_id: i32) -> Action {
+        Action::LoadDocument {
+            doc_id,
+            cancel: Vec::new(),
+        }
+    }
+
     fn app_with_documents() -> App {
         let mut app = App::new(version(), None);
         app.opened(
@@ -2308,23 +2401,117 @@ mod tests {
         let mut app = app_with_documents();
         assert!(render(&mut app).contains("1 Overview"));
 
-        assert_eq!(
-            app.handle_key(key(KeyCode::Char('2'))),
-            Some(Action::LoadDocument(0))
-        );
+        assert_eq!(app.handle_key(key(KeyCode::Char('2'))), Some(load(0)));
         app.document_loaded(document(0));
         let screen = render(&mut app);
         assert!(screen.contains("#0 of 0–2"), "{screen}");
         assert!(screen.contains("doc-0"), "{screen}");
 
-        assert_eq!(
-            app.handle_key(key(KeyCode::Right)),
-            Some(Action::LoadDocument(1))
-        );
+        assert_eq!(app.handle_key(key(KeyCode::Right)), Some(load(1)));
         // Back and forth fetches nothing new.
         assert_eq!(app.handle_key(key(KeyCode::Char('1'))), None);
         assert!(render(&mut app).contains("Path       /data/idx"));
         assert_eq!(app.handle_key(key(KeyCode::Char('2'))), None);
+    }
+
+    #[test]
+    fn rebuilds_a_field_and_stops_when_the_document_changes() {
+        let mut app = app_with_documents();
+        app.handle_key(key(KeyCode::Char('2')));
+        app.document_loaded(document(1));
+
+        assert_eq!(
+            app.handle_key(key(KeyCode::Char('r'))),
+            Some(Action::StartReconstruct {
+                params: StartReconstructParams {
+                    doc_id: 1,
+                    fields: Some(vec!["id".to_owned()]),
+                },
+                cancel: Vec::new(),
+            })
+        );
+        app.reconstruct_started(7);
+        assert_eq!(app.polls(), vec![Poll::Reconstruct(7)]);
+        app.reconstruct_progress(GetReconstructResult {
+            scanned_terms: 1024,
+            total_terms: Some(3000),
+            result: None,
+        });
+        // The details panel at its end.
+        app.handle_key(key(KeyCode::Tab));
+        app.handle_key(key(KeyCode::End));
+        let screen = render(&mut app);
+        assert!(screen.contains("Esc stop rebuild"), "{screen}");
+        assert!(
+            screen.contains("rebuilding… 1024 of 3000 terms"),
+            "{screen}"
+        );
+
+        // Another document stops it.
+        assert_eq!(
+            app.handle_key(key(KeyCode::Right)),
+            Some(Action::LoadDocument {
+                doc_id: 2,
+                cancel: vec![7],
+            })
+        );
+        app.document_loaded(document(2));
+        assert_eq!(app.polls(), Vec::new());
+
+        // So does Esc, before it quits.
+        app.handle_key(key(KeyCode::Char('r')));
+        app.reconstruct_started(8);
+        assert_eq!(
+            app.handle_key(key(KeyCode::Esc)),
+            Some(Action::CancelReconstruct(8))
+        );
+        app.reconstruct_cancelled();
+        assert_eq!(app.polls(), Vec::new());
+        app.handle_key(key(KeyCode::End));
+        let screen = render(&mut app);
+        assert!(screen.contains("r rebuilds the terms"), "{screen}");
+        assert_eq!(app.handle_key(key(KeyCode::Esc)), Some(Action::Quit));
+    }
+
+    #[test]
+    fn shows_the_rebuilt_field() {
+        let mut app = app_with_documents();
+        app.handle_key(key(KeyCode::Char('2')));
+        app.document_loaded(document(1));
+        app.handle_key(key(KeyCode::Char('r')));
+        app.reconstruct_started(7);
+
+        app.reconstruct_progress(GetReconstructResult {
+            scanned_terms: 3,
+            total_terms: Some(3),
+            result: Some(ReconstructResult {
+                fields: vec![ReconstructedField {
+                    field: "id".to_owned(),
+                    index_options: IndexOptions::Docs,
+                    source: ReconstructSource::Postings,
+                    terms: vec![TermVectorTerm {
+                        term: "doc-1".to_owned(),
+                        binary: false,
+                        freq: 1,
+                        positions: Vec::new(),
+                    }],
+                }],
+                took_millis: 2,
+            }),
+        });
+
+        assert_eq!(app.polls(), Vec::new());
+        app.handle_key(key(KeyCode::Tab));
+        app.handle_key(key(KeyCode::End));
+        // Drawing clamps End to the last line.
+        render(&mut app);
+        app.handle_key(key(KeyCode::Up));
+        let screen = render(&mut app);
+        assert!(screen.contains("1 term, from the postings"), "{screen}");
+        assert!(screen.contains("  doc-1"), "{screen}");
+        assert!(!screen.contains("×1"), "{screen}");
+        // Rebuilt once is enough.
+        assert_eq!(app.handle_key(key(KeyCode::Char('r'))), None);
     }
 
     #[test]
@@ -2411,7 +2598,7 @@ mod tests {
                 },
                 Vec::new()
             ),
-            Some(Action::LoadDocument(0))
+            Some(load(0))
         );
         assert_eq!(app.opened(stats("/data/empty"), Vec::new()), None);
     }
@@ -2431,10 +2618,7 @@ mod tests {
 
         app.handle_key(key(KeyCode::Char('i')));
         app.handle_key(key(KeyCode::Char('2')));
-        assert_eq!(
-            app.handle_key(key(KeyCode::Enter)),
-            Some(Action::LoadDocument(2))
-        );
+        assert_eq!(app.handle_key(key(KeyCode::Enter)), Some(load(2)));
         assert_eq!(app.handle_key(key(KeyCode::Esc)), Some(Action::Quit));
     }
 
@@ -2707,8 +2891,8 @@ mod tests {
             ..stats("/data/idx")
         };
 
-        assert_eq!(app.reopened(with_docs(5)), Some(Action::LoadDocument(2)));
-        assert_eq!(app.reopened(with_docs(2)), Some(Action::LoadDocument(1)));
+        assert_eq!(app.reopened(with_docs(5)), Some(load(2)));
+        assert_eq!(app.reopened(with_docs(2)), Some(load(1)));
         assert_eq!(app.reopened(with_docs(0)), None);
     }
 
@@ -2834,10 +3018,7 @@ mod tests {
         app.handle_key(key(KeyCode::Enter));
         app.handle_key(key(KeyCode::Enter));
 
-        assert_eq!(
-            app.handle_key(key(KeyCode::Enter)),
-            Some(Action::LoadDocument(0))
-        );
+        assert_eq!(app.handle_key(key(KeyCode::Enter)), Some(load(0)));
         assert_eq!(
             app.document_loaded(document(0)),
             Some(Action::LoadPositions {
@@ -2851,10 +3032,7 @@ mod tests {
         assert!(screen.contains("id:1  1 of 2"), "{screen}");
         assert!(screen.contains("[ ] term docs"), "{screen}");
 
-        assert_eq!(
-            app.handle_key(key(KeyCode::Char(']'))),
-            Some(Action::LoadDocument(2))
-        );
+        assert_eq!(app.handle_key(key(KeyCode::Char(']'))), Some(load(2)));
         assert_eq!(app.handle_key(key(KeyCode::Char(']'))), None);
         // The terms screen has everything it shows.
         assert_eq!(app.handle_key(key(KeyCode::Char('3'))), None);
@@ -3099,10 +3277,7 @@ mod tests {
         app.search_cancelled();
         assert_eq!(app.polls(), vec![]);
 
-        assert_eq!(
-            app.handle_key(key(KeyCode::Char('v'))),
-            Some(Action::LoadDocument(2))
-        );
+        assert_eq!(app.handle_key(key(KeyCode::Char('v'))), Some(load(2)));
         assert!(render(&mut app).contains("2 Documents"));
     }
 
@@ -3149,24 +3324,15 @@ mod tests {
             }),
         });
 
-        assert_eq!(
-            app.handle_key(key(KeyCode::Enter)),
-            Some(Action::LoadDocument(2))
-        );
+        assert_eq!(app.handle_key(key(KeyCode::Enter)), Some(load(2)));
         assert!(render(&mut app).contains("2 Documents"));
         assert!(!render(&mut app).contains("[ ] term docs"));
 
         // `[`/`]` step through the hits, as far as they go.
         assert!(render(&mut app).contains("[ ] hits"));
-        assert_eq!(
-            app.handle_key(key(KeyCode::Char(']'))),
-            Some(Action::LoadDocument(0))
-        );
+        assert_eq!(app.handle_key(key(KeyCode::Char(']'))), Some(load(0)));
         assert_eq!(app.handle_key(key(KeyCode::Char(']'))), None);
-        assert_eq!(
-            app.handle_key(key(KeyCode::Char('['))),
-            Some(Action::LoadDocument(2))
-        );
+        assert_eq!(app.handle_key(key(KeyCode::Char('['))), Some(load(2)));
         assert!(render(&mut app).contains("2 Documents"));
     }
 
@@ -3181,10 +3347,7 @@ mod tests {
             },
             Vec::new(),
         );
-        assert_eq!(
-            app.handle_key(key(KeyCode::Char('2'))),
-            Some(Action::LoadDocument(0))
-        );
+        assert_eq!(app.handle_key(key(KeyCode::Char('2'))), Some(load(0)));
 
         let Some(Action::StartSearch { params, cancel }) = app.handle_key(key(KeyCode::Char('m')))
         else {

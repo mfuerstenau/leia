@@ -22,8 +22,8 @@ use leia::protocol::check::{
 };
 use leia::protocol::commits::{GetCommit, GetCommitParams, GetCommits, GetCommitsParams};
 use leia::protocol::document::{
-    GetDocument, GetDocumentParams, GetStoredValue, GetStoredValueParams, GetTermVector,
-    GetTermVectorParams,
+    GetDocument, GetDocumentParams, GetReconstruct, GetStoredValue, GetStoredValueParams,
+    GetTermVector, GetTermVectorParams, StartReconstruct,
 };
 use leia::protocol::index::{
     CloseIndex, CloseIndexParams, DirectoryImpl, GetIndexStats, GetIndexStatsParams, OpenIndex,
@@ -252,7 +252,8 @@ fn perform(
             server.call::<CancelJob>(JobParams { job_id })?;
             app.scan_cancelled();
         }
-        Action::LoadDocument(doc_id) => {
+        Action::LoadDocument { doc_id, cancel } => {
+            cancel_jobs(server, cancel)?;
             match answered(server.call::<GetDocument>(GetDocumentParams { doc_id }))? {
                 Ok(document) => return Ok(app.document_loaded(document)),
                 Err(error) => app.document_failed(doc_id, error),
@@ -278,6 +279,17 @@ fn perform(
             let mut out = io::stdout().lock();
             out.write_all(osc52(&text).as_bytes())?;
             out.flush()?;
+        }
+        Action::StartReconstruct { params, cancel } => {
+            cancel_jobs(server, cancel)?;
+            match answered(server.call::<StartReconstruct>(params))? {
+                Ok(job) => app.reconstruct_started(job.job_id),
+                Err(error) => app.reconstruct_failed(error),
+            }
+        }
+        Action::CancelReconstruct(job_id) => {
+            server.call::<CancelJob>(JobParams { job_id })?;
+            app.reconstruct_cancelled();
         }
         Action::LoadTermVector { doc_id, field } => {
             let params = GetTermVectorParams {
@@ -482,6 +494,13 @@ fn poll_jobs(server: &mut Server, app: &mut App, polls: &[Poll]) -> Result<Vec<A
                 match answered(server.call::<GetCheckIndex>(params))? {
                     Ok(result) => app.check_progress(result),
                     Err(error) => app.check_failed(error),
+                }
+                None
+            }
+            Poll::Reconstruct(job_id) => {
+                match answered(server.call::<GetReconstruct>(JobParams { job_id }))? {
+                    Ok(result) => app.reconstruct_progress(result),
+                    Err(error) => app.reconstruct_failed(error),
                 }
                 None
             }

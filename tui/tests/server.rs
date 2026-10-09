@@ -26,8 +26,9 @@ use leia::protocol::check::{
 };
 use leia::protocol::commits::{GetCommit, GetCommitParams, GetCommits, GetCommitsParams};
 use leia::protocol::document::{
-    BytesValue, DocumentField, GetDocument, GetDocumentParams, GetDocumentResult, GetStoredValue,
-    GetStoredValueParams, GetTermVector, GetTermVectorParams, StoredType, StoredValue,
+    BytesValue, DocumentField, GetDocument, GetDocumentParams, GetDocumentResult, GetReconstruct,
+    GetStoredValue, GetStoredValueParams, GetTermVector, GetTermVectorParams, ReconstructResult,
+    ReconstructSource, StartReconstruct, StartReconstructParams, StoredType, StoredValue,
     TermPosition,
 };
 use leia::protocol::index::{
@@ -2129,4 +2130,90 @@ fn exports_the_terms_of_a_field() {
     server.call::<CloseIndex>(CloseIndexParams {}).unwrap();
     assert!(server.shutdown(SHUTDOWN_TIMEOUT).unwrap().success());
     std::fs::remove_dir_all(&dir).unwrap();
+}
+
+/// Rebuilds the fields of a document and waits for the outcome.
+fn reconstruct(server: &mut Server, doc_id: i32, fields: &[&str]) -> ReconstructResult {
+    let job = server
+        .call::<StartReconstruct>(StartReconstructParams {
+            doc_id,
+            fields: Some(fields.iter().map(|&field| field.to_owned()).collect()),
+        })
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let poll = server
+            .call::<GetReconstruct>(JobParams { job_id: job.job_id })
+            .unwrap();
+        if let Some(result) = poll.result {
+            return result;
+        }
+        assert!(Instant::now() < deadline, "the rebuild did not finish");
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn rebuilds_the_indexed_terms_of_a_document() {
+    let mut server = start();
+    server
+        .call::<OpenIndex>(OpenIndexParams {
+            path: lucene9_index(),
+            directory_impl: None,
+            mode: None,
+        })
+        .unwrap();
+
+    // "document number 2", deleted, without term vectors.
+    let result = reconstruct(&mut server, 1, &["body", "id"]);
+    let [body, id] = result.fields.as_slice() else {
+        panic!("two fields: {result:?}");
+    };
+    assert_eq!(body.source, ReconstructSource::Postings);
+    assert_eq!(body.index_options, IndexOptions::DocsAndFreqsAndPositions);
+    let positions: Vec<(&str, Vec<i32>)> = body
+        .terms
+        .iter()
+        .map(|term| {
+            let positions = term.positions.iter().filter_map(|p| p.position).collect();
+            (term.term.as_str(), positions)
+        })
+        .collect();
+    assert_eq!(
+        positions,
+        vec![("2", vec![2]), ("document", vec![0]), ("number", vec![1])]
+    );
+    assert_eq!(id.index_options, IndexOptions::Docs);
+    assert_eq!(id.terms.len(), 1);
+    assert_eq!(id.terms[0].term, "2");
+
+    let unknown = server
+        .call::<StartReconstruct>(StartReconstructParams {
+            doc_id: 0,
+            fields: Some(vec!["nope".to_owned()]),
+        })
+        .unwrap_err();
+    assert!(
+        matches!(&unknown, CallError::Rpc(e) if e.code == ErrorCode::FieldNotFound),
+        "{unknown:?}"
+    );
+
+    // The demo index's body has term vectors with positions and offsets, as its postings.
+    server
+        .call::<OpenIndex>(OpenIndexParams {
+            path: test_index("demo", "demoIndex"),
+            directory_impl: None,
+            mode: None,
+        })
+        .unwrap();
+    let result = reconstruct(&mut server, 3, &["body"]);
+    assert_eq!(result.fields[0].source, ReconstructSource::TermVector);
+    let vector = server
+        .call::<GetTermVector>(GetTermVectorParams {
+            doc_id: 3,
+            field: "body".to_owned(),
+        })
+        .unwrap();
+    assert_eq!(result.fields[0].terms, vector.terms);
 }

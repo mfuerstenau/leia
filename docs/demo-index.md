@@ -68,6 +68,10 @@ their own indexes and the Lucene 9 and 8 indexes from `LegacyIndexWriter`.
 - **42:** a 5000-word `body` (its norm encodes a range), a `_source` of about 108 KiB with a
   3000-entry `history` array (cut, then fetched whole by the viewer), and `blob`.
 - **37, 74, …:** deleted; 74 has `deleted_only`.
+- **Rebuilding indexed terms (`r`):** `title` from the postings with positions; `body` from its term
+  vector at once, and 42's 5000 words in position order (`東京` as `東 京`); `labels` with freqs and
+  `keywords` with docs only, neither of them stored; `binary_key` as hex; `deleted_only` in the
+  deleted document 74.
 
 ## Searches worth a try
 

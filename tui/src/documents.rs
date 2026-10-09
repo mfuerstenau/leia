@@ -2,7 +2,7 @@
 //! `getDocument` reports it (ADR 0006), with a panel for the selected field's values and its
 //! term vector. A document opened from the terms screen also shows where the term occurs in it,
 //! and `[`/`]` step through the term's other documents. `v` opens the selected field's values in
-//! the [`Viewer`].
+//! the [`Viewer`], and `r` rebuilds the terms the field was indexed with (ADR 0029).
 
 use std::collections::HashMap;
 
@@ -15,11 +15,12 @@ use ratatui::widgets::{Block, Cell, Clear, Paragraph, Row, Table, TableState, Wr
 
 use crate::overview::{doc_values, highlight, panel, postings};
 use crate::protocol::document::{
-    BytesValue, DocValues, DocumentField, GetDocumentResult, StoredType, StoredValue, TermPosition,
-    TermVectorTerm,
+    BytesValue, DocValues, DocumentField, GetDocumentResult, GetReconstructResult, StoredType,
+    StoredValue, TermPosition, TermVectorTerm,
 };
 use crate::protocol::index::{IndexField, IndexOptions};
 use crate::protocol::search::MatchSpan;
+use crate::reconstruct::{self, Reconstruction};
 use crate::terms::TermHit;
 use crate::text::{bytes_text, count, escape_control, first_chars};
 use crate::viewer::{self, Delimiters, Viewer, cut_size, size, stored_type};
@@ -83,6 +84,14 @@ pub enum Request {
         doc_id: i32,
         field: String,
         text: String,
+    },
+    /// Cancel the jobs in `cancel`, then rebuild the terms a field of the document was indexed
+    /// with (ADR 0029), reported back with [`Documents::reconstruct_started`],
+    /// [`Documents::reconstruct_progress`] or [`Documents::reconstruct_failed`].
+    Reconstruct {
+        doc_id: i32,
+        field: String,
+        cancel: Vec<i64>,
     },
 }
 
@@ -189,6 +198,8 @@ pub struct Documents {
     numbers: NumberFormat,
     /// Term vectors of the shown document, by field name.
     term_vectors: HashMap<String, TermVector>,
+    /// The rebuilt fields of the shown document, by field name; at most one is active.
+    reconstructions: HashMap<String, Reconstruction>,
     focus: Focus,
     /// The first line of the details panel that is shown.
     details_scroll: u16,
@@ -228,6 +239,7 @@ impl Documents {
             hide_empty: false,
             numbers: NumberFormat::Long,
             term_vectors: HashMap::new(),
+            reconstructions: HashMap::new(),
             focus: Focus::Fields,
             details_scroll: 0,
             prompt: None,
@@ -413,6 +425,7 @@ impl Documents {
         self.error = None;
         self.close_viewer();
         self.term_vectors.clear();
+        self.reconstructions.clear();
         self.details_scroll = 0;
         self.update_rows(selected);
     }
@@ -424,6 +437,7 @@ impl Documents {
         self.error = Some(error);
         self.close_viewer();
         self.term_vectors.clear();
+        self.reconstructions.clear();
         self.rows.clear();
         self.details_scroll = 0;
     }
@@ -440,6 +454,89 @@ impl Documents {
             self.term_vectors
                 .insert(field.to_owned(), TermVector::Failed(error));
         }
+    }
+
+    /// The rebuild that is asked for or running, with its field.
+    fn active_reconstruction(&mut self) -> Option<&mut Reconstruction> {
+        self.reconstructions
+            .values_mut()
+            .find(|reconstruction| reconstruction.active())
+    }
+
+    /// The rebuild job, while one runs.
+    pub fn reconstruct_job(&self) -> Option<i64> {
+        self.reconstructions.values().find_map(Reconstruction::job)
+    }
+
+    /// Rebuilds the selected field, if it is indexed and not rebuilt yet; a rebuild of another
+    /// field stops.
+    fn reconstruct(&mut self) -> Option<Request> {
+        let field = self.selected_field()?.name.clone();
+        let indexed = self
+            .schema
+            .get(&field)
+            .is_some_and(|schema| schema.index_options != IndexOptions::None);
+        let rebuilt = self
+            .reconstructions
+            .get(&field)
+            .is_some_and(|reconstruction| !matches!(reconstruction, Reconstruction::Failed(_)));
+        if !indexed || rebuilt {
+            return None;
+        }
+        let cancel = self.reconstruct_job().into_iter().collect();
+        self.reconstructions
+            .retain(|_, reconstruction| !reconstruction.active());
+        self.reconstructions
+            .insert(field.clone(), Reconstruction::Starting);
+        Some(Request::Reconstruct {
+            doc_id: self.doc_id,
+            field,
+            cancel,
+        })
+    }
+
+    pub fn reconstruct_started(&mut self, job_id: i64) {
+        if let Some(reconstruction) = self.active_reconstruction() {
+            *reconstruction = Reconstruction::Running {
+                job_id,
+                scanned: 0,
+                total: None,
+            };
+        }
+    }
+
+    /// Shows the progress of the rebuild, or the rebuilt field.
+    pub fn reconstruct_progress(&mut self, result: GetReconstructResult) {
+        let Some(reconstruction) = self.active_reconstruction() else {
+            return;
+        };
+        let Reconstruction::Running { job_id, .. } = *reconstruction else {
+            return;
+        };
+        *reconstruction = match result.result {
+            Some(done) => match done.fields.into_iter().next() {
+                Some(field) => Reconstruction::Done(field),
+                None => Reconstruction::Failed("the server rebuilt no field".to_owned()),
+            },
+            None => Reconstruction::Running {
+                job_id,
+                scanned: result.scanned_terms,
+                total: result.total_terms,
+            },
+        };
+    }
+
+    /// Shows why the rebuild couldn't start, or failed.
+    pub fn reconstruct_failed(&mut self, error: String) {
+        if let Some(reconstruction) = self.active_reconstruction() {
+            *reconstruction = Reconstruction::Failed(error);
+        }
+    }
+
+    /// Forgets the stopped rebuild, so that `r` can start it again.
+    pub fn reconstruct_cancelled(&mut self) {
+        self.reconstructions
+            .retain(|_, reconstruction| !reconstruction.active());
     }
 
     pub fn stored_value_loaded(
@@ -621,6 +718,7 @@ impl Documents {
             }
             KeyCode::Char('v') => return self.view(),
             KeyCode::Char('a') => return self.analyze(),
+            KeyCode::Char('r') => return self.reconstruct(),
             KeyCode::Char('m') if self.max_doc > 0 => {
                 return Some(Request::MoreLikeThis(self.doc_id));
             }
@@ -838,14 +936,19 @@ impl Documents {
             field,
             hit,
             self.term_vectors.get(&field.name),
+            self.reconstructions.get(&field.name),
             self.numbers,
         );
-        // Keeps the last line reachable, however far End scrolled.
-        let last = u16::try_from(lines.len().saturating_sub(1)).unwrap_or(u16::MAX);
-        self.details_scroll = self.details_scroll.min(last);
+        // Ends on the last wrapped line, however far End scrolled: a rebuilt field's tokens can
+        // wrap over many rows.
+        let paragraph = Paragraph::new(lines).wrap(Wrap { trim: false });
+        let rows = paragraph.line_count(area.width.saturating_sub(2));
+        let max_scroll = u16::try_from(rows)
+            .unwrap_or(u16::MAX)
+            .saturating_sub(area.height.saturating_sub(2));
+        self.details_scroll = self.details_scroll.min(max_scroll);
         frame.render_widget(
-            Paragraph::new(lines)
-                .wrap(Wrap { trim: false })
+            paragraph
                 .scroll((self.details_scroll, 0))
                 .block(panel(title, focused)),
             area,
@@ -965,6 +1068,7 @@ fn detail_lines(
     field: &DocumentField,
     hit: Option<HitPositions>,
     term_vector: Option<&TermVector>,
+    reconstruction: Option<&Reconstruction>,
     numbers: NumberFormat,
 ) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
@@ -1082,39 +1186,78 @@ fn detail_lines(
     lines.push(Line::from(""));
     if !field.has_term_vector {
         lines.push(Line::from(vec![label("Term vector"), Span::raw("-")]));
-        return lines;
-    }
-    match term_vector {
-        None => lines.push(Line::from(vec![
-            label("Term vector"),
-            Span::raw("⏎ loads it"),
-        ])),
-        Some(TermVector::Failed(error)) => lines.push(Line::from(vec![
-            label("Term vector"),
-            Span::raw(format!("cannot read it: {error}")),
-        ])),
-        Some(TermVector::Loaded(terms)) => {
-            lines.push(Line::from(vec![
+    } else {
+        match term_vector {
+            None => lines.push(Line::from(vec![
                 label("Term vector"),
-                Span::raw(count(terms.len(), "term")),
-            ]));
-            for term in terms {
-                let mut spans = vec![
-                    Span::raw(format!("  {}", bytes_text(&term.term, term.binary))),
-                    Span::styled(
-                        format!(" ×{}", term.freq),
-                        Style::new().add_modifier(Modifier::DIM),
-                    ),
-                ];
-                if !term.positions.is_empty() {
-                    let positions: Vec<String> = term.positions.iter().map(position_text).collect();
-                    spans.push(Span::raw(format!("  {}", positions.join(", "))));
-                }
-                lines.push(Line::from(spans));
+                Span::raw("⏎ loads it"),
+            ])),
+            Some(TermVector::Failed(error)) => lines.push(Line::from(vec![
+                label("Term vector"),
+                Span::raw(format!("cannot read it: {error}")),
+            ])),
+            Some(TermVector::Loaded(terms)) => {
+                lines.push(Line::from(vec![
+                    label("Term vector"),
+                    Span::raw(count(terms.len(), "term")),
+                ]));
+                lines.extend(term_lines(terms, true));
             }
         }
     }
+
+    if schema.is_some_and(|schema| schema.index_options != IndexOptions::None) {
+        lines.push(Line::from(""));
+        lines.extend(reconstruction_lines(reconstruction));
+    }
     lines
+}
+
+/// The terms the field was indexed with, once rebuilt: in position order if they have
+/// positions, then term by term.
+fn reconstruction_lines(reconstruction: Option<&Reconstruction>) -> Vec<Line<'static>> {
+    let Some(reconstruction) = reconstruction else {
+        return vec![Line::from(vec![
+            label("Rebuilt"),
+            Span::raw("r rebuilds the terms it was indexed with"),
+        ])];
+    };
+    let mut lines = vec![Line::from(vec![
+        label("Rebuilt"),
+        Span::raw(reconstruction.summary()),
+    ])];
+    if let Reconstruction::Done(field) = reconstruction {
+        if let Some(tokens) = reconstruct::token_line(&field.terms) {
+            lines.push(Line::from(format!("  {tokens}")));
+            lines.push(Line::from(""));
+        }
+        lines.extend(term_lines(&field.terms, reconstruct::has_freqs(field)));
+    }
+    lines
+}
+
+/// One line per term: the term, `×freq` if `freqs`, and where it occurs if known.
+fn term_lines(terms: &[TermVectorTerm], freqs: bool) -> Vec<Line<'static>> {
+    terms
+        .iter()
+        .map(|term| {
+            let mut spans = vec![Span::raw(format!(
+                "  {}",
+                bytes_text(&term.term, term.binary)
+            ))];
+            if freqs {
+                spans.push(Span::styled(
+                    format!(" ×{}", term.freq),
+                    Style::new().add_modifier(Modifier::DIM),
+                ));
+            }
+            if !term.positions.is_empty() {
+                let positions: Vec<String> = term.positions.iter().map(position_text).collect();
+                spans.push(Span::raw(format!("  {}", positions.join(", "))));
+            }
+            Line::from(spans)
+        })
+        .collect()
 }
 
 /// The term of the hit, how often it occurs, and where.
@@ -1848,13 +1991,99 @@ mod tests {
         documents.loaded(document(0, false));
         documents.handle_key(KeyCode::Tab);
         documents.handle_key(KeyCode::End);
-        let screen = render(&mut documents, 140, 30);
-        // Scrolled to the last line.
+        let screen = render(&mut documents, 140, 12);
+        // Scrolled to the last line, at the bottom of the panel.
         assert!(!screen.contains("Indexed"), "{screen}");
-        assert!(screen.contains("Term vector -"), "{screen}");
+        assert!(screen.contains("Doc values  -"), "{screen}");
+        assert!(screen.contains("Rebuilt     r rebuilds"), "{screen}");
 
         documents.handle_key(KeyCode::Home);
-        assert!(render(&mut documents, 140, 30).contains("Indexed"));
+        assert!(render(&mut documents, 140, 12).contains("Indexed"));
+    }
+
+    fn rebuilt(field: &str, terms: &[(&str, &[i32])]) -> GetReconstructResult {
+        use crate::protocol::document::{ReconstructResult, ReconstructSource, ReconstructedField};
+        GetReconstructResult {
+            scanned_terms: 10,
+            total_terms: Some(10),
+            result: Some(ReconstructResult {
+                fields: vec![ReconstructedField {
+                    field: field.to_owned(),
+                    index_options: IndexOptions::DocsAndFreqsAndPositions,
+                    source: ReconstructSource::Postings,
+                    terms: terms
+                        .iter()
+                        .map(|(term, positions)| TermVectorTerm {
+                            term: (*term).to_owned(),
+                            binary: false,
+                            freq: i32::try_from(positions.len()).unwrap(),
+                            positions: positions
+                                .iter()
+                                .map(|&position| TermPosition {
+                                    position: Some(position),
+                                    start_offset: None,
+                                    end_offset: None,
+                                    payload: None,
+                                })
+                                .collect(),
+                        })
+                        .collect(),
+                }],
+                took_millis: 1,
+            }),
+        }
+    }
+
+    #[test]
+    fn rebuilds_one_indexed_field_at_a_time() {
+        let mut rank = schema("rank", 2);
+        rank.index_options = IndexOptions::None;
+        let mut documents = Documents::new(
+            vec![schema("id", 0), schema("body", 1), rank, schema("extra", 3)],
+            5,
+        );
+        documents.loaded(document(0, false));
+
+        assert_eq!(
+            documents.handle_key(KeyCode::Char('r')),
+            Some(Request::Reconstruct {
+                doc_id: 0,
+                field: "id".to_owned(),
+                cancel: Vec::new(),
+            })
+        );
+        // Progress of no running job changes nothing.
+        documents.reconstruct_progress(rebuilt("id", &[]));
+        assert_eq!(documents.reconstruct_job(), None);
+        documents.reconstruct_started(3);
+        assert_eq!(documents.reconstruct_job(), Some(3));
+
+        // Another field stops the running rebuild.
+        documents.handle_key(KeyCode::Down);
+        assert_eq!(
+            documents.handle_key(KeyCode::Char('r')),
+            Some(Request::Reconstruct {
+                doc_id: 0,
+                field: "body".to_owned(),
+                cancel: vec![3],
+            })
+        );
+        documents.reconstruct_started(4);
+        documents.reconstruct_progress(rebuilt("body", &[("blue", &[1]), ("red", &[0, 3])]));
+        assert_eq!(documents.reconstruct_job(), None);
+        let screen = render(&mut documents, 140, 50);
+        assert!(
+            screen.contains("Rebuilt     2 terms, from the postings"),
+            "{screen}"
+        );
+        assert!(screen.contains("  red blue · red"), "{screen}");
+        assert!(screen.contains("  red ×2  0, 3"), "{screen}");
+        assert_eq!(documents.handle_key(KeyCode::Char('r')), None);
+
+        // A field that isn't indexed has nothing to rebuild.
+        documents.handle_key(KeyCode::Down);
+        assert_eq!(documents.handle_key(KeyCode::Char('r')), None);
+        assert!(!render(&mut documents, 140, 50).contains("Rebuilt"));
     }
 
     fn text(value: &str) -> BytesValue {

@@ -13,7 +13,9 @@ use serde_json::Value;
 use super::analysis::{Analyze, GetAnalysisComponents};
 use super::check::{GetCheckIndex, StartCheckIndex};
 use super::commits::{GetCommit, GetCommits};
-use super::document::{GetDocument, GetStoredValue, GetTermVector};
+use super::document::{
+    GetDocument, GetReconstruct, GetStoredValue, GetTermVector, StartReconstruct,
+};
 use super::index::{CloseIndex, GetIndexStats, OpenIndex, ReopenIndex};
 use super::jars::{AddJars, GetJars};
 use super::job::CancelJob;
@@ -161,6 +163,8 @@ fn check(fixture: &Fixture, json: &str) -> Result<(), String> {
         GetDocument::NAME => check_method::<GetDocument>(fixture, json),
         GetStoredValue::NAME => check_method::<GetStoredValue>(fixture, json),
         GetTermVector::NAME => check_method::<GetTermVector>(fixture, json),
+        StartReconstruct::NAME => check_method::<StartReconstruct>(fixture, json),
+        GetReconstruct::NAME => check_method::<GetReconstruct>(fixture, json),
         GetTerms::NAME => check_method::<GetTerms>(fixture, json),
         GetPostings::NAME => check_method::<GetPostings>(fixture, json),
         GetPositions::NAME => check_method::<GetPositions>(fixture, json),

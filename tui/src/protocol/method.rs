@@ -6,7 +6,9 @@ use serde::de::DeserializeOwned;
 use super::analysis::{Analyze, GetAnalysisComponents};
 use super::check::{GetCheckIndex, StartCheckIndex};
 use super::commits::{GetCommit, GetCommits};
-use super::document::{GetDocument, GetStoredValue, GetTermVector};
+use super::document::{
+    GetDocument, GetReconstruct, GetStoredValue, GetTermVector, StartReconstruct,
+};
 use super::index::{CloseIndex, GetIndexStats, OpenIndex, ReopenIndex};
 use super::jars::{AddJars, GetJars};
 use super::job::CancelJob;
@@ -39,6 +41,8 @@ pub const METHOD_NAMES: &[&str] = &[
     GetDocument::NAME,
     GetStoredValue::NAME,
     GetTermVector::NAME,
+    StartReconstruct::NAME,
+    GetReconstruct::NAME,
     GetTerms::NAME,
     GetPostings::NAME,
     GetPositions::NAME,

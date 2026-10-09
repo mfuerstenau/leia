@@ -10,8 +10,10 @@ import io.github.mfuerstenau.leia.server.check.StartCheckIndexHandler;
 import io.github.mfuerstenau.leia.server.commits.GetCommitHandler;
 import io.github.mfuerstenau.leia.server.commits.GetCommitsHandler;
 import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
+import io.github.mfuerstenau.leia.server.document.GetReconstructHandler;
 import io.github.mfuerstenau.leia.server.document.GetStoredValueHandler;
 import io.github.mfuerstenau.leia.server.document.GetTermVectorHandler;
+import io.github.mfuerstenau.leia.server.document.StartReconstructHandler;
 import io.github.mfuerstenau.leia.server.index.CloseIndexHandler;
 import io.github.mfuerstenau.leia.server.index.GetIndexStatsHandler;
 import io.github.mfuerstenau.leia.server.index.OpenIndexHandler;
@@ -81,6 +83,14 @@ interface HandlerModule {
     @Binds
     @IntoSet
     MethodHandler<?, ?> getTermVector(GetTermVectorHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> startReconstruct(StartReconstructHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> getReconstruct(GetReconstructHandler handler);
 
     @Binds
     @IntoSet

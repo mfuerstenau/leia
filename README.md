@@ -18,7 +18,8 @@ because Lucene 10 can't read them.
   point and vector dimensions, and summed postings statistics (doc count, Σ doc freq, Σ term freq),
   plus on request each field's term count and top terms.
 - **Documents:** one document at a time, deleted ones included: norms with the field length they
-  encode, stored values, doc values and term vectors, and a viewer for whole values as text, hex, pretty-printed JSON or delimited data.
+  encode, stored values, doc values and term vectors, the terms a field was indexed with (rebuilt
+  from the postings), and a viewer for whole values as text, hex, pretty-printed JSON or delimited data.
 - **Terms:** the terms of a field with their frequencies, and the documents that contain a term,
   with the positions, offsets and payloads of each occurrence.
 - **Commits:** every commit in the index directory with its segments, and for each segment its
@@ -195,6 +196,7 @@ scans it again; a smaller N needs no new scan.
 | `i` | go to a document id |
 | `[` `]` | previous or next document of the term opened on the terms screen |
 | `Enter` | load the term vector of the selected field |
+| `r` | rebuild the terms the selected field was indexed with (`Esc` stops it) |
 | `v` | view the selected field's values (see below) |
 | `x` | show numeric doc values as long, double bits, sortable double, float bits or sortable float |
 | `e` | hide or show the fields in which the document has nothing |
@@ -208,6 +210,14 @@ selected field's stored values, doc values and, on `Enter`, its term vector with
 offsets and payloads. Deleted documents can be read too, until a merge removes them; they are
 marked `deleted`. Byte strings that aren't UTF-8 are shown as `0x` and their hex.
 
+`r` rebuilds the terms the document was indexed with in the selected field, also for fields
+without term vectors (ADR 0029). A term vector that holds all that the postings hold is read at
+once. Otherwise every term of the field in the document's segment is checked for the document, so
+it takes a while on a field with many terms; the details panel shows the progress, and `Esc` or
+another document stops it. The result shows the tokens in position order (`a|b` at one position,
+`·` where positions were skipped, such as for a removed stop word), then each term with its freq
+and positions.
+
 The norm is shown with the field length it encodes, such as `88 → length 1048–1175`: all of
 Lucene's similarities store the number of terms in one byte (`SmallFloat.intToByte4`), exactly up to
 39 and as a range above. A norm that another similarity wrote may mean something else.
@@ -218,7 +228,7 @@ viewer fetches them whole.
 Flags: `I` indexed, `N` has a norm, `P` payloads, `S` stored, `V` term vector, `D` doc values,
 `T` points, `K` KNN vectors. `N`, `S`, `V` and `D` say what this document has; the others describe
 the field. Whether the document has terms in a field is not shown: finding out means reading the
-field's terms.
+field's terms, which `r` does.
 
 #### Viewer
 

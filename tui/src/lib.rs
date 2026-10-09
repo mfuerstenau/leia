@@ -25,6 +25,7 @@ pub mod overview;
 pub mod parser_options;
 pub mod prompt;
 pub mod protocol;
+pub mod reconstruct;
 pub mod scoring;
 pub mod search;
 pub mod server;

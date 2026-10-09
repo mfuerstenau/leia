@@ -51,7 +51,7 @@ public final class GetTermVectorHandler implements MethodHandler<GetTermVectorPa
         }
     }
 
-    private static TermVectorTerm term(io.github.mfuerstenau.leia.core.TermVectorTerm term) {
+    static TermVectorTerm term(io.github.mfuerstenau.leia.core.TermVectorTerm term) {
         ByteStrings.Encoded text = ByteStrings.encode(term.term());
         return new TermVectorTerm(
                 text.value(),

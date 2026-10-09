@@ -15,12 +15,14 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CancellationException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
+import java.util.stream.StreamSupport;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.FieldInfo;
@@ -28,6 +30,7 @@ import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.IndexFormatTooNewException;
 import org.apache.lucene.index.IndexFormatTooOldException;
 import org.apache.lucene.index.IndexNotFoundException;
+import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.MultiReader;
 import org.apache.lucene.index.MultiTerms;
@@ -603,6 +606,54 @@ public final class ReadOnlyIndex implements OpenedIndex {
         checkDocId(docId);
         checkField(field);
         return DocumentReader.termVector(reader, docId, field);
+    }
+
+    /**
+     * Rebuilds the terms a document was indexed with in each of {@code fields} (ADR 0029), from its
+     * term vector where that holds all that the postings hold, else from the postings of the
+     * document's segment. {@code progress} receives the terms gone through and can stop the scan by
+     * throwing a {@link CancellationException}. A deleted document is rebuilt too.
+     *
+     * @param fields the indexed fields to rebuild, in order; empty for every indexed field, in field
+     *     number order
+     * @throws IllegalArgumentException if there is no such document id or field, or a field isn't
+     *     indexed
+     * @throws IOException if reading the term vectors or postings fails
+     */
+    public List<Reconstruct.Field> reconstruct(int docId, Optional<List<String>> fields, ScanProgress progress)
+            throws IOException {
+        checkDocId(docId);
+        return Reconstruct.reconstruct(reader, docId, indexedFields(fields), progress);
+    }
+
+    /**
+     * How many terms {@link #reconstruct} goes through, or empty if a segment doesn't know.
+     *
+     * @throws IllegalArgumentException if there is no such document id or field, or a field isn't
+     *     indexed
+     * @throws IOException if reading the term vectors fails
+     */
+    public OptionalLong reconstructTermCount(int docId, Optional<List<String>> fields) throws IOException {
+        checkDocId(docId);
+        return Reconstruct.termCount(reader, docId, indexedFields(fields));
+    }
+
+    /** The given fields, which must be indexed, or else every indexed field in field number order. */
+    private List<String> indexedFields(Optional<List<String>> fields) {
+        if (fields.isEmpty()) {
+            return StreamSupport.stream(fieldInfos.spliterator(), false)
+                    .filter(field -> field.getIndexOptions() != IndexOptions.NONE)
+                    .sorted(Comparator.comparingInt(FieldInfo::getFieldNumber))
+                    .map(FieldInfo::getName)
+                    .toList();
+        }
+        for (String field : fields.get()) {
+            checkField(field);
+            if (fieldInfos.fieldInfo(field).getIndexOptions() == IndexOptions.NONE) {
+                throw new IllegalArgumentException("Field " + field + " is not indexed");
+            }
+        }
+        return List.copyOf(fields.get());
     }
 
     /**
