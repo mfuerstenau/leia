@@ -202,6 +202,7 @@ scans it again; a smaller N needs no new scan.
 | `r` | rebuild the terms the selected field was indexed with (`Esc` stops it) |
 | `v` | view the selected field's values (see below) |
 | `x` | show numeric doc values as long, double bits, sortable double, float bits or sortable float |
+| `s` | search for the documents with any of the selected field's doc values on the search screen, numbers as `x` shows them |
 | `e` | hide or show the fields in which the document has nothing |
 | `m` | search for documents like this one (More-Like-This) on the search screen |
 | `E` | export the document as JSON to a file, or copy it (see below) |
@@ -336,12 +337,14 @@ shows as missing. The documents and terms screens always show the opened commit.
 
 | Key | Action |
 |---|---|
-| `/` | edit the query, or for More-Like-This the document id or the text; `Enter` searches, `Esc` leaves the line, and `←` `→`, `Ctrl+A` `E` `U` `K` `W` edit |
-| `m` | switch between classic query syntax, standard query syntax, a single term, More-Like-This for a document, More-Like-This for a text and a regex over stored values |
+| `/` | edit the query, the doc values, or for More-Like-This the document id or the text; `Enter` searches, `Esc` leaves the line, and `←` `→`, `Ctrl+A` `E` `U` `K` `W` edit |
+| `m` | switch between classic query syntax, standard query syntax, a single term, doc values, More-Like-This for a document, More-Like-This for a text and a regex over stored values |
 | `p` | set the parser options, and for the standard syntax the type of each point field; for More-Like-This, its fields, limits, word lengths and stop words; `Enter` applies, `Esc` cancels |
 | `s` | set the similarity (BM25 with `k1` and `b`, classic TF-IDF or boolean) and the sort; `Enter` applies, `Esc` cancels |
 | `l` | choose the stored fields each hit shows; `Space` shows or hides one, `a` all, `n` none |
-| `f` `F` | step through the fields with postings: the default field of a query, or the field of a term |
+| `f` `F` | step through the fields with postings: the default field of a query, or the field of a term; in doc values mode, the fields with doc values |
+| `n` | doc values: read a number field as long, double bits, sortable double, float bits or sortable float |
+| `h` | doc values: read the values of a field of bytes as hex, or as text |
 | `a` | combine clauses without an operator with OR or AND |
 | `t` | count every hit, or stop counting after 1000 |
 | `x` | explain how the selected hit scores |
@@ -368,6 +371,17 @@ a resolution, the bounds stay text. Without a time zone, they are read in the se
 as Lucene does (ADR 0026). A term query searches the field for
 the line exactly as typed, `:` and spaces included, without analysis. A changed setting searches
 again.
+
+The doc values mode searches one field's doc values, which find what has neither terms nor points,
+such as a sort or facet field (ADR 0033). The line holds one value, several values separated by
+spaces, or a range in Lucene's syntax: `42`, `-1 0 1`, `[10 TO 20]`, `{0 TO *]`, `"new york"
+boston`; quotes take `\"` and `\\`, and `*` is an open bound. A document matches if any of its
+values does. The index doesn't record what a number field's longs encode, so `n` says it, as `x`
+does on the documents screen: raw double or float bits (`DoubleDocValuesField`) read as double or
+float bits, Lucene's `DoubleField` as a sortable double. Sorted and binary values compare as
+unsigned bytes, and `h` takes them in hex. Binary doc values have no query of Lucene's, so every
+document's value is read; `Esc` stops it. `s` on the documents screen searches for the selected
+field's doc values.
 
 More-Like-This searches for the documents like the one whose id the line holds, as Lucene's
 `MoreLikeThis` does; `m` on the documents screen starts it for the document shown. It takes the

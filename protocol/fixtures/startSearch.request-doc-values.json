@@ -1,0 +1,22 @@
+{
+  "jsonrpc": "2.0",
+  "id": 26,
+  "method": "startSearch",
+  "params": {
+    "query": {
+      "docValues": {
+        "field": "price",
+        "number": "DOUBLE",
+        "values": [
+          {"value": "12.5", "binary": false},
+          {"value": "-3", "binary": false}
+        ]
+      }
+    },
+    "similarity": {"bm25": {"k1": 1.2, "b": 0.75}},
+    "sort": [],
+    "offset": 0,
+    "limit": 20,
+    "exactTotalHits": true
+  }
+}

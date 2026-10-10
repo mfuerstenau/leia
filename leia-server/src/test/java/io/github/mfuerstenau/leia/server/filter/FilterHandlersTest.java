@@ -11,6 +11,7 @@ import io.github.mfuerstenau.leia.protocol.ProtocolJson;
 import io.github.mfuerstenau.leia.protocol.Response;
 import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.StandardAnalyzer;
+import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.filter.FilterMatch;
 import io.github.mfuerstenau.leia.protocol.filter.FilterPattern;
 import io.github.mfuerstenau.leia.protocol.filter.FilterResult;
@@ -20,6 +21,7 @@ import io.github.mfuerstenau.leia.protocol.filter.StartFilterParams;
 import io.github.mfuerstenau.leia.protocol.filter.StepFilterParams;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
+import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
 import io.github.mfuerstenau.leia.protocol.search.ParserOptions;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
 import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
@@ -34,12 +36,14 @@ import java.util.List;
 import java.util.Optional;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
+import org.apache.lucene.document.SortedDocValuesField;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.store.FSDirectory;
+import org.apache.lucene.util.BytesRef;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -99,6 +103,28 @@ class FilterHandlersTest {
         long jobId = start.handle(byQuery(classic("red"), true)).jobId();
 
         assertThat(await(jobId).result().orElseThrow().matchCount()).isEqualTo(3);
+        assertThat(step(jobId, 3, true)).contains(new FilterMatch(3, 2));
+    }
+
+    @Test
+    void buildsAFilterFromDocValues() throws Exception {
+        openIndex();
+        SearchQuery query = new SearchQuery(
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(new DocValuesQuery(
+                        "color",
+                        Optional.empty(),
+                        Optional.of(List.of(new BytesValue("red", false))),
+                        Optional.empty())));
+
+        long jobId = start.handle(byQuery(query, true)).jobId();
+        FilterResult filter = await(jobId).result().orElseThrow();
+
+        assertThat(filter.matchCount()).isEqualTo(3);
+        assertThat(step(jobId, 1, true)).contains(new FilterMatch(2, 1));
         assertThat(step(jobId, 3, true)).contains(new FilterMatch(3, 2));
     }
 
@@ -251,10 +277,14 @@ class FilterHandlersTest {
                         expression, defaultField, QueryOperator.OR, options, 2, false, false, STANDARD)),
                 Optional.empty(),
                 Optional.empty(),
+                Optional.empty(),
                 Optional.empty());
     }
 
-    /** One segment: "red", "blue", "red", "red" (deleted) and "green", with the ids 0 to 4. */
+    /**
+     * One segment: "red", "blue", "red", "red" (deleted) and "green", with the ids 0 to 4, each
+     * also as the sorted doc values {@code color}.
+     */
     private void openIndex() throws Exception {
         Path dir = tmp.resolve("index");
         try (FSDirectory directory = FSDirectory.open(dir);
@@ -264,6 +294,7 @@ class FilterHandlersTest {
                 Document doc = new Document();
                 doc.add(new StringField("id", Integer.toString(id), Field.Store.YES));
                 doc.add(new TextField("body", bodies.get(id), Field.Store.YES));
+                doc.add(new SortedDocValuesField("color", new BytesRef(bodies.get(id))));
                 writer.addDocument(doc);
             }
             writer.deleteDocuments(new Term("id", "3"));

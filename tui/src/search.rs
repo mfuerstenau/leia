@@ -15,6 +15,7 @@ use ratatui::text::Line;
 use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState, Wrap};
 
 use crate::analyzer::AnalyzerSettings;
+use crate::doc_values;
 use crate::form::FormEvent;
 use crate::hit_fields::{FieldsForm, HitFields};
 use crate::input::{Edit, LineInput, typed_char, word_start};
@@ -23,12 +24,12 @@ use crate::overview::{highlight, panel};
 use crate::parser_options::{OptionsForm, ParserSettings};
 use crate::protocol::document::{BytesValue, StoredValue};
 use crate::protocol::filter::{FilterPattern, StartFilterParams};
-use crate::protocol::index::{IndexField, IndexOptions};
+use crate::protocol::index::{DocValuesType, IndexField, IndexOptions};
 use crate::protocol::search::{
-    ClassicQuery, Explanation, GetExplainResult, GetSearchResult, GetStoredScanResult, Hit,
-    LikeTerm, MAX_WINDOW, MatchSpan, QueryOperator, SearchQuery, SearchResults, SortValue,
-    StandardQuery, StartExplainParams, StartSearchParams, StartStoredScanParams, TermQuery,
-    TotalHitsRelation,
+    ClassicQuery, DocValuesNumber, Explanation, GetExplainResult, GetSearchResult,
+    GetStoredScanResult, Hit, LikeTerm, MAX_WINDOW, MatchSpan, QueryOperator, SearchQuery,
+    SearchResults, SortValue, StandardQuery, StartExplainParams, StartSearchParams,
+    StartStoredScanParams, TermQuery, TotalHitsRelation,
 };
 use crate::scoring::{ScoringForm, ScoringSettings};
 use crate::stored_scan::StoredScan;
@@ -102,6 +103,8 @@ enum Mode {
     LikeText,
     /// A regular expression over the stored values of every document (ADR 0027).
     Regex,
+    /// Values of the selected field's doc values: one, several or a range (ADR 0033).
+    DocValues,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -193,6 +196,16 @@ pub struct Search {
     /// Whether the input holds a binary term in hex, as the overview's top terms bring it. An
     /// edit makes it text again.
     binary: bool,
+    /// The fields with doc values and their types, in field number order (ADR 0033).
+    doc_values_fields: Vec<(String, DocValuesType)>,
+    /// The field of a doc values query.
+    doc_values_field: usize,
+    /// How the selected number field encodes its numbers.
+    number: DocValuesNumber,
+    /// Whether the values of a doc values query on bytes are hex; edits keep it.
+    hex: bool,
+    /// Why the doc values line could not be read, until the next search.
+    line_error: Option<String>,
     editing: bool,
     focus: Focus,
     submitted: Option<Submitted>,
@@ -240,6 +253,15 @@ impl Search {
             scan: None,
             input: LineInput::new(""),
             binary: false,
+            doc_values_fields: fields
+                .iter()
+                .filter(|field| field.doc_values_type != DocValuesType::None)
+                .map(|field| (field.name.clone(), field.doc_values_type))
+                .collect(),
+            doc_values_field: 0,
+            number: DocValuesNumber::Long,
+            hex: false,
+            line_error: None,
             editing: false,
             focus: Focus::Hits,
             submitted: None,
@@ -262,6 +284,16 @@ impl Search {
         {
             search.field = row;
         }
+        if let Some((field, _)) = self.doc_values_fields.get(self.doc_values_field)
+            && let Some(row) = search
+                .doc_values_fields
+                .iter()
+                .position(|(f, _)| f == field)
+        {
+            search.doc_values_field = row;
+        }
+        search.number = self.number;
+        search.hex = self.hex;
         search.mode = self.mode;
         search.operator = self.operator;
         search.exact = self.exact;
@@ -361,9 +393,82 @@ impl Search {
         self.submit()
     }
 
+    /// Searches `field`'s doc values for `values` (ADR 0033), as the documents screen asks for:
+    /// numbers in `number`, bytes in hex if `hex`.
+    pub fn doc_values_query(
+        &mut self,
+        field: &str,
+        number: DocValuesNumber,
+        hex: bool,
+        values: &[String],
+    ) -> Option<Request> {
+        self.doc_values_field = self
+            .doc_values_fields
+            .iter()
+            .position(|(f, _)| f == field)?;
+        self.mode = Mode::DocValues;
+        if self.number_field() {
+            self.number = number;
+        } else {
+            self.hex = hex;
+        }
+        let line: Vec<String> = values
+            .iter()
+            .map(|value| doc_values::quote(value))
+            .collect();
+        self.input.set(line.join(" "));
+        self.binary = false;
+        self.editing = false;
+        self.focus = Focus::Hits;
+        self.submit()
+    }
+
+    /// The doc values field of the doc values mode, and its type.
+    fn doc_values_field(&self) -> Option<&(String, DocValuesType)> {
+        self.doc_values_fields.get(self.doc_values_field)
+    }
+
+    /// Whether the doc values field holds numbers, which need [`Self::number`].
+    fn number_field(&self) -> bool {
+        self.doc_values_field().is_some_and(|(_, kind)| {
+            matches!(kind, DocValuesType::Numeric | DocValuesType::SortedNumeric)
+        })
+    }
+
+    /// Whether the mode has a field to search.
+    fn has_fields(&self) -> bool {
+        match self.mode {
+            Mode::DocValues => !self.doc_values_fields.is_empty(),
+            Mode::Regex => true,
+            _ => !self.fields.is_empty(),
+        }
+    }
+
+    /// The doc values query of the line; `None` while the line is blank, an error if it doesn't
+    /// read.
+    fn doc_values_line(&self) -> Option<Result<SearchQuery, String>> {
+        let (field, _) = self.doc_values_field()?;
+        if self.input.text().trim().is_empty() {
+            return None;
+        }
+        let number = self.number_field().then_some(self.number);
+        Some(
+            doc_values::query(field, number, self.hex, self.input.text()).map(|query| {
+                SearchQuery {
+                    doc_values: Some(query),
+                    ..SearchQuery::default()
+                }
+            }),
+        )
+    }
+
     /// The query that the query line and the settings describe; `None` while the line is blank,
-    /// or in More-Like-This mode while it is no document id.
+    /// in More-Like-This mode while it is no document id, or in doc values mode while it doesn't
+    /// read.
     fn query(&self) -> Option<SearchQuery> {
+        if self.mode == Mode::DocValues {
+            return self.doc_values_line()?.ok();
+        }
         let field = self.fields.get(self.field)?.clone();
         let text = self.input.text();
         if text.trim().is_empty() {
@@ -419,7 +524,7 @@ impl Search {
                 ),
                 ..SearchQuery::default()
             },
-            Mode::Regex => return None,
+            Mode::Regex | Mode::DocValues => return None,
         })
     }
 
@@ -434,6 +539,7 @@ impl Search {
         let text = self.input.text().trim();
         let label = match self.mode {
             Mode::Term => format!("{}:{text}", self.fields.get(self.field)?),
+            Mode::DocValues => format!("{}:{text}", self.doc_values_field()?.0),
             Mode::Like => format!("like #{text}"),
             Mode::LikeText => format!("like \"{text}\""),
             _ => text.to_owned(),
@@ -480,6 +586,15 @@ impl Search {
     fn submit(&mut self) -> Option<Request> {
         if self.mode == Mode::Regex {
             return self.submit_scan();
+        }
+        self.line_error = None;
+        if self.mode == Mode::DocValues
+            && let Some(Err(error)) = self.doc_values_line()
+        {
+            let cancel = self.jobs();
+            self.forget_hits();
+            self.line_error = Some(error);
+            return (!cancel.is_empty()).then_some(Request::Cancel(cancel));
         }
         let params = StartSearchParams {
             query: self.query()?,
@@ -531,8 +646,8 @@ impl Search {
     fn resubmit(&mut self) -> Option<Request> {
         if self.mode == Mode::Regex {
             self.scan.as_ref()?;
-        } else {
-            self.submitted.as_ref()?;
+        } else if self.submitted.is_none() && self.line_error.is_none() {
+            return None;
         }
         self.submit()
     }
@@ -560,6 +675,7 @@ impl Search {
 
     /// Forgets the submitted search, its hits and its explanation.
     fn forget_hits(&mut self) {
+        self.line_error = None;
         self.submitted = None;
         self.running = None;
         self.explain = None;
@@ -761,10 +877,11 @@ impl Search {
 
     /// Edits the query line while it is open (Enter searches, Esc closes it), or a popup (Enter
     /// applies and searches again, Esc cancels). Otherwise `/` opens the line, `m` cycles classic
-    /// syntax, standard syntax, a term, More-Like-This for a document or a text, and a regex over
-    /// stored values, `p` opens the parser options or the
+    /// syntax, standard syntax, a term, doc values, More-Like-This for a document or a text, and a
+    /// regex over stored values, `p` opens the parser options or the
     /// More-Like-This settings, `s` the similarity and the sort, `l` the stored fields per hit,
-    /// `f`/`F` step the field, `a` switches between OR and AND, `t` between an exact and an
+    /// `f`/`F` step the field, `n` the encoding of a doc values number field, `h` switches its
+    /// bytes between text and hex, `a` switches between OR and AND, `t` between an exact and an
     /// approximate count, `x` explains the selected hit, Enter shows its document, `b`/`B`
     /// browse the documents that match without or with the deleted ones (ADR 0031, ADR 0032 for
     /// the regex), and Tab
@@ -813,12 +930,13 @@ impl Search {
             return request;
         }
         match key.code {
-            KeyCode::Char('/') if !self.fields.is_empty() => self.editing = true,
+            KeyCode::Char('/') if self.has_fields() => self.editing = true,
             KeyCode::Char('m') => {
                 return self.switch_mode(match self.mode {
                     Mode::Classic => Mode::Standard,
                     Mode::Standard => Mode::Term,
-                    Mode::Term => Mode::Like,
+                    Mode::Term => Mode::DocValues,
+                    Mode::DocValues => Mode::Like,
                     Mode::Like => Mode::LikeText,
                     Mode::LikeText => Mode::Regex,
                     Mode::Regex => Mode::Classic,
@@ -827,7 +945,7 @@ impl Search {
             KeyCode::Char('p') if matches!(self.mode, Mode::Like | Mode::LikeText) => {
                 self.form = Some(Popup::Like(LikeForm::new(&self.like)));
             }
-            KeyCode::Char('p') if self.mode != Mode::Term => {
+            KeyCode::Char('p') if matches!(self.mode, Mode::Classic | Mode::Standard) => {
                 let form = OptionsForm::new(&self.parser, self.mode == Mode::Classic);
                 self.form = Some(Popup::Parser(form));
             }
@@ -838,7 +956,27 @@ impl Search {
                 self.form = Some(Popup::Fields(FieldsForm::new(&self.hit_fields)));
             }
             KeyCode::Char('f') | KeyCode::Char('F')
-                if !self.fields.is_empty() && !matches!(self.mode, Mode::Like | Mode::LikeText) =>
+                if self.mode == Mode::DocValues && !self.doc_values_fields.is_empty() =>
+            {
+                let len = self.doc_values_fields.len();
+                self.doc_values_field = if key.code == KeyCode::Char('f') {
+                    (self.doc_values_field + 1) % len
+                } else {
+                    (self.doc_values_field + len - 1) % len
+                };
+                return self.resubmit();
+            }
+            KeyCode::Char('n') if self.mode == Mode::DocValues && self.number_field() => {
+                self.number = next_number(self.number);
+                return self.resubmit();
+            }
+            KeyCode::Char('h') if self.mode == Mode::DocValues && !self.number_field() => {
+                self.hex = !self.hex;
+                return self.resubmit();
+            }
+            KeyCode::Char('f') | KeyCode::Char('F')
+                if !self.fields.is_empty()
+                    && !matches!(self.mode, Mode::Like | Mode::LikeText | Mode::DocValues) =>
             {
                 let len = self.fields.len();
                 self.field = if key.code == KeyCode::Char('f') {
@@ -962,6 +1100,10 @@ impl Search {
                 "/ text   m mode   p/s/l settings   t count   x explain   ⏎ open doc   b/B browse   \
                  Tab panel   ↑↓"
             }
+            None if self.mode == Mode::DocValues => {
+                "/ values   m mode   s/l settings   f/F field   n number   h hex   t count   \
+                 x explain   ⏎ open doc   b/B browse   Tab panel   ↑↓"
+            }
             None if self.mode != Mode::Term => {
                 "/ query   m mode   p/s/l settings   f/F field   a AND/OR   t count   x explain   \
                  ⏎ open doc   b/B browse   Tab panel   ↑↓"
@@ -974,9 +1116,14 @@ impl Search {
     }
 
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
-        if self.fields.is_empty() && self.mode != Mode::Regex {
+        if !self.has_fields() {
+            let text = if self.mode == Mode::DocValues {
+                "No field has doc values, so there is nothing to search. m switches the mode."
+            } else {
+                "No field has postings, so there is nothing to search."
+            };
             frame.render_widget(
-                Paragraph::new("No field has postings, so there is nothing to search.")
+                Paragraph::new(text)
                     .wrap(Wrap { trim: false })
                     .block(panel(" Query ".to_owned(), true)),
                 area,
@@ -1049,6 +1196,23 @@ impl Search {
                 };
                 format!(" Regex over stored values · fields {fields} · {case}{deleted} ")
             }
+            Mode::DocValues => {
+                let (field, kind) = self
+                    .doc_values_field()
+                    .map(|(field, kind)| (escape_control(field), *kind))
+                    .unwrap_or((String::new(), DocValuesType::None));
+                let encoding = if self.number_field() {
+                    number_label(self.number)
+                } else if self.hex {
+                    "hex"
+                } else {
+                    "text"
+                };
+                format!(
+                    " Doc values · field {field} ({}) · {encoding} · {count} ",
+                    doc_values_type_label(kind)
+                )
+            }
         };
         let block = panel(title, self.editing);
         let inner = block.inner(area);
@@ -1062,6 +1226,7 @@ impl Search {
                 Mode::Like => "Press / to type a document id, or m on the documents screen.",
                 Mode::LikeText => "Press / to type a text to find documents like it.",
                 Mode::Regex => "Press / to type a regular expression.",
+                Mode::DocValues => "Press / to type a value, several values, or a range.",
                 _ => "Press / to type a query.",
             };
             frame.render_widget(Line::from(hint).style(dim()), inner);
@@ -1087,6 +1252,16 @@ impl Search {
             };
             format!("searching… {percent}%")
         });
+        if let Some(error) = &self.line_error {
+            frame.render_widget(
+                Paragraph::new(error.clone())
+                    .style(Style::new().fg(Color::Red))
+                    .wrap(Wrap { trim: false })
+                    .block(panel(" Cannot read the values ".to_owned(), focused)),
+                area,
+            );
+            return;
+        }
         let Some(submitted) = &self.submitted else {
             frame.render_widget(panel(" Hits ".to_owned(), focused), area);
             return;
@@ -1263,6 +1438,17 @@ impl Search {
                 Mode::Term => vec![Line::from(
                     "The line is one term of the field, as it is: nothing is analyzed or split.",
                 )],
+                Mode::DocValues => vec![
+                    Line::from("Doc values: one value, several values, or a range, for example:"),
+                    Line::from("  42   -1 0 1   [10 TO 20]   {0 TO *]   \"new york\" boston"),
+                    Line::from(
+                        "Numbers are read as n says, as the documents screen's x shows them;",
+                    ),
+                    Line::from("h reads bytes as hex. A document matches if any of its values does."),
+                    Line::from(
+                        "Every value of the field is read, and a BINARY field is scanned: Esc stops it.",
+                    ),
+                ],
                 Mode::Regex => Vec::new(),
                 Mode::Like => vec![
                     Line::from(
@@ -1346,7 +1532,7 @@ impl Search {
     /// What the settings popups set, for the footer's `p/s/l settings`.
     fn settings_line(&self) -> Line<'static> {
         let popups = match self.mode {
-            Mode::Term => "s similarity and sort · l stored fields per hit",
+            Mode::Term | Mode::DocValues => "s similarity and sort · l stored fields per hit",
             Mode::Regex => "l fields to scan",
             Mode::Like | Mode::LikeText => {
                 "p more like this · s similarity and sort · l stored fields per hit"
@@ -1371,11 +1557,11 @@ impl Search {
         if let Some(fields) = self.hit_fields.text() {
             lines.push(Line::from(format!("Fields     {fields}")));
         }
-        if self.mode != Mode::Term && !self.analyzer.is_standard() {
+        if !matches!(self.mode, Mode::Term | Mode::DocValues) && !self.analyzer.is_standard() {
             lines.push(Line::from(format!("Analyzer   {}", self.analyzer.text())));
         }
         match self.mode {
-            Mode::Term | Mode::Regex => return lines,
+            Mode::Term | Mode::Regex | Mode::DocValues => return lines,
             Mode::Like | Mode::LikeText => {
                 lines.push(Line::from(format!(
                     "Like       {}",
@@ -1396,6 +1582,39 @@ impl Search {
             )));
         }
         lines
+    }
+}
+
+/// The next encoding `n` steps to, in the order of the documents screen's `x`.
+fn next_number(number: DocValuesNumber) -> DocValuesNumber {
+    match number {
+        DocValuesNumber::Long => DocValuesNumber::Double,
+        DocValuesNumber::Double => DocValuesNumber::SortableDouble,
+        DocValuesNumber::SortableDouble => DocValuesNumber::Float,
+        DocValuesNumber::Float => DocValuesNumber::SortableFloat,
+        DocValuesNumber::SortableFloat => DocValuesNumber::Long,
+    }
+}
+
+/// How the title names an encoding, as the documents screen's `x` does.
+fn number_label(number: DocValuesNumber) -> &'static str {
+    match number {
+        DocValuesNumber::Long => "long",
+        DocValuesNumber::Double => "double bits",
+        DocValuesNumber::SortableDouble => "sortable double",
+        DocValuesNumber::Float => "float bits",
+        DocValuesNumber::SortableFloat => "sortable float",
+    }
+}
+
+fn doc_values_type_label(kind: DocValuesType) -> &'static str {
+    match kind {
+        DocValuesType::None => "none",
+        DocValuesType::Numeric => "NUMERIC",
+        DocValuesType::Binary => "BINARY",
+        DocValuesType::Sorted => "SORTED",
+        DocValuesType::SortedNumeric => "SORTED_NUMERIC",
+        DocValuesType::SortedSet => "SORTED_SET",
     }
 }
 
@@ -1562,9 +1781,9 @@ mod tests {
     use crate::protocol::document::StoredType;
     use crate::protocol::index::{DocValuesType, TermStats};
     use crate::protocol::search::{
-        Bm25Similarity, ClassicSimilarity, FieldSort, HitField, MoreLikeThisQuery, ParserOptions,
-        PointField, PointType, Similarity, Snippet, SortKey, SortMissing, SortSelector, SortType,
-        StoredScanHit, StoredScanResult,
+        Bm25Similarity, ClassicSimilarity, DocValuesQuery, DocValuesRange, FieldSort, HitField,
+        MoreLikeThisQuery, ParserOptions, PointField, PointType, Similarity, Snippet, SortKey,
+        SortMissing, SortSelector, SortType, StoredScanHit, StoredScanResult,
     };
 
     fn bm25() -> Similarity {
@@ -1739,7 +1958,7 @@ mod tests {
     /// The search screen in regex mode, with `pattern` submitted.
     fn regex(pattern: &str) -> (Search, StartStoredScanParams) {
         let mut search = search();
-        for _ in 0..5 {
+        for _ in 0..6 {
             assert_eq!(press(&mut search, KeyCode::Char('m')), None);
         }
         press(&mut search, KeyCode::Char('/'));
@@ -1886,7 +2105,7 @@ mod tests {
         assert_eq!(search.mode, Mode::Classic);
         assert!(search.scan.is_none());
         // Back in regex mode, nothing runs by itself.
-        for _ in 0..5 {
+        for _ in 0..6 {
             assert_eq!(press(&mut search, KeyCode::Char('m')), None);
         }
         assert!(search.scan.is_none());
@@ -2094,6 +2313,210 @@ mod tests {
         assert!(!search.prompting());
     }
 
+    fn doc_values_of(request: Option<Request>) -> DocValuesQuery {
+        let Some(Request::Search { params, .. }) = request else {
+            panic!("searches the doc values: {request:?}");
+        };
+        params.query.doc_values.expect("a doc values query")
+    }
+
+    fn text(value: &str) -> BytesValue {
+        BytesValue {
+            value: value.to_owned(),
+            binary: false,
+        }
+    }
+
+    /// The search screen in doc values mode, on `price`.
+    fn doc_values_mode() -> Search {
+        let mut search = search();
+        for _ in 0..3 {
+            assert_eq!(press(&mut search, KeyCode::Char('m')), None);
+        }
+        assert_eq!(search.mode, Mode::DocValues);
+        search
+    }
+
+    #[test]
+    fn doc_values_mode_searches_the_values_of_a_field() {
+        let mut search = doc_values_mode();
+        let screen = render(&mut search);
+        assert!(
+            screen.contains("Doc values · field price (NUMERIC) · long · count to 1000"),
+            "{screen}"
+        );
+        assert!(screen.contains("Press / to type a value, several values, or a range."));
+        assert!(search.keys().starts_with("/ values"));
+
+        press(&mut search, KeyCode::Char('/'));
+        typed(&mut search, "{1 TO *]");
+        assert_eq!(
+            doc_values_of(press(&mut search, KeyCode::Enter)),
+            DocValuesQuery {
+                field: "price".to_owned(),
+                number: Some(DocValuesNumber::Long),
+                values: None,
+                range: Some(DocValuesRange {
+                    lower: Some(text("1")),
+                    upper: None,
+                    include_lower: false,
+                    include_upper: true,
+                }),
+            }
+        );
+
+        // n steps the encoding of the numbers, and searches again.
+        let query = doc_values_of(press(&mut search, KeyCode::Char('n')));
+        assert_eq!(query.number, Some(DocValuesNumber::Double));
+        assert!(render(&mut search).contains("price (NUMERIC) · double bits"));
+        // There is no operator and there are no parser options; h is for bytes only.
+        assert_eq!(press(&mut search, KeyCode::Char('a')), None);
+        assert_eq!(press(&mut search, KeyCode::Char('p')), None);
+        assert_eq!(press(&mut search, KeyCode::Char('h')), None);
+        assert!(!search.prompting());
+    }
+
+    #[test]
+    fn doc_values_mode_steps_through_the_fields_with_doc_values() {
+        let mut search = doc_values_mode();
+        press(&mut search, KeyCode::Char('/'));
+        typed(&mut search, "books \"new york\"");
+        press(&mut search, KeyCode::Enter);
+
+        let query = doc_values_of(press(&mut search, KeyCode::Char('f')));
+        assert_eq!(query.field, "category");
+        assert_eq!(query.number, None);
+        assert_eq!(query.values, Some(vec![text("books"), text("new york")]));
+        assert!(render(&mut search).contains("Doc values · field category (SORTED) · text"));
+        // n is for numbers only.
+        assert_eq!(press(&mut search, KeyCode::Char('n')), None);
+        // f goes round to price again.
+        assert_eq!(
+            doc_values_of(press(&mut search, KeyCode::Char('f'))).field,
+            "price"
+        );
+    }
+
+    #[test]
+    fn a_doc_values_line_that_doesnt_read_says_why() {
+        let mut search = doc_values_mode();
+        press(&mut search, KeyCode::Char('f'));
+        press(&mut search, KeyCode::Char('/'));
+        typed(&mut search, "80ff");
+        press(&mut search, KeyCode::Enter);
+        search.search_started(4);
+
+        // In hex, "80ff" reads; "8" doesn't, and the running search stops.
+        assert_eq!(
+            doc_values_of(press(&mut search, KeyCode::Char('h'))).values,
+            Some(vec![BytesValue {
+                value: "80ff".to_owned(),
+                binary: true,
+            }])
+        );
+        search.search_started(5);
+        press(&mut search, KeyCode::Char('/'));
+        press(&mut search, KeyCode::Backspace);
+        press(&mut search, KeyCode::Backspace);
+        press(&mut search, KeyCode::Backspace);
+        assert_eq!(
+            press(&mut search, KeyCode::Enter),
+            Some(Request::Cancel(vec![5]))
+        );
+        let screen = render(&mut search);
+        assert!(screen.contains("Cannot read the values"), "{screen}");
+        assert!(screen.contains("'8' is not hex"), "{screen}");
+        assert!(screen.contains("category (SORTED) · hex"), "{screen}");
+
+        press(&mut search, KeyCode::Char('/'));
+        typed(&mut search, "0");
+        assert!(
+            doc_values_of(press(&mut search, KeyCode::Enter))
+                .values
+                .is_some()
+        );
+        assert!(!render(&mut search).contains("Cannot read the values"));
+    }
+
+    #[test]
+    fn the_documents_screen_searches_doc_values() {
+        let mut search = search();
+
+        let query = doc_values_of(search.doc_values_query(
+            "category",
+            DocValuesNumber::Float,
+            false,
+            &["new york".to_owned(), "*".to_owned()],
+        ));
+
+        assert_eq!(query.number, None);
+        assert_eq!(query.values, Some(vec![text("new york"), text("*")]));
+        assert_eq!(search.input.text(), "\"new york\" \"*\"");
+        let query = doc_values_of(search.doc_values_query(
+            "price",
+            DocValuesNumber::Float,
+            false,
+            &["1.5".to_owned()],
+        ));
+        assert_eq!(query.number, Some(DocValuesNumber::Float));
+        assert_eq!(query.values, Some(vec![text("1.5")]));
+        assert_eq!(
+            search.doc_values_query("title", DocValuesNumber::Long, false, &[]),
+            None
+        );
+    }
+
+    #[test]
+    fn doc_values_browse_the_documents_and_survive_a_reopen() {
+        let mut search = doc_values_mode();
+        search.doc_values_query("category", DocValuesNumber::Long, true, &["00".to_owned()]);
+
+        let Some(Request::Filter { params, label, .. }) = press(&mut search, KeyCode::Char('b'))
+        else {
+            panic!("b browses the matches");
+        };
+        assert_eq!(label, "category:00");
+        assert_eq!(
+            params
+                .query
+                .and_then(|query| query.doc_values)
+                .map(|query| query.field),
+            Some("category".to_owned())
+        );
+
+        search.number = DocValuesNumber::SortableFloat;
+        let reopened = search.reopened(
+            &[
+                IndexField {
+                    doc_values_type: DocValuesType::Sorted,
+                    terms: None,
+                    ..field("category", IndexOptions::None)
+                },
+                field("title", IndexOptions::DocsAndFreqsAndPositions),
+            ],
+            500,
+            false,
+        );
+        assert_eq!(reopened.mode, Mode::DocValues);
+        assert_eq!(
+            reopened.doc_values_field().map(|(field, _)| field.as_str()),
+            Some("category")
+        );
+        assert_eq!(reopened.number, DocValuesNumber::SortableFloat);
+        assert!(reopened.hex);
+    }
+
+    #[test]
+    fn doc_values_mode_without_doc_values_says_so() {
+        let mut search = Search::new(&[field("title", IndexOptions::DocsAndFreqsAndPositions)], 5);
+        for _ in 0..3 {
+            press(&mut search, KeyCode::Char('m'));
+        }
+        assert!(render(&mut search).contains("No field has doc values"));
+        press(&mut search, KeyCode::Char('/'));
+        assert!(!search.prompting());
+    }
+
     fn like(doc_id: i32) -> MoreLikeThisQuery {
         MoreLikeThisQuery {
             doc_id: Some(doc_id),
@@ -2125,7 +2548,7 @@ mod tests {
     #[test]
     fn like_text_mode_takes_the_line_as_a_text_and_shows_the_chosen_terms() {
         let mut search = search();
-        for _ in 0..4 {
+        for _ in 0..5 {
             assert_eq!(press(&mut search, KeyCode::Char('m')), None);
         }
         let screen = render(&mut search);
@@ -2187,7 +2610,7 @@ mod tests {
     #[test]
     fn more_like_this_mode_takes_the_line_as_a_document_id() {
         let mut search = search();
-        for _ in 0..3 {
+        for _ in 0..4 {
             assert_eq!(press(&mut search, KeyCode::Char('m')), None);
         }
         let screen = render(&mut search);
@@ -2267,9 +2690,13 @@ mod tests {
         press(&mut search, KeyCode::Char('m'));
         let running = press(&mut search, KeyCode::Char('m'));
         assert!(matches!(running, Some(Request::Search { .. })));
+        search.search_started(6);
+        // The doc values mode takes "red" as a value too.
+        let running = press(&mut search, KeyCode::Char('m'));
+        assert!(matches!(running, Some(Request::Search { cancel, .. }) if cancel == vec![6]));
         search.search_started(7);
 
-        // "red" is no document id: the term search's hits and job go.
+        // "red" is no document id: the doc values search's hits and job go.
         assert_eq!(
             press(&mut search, KeyCode::Char('m')),
             Some(Request::Cancel(vec![7]))

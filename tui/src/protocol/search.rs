@@ -49,7 +49,8 @@ pub const MAX_SEARCH_LIMIT: i32 = 1000;
 /// The largest `offset + limit` of `startSearch` the server accepts.
 pub const MAX_WINDOW: i32 = 10_000;
 
-/// A query, as one of several alternatives: exactly one is present (ADR 0010, ADR 0011, ADR 0013).
+/// A query, as one of several alternatives: exactly one is present (ADR 0010, ADR 0011, ADR 0013,
+/// ADR 0033).
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SearchQuery {
@@ -65,6 +66,9 @@ pub struct SearchQuery {
     /// Documents like one document of the index.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub more_like_this: Option<MoreLikeThisQuery>,
+    /// Documents by the doc values of one field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doc_values: Option<DocValuesQuery>,
 }
 
 /// Documents like one document of the index, or like a text, by the terms that Lucene's
@@ -392,6 +396,61 @@ pub enum QueryOperator {
 pub struct TermQuery {
     pub field: String,
     pub term: BytesValue,
+}
+
+/// Documents by the doc values of one field (ADR 0033): those with a value equal to one of
+/// `values`, or with a value in `range`. Exactly one of the two is present. A field with several
+/// values per document matches if any of them does.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DocValuesQuery {
+    /// A field with doc values.
+    pub field: String,
+    /// How the values of a `NUMERIC` or `SORTED_NUMERIC` field are encoded; present for those
+    /// fields only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub number: Option<DocValuesNumber>,
+    /// The values to match, at least one: a number's decimal text for a number field (as text,
+    /// never binary), the bytes otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub values: Option<Vec<BytesValue>>,
+    /// The values to match, from a lower to an upper bound.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub range: Option<DocValuesRange>,
+}
+
+/// A range of doc values (ADR 0033). Bytes compare unsigned, byte by byte; numbers compare as the
+/// numbers they encode.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DocValuesRange {
+    /// The lower bound, as [`DocValuesQuery::values`] has them; `None` for none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lower: Option<BytesValue>,
+    /// The upper bound; `None` for none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub upper: Option<BytesValue>,
+    /// Whether the lower bound itself matches.
+    pub include_lower: bool,
+    /// Whether the upper bound itself matches.
+    pub include_upper: bool,
+}
+
+/// How a number field's doc values encode their numbers, which the index doesn't record
+/// (ADR 0033).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum DocValuesNumber {
+    /// The long itself, as `NumericDocValuesField` and `LongField` write it.
+    Long,
+    /// The raw bits of a double, as `DoubleDocValuesField` writes them.
+    Double,
+    /// `NumericUtils.doubleToSortableLong`, as `DoubleField` writes it.
+    SortableDouble,
+    /// The raw bits of a float, as `FloatDocValuesField` writes them.
+    Float,
+    /// `NumericUtils.floatToSortableInt`, as `FloatField` writes it.
+    SortableFloat,
 }
 
 /// `getSearch`: the progress of a search, and its outcome once it is done. The outcome is handed

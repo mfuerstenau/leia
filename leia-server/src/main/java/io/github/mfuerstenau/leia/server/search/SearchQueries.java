@@ -1,6 +1,9 @@
 package io.github.mfuerstenau.leia.server.search;
 
 import io.github.mfuerstenau.leia.core.ClassicOptions;
+import io.github.mfuerstenau.leia.core.DocValuesMatch;
+import io.github.mfuerstenau.leia.core.DocValuesNumber;
+import io.github.mfuerstenau.leia.core.DocValuesQueries;
 import io.github.mfuerstenau.leia.core.InvalidQueryException;
 import io.github.mfuerstenau.leia.core.MoreLikeThisOptions;
 import io.github.mfuerstenau.leia.core.ParserOptions;
@@ -12,7 +15,10 @@ import io.github.mfuerstenau.leia.core.SortMissing;
 import io.github.mfuerstenau.leia.core.SortSelector;
 import io.github.mfuerstenau.leia.core.SortType;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
+import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
+import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
+import io.github.mfuerstenau.leia.protocol.search.DocValuesRange;
 import io.github.mfuerstenau.leia.protocol.search.FieldSort;
 import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
 import io.github.mfuerstenau.leia.protocol.search.PointField;
@@ -37,6 +43,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Stream;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.document.DateTools;
@@ -45,10 +52,11 @@ import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.Sort;
 import org.apache.lucene.search.SortField;
+import org.apache.lucene.util.BytesRef;
 
 /**
  * Turns the query, the similarity and the sort of {@code startSearch} and {@code startExplain} into
- * their Lucene counterparts (ADR 0010 to ADR 0014, ADR 0025). {@code startFilter} takes the query
+ * their Lucene counterparts (ADR 0010 to ADR 0014, ADR 0025, ADR 0033). {@code startFilter} takes the query
  * too (ADR 0031).
  */
 public final class SearchQueries {
@@ -74,20 +82,26 @@ public final class SearchQueries {
      *
      * @throws RpcException {@code INVALID_PARAMS} unless exactly one alternative is present, for a
      *     parser option or More-Like-This setting out of range, a point type that doesn't fit its
-     *     field, a More-Like-This field that isn't indexed, or a binary term that is not hex; {@code
-     *     FIELD_NOT_FOUND} for an unknown default, term, point or More-Like-This field; {@code
+     *     field, a More-Like-This field that isn't indexed, a binary term that is not hex, or doc
+     *     values that don't fit the field or its number encoding; {@code FIELD_NOT_FOUND} for an
+     *     unknown default, term, point, More-Like-This or doc values field; {@code
      *     DOC_NOT_FOUND} for a More-Like-This document outside 0 to maxDoc - 1; {@code INVALID_QUERY}
      *     if the expression doesn't parse; {@code INVALID_ANALYZER} if the query's analyzer can't be
      *     built
      */
     public static AnalyzedQuery query(ReadOnlyIndex index, SearchQuery query) throws RpcException {
-        long present = Stream.of(query.classic(), query.standard(), query.term(), query.moreLikeThis())
+        long present = Stream.of(
+                        query.classic(), query.standard(), query.term(), query.moreLikeThis(), query.docValues())
                 .filter(alternative -> alternative.isPresent())
                 .count();
         if (present != 1) {
             throw new RpcException(
                     ErrorCode.INVALID_PARAMS,
-                    "Invalid params: the query needs exactly one of classic, standard, term and moreLikeThis");
+                    "Invalid params: the query needs exactly one of classic, standard, term, moreLikeThis and"
+                            + " docValues");
+        }
+        if (query.docValues().isPresent()) {
+            return new AnalyzedQuery(docValues(index, query.docValues().get()), Optional.empty());
         }
         if (query.moreLikeThis().isPresent()) {
             return moreLikeThis(index, query.moreLikeThis().get());
@@ -236,6 +250,49 @@ public final class SearchQueries {
                     "Invalid params: the binary term '" + term.term().value() + "' is not hex",
                     e);
         }
+    }
+
+    private static Query docValues(ReadOnlyIndex index, DocValuesQuery query) throws RpcException {
+        FieldInfo field = index.fieldInfo(query.field())
+                .orElseThrow(() ->
+                        new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + query.field() + "' in the index"));
+        if (query.values().isPresent() == query.range().isPresent()) {
+            throw new RpcException(
+                    ErrorCode.INVALID_PARAMS, "Invalid params: docValues needs exactly one of values and range");
+        }
+        try {
+            if (query.number().isPresent()) {
+                DocValuesMatch<String> match = docValuesMatch(query, value -> {
+                    if (value.binary()) {
+                        throw new IllegalArgumentException("a number can't be binary: '" + value.value() + "'");
+                    }
+                    return value.value();
+                });
+                return DocValuesQueries.numbers(
+                        field, DocValuesNumber.valueOf(query.number().get().name()), match);
+            }
+            DocValuesMatch<BytesRef> match = docValuesMatch(query, value -> {
+                try {
+                    return ByteStrings.decode(value.value(), value.binary());
+                } catch (IllegalArgumentException e) {
+                    throw new IllegalArgumentException("the binary value '" + value.value() + "' is not hex", e);
+                }
+            });
+            return DocValuesQueries.bytes(field, match);
+        } catch (IllegalArgumentException e) {
+            throw invalidParams(e);
+        }
+    }
+
+    /** @throws IllegalArgumentException if {@code convert} does, or there are no values */
+    private static <T> DocValuesMatch<T> docValuesMatch(DocValuesQuery query, Function<BytesValue, T> convert) {
+        if (query.values().isPresent()) {
+            return new DocValuesMatch.Values<>(
+                    query.values().get().stream().map(convert).toList());
+        }
+        DocValuesRange range = query.range().orElseThrow();
+        return new DocValuesMatch.Range<>(
+                range.lower().map(convert), range.upper().map(convert), range.includeLower(), range.includeUpper());
     }
 
     private static AnalyzedQuery moreLikeThis(ReadOnlyIndex index, MoreLikeThisQuery like) throws RpcException {

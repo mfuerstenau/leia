@@ -43,12 +43,12 @@ use leia::protocol::index::{
 use leia::protocol::jars::{AddJars, AddJarsParams, GetJars, GetJarsParams};
 use leia::protocol::job::{CancelJob, JobParams};
 use leia::protocol::search::{
-    Bm25Similarity, ClassicQuery, ClassicSimilarity, DateResolution, DocSort, FieldSort,
-    GetExplain, GetSearch, GetStoredScan, GetStoredScanParams, MAX_FUZZY_EDITS, MoreLikeThisQuery,
-    ParserOptions, PointField, PointType, QueryOperator, ScoreSort, SearchQuery, Similarity,
-    SortKey, SortMissing, SortSelector, SortType, StandardQuery, StartExplain, StartExplainParams,
-    StartSearch, StartSearchParams, StartStoredScan, StartStoredScanParams, StoredScanHit,
-    StoredScanResult, TotalHitsRelation,
+    Bm25Similarity, ClassicQuery, ClassicSimilarity, DateResolution, DocSort, DocValuesNumber,
+    FieldSort, GetExplain, GetSearch, GetStoredScan, GetStoredScanParams, MAX_FUZZY_EDITS,
+    MoreLikeThisQuery, ParserOptions, PointField, PointType, QueryOperator, ScoreSort, SearchQuery,
+    Similarity, SortKey, SortMissing, SortSelector, SortType, StandardQuery, StartExplain,
+    StartExplainParams, StartSearch, StartSearchParams, StartStoredScan, StartStoredScanParams,
+    StoredScanHit, StoredScanResult, TotalHitsRelation,
 };
 use leia::protocol::terms::{
     ExportTermsResult, FieldTerms, GetExportTerms, GetFieldTermScan, GetPositions,
@@ -1443,6 +1443,112 @@ fn searches_date_ranges_of_the_demo_index() {
         ParserOptions::default(),
     ));
     assert_eq!(text.total_hits, 0);
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn searches_the_doc_values_of_the_demo_index() {
+    let mut server = start();
+    server
+        .call::<OpenIndex>(OpenIndexParams {
+            path: test_index("demo", "demoIndex"),
+            directory_impl: None,
+            mode: None,
+        })
+        .unwrap();
+    let checksum = server
+        .call::<GetDocument>(GetDocumentParams { doc_id: 5 })
+        .unwrap()
+        .fields
+        .into_iter()
+        .find(|field| field.name == "checksum")
+        .and_then(|field| field.doc_values)
+        .unwrap()
+        .values
+        .remove(0);
+    let mut search = |query: SearchQuery| {
+        let job = server
+            .call::<StartSearch>(StartSearchParams {
+                query,
+                similarity: bm25(),
+                sort: Vec::new(),
+                offset: 0,
+                limit: 1000,
+                exact_total_hits: true,
+                fields: Some(Vec::new()),
+            })
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let poll = server
+                .call::<GetSearch>(JobParams { job_id: job.job_id })
+                .unwrap();
+            if let Some(results) = poll.results {
+                break results;
+            }
+            assert!(Instant::now() < deadline, "the search did not finish");
+            thread::sleep(Duration::from_millis(10));
+        }
+    };
+    let doc_values =
+        |field: &str, number: Option<DocValuesNumber>, line: &str, hex: bool| SearchQuery {
+            doc_values: Some(leia::doc_values::query(field, number, hex, line).unwrap()),
+            ..SearchQuery::default()
+        };
+    let points = |expression: &str, field: &str, point_type: PointType| SearchQuery {
+        standard: Some(StandardQuery {
+            expression: expression.to_owned(),
+            default_field: "body".to_owned(),
+            default_operator: QueryOperator::Or,
+            options: ParserOptions::default(),
+            points: vec![PointField {
+                field: field.to_owned(),
+                point_type,
+            }],
+            analyzer: Analyzer::default(),
+        }),
+        ..SearchQuery::default()
+    };
+
+    // Each field's doc values hold what its points or terms hold.
+    let quantity = search(doc_values(
+        "quantity",
+        Some(DocValuesNumber::Long),
+        "[-5 TO 5]",
+        false,
+    ));
+    assert!(quantity.total_hits > 0);
+    assert_eq!(
+        quantity.total_hits,
+        search(points("quantity:[-5 TO 5]", "quantity", PointType::Int)).total_hits
+    );
+    // price has raw double bits, which order negative numbers backwards.
+    let price = search(doc_values(
+        "price",
+        Some(DocValuesNumber::Double),
+        "{* TO 10]",
+        false,
+    ));
+    assert!(price.total_hits > 0);
+    assert_eq!(
+        price.total_hits,
+        search(points("price:[* TO 10]", "price", PointType::Double)).total_hits
+    );
+    let kitchen = search(doc_values("category", None, "kitchen", false));
+    assert!(kitchen.total_hits > 0);
+    assert_eq!(
+        kitchen.total_hits,
+        search(classic("category:kitchen")).total_hits
+    );
+    // A binary value is found by scanning every document's.
+    let same = search(doc_values(
+        "checksum",
+        None,
+        &leia::doc_values::quote(&checksum.value),
+        checksum.binary,
+    ));
+    assert!(same.hits.iter().any(|hit| hit.doc_id == 5), "{same:?}");
+    assert!(same.query.starts_with("checksum:["), "{}", same.query);
 }
 
 #[test]

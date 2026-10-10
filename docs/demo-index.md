@@ -121,6 +121,13 @@ their own indexes and the Lucene 9 and 8 indexes from `LegacyIndexWriter`.
   440 goes on to the next lamp, 466.
 - The filter on the terms screen: with `title:lamp` as the filter, the postings of `body`/`quick`
   (249) mark the lamps `•`; `b` lists only those, 10 of them from doc 93 to 489.
+- Doc values (`m` three times, `f` to the field, `t` for an exact count): `quantity` as long,
+  `[-5 TO 5]`: 9 hits, the same as `quantity:[-5 TO 5]` on the int points in standard syntax.
+  `price` with `n` as double bits, `{* TO 10]`: 12 hits, the same as the double points, with the
+  range split at zero in the parsed query. `category` `kitchen`: 80
+  hits; `tags` `eco gift`: 101, `[a TO c}`: 92. On the documents screen, `s` on `checksum` (binary,
+  8 random bytes) searches for it in hex: 1 hit, the document itself; `s` on `price` after `x`
+  searches for its double.
 - A regex as the filter: `qu\w+` in regex mode, then `b`: 499 matches, starting on `1 of 499`.
   Open a copy of the demo index without `segments_4`, put it back and press `R`: the tab line says
   `Reopened: segments_4; rebuilding the filter`, and the title then says `2 of 486`, on the same
@@ -141,12 +148,12 @@ The analysis screen (`6`) needs no index, but these go with the demo index's tex
 - A config directory with `syn.txt` (`wifi, wireless network`) and `synonymGraph` with
   `synonyms=syn.txt`: `fast wifi router` gives `wireless` and `network` at positions 1 and 2, and
   `wifi` in italics, stacked on `wireless` and spanning `1–2`; `router` moves to position 3.
-- More-Like-This for a text (`m` four times), `A vintage leather wallet with a wooden table`:
+- More-Like-This for a text (`m` five times), `A vintage leather wallet with a wooden table`:
   with Lucene's defaults only `a` occurs twice, so the query is `a` in four fields, as the term
   table shows. With `p`, a min term freq of 1 and the stop words `a with`: `vintage`, `wooden`,
   `wallet`, `table` and `leather`, in `title` first, where they are rarest. A min word length of 7
   leaves only `vintage` and `leather`.
-- Regex over stored values (`m` five times), `sku\d{4}`: 980 values in 486 documents, in `body`,
+- Regex over stored values (`m` six times), `sku\d{4}`: 980 values in 486 documents, in `body`,
   `tagged` and `note`, each with its matches highlighted. `"event":` finds one value, the 108 KiB
   `_source` of doc 42, with 3000 matches: `v` opens it with the first 100 highlighted, and `m`/`M`
   jump between them. `DELETED` with `i` (ignore case) and `d` (deleted documents too): doc 74's

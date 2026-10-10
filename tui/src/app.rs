@@ -857,6 +857,19 @@ impl App {
                 self.screen = Screen::Search;
                 self.search_request(request)
             }
+            documents::Request::SearchDocValues {
+                field,
+                number,
+                hex,
+                values,
+            } => {
+                let request = self
+                    .search
+                    .as_mut()?
+                    .doc_values_query(&field, number, hex, &values);
+                self.screen = Screen::Search;
+                self.search_request(request)
+            }
             documents::Request::Step {
                 walk: Walk::TermDocs,
                 forward,
@@ -1908,7 +1921,7 @@ impl App {
                     None if documents.seeking() => Line::from(" type to seek a field   ⏎/Esc done"),
                     None => Line::from(format!(
                         " {cancel}q quit   o open   c close   1-7 screen   {step}   {filter}{steps}i go to   \
-                         ⏎ term vector   v view   a analyze   x numbers   e empty   m similar   r rebuild   E export   \
+                         ⏎ term vector   v view   a analyze   s search value   x numbers   e empty   m similar   r rebuild   E export   \
                          Tab panel   ↑↓"
                     )),
                 }
@@ -3604,7 +3617,7 @@ mod tests {
     fn a_regex_scan_is_polled_from_its_last_hit_and_opens_a_value() {
         let mut app = app_with_fields();
         app.handle_key(key(KeyCode::Char('5')));
-        for _ in 0..5 {
+        for _ in 0..6 {
             assert_eq!(app.handle_key(key(KeyCode::Char('m'))), None);
         }
         app.handle_key(key(KeyCode::Char('/')));
@@ -3904,6 +3917,48 @@ mod tests {
         // No field has positions: the first indexed one.
         assert_eq!(like.fields, ["id"]);
         assert!(render(&mut app).contains("More like this document · field id"));
+    }
+
+    #[test]
+    fn s_on_a_doc_value_searches_for_the_documents_with_it() {
+        let mut app = App::new(version(), None);
+        app.opened(
+            GetIndexStatsResult {
+                fields: vec![IndexField {
+                    doc_values_type: DocValuesType::Sorted,
+                    ..field("id", 0, true)
+                }],
+                max_doc: 3,
+                ..stats("/data/idx")
+            },
+            Vec::new(),
+        );
+        assert_eq!(app.handle_key(key(KeyCode::Char('2'))), Some(load(0)));
+        let mut doc = document(0);
+        doc.fields[0].doc_values = Some(crate::protocol::document::DocValues {
+            kind: DocValuesType::Sorted,
+            numbers: Vec::new(),
+            values: vec![BytesValue {
+                value: "a b".to_owned(),
+                binary: false,
+            }],
+        });
+        app.document_loaded(doc);
+
+        let Some(Action::StartSearch { params, .. }) = app.handle_key(key(KeyCode::Char('s')))
+        else {
+            panic!("s starts a search");
+        };
+        let query = params.query.doc_values.expect("a doc values query");
+        assert_eq!(query.field, "id");
+        assert_eq!(
+            query.values,
+            Some(vec![BytesValue {
+                value: "a b".to_owned(),
+                binary: false,
+            }])
+        );
+        assert!(render(&mut app).contains("Doc values · field id (SORTED) · text"));
     }
 
     #[test]

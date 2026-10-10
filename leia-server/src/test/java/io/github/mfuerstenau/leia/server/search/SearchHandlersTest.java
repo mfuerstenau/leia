@@ -22,6 +22,9 @@ import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
 import io.github.mfuerstenau.leia.protocol.search.ClassicSimilarity;
 import io.github.mfuerstenau.leia.protocol.search.DateResolution;
 import io.github.mfuerstenau.leia.protocol.search.DocSort;
+import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
+import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
+import io.github.mfuerstenau.leia.protocol.search.DocValuesRange;
 import io.github.mfuerstenau.leia.protocol.search.Explanation;
 import io.github.mfuerstenau.leia.protocol.search.FieldSort;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
@@ -173,6 +176,7 @@ class SearchHandlersTest {
                 Optional.of(new ClassicQuery("red", "bdy", QueryOperator.OR, DEFAULTS, 2, false, false, STANDARD)),
                 Optional.empty(),
                 Optional.empty(),
+                Optional.empty(),
                 Optional.empty());
 
         assertFails(
@@ -192,14 +196,72 @@ class SearchHandlersTest {
                 classic("red").classic(),
                 Optional.empty(),
                 Optional.of(new TermQuery("body", new BytesValue("red", false))),
+                Optional.empty(),
                 Optional.empty());
-        SearchQuery neither = new SearchQuery(Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
+        SearchQuery neither = new SearchQuery(
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
 
         assertFails(() -> startSearch.handle(params(both, 0, 10, Optional.empty())), ErrorCode.INVALID_PARAMS);
         assertFails(() -> startSearch.handle(params(neither, 0, 10, Optional.empty())), ErrorCode.INVALID_PARAMS);
         assertFails(
                 () -> startSearch.handle(params(term("key", new BytesValue("zz", true)), 0, 10, Optional.empty())),
                 ErrorCode.INVALID_PARAMS);
+    }
+
+    @Test
+    void searchesByDocValues() throws Exception {
+        openIndex();
+
+        SearchResults ranks = search(params(
+                docValues("rank", DocValuesNumber.LONG, Optional.empty(), Optional.of(range("75", null))),
+                0,
+                10,
+                Optional.of(List.of())));
+        SearchResults colors = search(params(
+                docValues("color", null, Optional.of(List.of(text("crimson"), text("blue"))), Optional.empty()),
+                0,
+                10,
+                Optional.of(List.of())));
+
+        // rank: 90, 80, 70
+        assertThat(ranks.hits()).extracting(Hit::docId).containsExactly(0, 1);
+        assertThat(ranks.query()).isEqualTo("rank:[75 TO 9223372036854775807]");
+        assertThat(colors.hits()).extracting(Hit::docId).containsExactly(2);
+    }
+
+    @Test
+    void checksTheDocValuesQuery() throws Exception {
+        openIndex();
+        Optional<List<BytesValue>> one = Optional.of(List.of(text("80")));
+
+        assertFails(
+                () -> search(params(docValues("nope", null, one, Optional.empty()), 0, 10, Optional.empty())),
+                ErrorCode.FIELD_NOT_FOUND);
+        for (SearchQuery query : List.of(
+                // no doc values
+                docValues("body", null, one, Optional.empty()),
+                // numbers without an encoding, bytes with one
+                docValues("rank", null, one, Optional.empty()),
+                docValues("color", DocValuesNumber.LONG, one, Optional.empty()),
+                // not exactly one of values and range
+                docValues("rank", DocValuesNumber.LONG, one, Optional.of(range("1", "2"))),
+                docValues("rank", DocValuesNumber.LONG, Optional.empty(), Optional.empty()),
+                docValues("rank", DocValuesNumber.LONG, Optional.of(List.of()), Optional.empty()),
+                // values that don't parse
+                docValues("rank", DocValuesNumber.LONG, Optional.of(List.of(text("8x"))), Optional.empty()),
+                docValues("rank", DocValuesNumber.DOUBLE, Optional.of(List.of(text("NaN"))), Optional.empty()),
+                docValues(
+                        "rank",
+                        DocValuesNumber.LONG,
+                        Optional.of(List.of(new BytesValue("50", true))),
+                        Optional.empty()),
+                docValues("color", null, Optional.of(List.of(new BytesValue("zz", true))), Optional.empty()))) {
+            assertFails(() -> startSearch.handle(params(query, 0, 10, Optional.empty())), ErrorCode.INVALID_PARAMS);
+        }
+        assertThatThrownBy(() -> startSearch.handle(
+                        params(docValues("rank", null, one, Optional.empty()), 0, 10, Optional.empty())))
+                .hasMessage("Invalid params: the field 'rank' has NUMERIC doc values, which hold numbers: say how"
+                        + " they are encoded");
     }
 
     @ParameterizedTest
@@ -736,6 +798,7 @@ class SearchHandlersTest {
                         analyzer)),
                 Optional.empty(),
                 Optional.empty(),
+                Optional.empty(),
                 Optional.empty());
     }
 
@@ -744,12 +807,39 @@ class SearchHandlersTest {
                 Optional.empty(),
                 Optional.of(new StandardQuery(expression, "body", QueryOperator.OR, options, points, STANDARD)),
                 Optional.empty(),
+                Optional.empty(),
                 Optional.empty());
     }
 
     private static SearchQuery term(String field, BytesValue term) {
         return new SearchQuery(
-                Optional.empty(), Optional.empty(), Optional.of(new TermQuery(field, term)), Optional.empty());
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(new TermQuery(field, term)),
+                Optional.empty(),
+                Optional.empty());
+    }
+
+    private static SearchQuery docValues(
+            String field, DocValuesNumber number, Optional<List<BytesValue>> values, Optional<DocValuesRange> range) {
+        return new SearchQuery(
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(new DocValuesQuery(field, Optional.ofNullable(number), values, range)));
+    }
+
+    private static DocValuesRange range(String lower, String upper) {
+        return new DocValuesRange(
+                Optional.ofNullable(lower).map(SearchHandlersTest::text),
+                Optional.ofNullable(upper).map(SearchHandlersTest::text),
+                true,
+                true);
+    }
+
+    private static BytesValue text(String text) {
+        return new BytesValue(text, false);
     }
 
     private static SearchQuery moreLikeThis(int docId, List<String> fields, int maxQueryTerms) {
@@ -790,7 +880,8 @@ class SearchHandlersTest {
     }
 
     private static SearchQuery moreLikeThis(MoreLikeThisQuery like) {
-        return new SearchQuery(Optional.empty(), Optional.empty(), Optional.empty(), Optional.of(like));
+        return new SearchQuery(
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.of(like), Optional.empty());
     }
 
     private static Analyzer whitespace() {

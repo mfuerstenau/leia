@@ -15,6 +15,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Cell, Clear, Paragraph, Row, Table, TableState, Wrap};
 
 use crate::doc_filter::{DocFilter, FilterStep, Stepped};
+use crate::doc_values;
 use crate::overview::{doc_values, highlight, panel, postings};
 use crate::protocol::document::{
     BytesValue, DocValues, DocumentField, GetDocumentResult, GetReconstructResult, StoredType,
@@ -22,7 +23,7 @@ use crate::protocol::document::{
 };
 use crate::protocol::filter::{FilterMatch, GetFilterResult, StartFilterParams, StepFilterParams};
 use crate::protocol::index::{IndexField, IndexOptions};
-use crate::protocol::search::MatchSpan;
+use crate::protocol::search::{DocValuesNumber, MatchSpan};
 use crate::reconstruct::{self, Reconstruction};
 use crate::terms::TermHit;
 use crate::text::{bytes_text, count, escape_control, first_chars};
@@ -90,6 +91,14 @@ pub enum Request {
     },
     /// Ask where to export this document as JSON (ADR 0030).
     Export(i32),
+    /// Search the documents with any of these doc values of the field on the search screen
+    /// (ADR 0033): numbers as text in `number`, bytes as text, or as hex if `hex`.
+    SearchDocValues {
+        field: String,
+        number: DocValuesNumber,
+        hex: bool,
+        values: Vec<String>,
+    },
     /// Cancel the jobs in `cancel`, then rebuild the terms a field of the document was indexed
     /// with (ADR 0029), reported back with [`Documents::reconstruct_started`],
     /// [`Documents::reconstruct_progress`] or [`Documents::reconstruct_failed`].
@@ -134,6 +143,17 @@ impl NumberFormat {
             NumberFormat::SortableDouble => NumberFormat::Float,
             NumberFormat::Float => NumberFormat::SortableFloat,
             NumberFormat::SortableFloat => NumberFormat::Long,
+        }
+    }
+
+    /// The same encoding on the wire, for a doc values query.
+    fn doc_values_number(self) -> DocValuesNumber {
+        match self {
+            NumberFormat::Long => DocValuesNumber::Long,
+            NumberFormat::Double => DocValuesNumber::Double,
+            NumberFormat::SortableDouble => DocValuesNumber::SortableDouble,
+            NumberFormat::Float => DocValuesNumber::Float,
+            NumberFormat::SortableFloat => DocValuesNumber::SortableFloat,
         }
     }
 
@@ -859,6 +879,43 @@ impl Documents {
         values
     }
 
+    /// The selected field's doc values, for a search for the documents that share any of them
+    /// (ADR 0033): numbers in the shown format, bytes as text unless one of them is not UTF-8.
+    fn search_doc_values(&self) -> Option<Request> {
+        let field = self.selected_field()?;
+        let doc_values = field.doc_values.as_ref()?;
+        let hex = doc_values.values.iter().any(|value| value.binary);
+        let mut values: Vec<String> = doc_values
+            .numbers
+            .iter()
+            .map(|&number| match self.numbers.format(number).as_str() {
+                // Rust's names for the infinities, as Java's parser reads them.
+                "inf" => "Infinity".to_owned(),
+                "-inf" => "-Infinity".to_owned(),
+                text => text.to_owned(),
+            })
+            .chain(
+                doc_values
+                    .values
+                    .iter()
+                    .map(|value| match (hex, value.binary) {
+                        (true, false) => doc_values::hex(value.value.as_bytes()),
+                        _ => value.value.clone(),
+                    }),
+            )
+            .collect();
+        values.dedup();
+        if values.is_empty() {
+            return None;
+        }
+        Some(Request::SearchDocValues {
+            field: field.name.clone(),
+            number: self.numbers.doc_values_number(),
+            hex,
+            values,
+        })
+    }
+
     /// The selected field's first stored text, for the analysis screen; the viewer analyzes any
     /// other value.
     fn analyze(&self) -> Option<Request> {
@@ -878,7 +935,8 @@ impl Documents {
     /// Goes to another document with ←/→, the `i` prompt, or `[`/`]` through the documents of
     /// the hit's term; with a filter, ←/→ and `i` go to its matches only, and `b` clears it;
     /// loads the selected field's term vector with Enter, views its values with
-    /// `v`, analyzes its stored text with `a`, cycles the number format with `x`, hides empty
+    /// `v`, analyzes its stored text with `a`, searches for its doc values with `s`, cycles the
+    /// number format with `x`, hides empty
     /// fields with `e`, searches for documents like this one with `m`, rebuilds the field's
     /// indexed terms with `r`, exports the document with `E`, switches the focus with Tab, and
     /// moves the selection or scrolls the details.
@@ -964,6 +1022,7 @@ impl Documents {
                 return Some(Request::MoreLikeThis(self.doc_id));
             }
             KeyCode::Char('x') => self.numbers = self.numbers.next(),
+            KeyCode::Char('s') => return self.search_doc_values(),
             KeyCode::Char('e') => {
                 self.hide_empty = !self.hide_empty;
                 let selected = self.selected_field().map(|field| field.name.clone());
@@ -2028,6 +2087,70 @@ mod tests {
         assert!(!screen.contains("extra"), "{screen}");
         // The hidden field's selection falls back to the first row.
         assert_eq!(documents.selected_field().unwrap().name, "id");
+    }
+
+    #[test]
+    fn searches_the_doc_values_of_the_selected_field() {
+        let mut documents = documents();
+        documents.loaded(document(0, false));
+        assert_eq!(
+            documents.handle_key(KeyCode::Char('s')),
+            None,
+            "id has no doc values"
+        );
+        documents.handle_key(KeyCode::Down);
+        documents.handle_key(KeyCode::Down);
+
+        let search = |number, values: &[&str]| {
+            Some(Request::SearchDocValues {
+                field: "rank".to_owned(),
+                number,
+                hex: false,
+                values: values.iter().map(|&value| value.to_owned()).collect(),
+            })
+        };
+        assert_eq!(
+            documents.handle_key(KeyCode::Char('s')),
+            search(DocValuesNumber::Long, &["-1", "4612811918334230528"])
+        );
+        documents.handle_key(KeyCode::Char('x'));
+        assert_eq!(
+            documents.handle_key(KeyCode::Char('s')),
+            search(DocValuesNumber::Double, &["NaN", "2.5"])
+        );
+    }
+
+    #[test]
+    fn searches_bytes_as_hex_if_one_of_them_is_binary() {
+        let mut document = document(0, false);
+        document.fields[2].doc_values = Some(DocValues {
+            kind: DocValuesType::SortedSet,
+            numbers: Vec::new(),
+            values: vec![
+                BytesValue {
+                    value: "ab".to_owned(),
+                    binary: false,
+                },
+                BytesValue {
+                    value: "ff00".to_owned(),
+                    binary: true,
+                },
+            ],
+        });
+        let mut documents = documents();
+        documents.loaded(document);
+        documents.handle_key(KeyCode::Down);
+        documents.handle_key(KeyCode::Down);
+
+        assert_eq!(
+            documents.handle_key(KeyCode::Char('s')),
+            Some(Request::SearchDocValues {
+                field: "rank".to_owned(),
+                number: DocValuesNumber::Long,
+                hex: true,
+                values: vec!["6162".to_owned(), "ff00".to_owned()],
+            })
+        );
     }
 
     #[test]
