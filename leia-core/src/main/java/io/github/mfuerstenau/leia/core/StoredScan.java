@@ -13,8 +13,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
+import java.util.function.IntConsumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.apache.lucene.index.IndexReader;
@@ -23,6 +25,7 @@ import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.StoredFields;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
+import org.apache.lucene.util.FixedBitSet;
 
 /**
  * A regular expression over stored values (ADR 0027): reads every document's stored fields and
@@ -105,6 +108,15 @@ public final class StoredScan {
             List<ValueRef> timedOut,
             Duration took) {}
 
+    /** Passes nothing on: a scan for a filter only notes the matching documents. */
+    private static final Listener NO_HITS = new Listener() {
+        @Override
+        public void hit(Hit hit) {}
+
+        @Override
+        public void matched(long matchedValues) {}
+    };
+
     /** Receives what the scan finds, on the scan's thread. */
     public interface Listener {
 
@@ -121,6 +133,7 @@ public final class StoredScan {
     private final int maxHits;
     private final long valueTimeLimitNanos;
     private final Listener listener;
+    private final IntConsumer matchedDoc;
     private final ScanProgress progress;
     private final CharsetDecoder utf8 = StandardCharsets.UTF_8
             .newDecoder()
@@ -141,6 +154,7 @@ public final class StoredScan {
             int maxHits,
             Duration valueTimeLimit,
             Listener listener,
+            IntConsumer matchedDoc,
             ScanProgress progress) {
         this.pattern = pattern;
         this.fields = fields;
@@ -148,6 +162,7 @@ public final class StoredScan {
         this.maxHits = maxHits;
         this.valueTimeLimitNanos = valueTimeLimit.toNanos();
         this.listener = listener;
+        this.matchedDoc = matchedDoc;
         this.progress = progress;
     }
 
@@ -171,7 +186,31 @@ public final class StoredScan {
             Listener listener,
             ScanProgress progress)
             throws IOException {
-        return new StoredScan(pattern, fields, includeDeleted, maxHits, valueTimeLimit, listener, progress).run(reader);
+        return new StoredScan(pattern, fields, includeDeleted, maxHits, valueTimeLimit, listener, docId -> {}, progress)
+                .run(reader);
+    }
+
+    /**
+     * Scans every document of {@code reader} as {@link #scan} does, and keeps the documents with a
+     * value in which the pattern was found as a filter (ADR 0032).
+     *
+     * @throws CancellationException from {@code progress}, to stop the scan
+     * @throws IOException if reading a document fails
+     */
+    static DocFilter matches(
+            IndexReader reader,
+            Pattern pattern,
+            Optional<Set<String>> fields,
+            boolean includeDeleted,
+            Duration valueTimeLimit,
+            ScanProgress progress)
+            throws IOException {
+        FixedBitSet matches = new FixedBitSet(reader.maxDoc());
+        Summary summary = new StoredScan(
+                        pattern, fields, includeDeleted, 0, valueTimeLimit, NO_HITS, matches::set, progress)
+                .run(reader);
+        String label = "/" + pattern.pattern() + "/" + ((pattern.flags() & Pattern.CASE_INSENSITIVE) != 0 ? "i" : "");
+        return new DocFilter(matches, label, label, summary.took(), OptionalLong.of(summary.timedOutValues()));
     }
 
     private Summary run(IndexReader reader) throws IOException {
@@ -191,6 +230,7 @@ public final class StoredScan {
                     storedFields.document(doc, values);
                     if (scanDocument(context.docBase + doc, deleted, values.values)) {
                         matchedDocs++;
+                        matchedDoc.accept(context.docBase + doc);
                     }
                 }
                 scannedDocs++;

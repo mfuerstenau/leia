@@ -174,9 +174,10 @@ public final class Methods {
 
     /**
      * A page of the postings of a term: the documents that contain it, from a given document id on,
-     * deleted documents included (ADR 0007). Fails with {@code NO_INDEX_OPEN}, {@code
-     * FIELD_NOT_FOUND}, {@code TERM_NOT_FOUND}, or {@code INVALID_PARAMS} for a {@code limit} out of
-     * range, a negative {@code fromDoc} or a term that is not valid hex.
+     * deleted documents included (ADR 0007), marked with a filter or narrowed to it (ADR 0032).
+     * Fails with {@code NO_INDEX_OPEN}, {@code FIELD_NOT_FOUND}, {@code TERM_NOT_FOUND}, {@code
+     * FILTER_NOT_FOUND}, or {@code INVALID_PARAMS} for a {@code limit} out of range, a negative
+     * {@code fromDoc} or a term that is not valid hex.
      */
     public static final RpcMethod<GetPostingsParams, GetPostingsResult> GET_POSTINGS =
             new RpcMethod<>("getPostings", GetPostingsParams.class, GetPostingsResult.class);

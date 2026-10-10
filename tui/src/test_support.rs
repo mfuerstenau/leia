@@ -4,6 +4,21 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::{env, fs, process};
 
+use crate::protocol::filter::{FilterPattern, StartFilterParams};
+
+/// The params of a filter for the pattern `red`.
+pub fn filter_params(include_deleted: bool) -> StartFilterParams {
+    StartFilterParams {
+        query: None,
+        pattern: Some(FilterPattern {
+            pattern: "red".to_owned(),
+            case_insensitive: false,
+            fields: None,
+        }),
+        include_deleted,
+    }
+}
+
 /// A fresh directory under the system temp directory, removed on drop.
 pub struct TempDir(PathBuf);
 

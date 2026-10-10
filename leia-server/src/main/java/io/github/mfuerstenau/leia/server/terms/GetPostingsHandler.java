@@ -10,19 +10,26 @@ import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.Posting;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import jakarta.inject.Inject;
 import java.io.IOException;
+import java.util.Optional;
 import org.apache.lucene.util.BytesRef;
 
-/** {@code getPostings}: a page of the postings of a term of the {@link CurrentIndex}. */
+/**
+ * {@code getPostings}: a page of the postings of a term of the {@link CurrentIndex}, through the
+ * kept filter if asked (ADR 0032).
+ */
 public final class GetPostingsHandler implements MethodHandler<GetPostingsParams, GetPostingsResult> {
 
     private final CurrentIndex currentIndex;
+    private final Filters filters;
 
     @Inject
-    GetPostingsHandler(CurrentIndex currentIndex) {
+    GetPostingsHandler(CurrentIndex currentIndex, Filters filters) {
         this.currentIndex = currentIndex;
+        this.filters = filters;
     }
 
     @Override
@@ -41,8 +48,14 @@ public final class GetPostingsHandler implements MethodHandler<GetPostingsParams
         ReadOnlyIndex index = currentIndex.readable();
         String field = params.field();
         TermParams.checkField(index, field);
+        Optional<PostingsPage.Filter> filter = Optional.empty();
+        if (params.filter().isPresent()) {
+            filter = Optional.of(new PostingsPage.Filter(
+                    filters.get(params.filter().get().filterId()),
+                    params.filter().get().onlyMatches()));
+        }
         try {
-            PostingsPage page = index.postings(field, term, params.fromDoc(), params.limit())
+            PostingsPage page = index.postings(field, term, params.fromDoc(), params.limit(), filter)
                     .orElseThrow(() -> new RpcException(
                             ErrorCode.TERM_NOT_FOUND,
                             "No term '" + TermParams.text(params.term()) + "' in field '" + field + "'"));
@@ -50,7 +63,8 @@ public final class GetPostingsHandler implements MethodHandler<GetPostingsParams
                     page.docFreq(),
                     page.totalTermFreq(),
                     page.postings().stream()
-                            .map(posting -> new Posting(posting.docId(), posting.deleted(), posting.freq()))
+                            .map(posting ->
+                                    new Posting(posting.docId(), posting.deleted(), posting.freq(), posting.inFilter()))
                             .toList(),
                     page.nextDoc());
         } catch (IOException e) {

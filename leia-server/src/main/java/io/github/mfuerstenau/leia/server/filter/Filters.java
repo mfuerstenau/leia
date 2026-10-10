@@ -9,7 +9,8 @@ import java.util.Optional;
 
 /**
  * The filter that the server keeps for the open index (ADR 0031): at most one, since the TUI browses
- * through one at a time and each takes maxDoc / 8 bytes. Only the request loop touches it, so it
+ * through one at a time and each takes maxDoc / 8 bytes. The postings of a term can be read through
+ * it (ADR 0032). Only the request loop touches it, so it
  * needs no locking.
  */
 @Singleton
@@ -23,7 +24,7 @@ public final class Filters {
     public Filters() {}
 
     /** Keeps {@code filter} under {@code id}, in place of the filter kept before. */
-    void put(long id, DocFilter filter) {
+    public void put(long id, DocFilter filter) {
         kept = Optional.of(new Kept(id, filter));
     }
 
@@ -32,7 +33,7 @@ public final class Filters {
      *
      * @throws RpcException {@code FILTER_NOT_FOUND} if no filter is kept under it
      */
-    DocFilter get(long id) throws RpcException {
+    public DocFilter get(long id) throws RpcException {
         return kept.filter(k -> k.id() == id)
                 .map(Kept::filter)
                 .orElseThrow(() -> new RpcException(

@@ -1,6 +1,6 @@
 # ADR 0031 — Browse the documents through a filter
 
-- **Status:** Accepted
+- **Status:** Accepted; amended by ADR 0032
 - **Date:** 2026-10-07
 
 ## Context
@@ -25,12 +25,12 @@ Constraints:
 2. **The matches are a bit set over maxDoc** (`DocFilter` in core, a `FixedBitSet`): one bit per document, 12.5 MB at 100 million documents. Stepping uses `nextSetBit`/`prevSetBit`; `index` is a popcount of the words below the document.
 3. **Found without scores.** The query is built (More-Like-This needs the reader, ADR 0013) and rewritten as for a search, then collected with `COMPLETE_NO_SCORES` into the set, by doc ids of the whole index (ADR 0021). It is cancellable through the same `QueryTimeout` and `ExitableDirectoryReader` as a search. Too many clauses fail the job with `INVALID_QUERY`.
 4. **Deleted documents match with `includeDeleted`.** Each directory reader is wrapped in a `FilterDirectoryReader` whose leaves have no live docs, so the `IndexSearcher` has nothing to skip. The wrappers have no cache helpers and are never closed, like the exitable ones around them.
-5. **The server keeps one filter.** A newer filter replaces it when `getFilter` collects it. A filter belongs to the open index: opening another one, closing it, or a reopen that finds a new commit forgets it (`CurrentIndex`), since doc ids may change. An unchanged reopen keeps it.
+5. **The server keeps one filter.** A newer filter replaces it when `getFilter` collects it. A filter belongs to the open index: opening another one, closing it, or a reopen that finds a new commit forgets it (`CurrentIndex`), since doc ids may change. An unchanged reopen keeps it. *Amended by ADR 0032: after a reopen that finds a new commit, the TUI builds the filter again.*
 6. **New error code `FILTER_NOT_FOUND` (-32018)**, for a filter that is unknown, released, replaced, or of an index that was closed or reopened.
 
 ### The TUI
 
-7. **`b` on the search screen** turns the current query into a filter over the live documents, **`B`** over all of them, deleted ones included. The regex over stored values (ADR 0027) is no query and can't be a filter. The screen switches to the documents screen, which shows the filter in its title: `filter <query>: finding matches… 40%`, then `3 of 19`, `not a match, 19 in all`, or the error. `Esc` stops the job.
+7. **`b` on the search screen** turns the current query into a filter over the live documents, **`B`** over all of them, deleted ones included. The regex over stored values (ADR 0027) is no query and can't be a filter. *Amended by ADR 0032: `startFilter` takes a pattern too, and `b`/`B` work in regex mode.* The screen switches to the documents screen, which shows the filter in its title: `filter <query>: finding matches… 40%`, then `3 of 19`, `not a match, 19 in all`, or the error. `Esc` stops the job.
 8. **Once built, it starts on the search screen's selected hit**, which matches, else on the first match after it, else on the last match.
 9. **On the documents screen:**
    - `←`/`→` step to the previous or next match, and say `no previous match` or `no next match` at the ends;
@@ -49,4 +49,4 @@ Constraints:
 
 - Four more methods with fixtures and DTOs on both sides, `Filters` in the server, and `DocFilter` and `Searcher.matches` in core.
 - `startFilter` reuses `SearchQueries`, which the server's search package now exposes.
-- The terms screen doesn't know about the filter yet: marking or hiding postings outside it, the regex scan as a source of a filter, and building the filter again after a reopen stay on the task list.
+- The terms screen doesn't know about the filter yet: marking or hiding postings outside it, the regex scan as a source of a filter, and building the filter again after a reopen stay on the task list. *All three came with ADR 0032.*

@@ -28,8 +28,8 @@ import java.util.regex.PatternSyntaxException;
  */
 public final class StartStoredScanHandler implements MethodHandler<StartStoredScanParams, JobStarted> {
 
-    /** How long matching one value may take before the scan skips it. */
-    static final Duration VALUE_TIME_LIMIT = Duration.ofSeconds(1);
+    /** How long matching one value may take before the scan skips it; a filter's too (ADR 0032). */
+    public static final Duration VALUE_TIME_LIMIT = Duration.ofSeconds(1);
 
     private final CurrentIndex currentIndex;
     private final Jobs jobs;
@@ -67,9 +67,11 @@ public final class StartStoredScanHandler implements MethodHandler<StartStoredSc
     }
 
     /**
+     * The pattern of a scan or a filter (ADR 0032), compiled.
+     *
      * @throws RpcException {@code INVALID_QUERY} if the pattern doesn't compile, with where it fails
      */
-    private static Pattern pattern(String pattern, boolean caseInsensitive) throws RpcException {
+    public static Pattern pattern(String pattern, boolean caseInsensitive) throws RpcException {
         try {
             return Pattern.compile(pattern, caseInsensitive ? Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE : 0);
         } catch (PatternSyntaxException e) {

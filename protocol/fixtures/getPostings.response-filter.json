@@ -1,0 +1,23 @@
+{
+  "jsonrpc": "2.0",
+  "id": 11,
+  "result": {
+    "docFreq": 17,
+    "totalTermFreq": 25,
+    "postings": [
+      {
+        "docId": 3,
+        "deleted": false,
+        "freq": 2,
+        "inFilter": true
+      },
+      {
+        "docId": 8,
+        "deleted": true,
+        "freq": 1,
+        "inFilter": false
+      }
+    ],
+    "nextDoc": 12
+  }
+}

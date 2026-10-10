@@ -3,11 +3,13 @@ package io.github.mfuerstenau.leia.core;
 import static io.github.mfuerstenau.leia.core.TestIndexes.testIndex;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 import io.github.mfuerstenau.leia.core.PostingsPage.Posting;
 import io.github.mfuerstenau.leia.core.TermPage.Entry;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -24,6 +26,7 @@ import org.apache.lucene.index.NoMergePolicy;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
+import org.apache.lucene.util.FixedBitSet;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -107,6 +110,41 @@ class TermBrowseTest {
                     index.postings("body", new BytesRef("blue"), 3, 3).orElseThrow();
             assertThat(second.postings()).containsExactly(posting(3, false, 1));
             assertThat(second.nextDoc()).isEmpty();
+        }
+    }
+
+    @Test
+    void marksThePostingsInAFilterOrReadsOnlyThose() throws Exception {
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
+            DocFilter filter = filter(4, 1, 3);
+            BytesRef blue = new BytesRef("blue");
+
+            PostingsPage marked = index.postings(
+                            "body", blue, 0, 10, Optional.of(new PostingsPage.Filter(filter, false)))
+                    .orElseThrow();
+            assertThat(marked.postings())
+                    .extracting(Posting::docId, Posting::inFilter)
+                    .containsExactly(
+                            tuple(0, Optional.of(false)),
+                            tuple(1, Optional.of(true)),
+                            tuple(2, Optional.of(false)),
+                            tuple(3, Optional.of(true)));
+
+            Optional<PostingsPage.Filter> only = Optional.of(new PostingsPage.Filter(filter, true));
+            PostingsPage first = index.postings("body", blue, 0, 1, only).orElseThrow();
+            assertThat(first.docFreq()).isEqualTo(4);
+            // The deleted document 1 is in the filter.
+            assertThat(first.postings()).containsExactly(new Posting(1, true, OptionalInt.of(1), Optional.of(true)));
+            assertThat(first.nextDoc()).hasValue(3);
+            PostingsPage second = index.postings("body", blue, 2, 1, only).orElseThrow();
+            assertThat(second.postings()).extracting(Posting::docId).containsExactly(3);
+            assertThat(second.nextDoc()).isEmpty();
+
+            // Red is only in document 0, which the filter leaves out.
+            PostingsPage none =
+                    index.postings("body", new BytesRef("red"), 0, 10, only).orElseThrow();
+            assertThat(none.postings()).isEmpty();
+            assertThat(none.nextDoc()).isEmpty();
         }
     }
 
@@ -216,6 +254,14 @@ class TermBrowseTest {
                     .extracting(TermPosition::position)
                     .containsExactly(OptionalInt.of(1));
         }
+    }
+
+    private static DocFilter filter(int maxDoc, int... matches) {
+        FixedBitSet bits = new FixedBitSet(maxDoc);
+        for (int docId : matches) {
+            bits.set(docId);
+        }
+        return new DocFilter(bits, "q", "q", Duration.ZERO);
     }
 
     private static Entry entry(String term, int docFreq, long totalTermFreq) {

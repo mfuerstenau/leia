@@ -1,0 +1,15 @@
+{
+  "jsonrpc": "2.0",
+  "id": 64,
+  "result": {
+    "docsSearched": 500,
+    "result": {
+      "filterId": 32,
+      "matchCount": 12,
+      "query": "/sku\\d{4}/i",
+      "rewrittenQuery": "/sku\\d{4}/i",
+      "tookMillis": 85,
+      "timedOutValues": 0
+    }
+  }
+}

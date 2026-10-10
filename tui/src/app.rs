@@ -48,7 +48,7 @@ use crate::protocol::search::{
 };
 use crate::protocol::terms::{
     GetExportTermsResult, GetFieldTermScanResult, GetPostingsResult, GetTermsResult,
-    StartExportTermsParams,
+    PostingsFilter, StartExportTermsParams,
 };
 use crate::protocol::version::VersionResult;
 use crate::search::{self, Search};
@@ -129,6 +129,8 @@ pub enum Action {
         from_doc: i32,
         /// Whether the page continues the shown postings.
         more: bool,
+        /// The filter to read the postings through (ADR 0032).
+        filter: Option<PostingsFilter>,
     },
     /// Fetch where a term occurs in a document, and report back with [`App::positions_loaded`]
     /// or [`App::positions_failed`].
@@ -627,6 +629,7 @@ impl App {
             }
         });
         self.overview = Some(overview.reopened(stats, self.top_n));
+        self.sync_terms_filter();
         self.forget_scans();
         if let Some(check) = &mut self.check {
             check.stopped_by_reopen();
@@ -637,7 +640,18 @@ impl App {
             text.push_str("; export stopped");
         }
         self.forget_export();
+        if self.filter_to_rebuild().is_some()
+            && let Some(Notice::Reopened(text)) = &mut self.notice
+        {
+            text.push_str("; rebuilding the filter");
+        }
         self.initial_request()
+    }
+
+    /// What to build the filter of the documents screen from again after a reopen (ADR 0032),
+    /// until it is started; [`App::filter_started`] or [`App::filter_failed`] reports back.
+    pub fn filter_to_rebuild(&self) -> Option<StartFilterParams> {
+        self.documents.as_ref()?.filter_to_rebuild().cloned()
     }
 
     /// The index has no newer commit; everything stays as it is.
@@ -726,7 +740,8 @@ impl App {
                 let (cancel, release) =
                     self.documents
                         .as_mut()?
-                        .start_filter(label, params.include_deleted, start_doc);
+                        .start_filter(label, params.clone(), start_doc);
+                self.sync_terms_filter();
                 self.screen = Screen::Documents;
                 Some(Action::StartFilter {
                     params,
@@ -772,6 +787,8 @@ impl App {
     }
 
     fn documents_request(&mut self, request: Option<documents::Request>) -> Option<Action> {
+        // A key or a step may have built, failed or cleared the filter.
+        self.sync_terms_filter();
         match request? {
             documents::Request::Document(doc_id) => self.load_document(doc_id),
             documents::Request::Reconstruct {
@@ -869,11 +886,13 @@ impl App {
                 term,
                 from_doc,
                 more,
+                filter,
             } => Some(Action::LoadPostings {
                 field,
                 term,
                 from_doc,
                 more,
+                filter,
             }),
             terms::Request::Document(hit) => {
                 let doc_id = hit.doc_id;
@@ -964,6 +983,16 @@ impl App {
     pub fn filter_failed(&mut self, error: String) {
         if let Some(documents) = &mut self.documents {
             documents.filter_failed(error);
+        }
+        self.sync_terms_filter();
+    }
+
+    /// Hands the filter of the documents screen, once it is built, to the terms screen, which
+    /// marks its postings with it (ADR 0032).
+    fn sync_terms_filter(&mut self) {
+        let filter = self.documents.as_ref().and_then(Documents::filter_id);
+        if let Some(terms) = &mut self.terms {
+            terms.set_filter(filter);
         }
     }
 
@@ -1889,9 +1918,14 @@ impl App {
                 if terms.prompting() {
                     Line::from(" type to seek   ⏎/Esc done")
                 } else {
+                    let filter = match (terms.filtered(), terms.only_filtered()) {
+                        (true, true) => "b all postings   ",
+                        (true, false) => "b filter only   ",
+                        (false, _) => "",
+                    };
                     Line::from(format!(
                         " {cancel}q quit   o open   c close   1-7 screen   / seek   \
-                         ⏎ open doc   e export   ←/→ column   ↑↓"
+                         ⏎ open doc   {filter}e export   ←/→ column   ↑↓"
                     ))
                 }
             }
@@ -3328,12 +3362,14 @@ mod tests {
                 term: text("1"),
                 from_doc: 0,
                 more: false,
+                filter: None,
             })
         );
         let posting = |doc_id| Posting {
             doc_id,
             deleted: false,
             freq: None,
+            in_filter: None,
         };
         let postings = GetPostingsResult {
             doc_freq: 2,
@@ -3716,6 +3752,7 @@ mod tests {
                     query: "body:q".to_owned(),
                     rewritten_query: "body:q".to_owned(),
                     took_millis: 1,
+                    timed_out_values: None,
                 }),
             }),
             Some(Action::StepFilter {
@@ -3736,6 +3773,34 @@ mod tests {
         assert!(screen.contains("filter q: 2 of 2"), "{screen}");
         assert!(screen.contains("b unfilter"), "{screen}");
 
+        // The terms screen reads the postings through it.
+        assert!(matches!(
+            app.handle_key(key(KeyCode::Char('3'))),
+            Some(Action::LoadTerms { .. })
+        ));
+        let terms = GetTermsResult {
+            terms: vec![TermEntry {
+                term: "1".to_owned(),
+                binary: false,
+                doc_freq: 1,
+                total_term_freq: 1,
+            }],
+            next: None,
+        };
+        let marked = Some(PostingsFilter {
+            filter_id: 5,
+            only_matches: false,
+        });
+        assert!(
+            matches!(
+                app.terms_loaded("id", false, terms),
+                Some(Action::LoadPostings { filter, .. }) if filter == marked
+            ),
+            "the postings are marked"
+        );
+        assert!(render(&mut app).contains("b filter only"));
+        app.handle_key(key(KeyCode::Char('2')));
+
         // A hit opened from the search screen is located in the filter.
         app.handle_key(key(KeyCode::Char('5')));
         app.handle_key(key(KeyCode::Down));
@@ -3752,6 +3817,66 @@ mod tests {
             Some(Action::ClearFilter {
                 cancel: None,
                 release: Some(5),
+            })
+        );
+    }
+
+    #[test]
+    fn a_reopen_that_found_a_new_commit_builds_the_filter_again() {
+        let mut app = searching("q");
+        app.search_progress(page(&[2, 0]));
+        let Some(Action::StartFilter { params, .. }) = app.handle_key(key(KeyCode::Char('b')))
+        else {
+            panic!("b filters");
+        };
+        app.filter_started(5);
+        let built = |filter_id| GetFilterResult {
+            docs_searched: 3,
+            result: Some(FilterResult {
+                filter_id,
+                match_count: 2,
+                query: "body:q".to_owned(),
+                rewritten_query: "body:q".to_owned(),
+                took_millis: 1,
+                timed_out_values: None,
+            }),
+        };
+        let Some(Action::StepFilter { params: step, .. }) = app.filter_progress(built(5)) else {
+            panic!("the filter starts on the selected hit");
+        };
+        let found = Some(FilterMatch {
+            doc_id: 1,
+            index: 0,
+        });
+        assert_eq!(
+            app.filter_stepped(step, FilterStep::Nearest, found),
+            Some(load(1))
+        );
+        app.document_loaded(document(1));
+        assert_eq!(app.filter_to_rebuild(), None);
+
+        let mut changed = stats("/data/idx");
+        changed.indexes[0].segments_file = "segments_2".to_owned();
+        changed.fields = vec![field("id", 0, true), field("body", 1, true)];
+        changed.max_doc = 3;
+        app.reopened(changed);
+
+        assert_eq!(app.filter_to_rebuild(), Some(params));
+        let screen = render(&mut app);
+        assert!(screen.contains("rebuilding the filter"), "{screen}");
+        app.filter_started(9);
+        assert_eq!(app.filter_to_rebuild(), None);
+        assert_eq!(app.polls(), vec![Poll::Filter(9)]);
+        // Once built, it only locates the document shown.
+        assert_eq!(
+            app.filter_progress(built(9)),
+            Some(Action::StepFilter {
+                params: StepFilterParams {
+                    filter_id: 9,
+                    from_doc: 1,
+                    forward: true,
+                },
+                step: FilterStep::Locate,
             })
         );
     }

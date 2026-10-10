@@ -2,12 +2,14 @@ package io.github.mfuerstenau.leia.core;
 
 import java.time.Duration;
 import java.util.Optional;
+import java.util.OptionalLong;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.util.FixedBitSet;
 
 /**
- * The documents that match a query, as a set of the document ids of the whole index (ADR 0031): one
- * bit per document, so it takes maxDoc / 8 bytes. It can be read from any thread once it is built.
+ * The documents that match a query (ADR 0031), or have a stored value in which a pattern is found
+ * (ADR 0032), as a set of the document ids of the whole index: one bit per document, so it takes
+ * maxDoc / 8 bytes. It can be read from any thread once it is built.
  */
 public final class DocFilter {
 
@@ -16,6 +18,7 @@ public final class DocFilter {
     private final String query;
     private final String rewrittenQuery;
     private final Duration took;
+    private final OptionalLong timedOutValues;
 
     /**
      * A matching document.
@@ -26,11 +29,16 @@ public final class DocFilter {
     public record Match(int docId, int index) {}
 
     DocFilter(FixedBitSet matches, String query, String rewrittenQuery, Duration took) {
+        this(matches, query, rewrittenQuery, took, OptionalLong.empty());
+    }
+
+    DocFilter(FixedBitSet matches, String query, String rewrittenQuery, Duration took, OptionalLong timedOutValues) {
         this.matches = matches;
         this.matchCount = matches.cardinality();
         this.query = query;
         this.rewrittenQuery = rewrittenQuery;
         this.took = took;
+        this.timedOutValues = timedOutValues;
     }
 
     /** How many documents match. */
@@ -38,12 +46,15 @@ public final class DocFilter {
         return matchCount;
     }
 
-    /** The query as Lucene writes it ({@code Query.toString()}). */
+    /**
+     * The query as Lucene writes it ({@code Query.toString()}), or the pattern as {@code /pattern/},
+     * with an {@code i} after it if case doesn't matter.
+     */
     public String query() {
         return query;
     }
 
-    /** The query after rewriting, as Lucene writes it. */
+    /** The query after rewriting, as Lucene writes it; the pattern as in {@link #query}. */
     public String rewrittenQuery() {
         return rewrittenQuery;
     }
@@ -51,6 +62,28 @@ public final class DocFilter {
     /** How long finding the matches took. */
     public Duration took() {
         return took;
+    }
+
+    /**
+     * For a pattern, the values that were skipped because matching them took too long (ADR 0027):
+     * their documents may be missing. Empty for a query.
+     */
+    public OptionalLong timedOutValues() {
+        return timedOutValues;
+    }
+
+    /** Whether {@code docId} matches; an id outside 0 to maxDoc - 1 doesn't. */
+    public boolean contains(int docId) {
+        return docId >= 0 && docId < matches.length() && matches.get(docId);
+    }
+
+    /**
+     * The first matching document from {@code fromDoc} on, or {@link DocIdSetIterator#NO_MORE_DOCS}
+     * if there is none; {@code fromDoc} may be anything.
+     */
+    public int next(int fromDoc) {
+        int from = Math.max(fromDoc, 0);
+        return from < matches.length() ? matches.nextSetBit(from) : DocIdSetIterator.NO_MORE_DOCS;
     }
 
     /**
@@ -62,8 +95,7 @@ public final class DocFilter {
         int maxDoc = matches.length();
         int docId;
         if (forward) {
-            int from = Math.max(fromDoc, 0);
-            docId = from < maxDoc ? matches.nextSetBit(from) : DocIdSetIterator.NO_MORE_DOCS;
+            docId = next(fromDoc);
         } else {
             int from = Math.min(fromDoc, maxDoc - 1);
             docId = from >= 0 ? matches.prevSetBit(from) : -1;

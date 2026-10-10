@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.time.Duration;
 import java.util.Optional;
+import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.util.FixedBitSet;
 import org.junit.jupiter.api.Test;
 
@@ -34,6 +35,21 @@ class DocFilterTest {
         assertThat(filter.step(-1, false)).isEmpty();
         assertThat(filter.step(10, true)).isEmpty();
         assertThat(filter.step(Integer.MAX_VALUE, false)).contains(new DocFilter.Match(9, 1));
+    }
+
+    @Test
+    void saysWhetherADocumentMatchesAndWhichIsNext() {
+        DocFilter filter = filter(130, 3, 64, 129);
+
+        assertThat(filter.contains(3)).isTrue();
+        assertThat(filter.contains(4)).isFalse();
+        assertThat(filter.contains(-1)).isFalse();
+        assertThat(filter.contains(130)).isFalse();
+        assertThat(filter.next(-5)).isEqualTo(3);
+        assertThat(filter.next(4)).isEqualTo(64);
+        assertThat(filter.next(129)).isEqualTo(129);
+        assertThat(filter.next(130)).isEqualTo(DocIdSetIterator.NO_MORE_DOCS);
+        assertThat(filter.timedOutValues()).isEmpty();
     }
 
     @Test

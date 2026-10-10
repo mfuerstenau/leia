@@ -1,5 +1,5 @@
-//! Browsing the documents through the matches of a query (ADR 0031). Mirrors
-//! `io.github.mfuerstenau.leia.protocol.filter`.
+//! Browsing the documents through the matches of a query (ADR 0031) or of a pattern over stored
+//! values (ADR 0032). Mirrors `io.github.mfuerstenau.leia.protocol.filter`.
 
 use serde::{Deserialize, Serialize};
 
@@ -8,7 +8,8 @@ use super::method::RpcMethod;
 use super::search::SearchQuery;
 
 /// `startFilter`: starts a job that finds every document of the open index that matches a query,
-/// without scoring, to browse the documents through. Fails as `startSearch` does for the query.
+/// without scoring, or has a stored value in which a pattern is found, to browse the documents
+/// through. Fails as `startSearch` does for a query and as `startStoredScan` does for a pattern.
 pub enum StartFilter {}
 
 impl RpcMethod for StartFilter {
@@ -20,10 +21,28 @@ impl RpcMethod for StartFilter {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StartFilterParams {
-    /// The query, as for `startSearch`.
-    pub query: SearchQuery,
+    /// The query, as for `startSearch`; exactly one of `query` and `pattern` is given.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query: Option<SearchQuery>,
+    /// The pattern, as for `startStoredScan`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pattern: Option<FilterPattern>,
     /// Whether deleted documents match too.
     pub include_deleted: bool,
+}
+
+/// A regular expression over stored values as the source of a filter (ADR 0032): a document
+/// matches if the pattern is found in one of its values.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FilterPattern {
+    /// A Java regular expression, found anywhere in a value (`Matcher.find`).
+    pub pattern: String,
+    /// Whether case doesn't matter, Unicode case included.
+    pub case_insensitive: bool,
+    /// The stored fields to scan; `None` for all of them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fields: Option<Vec<String>>,
 }
 
 /// `getFilter`: the progress of building a filter, and the filter once it is built. The server
@@ -55,12 +74,17 @@ pub struct FilterResult {
     pub filter_id: i64,
     /// How many documents match.
     pub match_count: i32,
-    /// The query as Lucene writes it.
+    /// The query as Lucene writes it, or the pattern as `/pattern/`, with an `i` after it if case
+    /// doesn't matter.
     pub query: String,
-    /// The query after rewriting, as Lucene writes it.
+    /// The query after rewriting, as Lucene writes it; the pattern as in `query`.
     pub rewritten_query: String,
     /// How long finding the matches took.
     pub took_millis: i64,
+    /// For a pattern, the values skipped because matching them took too long, whose documents
+    /// may be missing; `None` for a query.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timed_out_values: Option<i64>,
 }
 
 /// `stepFilter`: the first document of a filter from a document id on, or the last one up to it,

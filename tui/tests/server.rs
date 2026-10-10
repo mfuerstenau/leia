@@ -33,8 +33,8 @@ use leia::protocol::document::{
     TermPosition,
 };
 use leia::protocol::filter::{
-    GetFilter, ReleaseFilter, ReleaseFilterParams, StartFilter, StartFilterParams, StepFilter,
-    StepFilterParams, StepFilterResult,
+    FilterPattern, FilterResult, GetFilter, ReleaseFilter, ReleaseFilterParams, StartFilter,
+    StartFilterParams, StepFilter, StepFilterParams, StepFilterResult,
 };
 use leia::protocol::index::{
     CloseIndex, CloseIndexParams, DirectoryImpl, DocValuesType, GetIndexStats, GetIndexStatsParams,
@@ -53,8 +53,8 @@ use leia::protocol::search::{
 use leia::protocol::terms::{
     ExportTermsResult, FieldTerms, GetExportTerms, GetFieldTermScan, GetPositions,
     GetPositionsParams, GetPostings, GetPostingsParams, GetPostingsResult, GetTerms,
-    GetTermsParams, Posting, StartExportTerms, StartExportTermsParams, StartFieldTermScan,
-    StartFieldTermScanParams, TermDelimiter, TermEntry, TopTerm,
+    GetTermsParams, Posting, PostingsFilter, StartExportTerms, StartExportTermsParams,
+    StartFieldTermScan, StartFieldTermScanParams, TermDelimiter, TermEntry, TopTerm,
 };
 use leia::protocol::version::{Version, VersionParams};
 use leia::server::{SERVER_JAR_ENV, SHUTDOWN_TIMEOUT, Server, find_server_jar};
@@ -882,12 +882,14 @@ fn browses_the_terms_and_postings_of_a_lucene9_index() {
             term: text("number"),
             from_doc: 1,
             limit: 10,
+            filter: None,
         })
         .unwrap();
     let posting = |doc_id: i32, deleted: bool| Posting {
         doc_id,
         deleted,
         freq: Some(1),
+        in_filter: None,
     };
     assert_eq!(
         postings,
@@ -923,6 +925,7 @@ fn browses_the_terms_and_postings_of_a_lucene9_index() {
             term: text("nothing"),
             from_doc: 0,
             limit: 10,
+            filter: None,
         })
         .unwrap_err();
     assert!(
@@ -1454,28 +1457,14 @@ fn browses_a_lucene9_index_through_a_filter() {
         })
         .unwrap();
 
-    let mut build = |include_deleted: bool| {
-        let job = server
-            .call::<StartFilter>(StartFilterParams {
-                query: classic("number AND (1 OR 2 OR 3)"),
-                include_deleted,
-            })
-            .unwrap();
-        let deadline = Instant::now() + Duration::from_secs(10);
-        loop {
-            let poll = server
-                .call::<GetFilter>(JobParams { job_id: job.job_id })
-                .unwrap();
-            if let Some(result) = poll.result {
-                break result;
-            }
-            assert!(Instant::now() < deadline, "the filter was not built");
-            thread::sleep(Duration::from_millis(10));
-        }
+    let query = |include_deleted: bool| StartFilterParams {
+        query: Some(classic("number AND (1 OR 2 OR 3)")),
+        pattern: None,
+        include_deleted,
     };
     // "document number N" for N = 1..3; document 1 (id 2) is deleted.
-    let live = build(false);
-    let all = build(true);
+    let live = build_filter(&mut server, query(false));
+    let all = build_filter(&mut server, query(true));
     assert_eq!(live.query, "+body:number +(body:1 body:2 body:3)");
     assert_eq!((live.match_count, all.match_count), (2, 3));
 
@@ -1511,6 +1500,65 @@ fn browses_a_lucene9_index_through_a_filter() {
     };
     assert!(release(&mut server));
     assert!(!release(&mut server));
+
+    // A pattern over the stored values, and the postings of a term through it (ADR 0032).
+    let pattern = build_filter(
+        &mut server,
+        StartFilterParams {
+            query: None,
+            pattern: Some(FilterPattern {
+                pattern: "NUMBER [13]".to_owned(),
+                case_insensitive: true,
+                fields: Some(vec!["body".to_owned()]),
+            }),
+            include_deleted: false,
+        },
+    );
+    assert_eq!(pattern.query, "/NUMBER [13]/i");
+    assert_eq!(pattern.match_count, 2);
+    assert_eq!(pattern.timed_out_values, Some(0));
+    let mut postings = |only_matches: bool| {
+        server
+            .call::<GetPostings>(GetPostingsParams {
+                field: "body".to_owned(),
+                term: BytesValue {
+                    value: "number".to_owned(),
+                    binary: false,
+                },
+                from_doc: 0,
+                limit: 10,
+                filter: Some(PostingsFilter {
+                    filter_id: pattern.filter_id,
+                    only_matches,
+                }),
+            })
+            .unwrap()
+            .postings
+            .into_iter()
+            .map(|posting| (posting.doc_id, posting.in_filter))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        postings(false),
+        vec![(0, Some(true)), (1, Some(false)), (2, Some(true))]
+    );
+    assert_eq!(postings(true), vec![(0, Some(true)), (2, Some(true))]);
+}
+
+/// Builds a filter and waits until the server keeps it.
+fn build_filter(server: &mut Server, params: StartFilterParams) -> FilterResult {
+    let job = server.call::<StartFilter>(params).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let poll = server
+            .call::<GetFilter>(JobParams { job_id: job.job_id })
+            .unwrap();
+        if let Some(result) = poll.result {
+            break result;
+        }
+        assert!(Instant::now() < deadline, "the filter was not built");
+        thread::sleep(Duration::from_millis(10));
+    }
 }
 
 fn bm25() -> Similarity {

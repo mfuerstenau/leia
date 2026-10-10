@@ -12,6 +12,7 @@ import io.github.mfuerstenau.leia.protocol.Response;
 import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.StandardAnalyzer;
 import io.github.mfuerstenau.leia.protocol.filter.FilterMatch;
+import io.github.mfuerstenau.leia.protocol.filter.FilterPattern;
 import io.github.mfuerstenau.leia.protocol.filter.FilterResult;
 import io.github.mfuerstenau.leia.protocol.filter.GetFilterResult;
 import io.github.mfuerstenau.leia.protocol.filter.ReleaseFilterParams;
@@ -43,7 +44,10 @@ import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-/** {@code startFilter}, {@code getFilter}, {@code stepFilter} and {@code releaseFilter} (ADR 0031). */
+/**
+ * {@code startFilter}, {@code getFilter}, {@code stepFilter} and {@code releaseFilter} (ADR 0031,
+ * ADR 0032).
+ */
 class FilterHandlersTest {
 
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
@@ -69,7 +73,7 @@ class FilterHandlersTest {
     void buildsAFilterAndStepsThroughItsMatches() throws Exception {
         openIndex();
 
-        long jobId = start.handle(new StartFilterParams(classic("red"), false)).jobId();
+        long jobId = start.handle(byQuery(classic("red"), false)).jobId();
         GetFilterResult done = await(jobId);
         FilterResult filter = done.result().orElseThrow();
 
@@ -92,19 +96,73 @@ class FilterHandlersTest {
     void deletedDocumentsMatchWhenAsked() throws Exception {
         openIndex();
 
-        long jobId = start.handle(new StartFilterParams(classic("red"), true)).jobId();
+        long jobId = start.handle(byQuery(classic("red"), true)).jobId();
 
         assertThat(await(jobId).result().orElseThrow().matchCount()).isEqualTo(3);
         assertThat(step(jobId, 3, true)).contains(new FilterMatch(3, 2));
     }
 
     @Test
+    void buildsAFilterFromAPatternOverStoredValues() throws Exception {
+        openIndex();
+
+        long jobId =
+                start.handle(byPattern("^R", true, Optional.empty(), false)).jobId();
+        GetFilterResult done = await(jobId);
+        FilterResult filter = done.result().orElseThrow();
+
+        assertThat(done.docsSearched()).isEqualTo(5);
+        assertThat(filter.matchCount()).isEqualTo(2);
+        assertThat(filter.query()).isEqualTo("/^R/i");
+        assertThat(filter.rewrittenQuery()).isEqualTo("/^R/i");
+        assertThat(filter.timedOutValues()).hasValue(0);
+        assertThat(step(jobId, 1, true)).contains(new FilterMatch(2, 1));
+
+        long withDeleted = start.handle(byPattern("e", false, Optional.of(List.of("body")), true))
+                .jobId();
+        assertThat(await(withDeleted).result().orElseThrow().matchCount()).isEqualTo(5);
+        // The id field has no "e"; only body was scanned.
+        long ids = start.handle(byPattern("\\d", false, Optional.of(List.of("body")), false))
+                .jobId();
+        assertThat(await(ids).result().orElseThrow().matchCount()).isZero();
+    }
+
+    @Test
+    void aQueryFilterSaysNothingOfTimedOutValues() throws Exception {
+        openIndex();
+
+        long jobId = start.handle(byQuery(classic("red"), false)).jobId();
+
+        assertThat(await(jobId).result().orElseThrow().timedOutValues()).isEmpty();
+    }
+
+    @Test
+    void checksThePatternAtOnce() throws Exception {
+        openIndex();
+
+        assertFails(
+                () -> start.handle(byPattern("(red", false, Optional.empty(), false)),
+                errorCodeOf("startStoredScan.error-invalid-query.json"));
+        assertFails(
+                () -> start.handle(byPattern("red", false, Optional.of(List.of("missing")), false)),
+                ErrorCode.FIELD_NOT_FOUND);
+        assertFails(
+                () -> start.handle(new StartFilterParams(Optional.empty(), Optional.empty(), false)),
+                errorCodeOf("startFilter.error-invalid-params.json"));
+        assertFails(
+                () -> start.handle(new StartFilterParams(
+                        Optional.of(classic("red")),
+                        Optional.of(new FilterPattern("red", false, Optional.empty())),
+                        false)),
+                ErrorCode.INVALID_PARAMS);
+    }
+
+    @Test
     void keepsOneFilterUntilItIsReleased() throws Exception {
         openIndex();
-        long first = start.handle(new StartFilterParams(classic("red"), false)).jobId();
+        long first = start.handle(byQuery(classic("red"), false)).jobId();
         await(first);
-        long second =
-                start.handle(new StartFilterParams(classic("blue"), false)).jobId();
+        long second = start.handle(byQuery(classic("blue"), false)).jobId();
 
         // The first one is kept until the second is built.
         assertThat(step(first, 0, true)).contains(new FilterMatch(0, 0));
@@ -121,14 +179,14 @@ class FilterHandlersTest {
     @Test
     void closingOrReplacingTheIndexForgetsTheFilter() throws Exception {
         openIndex();
-        long first = start.handle(new StartFilterParams(classic("red"), false)).jobId();
+        long first = start.handle(byQuery(classic("red"), false)).jobId();
         await(first);
 
         currentIndex.replace(ReadOnlyIndex.open(tmp.resolve("index")));
 
         assertFails(() -> step(first, 0, true), ErrorCode.FILTER_NOT_FOUND);
 
-        long second = start.handle(new StartFilterParams(classic("red"), false)).jobId();
+        long second = start.handle(byQuery(classic("red"), false)).jobId();
         await(second);
         currentIndex.close();
 
@@ -137,18 +195,17 @@ class FilterHandlersTest {
 
     @Test
     void checksTheQueryAtOnce() throws Exception {
-        assertFails(() -> start.handle(new StartFilterParams(classic("red"), false)), ErrorCode.NO_INDEX_OPEN);
+        assertFails(() -> start.handle(byQuery(classic("red"), false)), ErrorCode.NO_INDEX_OPEN);
         openIndex();
 
         assertFails(
-                () -> start.handle(new StartFilterParams(classic("title:(lamp"), false)),
+                () -> start.handle(byQuery(classic("title:(lamp"), false)),
                 errorCodeOf("startFilter.error-invalid-query.json"));
-        assertFails(
-                () -> start.handle(new StartFilterParams(classic("red", "missing"), false)), ErrorCode.FIELD_NOT_FOUND);
+        assertFails(() -> start.handle(byQuery(classic("red", "missing"), false)), ErrorCode.FIELD_NOT_FOUND);
 
         currentIndex.replace(DirectoryOnlyIndex.open(tmp.resolve("index"), DirectoryImpl.FS));
 
-        assertFails(() -> start.handle(new StartFilterParams(classic("red"), false)), ErrorCode.NO_READER);
+        assertFails(() -> start.handle(byQuery(classic("red"), false)), ErrorCode.NO_READER);
     }
 
     @Test
@@ -170,6 +227,16 @@ class FilterHandlersTest {
             Thread.sleep(5);
         }
         throw new AssertionError("job " + jobId + " did not finish");
+    }
+
+    private static StartFilterParams byQuery(SearchQuery query, boolean includeDeleted) {
+        return new StartFilterParams(Optional.of(query), Optional.empty(), includeDeleted);
+    }
+
+    private static StartFilterParams byPattern(
+            String pattern, boolean caseInsensitive, Optional<List<String>> fields, boolean includeDeleted) {
+        return new StartFilterParams(
+                Optional.empty(), Optional.of(new FilterPattern(pattern, caseInsensitive, fields)), includeDeleted);
     }
 
     private static SearchQuery classic(String expression) {

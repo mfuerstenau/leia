@@ -20,7 +20,7 @@ use crate::protocol::document::{
     BytesValue, DocValues, DocumentField, GetDocumentResult, GetReconstructResult, StoredType,
     StoredValue, TermPosition, TermVectorTerm,
 };
-use crate::protocol::filter::{FilterMatch, GetFilterResult, StepFilterParams};
+use crate::protocol::filter::{FilterMatch, GetFilterResult, StartFilterParams, StepFilterParams};
 use crate::protocol::index::{IndexField, IndexOptions};
 use crate::protocol::search::MatchSpan;
 use crate::reconstruct::{self, Reconstruction};
@@ -302,8 +302,8 @@ impl Documents {
 
     /// The screen for the reopened index (ADR 0019): the same document id, clamped to the new
     /// `max_doc`, with the same field selected, and values shown as before. The document is
-    /// fetched again; walks through term docs or hits end, and so does the filter, which the
-    /// server forgets.
+    /// fetched again; walks through term docs or hits end. The server forgets the filter, which
+    /// is built again (ADR 0032).
     pub fn reopened(&self, fields: Vec<IndexField>, max_doc: i32) -> Self {
         let mut documents = Self::new(fields, max_doc);
         documents.indexes = self.indexes.clone();
@@ -312,6 +312,7 @@ impl Documents {
         documents.hide_empty = self.hide_empty;
         documents.numbers = self.numbers;
         documents.delimiters = self.delimiters.clone();
+        documents.filter = self.filter.as_ref().map(DocFilter::rebuild);
         documents
     }
 
@@ -403,23 +404,29 @@ impl Documents {
         }
     }
 
-    /// Starts a filter (ADR 0031) on `label`, which starts on `start_doc` once it is built.
-    /// Returns the job to cancel and the filter to release of the filter it replaces.
+    /// Starts a filter (ADR 0031) on `label`, built from `params`, which starts on `start_doc`
+    /// once it is built. Returns the job to cancel and the filter to release of the filter it
+    /// replaces.
     pub fn start_filter(
         &mut self,
         label: String,
-        include_deleted: bool,
+        params: StartFilterParams,
         start_doc: i32,
     ) -> (Option<i64>, Option<i64>) {
         let old = self
             .filter
-            .replace(DocFilter::new(label, include_deleted, start_doc));
+            .replace(DocFilter::new(label, params, start_doc));
         old.map_or((None, None), |old| (old.job_id(), old.filter_id()))
     }
 
     /// Whether ←/→ step through a filter, or would once it is built.
     pub fn filtered(&self) -> bool {
         self.filter.is_some()
+    }
+
+    /// The filter the server keeps, once it is built.
+    pub fn filter_id(&self) -> Option<i64> {
+        self.filter.as_ref().and_then(DocFilter::filter_id)
     }
 
     /// The job that builds the filter, while it runs.
@@ -444,17 +451,28 @@ impl Documents {
     }
 
     /// Takes the progress of the job that builds the filter. Once it is built, returns the step
-    /// to the document it starts on.
+    /// to the document it starts on, or for a filter built again after a reopen, the step that
+    /// locates the shown document in it.
     pub fn filter_progress(&mut self, result: GetFilterResult) -> Option<Request> {
-        let (filter_id, start_doc) = self.filter.as_mut()?.progress(result)?;
+        let (filter_id, start_doc, step) = self.filter.as_mut()?.progress(result)?;
+        let from_doc = if step == FilterStep::Locate {
+            self.doc_id
+        } else {
+            start_doc
+        };
         Some(Request::StepFilter {
             params: StepFilterParams {
                 filter_id,
-                from_doc: start_doc,
+                from_doc,
                 forward: true,
             },
-            step: FilterStep::Nearest,
+            step,
         })
+    }
+
+    /// What to build the filter from again after a reopen (ADR 0032), until it is started.
+    pub fn filter_to_rebuild(&self) -> Option<&StartFilterParams> {
+        self.filter.as_ref()?.to_rebuild()
     }
 
     /// Building or stepping through the filter failed: the title says why until `b` clears it,
@@ -1624,6 +1642,7 @@ mod tests {
     use crate::protocol::document::{BytesValue, StoredType};
     use crate::protocol::filter::FilterResult;
     use crate::protocol::index::{DocValuesType, TermStats};
+    use crate::test_support::filter_params;
 
     fn schema(name: &str, number: i32) -> IndexField {
         IndexField {
@@ -1792,6 +1811,7 @@ mod tests {
                 query: "body:red".to_owned(),
                 rewritten_query: "body:red".to_owned(),
                 took_millis: 1,
+                timed_out_values: None,
             }),
         }
     }
@@ -1801,7 +1821,7 @@ mod tests {
         let mut documents = documents();
         documents.loaded(document(0, false));
         assert_eq!(
-            documents.start_filter("red".to_owned(), false, 2),
+            documents.start_filter("red".to_owned(), filter_params(false), 2),
             (None, None)
         );
         documents.filter_started(9);
@@ -1869,10 +1889,10 @@ mod tests {
     fn a_new_filter_replaces_the_old_one_and_a_failed_one_steps_through_every_document() {
         let mut documents = documents();
         documents.loaded(document(1, false));
-        documents.start_filter("red".to_owned(), false, 0);
+        documents.start_filter("red".to_owned(), filter_params(false), 0);
         documents.filter_started(9);
         assert_eq!(
-            documents.start_filter("blue".to_owned(), true, 0),
+            documents.start_filter("blue".to_owned(), filter_params(true), 0),
             (Some(9), None)
         );
         documents.filter_started(10);

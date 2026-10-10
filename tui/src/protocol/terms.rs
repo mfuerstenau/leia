@@ -131,9 +131,10 @@ pub struct TermEntry {
 }
 
 /// `getPostings`: a page of the postings of a term: the documents that contain it, from a given
-/// document id on, deleted documents included (ADR 0007). Fails with `NO_INDEX_OPEN`,
-/// `FIELD_NOT_FOUND`, `TERM_NOT_FOUND`, or `INVALID_PARAMS` for a `limit` out of range, a
-/// negative `from_doc` or a term that is not valid hex.
+/// document id on, deleted documents included (ADR 0007), marked with a filter or narrowed to it
+/// (ADR 0032). Fails with `NO_INDEX_OPEN`, `FIELD_NOT_FOUND`, `TERM_NOT_FOUND`,
+/// `FILTER_NOT_FOUND`, or `INVALID_PARAMS` for a `limit` out of range, a negative `from_doc` or a
+/// term that is not valid hex.
 pub enum GetPostings {}
 
 impl RpcMethod for GetPostings {
@@ -152,6 +153,20 @@ pub struct GetPostingsParams {
     pub from_doc: i32,
     /// The most postings the page has, from 1 to [`MAX_POSTINGS_LIMIT`].
     pub limit: i32,
+    /// The filter to mark the postings with, or to keep only those in it (ADR 0032).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filter: Option<PostingsFilter>,
+}
+
+/// The filter that a page of postings is read through (ADR 0032).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PostingsFilter {
+    /// The filter, as `getFilter` returned it.
+    pub filter_id: i64,
+    /// Whether the page has only the postings of documents in the filter; otherwise it has all of
+    /// them, and says of each whether its document is in the filter.
+    pub only_matches: bool,
 }
 
 /// The largest `limit` of `getPostings` the server accepts.
@@ -182,6 +197,10 @@ pub struct Posting {
     /// How often the term occurs in the document; `None` if frequencies are not indexed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub freq: Option<i32>,
+    /// Whether the document is in the filter the postings were read through (ADR 0032); `None`
+    /// without one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_filter: Option<bool>,
 }
 
 /// `getPositions`: where a term occurs in a document, from the postings, with offsets and
@@ -263,6 +282,7 @@ mod tests {
                 doc_id: 4,
                 deleted: false,
                 freq: None,
+                in_filter: None,
             }],
             next_doc: None,
         };

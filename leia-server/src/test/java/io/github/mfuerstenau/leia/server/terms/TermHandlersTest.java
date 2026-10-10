@@ -3,7 +3,9 @@ package io.github.mfuerstenau.leia.server.terms;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.github.mfuerstenau.leia.core.DocFilter;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
+import io.github.mfuerstenau.leia.core.ScanProgress;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.ProtocolJson;
 import io.github.mfuerstenau.leia.protocol.Response;
@@ -16,6 +18,7 @@ import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.Posting;
+import io.github.mfuerstenau.leia.protocol.terms.PostingsFilter;
 import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.filter.Filters;
@@ -37,6 +40,7 @@ import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.NoMergePolicy;
 import org.apache.lucene.index.Term;
+import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
@@ -49,9 +53,10 @@ class TermHandlersTest {
     @TempDir
     Path tmp;
 
-    private final CurrentIndex currentIndex = new CurrentIndex(new Jobs(), new Filters());
+    private final Filters filters = new Filters();
+    private final CurrentIndex currentIndex = new CurrentIndex(new Jobs(), filters);
     private final GetTermsHandler getTerms = new GetTermsHandler(currentIndex);
-    private final GetPostingsHandler getPostings = new GetPostingsHandler(currentIndex);
+    private final GetPostingsHandler getPostings = new GetPostingsHandler(currentIndex, filters);
     private final GetPositionsHandler getPositions = new GetPositionsHandler(currentIndex);
 
     @Test
@@ -83,22 +88,52 @@ class TermHandlersTest {
     void pagesThroughPostings() throws Exception {
         openIndex();
 
-        GetPostingsResult first = getPostings.handle(new GetPostingsParams("body", text("blue"), 0, 1));
+        GetPostingsResult first =
+                getPostings.handle(new GetPostingsParams("body", text("blue"), 0, 1, Optional.empty()));
         assertThat(first)
                 .isEqualTo(new GetPostingsResult(
-                        2, 2, List.of(new Posting(0, false, OptionalInt.of(1))), OptionalInt.of(2)));
-        assertThat(getPostings.handle(new GetPostingsParams("body", text("blue"), 2, 1)))
+                        2, 2, List.of(new Posting(0, false, OptionalInt.of(1), Optional.empty())), OptionalInt.of(2)));
+        assertThat(getPostings.handle(new GetPostingsParams("body", text("blue"), 2, 1, Optional.empty())))
                 .isEqualTo(new GetPostingsResult(
-                        2, 2, List.of(new Posting(2, false, OptionalInt.of(1))), OptionalInt.empty()));
+                        2,
+                        2,
+                        List.of(new Posting(2, false, OptionalInt.of(1), Optional.empty())),
+                        OptionalInt.empty()));
         // A deleted document, and a field without frequencies.
         assertThat(getPostings
-                        .handle(new GetPostingsParams("body", text("green"), 0, 10))
+                        .handle(new GetPostingsParams("body", text("green"), 0, 10, Optional.empty()))
                         .postings())
-                .containsExactly(new Posting(1, true, OptionalInt.of(1)));
+                .containsExactly(new Posting(1, true, OptionalInt.of(1), Optional.empty()));
         assertThat(getPostings
-                        .handle(new GetPostingsParams("key", new BytesValue("ff", true), 0, 10))
+                        .handle(new GetPostingsParams("key", new BytesValue("ff", true), 0, 10, Optional.empty()))
                         .postings())
-                .containsExactly(new Posting(2, false, OptionalInt.empty()));
+                .containsExactly(new Posting(2, false, OptionalInt.empty(), Optional.empty()));
+    }
+
+    @Test
+    void marksThePostingsInTheFilterOrReadsOnlyThose() throws Exception {
+        openIndex();
+        DocFilter filter =
+                currentIndex.readable().matches(new TermQuery(new Term("id", "3")), false, ScanProgress.NONE);
+        filters.put(7, filter);
+
+        assertThat(getPostings
+                        .handle(new GetPostingsParams(
+                                "body", text("blue"), 0, 10, Optional.of(new PostingsFilter(7, false))))
+                        .postings())
+                .containsExactly(
+                        new Posting(0, false, OptionalInt.of(1), Optional.of(false)),
+                        new Posting(2, false, OptionalInt.of(1), Optional.of(true)));
+        GetPostingsResult only = getPostings.handle(
+                new GetPostingsParams("body", text("blue"), 0, 10, Optional.of(new PostingsFilter(7, true))));
+        assertThat(only.docFreq()).isEqualTo(2);
+        assertThat(only.postings()).extracting(Posting::docId).containsExactly(2);
+        assertThat(only.nextDoc()).isEmpty();
+
+        assertFails(
+                () -> getPostings.handle(
+                        new GetPostingsParams("body", text("blue"), 0, 10, Optional.of(new PostingsFilter(8, false)))),
+                errorCodeOf("getPostings.error-filter-not-found.json"));
     }
 
     @Test
@@ -117,7 +152,8 @@ class TermHandlersTest {
     void failsWithoutOpenIndex() {
         assertFails(() -> getTerms.handle(new GetTermsParams("body", Optional.empty(), 10)), ErrorCode.NO_INDEX_OPEN);
         assertFails(
-                () -> getPostings.handle(new GetPostingsParams("body", text("red"), 0, 10)), ErrorCode.NO_INDEX_OPEN);
+                () -> getPostings.handle(new GetPostingsParams("body", text("red"), 0, 10, Optional.empty())),
+                ErrorCode.NO_INDEX_OPEN);
         assertFails(() -> getPositions.handle(new GetPositionsParams(0, "body", text("red"))), ErrorCode.NO_INDEX_OPEN);
     }
 
@@ -130,7 +166,7 @@ class TermHandlersTest {
                 ErrorCode.FIELD_NOT_FOUND,
                 "No field 'bdy' in the index");
         assertFails(
-                () -> getPostings.handle(new GetPostingsParams("body", text("quik"), 0, 10)),
+                () -> getPostings.handle(new GetPostingsParams("body", text("quik"), 0, 10, Optional.empty())),
                 ErrorCode.TERM_NOT_FOUND,
                 "No term 'quik' in field 'body'");
         assertFails(
@@ -161,11 +197,11 @@ class TermHandlersTest {
                 ErrorCode.INVALID_PARAMS,
                 "Invalid params: the binary term 'xyz' is not hex");
         assertFails(
-                () -> getPostings.handle(new GetPostingsParams("body", text("red"), -1, 10)),
+                () -> getPostings.handle(new GetPostingsParams("body", text("red"), -1, 10, Optional.empty())),
                 ErrorCode.INVALID_PARAMS,
                 "Invalid params: fromDoc must not be negative, not -1");
         assertFails(
-                () -> getPostings.handle(new GetPostingsParams("body", text("red"), 0, 1001)),
+                () -> getPostings.handle(new GetPostingsParams("body", text("red"), 0, 1001, Optional.empty())),
                 ErrorCode.INVALID_PARAMS);
     }
 

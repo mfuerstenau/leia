@@ -231,6 +231,47 @@ class StoredScanTest {
     }
 
     @Test
+    void keepsTheDocumentsWithAMatchAsAFilter() throws Exception {
+        Path dir = writeIndex(
+                tmp,
+                doc -> doc.add(new StoredField("text", "live match")),
+                doc -> doc.add(new StoredField("text", "deleted match")),
+                doc -> doc.add(new StoredField("text", "none")),
+                doc -> doc.add(new StoredField("text", "a".repeat(40) + "c")),
+                doc -> {
+                    doc.add(new StoredField("text", "MATCH"));
+                    doc.add(new StoredField("text", "match"));
+                });
+        try (IndexWriter writer = new IndexWriter(
+                FSDirectory.open(dir), new IndexWriterConfig().setMergePolicy(NoMergePolicy.INSTANCE))) {
+            writer.deleteDocuments(new Term("id", "1"));
+        }
+
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
+            Pattern pattern = Pattern.compile("(.*a){20}b|match", Pattern.CASE_INSENSITIVE);
+            DocFilter live =
+                    index.storedScanMatches(pattern, Optional.empty(), false, Duration.ofMillis(50), ScanProgress.NONE);
+
+            assertThat(live.matchCount()).isEqualTo(2);
+            assertThat(live.contains(0)).isTrue();
+            assertThat(live.contains(4)).isTrue();
+            assertThat(live.query()).isEqualTo("/(.*a){20}b|match/i");
+            assertThat(live.rewrittenQuery()).isEqualTo(live.query());
+            assertThat(live.timedOutValues()).hasValue(1);
+
+            DocFilter all = index.storedScanMatches(
+                    Pattern.compile("match"), Optional.of(Set.of("text")), true, LIMIT, ScanProgress.NONE);
+            assertThat(all.matchCount()).isEqualTo(3);
+            assertThat(all.contains(1)).isTrue();
+            assertThat(all.query()).isEqualTo("/match/");
+            assertThat(all.timedOutValues()).hasValue(0);
+            assertThatThrownBy(() -> index.storedScanMatches(
+                            pattern, Optional.of(Set.of("missing")), false, LIMIT, ScanProgress.NONE))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
     void docIdsCountOverEveryIndexBelowThePath() throws Exception {
         writeIndex(
                 tmp.resolve("a"),

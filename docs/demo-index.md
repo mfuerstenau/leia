@@ -119,6 +119,12 @@ their own indexes and the Lucene 9 and 8 indexes from `LegacyIndexWriter`.
   with `B` 500, and `i` `37` then shows the deleted doc 37 as `38 of 500`. With `title:lamp` as
   the filter (19 matches), `Enter` on hits of `body:quick` says `not a match`, and `→` from doc
   440 goes on to the next lamp, 466.
+- The filter on the terms screen: with `title:lamp` as the filter, the postings of `body`/`quick`
+  (249) mark the lamps `•`; `b` lists only those, 10 of them from doc 93 to 489.
+- A regex as the filter: `qu\w+` in regex mode, then `b`: 499 matches, starting on `1 of 499`.
+  Open a copy of the demo index without `segments_4`, put it back and press `R`: the tab line says
+  `Reopened: segments_4; rebuilding the filter`, and the title then says `2 of 486`, on the same
+  document.
 
 ## Analysis worth a try
 

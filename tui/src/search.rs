@@ -22,7 +22,7 @@ use crate::more_like_this::{LikeForm, LikeSettings, LikeSource};
 use crate::overview::{highlight, panel};
 use crate::parser_options::{OptionsForm, ParserSettings};
 use crate::protocol::document::{BytesValue, StoredValue};
-use crate::protocol::filter::StartFilterParams;
+use crate::protocol::filter::{FilterPattern, StartFilterParams};
 use crate::protocol::index::{IndexField, IndexOptions};
 use crate::protocol::search::{
     ClassicQuery, Explanation, GetExplainResult, GetSearchResult, GetStoredScanResult, Hit,
@@ -423,9 +423,13 @@ impl Search {
         })
     }
 
-    /// Narrows the documents screen to the documents that match the query (ADR 0031), starting
-    /// on the selected hit if there is one.
+    /// Narrows the documents screen to the documents that match the query (ADR 0031), or have a
+    /// stored value in which the pattern is found (ADR 0032), starting on the selected hit if
+    /// there is one.
     fn filter(&self, include_deleted: bool) -> Option<Request> {
+        if self.mode == Mode::Regex {
+            return self.pattern_filter(include_deleted);
+        }
         let query = self.query()?;
         let text = self.input.text().trim();
         let label = match self.mode {
@@ -436,11 +440,39 @@ impl Search {
         };
         Some(Request::Filter {
             params: StartFilterParams {
-                query,
+                query: Some(query),
+                pattern: None,
                 include_deleted,
             },
             label,
             start_doc: self.selected_hit().map_or(0, |hit| hit.doc_id),
+        })
+    }
+
+    /// The regex over stored values as a filter, with its fields and case setting; `None` while
+    /// the line is empty. The scan's own setting for deleted documents doesn't carry over.
+    fn pattern_filter(&self, include_deleted: bool) -> Option<Request> {
+        let pattern = self.input.text();
+        if pattern.is_empty() {
+            return None;
+        }
+        let flags = if self.case_insensitive { "i" } else { "" };
+        Some(Request::Filter {
+            params: StartFilterParams {
+                query: None,
+                pattern: Some(FilterPattern {
+                    pattern: pattern.to_owned(),
+                    case_insensitive: self.case_insensitive,
+                    fields: self.hit_fields.param(),
+                }),
+                include_deleted,
+            },
+            label: format!("/{pattern}/{flags}"),
+            start_doc: self
+                .scan
+                .as_ref()
+                .and_then(StoredScan::selected)
+                .map_or(0, |hit| hit.doc_id),
         })
     }
 
@@ -734,7 +766,8 @@ impl Search {
     /// More-Like-This settings, `s` the similarity and the sort, `l` the stored fields per hit,
     /// `f`/`F` step the field, `a` switches between OR and AND, `t` between an exact and an
     /// approximate count, `x` explains the selected hit, Enter shows its document, `b`/`B`
-    /// browse the documents that match without or with the deleted ones (ADR 0031), and Tab
+    /// browse the documents that match without or with the deleted ones (ADR 0031, ADR 0032 for
+    /// the regex), and Tab
     /// switches between the hits and the details.
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<Request> {
         if let Some(form) = &mut self.form {
@@ -827,7 +860,7 @@ impl Search {
                 return self.resubmit();
             }
             KeyCode::Char('x') => return self.explain_selected(),
-            KeyCode::Char('b') | KeyCode::Char('B') if self.mode != Mode::Regex => {
+            KeyCode::Char('b') | KeyCode::Char('B') => {
                 return self.filter(key.code == KeyCode::Char('B'));
             }
             KeyCode::Enter => return self.selected_hit().map(|hit| Request::Document(hit.doc_id)),
@@ -2563,7 +2596,8 @@ mod tests {
             press(&mut search, KeyCode::Char('b')),
             Some(Request::Filter {
                 params: StartFilterParams {
-                    query: classic("red", "title", QueryOperator::Or),
+                    query: Some(classic("red", "title", QueryOperator::Or)),
+                    pattern: None,
                     include_deleted: false,
                 },
                 label: "red".to_owned(),
@@ -2575,13 +2609,38 @@ mod tests {
         };
         assert!(params.include_deleted);
 
-        // In regex mode, or without a query, there is nothing to browse.
-        for _ in 0..5 {
-            press(&mut search, KeyCode::Char('m'));
-        }
-        assert_eq!(press(&mut search, KeyCode::Char('b')), None);
+        // Without a query, there is nothing to browse.
         let mut blank = self::search();
         assert_eq!(press(&mut blank, KeyCode::Char('b')), None);
+    }
+
+    #[test]
+    fn browses_the_documents_with_a_value_that_the_regex_finds() {
+        let (mut search, _) = regex("re[d]");
+        press(&mut search, KeyCode::Char('i'));
+        search.stored_scan_started(6);
+        search.stored_scan_progress(scan_poll(
+            vec![scan_hit(3, "body"), scan_hit(8, "title")],
+            true,
+        ));
+        press(&mut search, KeyCode::Down);
+
+        assert_eq!(
+            press(&mut search, KeyCode::Char('B')),
+            Some(Request::Filter {
+                params: StartFilterParams {
+                    query: None,
+                    pattern: Some(FilterPattern {
+                        pattern: "re[d]".to_owned(),
+                        case_insensitive: true,
+                        fields: None,
+                    }),
+                    include_deleted: true,
+                },
+                label: "/re[d]/i".to_owned(),
+                start_doc: 8,
+            })
+        );
     }
 
     #[test]

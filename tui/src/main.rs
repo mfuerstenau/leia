@@ -341,12 +341,14 @@ fn perform(
             term,
             from_doc,
             more,
+            filter,
         } => {
             let params = GetPostingsParams {
                 field: field.clone(),
                 term: term.clone(),
                 from_doc,
                 limit: POSTINGS_PAGE,
+                filter,
             };
             match answered(server.call::<GetPostings>(params))? {
                 Ok(result) => return Ok(app.postings_loaded(&field, &term, more, result)),
@@ -668,7 +670,17 @@ fn reopen_index(server: &mut Server, app: &mut App) -> Result<Option<Action>> {
         return Ok(None);
     }
     match answered(server.call::<GetIndexStats>(GetIndexStatsParams {}))? {
-        Ok(stats) => Ok(app.reopened(stats)),
+        Ok(stats) => {
+            let action = app.reopened(stats);
+            // The server forgot the filter with the old index: build it again (ADR 0032).
+            if let Some(params) = app.filter_to_rebuild() {
+                match answered(server.call::<StartFilter>(params))? {
+                    Ok(job) => app.filter_started(job.job_id),
+                    Err(error) => app.filter_failed(error),
+                }
+            }
+            Ok(action)
+        }
         Err(error) => {
             // Reopened, but the overview can't show it: close it rather than keep it open unseen.
             server.call::<CloseIndex>(CloseIndexParams {})?;

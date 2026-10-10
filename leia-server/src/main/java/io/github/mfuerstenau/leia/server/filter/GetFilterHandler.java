@@ -44,6 +44,7 @@ public final class GetFilterHandler implements MethodHandler<JobParams, GetFilte
                                 filter.matchCount(),
                                 filter.query(),
                                 filter.rewrittenQuery(),
-                                filter.took().toMillis())));
+                                filter.took().toMillis(),
+                                filter.timedOutValues())));
     }
 }

@@ -238,12 +238,15 @@ Stored values longer than 64 KiB come cut: the details panel shows their beginni
 viewer fetches them whole.
 
 `b` on the search screen narrows the documents screen to the documents that match the query
-(ADR 0031), `B` to those including the deleted ones. The server finds every match once, without
+(ADR 0031), or that have a stored value the regex finds (ADR 0032), `B` to those including the
+deleted ones. The server finds every match once, without
 scoring, and keeps them as one bit per document. The documents screen then starts on the selected
 hit, `←` `→` step to the previous or next match in document id order, and the title says
 `filter <query>: 3 of 19`. A document shown some other way, such as from a hit of another search,
-says `not a match` if the filter doesn't hold it. `b` on the documents screen clears the filter;
-opening, closing or a reopen that finds a new commit forgets it too.
+says `not a match` if the filter doesn't hold it. `b` on the documents screen clears the filter,
+and so do opening and closing an index. A reopen that finds a new commit builds the filter again,
+and then only says where the shown document stands in it. A regex filter reads every stored value
+again, so its title also says how many values took too long and were skipped.
 
 Flags: `I` indexed, `N` has a norm, `P` payloads, `S` stored, `V` term vector, `D` doc values,
 `T` points, `K` KNN vectors. `N`, `S`, `V` and `D` say what this document has; the others describe
@@ -288,6 +291,7 @@ takes about 1 MiB.
 | `/` | seek: type a text, and the terms start from the first one that is not smaller; `Enter` or `Esc` ends it, and an empty text goes back to the first term |
 | `Enter` | go to the next column; on a posting, show its document on the documents screen |
 | `e` | export the selected field's terms to a file |
+| `b` | with a filter on the documents screen, show only the postings in it, or all of them again |
 | `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the focused column |
 
 The terms screen lists the fields that have postings, the terms of the selected field in term
@@ -295,7 +299,9 @@ order with their document frequency and total term frequency, and the documents 
 selected term with the term's frequency in each. Terms and postings are fetched 100 at a time,
 the next ones once the selection reaches the last row. Lucene can't step back through terms, so
 to see the terms before the first one shown, seek again. Like the statistics, the frequencies
-include deleted documents, and the postings mark them `deleted`.
+include deleted documents, and the postings mark them `deleted`. With a filter on the documents
+screen (ADR 0032), the postings of the documents in it are marked `•` and the others are dimmed,
+or with `b` only those in it are listed; the title says which.
 
 A document opened from a posting shows the term in the header, and the details panel of the
 term's field shows where the term occurs: its positions, offsets and payloads, as far as they
@@ -342,7 +348,7 @@ shows as missing. The documents and terms screens always show the opened commit.
 | `i` | regex: ignore case, or match it |
 | `d` | regex: scan deleted documents too, or not |
 | `Enter` | show the selected hit's document on the documents screen |
-| `b` `B` | browse the documents that match the query on the documents screen, without or with the deleted ones (not for the regex) |
+| `b` `B` | browse the documents that match the query, or have a value the regex finds, on the documents screen, without or with the deleted ones |
 | `v` | regex: view the selected value with its matches highlighted |
 | `Tab` | switch between the hits and the details |
 | `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the hits, or scroll the details |

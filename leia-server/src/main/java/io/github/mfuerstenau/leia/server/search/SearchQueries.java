@@ -334,7 +334,7 @@ public final class SearchQueries {
         }
     }
 
-    static void checkField(ReadOnlyIndex index, String field) throws RpcException {
+    public static void checkField(ReadOnlyIndex index, String field) throws RpcException {
         if (!index.hasField(field)) {
             throw new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + field + "' in the index");
         }

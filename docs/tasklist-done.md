@@ -235,3 +235,7 @@ Finished items, moved here from `docs/tasklist.md` (the open work queue).
 - [x] Documents: browse through a filter (ADR 0031): `startFilter {query, includeDeleted}` / `getFilter {jobId}` find every match once, without scoring, into a bit set the server keeps; `stepFilter {filterId, fromDoc, forward}` returns the match from `fromDoc` on or up to it with its `index`; `releaseFilter`; `FILTER_NOT_FOUND` (-32018)
   - one filter kept, replaced by a newer one; forgotten with its index (open, close, a reopen that changed); deleted documents through a reader without live docs
   - TUI: `b`/`B` on the search screen browse the documents screen through the query, starting on the selected hit; `←`/`→` step through the matches, `i` goes to the nearest one, the title says `n of M` or `not a match`; `b` clears it, `Esc` stops building it
+- [x] Documents: the filter beyond the documents screen (ADR 0032)
+  - `startFilter` takes a `pattern {pattern, caseInsensitive, fields?}` instead of a `query`: a full scan of the stored values into the bit set (`ReadOnlyIndex.storedScanMatches`); `FilterResult.timedOutValues`
+  - `getPostings` takes `filter {filterId, onlyMatches}`: each posting says `inFilter`, or only those in the filter are read, leapfrogging postings and bit set
+  - TUI: `b`/`B` in regex mode; the terms screen marks postings in the filter `•` and dims the rest, `b` shows only those; a reopen that finds a new commit builds the filter again and only locates the shown document

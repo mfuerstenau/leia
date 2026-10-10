@@ -683,12 +683,27 @@ public final class ReadOnlyIndex implements OpenedIndex {
      * @throws IOException if reading the postings fails
      */
     public Optional<PostingsPage> postings(String field, BytesRef term, int fromDoc, int limit) throws IOException {
+        return postings(field, term, fromDoc, limit, Optional.empty());
+    }
+
+    /**
+     * A page of the postings of a term, as {@link #postings(String, BytesRef, int, int)} reads it,
+     * through a filter of this index (ADR 0032): each posting says whether its document is in the
+     * filter, or with {@code onlyMatches} the page has only those that are.
+     *
+     * @throws IllegalArgumentException if there is no such field, {@code fromDoc} is negative or
+     *     {@code limit} is below 1
+     * @throws IOException if reading the postings fails
+     */
+    public Optional<PostingsPage> postings(
+            String field, BytesRef term, int fromDoc, int limit, Optional<PostingsPage.Filter> filter)
+            throws IOException {
         checkField(field);
         checkLimit(limit);
         if (fromDoc < 0) {
             throw new IllegalArgumentException("fromDoc must not be negative: " + fromDoc);
         }
-        return TermReader.postings(reader, fieldInfos.fieldInfo(field), term, fromDoc, limit);
+        return TermReader.postings(reader, fieldInfos.fieldInfo(field), term, fromDoc, limit, filter);
     }
 
     /**
@@ -800,6 +815,30 @@ public final class ReadOnlyIndex implements OpenedIndex {
             throw new IllegalArgumentException("maxHits must not be negative: " + maxHits);
         }
         return StoredScan.scan(reader, pattern, fields, includeDeleted, maxHits, valueTimeLimit, listener, progress);
+    }
+
+    /**
+     * Finds every document with a stored value in which {@code pattern} is found (ADR 0032), as
+     * {@link #storedScan} looks for it, and keeps them as a filter. Values that take longer than
+     * {@code valueTimeLimit} are skipped and counted. {@code progress} receives the document ids gone
+     * through and can stop the scan by throwing a {@link CancellationException}.
+     *
+     * @param fields the stored fields to scan; empty for all of them
+     * @param includeDeleted whether deleted documents can match too
+     * @throws IllegalArgumentException if a field doesn't exist
+     * @throws IOException if reading a document fails
+     */
+    public DocFilter storedScanMatches(
+            Pattern pattern,
+            Optional<Set<String>> fields,
+            boolean includeDeleted,
+            Duration valueTimeLimit,
+            ScanProgress progress)
+            throws IOException {
+        if (fields.isPresent()) {
+            fields.get().forEach(this::checkField);
+        }
+        return StoredScan.matches(reader, pattern, fields, includeDeleted, valueTimeLimit, progress);
     }
 
     @Override

@@ -1,7 +1,8 @@
 //! The terms screen: the fields with postings, the terms of the selected field and the postings
 //! of the selected term, side by side (ADR 0007). Terms and postings come in pages, and the next
 //! page is fetched once the selection reaches the last row. Enter on a posting shows its document
-//! on the documents screen.
+//! on the documents screen. With a filter on the documents screen, the postings in it are marked,
+//! or `b` shows only those (ADR 0032).
 
 use ratatui::Frame;
 use ratatui::crossterm::event::KeyCode;
@@ -13,7 +14,9 @@ use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState, Wrap};
 use crate::overview::{highlight, panel};
 use crate::protocol::document::BytesValue;
 use crate::protocol::index::{IndexField, IndexOptions};
-use crate::protocol::terms::{GetPostingsResult, GetTermsResult, Posting, TermEntry};
+use crate::protocol::terms::{
+    GetPostingsResult, GetTermsResult, Posting, PostingsFilter, TermEntry,
+};
 use crate::text::{bytes_text, escape_control, first_chars};
 
 /// How many terms one `getTerms` call fetches.
@@ -24,7 +27,8 @@ pub const POSTINGS_PAGE: i32 = 100;
 const PAGE: usize = 10;
 /// The fields column is at most this wide, borders included.
 const FIELDS_MAX_WIDTH: u16 = 32;
-const POSTINGS_WIDTH: u16 = 30;
+/// Wide enough for the title of the postings in a filter (ADR 0032).
+const POSTINGS_WIDTH: u16 = 34;
 const COLUMN_SPACING: u16 = 2;
 
 /// What the caller has to fetch or show for the terms screen.
@@ -40,12 +44,13 @@ pub enum Request {
     },
     /// A page of the postings of a term from `from_doc` on, reported back with
     /// [`Terms::postings_loaded`] or [`Terms::postings_failed`]. With `more`, it continues the
-    /// shown postings; otherwise it replaces them.
+    /// shown postings; otherwise it replaces them. `filter` is the filter to read them through.
     Postings {
         field: String,
         term: BytesValue,
         from_doc: i32,
         more: bool,
+        filter: Option<PostingsFilter>,
     },
     /// Show this document on the documents screen.
     Document(TermHit),
@@ -103,6 +108,8 @@ impl TermList {
 struct PostingList {
     field: String,
     term: BytesValue,
+    /// The filter the postings were read through.
+    filter: Option<PostingsFilter>,
     doc_freq: i32,
     postings: Vec<Posting>,
     /// Where the next page starts; `None` after the last posting.
@@ -116,8 +123,8 @@ struct PostingList {
 }
 
 impl PostingList {
-    fn is_of(&self, field: &str, term: &BytesValue) -> bool {
-        self.field == field && self.term == *term
+    fn is_of(&self, field: &str, term: &BytesValue, filter: Option<PostingsFilter>) -> bool {
+        self.field == field && self.term == *term && self.filter == filter
     }
 
     fn hit(&self) -> Option<TermHit> {
@@ -145,6 +152,10 @@ pub struct Terms {
     seek: Option<String>,
     /// The text that the first page asked for starts from, if any.
     requested_from: Option<String>,
+    /// The filter of the documents screen, once it is built (ADR 0032).
+    filter: Option<i64>,
+    /// Whether only the postings in the filter are shown, rather than all of them marked.
+    only_filtered: bool,
 }
 
 impl Terms {
@@ -161,6 +172,8 @@ impl Terms {
             focus: Column::Fields,
             seek: None,
             requested_from: None,
+            filter: None,
+            only_filtered: false,
         }
     }
 
@@ -176,7 +189,37 @@ impl Terms {
                 .unwrap_or_default();
         }
         terms.focus = self.focus;
+        terms.only_filtered = self.only_filtered;
         terms
+    }
+
+    /// Takes the filter of the documents screen: the one built, or `None`. The postings are
+    /// fetched again through a new filter; without one, all of them are shown.
+    pub fn set_filter(&mut self, filter: Option<i64>) {
+        if filter != self.filter {
+            self.filter = filter;
+            if filter.is_none() {
+                self.only_filtered = false;
+            }
+        }
+    }
+
+    /// Whether `b` has a filter to show only the postings of.
+    pub fn filtered(&self) -> bool {
+        self.filter.is_some()
+    }
+
+    /// Whether only the postings in the filter are shown.
+    pub fn only_filtered(&self) -> bool {
+        self.only_filtered
+    }
+
+    /// What the postings are read through.
+    fn postings_filter(&self) -> Option<PostingsFilter> {
+        self.filter.map(|filter_id| PostingsFilter {
+            filter_id,
+            only_matches: self.only_filtered,
+        })
     }
 
     /// What to fetch when the screen is shown.
@@ -214,16 +257,18 @@ impl Terms {
             });
         }
         let term = terms.selected_term()?;
+        let filter = self.postings_filter();
         let Some(postings) = self
             .postings
             .as_ref()
-            .filter(|postings| postings.is_of(&field, &term))
+            .filter(|postings| postings.is_of(&field, &term, filter))
         else {
             return Some(Request::Postings {
                 field,
                 term,
                 from_doc: 0,
                 more: false,
+                filter,
             });
         };
         if postings.error.is_none()
@@ -235,6 +280,7 @@ impl Terms {
                 term,
                 from_doc,
                 more: true,
+                filter,
             });
         }
         None
@@ -296,8 +342,9 @@ impl Terms {
         more: bool,
         result: GetPostingsResult,
     ) -> Option<Request> {
+        let filter = self.postings_filter();
         match &mut self.postings {
-            Some(postings) if more && postings.is_of(field, term) => {
+            Some(postings) if more && postings.is_of(field, term, filter) => {
                 postings.postings.extend(result.postings);
                 postings.next_doc = result.next_doc;
                 postings.doc_freq = result.doc_freq;
@@ -314,6 +361,7 @@ impl Terms {
                 self.postings = Some(PostingList {
                     field: field.to_owned(),
                     term: term.clone(),
+                    filter,
                     doc_freq: result.doc_freq,
                     postings: result.postings,
                     next_doc: result.next_doc,
@@ -328,8 +376,9 @@ impl Terms {
     }
 
     pub fn postings_failed(&mut self, field: &str, term: &BytesValue, more: bool, error: String) {
+        let filter = self.postings_filter();
         match &mut self.postings {
-            Some(postings) if more && postings.is_of(field, term) => {
+            Some(postings) if more && postings.is_of(field, term, filter) => {
                 postings.error = Some(error);
                 postings.step_pending = false;
             }
@@ -338,6 +387,7 @@ impl Terms {
                 self.postings = Some(PostingList {
                     field: field.to_owned(),
                     term: term.clone(),
+                    filter,
                     doc_freq: 0,
                     postings: Vec::new(),
                     next_doc: None,
@@ -369,6 +419,7 @@ impl Terms {
             term: postings.term.clone(),
             from_doc,
             more: true,
+            filter: postings.filter,
         })
     }
 
@@ -391,14 +442,19 @@ impl Terms {
     }
 
     /// Moves the selection in the focused column, switches columns with ←/→ and Tab, seeks with
-    /// `/`, with Enter goes one column to the right or shows the selected posting's document, and
-    /// with `e` exports the selected field's terms.
+    /// `/`, with Enter goes one column to the right or shows the selected posting's document, with
+    /// `e` exports the selected field's terms, and with `b` switches between all postings and
+    /// those in the filter, if there is one.
     pub fn handle_key(&mut self, key: KeyCode) -> Option<Request> {
         if self.seek.is_some() {
             return self.seek_key(key);
         }
         match key {
             KeyCode::Char('e') => Some(Request::Export(self.selected_field()?.name.clone())),
+            KeyCode::Char('b') if self.filter.is_some() => {
+                self.only_filtered = !self.only_filtered;
+                self.next_request()
+            }
             KeyCode::Char('/') if self.selected_field().is_some() => {
                 self.seek = Some(String::new());
                 self.focus = Column::Terms;
@@ -583,11 +639,20 @@ impl Terms {
             frame.render_widget(panel(" Postings ".to_owned(), focused), area);
             return;
         };
-        let title = format!(" Postings ({}) ", postings.doc_freq);
+        let title = match postings.filter {
+            Some(PostingsFilter {
+                only_matches: true, ..
+            }) => format!(" Postings ({}) · filter only ", postings.doc_freq),
+            Some(_) => format!(" Postings ({}) · • filter ", postings.doc_freq),
+            None => format!(" Postings ({}) ", postings.doc_freq),
+        };
         let block = panel(title, focused);
         if postings.postings.is_empty() {
             let text = match &postings.error {
                 Some(error) => format!("Cannot read the postings: {error}"),
+                None if postings.filter.is_some_and(|filter| filter.only_matches) => {
+                    "No postings in the filter.".to_owned()
+                }
                 None => "No postings.".to_owned(),
             };
             frame.render_widget(
@@ -602,12 +667,19 @@ impl Terms {
             Cell::from(""),
         ])
         .style(Style::new().add_modifier(Modifier::BOLD));
+        let marked = postings.filter.is_some_and(|filter| !filter.only_matches);
         let mut rows: Vec<Row> = postings
             .postings
             .iter()
             .map(|posting| {
+                // Marked: in the filter, or dimmed outside it.
+                let (mark, style) = match posting.in_filter {
+                    Some(true) if marked => ("• ", Style::new()),
+                    Some(false) if marked => ("", Style::new().fg(Color::DarkGray)),
+                    _ => ("", Style::new()),
+                };
                 Row::new([
-                    Cell::from(Line::from(posting.doc_id.to_string()).right_aligned()),
+                    Cell::from(Line::from(format!("{mark}{}", posting.doc_id)).right_aligned()),
                     Cell::from(
                         Line::from(posting.freq.map_or("-".to_owned(), |freq| freq.to_string()))
                             .right_aligned(),
@@ -618,6 +690,7 @@ impl Terms {
                         Cell::from("")
                     },
                 ])
+                .style(style)
             })
             .collect();
         rows.extend(tail_row(
@@ -625,12 +698,14 @@ impl Terms {
             postings.error.as_deref(),
         ));
         let widths = [
-            Constraint::Length(number_width(
-                postings
-                    .postings
-                    .iter()
-                    .map(|posting| i64::from(posting.doc_id)),
-            )),
+            Constraint::Length(
+                number_width(
+                    postings
+                        .postings
+                        .iter()
+                        .map(|posting| i64::from(posting.doc_id)),
+                ) + if marked { 2 } else { 0 },
+            ),
             Constraint::Length(4),
             Constraint::Fill(1),
         ];
@@ -743,6 +818,7 @@ mod tests {
             doc_id,
             deleted,
             freq: Some(2),
+            in_filter: None,
         }
     }
 
@@ -772,6 +848,7 @@ mod tests {
             term: text(term),
             from_doc,
             more,
+            filter: None,
         })
     }
 
@@ -968,8 +1045,10 @@ mod tests {
 
         let screen = render(&mut terms, 100, 12);
         assert!(screen.contains("Cannot read more: broken"), "{screen}");
-        assert!(screen.contains("Cannot read the postings:"), "{screen}");
-        assert!(screen.contains("│gone"), "{screen}");
+        assert!(
+            screen.contains("Cannot read the postings: gone"),
+            "{screen}"
+        );
         assert_eq!(terms.handle_key(KeyCode::End), None);
     }
 
@@ -998,6 +1077,7 @@ mod tests {
                 term: text("quick"),
                 from_doc: 0,
                 more: false,
+                filter: None,
             })
         );
         terms.postings_loaded("body", &text("quick"), false, postings(&[9], None));
@@ -1016,5 +1096,54 @@ mod tests {
             }))
         );
         assert_eq!(terms.browse("rank", text("1")), None);
+    }
+
+    #[test]
+    fn marks_the_postings_in_the_filter_and_b_shows_only_those() {
+        let mut terms = loaded();
+        assert!(!terms.filtered());
+        assert_eq!(terms.handle_key(KeyCode::Char('b')), None);
+
+        terms.set_filter(Some(9));
+        let marked = PostingsFilter {
+            filter_id: 9,
+            only_matches: false,
+        };
+        let request = |filter| {
+            Some(Request::Postings {
+                field: "id".to_owned(),
+                term: text("a"),
+                from_doc: 0,
+                more: false,
+                filter: Some(filter),
+            })
+        };
+        assert_eq!(terms.initial_request(), request(marked));
+        let mut result = postings(&[1, 4], None);
+        result.postings[1].in_filter = Some(true);
+        result.postings[0].in_filter = Some(false);
+        assert_eq!(terms.postings_loaded("id", &text("a"), false, result), None);
+        let screen = render(&mut terms, 100, 12);
+        assert!(screen.contains("Postings (5) · • filter"), "{screen}");
+        assert!(screen.contains("• 4"), "{screen}");
+
+        let only = PostingsFilter {
+            only_matches: true,
+            ..marked
+        };
+        assert_eq!(terms.handle_key(KeyCode::Char('b')), request(only));
+        assert!(terms.only_filtered());
+        terms.postings_loaded("id", &text("a"), false, postings(&[], None));
+        let screen = render(&mut terms, 100, 12);
+        assert!(screen.contains("Postings (5) · filter only"), "{screen}");
+        assert!(screen.contains("No postings in the filter."), "{screen}");
+
+        // Without the filter, all postings are shown again, unmarked.
+        terms.set_filter(None);
+        assert!(!terms.only_filtered());
+        assert_eq!(
+            terms.initial_request(),
+            postings_request("id", "a", 0, false)
+        );
     }
 }
