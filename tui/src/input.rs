@@ -42,8 +42,12 @@ impl LineInput {
     /// Moves the cursor or edits the text. Ctrl+W deletes back to `word_start(text before the
     /// cursor)`. Keys that don't edit, such as Enter, Esc and Tab, are left to the caller.
     pub fn handle_key(&mut self, key: KeyEvent, word_start: fn(&str) -> usize) -> Edit {
+        if let Some(c) = typed_char(key) {
+            self.text.insert(self.cursor, c);
+            self.cursor += c.len_utf8();
+            return Edit::Changed;
+        }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        let alt = key.modifiers.contains(KeyModifiers::ALT);
         match key.code {
             KeyCode::Left => self.cursor = self.previous_boundary(),
             KeyCode::Right => self.cursor = self.next_boundary(),
@@ -57,11 +61,6 @@ impl LineInput {
             KeyCode::Char('k') if ctrl => return self.delete(self.cursor..self.text.len()),
             KeyCode::Char('w') if ctrl => {
                 return self.delete(word_start(&self.text[..self.cursor])..self.cursor);
-            }
-            KeyCode::Char(c) if !ctrl && !alt => {
-                self.text.insert(self.cursor, c);
-                self.cursor += c.len_utf8();
-                return Edit::Changed;
             }
             _ => {}
         }
@@ -104,6 +103,17 @@ impl LineInput {
             &self.text[start..],
             Span::raw(&before[start..]).width() as u16,
         )
+    }
+}
+
+/// The character that `key` types, if it types one. Ctrl or Alt alone make a shortcut, but both
+/// together are AltGr: Windows reports `\` or `@` on a German layout, typed or pasted, with both.
+pub fn typed_char(key: KeyEvent) -> Option<char> {
+    let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+    let alt = key.modifiers.contains(KeyModifiers::ALT);
+    match key.code {
+        KeyCode::Char(c) if ctrl == alt => Some(c),
+        _ => None,
     }
 }
 
@@ -156,6 +166,25 @@ mod tests {
             Edit::Unchanged
         );
         assert_eq!(input.text(), "aé");
+    }
+
+    #[test]
+    fn altgr_types_but_ctrl_or_alt_alone_do_not() {
+        let mut input = LineInput::new("C:");
+        let altgr = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL | KeyModifiers::ALT);
+
+        input.handle_key(altgr('\\'), word_start);
+        input.handle_key(
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT),
+            word_start,
+        );
+        input.handle_key(
+            KeyEvent::new(KeyCode::Char('x'), KeyModifiers::CONTROL),
+            word_start,
+        );
+        input.handle_key(altgr('@'), word_start);
+
+        assert_eq!(input.text(), "C:\\@");
     }
 
     #[test]

@@ -1771,6 +1771,7 @@ impl App {
                 };
                 match documents.viewer() {
                     Some(viewer) => Line::from(viewer.keys()),
+                    None if documents.seeking() => Line::from(" type to seek a field   ⏎/Esc done"),
                     None => Line::from(format!(
                         " {cancel}q quit   o open   c close   1-7 screen   ←→ doc   {steps}i go to   \
                          ⏎ term vector   v view   a analyze   x numbers   e empty   m similar   r rebuild   E export   \

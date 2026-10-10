@@ -8,7 +8,7 @@
 //! expression ([`StoredScan`], ADR 0027).
 
 use ratatui::Frame;
-use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
@@ -17,7 +17,7 @@ use ratatui::widgets::{Cell, Paragraph, Row, Table, TableState, Wrap};
 use crate::analyzer::AnalyzerSettings;
 use crate::form::FormEvent;
 use crate::hit_fields::{FieldsForm, HitFields};
-use crate::input::{Edit, LineInput, word_start};
+use crate::input::{Edit, LineInput, typed_char, word_start};
 use crate::more_like_this::{LikeForm, LikeSettings, LikeSource};
 use crate::overview::{highlight, panel};
 use crate::parser_options::{OptionsForm, ParserSettings};
@@ -734,10 +734,8 @@ impl Search {
                 }
                 KeyCode::Esc => self.editing = false,
                 // A document id has digits only.
-                KeyCode::Char(c)
-                    if self.mode == Mode::Like
-                        && !c.is_ascii_digit()
-                        && !key.modifiers.contains(KeyModifiers::CONTROL) => {}
+                _ if self.mode == Mode::Like
+                    && typed_char(key).is_some_and(|c| !c.is_ascii_digit()) => {}
                 _ => {
                     if self.input.handle_key(key, word_start) == Edit::Changed {
                         self.binary = false;

@@ -194,6 +194,7 @@ scans it again; a smaller N needs no new scan.
 |---|---|
 | `←` `→` / `p` `n` | previous or next document id |
 | `i` | go to a document id |
+| `/` | seek a field: type a text, and the first shown field whose name starts with it (ignoring case), or else contains it, is selected; `Enter` or `Esc` ends it |
 | `[` `]` | previous or next document of the term opened on the terms screen |
 | `Enter` | load the term vector of the selected field |
 | `r` | rebuild the terms the selected field was indexed with (`Esc` stops it) |

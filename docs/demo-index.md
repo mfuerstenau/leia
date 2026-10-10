@@ -72,6 +72,8 @@ their own indexes and the Lucene 9 and 8 indexes from `LegacyIndexWriter`.
   vector at once, and 42's 5000 words in position order (`東京` as `東 京`); `labels` with freqs and
   `keywords` with docs only, neither of them stored; `binary_key` as hex; `deleted_only` in the
   deleted document 74.
+- **Seeking a field (`/`):** `ts` selects `tsv`, `sep` selects `unit_separated` (it contains
+  `sep`), and `bl` selects `blob` on document 42; on document 0 with `e`, `bl` finds no match.
 - **Exporting a document (`E`):** 42 gives a file of about 1.7 MB: `blob` and `_source` whole, not
   cut; `body` with `termVector` and `indexed` from the term vector; `labels` and `keywords` with
   `indexed` from the postings only. `jq '.fields[] | {name, flags, src: .indexed.source}'` lists

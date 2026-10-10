@@ -466,6 +466,22 @@ mod tests {
     }
 
     #[test]
+    fn types_backslashes_that_windows_reports_with_altgr() {
+        let mut prompt = PathPrompt::new("", None);
+
+        for c in r"C:\data\idx".chars() {
+            let modifiers = if c == '\\' {
+                KeyModifiers::CONTROL | KeyModifiers::ALT
+            } else {
+                KeyModifiers::NONE
+            };
+            prompt.handle_key(KeyEvent::new(KeyCode::Char(c), modifiers));
+        }
+
+        assert_eq!(prompt.input(), r"C:\data\idx");
+    }
+
+    #[test]
     fn an_edit_clears_the_error() {
         let mut prompt = PathPrompt::new("/x", None);
         prompt.set_busy();

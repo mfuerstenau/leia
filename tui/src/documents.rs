@@ -206,6 +206,8 @@ pub struct Documents {
     /// The first line of the details panel that is shown.
     details_scroll: u16,
     prompt: Option<DocIdPrompt>,
+    /// The text typed into the field seek while it is open.
+    seek: Option<String>,
     /// The term and document that the terms screen opened, if any.
     hit: Option<TermHit>,
     /// Whether the search screen opened the document, so `[`/`]` step through its hits.
@@ -245,6 +247,7 @@ impl Documents {
             focus: Focus::Fields,
             details_scroll: 0,
             prompt: None,
+            seek: None,
             hit: None,
             search_hits: false,
             positions: None,
@@ -606,9 +609,56 @@ impl Documents {
         Some(&document.fields[self.rows[row]])
     }
 
-    /// Whether the go-to-document prompt or the viewer takes the keys, Esc included.
+    /// Whether the go-to-document prompt, the field seek or the viewer takes the keys, Esc
+    /// included.
     pub fn prompting(&self) -> bool {
-        self.prompt.is_some() || self.viewer.is_some()
+        self.prompt.is_some() || self.seek.is_some() || self.viewer.is_some()
+    }
+
+    /// Whether the field seek takes the keys.
+    pub fn seeking(&self) -> bool {
+        self.seek.is_some()
+    }
+
+    /// Edits the field seek, and selects the first shown field whose name starts with its text,
+    /// ignoring case, or else the first that contains it. Enter and Esc close it.
+    fn seek_key(&mut self, key: KeyCode) {
+        let Some(text) = &mut self.seek else {
+            return;
+        };
+        match key {
+            KeyCode::Enter | KeyCode::Esc => {
+                self.seek = None;
+                return;
+            }
+            KeyCode::Char(c) => text.push(c),
+            KeyCode::Backspace => {
+                text.pop();
+            }
+            _ => return,
+        }
+        if let Some(row) = self.seek_match() {
+            if self.table.selected() != Some(row) {
+                self.details_scroll = 0;
+            }
+            self.table.select(Some(row));
+        }
+    }
+
+    /// The row that the field seek's text finds, if it finds one. An empty text finds nothing.
+    fn seek_match(&self) -> Option<usize> {
+        let text = self.seek.as_deref().filter(|text| !text.is_empty())?;
+        let document = self.document.as_ref()?;
+        let text = text.to_lowercase();
+        let names: Vec<String> = self
+            .rows
+            .iter()
+            .map(|&i| document.fields[i].name.to_lowercase())
+            .collect();
+        names
+            .iter()
+            .position(|name| name.starts_with(&text))
+            .or_else(|| names.iter().position(|name| name.contains(&text)))
     }
 
     /// The viewer, if it is open.
@@ -692,6 +742,10 @@ impl Documents {
             }
             return viewer_request(event);
         }
+        if self.seek.is_some() {
+            self.seek_key(key);
+            return None;
+        }
         if let Some(prompt) = &mut self.prompt {
             if key == KeyCode::Esc {
                 self.prompt = None;
@@ -710,6 +764,10 @@ impl Documents {
                 return Some(Request::Document(self.doc_id + 1));
             }
             KeyCode::Char('i') if self.max_doc > 0 => self.prompt = Some(DocIdPrompt::default()),
+            KeyCode::Char('/') if !self.rows.is_empty() => {
+                self.seek = Some(String::new());
+                self.focus = Focus::Fields;
+            }
             KeyCode::Char('[') | KeyCode::Char(']') => {
                 return self.walk().map(|walk| Request::Step {
                     walk,
@@ -921,10 +979,17 @@ impl Documents {
         });
         let shown = self.rows.len();
         let total = document.fields.len();
-        let title = if shown == total {
-            format!(" Fields ({total}) ")
+        let count = if shown == total {
+            format!("{total}")
         } else {
-            format!(" Fields ({shown} of {total}, e shows all) ")
+            format!("{shown} of {total}, e shows all")
+        };
+        let title = match &self.seek {
+            Some(text) if !text.is_empty() && self.seek_match().is_none() => {
+                format!(" Fields ({count}) /{}▏ no match ", escape_control(text))
+            }
+            Some(text) => format!(" Fields ({count}) /{}▏ ", escape_control(text)),
+            None => format!(" Fields ({count}, / seeks) "),
         };
         let table = Table::new(rows, widths)
             .header(header)
@@ -1584,6 +1649,44 @@ mod tests {
     }
 
     #[test]
+    fn seeks_a_field_while_typing() {
+        let mut documents = documents();
+        assert_eq!(documents.handle_key(KeyCode::Char('/')), None);
+        assert!(!documents.prompting(), "no fields to seek yet");
+        documents.loaded(document(0, false));
+        documents.handle_key(KeyCode::Tab);
+
+        documents.handle_key(KeyCode::Char('/'));
+        assert!(documents.seeking());
+        documents.handle_key(KeyCode::Char('R'));
+        assert_eq!(documents.selected_field().unwrap().name, "rank");
+        assert!(render(&mut documents, 100, 20).contains("Fields (4) /R▏"));
+
+        // A text that finds nothing keeps the selection.
+        documents.handle_key(KeyCode::Char('x'));
+        assert_eq!(documents.selected_field().unwrap().name, "rank");
+        assert!(render(&mut documents, 100, 20).contains("/Rx▏ no match"));
+
+        // Without a field that starts with it, the first that contains it.
+        documents.handle_key(KeyCode::Backspace);
+        documents.handle_key(KeyCode::Backspace);
+        documents.handle_key(KeyCode::Char('t'));
+        documents.handle_key(KeyCode::Char('r'));
+        assert_eq!(documents.selected_field().unwrap().name, "extra");
+
+        // Keys are typed, not run, until Enter or Esc.
+        documents.handle_key(KeyCode::Char('e'));
+        assert_eq!(documents.handle_key(KeyCode::Esc), None);
+        assert!(!documents.prompting());
+        let screen = render(&mut documents, 100, 20);
+        assert!(screen.contains("Fields (4, / seeks)"), "{screen}");
+        assert_eq!(documents.selected_field().unwrap().name, "extra");
+        // The seek moved the focus to the fields.
+        documents.handle_key(KeyCode::Up);
+        assert_eq!(documents.selected_field().unwrap().name, "rank");
+    }
+
+    #[test]
     fn exports_the_shown_document() {
         let mut documents = documents();
         assert_eq!(documents.handle_key(KeyCode::Char('E')), None);
@@ -1604,7 +1707,10 @@ mod tests {
         documents.handle_key(KeyCode::Char('e'));
 
         let screen = render(&mut documents, 100, 20);
-        assert!(screen.contains("Fields (3 of 4, e shows all)"), "{screen}");
+        assert!(
+            screen.contains("Fields (3 of 4, e shows all, / seeks)"),
+            "{screen}"
+        );
         assert!(!screen.contains("extra"), "{screen}");
         // The hidden field's selection falls back to the first row.
         assert_eq!(documents.selected_field().unwrap().name, "id");
@@ -2210,7 +2316,7 @@ mod tests {
         assert_eq!(documents.selected_field().unwrap().name, "extra");
         documents.positions_failed(1, "extra", &text("red"), "broken".to_owned());
         let screen = render(&mut documents, 140, 30);
-        assert!(screen.contains("Fields (4) "), "{screen}");
+        assert!(screen.contains("Fields (4, / seeks)"), "{screen}");
         assert!(
             screen.contains("cannot read the positions: broken"),
             "{screen}"
