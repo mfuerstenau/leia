@@ -201,6 +201,7 @@ scans it again; a smaller N needs no new scan.
 | `x` | show numeric doc values as long, double bits, sortable double, float bits or sortable float |
 | `e` | hide or show the fields in which the document has nothing |
 | `m` | search for documents like this one (More-Like-This) on the search screen |
+| `E` | export the document as JSON to a file, or copy it (see below) |
 | `Tab` | switch between the field table and the details of the selected field |
 | `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the fields or scroll the details |
 
@@ -217,6 +218,14 @@ it takes a while on a field with many terms; the details panel shows the progres
 another document stops it. The result shows the tokens in position order (`a|b` at one position,
 `·` where positions were skipped, such as for a removed stop word), then each term with its freq
 and positions.
+
+`E` exports the whole document as JSON (ADR 0030): per field, the flags, the norm, the stored
+values (whole, never cut), the doc values, the term vector and the rebuilt indexed terms; binary
+values are hex. The prompt offers `doc-<id>.json` in the working directory; `Tab` turns the
+rebuild of the indexed terms off, which is the slow part on a large index, and `Ctrl+Y` copies
+the JSON through OSC 52 instead of writing it (terminals and tmux may cut large copies). As with
+the terms export, a file that exists takes a second `Enter`, and leia never writes into an index
+directory. While the terms are rebuilt, the tab line shows the progress and `Esc` stops it.
 
 The norm is shown with the field length it encodes, such as `88 → length 1048–1175`: all of
 Lucene's similarities store the number of terms in one byte (`SmallFloat.intToByte4`), exactly up to

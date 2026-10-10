@@ -11,6 +11,7 @@ pub mod cli;
 pub mod client;
 pub mod clipboard;
 pub mod commits;
+pub mod doc_export;
 pub mod documents;
 pub mod export;
 pub mod form;

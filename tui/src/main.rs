@@ -12,6 +12,7 @@ use leia::build_info::{LEIA, java_line, server_line};
 use leia::cli::Cli;
 use leia::client::CallError;
 use leia::clipboard::osc52;
+use leia::doc_export;
 use leia::history::{self, History};
 use leia::jars::{self, DefaultJars};
 use leia::java::find_java;
@@ -425,6 +426,34 @@ fn perform(
             server.call::<CancelJob>(JobParams { job_id })?;
             app.export_cancelled();
         }
+        Action::LoadDocumentExport {
+            doc_id,
+            indexed_terms,
+            target,
+        } => {
+            // Shows "Exporting…" while the document is fetched.
+            terminal.draw(|frame| app.draw(frame))?;
+            match answered(doc_export::load(server, doc_id))? {
+                Ok(data) => return Ok(app.document_export_loaded(data, indexed_terms, target)),
+                Err(error) => app.export_failed(error),
+            }
+        }
+        Action::StartDocumentExport(params) => {
+            match answered(server.call::<StartReconstruct>(params))? {
+                Ok(job) => app.export_started(job.job_id),
+                Err(error) => app.export_failed(error),
+            }
+        }
+        Action::WriteExport {
+            doc_id,
+            path,
+            text,
+            overwrite,
+            index_dirs,
+        } => match doc_export::write_file(Path::new(&path), &text, overwrite, &index_dirs) {
+            Ok(()) => app.document_exported(doc_id, &path),
+            Err(error) => app.export_failed(error),
+        },
         Action::LoadJars => match answered(server.call::<GetJars>(GetJarsParams {}))? {
             Ok(result) => app.jars_loaded(result.jars),
             Err(error) => app.jars_failed(error),
@@ -503,6 +532,15 @@ fn poll_jobs(server: &mut Server, app: &mut App, polls: &[Poll]) -> Result<Vec<A
                     Err(error) => app.reconstruct_failed(error),
                 }
                 None
+            }
+            Poll::DocumentExport(job_id) => {
+                match answered(server.call::<GetReconstruct>(JobParams { job_id }))? {
+                    Ok(result) => app.document_export_progress(result),
+                    Err(error) => {
+                        app.export_failed(error);
+                        None
+                    }
+                }
             }
             Poll::Export(job_id) => {
                 match answered(server.call::<GetExportTerms>(JobParams { job_id }))? {

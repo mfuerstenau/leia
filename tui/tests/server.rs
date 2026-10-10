@@ -13,6 +13,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use leia::client::CallError;
+use leia::doc_export;
 use leia::java::find_java;
 use leia::protocol::ErrorCode;
 use leia::protocol::analysis::{
@@ -2134,12 +2135,13 @@ fn exports_the_terms_of_a_field() {
 
 /// Rebuilds the fields of a document and waits for the outcome.
 fn reconstruct(server: &mut Server, doc_id: i32, fields: &[&str]) -> ReconstructResult {
-    let job = server
-        .call::<StartReconstruct>(StartReconstructParams {
-            doc_id,
-            fields: Some(fields.iter().map(|&field| field.to_owned()).collect()),
-        })
-        .unwrap();
+    let fields = Some(fields.iter().map(|&field| field.to_owned()).collect());
+    reconstruct_fields(server, StartReconstructParams { doc_id, fields })
+}
+
+/// Starts the rebuild and waits for its outcome.
+fn reconstruct_fields(server: &mut Server, params: StartReconstructParams) -> ReconstructResult {
+    let job = server.call::<StartReconstruct>(params).unwrap();
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
         let poll = server
@@ -2151,6 +2153,87 @@ fn reconstruct(server: &mut Server, doc_id: i32, fields: &[&str]) -> Reconstruct
         assert!(Instant::now() < deadline, "the rebuild did not finish");
         thread::sleep(Duration::from_millis(10));
     }
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn exports_a_document_with_everything_leia_knows() {
+    let mut server = start();
+    let path = test_index("demo", "demoIndex");
+    server
+        .call::<OpenIndex>(OpenIndexParams {
+            path: path.clone(),
+            directory_impl: None,
+            mode: None,
+        })
+        .unwrap();
+    let stats = server
+        .call::<GetIndexStats>(GetIndexStatsParams {})
+        .unwrap();
+    let schema = stats
+        .fields
+        .into_iter()
+        .map(|field| (field.name.clone(), field))
+        .collect();
+
+    // Document 42 has the blob, which getDocument cuts, and 5000 words of body.
+    let data = doc_export::load(&mut server, 42).unwrap();
+    let rebuilt = reconstruct_fields(
+        &mut server,
+        StartReconstructParams {
+            doc_id: 42,
+            fields: None,
+        },
+    );
+    let export = doc_export::assemble(data, Some(rebuilt.fields), &schema, &path, None);
+    let field = |name: &str| {
+        export
+            .fields
+            .iter()
+            .find(|field| field.name == name)
+            .unwrap_or_else(|| panic!("no {name}"))
+    };
+
+    assert_eq!((export.doc_id, export.indexed_terms), (42, true));
+    let blob = &field("blob").stored[0];
+    assert!(blob.binary);
+    assert_eq!(blob.full_length, None);
+    assert_eq!(blob.value.len(), 200_000);
+    let body = field("body");
+    assert!(
+        body.term_vector
+            .as_ref()
+            .is_some_and(|terms| !terms.is_empty())
+    );
+    let indexed = body.indexed.as_ref().unwrap();
+    assert_eq!(indexed.source, ReconstructSource::TermVector);
+    assert_eq!(Some(&indexed.terms), body.term_vector.as_ref());
+    for name in ["labels", "keywords"] {
+        let unstored = field(name);
+        assert!(unstored.stored.is_empty(), "{name}");
+        let indexed = unstored.indexed.as_ref().unwrap();
+        assert_eq!(indexed.source, ReconstructSource::Postings, "{name}");
+        assert!(!indexed.terms.is_empty(), "{name}");
+    }
+    let json = doc_export::to_json(&export);
+    let parsed: doc_export::ExportedDocument = serde_json::from_str(&json).unwrap();
+    assert_eq!(parsed, export);
+
+    // Never into the index directory.
+    let refused = doc_export::write_file(
+        &Path::new(&path).join("doc-42.json"),
+        &json,
+        false,
+        std::slice::from_ref(&path),
+    );
+    assert!(
+        refused
+            .unwrap_err()
+            .starts_with("Not writing into the index directory")
+    );
+
+    server.call::<CloseIndex>(CloseIndexParams {}).unwrap();
+    assert!(server.shutdown(SHUTDOWN_TIMEOUT).unwrap().success());
 }
 
 #[test]

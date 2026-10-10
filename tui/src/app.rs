@@ -19,8 +19,9 @@ use crate::analysis::{self, Analysis};
 use crate::build_info::{java_line, server_line};
 use crate::check::{self, Check};
 use crate::commits::{self, Commits};
+use crate::doc_export::{DocumentData, assemble, to_json};
 use crate::documents::{self, Documents, Walk};
-use crate::export::{ExportEvent, ExportPrompt};
+use crate::export::{ExportEvent, ExportPrompt, ExportRequest, ExportTarget};
 use crate::history::History;
 use crate::jars::{DefaultJars, JarsEvent, JarsPopup};
 use crate::logo;
@@ -31,8 +32,8 @@ use crate::protocol::analysis::{AnalyzeParams, AnalyzeResult, GetAnalysisCompone
 use crate::protocol::check::GetCheckIndexResult;
 use crate::protocol::commits::{GetCommitResult, GetCommitsResult};
 use crate::protocol::document::{
-    BytesValue, GetDocumentResult, GetReconstructResult, StartReconstructParams, StoredValue,
-    TermPosition, TermVectorTerm,
+    BytesValue, GetDocumentResult, GetReconstructResult, ReconstructedField,
+    StartReconstructParams, StoredValue, TermPosition, TermVectorTerm,
 };
 use crate::protocol::index::{
     DirectoryImpl, GetIndexStatsResult, IndexField, OpenIndexResult, OpenMode, ReopenIndexResult,
@@ -51,6 +52,7 @@ use crate::protocol::version::VersionResult;
 use crate::search::{self, Search};
 use crate::terms::{self, Terms};
 use crate::text::count;
+use crate::viewer::size;
 
 /// What the caller has to do after a key.
 #[derive(Debug, PartialEq)]
@@ -172,6 +174,25 @@ pub enum Action {
     StartExport(StartExportTermsParams),
     /// Cancel this export job, and report back with [`App::export_cancelled`].
     CancelExport(i64),
+    /// Fetch a document with its stored values whole and its term vectors, and report back with
+    /// [`App::document_export_loaded`] or [`App::export_failed`] (ADR 0030).
+    LoadDocumentExport {
+        doc_id: i32,
+        indexed_terms: bool,
+        target: ExportTarget,
+    },
+    /// Start rebuilding the indexed terms of the exported document, and report back with
+    /// [`App::export_started`] or [`App::export_failed`].
+    StartDocumentExport(StartReconstructParams),
+    /// Write the exported document to `path`, never into `index_dirs`, and report back with
+    /// [`App::document_exported`] or [`App::export_failed`].
+    WriteExport {
+        doc_id: i32,
+        path: String,
+        text: String,
+        overwrite: bool,
+        index_dirs: Vec<String>,
+    },
     /// Fetch the loaded jars, and report back with [`App::jars_loaded`] or [`App::jars_failed`]
     /// (ADR 0024).
     LoadJars,
@@ -197,6 +218,8 @@ pub enum Poll {
     Check(i64),
     /// Report back with [`App::export_progress`] or [`App::export_failed`].
     Export(i64),
+    /// Report back with [`App::document_export_progress`] or [`App::export_failed`].
+    DocumentExport(i64),
     /// Report back with [`App::reconstruct_progress`] or [`App::reconstruct_failed`].
     Reconstruct(i64),
 }
@@ -222,12 +245,72 @@ struct RunningScan {
     job_id: Option<i64>,
 }
 
-/// The export of terms that runs in the server (ADR 0022). There is at most one.
-struct RunningExport {
-    field: String,
-    /// `None` until the server has started the job.
-    job_id: Option<i64>,
-    terms_written: i64,
+/// The export that runs. There is at most one.
+enum RunningExport {
+    /// The terms of a field, written by the server (ADR 0022).
+    Terms {
+        field: String,
+        /// `None` until the server has started the job.
+        job_id: Option<i64>,
+        terms_written: i64,
+    },
+    /// A document, whose indexed terms are being rebuilt (ADR 0030).
+    Document {
+        data: Box<DocumentData>,
+        target: ExportTarget,
+        /// `None` until the server has started the job.
+        job_id: Option<i64>,
+        scanned: i64,
+        total: Option<i64>,
+    },
+    /// A document, being written to its file.
+    Writing(i32),
+}
+
+impl RunningExport {
+    fn job_id(&self) -> Option<i64> {
+        match self {
+            Self::Terms { job_id, .. } | Self::Document { job_id, .. } => *job_id,
+            Self::Writing(_) => None,
+        }
+    }
+
+    fn poll(&self) -> Option<Poll> {
+        match self {
+            Self::Terms { job_id, .. } => job_id.map(Poll::Export),
+            Self::Document { job_id, .. } => job_id.map(Poll::DocumentExport),
+            Self::Writing(_) => None,
+        }
+    }
+
+    /// The tab line while it runs.
+    fn line(&self) -> String {
+        match self {
+            Self::Terms {
+                field,
+                terms_written,
+                ..
+            } => format!(
+                "Exporting {field}: {}",
+                count(usize::try_from(*terms_written).unwrap_or(0), "term")
+            ),
+            Self::Document {
+                data,
+                scanned,
+                total,
+                ..
+            } => {
+                let doc_id = data.document.doc_id;
+                match total {
+                    Some(total) => {
+                        format!("Exporting doc {doc_id}: {scanned}/{total} terms")
+                    }
+                    None => format!("Exporting doc {doc_id}: {scanned} terms"),
+                }
+            }
+            Self::Writing(doc_id) => format!("Exporting doc {doc_id}: writing…"),
+        }
+    }
 }
 
 /// What was opened (ADR 0021).
@@ -240,6 +323,8 @@ struct Opened {
     directory: DirectoryImpl,
     /// The index directories, in order; at least one.
     indexes: Vec<String>,
+    /// The index directories that were found but left out.
+    skipped: Vec<String>,
 }
 
 pub struct App {
@@ -261,7 +346,7 @@ pub struct App {
     analysis: Analysis,
     /// The check screen of the open path, with or without a reader.
     check: Option<Check>,
-    /// Where to export the terms of a field, while it is asked.
+    /// Where to export the terms of a field or a document, while it is asked.
     export_prompt: Option<ExportPrompt>,
     export: Option<RunningExport>,
     /// The directory that a relative export path is resolved against.
@@ -295,7 +380,7 @@ enum Notice {
     Failed(String),
     /// `R` without a reader.
     NoReader,
-    /// The terms were written: how many, and where.
+    /// The terms or the document were written: what, and where.
     Exported(String),
     ExportFailed(String),
     /// `e` while an export runs.
@@ -435,6 +520,7 @@ impl App {
             no_reader: false,
             directory: self.directory,
             indexes: paths,
+            skipped: skipped.iter().map(|index| index.path.clone()).collect(),
         });
         self.check = Some(Check::new(&stats.path));
         self.overview = Some(Overview::new(stats, self.top_n).with_skipped(skipped));
@@ -461,6 +547,7 @@ impl App {
             no_reader: true,
             directory: self.directory,
             indexes: paths,
+            skipped: result.skipped.into_iter().map(|index| index.path).collect(),
         });
         if !matches!(self.screen, Screen::Analysis | Screen::Check) {
             self.screen = Screen::Commits;
@@ -674,6 +761,19 @@ impl App {
                 index,
             }),
             documents::Request::Copy(text) => Some(Action::Copy(text)),
+            documents::Request::Export(doc_id) => {
+                if self.export.is_some() {
+                    self.notice = Some(Notice::ExportRunning);
+                } else {
+                    self.export_prompt = Some(ExportPrompt::document(
+                        doc_id,
+                        self.index_dirs(),
+                        self.home.clone(),
+                        self.cwd.clone(),
+                    ));
+                }
+                None
+            }
             documents::Request::Analyze {
                 doc_id,
                 field,
@@ -1038,7 +1138,7 @@ impl App {
                     .map(Poll::StoredScan),
             )
             .chain(self.check.as_ref().and_then(Check::job).map(Poll::Check))
-            .chain(self.export_job().map(Poll::Export))
+            .chain(self.export.as_ref().and_then(RunningExport::poll))
             .chain(
                 self.documents
                     .as_ref()
@@ -1078,7 +1178,27 @@ impl App {
     }
 
     fn export_job(&self) -> Option<i64> {
-        self.export.as_ref().and_then(|export| export.job_id)
+        self.export.as_ref().and_then(RunningExport::job_id)
+    }
+
+    /// The index directories of the open path, opened or skipped: an export never writes there.
+    fn index_dirs(&self) -> Vec<String> {
+        self.opened.as_ref().map_or_else(Vec::new, |opened| {
+            opened
+                .indexes
+                .iter()
+                .chain(&opened.skipped)
+                .cloned()
+                .collect()
+        })
+    }
+
+    /// The file as it would be typed: below the working directory, relative to it.
+    fn shown_path(&self, path: &str) -> String {
+        match self.cwd.as_ref().and_then(|cwd| cwd.to_str()) {
+            Some(cwd) => relative(cwd, path),
+            None => path.to_owned(),
+        }
     }
 
     fn forget_export(&mut self) {
@@ -1091,37 +1211,134 @@ impl App {
         let Some(prompt) = self.export_prompt.take() else {
             return;
         };
-        self.export = Some(RunningExport {
-            field: prompt.field().to_owned(),
-            job_id: Some(job_id),
-            terms_written: 0,
-        });
+        match (&mut self.export, prompt.field()) {
+            (Some(RunningExport::Document { job_id: job, .. }), _) => *job = Some(job_id),
+            (None, Some(field)) => {
+                self.export = Some(RunningExport::Terms {
+                    field: field.to_owned(),
+                    job_id: Some(job_id),
+                    terms_written: 0,
+                });
+            }
+            _ => {}
+        }
     }
 
     /// Shows the progress of the export, or where it wrote the terms.
     pub fn export_progress(&mut self, result: GetExportTermsResult) {
-        let Some(export) = &mut self.export else {
+        let Some(RunningExport::Terms { terms_written, .. }) = &mut self.export else {
             return;
         };
-        export.terms_written = result.terms_written;
+        *terms_written = result.terms_written;
         if let Some(done) = result.result {
             self.export = None;
-            // The file as it would be typed: below the working directory, relative to it.
-            let path = match self.cwd.as_ref().and_then(|cwd| cwd.to_str()) {
-                Some(cwd) => relative(cwd, &done.path),
-                None => done.path,
-            };
             self.notice = Some(Notice::Exported(format!(
-                "Exported {} to {path}",
-                count(usize::try_from(done.terms).unwrap_or(0), "term")
+                "Exported {} to {}",
+                count(usize::try_from(done.terms).unwrap_or(0), "term"),
+                self.shown_path(&done.path)
             )));
         }
+    }
+
+    /// The document to export is in. Returns the rebuild of its indexed terms, or, without them,
+    /// where the export goes.
+    pub fn document_export_loaded(
+        &mut self,
+        data: DocumentData,
+        indexed_terms: bool,
+        target: ExportTarget,
+    ) -> Option<Action> {
+        // The index was closed meanwhile.
+        self.export_prompt.as_ref()?;
+        if !indexed_terms {
+            return self.finish_document_export(data, None, target);
+        }
+        let doc_id = data.document.doc_id;
+        self.export = Some(RunningExport::Document {
+            data: Box::new(data),
+            target,
+            job_id: None,
+            scanned: 0,
+            total: None,
+        });
+        Some(Action::StartDocumentExport(StartReconstructParams {
+            doc_id,
+            fields: None,
+        }))
+    }
+
+    /// Shows the progress of the rebuild. Returns where the export goes once it is done.
+    pub fn document_export_progress(&mut self, result: GetReconstructResult) -> Option<Action> {
+        let Some(RunningExport::Document { scanned, total, .. }) = &mut self.export else {
+            return None;
+        };
+        *scanned = result.scanned_terms;
+        *total = result.total_terms;
+        let done = result.result?;
+        let Some(RunningExport::Document { data, target, .. }) = self.export.take() else {
+            return None;
+        };
+        self.finish_document_export(*data, Some(done.fields), target)
+    }
+
+    /// Puts the export together: the file to write, or the text to copy.
+    fn finish_document_export(
+        &mut self,
+        data: DocumentData,
+        rebuilt: Option<Vec<ReconstructedField>>,
+        target: ExportTarget,
+    ) -> Option<Action> {
+        let documents = self.documents.as_ref()?;
+        let opened = self.opened.as_ref()?;
+        let doc_id = data.document.doc_id;
+        let index_directory = documents.index_of(doc_id).map(str::to_owned);
+        let document = assemble(
+            data,
+            rebuilt,
+            documents.schema(),
+            &opened.path,
+            index_directory,
+        );
+        let text = to_json(&document);
+        match target {
+            ExportTarget::File { path, overwrite } => {
+                if self.export_prompt.is_none() {
+                    self.export = Some(RunningExport::Writing(doc_id));
+                }
+                Some(Action::WriteExport {
+                    doc_id,
+                    path,
+                    text,
+                    overwrite,
+                    index_dirs: self.index_dirs(),
+                })
+            }
+            ExportTarget::Clipboard => {
+                self.export_prompt = None;
+                self.notice = Some(Notice::Exported(format!(
+                    "Copied document {doc_id} as JSON, {}",
+                    size(i64::try_from(text.len()).unwrap_or(i64::MAX))
+                )));
+                Some(Action::Copy(text))
+            }
+        }
+    }
+
+    /// The document was written to `path`.
+    pub fn document_exported(&mut self, doc_id: i32, path: &str) {
+        self.export_prompt = None;
+        self.export = None;
+        self.notice = Some(Notice::Exported(format!(
+            "Exported document {doc_id} to {}",
+            self.shown_path(path)
+        )));
     }
 
     /// Shows why the export couldn't start in its prompt, or why the running one failed.
     pub fn export_failed(&mut self, error: String) {
         if let Some(prompt) = &mut self.export_prompt {
             prompt.set_error(error);
+            self.export = None;
         } else if self.export.take().is_some() {
             self.notice = Some(Notice::ExportFailed(error));
         }
@@ -1269,9 +1486,21 @@ impl App {
         }
         if let Some(prompt) = &mut self.export_prompt {
             return match prompt.handle_key(key) {
-                ExportEvent::Submit(params) => {
+                ExportEvent::Submit(ExportRequest::Terms(params)) => {
                     prompt.set_busy();
                     Some(Action::StartExport(params))
+                }
+                ExportEvent::Submit(ExportRequest::Document {
+                    doc_id,
+                    indexed_terms,
+                    target,
+                }) => {
+                    prompt.set_busy();
+                    Some(Action::LoadDocumentExport {
+                        doc_id,
+                        indexed_terms,
+                        target,
+                    })
                 }
                 ExportEvent::Cancel => {
                     self.export_prompt = None;
@@ -1544,7 +1773,7 @@ impl App {
                     Some(viewer) => Line::from(viewer.keys()),
                     None => Line::from(format!(
                         " {cancel}q quit   o open   c close   1-7 screen   ←→ doc   {steps}i go to   \
-                         ⏎ term vector   v view   a analyze   x numbers   e empty   m similar   r rebuild   \
+                         ⏎ term vector   v view   a analyze   x numbers   e empty   m similar   r rebuild   E export   \
                          Tab panel   ↑↓"
                     )),
                 }
@@ -1620,11 +1849,7 @@ impl App {
             let notice = self.notice.as_ref().filter(|notice| !notice.in_footer());
             let line = match (notice, &self.export, &self.opened) {
                 (Some(notice), _, _) => Some(notice.line()),
-                (None, Some(export), _) => Some(Line::from(format!(
-                    "Exporting {}: {}",
-                    export.field,
-                    count(usize::try_from(export.terms_written).unwrap_or(0), "term")
-                ))),
+                (None, Some(export), _) => Some(Line::from(export.line())),
                 (None, None, Some(opened)) => marker(opened),
                 (None, None, None) => None,
             };
@@ -3559,5 +3784,192 @@ mod tests {
         app.export_failed("Cannot write /work/x: disk full".to_owned());
         assert!(app.polls().is_empty());
         assert!(render(&mut app).contains("Export failed: Cannot write /work/x: disk full"));
+    }
+
+    /// The documents screen on document 1, with relative export paths against a new directory.
+    fn app_exporting(name: &str) -> (App, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("leia-app-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut app = app_with_documents().with_cwd(Some(dir.clone()));
+        app.handle_key(key(KeyCode::Char('2')));
+        app.document_loaded(document(1));
+        (app, dir)
+    }
+
+    fn data(doc_id: i32) -> DocumentData {
+        DocumentData {
+            document: document(doc_id),
+            term_vectors: std::collections::HashMap::new(),
+        }
+    }
+
+    fn rebuilt_id(doc_id: i32) -> GetReconstructResult {
+        GetReconstructResult {
+            scanned_terms: 3,
+            total_terms: Some(3),
+            result: Some(ReconstructResult {
+                fields: vec![ReconstructedField {
+                    field: "id".to_owned(),
+                    index_options: IndexOptions::Docs,
+                    source: ReconstructSource::Postings,
+                    terms: vec![TermVectorTerm {
+                        term: format!("doc-{doc_id}"),
+                        binary: false,
+                        freq: 1,
+                        positions: Vec::new(),
+                    }],
+                }],
+                took_millis: 2,
+            }),
+        }
+    }
+
+    #[test]
+    fn exports_a_document_with_its_indexed_terms() {
+        let (mut app, dir) = app_exporting("export");
+        assert_eq!(app.handle_key(key(KeyCode::Char('E'))), None);
+        let screen = render(&mut app);
+        assert!(screen.contains("Export document 1 as JSON"), "{screen}");
+        assert!(screen.contains("Tab indexed terms: on"), "{screen}");
+
+        let path = dir.join("doc-1.json").display().to_string();
+        let target = ExportTarget::File {
+            path: path.clone(),
+            overwrite: false,
+        };
+        assert_eq!(
+            app.handle_key(key(KeyCode::Enter)),
+            Some(Action::LoadDocumentExport {
+                doc_id: 1,
+                indexed_terms: true,
+                target: target.clone(),
+            })
+        );
+        assert!(render(&mut app).contains("Exporting…"));
+        assert_eq!(
+            app.document_export_loaded(data(1), true, target),
+            Some(Action::StartDocumentExport(StartReconstructParams {
+                doc_id: 1,
+                fields: None,
+            }))
+        );
+        app.export_started(7);
+        assert_eq!(app.polls(), vec![Poll::DocumentExport(7)]);
+        let progress = GetReconstructResult {
+            scanned_terms: 1024,
+            total_terms: Some(3000),
+            result: None,
+        };
+        assert_eq!(app.document_export_progress(progress), None);
+        let screen = render(&mut app);
+        assert!(
+            screen.contains("Exporting doc 1: 1024/3000 terms"),
+            "{screen}"
+        );
+        assert!(screen.contains("Esc cancel export"), "{screen}");
+        // One export at a time.
+        app.handle_key(key(KeyCode::Char('E')));
+        assert!(render(&mut app).contains("An export runs; Esc cancels it"));
+
+        let Some(Action::WriteExport {
+            doc_id,
+            path: written,
+            text,
+            overwrite,
+            index_dirs,
+        }) = app.document_export_progress(rebuilt_id(1))
+        else {
+            panic!("no write");
+        };
+        assert_eq!(
+            (doc_id, written.as_str(), overwrite),
+            (1, path.as_str(), false)
+        );
+        assert_eq!(index_dirs, vec!["/data/idx".to_owned()]);
+        assert!(text.contains("\"indexedTerms\": true"), "{text}");
+        assert!(text.contains("\"source\": \"POSTINGS\""), "{text}");
+        assert!(app.polls().is_empty());
+
+        app.document_exported(1, &path);
+        let screen = render(&mut app);
+        assert!(
+            screen.contains(" Exported document 1 to doc-1.json"),
+            "{screen}"
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn copies_a_document_without_its_indexed_terms() {
+        let (mut app, dir) = app_exporting("copy");
+        app.handle_key(key(KeyCode::Char('E')));
+        app.handle_key(key(KeyCode::Tab));
+        assert!(render(&mut app).contains("Tab indexed terms: off"));
+        assert_eq!(
+            app.handle_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL)),
+            Some(Action::LoadDocumentExport {
+                doc_id: 1,
+                indexed_terms: false,
+                target: ExportTarget::Clipboard,
+            })
+        );
+        let Some(Action::Copy(text)) =
+            app.document_export_loaded(data(1), false, ExportTarget::Clipboard)
+        else {
+            panic!("no copy");
+        };
+        assert!(text.contains("\"indexedTerms\": false"), "{text}");
+        assert!(text.contains("\"value\": \"doc-1\""), "{text}");
+        let screen = render(&mut app);
+        assert!(!screen.contains("Export document"), "{screen}");
+        assert!(screen.contains(" Copied document 1 as JSON, "), "{screen}");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn a_document_export_that_fails_says_why() {
+        let (mut app, dir) = app_exporting("fails");
+        // Without indexed terms, the prompt stays open until the file is written.
+        app.handle_key(key(KeyCode::Char('E')));
+        app.handle_key(key(KeyCode::Tab));
+        let Some(Action::LoadDocumentExport { target, .. }) = app.handle_key(key(KeyCode::Enter))
+        else {
+            panic!("no export");
+        };
+        assert!(matches!(
+            app.document_export_loaded(data(1), false, target),
+            Some(Action::WriteExport { .. })
+        ));
+        app.export_failed("Cannot write doc-1.json: disk full".to_owned());
+        assert!(render(&mut app).contains("Cannot write doc-1.json: disk full"));
+        assert_eq!(app.handle_key(key(KeyCode::Esc)), None);
+        assert!(!render(&mut app).contains("Export document"));
+
+        // With them, Esc stops the rebuild.
+        app.handle_key(key(KeyCode::Char('E')));
+        let Some(Action::LoadDocumentExport { target, .. }) = app.handle_key(key(KeyCode::Enter))
+        else {
+            panic!("no export");
+        };
+        app.document_export_loaded(data(1), true, target.clone());
+        app.export_started(4);
+        assert_eq!(
+            app.handle_key(key(KeyCode::Esc)),
+            Some(Action::CancelExport(4))
+        );
+        app.export_cancelled();
+        assert!(app.polls().is_empty());
+
+        // A write that fails after the rebuild is a notice.
+        app.handle_key(key(KeyCode::Char('E')));
+        app.handle_key(key(KeyCode::Enter));
+        app.document_export_loaded(data(1), true, target);
+        app.export_started(5);
+        app.document_export_progress(rebuilt_id(1));
+        assert!(render(&mut app).contains("Exporting doc 1: writing…"));
+        app.export_failed("Cannot write doc-1.json: disk full".to_owned());
+        assert!(render(&mut app).contains("Export failed: Cannot write doc-1.json: disk full"));
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

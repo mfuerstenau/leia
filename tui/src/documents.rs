@@ -85,6 +85,8 @@ pub enum Request {
         field: String,
         text: String,
     },
+    /// Ask where to export this document as JSON (ADR 0030).
+    Export(i32),
     /// Cancel the jobs in `cancel`, then rebuild the terms a field of the document was indexed
     /// with (ADR 0029), reported back with [`Documents::reconstruct_started`],
     /// [`Documents::reconstruct_progress`] or [`Documents::reconstruct_failed`].
@@ -265,8 +267,13 @@ impl Documents {
         self
     }
 
+    /// How each field of the index is indexed, by name.
+    pub fn schema(&self) -> &HashMap<String, IndexField> {
+        &self.schema
+    }
+
     /// The name of the index directory that `doc_id` is in, with several of them.
-    fn index_of(&self, doc_id: i32) -> Option<&str> {
+    pub fn index_of(&self, doc_id: i32) -> Option<&str> {
         let at = self
             .indexes
             .partition_point(|(doc_base, _)| *doc_base <= doc_id);
@@ -674,8 +681,9 @@ impl Documents {
     /// Goes to another document with ←/→, the `i` prompt, or `[`/`]` through the documents of
     /// the hit's term; loads the selected field's term vector with Enter, views its values with
     /// `v`, analyzes its stored text with `a`, cycles the number format with `x`, hides empty
-    /// fields with `e`, searches for documents like this one with `m`, switches the focus with Tab, and moves the selection or scrolls the
-    /// details.
+    /// fields with `e`, searches for documents like this one with `m`, rebuilds the field's
+    /// indexed terms with `r`, exports the document with `E`, switches the focus with Tab, and
+    /// moves the selection or scrolls the details.
     pub fn handle_key(&mut self, key: KeyCode) -> Option<Request> {
         if let Some(viewer) = &mut self.viewer {
             let event = viewer.handle_key(key)?;
@@ -719,6 +727,12 @@ impl Documents {
             KeyCode::Char('v') => return self.view(),
             KeyCode::Char('a') => return self.analyze(),
             KeyCode::Char('r') => return self.reconstruct(),
+            KeyCode::Char('E') => {
+                return self
+                    .document
+                    .as_ref()
+                    .map(|doc| Request::Export(doc.doc_id));
+            }
             KeyCode::Char('m') if self.max_doc > 0 => {
                 return Some(Request::MoreLikeThis(self.doc_id));
             }
@@ -983,7 +997,7 @@ fn viewer_request(event: viewer::Event) -> Option<Request> {
 
 /// Whether the document has nothing that `getDocument` reports in the field. It may still have
 /// postings there.
-fn is_empty(field: &DocumentField) -> bool {
+pub(crate) fn is_empty(field: &DocumentField) -> bool {
     field.norm.is_none()
         && field.stored.is_empty()
         && field.doc_values.is_none()
@@ -993,7 +1007,7 @@ fn is_empty(field: &DocumentField) -> bool {
 /// `I` indexed, `N` norm, `P` payloads, `S` stored, `V` term vector, `D` doc values, `T` points,
 /// `K` KNN vectors; `-` where absent. `N`, `S`, `V` and `D` are about this document, the others
 /// about the field.
-fn flags(schema: Option<&IndexField>, field: &DocumentField) -> String {
+pub(crate) fn flags(schema: Option<&IndexField>, field: &DocumentField) -> String {
     let indexed = schema.is_some_and(|f| f.index_options != IndexOptions::None);
     [
         (indexed, 'I'),
@@ -1567,6 +1581,17 @@ mod tests {
         documents.loaded(document(1, false));
 
         assert_eq!(documents.selected_field().unwrap().name, "rank");
+    }
+
+    #[test]
+    fn exports_the_shown_document() {
+        let mut documents = documents();
+        assert_eq!(documents.handle_key(KeyCode::Char('E')), None);
+        documents.loaded(document(2, false));
+        assert_eq!(
+            documents.handle_key(KeyCode::Char('E')),
+            Some(Request::Export(2))
+        );
     }
 
     #[test]

@@ -72,6 +72,10 @@ their own indexes and the Lucene 9 and 8 indexes from `LegacyIndexWriter`.
   vector at once, and 42's 5000 words in position order (`東京` as `東 京`); `labels` with freqs and
   `keywords` with docs only, neither of them stored; `binary_key` as hex; `deleted_only` in the
   deleted document 74.
+- **Exporting a document (`E`):** 42 gives a file of about 1.7 MB: `blob` and `_source` whole, not
+  cut; `body` with `termVector` and `indexed` from the term vector; `labels` and `keywords` with
+  `indexed` from the postings only. `jq '.fields[] | {name, flags, src: .indexed.source}'` lists
+  them. A path in `leia-core/build/test-indexes/demo/` is refused. Document 0 gives only `id`.
 
 ## Searches worth a try
 

@@ -1,18 +1,21 @@
-//! The export prompt of the terms screen (ADR 0022): asks for the file that the terms of a field
-//! are written to, and the delimiter. The server writes the file; the prompt only resolves the
-//! path and asks before overwriting a file that exists.
+//! The export prompts: of the terms screen (ADR 0022), for the file that the terms of a field are
+//! written to and the delimiter, and of the documents screen (ADR 0030), for the file that a
+//! document is written to as JSON and whether its indexed terms are rebuilt. The server writes
+//! the terms; the prompt only resolves the path and asks before overwriting a file that exists.
+//! The TUI writes the document, so its prompt checks the path first (rule 1).
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use ratatui::Frame;
-use ratatui::crossterm::event::{KeyCode, KeyEvent};
+use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Clear, Paragraph, Wrap};
 
+use crate::doc_export::{check_target, default_file as document_file};
 use crate::input::{Edit, LineInput};
 use crate::prompt::{component_start, expand_home};
 use crate::protocol::terms::{StartExportTermsParams, TermDelimiter};
@@ -27,15 +30,51 @@ pub enum ExportEvent {
     /// Nothing for the caller to do.
     None,
     /// Start the export.
-    Submit(StartExportTermsParams),
+    Submit(ExportRequest),
     /// Esc: close the prompt.
     Cancel,
 }
 
+/// The export a prompt asks for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExportRequest {
+    /// The terms of a field, written by the server.
+    Terms(StartExportTermsParams),
+    /// A document as JSON, written by the TUI (ADR 0030).
+    Document {
+        doc_id: i32,
+        /// Whether its indexed terms are rebuilt.
+        indexed_terms: bool,
+        target: ExportTarget,
+    },
+}
+
+/// Where a document export goes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExportTarget {
+    /// This absolute file, which exists if `overwrite`.
+    File { path: String, overwrite: bool },
+    /// The clipboard, through OSC 52.
+    Clipboard,
+}
+
+/// What is exported, and the prompt's choices for it.
+enum Kind {
+    Terms {
+        field: String,
+        delimiter: TermDelimiter,
+    },
+    Document {
+        doc_id: i32,
+        indexed_terms: bool,
+        /// The index directories of the open path, opened or skipped, which it never writes to.
+        index_dirs: Vec<String>,
+    },
+}
+
 pub struct ExportPrompt {
-    field: String,
+    kind: Kind,
     input: LineInput,
-    delimiter: TermDelimiter,
     /// Why the last export couldn't start, or that the file exists.
     error: Option<String>,
     /// The file that the prompt said exists: Enter on it again overwrites it.
@@ -54,10 +93,33 @@ impl ExportPrompt {
         let millis = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_or(0, |since| i64::try_from(since.as_millis()).unwrap_or(0));
-        Self {
+        let kind = Kind::Terms {
             field: field.to_owned(),
-            input: LineInput::new(&default_file(field, millis)),
             delimiter: TermDelimiter::default(),
+        };
+        Self::with_kind(kind, &default_file(field, millis), home, cwd)
+    }
+
+    /// The prompt for document `doc_id`, prefilled with `doc-<id>.json`, with its indexed terms
+    /// rebuilt. It never writes into `index_dirs`.
+    pub fn document(
+        doc_id: i32,
+        index_dirs: Vec<String>,
+        home: Option<PathBuf>,
+        cwd: Option<PathBuf>,
+    ) -> Self {
+        let kind = Kind::Document {
+            doc_id,
+            indexed_terms: true,
+            index_dirs,
+        };
+        Self::with_kind(kind, &document_file(doc_id), home, cwd)
+    }
+
+    fn with_kind(kind: Kind, file: &str, home: Option<PathBuf>, cwd: Option<PathBuf>) -> Self {
+        Self {
+            kind,
+            input: LineInput::new(file),
             error: None,
             overwrite: None,
             busy: false,
@@ -66,8 +128,12 @@ impl ExportPrompt {
         }
     }
 
-    pub fn field(&self) -> &str {
-        &self.field
+    /// The field whose terms are exported; `None` for a document.
+    pub fn field(&self) -> Option<&str> {
+        match &self.kind {
+            Kind::Terms { field, .. } => Some(field),
+            Kind::Document { .. } => None,
+        }
     }
 
     pub fn set_busy(&mut self) {
@@ -88,12 +154,32 @@ impl ExportPrompt {
         match key.code {
             KeyCode::Esc => return ExportEvent::Cancel,
             KeyCode::Enter if !self.input.text().trim().is_empty() => return self.submit(),
+            KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                if let Kind::Document {
+                    doc_id,
+                    indexed_terms,
+                    ..
+                } = self.kind
+                {
+                    return ExportEvent::Submit(ExportRequest::Document {
+                        doc_id,
+                        indexed_terms,
+                        target: ExportTarget::Clipboard,
+                    });
+                }
+                return ExportEvent::None;
+            }
             KeyCode::Tab => {
-                self.delimiter = match self.delimiter {
-                    TermDelimiter::Tab => TermDelimiter::Comma,
-                    TermDelimiter::Comma => TermDelimiter::Space,
-                    TermDelimiter::Space => TermDelimiter::Tab,
-                };
+                match &mut self.kind {
+                    Kind::Terms { delimiter, .. } => {
+                        *delimiter = match delimiter {
+                            TermDelimiter::Tab => TermDelimiter::Comma,
+                            TermDelimiter::Comma => TermDelimiter::Space,
+                            TermDelimiter::Space => TermDelimiter::Tab,
+                        };
+                    }
+                    Kind::Document { indexed_terms, .. } => *indexed_terms = !*indexed_terms,
+                }
                 return ExportEvent::None;
             }
             _ => {}
@@ -105,20 +191,42 @@ impl ExportPrompt {
         ExportEvent::None
     }
 
-    /// The export of the typed path, or first the question whether to overwrite it.
+    /// The export of the typed path, or first the question whether to overwrite it. A document
+    /// isn't written where it mustn't be.
     fn submit(&mut self) -> ExportEvent {
         let path = self.resolved();
+        if let Kind::Document { index_dirs, .. } = &self.kind
+            && let Err(error) = check_target(Path::new(&path), true, index_dirs)
+        {
+            self.overwrite = None;
+            self.error = Some(error);
+            return ExportEvent::None;
+        }
         let exists = fs::symlink_metadata(&path).is_ok();
         if exists && self.overwrite.as_ref() != Some(&path) {
             self.error = Some(format!("File exists: {path}. ⏎ again overwrites it."));
             self.overwrite = Some(path);
             return ExportEvent::None;
         }
-        ExportEvent::Submit(StartExportTermsParams {
-            field: self.field.clone(),
-            path,
-            delimiter: Some(self.delimiter),
-            overwrite: Some(exists),
+        ExportEvent::Submit(match &self.kind {
+            Kind::Terms { field, delimiter } => ExportRequest::Terms(StartExportTermsParams {
+                field: field.clone(),
+                path,
+                delimiter: Some(*delimiter),
+                overwrite: Some(exists),
+            }),
+            Kind::Document {
+                doc_id,
+                indexed_terms,
+                ..
+            } => ExportRequest::Document {
+                doc_id: *doc_id,
+                indexed_terms: *indexed_terms,
+                target: ExportTarget::File {
+                    path,
+                    overwrite: exists,
+                },
+            },
         })
     }
 
@@ -155,15 +263,28 @@ impl ExportPrompt {
             .min(area.height);
         let popup = area.centered(Constraint::Length(width), Constraint::Length(height));
         frame.render_widget(Clear, popup);
+        let (title, choice, keys) = match &self.kind {
+            Kind::Terms { field, delimiter } => (
+                format!(" Export the terms of {field} "),
+                format!(" Tab delimiter: {} ", delimiter_name(*delimiter)),
+                "Enter export   Tab delimiter   Esc cancel",
+            ),
+            Kind::Document {
+                doc_id,
+                indexed_terms,
+                ..
+            } => (
+                format!(" Export document {doc_id} as JSON "),
+                format!(
+                    " Tab indexed terms: {} ",
+                    if *indexed_terms { "on" } else { "off" }
+                ),
+                "Enter export   Ctrl+Y copy   Tab indexed terms   Esc cancel",
+            ),
+        };
         let block = Block::bordered()
-            .title(format!(" Export the terms of {} ", self.field))
-            .title_bottom(
-                Line::from(format!(
-                    " Tab delimiter: {} ",
-                    delimiter_name(self.delimiter)
-                ))
-                .right_aligned(),
-            );
+            .title(title)
+            .title_bottom(Line::from(choice).right_aligned());
         let inner = block.inner(popup);
         frame.render_widget(block, popup);
         let [input, error_area, hint] = Layout::vertical([
@@ -181,11 +302,7 @@ impl ExportPrompt {
         if let Some(paragraph) = error {
             frame.render_widget(paragraph, error_area);
         }
-        let hint_text = if self.busy {
-            "Exporting…"
-        } else {
-            "Enter export   Tab delimiter   Esc cancel"
-        };
+        let hint_text = if self.busy { "Exporting…" } else { keys };
         frame.render_widget(
             Line::from(hint_text).style(Style::new().add_modifier(Modifier::DIM)),
             hint,
@@ -220,8 +337,6 @@ fn default_file(field: &str, millis: i64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use ratatui::crossterm::event::KeyModifiers;
-
     use super::*;
 
     fn key(code: KeyCode) -> KeyEvent {
@@ -267,19 +382,21 @@ mod tests {
 
         assert_eq!(
             prompt.handle_key(key(KeyCode::Enter)),
-            ExportEvent::Submit(StartExportTermsParams {
+            ExportEvent::Submit(ExportRequest::Terms(StartExportTermsParams {
                 field: "body".to_owned(),
                 path: "/work/out/t.txt".to_owned(),
                 delimiter: Some(TermDelimiter::Comma),
                 overwrite: Some(false),
-            })
+            }))
         );
 
         clear(&mut prompt);
         typed(&mut prompt, "~/t.txt");
         prompt.handle_key(key(KeyCode::Tab));
         prompt.handle_key(key(KeyCode::Tab));
-        let ExportEvent::Submit(params) = prompt.handle_key(key(KeyCode::Enter)) else {
+        let ExportEvent::Submit(ExportRequest::Terms(params)) =
+            prompt.handle_key(key(KeyCode::Enter))
+        else {
             panic!("no submit");
         };
         assert_eq!(params.path, "/home/u/t.txt");
@@ -300,7 +417,9 @@ mod tests {
             prompt.error.as_deref(),
             Some(format!("File exists: {path}. ⏎ again overwrites it.").as_str())
         );
-        let ExportEvent::Submit(params) = prompt.handle_key(key(KeyCode::Enter)) else {
+        let ExportEvent::Submit(ExportRequest::Terms(params)) =
+            prompt.handle_key(key(KeyCode::Enter))
+        else {
             panic!("no submit");
         };
         assert_eq!(params.overwrite, Some(true));
@@ -309,6 +428,58 @@ mod tests {
         typed(&mut prompt, "x");
         prompt.handle_key(key(KeyCode::Backspace));
         assert_eq!(prompt.handle_key(key(KeyCode::Enter)), ExportEvent::None);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn exports_a_document_to_a_file_or_the_clipboard() {
+        let dir = temp_dir("document");
+        let mut prompt = ExportPrompt::document(7, Vec::new(), None, Some(dir.clone()));
+        assert_eq!(prompt.input.text(), "doc-7.json");
+        assert_eq!(prompt.field(), None);
+        assert_eq!(
+            prompt.handle_key(key(KeyCode::Enter)),
+            ExportEvent::Submit(ExportRequest::Document {
+                doc_id: 7,
+                indexed_terms: true,
+                target: ExportTarget::File {
+                    path: dir.join("doc-7.json").display().to_string(),
+                    overwrite: false,
+                },
+            })
+        );
+
+        prompt.handle_key(key(KeyCode::Tab));
+        assert_eq!(
+            prompt.handle_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL)),
+            ExportEvent::Submit(ExportRequest::Document {
+                doc_id: 7,
+                indexed_terms: false,
+                target: ExportTarget::Clipboard,
+            })
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn does_not_write_a_document_into_an_index_directory() {
+        let dir = temp_dir("index");
+        let mut prompt =
+            ExportPrompt::document(1, vec![dir.display().to_string()], None, Some(dir.clone()));
+        assert_eq!(prompt.handle_key(key(KeyCode::Enter)), ExportEvent::None);
+        assert_eq!(
+            prompt.error,
+            Some(format!(
+                "Not writing into the index directory {}: leia never changes an index",
+                dir.display()
+            ))
+        );
+        // The terms prompt has no Ctrl+Y.
+        let mut terms = ExportPrompt::new("body", None, None);
+        assert_eq!(
+            terms.handle_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::CONTROL)),
+            ExportEvent::None
+        );
         fs::remove_dir_all(dir).unwrap();
     }
 
