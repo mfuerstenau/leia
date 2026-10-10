@@ -18,6 +18,8 @@ From the read-only checklist in `luke-features.md` §7. Ordered roughly by value
   - a job (rule 7): `startFilter {query, includeDeleted}` / `getFilter {jobId}` collects the matches into a bit set once and gives their count; `filterStep {filterId, fromDoc, direction, count}` returns the next matching ids in doc-id order; `releaseFilter` (or replacing it) frees the set
   - `i` (go to id) jumps to the nearest match; the terms screen's postings can mark or hide documents outside the filter
   - TUI: a free key on the search screen (`f`/`F` are taken by the field) turns the current query into the filter; the tab line and the documents title show it with `n of M`; a key clears it
+- [ ] Documents: seek to a field in the document's field view (jump to a field by name instead of scrolling)
+- [ ] Open prompt: backslashes in the index path (`tui/src/prompt.rs`; its completion appends `MAIN_SEPARATOR`)
 
 ## Open questions
 
