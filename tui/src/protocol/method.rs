@@ -9,6 +9,7 @@ use super::commits::{GetCommit, GetCommits};
 use super::document::{
     GetDocument, GetReconstruct, GetStoredValue, GetTermVector, StartReconstruct,
 };
+use super::filter::{GetFilter, ReleaseFilter, StartFilter, StepFilter};
 use super::index::{CloseIndex, GetIndexStats, OpenIndex, ReopenIndex};
 use super::jars::{AddJars, GetJars};
 use super::job::CancelJob;
@@ -54,6 +55,10 @@ pub const METHOD_NAMES: &[&str] = &[
     GetExplain::NAME,
     StartStoredScan::NAME,
     GetStoredScan::NAME,
+    StartFilter::NAME,
+    GetFilter::NAME,
+    StepFilter::NAME,
+    ReleaseFilter::NAME,
     GetAnalysisComponents::NAME,
     Analyze::NAME,
     StartCheckIndex::NAME,

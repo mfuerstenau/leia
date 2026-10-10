@@ -12,6 +12,7 @@ pub mod client;
 pub mod clipboard;
 pub mod commits;
 pub mod doc_export;
+pub mod doc_filter;
 pub mod documents;
 pub mod export;
 pub mod form;

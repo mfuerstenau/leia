@@ -1,0 +1,10 @@
+{
+  "jsonrpc": "2.0",
+  "id": 64,
+  "result": {
+    "match": {
+      "docId": 344,
+      "index": 3
+    }
+  }
+}

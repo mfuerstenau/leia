@@ -20,6 +20,7 @@ use crate::build_info::{java_line, server_line};
 use crate::check::{self, Check};
 use crate::commits::{self, Commits};
 use crate::doc_export::{DocumentData, assemble, to_json};
+use crate::doc_filter::FilterStep;
 use crate::documents::{self, Documents, Walk};
 use crate::export::{ExportEvent, ExportPrompt, ExportRequest, ExportTarget};
 use crate::history::History;
@@ -35,6 +36,7 @@ use crate::protocol::document::{
     BytesValue, GetDocumentResult, GetReconstructResult, ReconstructedField,
     StartReconstructParams, StoredValue, TermPosition, TermVectorTerm,
 };
+use crate::protocol::filter::{FilterMatch, GetFilterResult, StartFilterParams, StepFilterParams};
 use crate::protocol::index::{
     DirectoryImpl, GetIndexStatsResult, IndexField, OpenIndexResult, OpenMode, ReopenIndexResult,
     SkippedIndex,
@@ -79,10 +81,13 @@ pub enum Action {
     /// Cancel this scan job, and report back with [`App::scan_cancelled`].
     CancelScan(i64),
     /// Cancel the jobs in `cancel`, then fetch this document, and report back with
-    /// [`App::document_loaded`] or [`App::document_failed`].
+    /// [`App::document_loaded`] or [`App::document_failed`]. With `locate`, first find out
+    /// whether it matches that filter, and report back with [`App::filter_stepped`] or
+    /// [`App::filter_failed`] (ADR 0031).
     LoadDocument {
         doc_id: i32,
         cancel: Vec<i64>,
+        locate: Option<i64>,
     },
     /// Fetch a stored value of a document whole, and report back with
     /// [`App::stored_value_loaded`] or [`App::stored_value_failed`].
@@ -159,6 +164,25 @@ pub enum Action {
     /// Cancel these search, explanation and scan jobs, and report back with
     /// [`App::search_cancelled`].
     CancelSearch(Vec<i64>),
+    /// Cancel the job `cancel` and release the filter `release`, which this filter replaces,
+    /// then start building it, and report back with [`App::filter_started`] or
+    /// [`App::filter_failed`] (ADR 0031).
+    StartFilter {
+        params: StartFilterParams,
+        cancel: Option<i64>,
+        release: Option<i64>,
+    },
+    /// Find a match of the filter, and report back with [`App::filter_stepped`] or
+    /// [`App::filter_failed`].
+    StepFilter {
+        params: StepFilterParams,
+        step: FilterStep,
+    },
+    /// Cancel the job that builds the filter, or release the filter.
+    ClearFilter {
+        cancel: Option<i64>,
+        release: Option<i64>,
+    },
     /// Fetch what custom analyzers can be built from, and report back with
     /// [`App::components_loaded`] or [`App::components_failed`].
     LoadAnalysisComponents,
@@ -222,6 +246,8 @@ pub enum Poll {
     DocumentExport(i64),
     /// Report back with [`App::reconstruct_progress`] or [`App::reconstruct_failed`].
     Reconstruct(i64),
+    /// Report back with [`App::filter_progress`] or [`App::filter_failed`].
+    Filter(i64),
 }
 
 /// The screens; `1` to `7` switch between them. All but the analysis screen need an open index.
@@ -692,6 +718,22 @@ impl App {
                 Some(Action::StartStoredScan { params, cancel })
             }
             search::Request::Cancel(jobs) => Some(Action::CancelSearch(jobs)),
+            search::Request::Filter {
+                params,
+                label,
+                start_doc,
+            } => {
+                let (cancel, release) =
+                    self.documents
+                        .as_mut()?
+                        .start_filter(label, params.include_deleted, start_doc);
+                self.screen = Screen::Documents;
+                Some(Action::StartFilter {
+                    params,
+                    cancel,
+                    release,
+                })
+            }
             search::Request::Document(doc_id) => {
                 self.documents.as_mut()?.show_search_hit();
                 self.screen = Screen::Documents;
@@ -714,15 +756,19 @@ impl App {
     }
 
     /// Fetches a document for the documents screen, which stops rebuilding a field of the shown
-    /// one.
+    /// one, and finds out whether it matches the filter if that isn't known yet.
     fn load_document(&self, doc_id: i32) -> Option<Action> {
-        let cancel = self
-            .documents
-            .as_ref()
+        let documents = self.documents.as_ref();
+        let cancel = documents
             .and_then(Documents::reconstruct_job)
             .into_iter()
             .collect();
-        Some(Action::LoadDocument { doc_id, cancel })
+        let locate = documents.and_then(|documents| documents.filter_to_locate(doc_id));
+        Some(Action::LoadDocument {
+            doc_id,
+            cancel,
+            locate,
+        })
     }
 
     fn documents_request(&mut self, request: Option<documents::Request>) -> Option<Action> {
@@ -761,6 +807,12 @@ impl App {
                 index,
             }),
             documents::Request::Copy(text) => Some(Action::Copy(text)),
+            documents::Request::StepFilter { params, step } => {
+                Some(Action::StepFilter { params, step })
+            }
+            documents::Request::ClearFilter { cancel, release } => {
+                Some(Action::ClearFilter { cancel, release })
+            }
             documents::Request::Export(doc_id) => {
                 if self.export.is_some() {
                     self.notice = Some(Notice::ExportRunning);
@@ -894,6 +946,36 @@ impl App {
         if let Some(documents) = &mut self.documents {
             documents.reconstruct_started(job_id);
         }
+    }
+
+    pub fn filter_started(&mut self, job_id: i64) {
+        if let Some(documents) = &mut self.documents {
+            documents.filter_started(job_id);
+        }
+    }
+
+    /// Takes the progress of the job that builds the filter. Returns the step to the first
+    /// document to show once it is built.
+    pub fn filter_progress(&mut self, result: GetFilterResult) -> Option<Action> {
+        let request = self.documents.as_mut()?.filter_progress(result);
+        self.documents_request(request)
+    }
+
+    pub fn filter_failed(&mut self, error: String) {
+        if let Some(documents) = &mut self.documents {
+            documents.filter_failed(error);
+        }
+    }
+
+    /// Takes what `stepFilter` found. Returns the document to show, if any.
+    pub fn filter_stepped(
+        &mut self,
+        params: StepFilterParams,
+        step: FilterStep,
+        found: Option<FilterMatch>,
+    ) -> Option<Action> {
+        let request = self.documents.as_mut()?.filter_stepped(params, step, found);
+        self.documents_request(request)
     }
 
     pub fn reconstruct_progress(&mut self, result: GetReconstructResult) {
@@ -1144,6 +1226,12 @@ impl App {
                     .as_ref()
                     .and_then(Documents::reconstruct_job)
                     .map(Poll::Reconstruct),
+            )
+            .chain(
+                self.documents
+                    .as_ref()
+                    .and_then(Documents::filter_job)
+                    .map(Poll::Filter),
             )
             .collect()
     }
@@ -1543,6 +1631,10 @@ impl App {
             (Some(documents), Screen::Documents) => documents.reconstruct_job(),
             _ => None,
         };
+        let filtering = match (&self.documents, self.screen) {
+            (Some(documents), Screen::Documents) => documents.filter_job(),
+            _ => None,
+        };
         match key.code {
             // Esc stops the scans first, then the export, then the shown screen's jobs, and quits
             // only when there are none.
@@ -1563,6 +1655,10 @@ impl App {
             KeyCode::Esc if !search_jobs.is_empty() => Some(Action::CancelSearch(search_jobs)),
             KeyCode::Esc if let Some(job_id) = rebuilding => {
                 Some(Action::CancelReconstruct(job_id))
+            }
+            KeyCode::Esc if filtering.is_some() => {
+                let request = self.documents.as_mut()?.handle_key(KeyCode::Char('b'));
+                self.documents_request(request)
             }
             KeyCode::Esc if checking => match self.check.as_ref().and_then(Check::job) {
                 Some(job_id) => Some(Action::CancelCheck(job_id)),
@@ -1764,16 +1860,25 @@ impl App {
                     Some(Walk::SearchHits) => "[ ] hits   ",
                     None => "",
                 };
-                let cancel = if cancel.is_empty() && documents.reconstruct_job().is_some() {
+                let cancel = if !cancel.is_empty() {
+                    cancel
+                } else if documents.reconstruct_job().is_some() {
                     "Esc stop rebuild   "
+                } else if documents.filter_job().is_some() {
+                    "Esc stop filter   "
                 } else {
                     cancel
+                };
+                let (step, filter) = if documents.filtered() {
+                    ("←→ match", "b unfilter   ")
+                } else {
+                    ("←→ doc", "")
                 };
                 match documents.viewer() {
                     Some(viewer) => Line::from(viewer.keys()),
                     None if documents.seeking() => Line::from(" type to seek a field   ⏎/Esc done"),
                     None => Line::from(format!(
-                        " {cancel}q quit   o open   c close   1-7 screen   ←→ doc   {steps}i go to   \
+                        " {cancel}q quit   o open   c close   1-7 screen   {step}   {filter}{steps}i go to   \
                          ⏎ term vector   v view   a analyze   x numbers   e empty   m similar   r rebuild   E export   \
                          Tab panel   ↑↓"
                     )),
@@ -2033,6 +2138,7 @@ mod tests {
         DocumentField, ReconstructResult, ReconstructSource, ReconstructedField, StoredType,
         StoredValue,
     };
+    use crate::protocol::filter::FilterResult;
     use crate::protocol::index::{
         DocValuesType, IndexCommitStats, IndexEntry, IndexField, IndexOptions, ReaderInfo,
         TermStats,
@@ -2605,6 +2711,7 @@ mod tests {
         Action::LoadDocument {
             doc_id,
             cancel: Vec::new(),
+            locate: None,
         }
     }
 
@@ -2679,6 +2786,7 @@ mod tests {
             Some(Action::LoadDocument {
                 doc_id: 2,
                 cancel: vec![7],
+                locate: None,
             })
         );
         app.document_loaded(document(2));
@@ -3560,6 +3668,92 @@ mod tests {
         assert_eq!(app.handle_key(key(KeyCode::Char(']'))), None);
         assert_eq!(app.handle_key(key(KeyCode::Char('['))), Some(load(2)));
         assert!(render(&mut app).contains("2 Documents"));
+    }
+
+    #[test]
+    fn b_browses_the_documents_through_the_query() {
+        let mut app = searching("q");
+        app.search_progress(page(&[2, 0]));
+
+        let Some(Action::StartFilter {
+            params,
+            cancel: None,
+            release: None,
+        }) = app.handle_key(key(KeyCode::Char('b')))
+        else {
+            panic!("b filters");
+        };
+        assert!(!params.include_deleted);
+        assert!(render(&mut app).contains("2 Documents"));
+        app.filter_started(4);
+        assert_eq!(app.polls(), vec![Poll::Filter(4)]);
+        assert!(render(&mut app).contains("Esc stop filter"));
+        // Esc stops building it.
+        assert_eq!(
+            app.handle_key(key(KeyCode::Esc)),
+            Some(Action::ClearFilter {
+                cancel: Some(4),
+                release: None,
+            })
+        );
+        assert_eq!(app.polls(), Vec::new());
+
+        app.handle_key(key(KeyCode::Char('5')));
+        app.handle_key(key(KeyCode::Char('b')));
+        app.filter_started(5);
+        let params = StepFilterParams {
+            filter_id: 5,
+            from_doc: 2,
+            forward: true,
+        };
+        // Once it is built, it starts on the selected hit.
+        assert_eq!(
+            app.filter_progress(GetFilterResult {
+                docs_searched: 3,
+                result: Some(FilterResult {
+                    filter_id: 5,
+                    match_count: 2,
+                    query: "body:q".to_owned(),
+                    rewritten_query: "body:q".to_owned(),
+                    took_millis: 1,
+                }),
+            }),
+            Some(Action::StepFilter {
+                params,
+                step: FilterStep::Nearest,
+            })
+        );
+        let found = Some(FilterMatch {
+            doc_id: 2,
+            index: 1,
+        });
+        assert_eq!(
+            app.filter_stepped(params, FilterStep::Nearest, found),
+            Some(load(2))
+        );
+        app.document_loaded(document(2));
+        let screen = render(&mut app);
+        assert!(screen.contains("filter q: 2 of 2"), "{screen}");
+        assert!(screen.contains("b unfilter"), "{screen}");
+
+        // A hit opened from the search screen is located in the filter.
+        app.handle_key(key(KeyCode::Char('5')));
+        app.handle_key(key(KeyCode::Down));
+        assert_eq!(
+            app.handle_key(key(KeyCode::Enter)),
+            Some(Action::LoadDocument {
+                doc_id: 0,
+                cancel: Vec::new(),
+                locate: Some(5),
+            })
+        );
+        assert_eq!(
+            app.handle_key(key(KeyCode::Char('b'))),
+            Some(Action::ClearFilter {
+                cancel: None,
+                release: Some(5),
+            })
+        );
     }
 
     #[test]

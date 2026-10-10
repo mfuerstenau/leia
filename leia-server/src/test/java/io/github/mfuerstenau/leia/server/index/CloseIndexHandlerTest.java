@@ -6,6 +6,7 @@ import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.index.CloseIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.CloseIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
+import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -21,7 +22,7 @@ class CloseIndexHandlerTest {
     @TempDir
     Path tmp;
 
-    private final CurrentIndex currentIndex = new CurrentIndex(new Jobs());
+    private final CurrentIndex currentIndex = new CurrentIndex(new Jobs(), new Filters());
     private final CloseIndexHandler handler = new CloseIndexHandler(currentIndex);
 
     @Test

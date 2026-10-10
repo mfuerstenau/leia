@@ -1,0 +1,25 @@
+{
+  "jsonrpc": "2.0",
+  "id": 60,
+  "method": "startFilter",
+  "params": {
+    "query": {
+      "classic": {
+        "expression": "title:lamp AND body:qu*",
+        "defaultField": "body",
+        "defaultOperator": "OR",
+        "options": {
+          "allowLeadingWildcard": false,
+          "phraseSlop": 0,
+          "fuzzyPrefixLength": 0,
+          "enablePositionIncrements": true
+        },
+        "fuzzyMaxEdits": 2,
+        "splitOnWhitespace": false,
+        "autoGeneratePhraseQueries": false,
+        "analyzer": {"standard": {}}
+      }
+    },
+    "includeDeleted": false
+  }
+}

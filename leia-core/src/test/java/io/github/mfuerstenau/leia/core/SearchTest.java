@@ -10,8 +10,10 @@ import io.github.mfuerstenau.leia.core.SearchResults.Hit;
 import io.github.mfuerstenau.leia.core.SearchResults.HitField;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -193,6 +195,52 @@ class SearchTest {
     }
 
     @Test
+    void findsEveryMatchingDocumentWithOrWithoutTheDeletedOnes() throws Exception {
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
+            DocFilter live = index.matches(classic("quick fox"), false, ScanProgress.NONE);
+
+            assertThat(live.query()).isEqualTo("body:quick body:fox");
+            assertThat(live.rewrittenQuery()).isEqualTo("body:quick body:fox");
+            assertThat(live.matchCount()).isEqualTo(3);
+            assertThat(matchIds(live)).containsExactly(0, 2, 3);
+
+            DocFilter all = index.matches(classic("quick fox"), true, ScanProgress.NONE);
+
+            assertThat(all.matchCount()).isEqualTo(4);
+            assertThat(matchIds(all)).containsExactly(0, 1, 2, 3);
+            // The index itself still knows what is deleted.
+            assertThat(index.numDocs()).isEqualTo(4);
+            assertThat(matchIds(index.matches(classic("quick fox"), false, ScanProgress.NONE)))
+                    .containsExactly(0, 2, 3);
+        }
+    }
+
+    @Test
+    void findsMatchesOfAMoreLikeThisQuery() throws Exception {
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
+            var options = new MoreLikeThisOptions(List.of("body"), 1, 1, OptionalInt.empty(), 25, false);
+            DocFilter like = index.matches(Queries.moreLikeThis(0, options, ANALYZER), false, ScanProgress.NONE);
+
+            assertThat(matchIds(like)).contains(0, 2, 3).doesNotContain(1, 4);
+        }
+    }
+
+    @Test
+    void cancellingStopsFindingMatches() throws Exception {
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
+            AtomicInteger calls = new AtomicInteger();
+            ScanProgress cancelled = _ -> {
+                if (calls.incrementAndGet() > 1) {
+                    throw new CancellationException("cancelled");
+                }
+            };
+
+            assertThatThrownBy(() -> index.matches(classic("*:*"), true, cancelled))
+                    .isInstanceOf(CancellationException.class);
+        }
+    }
+
+    @Test
     void explainsAMatchAndAMiss() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             Query query = classic("quick fox");
@@ -234,6 +282,17 @@ class SearchTest {
             assertThat(results.hits().getFirst().fields())
                     .contains(new HitField("id", List.of(new StoredValue.Text("1"))));
         }
+    }
+
+    private static List<Integer> matchIds(DocFilter filter) {
+        List<Integer> ids = new ArrayList<>();
+        for (var match = filter.step(0, true);
+                match.isPresent();
+                match = filter.step(match.get().docId() + 1, true)) {
+            assertThat(match.get().index()).isEqualTo(ids.size());
+            ids.add(match.get().docId());
+        }
+        return ids;
     }
 
     private static Query classic(String expression) throws InvalidQueryException {

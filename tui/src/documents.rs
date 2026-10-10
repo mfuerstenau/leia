@@ -2,7 +2,8 @@
 //! `getDocument` reports it (ADR 0006), with a panel for the selected field's values and its
 //! term vector. A document opened from the terms screen also shows where the term occurs in it,
 //! and `[`/`]` step through the term's other documents. `v` opens the selected field's values in
-//! the [`Viewer`], and `r` rebuilds the terms the field was indexed with (ADR 0029).
+//! the [`Viewer`], and `r` rebuilds the terms the field was indexed with (ADR 0029). Through a
+//! [`DocFilter`], ←/→ step through the documents that match a query only (ADR 0031).
 
 use std::collections::HashMap;
 
@@ -13,11 +14,13 @@ use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Cell, Clear, Paragraph, Row, Table, TableState, Wrap};
 
+use crate::doc_filter::{DocFilter, FilterStep, Stepped};
 use crate::overview::{doc_values, highlight, panel, postings};
 use crate::protocol::document::{
     BytesValue, DocValues, DocumentField, GetDocumentResult, GetReconstructResult, StoredType,
     StoredValue, TermPosition, TermVectorTerm,
 };
+use crate::protocol::filter::{FilterMatch, GetFilterResult, StepFilterParams};
 use crate::protocol::index::{IndexField, IndexOptions};
 use crate::protocol::search::MatchSpan;
 use crate::reconstruct::{self, Reconstruction};
@@ -94,6 +97,17 @@ pub enum Request {
         doc_id: i32,
         field: String,
         cancel: Vec<i64>,
+    },
+    /// Find a match of the filter (ADR 0031), reported back with [`Documents::filter_stepped`]
+    /// or [`Documents::filter_failed`].
+    StepFilter {
+        params: StepFilterParams,
+        step: FilterStep,
+    },
+    /// Forget the filter: cancel the job that builds it, or release the filter the server keeps.
+    ClearFilter {
+        cancel: Option<i64>,
+        release: Option<i64>,
     },
 }
 
@@ -225,6 +239,8 @@ pub struct Documents {
     /// With several index directories, the document id each starts at and its name as shown,
     /// in order (ADR 0021); empty with one.
     indexes: Vec<(i32, String)>,
+    /// The filter that ←/→ step through, if any (ADR 0031).
+    filter: Option<DocFilter>,
 }
 
 impl Documents {
@@ -256,6 +272,7 @@ impl Documents {
             pending_view: None,
             delimiters: Delimiters::default(),
             indexes: Vec::new(),
+            filter: None,
         }
     }
 
@@ -285,7 +302,8 @@ impl Documents {
 
     /// The screen for the reopened index (ADR 0019): the same document id, clamped to the new
     /// `max_doc`, with the same field selected, and values shown as before. The document is
-    /// fetched again; walks through term docs or hits end.
+    /// fetched again; walks through term docs or hits end, and so does the filter, which the
+    /// server forgets.
     pub fn reopened(&self, fields: Vec<IndexField>, max_doc: i32) -> Self {
         let mut documents = Self::new(fields, max_doc);
         documents.indexes = self.indexes.clone();
@@ -383,6 +401,117 @@ impl Documents {
         } else {
             None
         }
+    }
+
+    /// Starts a filter (ADR 0031) on `label`, which starts on `start_doc` once it is built.
+    /// Returns the job to cancel and the filter to release of the filter it replaces.
+    pub fn start_filter(
+        &mut self,
+        label: String,
+        include_deleted: bool,
+        start_doc: i32,
+    ) -> (Option<i64>, Option<i64>) {
+        let old = self
+            .filter
+            .replace(DocFilter::new(label, include_deleted, start_doc));
+        old.map_or((None, None), |old| (old.job_id(), old.filter_id()))
+    }
+
+    /// Whether ←/→ step through a filter, or would once it is built.
+    pub fn filtered(&self) -> bool {
+        self.filter.is_some()
+    }
+
+    /// The job that builds the filter, while it runs.
+    pub fn filter_job(&self) -> Option<i64> {
+        self.filter.as_ref().and_then(DocFilter::job_id)
+    }
+
+    /// The filter to locate `doc_id` in once it is loaded, if it is built and doesn't know yet
+    /// whether the document matches.
+    pub fn filter_to_locate(&self, doc_id: i32) -> Option<i64> {
+        let filter = self.filter.as_ref()?;
+        filter
+            .needs_locating(doc_id)
+            .then(|| filter.filter_id())
+            .flatten()
+    }
+
+    pub fn filter_started(&mut self, job_id: i64) {
+        if let Some(filter) = &mut self.filter {
+            filter.started(job_id);
+        }
+    }
+
+    /// Takes the progress of the job that builds the filter. Once it is built, returns the step
+    /// to the document it starts on.
+    pub fn filter_progress(&mut self, result: GetFilterResult) -> Option<Request> {
+        let (filter_id, start_doc) = self.filter.as_mut()?.progress(result)?;
+        Some(Request::StepFilter {
+            params: StepFilterParams {
+                filter_id,
+                from_doc: start_doc,
+                forward: true,
+            },
+            step: FilterStep::Nearest,
+        })
+    }
+
+    /// Building or stepping through the filter failed: the title says why until `b` clears it,
+    /// and ←/→ step through every document again.
+    pub fn filter_failed(&mut self, error: String) {
+        if let Some(filter) = &mut self.filter {
+            filter.failed(error);
+        }
+    }
+
+    /// Takes what `stepFilter` found, unless the filter was replaced since. Returns the
+    /// document to show, or the step back that `Nearest` takes when nothing matches forward.
+    pub fn filter_stepped(
+        &mut self,
+        params: StepFilterParams,
+        step: FilterStep,
+        found: Option<FilterMatch>,
+    ) -> Option<Request> {
+        let filter = self
+            .filter
+            .as_mut()
+            .filter(|filter| filter.filter_id() == Some(params.filter_id))?;
+        match filter.stepped(params.from_doc, params.forward, step, found) {
+            Stepped::Show(doc_id) => Some(Request::Document(doc_id)),
+            Stepped::LookBack(from_doc) => Some(Request::StepFilter {
+                params: StepFilterParams {
+                    from_doc,
+                    forward: false,
+                    ..params
+                },
+                step: FilterStep::Move,
+            }),
+            Stepped::Nothing => None,
+        }
+    }
+
+    /// What ←/→ and `i` do with a filter: step to a match of a built one from `from_doc`;
+    /// nothing while it is built; `None` without a filter or with a failed one.
+    fn filter_step(
+        &self,
+        from_doc: i32,
+        forward: bool,
+        step: FilterStep,
+    ) -> Option<Option<Request>> {
+        let filter = self.filter.as_ref()?;
+        if filter.building() {
+            return Some(None);
+        }
+        let filter_id = filter.filter_id()?;
+        Some(Some(Request::StepFilter {
+            params: StepFilterParams {
+                filter_id,
+                from_doc,
+                forward,
+            },
+            step,
+        }))
     }
 
     /// The positions to fetch, if the shown document is the hit's and they are not in yet.
@@ -729,7 +858,8 @@ impl Documents {
     }
 
     /// Goes to another document with ←/→, the `i` prompt, or `[`/`]` through the documents of
-    /// the hit's term; loads the selected field's term vector with Enter, views its values with
+    /// the hit's term; with a filter, ←/→ and `i` go to its matches only, and `b` clears it;
+    /// loads the selected field's term vector with Enter, views its values with
     /// `v`, analyzes its stored text with `a`, cycles the number format with `x`, hides empty
     /// fields with `e`, searches for documents like this one with `m`, rebuilds the field's
     /// indexed terms with `r`, exports the document with `E`, switches the focus with Tab, and
@@ -751,17 +881,38 @@ impl Documents {
                 self.prompt = None;
                 return None;
             }
-            return Self::prompt_key(prompt, key, self.max_doc).map(|doc_id| {
-                self.prompt = None;
-                Request::Document(doc_id)
-            });
+            let doc_id = Self::prompt_key(prompt, key, self.max_doc)?;
+            self.prompt = None;
+            return self
+                .filter_step(doc_id, true, FilterStep::Nearest)
+                .unwrap_or(Some(Request::Document(doc_id)));
+        }
+        if let Some(filter) = &mut self.filter {
+            filter.clear_note();
         }
         match key {
+            KeyCode::Left | KeyCode::Char('p')
+                if let Some(step) = self.filter_step(self.doc_id - 1, false, FilterStep::Move) =>
+            {
+                return step;
+            }
+            KeyCode::Right | KeyCode::Char('n')
+                if let Some(step) = self.filter_step(self.doc_id + 1, true, FilterStep::Move) =>
+            {
+                return step;
+            }
             KeyCode::Left | KeyCode::Char('p') if self.doc_id > 0 => {
                 return Some(Request::Document(self.doc_id - 1));
             }
             KeyCode::Right | KeyCode::Char('n') if self.doc_id < self.max_doc - 1 => {
                 return Some(Request::Document(self.doc_id + 1));
+            }
+            KeyCode::Char('b') => {
+                let filter = self.filter.take()?;
+                return Some(Request::ClearFilter {
+                    cancel: filter.job_id(),
+                    release: filter.filter_id(),
+                });
             }
             KeyCode::Char('i') if self.max_doc > 0 => self.prompt = Some(DocIdPrompt::default()),
             KeyCode::Char('/') if !self.rows.is_empty() => {
@@ -862,8 +1013,17 @@ impl Documents {
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         let [top, bottom] =
             Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]).areas(area);
+        let mut title = vec![Span::raw(" Document ")];
+        if let Some(filter) = &self.filter {
+            let (text, error) = filter.title(self.doc_id, self.max_doc);
+            let color = if error { Color::Red } else { Color::Yellow };
+            title.push(Span::styled(
+                format!("{text} "),
+                Style::new().fg(color).add_modifier(Modifier::BOLD),
+            ));
+        }
         frame.render_widget(
-            Paragraph::new(self.header()).block(Block::bordered().title(" Document ")),
+            Paragraph::new(self.header()).block(Block::bordered().title(Line::from(title))),
             top,
         );
         let [fields_area, details_area] = if bottom.width >= SIDE_BY_SIDE_WIDTH {
@@ -1462,6 +1622,7 @@ mod tests {
 
     use super::*;
     use crate::protocol::document::{BytesValue, StoredType};
+    use crate::protocol::filter::FilterResult;
     use crate::protocol::index::{DocValuesType, TermStats};
 
     fn schema(name: &str, number: i32) -> IndexField {
@@ -1608,6 +1769,139 @@ mod tests {
         assert_eq!(
             documents.handle_key(KeyCode::Char('p')),
             Some(Request::Document(3))
+        );
+    }
+
+    fn step(filter_id: i64, from_doc: i32, forward: bool, step: FilterStep) -> Option<Request> {
+        Some(Request::StepFilter {
+            params: StepFilterParams {
+                filter_id,
+                from_doc,
+                forward,
+            },
+            step,
+        })
+    }
+
+    fn built(filter_id: i64, match_count: i32) -> GetFilterResult {
+        GetFilterResult {
+            docs_searched: 5,
+            result: Some(FilterResult {
+                filter_id,
+                match_count,
+                query: "body:red".to_owned(),
+                rewritten_query: "body:red".to_owned(),
+                took_millis: 1,
+            }),
+        }
+    }
+
+    #[test]
+    fn steps_through_the_matches_of_a_filter() {
+        let mut documents = documents();
+        documents.loaded(document(0, false));
+        assert_eq!(
+            documents.start_filter("red".to_owned(), false, 2),
+            (None, None)
+        );
+        documents.filter_started(9);
+        assert_eq!(documents.filter_job(), Some(9));
+
+        // While the filter is built, ←/→ wait for it.
+        assert_eq!(documents.handle_key(KeyCode::Right), None);
+        assert!(render(&mut documents, 100, 20).contains("filter red: finding matches… 0%"));
+
+        assert_eq!(
+            documents.filter_progress(built(9, 2)),
+            step(9, 2, true, FilterStep::Nearest)
+        );
+        assert_eq!(documents.filter_job(), None);
+        let params = StepFilterParams {
+            filter_id: 9,
+            from_doc: 2,
+            forward: true,
+        };
+        let found = Some(FilterMatch {
+            doc_id: 3,
+            index: 1,
+        });
+        assert_eq!(
+            documents.filter_stepped(params, FilterStep::Nearest, found),
+            Some(Request::Document(3))
+        );
+        documents.loaded(document(3, false));
+        assert_eq!(documents.filter_to_locate(3), None);
+        assert!(render(&mut documents, 100, 20).contains("filter red: 2 of 2"));
+
+        assert_eq!(
+            documents.handle_key(KeyCode::Right),
+            step(9, 4, true, FilterStep::Move)
+        );
+        assert_eq!(
+            documents.handle_key(KeyCode::Char('p')),
+            step(9, 2, false, FilterStep::Move)
+        );
+        documents.handle_key(KeyCode::Char('i'));
+        documents.handle_key(KeyCode::Char('1'));
+        assert_eq!(
+            documents.handle_key(KeyCode::Enter),
+            step(9, 1, true, FilterStep::Nearest)
+        );
+
+        // A document shown some other way is located.
+        assert_eq!(documents.filter_to_locate(4), Some(9));
+
+        assert_eq!(
+            documents.handle_key(KeyCode::Char('b')),
+            Some(Request::ClearFilter {
+                cancel: None,
+                release: Some(9),
+            })
+        );
+        assert!(!documents.filtered());
+        assert_eq!(
+            documents.handle_key(KeyCode::Right),
+            Some(Request::Document(4))
+        );
+    }
+
+    #[test]
+    fn a_new_filter_replaces_the_old_one_and_a_failed_one_steps_through_every_document() {
+        let mut documents = documents();
+        documents.loaded(document(1, false));
+        documents.start_filter("red".to_owned(), false, 0);
+        documents.filter_started(9);
+        assert_eq!(
+            documents.start_filter("blue".to_owned(), true, 0),
+            (Some(9), None)
+        );
+        documents.filter_started(10);
+
+        documents.filter_failed("Invalid query: oops".to_owned());
+        assert!(
+            render(&mut documents, 100, 20)
+                .contains("filter blue, deleted too: Invalid query: oops")
+        );
+        assert_eq!(
+            documents.handle_key(KeyCode::Right),
+            Some(Request::Document(2))
+        );
+        // What the replaced filter found is ignored.
+        let params = StepFilterParams {
+            filter_id: 9,
+            from_doc: 0,
+            forward: true,
+        };
+        assert_eq!(
+            documents.filter_stepped(params, FilterStep::Move, None),
+            None
+        );
+        assert_eq!(
+            documents.handle_key(KeyCode::Char('b')),
+            Some(Request::ClearFilter {
+                cancel: None,
+                release: None,
+            })
         );
     }
 

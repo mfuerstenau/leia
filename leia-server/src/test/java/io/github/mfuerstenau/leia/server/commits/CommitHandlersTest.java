@@ -16,6 +16,7 @@ import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.commits.Segment;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import java.nio.file.Files;
@@ -44,7 +45,7 @@ class CommitHandlersTest {
     @TempDir
     Path tmp;
 
-    private final CurrentIndex currentIndex = new CurrentIndex(new Jobs());
+    private final CurrentIndex currentIndex = new CurrentIndex(new Jobs(), new Filters());
     private final GetCommitsHandler getCommits = new GetCommitsHandler(currentIndex);
     private final GetCommitHandler getCommit = new GetCommitHandler(currentIndex);
 

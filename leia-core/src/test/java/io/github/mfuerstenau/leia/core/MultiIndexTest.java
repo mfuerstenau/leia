@@ -60,6 +60,10 @@ class MultiIndexTest {
                     .extracting(entry -> entry.term().utf8ToString(), TermPage.Entry::docFreq)
                     .containsExactly(tuple("a", 2), tuple("b", 3));
             assertThat(search(index, "index", "b")).containsExactly(2, 3, 4);
+            DocFilter filter = index.matches(new TermQuery(new Term("index", "b")), false, _ -> {});
+            assertThat(filter.matchCount()).isEqualTo(3);
+            assertThat(filter.step(0, true)).contains(new DocFilter.Match(2, 0));
+            assertThat(filter.step(5, false)).contains(new DocFilter.Match(4, 2));
 
             IndexStats stats = index.stats();
             assertThat(stats.maxDoc()).isEqualTo(5);

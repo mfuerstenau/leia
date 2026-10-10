@@ -32,6 +32,10 @@ use leia::protocol::document::{
     ReconstructSource, StartReconstruct, StartReconstructParams, StoredType, StoredValue,
     TermPosition,
 };
+use leia::protocol::filter::{
+    GetFilter, ReleaseFilter, ReleaseFilterParams, StartFilter, StartFilterParams, StepFilter,
+    StepFilterParams, StepFilterResult,
+};
 use leia::protocol::index::{
     CloseIndex, CloseIndexParams, DirectoryImpl, DocValuesType, GetIndexStats, GetIndexStatsParams,
     IndexEntry, IndexOptions, OpenIndex, OpenIndexParams, OpenMode, ReopenIndex, ReopenIndexParams,
@@ -1436,6 +1440,77 @@ fn searches_date_ranges_of_the_demo_index() {
         ParserOptions::default(),
     ));
     assert_eq!(text.total_hits, 0);
+}
+
+#[test]
+#[ignore = "needs leia-server.jar and Java 25: set LEIA_SERVER_JAR and JAVA_HOME, run with --ignored"]
+fn browses_a_lucene9_index_through_a_filter() {
+    let mut server = start();
+    server
+        .call::<OpenIndex>(OpenIndexParams {
+            path: lucene9_index(),
+            directory_impl: None,
+            mode: None,
+        })
+        .unwrap();
+
+    let mut build = |include_deleted: bool| {
+        let job = server
+            .call::<StartFilter>(StartFilterParams {
+                query: classic("number AND (1 OR 2 OR 3)"),
+                include_deleted,
+            })
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let poll = server
+                .call::<GetFilter>(JobParams { job_id: job.job_id })
+                .unwrap();
+            if let Some(result) = poll.result {
+                break result;
+            }
+            assert!(Instant::now() < deadline, "the filter was not built");
+            thread::sleep(Duration::from_millis(10));
+        }
+    };
+    // "document number N" for N = 1..3; document 1 (id 2) is deleted.
+    let live = build(false);
+    let all = build(true);
+    assert_eq!(live.query, "+body:number +(body:1 body:2 body:3)");
+    assert_eq!((live.match_count, all.match_count), (2, 3));
+
+    let mut step = |filter_id: i64, from_doc: i32, forward: bool| {
+        server.call::<StepFilter>(StepFilterParams {
+            filter_id,
+            from_doc,
+            forward,
+        })
+    };
+    // The newer filter replaced the older one.
+    let Err(CallError::Rpc(error)) = step(live.filter_id, 0, true) else {
+        panic!("the replaced filter is still kept");
+    };
+    assert_eq!(error.code, ErrorCode::FilterNotFound);
+    let found = |result: Result<StepFilterResult, CallError>| {
+        result
+            .unwrap()
+            .found
+            .map(|found| (found.doc_id, found.index))
+    };
+    assert_eq!(found(step(all.filter_id, 1, true)), Some((1, 1)));
+    assert_eq!(found(step(all.filter_id, 3, true)), None);
+    assert_eq!(found(step(all.filter_id, 3, false)), Some((2, 2)));
+
+    let release = |server: &mut Server| {
+        server
+            .call::<ReleaseFilter>(ReleaseFilterParams {
+                filter_id: all.filter_id,
+            })
+            .unwrap()
+            .released
+    };
+    assert!(release(&mut server));
+    assert!(!release(&mut server));
 }
 
 fn bm25() -> Similarity {

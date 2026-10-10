@@ -113,6 +113,12 @@ their own indexes and the Lucene 9 and 8 indexes from `LegacyIndexWriter`.
   `ClassicSimilarity` explanation with the same value. Boolean scores every hit 1.
 - `body:the`: 471 hits. `Enter` on the first, then `]` a hundred times on the documents screen:
   the second page is fetched on the way to hit 101 (doc 418).
+- Browsing through a filter (`b`): `title:lamp AND body:qu*` with the third hit selected, then `b`:
+  the documents screen shows doc 93, `1 of 10`; `→` goes to 137 and 156, `←` from 93 says `no
+  previous match`, and `i` `499` lands on the last match, 489. `*:*` with `b` has 487 matches,
+  with `B` 500, and `i` `37` then shows the deleted doc 37 as `38 of 500`. With `title:lamp` as
+  the filter (19 matches), `Enter` on hits of `body:quick` says `not a match`, and `→` from doc
+  440 goes on to the next lamp, 466.
 
 ## Analysis worth a try
 

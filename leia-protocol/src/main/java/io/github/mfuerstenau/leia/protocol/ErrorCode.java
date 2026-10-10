@@ -59,7 +59,12 @@ public enum ErrorCode {
      * Jars can't be added (ADR 0024): a path is neither a jar nor a directory with jars, or their
      * factories, codecs or formats can't be loaded, such as for a missing dependency.
      */
-    INVALID_JAR(-32017);
+    INVALID_JAR(-32017),
+    /**
+     * The server doesn't keep that filter (ADR 0031): it is unknown, was released or replaced, or its
+     * index was closed or reopened.
+     */
+    FILTER_NOT_FOUND(-32018);
 
     private final int code;
 

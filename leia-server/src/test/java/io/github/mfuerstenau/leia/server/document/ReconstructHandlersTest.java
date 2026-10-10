@@ -18,6 +18,7 @@ import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import java.io.IOException;
@@ -51,7 +52,7 @@ class ReconstructHandlersTest {
     Path tmp;
 
     private final Jobs jobs = new Jobs();
-    private final CurrentIndex currentIndex = new CurrentIndex(jobs);
+    private final CurrentIndex currentIndex = new CurrentIndex(jobs, new Filters());
     private final StartReconstructHandler start = new StartReconstructHandler(currentIndex, jobs);
     private final GetReconstructHandler get = new GetReconstructHandler(jobs);
 

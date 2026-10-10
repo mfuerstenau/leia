@@ -12,6 +12,7 @@ pub mod commits;
 pub mod document;
 mod envelope;
 mod error;
+pub mod filter;
 pub mod index;
 pub mod jars;
 pub mod job;

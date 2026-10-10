@@ -23,6 +23,7 @@ import io.github.mfuerstenau.leia.protocol.document.TermPosition;
 import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import java.io.IOException;
@@ -56,7 +57,7 @@ class DocumentHandlersTest {
     @TempDir
     Path tmp;
 
-    private final CurrentIndex currentIndex = new CurrentIndex(new Jobs());
+    private final CurrentIndex currentIndex = new CurrentIndex(new Jobs(), new Filters());
     private final GetDocumentHandler getDocument = new GetDocumentHandler(currentIndex);
     private final GetTermVectorHandler getTermVector = new GetTermVectorHandler(currentIndex);
     private final GetStoredValueHandler getStoredValue = new GetStoredValueHandler(currentIndex);

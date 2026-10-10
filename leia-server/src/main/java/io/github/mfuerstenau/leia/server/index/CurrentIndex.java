@@ -4,6 +4,7 @@ import io.github.mfuerstenau.leia.core.OpenedIndex;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
@@ -16,7 +17,8 @@ import java.util.logging.Logger;
  * The index that is open in this server, if any: a path opened with or without a reader (ADR 0021).
  * There is at most one. Requests are handled one at
  * a time ({@code RpcServer}), so this needs no locking. Jobs read the open index from their own
- * threads, so they are stopped before it is closed (ADR 0005).
+ * threads, so they are stopped before it is closed (ADR 0005). The kept filter holds document ids of
+ * the open index, so it is forgotten with it (ADR 0031).
  */
 @Singleton
 public final class CurrentIndex {
@@ -24,11 +26,13 @@ public final class CurrentIndex {
     private static final Logger LOG = Logger.getLogger(CurrentIndex.class.getName());
 
     private final Jobs jobs;
+    private final Filters filters;
     private Optional<OpenedIndex> index = Optional.empty();
 
     @Inject
-    public CurrentIndex(Jobs jobs) {
+    public CurrentIndex(Jobs jobs, Filters filters) {
         this.jobs = jobs;
+        this.filters = filters;
     }
 
     public Optional<OpenedIndex> get() {
@@ -59,21 +63,23 @@ public final class CurrentIndex {
     }
 
     /**
-     * Makes {@code newIndex} the open index, stops the jobs, which all read the previous one, and
-     * closes it.
+     * Makes {@code newIndex} the open index, stops the jobs, which all read the previous one, forgets
+     * the filter, and closes it.
      */
     public void replace(OpenedIndex newIndex) {
         Optional<OpenedIndex> previous = index;
         index = Optional.of(newIndex);
         jobs.cancelAll();
+        filters.clear();
         previous.ifPresent(CurrentIndex::closeQuietly);
     }
 
-    /** Stops the jobs and closes the open index, if any, and returns it. */
+    /** Stops the jobs, forgets the filter, and closes the open index, if any, and returns it. */
     public Optional<OpenedIndex> close() {
         Optional<OpenedIndex> previous = index;
         index = Optional.empty();
         jobs.cancelAll();
+        filters.clear();
         previous.ifPresent(closed -> {
             closeQuietly(closed);
             LOG.info(() -> "Closed " + closed.path());

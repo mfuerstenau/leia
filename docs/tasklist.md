@@ -14,10 +14,7 @@ From the read-only checklist in `luke-features.md` §7. Ordered roughly by value
 - [ ] Tools: export terms with `totalTermFreq` and a marker for binary terms (left out of ADR 0022, which keeps Luke's format)
 - [ ] Misc: log view with level filter, cross-screen navigation (`luke-features.md` §5), themes, about
 - [ ] Improvements over Luke (§6): KNN vector inspection/search, point values (also a document's own, which ADR 0029 and the JSON export of ADR 0030 leave out), per-segment doc view, deleted-doc inspection, readable binary values, highlighting, cancellation of long operations
-- [ ] Documents: browse through a filter — a query (any of the search alternatives) narrows the documents screen to the matching documents until it is cleared, so ←/→ step to the previous/next match instead of the next id, unlike `[`/`]`, which only walk the fetched hits in score order
-  - a job (rule 7): `startFilter {query, includeDeleted}` / `getFilter {jobId}` collects the matches into a bit set once and gives their count; `filterStep {filterId, fromDoc, direction, count}` returns the next matching ids in doc-id order; `releaseFilter` (or replacing it) frees the set
-  - `i` (go to id) jumps to the nearest match; the terms screen's postings can mark or hide documents outside the filter
-  - TUI: a free key on the search screen (`f`/`F` are taken by the field) turns the current query into the filter; the tab line and the documents title show it with `n of M`; a key clears it
+- [ ] Documents: the filter (ADR 0031) beyond the documents screen — the terms screen's postings mark or hide the documents outside it (a method that says which ids of a page are in the filter); the regex over stored values as a source of a filter; building the filter again after a reopen that found a new commit
 
 ## Open questions
 

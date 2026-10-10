@@ -16,6 +16,7 @@ use super::commits::{GetCommit, GetCommits};
 use super::document::{
     GetDocument, GetReconstruct, GetStoredValue, GetTermVector, StartReconstruct,
 };
+use super::filter::{GetFilter, ReleaseFilter, StartFilter, StepFilter};
 use super::index::{CloseIndex, GetIndexStats, OpenIndex, ReopenIndex};
 use super::jars::{AddJars, GetJars};
 use super::job::CancelJob;
@@ -176,6 +177,10 @@ fn check(fixture: &Fixture, json: &str) -> Result<(), String> {
         GetExplain::NAME => check_method::<GetExplain>(fixture, json),
         StartStoredScan::NAME => check_method::<StartStoredScan>(fixture, json),
         GetStoredScan::NAME => check_method::<GetStoredScan>(fixture, json),
+        StartFilter::NAME => check_method::<StartFilter>(fixture, json),
+        GetFilter::NAME => check_method::<GetFilter>(fixture, json),
+        StepFilter::NAME => check_method::<StepFilter>(fixture, json),
+        ReleaseFilter::NAME => check_method::<ReleaseFilter>(fixture, json),
         GetAnalysisComponents::NAME => check_method::<GetAnalysisComponents>(fixture, json),
         Analyze::NAME => check_method::<Analyze>(fixture, json),
         StartCheckIndex::NAME => check_method::<StartCheckIndex>(fixture, json),

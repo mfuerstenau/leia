@@ -17,7 +17,10 @@ import java.util.function.Predicate;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.DocValues;
 import org.apache.lucene.index.ExitableDirectoryReader;
+import org.apache.lucene.index.FilterDirectoryReader;
+import org.apache.lucene.index.FilterLeafReader;
 import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.MultiReader;
 import org.apache.lucene.index.QueryTimeout;
@@ -31,7 +34,9 @@ import org.apache.lucene.search.FilterCollector;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.LeafCollector;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.Scorable;
 import org.apache.lucene.search.ScoreDoc;
+import org.apache.lucene.search.ScoreMode;
 import org.apache.lucene.search.Sort;
 import org.apache.lucene.search.SortField;
 import org.apache.lucene.search.SortedNumericSortField;
@@ -40,6 +45,8 @@ import org.apache.lucene.search.TopFieldCollector;
 import org.apache.lucene.search.TopFieldCollectorManager;
 import org.apache.lucene.search.TopScoreDocCollectorManager;
 import org.apache.lucene.search.similarities.Similarity;
+import org.apache.lucene.util.Bits;
+import org.apache.lucene.util.FixedBitSet;
 
 /**
  * Runs searches and explains them, cooperatively cancellable (ADR 0010). Each call searches with a
@@ -71,15 +78,14 @@ final class Searcher {
         long start = System.nanoTime();
         try {
             cancellation.searched(0);
-            Query toRewrite = query;
+            Query built = built(searcher, query);
             Optional<List<LikeTerm>> likeTerms = Optional.empty();
             if (query instanceof MoreLikeQuery like) {
-                // Built once, and explained before the rewrite merges a lone clause or drops a ^1.0.
-                IndexReader exitable = searcher.getIndexReader();
-                toRewrite = like.build(exitable);
-                likeTerms = Optional.of(LikeTerms.of(exitable, like, toRewrite, () -> cancellation.searched(0)));
+                // Explained before the rewrite merges a lone clause or drops a ^1.0.
+                likeTerms = Optional.of(
+                        LikeTerms.of(searcher.getIndexReader(), like, built, () -> cancellation.searched(0)));
             }
-            Query rewritten = searcher.rewrite(toRewrite);
+            Query rewritten = searcher.rewrite(built);
             int numHits = offset + limit;
             int threshold = exactTotalHits ? Integer.MAX_VALUE : TOTAL_HITS_THRESHOLD;
             TopDocs top = sort.isPresent()
@@ -108,6 +114,45 @@ final class Searcher {
                     hits(reader, page, sort, fields),
                     took,
                     likeTerms);
+        } catch (ExitableDirectoryReader.ExitingReaderException e) {
+            throw cancellation.stopped(e);
+        } catch (IndexSearcher.TooManyClauses e) {
+            throw new InvalidQueryException(e.getMessage(), e);
+        }
+    }
+
+    /**
+     * The documents that match {@code query}, found without scoring them (ADR 0031). Deleted
+     * documents match too with {@code includeDeleted}: the searcher then reads the index as if
+     * nothing were deleted.
+     */
+    static DocFilter matches(
+            IndexReader reader,
+            List<DirectoryReader> directoryReaders,
+            Query query,
+            boolean includeDeleted,
+            ScanProgress progress)
+            throws IOException, InvalidQueryException {
+        Cancellation cancellation = new Cancellation(progress);
+        List<DirectoryReader> readers = directoryReaders;
+        if (includeDeleted) {
+            readers = new ArrayList<>(directoryReaders.size());
+            for (DirectoryReader directoryReader : directoryReaders) {
+                readers.add(new UndeletedReader(directoryReader));
+            }
+        }
+        IndexSearcher searcher = searcher(readers, IndexSearcher.getDefaultSimilarity(), cancellation);
+        long start = System.nanoTime();
+        try {
+            cancellation.searched(0);
+            Query rewritten = searcher.rewrite(built(searcher, query));
+            FixedBitSet matches = new FixedBitSet(reader.maxDoc());
+            searcher.search(
+                    rewritten, new ProgressCollectorManager<>(new MatchCollectorManager(matches), cancellation));
+            cancellation.check();
+            cancellation.searched(reader.maxDoc());
+            Duration took = Duration.ofNanos(System.nanoTime() - start);
+            return new DocFilter(matches, query.toString(), rewritten.toString(), took);
         } catch (ExitableDirectoryReader.ExitingReaderException e) {
             throw cancellation.stopped(e);
         } catch (IndexSearcher.TooManyClauses e) {
@@ -156,6 +201,11 @@ final class Searcher {
         // No query cache: a repeated search shows what it really costs.
         searcher.setQueryCache(null);
         return searcher;
+    }
+
+    /** The query to rewrite: a More-Like-This query is built from the searcher's reader first. */
+    private static Query built(IndexSearcher searcher, Query query) throws IOException {
+        return query instanceof MoreLikeQuery like ? like.build(searcher.getIndexReader()) : query;
     }
 
     private static List<Hit> hits(
@@ -253,9 +303,9 @@ final class Searcher {
     }
 
     /** Reports each segment's first document id as progress before the segment is searched. */
-    private record ProgressCollectorManager<C extends Collector, T extends TopDocs>(
+    private record ProgressCollectorManager<C extends Collector, T>(
             CollectorManager<C, T> manager, Cancellation cancellation)
-            implements CollectorManager<ProgressCollector<C>, TopDocs> {
+            implements CollectorManager<ProgressCollector<C>, T> {
 
         @Override
         public ProgressCollector<C> newCollector() throws IOException {
@@ -263,7 +313,7 @@ final class Searcher {
         }
 
         @Override
-        public TopDocs reduce(Collection<ProgressCollector<C>> collectors) throws IOException {
+        public T reduce(Collection<ProgressCollector<C>> collectors) throws IOException {
             return manager.reduce(
                     collectors.stream().map(ProgressCollector::collector).toList());
         }
@@ -288,6 +338,96 @@ final class Searcher {
         public LeafCollector getLeafCollector(LeafReaderContext context) throws IOException {
             cancellation.searched(context.docBase);
             return super.getLeafCollector(context);
+        }
+    }
+
+    /**
+     * Sets the bit of each matching document, by its id in the whole index. Every collector sets
+     * bits in the same set: the searcher has no executor, so it collects one segment after another.
+     */
+    private record MatchCollectorManager(FixedBitSet matches) implements CollectorManager<Collector, Void> {
+
+        @Override
+        public Collector newCollector() {
+            return new Collector() {
+                @Override
+                public LeafCollector getLeafCollector(LeafReaderContext context) {
+                    int docBase = context.docBase;
+                    return new LeafCollector() {
+                        @Override
+                        public void setScorer(Scorable scorer) {}
+
+                        @Override
+                        public void collect(int doc) {
+                            matches.set(docBase + doc);
+                        }
+                    };
+                }
+
+                @Override
+                public ScoreMode scoreMode() {
+                    return ScoreMode.COMPLETE_NO_SCORES;
+                }
+            };
+        }
+
+        @Override
+        public Void reduce(Collection<Collector> collectors) {
+            return null;
+        }
+    }
+
+    /**
+     * Reads a directory reader as if none of its documents were deleted, so that deleted documents
+     * match too. Never closed, like the {@link ExitableDirectoryReader} around it: closing it would
+     * close the index's reader. Nothing may cache by it, since its leaves differ from the reader's.
+     */
+    private static final class UndeletedReader extends FilterDirectoryReader {
+
+        UndeletedReader(DirectoryReader in) throws IOException {
+            super(in, new SubReaderWrapper() {
+                @Override
+                public LeafReader wrap(LeafReader reader) {
+                    return new UndeletedLeaf(reader);
+                }
+            });
+        }
+
+        @Override
+        protected DirectoryReader doWrapDirectoryReader(DirectoryReader in) throws IOException {
+            return new UndeletedReader(in);
+        }
+
+        @Override
+        public CacheHelper getReaderCacheHelper() {
+            return null;
+        }
+    }
+
+    private static final class UndeletedLeaf extends FilterLeafReader {
+
+        UndeletedLeaf(LeafReader in) {
+            super(in);
+        }
+
+        @Override
+        public Bits getLiveDocs() {
+            return null;
+        }
+
+        @Override
+        public int numDocs() {
+            return maxDoc();
+        }
+
+        @Override
+        public CacheHelper getCoreCacheHelper() {
+            return null;
+        }
+
+        @Override
+        public CacheHelper getReaderCacheHelper() {
+            return null;
         }
     }
 }

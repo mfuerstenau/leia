@@ -49,6 +49,7 @@ import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.TermQuery;
 import io.github.mfuerstenau.leia.protocol.search.TotalHitsRelation;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import java.io.IOException;
@@ -98,7 +99,7 @@ class SearchHandlersTest {
     Path tmp;
 
     private final Jobs jobs = new Jobs();
-    private final CurrentIndex currentIndex = new CurrentIndex(jobs);
+    private final CurrentIndex currentIndex = new CurrentIndex(jobs, new Filters());
     private final StartSearchHandler startSearch = new StartSearchHandler(currentIndex, jobs);
     private final GetSearchHandler getSearch = new GetSearchHandler(jobs);
     private final StartExplainHandler startExplain = new StartExplainHandler(currentIndex, jobs);

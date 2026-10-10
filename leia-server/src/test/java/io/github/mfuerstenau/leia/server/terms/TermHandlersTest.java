@@ -18,6 +18,7 @@ import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.Posting;
 import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import java.io.IOException;
@@ -48,7 +49,7 @@ class TermHandlersTest {
     @TempDir
     Path tmp;
 
-    private final CurrentIndex currentIndex = new CurrentIndex(new Jobs());
+    private final CurrentIndex currentIndex = new CurrentIndex(new Jobs(), new Filters());
     private final GetTermsHandler getTerms = new GetTermsHandler(currentIndex);
     private final GetPostingsHandler getPostings = new GetPostingsHandler(currentIndex);
     private final GetPositionsHandler getPositions = new GetPositionsHandler(currentIndex);

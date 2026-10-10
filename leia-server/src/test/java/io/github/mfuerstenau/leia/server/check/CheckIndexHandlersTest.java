@@ -14,6 +14,7 @@ import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexResult;
 import io.github.mfuerstenau.leia.protocol.check.IndexCheck;
 import io.github.mfuerstenau.leia.protocol.check.StartCheckIndexParams;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import java.io.IOException;
@@ -45,7 +46,7 @@ class CheckIndexHandlersTest {
     Path tmp;
 
     private final Jobs jobs = new Jobs();
-    private final CurrentIndex currentIndex = new CurrentIndex(jobs);
+    private final CurrentIndex currentIndex = new CurrentIndex(jobs, new Filters());
     private final StartCheckIndexHandler start = new StartCheckIndexHandler(currentIndex, jobs);
     private final GetCheckIndexHandler get = new GetCheckIndexHandler(jobs);
 

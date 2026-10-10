@@ -1,0 +1,8 @@
+{
+  "jsonrpc": "2.0",
+  "id": 66,
+  "method": "releaseFilter",
+  "params": {
+    "filterId": 31
+  }
+}

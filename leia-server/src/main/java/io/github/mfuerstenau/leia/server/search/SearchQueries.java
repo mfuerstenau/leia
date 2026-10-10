@@ -48,9 +48,10 @@ import org.apache.lucene.search.SortField;
 
 /**
  * Turns the query, the similarity and the sort of {@code startSearch} and {@code startExplain} into
- * their Lucene counterparts (ADR 0010 to ADR 0014, ADR 0025).
+ * their Lucene counterparts (ADR 0010 to ADR 0014, ADR 0025). {@code startFilter} takes the query
+ * too (ADR 0031).
  */
-final class SearchQueries {
+public final class SearchQueries {
 
     private SearchQueries() {}
 
@@ -58,7 +59,7 @@ final class SearchQueries {
      * A Lucene query and the analyzer that it still needs while it runs: More-Like-This analyzes in
      * the search. The job closes it once the query has run.
      */
-    record AnalyzedQuery(Query query, Optional<Analyzer> analyzer) implements AutoCloseable {
+    public record AnalyzedQuery(Query query, Optional<Analyzer> analyzer) implements AutoCloseable {
 
         @Override
         public void close() {
@@ -79,7 +80,7 @@ final class SearchQueries {
      *     if the expression doesn't parse; {@code INVALID_ANALYZER} if the query's analyzer can't be
      *     built
      */
-    static AnalyzedQuery query(ReadOnlyIndex index, SearchQuery query) throws RpcException {
+    public static AnalyzedQuery query(ReadOnlyIndex index, SearchQuery query) throws RpcException {
         long present = Stream.of(query.classic(), query.standard(), query.term(), query.moreLikeThis())
                 .filter(alternative -> alternative.isPresent())
                 .count();
@@ -339,7 +340,7 @@ final class SearchQueries {
         }
     }
 
-    static RpcException invalidQuery(InvalidQueryException e) {
+    public static RpcException invalidQuery(InvalidQueryException e) {
         return new RpcException(ErrorCode.INVALID_QUERY, "Invalid query: " + e.getMessage(), e);
     }
 

@@ -744,6 +744,19 @@ public final class ReadOnlyIndex implements OpenedIndex {
     }
 
     /**
+     * Finds every document that matches {@code query}, without scoring (ADR 0031). Deleted documents
+     * match only with {@code includeDeleted}. {@code progress} can stop it by throwing a {@link
+     * CancellationException}, as for {@link #search}. It runs in the calling thread.
+     *
+     * @throws InvalidQueryException if the rewritten query has too many clauses
+     * @throws IOException if reading the index fails
+     */
+    public DocFilter matches(Query query, boolean includeDeleted, ScanProgress progress)
+            throws IOException, InvalidQueryException {
+        return Searcher.matches(reader, directoryReaders(), query, includeDeleted, progress);
+    }
+
+    /**
      * Explains how a document scores for {@code query} with {@code similarity}, or why it doesn't
      * match. {@code progress} can
      * stop the explanation by throwing a {@link CancellationException}, as for {@link #search}.

@@ -16,6 +16,7 @@ import io.github.mfuerstenau.leia.protocol.search.StartStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.search.StoredScanHit;
 import io.github.mfuerstenau.leia.protocol.search.StoredScanResult;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import java.io.IOException;
@@ -48,7 +49,7 @@ class StoredScanHandlersTest {
     Path tmp;
 
     private final Jobs jobs = new Jobs();
-    private final CurrentIndex currentIndex = new CurrentIndex(jobs);
+    private final CurrentIndex currentIndex = new CurrentIndex(jobs, new Filters());
     private final StartStoredScanHandler start = new StartStoredScanHandler(currentIndex, jobs);
     private final GetStoredScanHandler get = new GetStoredScanHandler(jobs);
 

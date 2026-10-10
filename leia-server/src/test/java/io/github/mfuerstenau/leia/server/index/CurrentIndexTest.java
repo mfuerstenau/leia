@@ -3,6 +3,7 @@ package io.github.mfuerstenau.leia.server.index;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
+import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -22,7 +23,7 @@ class CurrentIndexTest {
     Path tmp;
 
     private final Jobs jobs = new Jobs();
-    private final CurrentIndex currentIndex = new CurrentIndex(jobs);
+    private final CurrentIndex currentIndex = new CurrentIndex(jobs, new Filters());
 
     @Test
     void closingStopsTheJobsFirst() throws Exception {

@@ -52,10 +52,13 @@ pub enum ErrorCode {
     /// Jars can't be added (ADR 0024): a path is neither a jar nor a directory with jars, or their
     /// factories, codecs or formats can't be loaded, such as for a missing dependency.
     InvalidJar,
+    /// The server doesn't keep that filter (ADR 0031): it is unknown, was released or replaced,
+    /// or its index was closed or reopened.
+    FilterNotFound,
 }
 
 impl ErrorCode {
-    pub const ALL: [ErrorCode; 23] = [
+    pub const ALL: [ErrorCode; 24] = [
         ErrorCode::ParseError,
         ErrorCode::InvalidRequest,
         ErrorCode::MethodNotFound,
@@ -79,6 +82,7 @@ impl ErrorCode {
         ErrorCode::NoReader,
         ErrorCode::OutputNotWritable,
         ErrorCode::InvalidJar,
+        ErrorCode::FilterNotFound,
     ];
 
     pub const fn code(self) -> i32 {
@@ -106,6 +110,7 @@ impl ErrorCode {
             ErrorCode::NoReader => -32015,
             ErrorCode::OutputNotWritable => -32016,
             ErrorCode::InvalidJar => -32017,
+            ErrorCode::FilterNotFound => -32018,
         }
     }
 
@@ -135,6 +140,7 @@ impl ErrorCode {
             ErrorCode::NoReader => "NO_READER",
             ErrorCode::OutputNotWritable => "OUTPUT_NOT_WRITABLE",
             ErrorCode::InvalidJar => "INVALID_JAR",
+            ErrorCode::FilterNotFound => "FILTER_NOT_FOUND",
         }
     }
 }

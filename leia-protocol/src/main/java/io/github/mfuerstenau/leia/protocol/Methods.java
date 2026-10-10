@@ -19,6 +19,12 @@ import io.github.mfuerstenau.leia.protocol.document.GetStoredValueResult;
 import io.github.mfuerstenau.leia.protocol.document.GetTermVectorParams;
 import io.github.mfuerstenau.leia.protocol.document.GetTermVectorResult;
 import io.github.mfuerstenau.leia.protocol.document.StartReconstructParams;
+import io.github.mfuerstenau.leia.protocol.filter.GetFilterResult;
+import io.github.mfuerstenau.leia.protocol.filter.ReleaseFilterParams;
+import io.github.mfuerstenau.leia.protocol.filter.ReleaseFilterResult;
+import io.github.mfuerstenau.leia.protocol.filter.StartFilterParams;
+import io.github.mfuerstenau.leia.protocol.filter.StepFilterParams;
+import io.github.mfuerstenau.leia.protocol.filter.StepFilterResult;
 import io.github.mfuerstenau.leia.protocol.index.CloseIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.CloseIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
@@ -255,6 +261,37 @@ public final class Methods {
             new RpcMethod<>("getStoredScan", GetStoredScanParams.class, GetStoredScanResult.class);
 
     /**
+     * Starts a job that finds every document of the open index that matches a query, without scoring,
+     * to browse the documents through (ADR 0031). Fails as {@code startSearch} does for the query.
+     */
+    public static final RpcMethod<StartFilterParams, JobStarted> START_FILTER =
+            new RpcMethod<>("startFilter", StartFilterParams.class, JobStarted.class);
+
+    /**
+     * The progress of building a filter, and the filter once it is built (ADR 0031). The server
+     * keeps the filter for {@code stepFilter}, in place of the one it kept before; the job is gone
+     * as for every job ({@code JOB_NOT_FOUND}). A search that failed answers with its error ({@code
+     * INVALID_QUERY} for too many clauses).
+     */
+    public static final RpcMethod<JobParams, GetFilterResult> GET_FILTER =
+            new RpcMethod<>("getFilter", JobParams.class, GetFilterResult.class);
+
+    /**
+     * The first document of a filter from a document id on, or the last one up to it, and how many
+     * matches come before it (ADR 0031). Fails with {@code FILTER_NOT_FOUND} if the server doesn't
+     * keep the filter: it was released or replaced, or its index was closed or reopened.
+     */
+    public static final RpcMethod<StepFilterParams, StepFilterResult> STEP_FILTER =
+            new RpcMethod<>("stepFilter", StepFilterParams.class, StepFilterResult.class);
+
+    /**
+     * Forgets a filter and frees its memory (ADR 0031). An unknown filter is not an error; the result
+     * says whether the server kept it.
+     */
+    public static final RpcMethod<ReleaseFilterParams, ReleaseFilterResult> RELEASE_FILTER =
+            new RpcMethod<>("releaseFilter", ReleaseFilterParams.class, ReleaseFilterResult.class);
+
+    /**
      * The char filters, tokenizers and token filters that a custom analyzer can be built from (ADR
      * 0014). Needs no open index.
      */
@@ -345,6 +382,10 @@ public final class Methods {
             GET_EXPLAIN,
             START_STORED_SCAN,
             GET_STORED_SCAN,
+            START_FILTER,
+            GET_FILTER,
+            STEP_FILTER,
+            RELEASE_FILTER,
             GET_ANALYSIS_COMPONENTS,
             ANALYZE,
             START_CHECK_INDEX,

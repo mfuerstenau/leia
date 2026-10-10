@@ -16,6 +16,7 @@ import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -43,7 +44,7 @@ class GetIndexStatsHandlerTest {
     @TempDir
     Path tmp;
 
-    private final CurrentIndex currentIndex = new CurrentIndex(new Jobs());
+    private final CurrentIndex currentIndex = new CurrentIndex(new Jobs(), new Filters());
     private final GetIndexStatsHandler handler = new GetIndexStatsHandler(currentIndex);
 
     @Test

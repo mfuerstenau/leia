@@ -22,6 +22,7 @@ use crate::more_like_this::{LikeForm, LikeSettings, LikeSource};
 use crate::overview::{highlight, panel};
 use crate::parser_options::{OptionsForm, ParserSettings};
 use crate::protocol::document::{BytesValue, StoredValue};
+use crate::protocol::filter::StartFilterParams;
 use crate::protocol::index::{IndexField, IndexOptions};
 use crate::protocol::search::{
     ClassicQuery, Explanation, GetExplainResult, GetSearchResult, GetStoredScanResult, Hit,
@@ -68,6 +69,13 @@ pub enum Request {
     Cancel(Vec<i64>),
     /// Show this document on the documents screen.
     Document(i32),
+    /// Browse the documents screen through the documents that match this query (ADR 0031),
+    /// from `start_doc` on.
+    Filter {
+        params: StartFilterParams,
+        label: String,
+        start_doc: i32,
+    },
     /// Show this stored value of a document in the viewer of the documents screen, with its
     /// matches highlighted.
     View {
@@ -415,6 +423,27 @@ impl Search {
         })
     }
 
+    /// Narrows the documents screen to the documents that match the query (ADR 0031), starting
+    /// on the selected hit if there is one.
+    fn filter(&self, include_deleted: bool) -> Option<Request> {
+        let query = self.query()?;
+        let text = self.input.text().trim();
+        let label = match self.mode {
+            Mode::Term => format!("{}:{text}", self.fields.get(self.field)?),
+            Mode::Like => format!("like #{text}"),
+            Mode::LikeText => format!("like \"{text}\""),
+            _ => text.to_owned(),
+        };
+        Some(Request::Filter {
+            params: StartFilterParams {
+                query,
+                include_deleted,
+            },
+            label,
+            start_doc: self.selected_hit().map_or(0, |hit| hit.doc_id),
+        })
+    }
+
     /// Starts a search for the query line, stopping the jobs of the previous one.
     fn submit(&mut self) -> Option<Request> {
         if self.mode == Mode::Regex {
@@ -704,7 +733,8 @@ impl Search {
     /// stored values, `p` opens the parser options or the
     /// More-Like-This settings, `s` the similarity and the sort, `l` the stored fields per hit,
     /// `f`/`F` step the field, `a` switches between OR and AND, `t` between an exact and an
-    /// approximate count, `x` explains the selected hit, Enter shows its document, and Tab
+    /// approximate count, `x` explains the selected hit, Enter shows its document, `b`/`B`
+    /// browse the documents that match without or with the deleted ones (ADR 0031), and Tab
     /// switches between the hits and the details.
     pub fn handle_key(&mut self, key: KeyEvent) -> Option<Request> {
         if let Some(form) = &mut self.form {
@@ -797,6 +827,9 @@ impl Search {
                 return self.resubmit();
             }
             KeyCode::Char('x') => return self.explain_selected(),
+            KeyCode::Char('b') | KeyCode::Char('B') if self.mode != Mode::Regex => {
+                return self.filter(key.code == KeyCode::Char('B'));
+            }
             KeyCode::Enter => return self.selected_hit().map(|hit| Request::Document(hit.doc_id)),
             KeyCode::Tab | KeyCode::BackTab => {
                 self.focus = match self.focus {
@@ -889,18 +922,20 @@ impl Search {
                  Tab panel   ↑↓"
             }
             None if self.mode == Mode::Like => {
-                "/ doc id   m mode   p/s/l settings   t count   x explain   ⏎ open doc   Tab panel   ↑↓"
+                "/ doc id   m mode   p/s/l settings   t count   x explain   ⏎ open doc   b/B browse   \
+                 Tab panel   ↑↓"
             }
             None if self.mode == Mode::LikeText => {
-                "/ text   m mode   p/s/l settings   t count   x explain   ⏎ open doc   Tab panel   ↑↓"
+                "/ text   m mode   p/s/l settings   t count   x explain   ⏎ open doc   b/B browse   \
+                 Tab panel   ↑↓"
             }
             None if self.mode != Mode::Term => {
                 "/ query   m mode   p/s/l settings   f/F field   a AND/OR   t count   x explain   \
-                 ⏎ open doc   Tab panel   ↑↓"
+                 ⏎ open doc   b/B browse   Tab panel   ↑↓"
             }
             None => {
                 "/ term   m mode   s/l settings   f/F field   t count   x explain   ⏎ open doc   \
-                 Tab panel   ↑↓"
+                 b/B browse   Tab panel   ↑↓"
             }
         }
     }
@@ -2517,6 +2552,36 @@ mod tests {
         };
         assert_eq!(params.offset, SEARCH_PAGE);
         assert_eq!(params.fields.unwrap().len(), 6);
+    }
+
+    #[test]
+    fn browses_the_documents_that_match_from_the_selected_hit() {
+        let mut search = searched(3, 3);
+        press(&mut search, KeyCode::Down);
+
+        assert_eq!(
+            press(&mut search, KeyCode::Char('b')),
+            Some(Request::Filter {
+                params: StartFilterParams {
+                    query: classic("red", "title", QueryOperator::Or),
+                    include_deleted: false,
+                },
+                label: "red".to_owned(),
+                start_doc: 1,
+            })
+        );
+        let Some(Request::Filter { params, .. }) = press(&mut search, KeyCode::Char('B')) else {
+            panic!("no filter");
+        };
+        assert!(params.include_deleted);
+
+        // In regex mode, or without a query, there is nothing to browse.
+        for _ in 0..5 {
+            press(&mut search, KeyCode::Char('m'));
+        }
+        assert_eq!(press(&mut search, KeyCode::Char('b')), None);
+        let mut blank = self::search();
+        assert_eq!(press(&mut blank, KeyCode::Char('b')), None);
     }
 
     #[test]

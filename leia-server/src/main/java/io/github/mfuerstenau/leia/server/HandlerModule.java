@@ -14,6 +14,10 @@ import io.github.mfuerstenau.leia.server.document.GetReconstructHandler;
 import io.github.mfuerstenau.leia.server.document.GetStoredValueHandler;
 import io.github.mfuerstenau.leia.server.document.GetTermVectorHandler;
 import io.github.mfuerstenau.leia.server.document.StartReconstructHandler;
+import io.github.mfuerstenau.leia.server.filter.GetFilterHandler;
+import io.github.mfuerstenau.leia.server.filter.ReleaseFilterHandler;
+import io.github.mfuerstenau.leia.server.filter.StartFilterHandler;
+import io.github.mfuerstenau.leia.server.filter.StepFilterHandler;
 import io.github.mfuerstenau.leia.server.index.CloseIndexHandler;
 import io.github.mfuerstenau.leia.server.index.GetIndexStatsHandler;
 import io.github.mfuerstenau.leia.server.index.OpenIndexHandler;
@@ -135,6 +139,22 @@ interface HandlerModule {
     @Binds
     @IntoSet
     MethodHandler<?, ?> getStoredScan(GetStoredScanHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> startFilter(StartFilterHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> getFilter(GetFilterHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> stepFilter(StepFilterHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> releaseFilter(ReleaseFilterHandler handler);
 
     @Binds
     @IntoSet

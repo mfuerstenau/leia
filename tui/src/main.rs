@@ -13,6 +13,7 @@ use leia::cli::Cli;
 use leia::client::CallError;
 use leia::clipboard::osc52;
 use leia::doc_export;
+use leia::doc_filter::FilterStep;
 use leia::history::{self, History};
 use leia::jars::{self, DefaultJars};
 use leia::java::find_java;
@@ -25,6 +26,9 @@ use leia::protocol::commits::{GetCommit, GetCommitParams, GetCommits, GetCommits
 use leia::protocol::document::{
     GetDocument, GetDocumentParams, GetReconstruct, GetStoredValue, GetStoredValueParams,
     GetTermVector, GetTermVectorParams, StartReconstruct,
+};
+use leia::protocol::filter::{
+    GetFilter, ReleaseFilter, ReleaseFilterParams, StartFilter, StepFilter, StepFilterParams,
 };
 use leia::protocol::index::{
     CloseIndex, CloseIndexParams, DirectoryImpl, GetIndexStats, GetIndexStatsParams, OpenIndex,
@@ -253,10 +257,29 @@ fn perform(
             server.call::<CancelJob>(JobParams { job_id })?;
             app.scan_cancelled();
         }
-        Action::LoadDocument { doc_id, cancel } => {
+        Action::LoadDocument {
+            doc_id,
+            cancel,
+            locate,
+        } => {
             cancel_jobs(server, cancel)?;
             match answered(server.call::<GetDocument>(GetDocumentParams { doc_id }))? {
-                Ok(document) => return Ok(app.document_loaded(document)),
+                Ok(document) => {
+                    if let Some(filter_id) = locate {
+                        let params = StepFilterParams {
+                            filter_id,
+                            from_doc: doc_id,
+                            forward: true,
+                        };
+                        match answered(server.call::<StepFilter>(params))? {
+                            Ok(result) => {
+                                app.filter_stepped(params, FilterStep::Locate, result.found);
+                            }
+                            Err(error) => app.filter_failed(error),
+                        }
+                    }
+                    return Ok(app.document_loaded(document));
+                }
                 Err(error) => app.document_failed(doc_id, error),
             }
         }
@@ -385,6 +408,22 @@ fn perform(
                 Err(error) => app.stored_scan_failed(error),
             }
         }
+        Action::StartFilter {
+            params,
+            cancel,
+            release,
+        } => {
+            clear_filter(server, cancel, release)?;
+            match answered(server.call::<StartFilter>(params))? {
+                Ok(job) => app.filter_started(job.job_id),
+                Err(error) => app.filter_failed(error),
+            }
+        }
+        Action::StepFilter { params, step } => match answered(server.call::<StepFilter>(params))? {
+            Ok(result) => return Ok(app.filter_stepped(params, step, result.found)),
+            Err(error) => app.filter_failed(error),
+        },
+        Action::ClearFilter { cancel, release } => clear_filter(server, cancel, release)?,
         Action::CancelSearch(jobs) => {
             cancel_jobs(server, jobs)?;
             app.search_cancelled();
@@ -526,6 +565,15 @@ fn poll_jobs(server: &mut Server, app: &mut App, polls: &[Poll]) -> Result<Vec<A
                 }
                 None
             }
+            Poll::Filter(job_id) => {
+                match answered(server.call::<GetFilter>(JobParams { job_id }))? {
+                    Ok(result) => app.filter_progress(result),
+                    Err(error) => {
+                        app.filter_failed(error);
+                        None
+                    }
+                }
+            }
             Poll::Reconstruct(job_id) => {
                 match answered(server.call::<GetReconstruct>(JobParams { job_id }))? {
                     Ok(result) => app.reconstruct_progress(result),
@@ -647,6 +695,17 @@ fn with_jar_hint(error: CallError) -> CallError {
 
 /// Splits the outcome of a call: an error the server answered with becomes a message for the UI,
 /// a transport error is returned as an error.
+/// Stops building a filter, or forgets the one the server keeps (ADR 0031).
+fn clear_filter(server: &mut Server, cancel: Option<i64>, release: Option<i64>) -> Result<()> {
+    if let Some(job_id) = cancel {
+        server.call::<CancelJob>(JobParams { job_id })?;
+    }
+    if let Some(filter_id) = release {
+        server.call::<ReleaseFilter>(ReleaseFilterParams { filter_id })?;
+    }
+    Ok(())
+}
+
 fn answered<T>(result: Result<T, CallError>) -> Result<Result<T, String>> {
     match result {
         Ok(value) => Ok(Ok(value)),

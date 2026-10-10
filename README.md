@@ -31,7 +31,8 @@ because Lucene 10 can't read them.
   field and the place of missing values); the hits with their scores, sort values and
   chosen stored fields, exact or approximate hit counts, and an explanation of how a hit scores.
   A regular expression over the stored values finds what was never indexed or was analyzed
-  away, with the matches highlighted.
+  away, with the matches highlighted. A query can also narrow the documents screen to the
+  documents it matches, to browse them in document id order.
 - **Analysis:** the standard analyzer, one of Lucene's analyzers by class name (such as
   `EnglishAnalyzer`), or a custom one built from Lucene's char filters, tokenizers and token filters
   with their parameters and a config directory for resource files. More analyzers and components
@@ -192,8 +193,9 @@ scans it again; a smaller N needs no new scan.
 
 | Key | Action |
 |---|---|
-| `←` `→` / `p` `n` | previous or next document id |
-| `i` | go to a document id |
+| `←` `→` / `p` `n` | previous or next document id; with a filter, previous or next match |
+| `i` | go to a document id; with a filter, to the match there or after it, else the last one before |
+| `b` | clear the filter (`Esc` stops one that is still being built) |
 | `/` | seek a field: type a text, and the first shown field whose name starts with it (ignoring case), or else contains it, is selected; `Enter` or `Esc` ends it |
 | `[` `]` | previous or next document of the term opened on the terms screen |
 | `Enter` | load the term vector of the selected field |
@@ -234,6 +236,14 @@ Lucene's similarities store the number of terms in one byte (`SmallFloat.intToBy
 
 Stored values longer than 64 KiB come cut: the details panel shows their beginning, and the
 viewer fetches them whole.
+
+`b` on the search screen narrows the documents screen to the documents that match the query
+(ADR 0031), `B` to those including the deleted ones. The server finds every match once, without
+scoring, and keeps them as one bit per document. The documents screen then starts on the selected
+hit, `←` `→` step to the previous or next match in document id order, and the title says
+`filter <query>: 3 of 19`. A document shown some other way, such as from a hit of another search,
+says `not a match` if the filter doesn't hold it. `b` on the documents screen clears the filter;
+opening, closing or a reopen that finds a new commit forgets it too.
 
 Flags: `I` indexed, `N` has a norm, `P` payloads, `S` stored, `V` term vector, `D` doc values,
 `T` points, `K` KNN vectors. `N`, `S`, `V` and `D` say what this document has; the others describe
@@ -332,6 +342,7 @@ shows as missing. The documents and terms screens always show the opened commit.
 | `i` | regex: ignore case, or match it |
 | `d` | regex: scan deleted documents too, or not |
 | `Enter` | show the selected hit's document on the documents screen |
+| `b` `B` | browse the documents that match the query on the documents screen, without or with the deleted ones (not for the regex) |
 | `v` | regex: view the selected value with its matches highlighted |
 | `Tab` | switch between the hits and the details |
 | `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the hits, or scroll the details |

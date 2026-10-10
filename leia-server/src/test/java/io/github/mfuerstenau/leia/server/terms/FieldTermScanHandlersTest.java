@@ -13,6 +13,7 @@ import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
 import io.github.mfuerstenau.leia.protocol.terms.StartFieldTermScanParams;
 import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import java.io.IOException;
@@ -44,7 +45,7 @@ class FieldTermScanHandlersTest {
     Path tmp;
 
     private final Jobs jobs = new Jobs();
-    private final CurrentIndex currentIndex = new CurrentIndex(jobs);
+    private final CurrentIndex currentIndex = new CurrentIndex(jobs, new Filters());
     private final StartFieldTermScanHandler start = new StartFieldTermScanHandler(currentIndex, jobs);
     private final GetFieldTermScanHandler get = new GetFieldTermScanHandler(jobs);
 
