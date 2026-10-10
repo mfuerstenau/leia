@@ -7,6 +7,7 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 From the read-only checklist in `luke-features.md` §7. Ordered roughly by value. Each area will need its own protocol methods, fixtures and probably an ADR for the cross-cutting parts.
 
 - [ ] Search: a date resolution per field (ADR 0026 has one for all fields)
+- [ ] Search: find documents by doc values, through a query where Lucene has one (the `newSlowExactQuery`/`newSlowRangeQuery`/`newSlowSetQuery` of the numeric, sorted-numeric, sorted and sorted-set fields), else by scanning the values (binary doc values) as a job
 - [ ] Analysis: `PerFieldAnalyzerWrapper`, `QueryAutoStopWordAnalyzer` (needs an `IndexReader`), the collation analyzers (need a `Collator`) and `JapaneseCompletionAnalyzer` (left out of ADR 0023)
 - [ ] Open options: Elasticsearch/OpenSearch indexes (left out of ADR 0018): their codecs need the server's `lib/`, which has its own `lucene-*.jar` of another version; skipping those jars, or saying which ones clash, untested without an installation
 - [ ] Commits: per-field postings, doc values and KNN vectors formats (from each segment's field infos; ADR 0009 leaves them out)
