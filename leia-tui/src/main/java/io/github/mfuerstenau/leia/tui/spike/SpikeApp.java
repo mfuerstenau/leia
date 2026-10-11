@@ -195,7 +195,7 @@ public final class SpikeApp implements AutoCloseable {
                 return null;
             });
         } else if (key.isChar('p')) {
-            // While the UI runs, both streams go to leia-spike.log (ADR 0034 §7): nothing may show.
+            // While the UI runs, both streams go to leia.log (ADR 0034 §7): nothing may show.
             strayPrints++;
             System.out.println("stray System.out print " + strayPrints);
             System.err.println("stray System.err print " + strayPrints);

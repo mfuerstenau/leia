@@ -6,7 +6,6 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 
 **Feature freeze:** nothing from the backlog below starts until this section is done. Fixes to the Rust TUI are fine; new features are not, in either UI. Settled on 2026-10-09: one JVM, with the TamboUI app calling the server's handlers in-process; launcher scripts `leia`/`leia.cmd` that run `java -jar leia.jar`; no Rust left.
 
-- [ ] Java CLI: the arguments of the TUI CLI contract (`--jar`, `--no-default-jars`, `--directory`, `--no-reader`, `INDEX_PATH`, `--version`), parsed in `leia-tui`; logs to `leia.log` in the state folder, stderr only before the UI starts (ADR 0034 §7)
 - [ ] Launcher scripts `leia` (sh) and `leia.cmd`: `-j/--java` (an executable or a JDK/JRE directory), `$JAVA_HOME`, `PATH`, as `tui/src/java.rs` does now; `leia.jar` next to the script (symlinks resolved); the remaining arguments passed through. The Java side checks the Java version (the entry class of ADR 0034 §8) and prints `--version`
 - [ ] Port the screens, each with TamboUI Pilot tests in place of the Rust tests, keeping keys and behaviour:
   - [ ] app shell: tabs, open prompt (directory choice, no-reader, recent paths), status line, help, reopen (`R`), the logo

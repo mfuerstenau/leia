@@ -1,0 +1,126 @@
+package io.github.mfuerstenau.leia.tui;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Map;
+import java.util.Optional;
+import java.util.logging.LogManager;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.io.TempDir;
+
+/** What leia does before the TUI takes the terminal. A test that gets to the TUI times out. */
+@Timeout(30)
+class MainTest {
+
+    @TempDir
+    Path tmp;
+
+    private final ByteArrayOutputStream out = new ByteArrayOutputStream();
+    private final ByteArrayOutputStream err = new ByteArrayOutputStream();
+    private Path configDir;
+    private Path logFile;
+    private Platform platform;
+
+    @BeforeEach
+    void platform() {
+        configDir = tmp.resolve("config");
+        logFile = tmp.resolve("state/leia/leia.log");
+        platform = new Platform(
+                Map.of("XDG_STATE_HOME", tmp.resolve("state").toString(), "XDG_CONFIG_HOME", configDir.toString())::get,
+                Optional.empty(),
+                false);
+    }
+
+    @AfterEach
+    void resetLogging() {
+        LogManager.getLogManager().reset();
+    }
+
+    @Test
+    void reportsAWrongCommandLine() throws Exception {
+        assertThat(run("--frobnicate")).isEqualTo(2);
+
+        assertThat(err()).contains("leia: unknown option '--frobnicate'", Cli.USAGE, "--help");
+        assertThat(out()).isEmpty();
+    }
+
+    @Test
+    void printsHelp() throws Exception {
+        assertThat(run("--help", "--frobnicate-is-not-reached")).isEqualTo(2);
+        assertThat(run("--help")).isZero();
+
+        assertThat(out()).isEqualTo(Cli.HELP);
+    }
+
+    @Test
+    void printsTheVersionOfLeiaAndJava() throws Exception {
+        assertThat(run("--version", "--jar", "missing.jar")).isZero();
+
+        assertThat(out().lines())
+                .satisfiesExactly(
+                        leia -> assertThat(leia).matches("leia \\S+ \\(\\S+, \\S+\\)"),
+                        java -> assertThat(java).startsWith("Java " + Runtime.version() + " ("));
+        assertThat(err()).isEmpty();
+        // Not into the log, which keeps the last session's.
+        assertThat(logFile).doesNotExist();
+    }
+
+    @Test
+    void reportsAJarThatDoesNotExist() throws Exception {
+        Path missing = tmp.resolve("missing.jar");
+
+        assertThat(run("--jar", missing.toString())).isEqualTo(1);
+
+        assertThat(err()).isEqualTo("leia: --jar " + missing + ": no such jar or directory" + System.lineSeparator());
+    }
+
+    @Test
+    void reportsJarsThatCantBeLoaded() throws Exception {
+        Path notAJar = Files.writeString(tmp.resolve("notes.txt"), "no jar");
+
+        assertThat(run("--jar", notAJar.toString())).isEqualTo(1);
+
+        assertThat(err()).startsWith("leia: Cannot load the jars: ").doesNotContain("--no-default-jars");
+        assertThat(Files.readString(logFile)).contains("Cannot start");
+    }
+
+    @Test
+    void namesTheDefaultFolderIfItsJarsCantBeLoaded() throws Exception {
+        Path jarsDir = Files.createDirectories(configDir.resolve("leia/jars"));
+        // Names a factory that isn't in it.
+        try (ZipOutputStream jar = new ZipOutputStream(Files.newOutputStream(jarsDir.resolve("broken.jar")))) {
+            jar.putNextEntry(new ZipEntry("META-INF/services/org.apache.lucene.analysis.TokenizerFactory"));
+            jar.write("com.example.MissingTokenizerFactory\n".getBytes(StandardCharsets.UTF_8));
+        }
+
+        assertThat(run()).isEqualTo(1);
+
+        assertThat(err()).contains("leia: Cannot load the jars: ", jarsDir.toString(), "--no-default-jars");
+    }
+
+    private int run(String... args) throws Exception {
+        return Main.run(
+                args,
+                new PrintStream(out, true, StandardCharsets.UTF_8),
+                new PrintStream(err, true, StandardCharsets.UTF_8),
+                platform);
+    }
+
+    private String out() {
+        return out.toString(StandardCharsets.UTF_8);
+    }
+
+    private String err() {
+        return err.toString(StandardCharsets.UTF_8);
+    }
+}
