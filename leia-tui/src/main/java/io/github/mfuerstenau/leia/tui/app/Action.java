@@ -27,4 +27,13 @@ public sealed interface Action {
      * App#reopenUnchanged} or {@link App#reopenFailed} (ADR 0019).
      */
     record Reopen() implements Action {}
+
+    /**
+     * Start the term scan of this field for its top {@code topN} terms, and report back with {@link
+     * App#scanStarted} or {@link App#scanFailed}, under {@code scanId}.
+     */
+    record StartScan(long scanId, String field, int topN) implements Action {}
+
+    /** Cancel this scan job. The app has forgotten the scan already, so nothing is reported back. */
+    record CancelScan(long jobId) implements Action {}
 }

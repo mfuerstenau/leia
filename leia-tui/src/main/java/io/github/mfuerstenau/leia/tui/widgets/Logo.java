@@ -1,4 +1,4 @@
-package io.github.mfuerstenau.leia.tui.app;
+package io.github.mfuerstenau.leia.tui.widgets;
 
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Layout;
@@ -21,7 +21,7 @@ import java.util.Optional;
  * cell holds two pixels, one above the other, which keeps the pixels about square. Next to it go
  * leia's name, version and build.
  */
-final class Logo {
+public final class Logo {
 
     /**
      * The pixels, one character each: {@code .} black, {@code #} white, {@code W} skin, {@code s}
@@ -45,10 +45,10 @@ final class Logo {
             "gg########ggggg");
 
     /** Columns the logo takes. */
-    static final int WIDTH = 15;
+    public static final int WIDTH = 15;
 
     /** Rows the logo takes: two pixel rows each. */
-    static final int HEIGHT = 8;
+    public static final int HEIGHT = 8;
 
     /** Columns between the logo and the text next to it. */
     static final int GAP = 2;
@@ -102,18 +102,27 @@ final class Logo {
      * commit time. leia and its backend are one build (ADR 0034), so the backend's version is
      * leia's.
      */
-    static List<Line> aboutLines(VersionResult version) {
+    public static List<Line> aboutLines(VersionResult version) {
         return List.of(
                 Line.from(Span.styled("leia", Style.EMPTY.bold()), Span.raw(" " + version.version())),
                 Line.from("build " + version.commit()),
                 Line.from(version.commitTime()));
     }
 
+    /** Columns that the logo and {@code text} next to it take. */
+    public static int widthBeside(List<Line> text) {
+        int textWidth = 0;
+        for (Line line : text) {
+            textWidth = Math.max(textWidth, line.width());
+        }
+        return WIDTH + GAP + textWidth;
+    }
+
     /**
      * Draws the logo at the left of {@code area} and {@code text} next to it, centred on the logo's
      * height if it is shorter, wrapped if it is too wide.
      */
-    static void renderBeside(Frame frame, Rect area, List<Line> text) {
+    public static void renderBeside(Frame frame, Rect area, List<Line> text) {
         List<Rect> columns = Layout.horizontal()
                 .constraints(Constraint.length(WIDTH), Constraint.length(GAP), Constraint.fill())
                 .split(area);

@@ -1,4 +1,4 @@
-package io.github.mfuerstenau.leia.tui.app;
+package io.github.mfuerstenau.leia.tui.widgets;
 
 import static org.assertj.core.api.Assertions.assertThat;
 

@@ -80,6 +80,11 @@ What has to carry over:
       - *A screen that isn't ported yet shows a placeholder under its tab. The overview's lists the basics of the open index.*
       - *The Rust tests are ported as unit tests that render through `Frame.forTesting`. Pilot tests run whole flows against a real `LeiaBackend`. `Pilot.press` only dispatches the key and sleeps 50 ms, so they wait on a barrier event instead.*
       - *The about screen shows leia's own lines and Java's. The backend's line is gone, since they are one build.*
+    - *Settled with the overview:*
+      - *Each screen is a package of its own (`…tui.overview`, …). What several screens share is in `…tui.widgets` (`Logo`, `Panels`) and `…tui.text` (`TextFormat`, from `text.rs`).*
+      - *`Session` polls `app.polls()` on each `TickEvent` (100 ms), with at most one call per job in flight. The Rust TUI's first polls at 10 ms come back with the search screen.*
+      - *A reply can come after the user moved on, which the blocking Rust loop never saw. So each term scan has an id, and a reply for another scan is ignored. Esc forgets the scans at once, and a job whose scan was cancelled before its id came back is cancelled when it comes.*
+      - *TamboUI 0.5.0's `Table` ignores the alignment of a cell's text, so right-aligned cells are padded to their column's width.*
 
 ## Alternatives considered
 

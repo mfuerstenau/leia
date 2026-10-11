@@ -19,9 +19,12 @@ import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
+import io.github.mfuerstenau.leia.protocol.terms.FieldTerms;
+import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
 import io.github.mfuerstenau.leia.protocol.version.JavaRuntime;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import io.github.mfuerstenau.leia.tui.TestScreens;
+import io.github.mfuerstenau.leia.tui.overview.Overview;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -54,10 +57,14 @@ class AppTest {
     }
 
     private static IndexField field(String name, int number) {
+        return field(name, number, true);
+    }
+
+    private static IndexField field(String name, int number, boolean indexed) {
         return new IndexField(
                 name,
                 number,
-                IndexOptions.DOCS,
+                indexed ? IndexOptions.DOCS : IndexOptions.NONE,
                 false,
                 false,
                 false,
@@ -65,24 +72,38 @@ class AppTest {
                 0,
                 0,
                 0,
-                Optional.of(new TermStats(1, 1, 1)));
+                indexed ? Optional.of(new TermStats(1, 1, 1)) : Optional.empty());
     }
 
-    /** An index with the fields {@code id} and {@code body}. */
+    private static GetIndexStatsResult withFields(GetIndexStatsResult stats, IndexField... fields) {
+        return new GetIndexStatsResult(
+                stats.path(),
+                stats.directoryImpl(),
+                stats.segmentCount(),
+                stats.numDocs(),
+                stats.maxDoc(),
+                stats.indexes(),
+                List.of(fields));
+    }
+
+    /** An index with the fields {@code id} and {@code body}, and {@code rank} without postings. */
     private static App appWithFields() {
         App app = app();
-        GetIndexStatsResult stats = stats("/data/idx");
         app.opened(
-                new GetIndexStatsResult(
-                        stats.path(),
-                        stats.directoryImpl(),
-                        stats.segmentCount(),
-                        stats.numDocs(),
-                        stats.maxDoc(),
-                        stats.indexes(),
-                        List.of(field("id", 0), field("body", 1))),
-                List.of());
+                withFields(stats("/data/idx"), field("id", 0), field("body", 1), field("rank", 2, false)), List.of());
         return app;
+    }
+
+    private static GetFieldTermScanResult running(long termsScanned) {
+        return new GetFieldTermScanResult(termsScanned, Optional.empty());
+    }
+
+    private static GetFieldTermScanResult done(String field, long uniqueTerms) {
+        return new GetFieldTermScanResult(uniqueTerms, Optional.of(new FieldTerms(field, uniqueTerms, List.of())));
+    }
+
+    private static Optional<Action> start(long scanId, String field) {
+        return Optional.of(new Action.StartScan(scanId, field, Overview.DEFAULT_TOP_TERMS));
     }
 
     private static Optional<Action> open(String path) {
@@ -458,5 +479,166 @@ class AppTest {
         openedWithoutReader(app);
 
         assertThat(history.paths()).containsExactly("/data/broken", "/data/a");
+    }
+
+    @Test
+    void scansTheSelectedFieldAndPollsIt() {
+        App app = appWithFields();
+
+        assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(start(1, "id"));
+        assertThat(app.polls()).isEmpty();
+        assertThat(app.scanStarted(1, 7)).isEmpty();
+        assertThat(app.polls()).containsExactly(new Poll.Scan(1, 7));
+
+        assertThat(app.scanProgress(1, running(1024))).isEmpty();
+        assertThat(render(app)).contains("1024…", "Esc cancel scan");
+        // A running scan is not started again.
+        assertThat(app.handleKey(key(KeyCode.ENTER))).isEmpty();
+
+        assertThat(app.scanProgress(1, done("id", 3))).isEmpty();
+        assertThat(app.polls()).isEmpty();
+        assertThat(render(app)).contains("id: 3 terms, top 0");
+    }
+
+    @Test
+    void scansAllFieldsOneAfterAnother() {
+        App app = appWithFields();
+
+        assertThat(app.handleKey(key('a'))).isEqualTo(start(1, "id"));
+        app.scanStarted(1, 1);
+        assertThat(render(app)).contains("queued");
+
+        assertThat(app.scanProgress(1, done("id", 3))).isEqualTo(start(2, "body"));
+        app.scanStarted(2, 2);
+        assertThat(app.scanFailed(2, "Cannot read")).isEmpty();
+        assertThat(app.polls()).isEmpty();
+        assertThat(render(app)).contains("failed");
+
+        // A failed field is scanned again; the others are done or have no postings.
+        assertThat(app.handleKey(key('a'))).isEqualTo(start(3, "body"));
+    }
+
+    @Test
+    void aScanTheBackendRefusesStartsTheNext() {
+        App app = appWithFields();
+        assertThat(app.handleKey(key('a'))).isEqualTo(start(1, "id"));
+
+        assertThat(app.scanFailed(1, "No field 'id'")).isEqualTo(start(2, "body"));
+    }
+
+    @Test
+    void escCancelsTheScansBeforeItQuits() {
+        App app = appWithFields();
+        app.handleKey(key('a'));
+        app.scanStarted(1, 3);
+
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.CancelScan(3));
+
+        assertThat(app.polls()).isEmpty();
+        String screen = render(app);
+        assertThat(screen).doesNotContain("queued").doesNotContain("…");
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.Quit());
+    }
+
+    @Test
+    void aScanCancelledBeforeItsJobStartedIsCancelledOnceItHas() {
+        App app = appWithFields();
+        app.handleKey(key('a'));
+
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).isEmpty();
+        assertThat(app.scanning()).isFalse();
+        assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(start(2, "id"));
+
+        // The job of the cancelled scan, not of the new one.
+        assertThat(app.scanStarted(1, 5)).hasValue(new Action.CancelScan(5));
+        assertThat(app.scanStarted(2, 6)).isEmpty();
+        assertThat(app.polls()).containsExactly(new Poll.Scan(2, 6));
+    }
+
+    @Test
+    void aReplyForAnotherScanIsIgnored() {
+        App app = appWithFields();
+        app.handleKey(key(KeyCode.ENTER));
+        app.scanStarted(1, 4);
+        app.handleKey(key(KeyCode.ESCAPE));
+        app.handleKey(key(KeyCode.ENTER));
+        app.scanStarted(2, 5);
+
+        assertThat(app.scanProgress(1, done("id", 3))).isEmpty();
+        assertThat(app.scanFailed(1, "Cancelled")).isEmpty();
+
+        assertThat(app.polls()).containsExactly(new Poll.Scan(2, 5));
+        assertThat(render(app)).doesNotContain("id: 3 terms").doesNotContain("failed");
+    }
+
+    @Test
+    void enterIgnoresAFieldWithoutPostings() {
+        App app = appWithFields();
+        app.handleKey(key(KeyCode.END));
+
+        assertThat(app.handleKey(key(KeyCode.ENTER))).isEmpty();
+        assertThat(app.scanning()).isFalse();
+    }
+
+    @Test
+    void plusAndMinusChangeTheTopNOfTheNextScans() {
+        App app = appWithFields();
+        app.handleKey(key('-'));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.StartScan(1, "id", 20));
+        app.scanStarted(1, 1);
+        // id has more terms than the 20 it got.
+        app.scanProgress(1, done("id", 30));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).isEmpty();
+
+        app.handleKey(key('+'));
+        assertThat(TestScreens.render(app::render, 140, 30)).contains("id: 30 terms, top 0 (⏎ top 50)");
+        // A scan for 20 isn't enough any more.
+        assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(start(2, "id"));
+
+        // The top N is kept for another index.
+        app.handleKey(key('+'));
+        app.opened(withFields(stats("/data/idx"), field("id", 0)), List.of());
+        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.StartScan(3, "id", 100));
+    }
+
+    @Test
+    void openingAnotherIndexForgetsTheScans() {
+        App app = appWithFields();
+        app.handleKey(key('a'));
+        app.scanStarted(1, 4);
+
+        app.opened(stats("/data/other"), List.of());
+
+        assertThat(app.polls()).isEmpty();
+        assertThat(app.scanProgress(1, done("id", 1))).isEmpty();
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.Quit());
+    }
+
+    @Test
+    void reopeningKeepsTheScanOfAnUnchangedIndexAndForgetsItOtherwise() {
+        App app = appWithFields();
+        app.handleKey(key('a'));
+        app.scanStarted(1, 4);
+        app.handleKey(key('R'));
+
+        app.reopenUnchanged(reopenResult(1));
+        assertThat(app.polls()).hasSize(1);
+
+        app.handleKey(key('R'));
+        app.reopened(stats("/data/idx"));
+        assertThat(app.polls()).isEmpty();
+    }
+
+    @Test
+    void escCancelsAScanFromAnyScreen() {
+        App app = appWithFields();
+        app.handleKey(key('a'));
+        app.scanStarted(1, 2);
+        app.handleKey(key('4'));
+        assertThat(render(app)).contains("Esc cancel scan");
+
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.CancelScan(2));
+        // The screens that aren't ported take no overview keys.
+        assertThat(app.handleKey(key('a'))).isEmpty();
     }
 }

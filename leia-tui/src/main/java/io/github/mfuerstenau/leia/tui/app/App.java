@@ -1,5 +1,7 @@
 package io.github.mfuerstenau.leia.tui.app;
 
+import static io.github.mfuerstenau.leia.tui.widgets.Panels.labelLine;
+
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
@@ -18,16 +20,20 @@ import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
 import io.github.mfuerstenau.leia.protocol.index.IndexCommitStats;
 import io.github.mfuerstenau.leia.protocol.index.IndexEntry;
-import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
+import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
+import io.github.mfuerstenau.leia.tui.overview.FieldScan;
+import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.prompt.PathCompletion;
 import io.github.mfuerstenau.leia.tui.prompt.PathPrompt;
+import io.github.mfuerstenau.leia.tui.widgets.Logo;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -37,13 +43,16 @@ import java.util.Optional;
  * The application state: what is on screen and what a key does. It makes no calls itself: {@link
  * #handleKey} returns an {@link Action}, the {@link Session} makes the calls and reports back with
  * {@link #opened}, {@link #openedWithoutReader}, {@link #openFailed}, {@link #reopened}, {@link
- * #reopenUnchanged}, {@link #reopenFailed} or {@link #closed}.
+ * #reopenUnchanged}, {@link #reopenFailed}, {@link #closed}, and the {@code scan*} methods.
  *
  * <p>While an action that it waits for runs, the app is {@linkplain #busy() busy} and takes no keys
  * but Ctrl+C: the Rust TUI blocked on its calls, so no key came in between.
  *
- * <p>This is the shell of ADR 0034's port. The screens aren't ported yet, so each one shows what it
- * will be; the overview lists the basics of the open index.
+ * <p>The Rust TUI got each reply before the next key; here a reply can come late, after the user
+ * moved on. So each term scan has an id, a reply for a scan that is no longer the running one is
+ * ignored, and a job that started for a cancelled scan is cancelled as soon as its id is known.
+ *
+ * <p>This is ADR 0034's port. The screens that aren't ported yet show what they will be.
  */
 public final class App {
 
@@ -61,11 +70,27 @@ public final class App {
     /** What is open, or null. */
     private Opened opened;
 
-    /** The statistics of the open index; null without one, or without a reader. */
-    private GetIndexStatsResult stats;
+    /** The overview of the open index; null without one, or without a reader. */
+    private Overview overview;
 
-    /** The index directories that were found but left out of the open index. */
-    private List<SkippedIndex> skipped = List.of();
+    /**
+     * The term scan that runs in the backend, or null. There is at most one; the others wait in the
+     * queue.
+     *
+     * @param jobId null until the backend has started the job
+     */
+    private record RunningScan(long id, String field, int topN, Long jobId) {}
+
+    private RunningScan scan;
+
+    /** Fields whose scan waits for the running one. */
+    private final ArrayDeque<String> queue = new ArrayDeque<>();
+
+    /** The id of the next scan. */
+    private long nextScanId = 1;
+
+    /** How many top terms a scan asks for; kept when another index is opened. */
+    private int topN = Overview.DEFAULT_TOP_TERMS;
 
     /** The screen shown; kept when another index is opened. */
     private Screen screen = Screen.OVERVIEW;
@@ -126,8 +151,8 @@ public final class App {
      */
     public Optional<Action> opened(GetIndexStatsResult stats, List<SkippedIndex> skipped) {
         history.add(stats.path());
-        this.stats = stats;
-        this.skipped = List.copyOf(skipped);
+        overview = new Overview(stats, Logo.aboutLines(version), topN).withSkipped(skipped);
+        forgetScans();
         opened = new Opened(
                 stats.path(),
                 false,
@@ -146,8 +171,8 @@ public final class App {
      */
     public Optional<Action> openedWithoutReader(OpenIndexResult result) {
         history.add(result.path());
-        stats = null;
-        skipped = List.copyOf(result.skipped());
+        overview = null;
+        forgetScans();
         opened = new Opened(
                 result.path(),
                 true,
@@ -167,14 +192,14 @@ public final class App {
      * index. Returns what the shown screen has to fetch first.
      */
     public Optional<Action> reopened(GetIndexStatsResult stats) {
-        if (this.stats == null) {
+        if (overview == null) {
             return opened(stats, List.of());
         }
         List<IndexCommitStats> indexes = stats.indexes();
         if (indexes.size() == 1) {
             notice = new Notice.Reopened(indexes.getFirst().segmentsFile());
         } else {
-            List<IndexCommitStats> old = this.stats.indexes();
+            List<IndexCommitStats> old = overview.stats().indexes();
             int changed = 0;
             for (int i = 0; i < Math.min(indexes.size(), old.size()); i++) {
                 if (!indexes.get(i).segmentsFile().equals(old.get(i).segmentsFile())) {
@@ -183,7 +208,8 @@ public final class App {
             }
             notice = new Notice.Reopened(changed + " of " + indexes.size() + " indexes");
         }
-        this.stats = stats;
+        overview = overview.reopened(stats, topN);
+        forgetScans();
         opened = new Opened(
                 opened.path(),
                 false,
@@ -232,9 +258,129 @@ public final class App {
     /** The backend stopped the jobs of the closed index. */
     public void closed() {
         opened = null;
-        stats = null;
-        skipped = List.of();
+        overview = null;
+        forgetScans();
         busy = false;
+    }
+
+    private void forgetScans() {
+        scan = null;
+        queue.clear();
+    }
+
+    /** Whether a term scan runs or waits. */
+    boolean scanning() {
+        return scan != null;
+    }
+
+    /** The jobs to poll: the running term scan, once its job has started. */
+    public List<Poll> polls() {
+        if (scan == null || scan.jobId() == null) {
+            return List.of();
+        }
+        return List.of(new Poll.Scan(scan.id(), scan.jobId()));
+    }
+
+    /**
+     * The job of scan {@code scanId} has started. If that scan was cancelled or forgotten meanwhile,
+     * returns the action that cancels the job.
+     */
+    public Optional<Action> scanStarted(long scanId, long jobId) {
+        if (scan == null || scan.id() != scanId) {
+            return Optional.of(new Action.CancelScan(jobId));
+        }
+        scan = new RunningScan(scan.id(), scan.field(), scan.topN(), jobId);
+        return Optional.empty();
+    }
+
+    /**
+     * Shows the progress of scan {@code scanId}, or its outcome. Returns the next scan to start, once
+     * this one is done.
+     */
+    public Optional<Action> scanProgress(long scanId, GetFieldTermScanResult result) {
+        if (scan == null || scan.id() != scanId || overview == null) {
+            return Optional.empty();
+        }
+        if (result.terms().isPresent()) {
+            overview.setScan(
+                    scan.field(), Optional.of(FieldScan.done(result.terms().get(), scan.topN())));
+            scan = null;
+            return startNextScan();
+        }
+        overview.setScan(scan.field(), Optional.of(new FieldScan.Running(result.termsScanned())));
+        return Optional.empty();
+    }
+
+    /** Shows why scan {@code scanId} failed. Returns the next scan to start. */
+    public Optional<Action> scanFailed(long scanId, String error) {
+        if (scan == null || scan.id() != scanId) {
+            return Optional.empty();
+        }
+        if (overview != null) {
+            overview.setScan(scan.field(), Optional.of(new FieldScan.Failed(error)));
+        }
+        scan = null;
+        return startNextScan();
+    }
+
+    /**
+     * Forgets the running scan and the queued ones. Returns the action that cancels the running job,
+     * if it has started; otherwise {@link #scanStarted} cancels it once it has.
+     */
+    private Optional<Action> cancelScans() {
+        Long jobId = scan.jobId();
+        if (overview != null) {
+            overview.setScan(scan.field(), Optional.empty());
+            for (String field : queue) {
+                overview.setScan(field, Optional.empty());
+            }
+        }
+        forgetScans();
+        return jobId == null ? Optional.empty() : Optional.of(new Action.CancelScan(jobId));
+    }
+
+    /** Queues the scans of {@code fields}, and returns the scan to start if none runs. */
+    private Optional<Action> requestScans(List<String> fields) {
+        for (String field : fields) {
+            overview.setScan(field, Optional.of(new FieldScan.Queued()));
+            queue.addLast(field);
+        }
+        return scan != null ? Optional.empty() : startNextScan();
+    }
+
+    private Optional<Action> startNextScan() {
+        String field = queue.pollFirst();
+        if (field == null) {
+            return Optional.empty();
+        }
+        if (overview != null) {
+            overview.setScan(field, Optional.of(new FieldScan.Running(0)));
+        }
+        scan = new RunningScan(nextScanId++, field, topN, null);
+        return Optional.of(new Action.StartScan(scan.id(), field, topN));
+    }
+
+    /** What the overview does with a key that isn't one of the app's. */
+    private Optional<Action> overviewKey(KeyEvent key) {
+        if (key.code() == KeyCode.ENTER) {
+            // Enter on a top term will open it on the terms screen, once that is ported.
+            if (overview.selectedTopTerm().isPresent()) {
+                return Optional.empty();
+            }
+            return overview.selectedField()
+                    .filter(overview::needsScan)
+                    .flatMap(field -> requestScans(List.of(field.name())));
+        }
+        if (key.isChar('a')) {
+            return requestScans(overview.fieldsToScan());
+        }
+        if (key.isChar('+') || key.isChar('=') || key.isChar('-')) {
+            topN = Overview.stepTopTerms(topN, !key.isChar('-'));
+            overview.setTopN(topN);
+            return Optional.empty();
+        }
+        overview.handleKey(key);
+        return Optional.empty();
     }
 
     public Optional<Action> handleKey(KeyEvent key) {
@@ -264,10 +410,11 @@ public final class App {
             };
         }
         if (key.code() == KeyCode.ESCAPE) {
-            return Optional.of(new Action.Quit());
+            // Esc stops the scans first, and quits only when there are none.
+            return scan != null ? cancelScans() : Optional.of(new Action.Quit());
         }
         if (!isChar) {
-            return Optional.empty();
+            return screen == Screen.OVERVIEW && overview != null ? overviewKey(key) : Optional.empty();
         }
         switch (key.codePoint()) {
             case 'q' -> {
@@ -294,7 +441,7 @@ public final class App {
                 }
             }
             case 'R' -> {
-                if (stats != null) {
+                if (overview != null) {
                     notice = new Notice.Reopening();
                     busy = true;
                     return Optional.of(new Action.Reopen());
@@ -303,7 +450,11 @@ public final class App {
                     notice = new Notice.NoReader();
                 }
             }
-            default -> {}
+            default -> {
+                if (screen == Screen.OVERVIEW && overview != null) {
+                    return overviewKey(key);
+                }
+            }
         }
         return Optional.empty();
     }
@@ -333,10 +484,11 @@ public final class App {
 
     /** Draws the shown screen into {@code body}, and returns the footer's keys for it. */
     private String renderBody(Frame frame, Rect body) {
-        String reopen = stats != null ? "R reopen   " : "";
+        String reopen = overview != null ? "R reopen   " : "";
+        String cancel = scan != null ? "Esc cancel scan   " : "";
         if (screen == Screen.ANALYSIS) {
             renderNotPorted(frame, body, screen);
-            return hasIndex() ? " q quit   o open   c close   1-7 screen" : " q quit   o open";
+            return hasIndex() ? " " + cancel + "q quit   o open   c close   1-7 screen" : " q quit   o open";
         }
         if (opened == null) {
             renderAbout(frame, body);
@@ -344,18 +496,26 @@ public final class App {
         }
         if (screen == Screen.COMMITS || screen == Screen.CHECK) {
             renderNotPorted(frame, body, screen);
-            return " q quit   o open   c close   " + reopen + "1-7 screen";
+            return " " + cancel + "q quit   o open   c close   " + reopen + "1-7 screen";
         }
-        if (stats == null) {
+        if (overview == null) {
             renderWithoutReader(frame, body);
             return " q quit   o open   c close   1-7 screen";
         }
-        if (screen == Screen.OVERVIEW) {
-            renderOverview(frame, body, stats);
-        } else {
+        if (screen != Screen.OVERVIEW) {
             renderNotPorted(frame, body, screen);
+            return " " + cancel + "q quit   o open   c close   R reopen   1-7 screen";
         }
-        return " q quit   o open   c close   R reopen   1-7 screen";
+        overview.render(frame, body);
+        if (scan != null) {
+            return " Esc cancel scan   q quit   o open   c close   R reopen   1-7 screen   s/S sort   Tab panel   ↑↓";
+        }
+        // Enter and / on a top term come back with the terms and search screens.
+        if (overview.selectedTopTerm().isPresent()) {
+            return " q quit   o open   c close   R reopen   1-7 screen   +/- top N   s/S sort   Tab panel   ↑↓";
+        }
+        return " q quit   o open   c close   R reopen   1-7 screen   ⏎ terms   a all terms   +/- top N   s/S sort   "
+                + "Tab panel   ↑↓";
     }
 
     private void renderAbout(Frame frame, Rect body) {
@@ -376,31 +536,6 @@ public final class App {
         }
     }
 
-    /** The basics of the open index, until the overview is ported. */
-    private void renderOverview(Frame frame, Rect body, GetIndexStatsResult stats) {
-        List<Line> lines = new ArrayList<>();
-        lines.add(labelLine("Path", stats.path()));
-        lines.add(labelLine("Directory", stats.directoryImpl()));
-        lines.add(labelLine("Documents", stats.numDocs() + " live, max doc " + stats.maxDoc()));
-        lines.add(labelLine("Segments", Integer.toString(stats.segmentCount())));
-        if (stats.indexes().size() > 1 || !skipped.isEmpty()) {
-            String count = Integer.toString(stats.indexes().size());
-            lines.add(labelLine("Indexes", skipped.isEmpty() ? count : count + " (" + skipped.size() + " skipped)"));
-            for (IndexCommitStats index : stats.indexes()) {
-                lines.add(Line.from("  " + relative(stats.path(), index.path())));
-            }
-            for (SkippedIndex index : skipped) {
-                lines.add(Line.from("  " + relative(stats.path(), index.path()) + "  skipped: " + index.message()));
-            }
-        }
-        List<String> fields = stats.fields().stream().map(IndexField::name).toList();
-        lines.add(labelLine("Fields", fields.isEmpty() ? "none" : fields.size() + ": " + String.join(", ", fields)));
-        lines.add(Line.empty());
-        lines.add(Line.from(Span.raw("The overview isn't ported to the Java TUI yet (ADR 0034).")
-                .dim()));
-        frame.renderWidget(wrapped(lines, " Index "), body);
-    }
-
     /**
      * A screen of an index opened without a reader: the overview says how it was opened, and the
      * screens that need a reader say so.
@@ -415,7 +550,7 @@ public final class App {
             if (opened.indexes().size() > 1) {
                 lines.add(labelLine("Indexes", Integer.toString(opened.indexes().size())));
                 for (String index : opened.indexes()) {
-                    lines.add(Line.from("  " + relative(opened.path(), index)));
+                    lines.add(Line.from("  " + Overview.relative(opened.path(), index)));
                 }
             }
             title = " Index ";
@@ -501,26 +636,6 @@ public final class App {
             case MMAP -> "MMapDirectory";
             case NIO -> "NIOFSDirectory";
         };
-    }
-
-    /** A label, bold and padded to 10 columns, and its value. */
-    static Line labelLine(String label, String value) {
-        return Line.from(Span.styled(String.format(Locale.ROOT, "%-10s ", label), Style.EMPTY.bold()), Span.raw(value));
-    }
-
-    /** The name of an index directory as shown: below the opened path. */
-    static String relative(String root, String path) {
-        try {
-            Path rootPath = Path.of(root);
-            Path indexPath = Path.of(path);
-            if (!indexPath.startsWith(rootPath)) {
-                return path;
-            }
-            String rest = rootPath.relativize(indexPath).toString();
-            return rest.isEmpty() ? "." : rest;
-        } catch (IllegalArgumentException e) {
-            return path;
-        }
     }
 
     private static Block bordered(String title) {

@@ -8,10 +8,10 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 
 - [ ] Port the screens, each with TamboUI Pilot tests in place of the Rust tests, keeping keys and behaviour:
   - [x] app shell: tabs, open prompt (directory choice, no-reader, recent paths), status line, help, reopen (`R`), the logo; the screens are placeholders until they are ported
-  - [ ] overview (index stats, fields)
+  - [x] overview (index stats, fields, term scans); Enter and `/` on a top term come back with the terms and search screens
   - [ ] documents: viewer, stored values, term vectors, doc values, reconstruct, export, filter (ADR 0031/0032)
-  - [ ] terms: terms, postings, positions, field term scan
-  - [ ] search: parser options, scoring/similarity, sort, More-Like-This, explain, stored scan, doc-values search, hit fields
+  - [ ] terms: terms, postings, positions, field term scan; then Enter on an overview top term opens it here (`Overview.selectedTopTerm`)
+  - [ ] search: parser options, scoring/similarity, sort, More-Like-This, explain, stored scan, doc-values search, hit fields; then `/` on an overview top term searches for it, and the first polls of a new job at 10 ms
   - [ ] analysis: analyzer builder, presets and word sets, analyze
   - [ ] commits and segments
   - [ ] tools: check index, export terms

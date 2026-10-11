@@ -4,6 +4,7 @@ import dev.tamboui.terminal.Frame;
 import dev.tamboui.tui.TuiRunner;
 import dev.tamboui.tui.event.Event;
 import dev.tamboui.tui.event.KeyEvent;
+import dev.tamboui.tui.event.TickEvent;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.index.CloseIndexParams;
@@ -11,9 +12,13 @@ import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexParams;
+import io.github.mfuerstenau.leia.protocol.job.JobParams;
+import io.github.mfuerstenau.leia.protocol.terms.StartFieldTermScanParams;
 import io.github.mfuerstenau.leia.server.LeiaBackend;
 import io.github.mfuerstenau.leia.server.RpcException;
+import java.util.HashSet;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletionException;
 import java.util.function.Function;
 import java.util.logging.Level;
@@ -37,6 +42,9 @@ public final class Session {
 
     /** What made leia quit, if not the user: set on the UI thread. */
     private Throwable failure;
+
+    /** The polls whose call hasn't come back yet, so that a slow one isn't sent again: on the UI thread. */
+    private final Set<Poll> polling = new HashSet<>();
 
     public Session(App app, LeiaBackend backend) {
         this.app = app;
@@ -64,7 +72,10 @@ public final class Session {
                 perform(reply.apply().apply(app), runner);
                 yield true;
             }
-            // Ticks will poll the running jobs (ADR 0034 §4) once the screens that start them are ported.
+            case TickEvent _ -> {
+                poll(runner);
+                yield false;
+            }
             default -> false;
         };
     }
@@ -93,7 +104,58 @@ public final class Session {
                     }
                 });
             case Action.Reopen _ -> reopen(runner);
+            case Action.StartScan start ->
+                backend.call(Methods.START_FIELD_TERM_SCAN, new StartFieldTermScanParams(start.field(), start.topN()))
+                        .whenComplete((job, error) -> {
+                            if (error == null) {
+                                reply(runner, app -> app.scanStarted(start.scanId(), job.jobId()));
+                                return;
+                            }
+                            RpcException rpc = rpcException(error, runner);
+                            if (rpc != null) {
+                                String message = describe(rpc);
+                                reply(runner, app -> app.scanFailed(start.scanId(), message));
+                            }
+                        });
+            case Action.CancelScan cancel ->
+                backend.call(Methods.CANCEL_JOB, new JobParams(cancel.jobId())).whenComplete((cancelled, error) -> {
+                    if (error != null) {
+                        rpcException(error, runner);
+                    }
+                });
         }
+    }
+
+    /** Fetches the progress or the outcome of each running job that isn't being fetched already. */
+    private void poll(TuiRunner runner) {
+        for (Poll poll : app.polls()) {
+            if (!polling.add(poll)) {
+                continue;
+            }
+            switch (poll) {
+                case Poll.Scan scan ->
+                    backend.call(Methods.GET_FIELD_TERM_SCAN, new JobParams(scan.jobId()))
+                            .whenComplete((result, error) -> {
+                                if (error == null) {
+                                    polled(runner, poll, app -> app.scanProgress(scan.scanId(), result));
+                                    return;
+                                }
+                                RpcException rpc = rpcException(error, runner);
+                                if (rpc != null) {
+                                    String message = describe(rpc);
+                                    polled(runner, poll, app -> app.scanFailed(scan.scanId(), message));
+                                }
+                            });
+            }
+        }
+    }
+
+    /** Reports what {@code poll} brought back, and lets it be sent again. */
+    private void polled(TuiRunner runner, Poll poll, Function<App, Optional<Action>> apply) {
+        reply(runner, app -> {
+            polling.remove(poll);
+            return apply.apply(app);
+        });
     }
 
     /**

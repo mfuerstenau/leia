@@ -4,6 +4,8 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.tamboui.layout.Size;
+import dev.tamboui.terminal.TestBackend;
+import dev.tamboui.tui.TuiConfig;
 import dev.tamboui.tui.TuiRunner;
 import dev.tamboui.tui.event.Event;
 import dev.tamboui.tui.event.KeyCode;
@@ -68,7 +70,14 @@ class SessionPilotTest {
         app = new App(version, Optional.empty(), History.load(historyFile), DirectoryImpl.FS);
         Session session = new Session(app, backend);
         test = TuiTestRunner.runTest(
-                (event, runner) -> handle(session, event, runner), session::render, new Size(WIDTH, HEIGHT));
+                (event, runner) -> handle(session, event, runner),
+                session::render,
+                new Size(WIDTH, HEIGHT),
+                // The ticks poll the jobs, as in Main.
+                TuiConfig.builder()
+                        .backend(new TestBackend(WIDTH, HEIGHT))
+                        .tickRate(Duration.ofMillis(100))
+                        .build());
         pilot = test.pilot();
     }
 
@@ -86,7 +95,10 @@ class SessionPilotTest {
         return session.handle(event, runner);
     }
 
-    /** Waits until the events dispatched so far are handled, and no open, reopen or close runs. */
+    /**
+     * Waits until the events dispatched so far are handled, and no open, reopen, close or term scan
+     * runs.
+     */
     private void settle() throws InterruptedException {
         long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
         do {
@@ -95,8 +107,8 @@ class SessionPilotTest {
             assertThat(barrier.handled().await(20, SECONDS))
                     .as("the UI thread handles the events")
                     .isTrue();
-        } while (app.busy() && System.nanoTime() < deadline);
-        assertThat(app.busy()).as("the calls are done").isFalse();
+        } while ((app.busy() || app.scanning()) && System.nanoTime() < deadline);
+        assertThat(app.busy() || app.scanning()).as("the calls are done").isFalse();
     }
 
     private String screen() {
@@ -110,6 +122,13 @@ class SessionPilotTest {
             return Optional.of(new Action.Open(path.toString(), app.directory(), mode));
         }));
         settle();
+    }
+
+    /** Waits until the events dispatched so far are handled. */
+    private void handled() throws InterruptedException {
+        Barrier barrier = new Barrier(new CountDownLatch(1));
+        test.runner().dispatch(barrier);
+        assertThat(barrier.handled().await(20, SECONDS)).isTrue();
     }
 
     private static Path writeIndex(Path dir, int docs) throws IOException {
@@ -131,7 +150,7 @@ class SessionPilotTest {
 
         openAtStart(index, OpenMode.READER);
 
-        assertThat(screen()).contains("Path       " + index, "Documents  2 live, max doc 2", "Fields     1: id");
+        assertThat(screen()).contains("Path       " + index, "Documents  2 live, 0 deleted, 2 max", "Fields (1)");
         assertThat(Files.readAllLines(historyFile)).containsExactly(index.toString());
     }
 
@@ -147,7 +166,7 @@ class SessionPilotTest {
         writeIndex(index, 1);
         pilot.press('R');
         settle();
-        assertThat(screen()).contains("Reopened: segments_", "Documents  3 live, max doc 3");
+        assertThat(screen()).contains("Reopened: segments_", "Documents  3 live, 0 deleted, 3 max");
 
         // The prompt starts from the open index.
         pilot.press('o');
@@ -175,6 +194,33 @@ class SessionPilotTest {
         pilot.press('1');
         settle();
         assertThat(screen()).contains("Reader     none");
+    }
+
+    @Test
+    void scansTheTermsOfAField() throws Exception {
+        openAtStart(writeIndex(tmp.resolve("index"), 3), OpenMode.READER);
+
+        pilot.press(KeyCode.ENTER);
+        settle();
+
+        assertThat(screen()).contains("Fields (1, 3 terms)", "id: 3 terms, top 3", "doc-0", "doc-2");
+    }
+
+    @Test
+    void escCancelsTheScans() throws Exception {
+        openAtStart(writeIndex(tmp.resolve("index"), 3), OpenMode.READER);
+
+        // Back to back, unlike Pilot's keys: a scan ends only after a tick and a poll, which come later.
+        test.runner().dispatch(TestScreens.key('a'));
+        test.runner().dispatch(TestScreens.key(KeyCode.ESCAPE));
+        handled();
+        assertThat(app.scanning()).isFalse();
+        assertThat(test.runner().isRunning()).isTrue();
+
+        // Whatever the cancelled scan still reports back is ignored.
+        Thread.sleep(300);
+        handled();
+        assertThat(screen()).contains("Enter counts the terms").doesNotContain("3 terms");
     }
 
     @Test
