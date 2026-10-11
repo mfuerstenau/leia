@@ -11,5 +11,7 @@ interface ServerComponent {
 
     RpcServer server();
 
+    Handlers handlers();
+
     CurrentIndex currentIndex();
 }

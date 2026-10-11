@@ -20,14 +20,14 @@ leia (Rust TUI)  ──spawns──▶  <java> -jar leia-server.jar
 |---|---|
 | `leia-core/` | Java library with the Lucene functionality. No JSON-RPC, Jackson or I/O-transport code. |
 | `leia-protocol/` | Java DTOs (records) for every JSON-RPC method's params/result, and Jackson configuration. |
-| `leia-server/` | JSON-RPC server over stdin/stdout, with Dagger wiring. Maps core results to protocol DTOs. Builds the **fat jar** `leia-server.jar`. |
+| `leia-server/` | JSON-RPC server over stdin/stdout, with Dagger wiring. Maps core results to protocol DTOs. Builds the **fat jar** `leia-server.jar`. Also the library that `leia-tui` calls in-process, through `LeiaBackend` (ADR 0034). |
 | `leia-tui/` | The TamboUI UI of ADR 0034, which replaces `tui/`. For now it holds only the spike (package `…tui.spike`). Builds the **fat jar** `leia.jar`. |
 | `tui/` | Rust crate `leia` (library + binary): ratatui frontend that spawns the server and holds the protocol DTOs as serde structs in `tui/src/protocol/`. |
 | `protocol/fixtures/` | Golden JSON files shared by both sides: the wire contract (naming: `protocol/fixtures/README.md`). |
 | `protocol/error-codes.json` | The error-code catalogue that both `ErrorCode` enums are checked against. |
 | `docs/` | `adr/`, `tasklist.md`, `SESSION-SUMMARIES.md`, `demo-index.md` (the manual-testing index). |
 
-Dependency direction: `leia-server → leia-protocol`, `leia-server → leia-core`. `leia-core` and `leia-protocol` do not depend on each other.
+Dependency direction: `leia-server → leia-protocol`, `leia-server → leia-core`, `leia-tui → leia-server`, `leia-tui → leia-protocol` (`leia-tui` can't compile against core or Lucene). `leia-core` and `leia-protocol` do not depend on each other.
 
 ## Hard rules
 

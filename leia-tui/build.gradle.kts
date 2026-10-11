@@ -16,6 +16,9 @@ tasks.named<JavaCompile>(launcher.compileJavaTaskName) {
 }
 
 dependencies {
+    // The backend, called in-process (ADR 0034); core and Lucene are only on the runtime classpath.
+    implementation(project(":leia-server"))
+    implementation(project(":leia-protocol"))
     implementation(platform(libs.tamboui.bom))
     implementation(libs.tamboui.tui)
     implementation(libs.tamboui.widgets)

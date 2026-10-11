@@ -26,7 +26,8 @@ import java.util.logging.Logger;
  * a {@link ScanProgress}, which also stops it once it is cancelled: cancellation is cooperative,
  * threads are never interrupted.
  *
- * <p>The request loop is the only caller, so the registry needs no locking; a job's thread shares
+ * <p>The request loop, or the backend thread of {@code LeiaBackend}, is the only caller, so the
+ * registry needs no locking; a job's thread shares
  * only the job's progress, cancelled flag and outcome with it.
  */
 @Singleton

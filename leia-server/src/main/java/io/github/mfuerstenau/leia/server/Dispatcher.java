@@ -1,21 +1,12 @@
 package io.github.mfuerstenau.leia.server;
 
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
-import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.ProtocolJson;
 import io.github.mfuerstenau.leia.protocol.Request;
 import io.github.mfuerstenau.leia.protocol.Response;
 import io.github.mfuerstenau.leia.protocol.RpcError;
-import io.github.mfuerstenau.leia.protocol.RpcMethod;
 import jakarta.inject.Inject;
-import java.util.List;
-import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
-import java.util.function.Function;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-import java.util.stream.Collectors;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.exc.StreamReadException;
 import tools.jackson.databind.exc.UnrecognizedPropertyException;
@@ -36,23 +27,13 @@ import tools.jackson.databind.json.JsonMapper;
  */
 final class Dispatcher {
 
-    private static final Logger LOG = Logger.getLogger(Dispatcher.class.getName());
     private static final JsonMapper MAPPER = ProtocolJson.mapper();
 
-    private final Map<String, MethodHandler<?, ?>> handlers;
+    private final Handlers handlers;
 
     @Inject
-    Dispatcher(Set<MethodHandler<?, ?>> handlers) {
-        this.handlers = handlers.stream()
-                .collect(
-                        Collectors.toUnmodifiableMap(handler -> handler.method().name(), Function.identity()));
-        List<String> unhandled = Methods.ALL.stream()
-                .map(RpcMethod::name)
-                .filter(name -> !this.handlers.containsKey(name))
-                .toList();
-        if (!unhandled.isEmpty()) {
-            throw new IllegalStateException("No handler for " + unhandled);
-        }
+    Dispatcher(Handlers handlers) {
+        this.handlers = handlers;
     }
 
     Response<?> dispatch(String line) {
@@ -70,12 +51,12 @@ final class Dispatcher {
             return failure(scannedId, ErrorCode.INVALID_REQUEST, "Invalid request: " + describe(e));
         }
 
-        MethodHandler<?, ?> handler = handlers.get(envelope.method());
-        if (handler == null) {
+        Optional<MethodHandler<?, ?>> handler = handlers.named(envelope.method());
+        if (handler.isEmpty()) {
             return failure(
                     Optional.of(envelope.id()), ErrorCode.METHOD_NOT_FOUND, "Method not found: " + envelope.method());
         }
-        return invoke(handler, line, envelope.id());
+        return invoke(handler.get(), line, envelope.id());
     }
 
     private static <P, R> Response<?> invoke(MethodHandler<P, R> handler, String line, long id) {
@@ -89,12 +70,9 @@ final class Dispatcher {
         }
 
         try {
-            return Response.success(id, handler.handle(request.params()));
+            return Response.success(id, Handlers.run(handler, request.params()));
         } catch (RpcException e) {
             return failure(Optional.of(id), e.code(), e.getMessage());
-        } catch (RuntimeException e) {
-            LOG.log(Level.SEVERE, e, () -> "Method " + handler.method().name() + " failed");
-            return failure(Optional.of(id), ErrorCode.INTERNAL_ERROR, "Internal error: " + e);
         }
     }
 

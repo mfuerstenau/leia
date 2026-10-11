@@ -1,12 +1,16 @@
+// A library for leia-tui, which calls the methods in-process through LeiaBackend (ADR 0034), and
+// still the JSON-RPC server leia-server.jar for the Rust TUI until the port reaches parity.
 plugins {
-    id("leia.java-conventions")
+    id("leia.java-library-conventions")
     application
     alias(libs.plugins.shadow)
 }
 
 dependencies {
+    // api: the protocol records are LeiaBackend's API; implementation keeps core and Lucene out of
+    // the UI's compile classpath (AGENTS.md, hard rule 6).
+    api(project(":leia-protocol"))
     implementation(project(":leia-core"))
-    implementation(project(":leia-protocol"))
     implementation(libs.dagger)
     annotationProcessor(libs.dagger.compiler)
 }

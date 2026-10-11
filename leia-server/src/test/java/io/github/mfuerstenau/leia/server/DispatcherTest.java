@@ -1,23 +1,19 @@
 package io.github.mfuerstenau.leia.server;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.ProtocolJson;
 import io.github.mfuerstenau.leia.protocol.Response;
 import io.github.mfuerstenau.leia.protocol.RpcError;
-import io.github.mfuerstenau.leia.protocol.RpcMethod;
 import io.github.mfuerstenau.leia.protocol.version.JavaRuntime;
 import io.github.mfuerstenau.leia.protocol.version.VersionParams;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.HashSet;
 import java.util.Optional;
-import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -150,13 +146,6 @@ class DispatcherTest {
                 "rpc.error-invalid-params.json");
     }
 
-    @Test
-    void rejectsMissingHandler() {
-        assertThatThrownBy(() -> new Dispatcher(Set.of()))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessageContaining("version");
-    }
-
     /** Fixture messages are examples; the code and the id must match. */
     private void assertMatchesFixture(String request, String fixture) throws IOException {
         Response<?> expected =
@@ -185,42 +174,7 @@ class DispatcherTest {
     }
 
     /** A dispatcher whose {@code version} runs {@code body}; the other methods must not be called. */
-    private static Dispatcher dispatcherWith(VersionBody body) {
-        MethodHandler<VersionParams, VersionResult> version = new MethodHandler<>() {
-            @Override
-            public RpcMethod<VersionParams, VersionResult> method() {
-                return Methods.VERSION;
-            }
-
-            @Override
-            public VersionResult handle(VersionParams params) throws RpcException {
-                return body.handle(params);
-            }
-        };
-        Set<MethodHandler<?, ?>> handlers = new HashSet<>();
-        handlers.add(version);
-        Methods.ALL.stream()
-                .filter(method -> method != Methods.VERSION)
-                .forEach(method -> handlers.add(unused(method)));
-        return new Dispatcher(handlers);
-    }
-
-    private static <P, R> MethodHandler<P, R> unused(RpcMethod<P, R> method) {
-        return new MethodHandler<>() {
-            @Override
-            public RpcMethod<P, R> method() {
-                return method;
-            }
-
-            @Override
-            public R handle(P params) {
-                throw new AssertionError(method.name() + " must not be called");
-            }
-        };
-    }
-
-    @FunctionalInterface
-    private interface VersionBody {
-        VersionResult handle(VersionParams params) throws RpcException;
+    private static Dispatcher dispatcherWith(TestHandlers.Body<VersionParams, VersionResult> body) {
+        return new Dispatcher(TestHandlers.with(TestHandlers.handler(Methods.VERSION, body)));
     }
 }

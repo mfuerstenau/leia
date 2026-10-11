@@ -40,7 +40,7 @@ import io.github.mfuerstenau.leia.server.terms.StartExportTermsHandler;
 import io.github.mfuerstenau.leia.server.terms.StartFieldTermScanHandler;
 import io.github.mfuerstenau.leia.server.version.VersionHandler;
 
-/** One binding per JSON-RPC method. {@link Dispatcher} checks that every method in {@code Methods} has one. */
+/** One binding per JSON-RPC method. {@link Handlers} checks that every method in {@code Methods} has one. */
 @Module
 interface HandlerModule {
 
