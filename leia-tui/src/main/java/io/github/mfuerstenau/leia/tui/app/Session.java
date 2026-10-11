@@ -7,6 +7,8 @@ import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.tui.event.TickEvent;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
+import io.github.mfuerstenau.leia.protocol.commits.GetCommitParams;
+import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
 import io.github.mfuerstenau.leia.protocol.index.CloseIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
@@ -18,6 +20,7 @@ import io.github.mfuerstenau.leia.server.LeiaBackend;
 import io.github.mfuerstenau.leia.server.RpcException;
 import java.util.HashSet;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.CompletionException;
 import java.util.function.Function;
@@ -115,6 +118,41 @@ public final class Session {
                             if (rpc != null) {
                                 String message = describe(rpc);
                                 reply(runner, app -> app.scanFailed(start.scanId(), message));
+                            }
+                        });
+            case Action.LoadCommits load ->
+                backend.call(Methods.GET_COMMITS, new GetCommitsParams(OptionalInt.of(load.index())))
+                        .whenComplete((result, error) -> {
+                            if (error == null) {
+                                reply(runner, app -> app.commitsLoaded(load.index(), result));
+                                return;
+                            }
+                            RpcException rpc = rpcException(error, runner);
+                            if (rpc != null) {
+                                String message = describe(rpc);
+                                reply(runner, app -> {
+                                    app.commitsFailed(load.index(), message);
+                                    return Optional.empty();
+                                });
+                            }
+                        });
+            case Action.LoadCommit load ->
+                backend.call(Methods.GET_COMMIT, new GetCommitParams(load.generation(), OptionalInt.of(load.index())))
+                        .whenComplete((result, error) -> {
+                            if (error == null) {
+                                reply(runner, app -> {
+                                    app.commitLoaded(load.index(), load.generation(), result);
+                                    return Optional.empty();
+                                });
+                                return;
+                            }
+                            RpcException rpc = rpcException(error, runner);
+                            if (rpc != null) {
+                                String message = describe(rpc);
+                                reply(runner, app -> {
+                                    app.commitFailed(load.index(), load.generation(), message);
+                                    return Optional.empty();
+                                });
                             }
                         });
             case Action.CancelScan cancel ->

@@ -1,8 +1,12 @@
 package io.github.mfuerstenau.leia.tui.text;
 
 import dev.tamboui.text.CharWidth;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * How text from the index is shown: control characters escaped, so that they can't break the
@@ -33,6 +37,43 @@ public final class TextFormat {
     /** A byte string from the backend (ADR 0006): its text escaped, or {@code 0x} and the hex if {@code binary}. */
     public static String bytesText(String value, boolean binary) {
         return binary ? "0x" + value : escapeControl(value);
+    }
+
+    /** At most the first {@code max} characters of {@code text}, and {@code …} if it is longer. */
+    public static String firstChars(String text, int max) {
+        if (text.codePointCount(0, text.length()) <= max) {
+            return text;
+        }
+        return text.substring(0, text.offsetByCodePoints(0, max)) + "…";
+    }
+
+    /** {@code n} and the noun, in the plural unless {@code n} is 1. */
+    public static String count(long n, String noun) {
+        return n == 1 ? "1 " + noun : n + " " + noun + "s";
+    }
+
+    /** A size in bytes, in the largest binary unit that keeps it at 1 or more, such as {@code 1.5 KiB}. */
+    public static String size(long bytes) {
+        double kib = 1024.0;
+        if (bytes < 1024) {
+            return bytes + " B";
+        }
+        if (bytes < 1024 * 1024) {
+            return String.format(Locale.ROOT, "%.1f KiB", bytes / kib);
+        }
+        if (bytes < 1024L * 1024 * 1024) {
+            return String.format(Locale.ROOT, "%.1f MiB", bytes / kib / kib);
+        }
+        return String.format(Locale.ROOT, "%.1f GiB", bytes / kib / kib / kib);
+    }
+
+    private static final DateTimeFormatter UTC_TIME = DateTimeFormatter.ofPattern(
+                    "uuuu-MM-dd HH:mm:ss 'UTC'", Locale.ROOT)
+            .withZone(ZoneOffset.UTC);
+
+    /** Milliseconds since the epoch as {@code 2001-09-09 01:46:40 UTC}. */
+    public static String utcTime(long millis) {
+        return UTC_TIME.format(Instant.ofEpochMilli(millis));
     }
 
     /**

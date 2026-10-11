@@ -36,4 +36,16 @@ public sealed interface Action {
 
     /** Cancel this scan job. The app has forgotten the scan already, so nothing is reported back. */
     record CancelScan(long jobId) implements Action {}
+
+    /**
+     * Fetch the commits of the index directory at this position, and report back with {@link
+     * App#commitsLoaded} or {@link App#commitsFailed}.
+     */
+    record LoadCommits(int index) implements Action {}
+
+    /**
+     * Fetch a commit of the index directory at this position whole, by generation, and report back
+     * with {@link App#commitLoaded} or {@link App#commitFailed}.
+     */
+    record LoadCommit(int index, long generation) implements Action {}
 }

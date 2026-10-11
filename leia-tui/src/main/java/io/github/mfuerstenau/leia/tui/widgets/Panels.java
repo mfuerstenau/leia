@@ -1,11 +1,13 @@
 package io.github.mfuerstenau.leia.tui.widgets;
 
 import dev.tamboui.style.Style;
+import dev.tamboui.text.CharWidth;
 import dev.tamboui.text.Line;
 import dev.tamboui.text.Span;
 import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.block.BorderType;
 import dev.tamboui.widgets.block.Borders;
+import dev.tamboui.widgets.table.Cell;
 import java.util.Locale;
 
 /** The panels that the screens are made of, and how their parts are styled. */
@@ -30,5 +32,13 @@ public final class Panels {
     /** A label, bold and padded to 10 columns, and its value. */
     public static Line labelLine(String label, String value) {
         return Line.from(Span.styled(String.format(Locale.ROOT, "%-10s ", label), Style.EMPTY.bold()), Span.raw(value));
+    }
+
+    /**
+     * A cell with {@code text} right-aligned in {@code width} columns. TamboUI's table ignores the
+     * alignment of a cell's text, so the text is padded.
+     */
+    public static Cell right(String text, int width) {
+        return Cell.from(" ".repeat(Math.max(width - CharWidth.of(text), 0)) + text);
     }
 }

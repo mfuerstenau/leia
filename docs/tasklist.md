@@ -13,7 +13,7 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
   - [ ] terms: terms, postings, positions, field term scan; then Enter on an overview top term opens it here (`Overview.selectedTopTerm`)
   - [ ] search: parser options, scoring/similarity, sort, More-Like-This, explain, stored scan, doc-values search, hit fields; then `/` on an overview top term searches for it, and the first polls of a new job at 10 ms
   - [ ] analysis: analyzer builder, presets and word sets, analyze
-  - [ ] commits and segments
+  - [x] commits and segments
   - [ ] tools: check index, export terms
   - [ ] jars: `X`, the default folder; then the about screen's "X to add jars", the `X jars` key, and "add a jar that has it with X" in the missing-codec hint come back (`Session.withJarHint`)
 - [ ] Parity check against `docs/demo-index.md` and the real-server tests that `cargo test -- --ignored` runs now

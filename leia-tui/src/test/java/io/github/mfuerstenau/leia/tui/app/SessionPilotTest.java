@@ -96,8 +96,8 @@ class SessionPilotTest {
     }
 
     /**
-     * Waits until the events dispatched so far are handled, and no open, reopen, close or term scan
-     * runs.
+     * Waits until the events dispatched so far are handled, and no open, reopen, close, term scan
+     * or fetch of commits runs.
      */
     private void settle() throws InterruptedException {
         long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
@@ -107,8 +107,12 @@ class SessionPilotTest {
             assertThat(barrier.handled().await(20, SECONDS))
                     .as("the UI thread handles the events")
                     .isTrue();
-        } while ((app.busy() || app.scanning()) && System.nanoTime() < deadline);
-        assertThat(app.busy() || app.scanning()).as("the calls are done").isFalse();
+        } while (running() && System.nanoTime() < deadline);
+        assertThat(running()).as("the calls are done").isFalse();
+    }
+
+    private boolean running() {
+        return app.busy() || app.scanning() || app.loadingCommits();
     }
 
     private String screen() {
@@ -190,10 +194,34 @@ class SessionPilotTest {
         pilot.press('n', KeyModifiers.CTRL);
         pilot.press(KeyCode.ENTER);
         settle();
-        assertThat(screen()).contains("no reader", "commits screen");
+        // The commit can't be read either, but the commits screen says why.
+        assertThat(screen()).contains("no reader", "Commits (0, 1 unreadable", "segments_1 could not be read.");
         pilot.press('1');
         settle();
         assertThat(screen()).contains("Reader     none");
+    }
+
+    @Test
+    void showsTheCommitsAndReadsThemAgain() throws Exception {
+        Path index = writeIndex(tmp.resolve("index"), 2);
+        writeIndex(index, 1);
+        openAtStart(index, OpenMode.READER);
+
+        pilot.press('4');
+        settle();
+        assertThat(screen())
+                .contains("Commits (1; ● opened, r reads again)", "Segments of segments_2 (2)", "Generation 2");
+
+        pilot.press(KeyCode.ENTER);
+        pilot.press(KeyCode.DOWN);
+        settle();
+        assertThat(screen()).contains("Segment _1", "Document 2 · 0 deleted");
+
+        // A commit written since: the writer deletes the opened one, which the reader keeps open.
+        writeIndex(index, 1);
+        pilot.press('r');
+        settle();
+        assertThat(screen()).contains("segments_3", "Segments of segments_3 (3)");
     }
 
     @Test

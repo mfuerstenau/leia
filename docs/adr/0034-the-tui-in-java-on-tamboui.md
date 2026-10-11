@@ -85,6 +85,9 @@ What has to carry over:
       - *`Session` polls `app.polls()` on each `TickEvent` (100 ms), with at most one call per job in flight. The Rust TUI's first polls at 10 ms come back with the search screen.*
       - *A reply can come after the user moved on, which the blocking Rust loop never saw. So each term scan has an id, and a reply for another scan is ignored. Esc forgets the scans at once, and a job whose scan was cancelled before its id came back is cancelled when it comes.*
       - *TamboUI 0.5.0's `Table` ignores the alignment of a cell's text, so right-aligned cells are padded to their column's width.*
+    - *Settled with the commits screen:*
+      - *A screen that fetches without a job remembers the fetches under way and doesn't ask for one again until it is answered, so moving back and forth sends each fetch once. Its replies need no id: `LeiaBackend` answers one call after the other, so they come in order, and a screen is only made anew by an open, reopen or close, which come after every earlier call.*
+      - *TamboUI's `Paragraph` scrolls no further than to show the last line at the bottom; ratatui scrolled on until it was at the top. A scrolled panel stops where TamboUI does, so the next key after End moves at once.*
 
 ## Alternatives considered
 

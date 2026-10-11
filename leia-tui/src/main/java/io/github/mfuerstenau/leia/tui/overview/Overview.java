@@ -3,6 +3,7 @@ package io.github.mfuerstenau.leia.tui.overview;
 import static io.github.mfuerstenau.leia.tui.widgets.Panels.highlight;
 import static io.github.mfuerstenau.leia.tui.widgets.Panels.labelLine;
 import static io.github.mfuerstenau.leia.tui.widgets.Panels.panel;
+import static io.github.mfuerstenau.leia.tui.widgets.Panels.right;
 
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Layout;
@@ -650,14 +651,6 @@ public final class Overview {
                 .columnSpacing(COLUMN_SPACING)
                 .highlightSymbol("")
                 .highlightSpacing(Table.HighlightSpacing.NEVER);
-    }
-
-    /**
-     * A cell with {@code text} right-aligned in {@code width} columns. TamboUI's table ignores the
-     * alignment of a cell's text, so the text is padded.
-     */
-    private static Cell right(String text, int width) {
-        return Cell.from(" ".repeat(Math.max(width - CharWidth.of(text), 0)) + text);
     }
 
     /** The lines of the index panel, {@code width} columns wide inside its border. */

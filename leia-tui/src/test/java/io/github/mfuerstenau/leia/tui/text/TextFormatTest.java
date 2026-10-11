@@ -1,7 +1,11 @@
 package io.github.mfuerstenau.leia.tui.text;
 
 import static io.github.mfuerstenau.leia.tui.text.TextFormat.bytesText;
+import static io.github.mfuerstenau.leia.tui.text.TextFormat.count;
 import static io.github.mfuerstenau.leia.tui.text.TextFormat.escapeControl;
+import static io.github.mfuerstenau.leia.tui.text.TextFormat.firstChars;
+import static io.github.mfuerstenau.leia.tui.text.TextFormat.size;
+import static io.github.mfuerstenau.leia.tui.text.TextFormat.utcTime;
 import static io.github.mfuerstenau.leia.tui.text.TextFormat.wrap;
 import static io.github.mfuerstenau.leia.tui.text.TextFormat.wrapHanging;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -47,5 +51,35 @@ class TextFormatTest {
     void wrapsTheFirstLineNarrower() {
         assertThat(wrapHanging("one two three four", 3, 9, 5)).containsExactly("one", "two three", "four");
         assertThat(wrapHanging("one two three four", 3, 9, 2)).containsExactly("one", "two thre…");
+    }
+
+    @Test
+    void cutsAfterTheFirstCharacters() {
+        assertThat(firstChars("grüße", 3)).isEqualTo("grü…");
+        assertThat(firstChars("grüße", 5)).isEqualTo("grüße");
+    }
+
+    @Test
+    void countsInTheSingularOrPlural() {
+        assertThat(count(1, "doc")).isEqualTo("1 doc");
+        assertThat(count(0, "doc")).isEqualTo("0 docs");
+        assertThat(count(2, "segment")).isEqualTo("2 segments");
+    }
+
+    @Test
+    void formatsSizes() {
+        assertThat(size(0)).isEqualTo("0 B");
+        assertThat(size(1023)).isEqualTo("1023 B");
+        assertThat(size(1536)).isEqualTo("1.5 KiB");
+        assertThat(size(5 * 1024 * 1024)).isEqualTo("5.0 MiB");
+        assertThat(size(2L * 1024 * 1024 * 1024)).isEqualTo("2.0 GiB");
+    }
+
+    @Test
+    void formatsUtcTimes() {
+        assertThat(utcTime(0)).isEqualTo("1970-01-01 00:00:00 UTC");
+        assertThat(utcTime(1_000_000_000_000L)).isEqualTo("2001-09-09 01:46:40 UTC");
+        assertThat(utcTime(951_782_400_000L)).isEqualTo("2000-02-29 00:00:00 UTC");
+        assertThat(utcTime(-1000)).isEqualTo("1969-12-31 23:59:59 UTC");
     }
 }

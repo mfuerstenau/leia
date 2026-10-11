@@ -6,6 +6,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
+import dev.tamboui.tui.event.KeyModifiers;
+import io.github.mfuerstenau.leia.protocol.commits.Commit;
+import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
+import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
@@ -363,6 +367,14 @@ class AppTest {
 
         String screen = render(app);
         assertThat(screen).contains("2 indexes", "Indexes    2 (1 skipped)", "c  skipped: Corrupt index");
+
+        assertThat(app.handleKey(key('4'))).hasValue(new Action.LoadCommits(0));
+        assertThat(render(app)).contains("Indexes (2)");
+        app.commitsLoaded(0, list(commit(1, true)));
+        // From the commits back to the indexes.
+        app.handleKey(KeyEvent.ofKey(KeyCode.TAB, KeyModifiers.SHIFT));
+        assertThat(app.handleKey(key(KeyCode.DOWN))).hasValue(new Action.LoadCommits(1));
+        assertThat(app.commitsLoaded(1, list(commit(3, true)))).hasValue(new Action.LoadCommit(1, 3));
     }
 
     @Test
@@ -378,8 +390,8 @@ class AppTest {
         assertThat(render(app)).contains("Unchanged: 2 indexes");
     }
 
-    private static void openedWithoutReader(App app) {
-        app.openedWithoutReader(new OpenIndexResult(
+    private static Optional<Action> openedWithoutReader(App app) {
+        return app.openedWithoutReader(new OpenIndexResult(
                 "/data/broken",
                 OpenMode.DIRECTORY_ONLY,
                 OptionalInt.empty(),
@@ -393,9 +405,11 @@ class AppTest {
         App app = appWithFields();
         app.handleKey(key('2'));
 
-        openedWithoutReader(app);
+        assertThat(openedWithoutReader(app)).hasValue(new Action.LoadCommits(0));
         String screen = render(app);
-        assertThat(screen).contains("no reader", "4 Commits", "commits screen").doesNotContain("R reopen");
+        assertThat(screen)
+                .contains("no reader", "4 Commits", "Reading the commits…", "r read again")
+                .doesNotContain("R reopen");
 
         app.handleKey(key('2'));
         assertThat(render(app)).contains("This screen needs a reader");
@@ -640,5 +654,48 @@ class AppTest {
         assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.CancelScan(2));
         // The screens that aren't ported take no overview keys.
         assertThat(app.handleKey(key('a'))).isEmpty();
+    }
+
+    private static GetCommitsResult list(Commit... commits) {
+        return new GetCommitsResult(List.of(commits), List.of());
+    }
+
+    private static Commit commit(long generation, boolean current) {
+        return new Commit(generation, "segments_" + generation, current, 1, 1, 1, 0, "10.5.2", Map.of());
+    }
+
+    @Test
+    void switchesToTheCommitsAndFetchesThem() {
+        App app = appWithFields();
+
+        assertThat(app.handleKey(key('4'))).hasValue(new Action.LoadCommits(0));
+        assertThat(app.commitsLoaded(0, list(commit(2, true), commit(1, false))))
+                .hasValue(new Action.LoadCommit(0, 2));
+        app.commitLoaded(0, 2, new GetCommitResult(commit(2, true), List.of(), List.of()));
+        String screen = render(app);
+        assertThat(screen).contains("4 Commits", "No segments.", "r read again");
+
+        assertThat(app.handleKey(key(KeyCode.DOWN))).hasValue(new Action.LoadCommit(0, 1));
+        assertThat(app.handleKey(key('r'))).hasValue(new Action.LoadCommits(0));
+    }
+
+    @Test
+    void openingAnotherIndexOnTheCommitsScreenFetchesItsCommits() {
+        App app = appWithFields();
+        app.handleKey(key('4'));
+        app.commitsFailed(0, "unreadable");
+        assertThat(render(app)).contains("Cannot list the commits: unreadable");
+
+        assertThat(app.opened(stats("/data/other"), List.of())).hasValue(new Action.LoadCommits(0));
+    }
+
+    @Test
+    void reopeningOnTheCommitsScreenFetchesTheCommitsAgain() {
+        App app = appWithFields();
+        app.handleKey(key('4'));
+        app.commitsLoaded(0, list(commit(1, true)));
+        app.handleKey(key('R'));
+
+        assertThat(app.reopened(stats("/data/idx"))).hasValue(new Action.LoadCommits(0));
     }
 }

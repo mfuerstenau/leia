@@ -16,6 +16,8 @@ import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.paragraph.Paragraph;
+import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
+import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
 import io.github.mfuerstenau.leia.protocol.index.IndexCommitStats;
@@ -27,6 +29,7 @@ import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
+import io.github.mfuerstenau.leia.tui.commits.Commits;
 import io.github.mfuerstenau.leia.tui.overview.FieldScan;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.prompt.PathCompletion;
@@ -43,7 +46,8 @@ import java.util.Optional;
  * The application state: what is on screen and what a key does. It makes no calls itself: {@link
  * #handleKey} returns an {@link Action}, the {@link Session} makes the calls and reports back with
  * {@link #opened}, {@link #openedWithoutReader}, {@link #openFailed}, {@link #reopened}, {@link
- * #reopenUnchanged}, {@link #reopenFailed}, {@link #closed}, and the {@code scan*} methods.
+ * #reopenUnchanged}, {@link #reopenFailed}, {@link #closed}, and the {@code scan*} and {@code
+ * commit*} methods.
  *
  * <p>While an action that it waits for runs, the app is {@linkplain #busy() busy} and takes no keys
  * but Ctrl+C: the Rust TUI blocked on its calls, so no key came in between.
@@ -72,6 +76,9 @@ public final class App {
 
     /** The overview of the open index; null without one, or without a reader. */
     private Overview overview;
+
+    /** The commits screen of the open index, with or without a reader; null without one. */
+    private Commits commits;
 
     /**
      * The term scan that runs in the backend, or null. There is at most one; the others wait in the
@@ -159,9 +166,10 @@ public final class App {
                 directory,
                 stats.indexes().stream().map(IndexCommitStats::path).toList(),
                 skipped.stream().map(SkippedIndex::path).toList());
+        commits = new Commits(indexNames(opened));
         prompt = null;
         busy = false;
-        return Optional.empty();
+        return initialRequest();
     }
 
     /**
@@ -179,12 +187,13 @@ public final class App {
                 directory,
                 result.indexes().stream().map(IndexEntry::path).toList(),
                 result.skipped().stream().map(SkippedIndex::path).toList());
+        commits = new Commits(indexNames(opened));
         if (screen != Screen.ANALYSIS && screen != Screen.CHECK) {
             screen = Screen.COMMITS;
         }
         prompt = null;
         busy = false;
-        return Optional.empty();
+        return initialRequest();
     }
 
     /**
@@ -216,8 +225,9 @@ public final class App {
                 opened.directory(),
                 indexes.stream().map(IndexCommitStats::path).toList(),
                 opened.skipped());
+        commits = new Commits(indexNames(opened));
         busy = false;
-        return Optional.empty();
+        return initialRequest();
     }
 
     /** The index has no newer commit; everything stays as it is. */
@@ -259,8 +269,54 @@ public final class App {
     public void closed() {
         opened = null;
         overview = null;
+        commits = null;
         forgetScans();
         busy = false;
+    }
+
+    /** The index directories as the screens show them: below the opened path (Rust's {@code index_names}). */
+    private static List<String> indexNames(Opened opened) {
+        return opened.indexes().stream()
+                .map(index -> Overview.relative(opened.path(), index))
+                .toList();
+    }
+
+    /** What the shown screen has to fetch first, if anything. */
+    private Optional<Action> initialRequest() {
+        if (screen == Screen.COMMITS && commits != null) {
+            return commitsAction(commits.initialRequest());
+        }
+        return Optional.empty();
+    }
+
+    private static Optional<Action> commitsAction(Optional<Commits.Request> request) {
+        return request.map(next -> switch (next) {
+            case Commits.Request.LoadList list -> new Action.LoadCommits(list.index());
+            case Commits.Request.LoadCommit commit -> new Action.LoadCommit(commit.index(), commit.generation());
+        });
+    }
+
+    /** Shows the commits of the index directory at {@code index}. Returns the selected commit to fetch. */
+    public Optional<Action> commitsLoaded(int index, GetCommitsResult result) {
+        return commits == null ? Optional.empty() : commitsAction(commits.commitsLoaded(index, result));
+    }
+
+    public void commitsFailed(int index, String error) {
+        if (commits != null) {
+            commits.commitsFailed(index, error);
+        }
+    }
+
+    public void commitLoaded(int index, long generation, GetCommitResult result) {
+        if (commits != null) {
+            commits.commitLoaded(index, generation, result);
+        }
+    }
+
+    public void commitFailed(int index, long generation, String error) {
+        if (commits != null) {
+            commits.commitFailed(index, generation, error);
+        }
     }
 
     private void forgetScans() {
@@ -271,6 +327,11 @@ public final class App {
     /** Whether a term scan runs or waits. */
     boolean scanning() {
         return scan != null;
+    }
+
+    /** Whether the commits screen waits for a fetch. */
+    boolean loadingCommits() {
+        return commits != null && commits.loading();
     }
 
     /** The jobs to poll: the running term scan, once its job has started. */
@@ -414,7 +475,7 @@ public final class App {
             return scan != null ? cancelScans() : Optional.of(new Action.Quit());
         }
         if (!isChar) {
-            return screen == Screen.OVERVIEW && overview != null ? overviewKey(key) : Optional.empty();
+            return screenKey(key);
         }
         switch (key.codePoint()) {
             case 'q' -> {
@@ -423,7 +484,12 @@ public final class App {
             case '1' -> showIf(hasIndex(), Screen.OVERVIEW);
             case '2' -> showIf(hasIndex(), Screen.DOCUMENTS);
             case '3' -> showIf(hasIndex(), Screen.TERMS);
-            case '4' -> showIf(hasIndex(), Screen.COMMITS);
+            case '4' -> {
+                if (hasIndex()) {
+                    screen = Screen.COMMITS;
+                    return initialRequest();
+                }
+            }
             case '5' -> showIf(hasIndex(), Screen.SEARCH);
             case '6' -> showIf(true, Screen.ANALYSIS);
             case '7' -> showIf(hasIndex(), Screen.CHECK);
@@ -451,10 +517,19 @@ public final class App {
                 }
             }
             default -> {
-                if (screen == Screen.OVERVIEW && overview != null) {
-                    return overviewKey(key);
-                }
+                return screenKey(key);
             }
+        }
+        return Optional.empty();
+    }
+
+    /** What the shown screen does with a key that isn't one of the app's. */
+    private Optional<Action> screenKey(KeyEvent key) {
+        if (screen == Screen.OVERVIEW && overview != null) {
+            return overviewKey(key);
+        }
+        if (screen == Screen.COMMITS && commits != null) {
+            return commitsAction(commits.handleKey(key));
         }
         return Optional.empty();
     }
@@ -494,7 +569,12 @@ public final class App {
             renderAbout(frame, body);
             return " q quit   o open   6 analysis";
         }
-        if (screen == Screen.COMMITS || screen == Screen.CHECK) {
+        if (screen == Screen.COMMITS) {
+            commits.render(frame, body);
+            return " " + cancel + "q quit   o open   c close   " + reopen
+                    + "1-7 screen   r read again   ⏎ segments   Tab panel   ↑↓";
+        }
+        if (screen == Screen.CHECK) {
             renderNotPorted(frame, body, screen);
             return " " + cancel + "q quit   o open   c close   " + reopen + "1-7 screen";
         }
