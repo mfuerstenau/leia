@@ -10,6 +10,7 @@ import dev.tamboui.tui.event.KeyModifiers;
 import io.github.mfuerstenau.leia.protocol.commits.Commit;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
+import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
@@ -25,6 +26,11 @@ import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
 import io.github.mfuerstenau.leia.protocol.terms.FieldTerms;
 import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
+import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
+import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
+import io.github.mfuerstenau.leia.protocol.terms.Posting;
+import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
+import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
 import io.github.mfuerstenau.leia.protocol.version.JavaRuntime;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import io.github.mfuerstenau.leia.tui.TestScreens;
@@ -473,15 +479,15 @@ class AppTest {
     @Test
     void theTabsMarkTheSelectedScreen() {
         App app = appWithFields();
-        app.handleKey(key('3'));
+        app.handleKey(key('5'));
 
         var buffer = TestScreens.buffer(app::render, 100, 20);
         String tabs = TestScreens.text(buffer).lines().findFirst().orElseThrow();
-        int terms = tabs.indexOf("3 Terms");
-        assertThat(buffer.get(terms, 0).style().addModifiers()).contains(dev.tamboui.style.Modifier.REVERSED);
+        int search = tabs.indexOf("5 Search");
+        assertThat(buffer.get(search, 0).style().addModifiers()).contains(dev.tamboui.style.Modifier.REVERSED);
         assertThat(buffer.get(tabs.indexOf("1 Overview"), 0).style().addModifiers())
                 .doesNotContain(dev.tamboui.style.Modifier.REVERSED);
-        assertThat(render(app)).contains("terms screen");
+        assertThat(render(app)).contains("search screen");
     }
 
     @Test
@@ -697,5 +703,127 @@ class AppTest {
         app.handleKey(key('R'));
 
         assertThat(app.reopened(stats("/data/idx"))).hasValue(new Action.LoadCommits(0));
+    }
+
+    private static BytesValue text(String value) {
+        return new BytesValue(value, false);
+    }
+
+    private static Action.LoadTerms loadTerms(String field, String from) {
+        return new Action.LoadTerms(field, Optional.ofNullable(from).map(AppTest::text), false);
+    }
+
+    private static Action.LoadPostings loadPostings(String field, String term) {
+        return new Action.LoadPostings(field, text(term), 0, false, Optional.empty());
+    }
+
+    private static GetTermsResult termPage(String... terms) {
+        return new GetTermsResult(
+                List.of(terms).stream()
+                        .map(term -> new TermEntry(term, false, 1, 1))
+                        .toList(),
+                Optional.empty());
+    }
+
+    /** The postings of a term: documents 0 and 2. */
+    private static GetPostingsResult postingsOf() {
+        return new GetPostingsResult(
+                2,
+                2,
+                List.of(
+                        new Posting(0, false, OptionalInt.empty(), Optional.empty()),
+                        new Posting(2, false, OptionalInt.empty(), Optional.empty())),
+                OptionalInt.empty());
+    }
+
+    /** On the terms screen, with the terms "1" and "2" of {@code id} and the postings of "1". */
+    private static App appOnTerms() {
+        App app = appWithFields();
+        assertThat(app.handleKey(key('3'))).hasValue(loadTerms("id", null));
+        assertThat(app.loadingTerms()).isTrue();
+        assertThat(app.termsLoaded(loadTerms("id", null), termPage("1", "2"))).hasValue(loadPostings("id", "1"));
+        assertThat(app.postingsLoaded(loadPostings("id", "1"), postingsOf())).isEmpty();
+        assertThat(app.loadingTerms()).isFalse();
+        return app;
+    }
+
+    @Test
+    void showsTheTermsAndPostingsOfTheFirstField() {
+        App app = appOnTerms();
+
+        String screen = render(app);
+        assertThat(screen).contains("3 Terms", "id (/ seeks)", "Postings (2)", "/ seek", "←/→ column");
+        // The documents screen isn't ported yet, so Enter on a posting stays here.
+        app.handleKey(key(KeyCode.ENTER));
+        app.handleKey(key(KeyCode.ENTER));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).isEmpty();
+        assertThat(app.handleKey(key('e'))).isEmpty();
+        assertThat(render(app)).contains("Postings (2)");
+        // The terms screen has everything it shows.
+        app.handleKey(key('1'));
+        assertThat(app.handleKey(key('3'))).isEmpty();
+    }
+
+    @Test
+    void theSeekPromptTakesTheKeys() {
+        App app = appOnTerms();
+        app.handleKey(key('/'));
+
+        assertThat(app.handleKey(key('q'))).hasValue(loadTerms("id", "q"));
+        assertThat(app.handleKey(key('1'))).hasValue(loadTerms("id", "q1"));
+        assertThat(render(app)).contains("type to seek");
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).isEmpty();
+        assertThat(render(app)).contains("3 Terms", "/ seek");
+        assertThat(app.handleKey(key('q'))).hasValue(new Action.Quit());
+    }
+
+    @Test
+    void reopeningKeepsTheFieldOfTheTermsScreen() {
+        App app = appWithFields();
+        app.handleKey(key('3'));
+        app.termsFailed(loadTerms("id", null), "unreadable");
+        assertThat(app.handleKey(key(KeyCode.DOWN))).hasValue(loadTerms("body", null));
+        app.handleKey(key('R'));
+
+        assertThat(app.reopened(withFields(stats("/data/idx"), field("title", 0), field("id", 1), field("body", 2))))
+                .hasValue(loadTerms("body", null));
+    }
+
+    @Test
+    void openingAnotherIndexOnTheTermsScreenFetchesItsTerms() {
+        App app = appOnTerms();
+
+        assertThat(app.opened(withFields(stats("/data/other"), field("title", 0)), List.of()))
+                .hasValue(loadTerms("title", null));
+    }
+
+    @Test
+    void theTermsScreenNeedsAReader() {
+        App app = app();
+        openedWithoutReader(app);
+
+        assertThat(app.handleKey(key('3'))).isEmpty();
+        assertThat(render(app)).contains("This screen needs a reader");
+    }
+
+    @Test
+    void enterOnATopTermBrowsesItsDocuments() {
+        App app = appWithFields();
+        assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(start(1, "id"));
+        app.scanStarted(1, 1);
+        app.scanProgress(
+                1,
+                new GetFieldTermScanResult(
+                        2,
+                        Optional.of(new FieldTerms(
+                                "id", 2, List.of(new TopTerm("1", false, 1, 1), new TopTerm("2", false, 1, 1))))));
+        app.handleKey(key(KeyCode.TAB));
+        app.handleKey(key(KeyCode.DOWN));
+        assertThat(render(app)).contains("⏎ term's docs");
+
+        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(loadTerms("id", "2"));
+        assertThat(app.termsLoaded(loadTerms("id", "2"), termPage("2"))).hasValue(loadPostings("id", "2"));
+        app.postingsLoaded(loadPostings("id", "2"), postingsOf());
+        assertThat(render(app)).contains("3 Terms", "id from 2 (/ seeks)", "Postings (2)");
     }
 }

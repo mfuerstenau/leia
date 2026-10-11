@@ -96,8 +96,8 @@ class SessionPilotTest {
     }
 
     /**
-     * Waits until the events dispatched so far are handled, and no open, reopen, close, term scan
-     * or fetch of commits runs.
+     * Waits until the events dispatched so far are handled, and no open, reopen, close, term scan,
+     * fetch of commits or fetch of terms runs.
      */
     private void settle() throws InterruptedException {
         long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
@@ -112,7 +112,7 @@ class SessionPilotTest {
     }
 
     private boolean running() {
-        return app.busy() || app.scanning() || app.loadingCommits();
+        return app.busy() || app.scanning() || app.loadingCommits() || app.loadingTerms();
     }
 
     private String screen() {
@@ -232,6 +232,36 @@ class SessionPilotTest {
         settle();
 
         assertThat(screen()).contains("Fields (1, 3 terms)", "id: 3 terms, top 3", "doc-0", "doc-2");
+    }
+
+    @Test
+    void showsTheTermsAndSeeks() throws Exception {
+        openAtStart(writeIndex(tmp.resolve("index"), 3), OpenMode.READER);
+
+        pilot.press('3');
+        settle();
+        assertThat(screen()).contains("id (/ seeks)", "doc-0", "doc-2", "Postings (1)");
+
+        pilot.press('/');
+        for (char c : "doc-2".toCharArray()) {
+            pilot.press(c);
+        }
+        pilot.press(KeyCode.ENTER);
+        settle();
+        assertThat(screen()).contains("id from doc-2 (/ seeks)", "doc-2").doesNotContain("doc-0");
+    }
+
+    @Test
+    void enterOnATopTermShowsItOnTheTermsScreen() throws Exception {
+        openAtStart(writeIndex(tmp.resolve("index"), 3), OpenMode.READER);
+        pilot.press(KeyCode.ENTER);
+        settle();
+
+        pilot.press(KeyCode.TAB);
+        pilot.press(KeyCode.DOWN);
+        pilot.press(KeyCode.ENTER);
+        settle();
+        assertThat(screen()).contains("id from doc-1 (/ seeks)", "Postings (1)").doesNotContain("doc-0");
     }
 
     @Test

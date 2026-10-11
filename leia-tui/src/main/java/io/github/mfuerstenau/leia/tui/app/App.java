@@ -28,12 +28,15 @@ import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
+import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
+import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import io.github.mfuerstenau.leia.tui.commits.Commits;
 import io.github.mfuerstenau.leia.tui.overview.FieldScan;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.prompt.PathCompletion;
 import io.github.mfuerstenau.leia.tui.prompt.PathPrompt;
+import io.github.mfuerstenau.leia.tui.terms.Terms;
 import io.github.mfuerstenau.leia.tui.widgets.Logo;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
@@ -46,8 +49,8 @@ import java.util.Optional;
  * The application state: what is on screen and what a key does. It makes no calls itself: {@link
  * #handleKey} returns an {@link Action}, the {@link Session} makes the calls and reports back with
  * {@link #opened}, {@link #openedWithoutReader}, {@link #openFailed}, {@link #reopened}, {@link
- * #reopenUnchanged}, {@link #reopenFailed}, {@link #closed}, and the {@code scan*} and {@code
- * commit*} methods.
+ * #reopenUnchanged}, {@link #reopenFailed}, {@link #closed}, and the {@code scan*}, {@code commit*},
+ * {@code terms*} and {@code postings*} methods.
  *
  * <p>While an action that it waits for runs, the app is {@linkplain #busy() busy} and takes no keys
  * but Ctrl+C: the Rust TUI blocked on its calls, so no key came in between.
@@ -79,6 +82,9 @@ public final class App {
 
     /** The commits screen of the open index, with or without a reader; null without one. */
     private Commits commits;
+
+    /** The terms screen of the open index; null without one, or without a reader. */
+    private Terms terms;
 
     /**
      * The term scan that runs in the backend, or null. There is at most one; the others wait in the
@@ -167,6 +173,7 @@ public final class App {
                 stats.indexes().stream().map(IndexCommitStats::path).toList(),
                 skipped.stream().map(SkippedIndex::path).toList());
         commits = new Commits(indexNames(opened));
+        terms = new Terms(stats.fields());
         prompt = null;
         busy = false;
         return initialRequest();
@@ -180,6 +187,7 @@ public final class App {
     public Optional<Action> openedWithoutReader(OpenIndexResult result) {
         history.add(result.path());
         overview = null;
+        terms = null;
         forgetScans();
         opened = new Opened(
                 result.path(),
@@ -218,6 +226,7 @@ public final class App {
             notice = new Notice.Reopened(changed + " of " + indexes.size() + " indexes");
         }
         overview = overview.reopened(stats, topN);
+        terms = terms != null ? terms.reopened(stats.fields()) : new Terms(stats.fields());
         forgetScans();
         opened = new Opened(
                 opened.path(),
@@ -270,6 +279,7 @@ public final class App {
         opened = null;
         overview = null;
         commits = null;
+        terms = null;
         forgetScans();
         busy = false;
     }
@@ -285,6 +295,9 @@ public final class App {
     private Optional<Action> initialRequest() {
         if (screen == Screen.COMMITS && commits != null) {
             return commitsAction(commits.initialRequest());
+        }
+        if (screen == Screen.TERMS && terms != null) {
+            return termsAction(terms.initialRequest());
         }
         return Optional.empty();
     }
@@ -319,6 +332,49 @@ public final class App {
         }
     }
 
+    /**
+     * Turns what the terms screen needs into an action. A document to show and an export come back
+     * with the documents and tools screens.
+     */
+    private static Optional<Action> termsAction(Optional<Terms.Request> request) {
+        return request.flatMap(next -> switch (next) {
+            case Terms.Request.LoadTerms load ->
+                Optional.of(new Action.LoadTerms(load.field(), load.from(), load.more()));
+            case Terms.Request.LoadPostings load ->
+                Optional.of(
+                        new Action.LoadPostings(load.field(), load.term(), load.fromDoc(), load.more(), load.filter()));
+            case Terms.Request.Document _, Terms.Request.Export _ -> Optional.<Action>empty();
+        });
+    }
+
+    private static Terms.Request.LoadTerms request(Action.LoadTerms load) {
+        return new Terms.Request.LoadTerms(load.field(), load.from(), load.more());
+    }
+
+    private static Terms.Request.LoadPostings request(Action.LoadPostings load) {
+        return new Terms.Request.LoadPostings(load.field(), load.term(), load.fromDoc(), load.more(), load.filter());
+    }
+
+    /** Shows a page of terms. Returns what the terms screen needs next. */
+    public Optional<Action> termsLoaded(Action.LoadTerms load, GetTermsResult result) {
+        return terms == null ? Optional.empty() : termsAction(terms.termsLoaded(request(load), result));
+    }
+
+    public Optional<Action> termsFailed(Action.LoadTerms load, String error) {
+        return terms == null ? Optional.empty() : termsAction(terms.termsFailed(request(load), error));
+    }
+
+    /** Shows a page of postings. Returns what the terms screen needs next. */
+    public Optional<Action> postingsLoaded(Action.LoadPostings load, GetPostingsResult result) {
+        return terms == null ? Optional.empty() : termsAction(terms.postingsLoaded(request(load), result));
+    }
+
+    public void postingsFailed(Action.LoadPostings load, String error) {
+        if (terms != null) {
+            terms.postingsFailed(request(load), error);
+        }
+    }
+
     private void forgetScans() {
         scan = null;
         queue.clear();
@@ -332,6 +388,11 @@ public final class App {
     /** Whether the commits screen waits for a fetch. */
     boolean loadingCommits() {
         return commits != null && commits.loading();
+    }
+
+    /** Whether the terms screen waits for a fetch. */
+    boolean loadingTerms() {
+        return terms != null && terms.loading();
     }
 
     /** The jobs to poll: the running term scan, once its job has started. */
@@ -424,9 +485,10 @@ public final class App {
     /** What the overview does with a key that isn't one of the app's. */
     private Optional<Action> overviewKey(KeyEvent key) {
         if (key.code() == KeyCode.ENTER) {
-            // Enter on a top term will open it on the terms screen, once that is ported.
-            if (overview.selectedTopTerm().isPresent()) {
-                return Optional.empty();
+            Optional<Overview.FieldTerm> top = overview.selectedTopTerm();
+            if (top.isPresent()) {
+                screen = Screen.TERMS;
+                return termsAction(terms.browse(top.get().field(), top.get().term()));
             }
             return overview.selectedField()
                     .filter(overview::needsScan)
@@ -470,6 +532,9 @@ public final class App {
                 case PathPrompt.Nothing _ -> Optional.empty();
             };
         }
+        if (screen == Screen.TERMS && terms != null && terms.prompting()) {
+            return termsAction(terms.handleKey(key));
+        }
         if (key.code() == KeyCode.ESCAPE) {
             // Esc stops the scans first, and quits only when there are none.
             return scan != null ? cancelScans() : Optional.of(new Action.Quit());
@@ -483,7 +548,12 @@ public final class App {
             }
             case '1' -> showIf(hasIndex(), Screen.OVERVIEW);
             case '2' -> showIf(hasIndex(), Screen.DOCUMENTS);
-            case '3' -> showIf(hasIndex(), Screen.TERMS);
+            case '3' -> {
+                if (hasIndex()) {
+                    screen = Screen.TERMS;
+                    return initialRequest();
+                }
+            }
             case '4' -> {
                 if (hasIndex()) {
                     screen = Screen.COMMITS;
@@ -530,6 +600,9 @@ public final class App {
         }
         if (screen == Screen.COMMITS && commits != null) {
             return commitsAction(commits.handleKey(key));
+        }
+        if (screen == Screen.TERMS && terms != null) {
+            return termsAction(terms.handleKey(key));
         }
         return Optional.empty();
     }
@@ -582,6 +655,15 @@ public final class App {
             renderWithoutReader(frame, body);
             return " q quit   o open   c close   1-7 screen";
         }
+        if (screen == Screen.TERMS) {
+            terms.render(frame, body);
+            if (terms.prompting()) {
+                return " type to seek   ⏎/Esc done";
+            }
+            String filter = !terms.filtered() ? "" : terms.onlyFiltered() ? "b all postings   " : "b filter only   ";
+            // ⏎ open doc and e export come back with the documents and tools screens.
+            return " " + cancel + "q quit   o open   c close   1-7 screen   / seek   " + filter + "←/→ column   ↑↓";
+        }
         if (screen != Screen.OVERVIEW) {
             renderNotPorted(frame, body, screen);
             return " " + cancel + "q quit   o open   c close   R reopen   1-7 screen";
@@ -590,9 +672,10 @@ public final class App {
         if (scan != null) {
             return " Esc cancel scan   q quit   o open   c close   R reopen   1-7 screen   s/S sort   Tab panel   ↑↓";
         }
-        // Enter and / on a top term come back with the terms and search screens.
+        // / on a top term comes back with the search screen.
         if (overview.selectedTopTerm().isPresent()) {
-            return " q quit   o open   c close   R reopen   1-7 screen   +/- top N   s/S sort   Tab panel   ↑↓";
+            return " q quit   o open   c close   R reopen   1-7 screen   ⏎ term's docs   +/- top N   s/S sort   "
+                    + "Tab panel   ↑↓";
         }
         return " q quit   o open   c close   R reopen   1-7 screen   ⏎ terms   a all terms   +/- top N   s/S sort   "
                 + "Tab panel   ↑↓";

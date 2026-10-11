@@ -15,9 +15,12 @@ import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexParams;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
+import io.github.mfuerstenau.leia.protocol.terms.GetPostingsParams;
+import io.github.mfuerstenau.leia.protocol.terms.GetTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.StartFieldTermScanParams;
 import io.github.mfuerstenau.leia.server.LeiaBackend;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.tui.terms.Terms;
 import java.util.HashSet;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -151,6 +154,38 @@ public final class Session {
                                 String message = describe(rpc);
                                 reply(runner, app -> {
                                     app.commitFailed(load.index(), load.generation(), message);
+                                    return Optional.empty();
+                                });
+                            }
+                        });
+            case Action.LoadTerms load ->
+                backend.call(Methods.GET_TERMS, new GetTermsParams(load.field(), load.from(), Terms.TERMS_PAGE))
+                        .whenComplete((result, error) -> {
+                            if (error == null) {
+                                reply(runner, app -> app.termsLoaded(load, result));
+                                return;
+                            }
+                            RpcException rpc = rpcException(error, runner);
+                            if (rpc != null) {
+                                String message = describe(rpc);
+                                reply(runner, app -> app.termsFailed(load, message));
+                            }
+                        });
+            case Action.LoadPostings load ->
+                backend.call(
+                                Methods.GET_POSTINGS,
+                                new GetPostingsParams(
+                                        load.field(), load.term(), load.fromDoc(), Terms.POSTINGS_PAGE, load.filter()))
+                        .whenComplete((result, error) -> {
+                            if (error == null) {
+                                reply(runner, app -> app.postingsLoaded(load, result));
+                                return;
+                            }
+                            RpcException rpc = rpcException(error, runner);
+                            if (rpc != null) {
+                                String message = describe(rpc);
+                                reply(runner, app -> {
+                                    app.postingsFailed(load, message);
                                     return Optional.empty();
                                 });
                             }

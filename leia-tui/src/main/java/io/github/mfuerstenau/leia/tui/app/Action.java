@@ -1,7 +1,10 @@
 package io.github.mfuerstenau.leia.tui.app;
 
+import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
+import io.github.mfuerstenau.leia.protocol.terms.PostingsFilter;
+import java.util.Optional;
 
 /**
  * What the {@link Session} has to do after a key: {@link App} makes no calls itself. Each action
@@ -48,4 +51,23 @@ public sealed interface Action {
      * with {@link App#commitLoaded} or {@link App#commitFailed}.
      */
     record LoadCommit(int index, long generation) implements Action {}
+
+    /**
+     * Fetch a page of the terms of a field, and report back with {@link App#termsLoaded} or {@link
+     * App#termsFailed}.
+     *
+     * @param from where the page starts; empty for the first term
+     * @param more whether the page continues the shown terms
+     */
+    record LoadTerms(String field, Optional<BytesValue> from, boolean more) implements Action {}
+
+    /**
+     * Fetch a page of the postings of a term, and report back with {@link App#postingsLoaded} or
+     * {@link App#postingsFailed}.
+     *
+     * @param more whether the page continues the shown postings
+     * @param filter the filter to read the postings through (ADR 0032)
+     */
+    record LoadPostings(String field, BytesValue term, int fromDoc, boolean more, Optional<PostingsFilter> filter)
+            implements Action {}
 }

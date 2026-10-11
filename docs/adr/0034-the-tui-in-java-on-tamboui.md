@@ -88,6 +88,9 @@ What has to carry over:
     - *Settled with the commits screen:*
       - *A screen that fetches without a job remembers the fetches under way and doesn't ask for one again until it is answered, so moving back and forth sends each fetch once. Its replies need no id: `LeiaBackend` answers one call after the other, so they come in order, and a screen is only made anew by an open, reopen or close, which come after every earlier call.*
       - *TamboUI's `Paragraph` scrolls no further than to show the last line at the bottom; ratatui scrolled on until it was at the top. A scrolled panel stops where TamboUI does, so the next key after End moves at once.*
+    - *Settled with the terms screen:*
+      - *A screen whose fetches follow a selection or a typed text also drops a reply that no longer fits what it shows: a first page that isn't the last one asked for (seek, browse), postings of a term that isn't selected any more, and a next page of a list that was replaced. The fetch for what the screen shows now has always been asked for, and the replies come in order, so its reply comes last.*
+      - *A ported screen keeps the requests that lead to a screen not yet ported, such as Enter on a posting (documents) and `e` (export), with their tests. `App` drops them, and the footer leaves out their keys, until that screen is ported.*
 
 ## Alternatives considered
 

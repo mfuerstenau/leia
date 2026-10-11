@@ -8,7 +8,9 @@ import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.block.BorderType;
 import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.table.Cell;
+import dev.tamboui.widgets.table.Row;
 import java.util.Locale;
+import java.util.Optional;
 
 /** The panels that the screens are made of, and how their parts are styled. */
 public final class Panels {
@@ -40,5 +42,21 @@ public final class Panels {
      */
     public static Cell right(String text, int width) {
         return Cell.from(" ".repeat(Math.max(width - CharWidth.of(text), 0)) + text);
+    }
+
+    /**
+     * The row after the last one of a paged list: {@code …} while there are more, or why the next
+     * page failed. Empty otherwise.
+     */
+    public static Optional<Row> tailRow(boolean more, Optional<String> error) {
+        String text;
+        if (error.isPresent()) {
+            text = "Cannot read more: " + error.get();
+        } else if (more) {
+            text = "…";
+        } else {
+            return Optional.empty();
+        }
+        return Optional.of(Row.from(Cell.from(text)).style(Style.EMPTY.dim()));
     }
 }
