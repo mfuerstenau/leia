@@ -9,18 +9,24 @@ import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
+import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
+import io.github.mfuerstenau.leia.protocol.document.GetStoredValueParams;
+import io.github.mfuerstenau.leia.protocol.document.GetTermVectorParams;
 import io.github.mfuerstenau.leia.protocol.index.CloseIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexParams;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
+import io.github.mfuerstenau.leia.protocol.terms.GetPositionsParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.StartFieldTermScanParams;
 import io.github.mfuerstenau.leia.server.LeiaBackend;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.tui.Osc52;
 import io.github.mfuerstenau.leia.tui.terms.Terms;
+import java.io.IOException;
 import java.util.HashSet;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -190,12 +196,101 @@ public final class Session {
                                 });
                             }
                         });
+            case Action.LoadDocument load ->
+                backend.call(Methods.GET_DOCUMENT, new GetDocumentParams(load.docId()))
+                        .whenComplete((result, error) -> {
+                            if (error == null) {
+                                reply(runner, app -> app.documentLoaded(result));
+                                return;
+                            }
+                            RpcException rpc = rpcException(error, runner);
+                            if (rpc != null) {
+                                String message = describe(rpc);
+                                reply(runner, app -> {
+                                    app.documentFailed(load.docId(), message);
+                                    return Optional.empty();
+                                });
+                            }
+                        });
+            case Action.LoadStoredValue load ->
+                backend.call(
+                                Methods.GET_STORED_VALUE,
+                                new GetStoredValueParams(load.docId(), load.field(), load.index()))
+                        .whenComplete((result, error) -> {
+                            if (error == null) {
+                                reply(runner, app -> {
+                                    app.storedValueLoaded(load.docId(), load.field(), load.index(), result.value());
+                                    return Optional.empty();
+                                });
+                                return;
+                            }
+                            RpcException rpc = rpcException(error, runner);
+                            if (rpc != null) {
+                                String message = describe(rpc);
+                                reply(runner, app -> {
+                                    app.storedValueFailed(load.docId(), load.field(), load.index(), message);
+                                    return Optional.empty();
+                                });
+                            }
+                        });
+            case Action.LoadTermVector load ->
+                backend.call(Methods.GET_TERM_VECTOR, new GetTermVectorParams(load.docId(), load.field()))
+                        .whenComplete((result, error) -> {
+                            if (error == null) {
+                                reply(runner, app -> {
+                                    app.termVectorLoaded(load.docId(), load.field(), result.terms());
+                                    return Optional.empty();
+                                });
+                                return;
+                            }
+                            RpcException rpc = rpcException(error, runner);
+                            if (rpc != null) {
+                                String message = describe(rpc);
+                                reply(runner, app -> {
+                                    app.termVectorFailed(load.docId(), load.field(), message);
+                                    return Optional.empty();
+                                });
+                            }
+                        });
+            case Action.LoadPositions load ->
+                backend.call(Methods.GET_POSITIONS, new GetPositionsParams(load.docId(), load.field(), load.term()))
+                        .whenComplete((result, error) -> {
+                            if (error == null) {
+                                reply(runner, app -> {
+                                    app.positionsLoaded(load.docId(), load.field(), load.term(), result.positions());
+                                    return Optional.empty();
+                                });
+                                return;
+                            }
+                            RpcException rpc = rpcException(error, runner);
+                            if (rpc != null) {
+                                String message = describe(rpc);
+                                reply(runner, app -> {
+                                    app.positionsFailed(load.docId(), load.field(), load.term(), message);
+                                    return Optional.empty();
+                                });
+                            }
+                        });
+            case Action.Copy copy -> copy(copy.text(), runner);
             case Action.CancelScan cancel ->
                 backend.call(Methods.CANCEL_JOB, new JobParams(cancel.jobId())).whenComplete((cancelled, error) -> {
                     if (error != null) {
                         rpcException(error, runner);
                     }
                 });
+        }
+    }
+
+    /**
+     * Puts {@code text} on the terminal's clipboard: written on the UI thread, between two frames,
+     * so the sequence can't land inside one. A terminal that can't take it ignores it.
+     */
+    private static void copy(String text, TuiRunner runner) {
+        try {
+            runner.backend().writeRaw(Osc52.of(text));
+            runner.backend().flush();
+        } catch (IOException e) {
+            LOG.log(Level.WARNING, "Cannot copy to the clipboard", e);
         }
     }
 

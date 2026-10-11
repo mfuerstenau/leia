@@ -30,6 +30,7 @@ import java.util.stream.Stream;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.StringField;
+import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.store.FSDirectory;
@@ -97,7 +98,7 @@ class SessionPilotTest {
 
     /**
      * Waits until the events dispatched so far are handled, and no open, reopen, close, term scan,
-     * fetch of commits or fetch of terms runs.
+     * fetch of commits, terms or documents runs.
      */
     private void settle() throws InterruptedException {
         long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
@@ -112,7 +113,7 @@ class SessionPilotTest {
     }
 
     private boolean running() {
-        return app.busy() || app.scanning() || app.loadingCommits() || app.loadingTerms();
+        return app.busy() || app.scanning() || app.loadingCommits() || app.loadingTerms() || app.loadingDocuments();
     }
 
     private String screen() {
@@ -296,5 +297,58 @@ class SessionPilotTest {
             pilot.pause();
         }
         assertThat(test.runner().isRunning()).isFalse();
+    }
+
+    @Test
+    void stepsThroughTheDocumentsAndViewsAValue() throws Exception {
+        openAtStart(writeIndex(tmp.resolve("index"), 3), OpenMode.READER);
+
+        pilot.press('2');
+        settle();
+        assertThat(screen()).contains("#0 of 0–2", "doc-0");
+
+        pilot.press(KeyCode.RIGHT);
+        settle();
+        assertThat(screen()).contains("#1 of 0–2", "doc-1");
+
+        pilot.press('v');
+        settle();
+        assertThat(screen()).contains("id · 1 of 1 · string · 5 B", "Esc close");
+        pilot.press(KeyCode.ESCAPE);
+        settle();
+        assertThat(screen()).contains("Fields (1, / seeks)", "v view");
+        assertThat(test.runner().isRunning()).isTrue();
+    }
+
+    @Test
+    void opensAPostingAndStepsThroughTheTermsDocuments() throws Exception {
+        Path index = tmp.resolve("index");
+        try (FSDirectory directory = FSDirectory.open(index);
+                IndexWriter writer = new IndexWriter(directory, new IndexWriterConfig())) {
+            for (int i = 0; i < 3; i++) {
+                Document document = new Document();
+                document.add(new TextField("body", "red and red " + i, Field.Store.YES));
+                writer.addDocument(document);
+            }
+        }
+        openAtStart(index, OpenMode.READER);
+
+        pilot.press('3');
+        settle();
+        // The terms of body: 0, 1, 2, and, red.
+        pilot.press(KeyCode.TAB);
+        for (int i = 0; i < 4; i++) {
+            pilot.press(KeyCode.DOWN);
+        }
+        settle();
+        assertThat(screen()).contains("Postings (3)");
+        pilot.press(KeyCode.TAB);
+        pilot.press(KeyCode.ENTER);
+        settle();
+        assertThat(screen()).contains("#0 of 0–2", "body:red  1 of 3", "red ×2, doc 1 of 3", "  0, 2");
+
+        pilot.press(']');
+        settle();
+        assertThat(screen()).contains("#1 of 0–2", "body:red  2 of 3");
     }
 }

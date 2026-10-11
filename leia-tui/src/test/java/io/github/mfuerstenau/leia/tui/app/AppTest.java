@@ -11,6 +11,10 @@ import io.github.mfuerstenau.leia.protocol.commits.Commit;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
+import io.github.mfuerstenau.leia.protocol.document.DocumentField;
+import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
+import io.github.mfuerstenau.leia.protocol.document.StoredType;
+import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
@@ -40,6 +44,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.OptionalLong;
 import org.junit.jupiter.api.Test;
 
 /** The shell of {@code app.rs}: its tests, ported, and what the asynchronous calls add. */
@@ -752,11 +757,8 @@ class AppTest {
         App app = appOnTerms();
 
         String screen = render(app);
-        assertThat(screen).contains("3 Terms", "id (/ seeks)", "Postings (2)", "/ seek", "←/→ column");
-        // The documents screen isn't ported yet, so Enter on a posting stays here.
-        app.handleKey(key(KeyCode.ENTER));
-        app.handleKey(key(KeyCode.ENTER));
-        assertThat(app.handleKey(key(KeyCode.ENTER))).isEmpty();
+        assertThat(screen).contains("3 Terms", "id (/ seeks)", "Postings (2)", "/ seek", "⏎ open doc", "←/→ column");
+        // The tools screen isn't ported yet, so e exports nothing.
         assertThat(app.handleKey(key('e'))).isEmpty();
         assertThat(render(app)).contains("Postings (2)");
         // The terms screen has everything it shows.
@@ -825,5 +827,223 @@ class AppTest {
         assertThat(app.termsLoaded(loadTerms("id", "2"), termPage("2"))).hasValue(loadPostings("id", "2"));
         app.postingsLoaded(loadPostings("id", "2"), postingsOf());
         assertThat(render(app)).contains("3 Terms", "id from 2 (/ seeks)", "Postings (2)");
+    }
+
+    private static Optional<Action> load(int docId) {
+        return Optional.of(new Action.LoadDocument(docId, List.of(), OptionalLong.empty()));
+    }
+
+    private static GetIndexStatsResult withDocs(GetIndexStatsResult stats, int maxDoc, IndexField... fields) {
+        return new GetIndexStatsResult(
+                stats.path(),
+                stats.directoryImpl(),
+                stats.segmentCount(),
+                maxDoc,
+                maxDoc,
+                stats.indexes(),
+                List.of(fields));
+    }
+
+    /** A document with {@code doc-<docId>} stored in {@code id}. */
+    private static GetDocumentResult document(int docId) {
+        return document(docId, new StoredValue(StoredType.STRING, "doc-" + docId, false));
+    }
+
+    private static GetDocumentResult document(int docId, StoredValue id) {
+        return new GetDocumentResult(
+                docId,
+                false,
+                List.of(new DocumentField("id", OptionalLong.empty(), List.of(id), Optional.empty(), false)));
+    }
+
+    /** An index of three documents with the field {@code id}. */
+    private static App appWithDocuments() {
+        App app = app();
+        app.opened(withDocs(stats("/data/idx"), 3, field("id", 0)), List.of());
+        return app;
+    }
+
+    @Test
+    void switchesToTheDocumentsAndFetchesTheFirst() {
+        App app = appWithDocuments();
+        assertThat(render(app)).contains("1 Overview");
+
+        assertThat(app.handleKey(key('2'))).isEqualTo(load(0));
+        assertThat(app.loadingDocuments()).isTrue();
+        app.documentLoaded(document(0));
+        assertThat(app.loadingDocuments()).isFalse();
+        assertThat(render(app)).contains("#0 of 0–2", "doc-0", "←→ doc", "i go to");
+
+        assertThat(app.handleKey(key(KeyCode.RIGHT))).isEqualTo(load(1));
+        app.documentLoaded(document(1));
+        // Back and forth fetches nothing new.
+        assertThat(app.handleKey(key('1'))).isEmpty();
+        assertThat(render(app)).contains("Path       /data/idx");
+        assertThat(app.handleKey(key('2'))).isEmpty();
+    }
+
+    @Test
+    void viewsAValueFetchesItWholeAndCopiesIt() {
+        App app = appWithDocuments();
+        app.handleKey(key('2'));
+        app.documentLoaded(document(0, new StoredValue(StoredType.STRING, "doc-0", false, OptionalLong.of(100_000))));
+
+        assertThat(app.handleKey(key('v'))).hasValue(new Action.LoadStoredValue(0, "id", 0));
+        assertThat(render(app)).contains("Esc close   ←/→ value   t text   h hex   J json   d delimited   y copy");
+        // The viewer takes q and the screen keys.
+        assertThat(app.handleKey(key('1'))).isEmpty();
+        app.storedValueLoaded(0, "id", 0, new StoredValue(StoredType.STRING, "doc-0, whole", false));
+        assertThat(render(app)).contains("doc-0, whole");
+        assertThat(app.handleKey(key('y'))).hasValue(new Action.Copy("doc-0, whole"));
+        assertThat(app.handleKey(key('q'))).isEmpty();
+        assertThat(render(app)).contains("v view");
+        app.storedValueFailed(0, "id", 0, "late");
+        assertThat(app.handleKey(key('q'))).hasValue(new Action.Quit());
+    }
+
+    @Test
+    void openingAnotherIndexOnTheDocumentsScreenFetchesItsFirstDocument() {
+        App app = appWithDocuments();
+        app.handleKey(key('2'));
+        app.documentLoaded(document(0));
+
+        assertThat(app.opened(withDocs(stats("/data/other"), 1), List.of())).isEqualTo(load(0));
+        assertThat(app.opened(stats("/data/empty"), List.of())).isEmpty();
+    }
+
+    @Test
+    void theDocumentPromptTakesTheKeys() {
+        App app = appWithDocuments();
+        app.handleKey(key('2'));
+        app.documentLoaded(document(0));
+        app.handleKey(key('i'));
+
+        // Digits go to the prompt, not to the screen switch; Esc closes the prompt, not leia.
+        assertThat(app.handleKey(key('1'))).isEmpty();
+        assertThat(render(app)).contains("Go to document");
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).isEmpty();
+        assertThat(render(app)).doesNotContain("Go to document");
+
+        app.handleKey(key('i'));
+        app.handleKey(key('2'));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(load(2));
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.Quit());
+    }
+
+    @Test
+    void aFailedDocumentShowsTheError() {
+        App app = appWithDocuments();
+        app.handleKey(key('2'));
+
+        app.documentFailed(0, "Cannot read document 0");
+
+        assertThat(render(app)).contains("Cannot read it: Cannot read document 0");
+    }
+
+    @Test
+    void theDocumentsScreenSaysWhichIndexADocumentIsIn() {
+        App app = app();
+        app.opened(multiStats("segments_1"), List.of());
+        app.handleKey(key('2'));
+        app.documentLoaded(document(0));
+        assertThat(render(app)).contains("#0 of 0–4   in a");
+        app.handleKey(key(KeyCode.RIGHT));
+        app.documentLoaded(document(1));
+        app.handleKey(key(KeyCode.RIGHT));
+        app.documentLoaded(document(2));
+        assertThat(render(app)).contains("#2 of 0–4   in b");
+    }
+
+    @Test
+    void reopeningKeepsTheDocumentShownWithinTheNewMaxDoc() {
+        App app = appWithDocuments();
+        app.handleKey(key('2'));
+        app.documentLoaded(document(0));
+        app.handleKey(key('i'));
+        app.handleKey(key('2'));
+        app.handleKey(key(KeyCode.ENTER));
+        app.documentLoaded(document(2));
+
+        assertThat(app.reopened(withDocs(stats("/data/idx"), 5, field("id", 0))))
+                .isEqualTo(load(2));
+        assertThat(app.reopened(withDocs(stats("/data/idx"), 2, field("id", 0))))
+                .isEqualTo(load(1));
+        assertThat(app.reopened(withDocs(stats("/data/idx"), 0, field("id", 0))))
+                .isEmpty();
+    }
+
+    @Test
+    void theDocumentsScreenNeedsAReader() {
+        App app = app();
+        openedWithoutReader(app);
+
+        assertThat(app.handleKey(key('2'))).isEmpty();
+        assertThat(render(app)).contains("This screen needs a reader");
+    }
+
+    /** On the terms screen of an index of three documents, with the postings 0 and 2 of the term "1". */
+    private static App appOnTermsWithDocuments() {
+        App app = appWithDocuments();
+        app.handleKey(key('3'));
+        app.termsLoaded(loadTerms("id", null), termPage("1", "2"));
+        app.postingsLoaded(loadPostings("id", "1"), postingsOf());
+        return app;
+    }
+
+    @Test
+    void opensAPostingOnTheDocumentsScreen() {
+        App app = appOnTermsWithDocuments();
+        assertThat(render(app)).contains("3 Terms");
+        app.handleKey(key(KeyCode.ENTER));
+        app.handleKey(key(KeyCode.ENTER));
+
+        assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(load(0));
+        assertThat(app.documentLoaded(document(0))).hasValue(new Action.LoadPositions(0, "id", text("1")));
+        app.positionsLoaded(0, "id", text("1"), List.of());
+        assertThat(render(app)).contains("id:1  1 of 2", "[ ] term docs", "no positions indexed");
+
+        assertThat(app.handleKey(key(']'))).isEqualTo(load(2));
+        assertThat(app.handleKey(key(']'))).isEmpty();
+        // The terms screen has everything it shows.
+        assertThat(app.handleKey(key('3'))).isEmpty();
+    }
+
+    @Test
+    void aDocumentThatLoadsLateDoesNotTakeThePostingsField() {
+        App app = appOnTermsWithDocuments();
+        // The documents screen asks for its first document, and the terms screen for another one.
+        app.handleKey(key('2'));
+        app.handleKey(key('3'));
+        app.handleKey(key(KeyCode.ENTER));
+        app.handleKey(key(KeyCode.ENTER));
+        assertThat(app.handleKey(key(KeyCode.DOWN))).isEmpty();
+        assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(load(2));
+
+        assertThat(app.documentLoaded(document(0))).isEmpty();
+        assertThat(app.loadingDocuments()).isTrue();
+        assertThat(app.documentLoaded(document(2))).hasValue(new Action.LoadPositions(2, "id", text("1")));
+        assertThat(render(app)).contains("#2 of 0–2", "id:1  2 of 2");
+    }
+
+    @Test
+    void enterOnATopTermBrowsesItsDocumentsOnTheDocumentsScreen() {
+        App app = appWithDocuments();
+        app.handleKey(key(KeyCode.ENTER));
+        app.scanStarted(1, 1);
+        app.scanProgress(
+                1,
+                new GetFieldTermScanResult(
+                        2,
+                        Optional.of(new FieldTerms(
+                                "id", 2, List.of(new TopTerm("1", false, 1, 1), new TopTerm("2", false, 1, 1))))));
+        app.handleKey(key(KeyCode.TAB));
+        app.handleKey(key(KeyCode.DOWN));
+
+        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(loadTerms("id", "2"));
+        assertThat(app.termsLoaded(loadTerms("id", "2"), termPage("2"))).hasValue(loadPostings("id", "2"));
+        app.postingsLoaded(loadPostings("id", "2"), postingsOf());
+        app.handleKey(key(KeyCode.RIGHT));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(load(0));
+        assertThat(app.documentLoaded(document(0))).hasValue(new Action.LoadPositions(0, "id", text("2")));
     }
 }

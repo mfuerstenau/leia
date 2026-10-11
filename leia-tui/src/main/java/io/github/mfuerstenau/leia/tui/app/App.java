@@ -18,6 +18,11 @@ import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
+import io.github.mfuerstenau.leia.protocol.document.BytesValue;
+import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
+import io.github.mfuerstenau.leia.protocol.document.StoredValue;
+import io.github.mfuerstenau.leia.protocol.document.TermPosition;
+import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
 import io.github.mfuerstenau.leia.protocol.index.IndexCommitStats;
@@ -32,6 +37,7 @@ import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import io.github.mfuerstenau.leia.tui.commits.Commits;
+import io.github.mfuerstenau.leia.tui.documents.Documents;
 import io.github.mfuerstenau.leia.tui.overview.FieldScan;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.prompt.PathCompletion;
@@ -44,6 +50,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 /**
  * The application state: what is on screen and what a key does. It makes no calls itself: {@link
@@ -85,6 +92,12 @@ public final class App {
 
     /** The terms screen of the open index; null without one, or without a reader. */
     private Terms terms;
+
+    /** The documents screen of the open index; null without one, or without a reader. */
+    private Documents documents;
+
+    /** Document fetches (documents, stored values, term vectors, positions) whose reply is still to come. */
+    private int documentFetches;
 
     /**
      * The term scan that runs in the backend, or null. There is at most one; the others wait in the
@@ -174,6 +187,7 @@ public final class App {
                 skipped.stream().map(SkippedIndex::path).toList());
         commits = new Commits(indexNames(opened));
         terms = new Terms(stats.fields());
+        documents = newDocuments(stats, opened);
         prompt = null;
         busy = false;
         return initialRequest();
@@ -188,6 +202,7 @@ public final class App {
         history.add(result.path());
         overview = null;
         terms = null;
+        documents = null;
         forgetScans();
         opened = new Opened(
                 result.path(),
@@ -235,8 +250,20 @@ public final class App {
                 indexes.stream().map(IndexCommitStats::path).toList(),
                 opened.skipped());
         commits = new Commits(indexNames(opened));
+        documents =
+                documents != null ? documents.reopened(stats.fields(), stats.maxDoc()) : newDocuments(stats, opened);
         busy = false;
         return initialRequest();
+    }
+
+    /** The documents screen of {@code stats}, which says which index directory a document is in. */
+    private static Documents newDocuments(GetIndexStatsResult stats, Opened opened) {
+        List<String> names = indexNames(opened);
+        List<Documents.IndexStart> starts = new ArrayList<>();
+        for (int i = 0; i < Math.min(names.size(), stats.indexes().size()); i++) {
+            starts.add(new Documents.IndexStart(stats.indexes().get(i).docBase(), names.get(i)));
+        }
+        return new Documents(stats.fields(), stats.maxDoc()).withIndexes(starts);
     }
 
     /** The index has no newer commit; everything stays as it is. */
@@ -280,6 +307,7 @@ public final class App {
         overview = null;
         commits = null;
         terms = null;
+        documents = null;
         forgetScans();
         busy = false;
     }
@@ -298,6 +326,9 @@ public final class App {
         }
         if (screen == Screen.TERMS && terms != null) {
             return termsAction(terms.initialRequest());
+        }
+        if (screen == Screen.DOCUMENTS && documents != null) {
+            return documentsAction(documents.initialRequest());
         }
         return Optional.empty();
     }
@@ -333,18 +364,133 @@ public final class App {
     }
 
     /**
-     * Turns what the terms screen needs into an action. A document to show and an export come back
-     * with the documents and tools screens.
+     * Turns what the terms screen needs into an action; a document to show switches to the documents
+     * screen. An export comes back with the tools screen.
      */
-    private static Optional<Action> termsAction(Optional<Terms.Request> request) {
+    private Optional<Action> termsAction(Optional<Terms.Request> request) {
         return request.flatMap(next -> switch (next) {
             case Terms.Request.LoadTerms load ->
                 Optional.of(new Action.LoadTerms(load.field(), load.from(), load.more()));
             case Terms.Request.LoadPostings load ->
                 Optional.of(
                         new Action.LoadPostings(load.field(), load.term(), load.fromDoc(), load.more(), load.filter()));
-            case Terms.Request.Document _, Terms.Request.Export _ -> Optional.<Action>empty();
+            case Terms.Request.Document document -> {
+                if (documents == null) {
+                    yield Optional.<Action>empty();
+                }
+                documents.showHit(document.hit());
+                screen = Screen.DOCUMENTS;
+                yield loadDocument(document.hit().docId());
+            }
+            case Terms.Request.Export _ -> Optional.<Action>empty();
         });
+    }
+
+    /**
+     * Fetches a document for the documents screen. The rebuild and the filter of the documents
+     * screen come with their port.
+     */
+    private Optional<Action> loadDocument(int docId) {
+        documents.want(docId);
+        documentFetches++;
+        return Optional.of(new Action.LoadDocument(docId, List.of(), OptionalLong.empty()));
+    }
+
+    /**
+     * Turns what the documents screen needs into an action. What leads to the search and analysis
+     * screens is dropped until they are ported (ADR 0034 §10).
+     */
+    private Optional<Action> documentsAction(Optional<Documents.Request> request) {
+        if (request.isEmpty() || documents == null) {
+            return Optional.empty();
+        }
+        return switch (request.get()) {
+            case Documents.Request.Document document -> loadDocument(document.docId());
+            case Documents.Request.TermVector load -> {
+                documentFetches++;
+                yield Optional.of(new Action.LoadTermVector(load.docId(), load.field()));
+            }
+            case Documents.Request.Positions load -> {
+                documentFetches++;
+                yield Optional.of(new Action.LoadPositions(load.docId(), load.field(), load.term()));
+            }
+            case Documents.Request.StoredValue load -> {
+                documentFetches++;
+                yield Optional.of(new Action.LoadStoredValue(load.docId(), load.field(), load.index()));
+            }
+            case Documents.Request.Copy copy -> Optional.of(new Action.Copy(copy.text()));
+            case Documents.Request.Step step
+            when step.walk() == Documents.Walk.TERM_DOCS ->
+                terms == null ? Optional.empty() : termsAction(terms.step(step.forward()));
+            case Documents.Request.Step _,
+                    Documents.Request.MoreLikeThis _,
+                    Documents.Request.Analyze _,
+                    Documents.Request.SearchDocValues _ -> Optional.empty();
+        };
+    }
+
+    /** Shows the document, if it is the one asked for. Returns where the term occurs in it, if the terms screen opened it. */
+    public Optional<Action> documentLoaded(GetDocumentResult document) {
+        documentFetches--;
+        if (documents == null || !documents.loaded(document)) {
+            return Optional.empty();
+        }
+        Optional<Documents.Request> next = documents.positionsRequest();
+        return documentsAction(next.isPresent() ? next : documents.openPendingView());
+    }
+
+    public void documentFailed(int docId, String error) {
+        documentFetches--;
+        if (documents != null) {
+            documents.failed(docId, error);
+        }
+    }
+
+    public void storedValueLoaded(int docId, String field, int index, StoredValue value) {
+        documentFetches--;
+        if (documents != null) {
+            documents.storedValueLoaded(docId, field, index, value);
+        }
+    }
+
+    public void storedValueFailed(int docId, String field, int index, String error) {
+        documentFetches--;
+        if (documents != null) {
+            documents.storedValueFailed(docId, field, index, error);
+        }
+    }
+
+    public void termVectorLoaded(int docId, String field, List<TermVectorTerm> terms) {
+        documentFetches--;
+        if (documents != null) {
+            documents.termVectorLoaded(docId, field, terms);
+        }
+    }
+
+    public void termVectorFailed(int docId, String field, String error) {
+        documentFetches--;
+        if (documents != null) {
+            documents.termVectorFailed(docId, field, error);
+        }
+    }
+
+    public void positionsLoaded(int docId, String field, BytesValue term, List<TermPosition> positions) {
+        documentFetches--;
+        if (documents != null) {
+            documents.positionsLoaded(docId, field, term, positions);
+        }
+    }
+
+    public void positionsFailed(int docId, String field, BytesValue term, String error) {
+        documentFetches--;
+        if (documents != null) {
+            documents.positionsFailed(docId, field, term, error);
+        }
+    }
+
+    /** Whether the documents screen waits for a fetch. */
+    boolean loadingDocuments() {
+        return documentFetches > 0;
     }
 
     private static Terms.Request.LoadTerms request(Action.LoadTerms load) {
@@ -535,6 +681,9 @@ public final class App {
         if (screen == Screen.TERMS && terms != null && terms.prompting()) {
             return termsAction(terms.handleKey(key));
         }
+        if (screen == Screen.DOCUMENTS && documents != null && documents.prompting()) {
+            return documentsAction(documents.handleKey(key));
+        }
         if (key.code() == KeyCode.ESCAPE) {
             // Esc stops the scans first, and quits only when there are none.
             return scan != null ? cancelScans() : Optional.of(new Action.Quit());
@@ -547,7 +696,12 @@ public final class App {
                 return Optional.of(new Action.Quit());
             }
             case '1' -> showIf(hasIndex(), Screen.OVERVIEW);
-            case '2' -> showIf(hasIndex(), Screen.DOCUMENTS);
+            case '2' -> {
+                if (hasIndex()) {
+                    screen = Screen.DOCUMENTS;
+                    return initialRequest();
+                }
+            }
             case '3' -> {
                 if (hasIndex()) {
                     screen = Screen.TERMS;
@@ -603,6 +757,9 @@ public final class App {
         }
         if (screen == Screen.TERMS && terms != null) {
             return termsAction(terms.handleKey(key));
+        }
+        if (screen == Screen.DOCUMENTS && documents != null) {
+            return documentsAction(documents.handleKey(key));
         }
         return Optional.empty();
     }
@@ -661,8 +818,25 @@ public final class App {
                 return " type to seek   ⏎/Esc done";
             }
             String filter = !terms.filtered() ? "" : terms.onlyFiltered() ? "b all postings   " : "b filter only   ";
-            // ⏎ open doc and e export come back with the documents and tools screens.
-            return " " + cancel + "q quit   o open   c close   1-7 screen   / seek   " + filter + "←/→ column   ↑↓";
+            // e export comes back with the tools screen.
+            return " " + cancel + "q quit   o open   c close   1-7 screen   / seek   ⏎ open doc   " + filter
+                    + "←/→ column   ↑↓";
+        }
+        if (screen == Screen.DOCUMENTS) {
+            documents.render(frame, body);
+            if (documents.viewer().isPresent()) {
+                return documents.viewer().get().keys();
+            }
+            if (documents.seeking()) {
+                return " type to seek a field   ⏎/Esc done";
+            }
+            String steps = documents
+                    .walk()
+                    .map(walk -> walk == Documents.Walk.TERM_DOCS ? "[ ] term docs   " : "[ ] hits   ")
+                    .orElse("");
+            // a analyze, s search value and m similar come back with the analysis and search screens.
+            return " " + cancel + "q quit   o open   c close   1-7 screen   ←→ doc   " + steps
+                    + "i go to   ⏎ term vector   v view   x numbers   e empty   Tab panel   ↑↓";
         }
         if (screen != Screen.OVERVIEW) {
             renderNotPorted(frame, body, screen);

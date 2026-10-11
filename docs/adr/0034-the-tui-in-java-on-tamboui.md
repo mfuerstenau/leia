@@ -46,7 +46,7 @@ What has to carry over:
 6. **The protocol records are the API between the UI and the backend.** A field is optional exactly when it is `Optional*`, as before. The wire conventions of ADR 0003 have nothing left to serve once the Rust crate is gone, so these go with the old path:
    - `protocol/fixtures/` and the tests that replay them;
    - `Request`, `Response`, `JsonRpcVersion`, `ProtocolJson`, `ProtocolAnnotationIntrospector` and the Jackson annotations in `leia-protocol`;
-   - `protocol/error-codes.json`, and Jackson itself if nothing else needs it.
+   - `protocol/error-codes.json`, and Jackson itself if nothing else needs it. *Amended with the documents screen: the value viewer checks JSON with Jackson, and the document export writes JSON with it (ADR 0030), so Jackson stays, as a dependency of `leia-tui`.*
 
    One rule replaces hard rules 2–4: **the UI reaches an index only through `call` and the protocol records.**
 7. **Logs go to a file**, since the terminal belongs to the UI:
@@ -91,6 +91,10 @@ What has to carry over:
     - *Settled with the terms screen:*
       - *A screen whose fetches follow a selection or a typed text also drops a reply that no longer fits what it shows: a first page that isn't the last one asked for (seek, browse), postings of a term that isn't selected any more, and a next page of a list that was replaced. The fetch for what the screen shows now has always been asked for, and the replies come in order, so its reply comes last.*
       - *A ported screen keeps the requests that lead to a screen not yet ported, such as Enter on a posting (documents) and `e` (export), with their tests. `App` drops them, and the footer leaves out their keys, until that screen is ported.*
+    - *Settled with the documents screen:*
+      - *A document can come after another one was asked for, and would use up the field to select and the value to view that belong to the later one. So the screen remembers the document it asked for last, and drops a reply for any other. Term vectors, positions and whole stored values are checked against the shown document, hit or viewed value.*
+      - *Copying (OSC 52) writes through the terminal backend's `writeRaw` on the UI thread, between two frames.*
+      - *Java prints a float in its shortest form but with at least two digits in exponent form; the number formats print as Rust's `{:?}` does, with one digit where it reads back the same.*
 
 ## Alternatives considered
 

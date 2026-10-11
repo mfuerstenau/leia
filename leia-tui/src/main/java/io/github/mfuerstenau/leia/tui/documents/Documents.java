@@ -1,0 +1,1312 @@
+package io.github.mfuerstenau.leia.tui.documents;
+
+import static io.github.mfuerstenau.leia.tui.widgets.Panels.highlight;
+import static io.github.mfuerstenau.leia.tui.widgets.Panels.panel;
+import static io.github.mfuerstenau.leia.tui.widgets.Panels.right;
+
+import dev.tamboui.layout.Constraint;
+import dev.tamboui.layout.Layout;
+import dev.tamboui.layout.Rect;
+import dev.tamboui.style.Overflow;
+import dev.tamboui.style.Style;
+import dev.tamboui.terminal.Frame;
+import dev.tamboui.text.Line;
+import dev.tamboui.text.Span;
+import dev.tamboui.text.Text;
+import dev.tamboui.tui.event.KeyCode;
+import dev.tamboui.tui.event.KeyEvent;
+import dev.tamboui.widgets.Clear;
+import dev.tamboui.widgets.block.Block;
+import dev.tamboui.widgets.block.Borders;
+import dev.tamboui.widgets.paragraph.Paragraph;
+import dev.tamboui.widgets.table.Cell;
+import dev.tamboui.widgets.table.Row;
+import dev.tamboui.widgets.table.Table;
+import dev.tamboui.widgets.table.TableState;
+import io.github.mfuerstenau.leia.protocol.document.BytesValue;
+import io.github.mfuerstenau.leia.protocol.document.DocValues;
+import io.github.mfuerstenau.leia.protocol.document.DocumentField;
+import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
+import io.github.mfuerstenau.leia.protocol.document.StoredType;
+import io.github.mfuerstenau.leia.protocol.document.StoredValue;
+import io.github.mfuerstenau.leia.protocol.document.TermPosition;
+import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
+import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
+import io.github.mfuerstenau.leia.protocol.index.IndexField;
+import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
+import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
+import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
+import io.github.mfuerstenau.leia.tui.overview.Overview;
+import io.github.mfuerstenau.leia.tui.terms.Terms.TermHit;
+import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.widgets.Selection;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+/**
+ * The documents screen: one document of the open index at a time, field by field, as {@code
+ * getDocument} reports it (ADR 0006), with a panel for the selected field's values and its term
+ * vector. A document opened from the terms screen also shows where the term occurs in it, and
+ * {@code [}/{@code ]} step through the term's other documents. {@code v} opens the selected field's
+ * values in the {@link Viewer}.
+ *
+ * <p>The Rust TUI got each reply before the next key; here a document can come after another one
+ * was asked for. So the screen remembers the document it asked for last ({@link #want}), and drops
+ * the others: they would use up the field to select and the value to view that belong to it. Term
+ * vectors, positions and whole stored values are checked against the shown document.
+ */
+public final class Documents {
+
+    /** From this width on, the details panel is next to the fields instead of below them. */
+    private static final int SIDE_BY_SIDE_WIDTH = 130;
+
+    /** The width of the details panel next to the fields. */
+    private static final int DETAILS_PANEL_WIDTH = 64;
+
+    /** The value column shows at most this many characters of a value. */
+    private static final int SUMMARY_CHARS = 200;
+
+    /** The details show at most this many characters of a stored value, and this many lines. */
+    private static final int DETAIL_VALUE_CHARS = 2000;
+
+    private static final int DETAIL_VALUE_LINES = 20;
+
+    /** The name column is at most this wide. */
+    private static final int NAME_MAX_WIDTH = 32;
+
+    private static final int COLUMN_SPACING = 2;
+
+    /** Which documents {@code [}/{@code ]} step through. */
+    public enum Walk {
+        /** The documents of the term of the {@link TermHit}, from the terms screen. */
+        TERM_DOCS,
+        /** The hits of the search screen. */
+        SEARCH_HITS
+    }
+
+    /** What the caller has to fetch for the documents screen. */
+    public sealed interface Request {
+
+        /** The document with this id, reported back with {@link #loaded} or {@link #failed}. */
+        record Document(int docId) implements Request {}
+
+        /**
+         * The term vector of a field of the shown document, reported back with {@link
+         * #termVectorLoaded} or {@link #termVectorFailed}.
+         */
+        record TermVector(int docId, String field) implements Request {}
+
+        /**
+         * Where the term of the {@link TermHit} occurs in its document, reported back with {@link
+         * #positionsLoaded} or {@link #positionsFailed}.
+         */
+        record Positions(int docId, String field, BytesValue term) implements Request {}
+
+        /** The previous or next document of the {@link Walk}. */
+        record Step(Walk walk, boolean forward) implements Request {}
+
+        /**
+         * A stored value whole, which {@code getDocument} cut, reported back with {@link
+         * #storedValueLoaded} or {@link #storedValueFailed}.
+         */
+        record StoredValue(int docId, String field, int index) implements Request {}
+
+        /** Put this text on the clipboard. */
+        record Copy(String text) implements Request {}
+
+        /** Search for documents like this one on the search screen (ADR 0013). */
+        record MoreLikeThis(int docId) implements Request {}
+
+        /** Analyze a value of the document on the analysis screen (ADR 0014). */
+        record Analyze(int docId, String field, String text) implements Request {}
+
+        /**
+         * Search the documents with any of these doc values of the field on the search screen (ADR
+         * 0033): numbers as text in {@code number}, bytes as text, or as hex if {@code hex}.
+         */
+        record SearchDocValues(String field, DocValuesNumber number, boolean hex, List<String> values)
+                implements Request {}
+    }
+
+    /** The term vector of a field of the shown document. */
+    private sealed interface TermVector {
+        record Loaded(List<TermVectorTerm> terms) implements TermVector {}
+
+        record Failed(String error) implements TermVector {}
+    }
+
+    /** Where the hit's term occurs in its document. */
+    private sealed interface Positions {
+        record Loaded(List<TermPosition> positions) implements Positions {}
+
+        record Failed(String error) implements Positions {}
+    }
+
+    /** A stored value to view with its matches once its document is in (ADR 0027). */
+    private record PendingView(int docId, String field, int index, List<MatchSpan> spans, int matchCount) {}
+
+    /** An index directory: the document id it starts at, and its name as shown. */
+    public record IndexStart(int docBase, String name) {}
+
+    /** What the navigation keys move. */
+    private enum Focus {
+        FIELDS,
+        DETAILS
+    }
+
+    /** The go-to-document prompt. */
+    private static final class DocIdPrompt {
+        final StringBuilder input = new StringBuilder();
+
+        /** Or null. */
+        String error;
+    }
+
+    /** How each field of the index is indexed, by name, from {@code getIndexStats}. */
+    private final Map<String, IndexField> schema;
+
+    private final int maxDoc;
+
+    /** The document shown, or the one that failed to load. */
+    private int docId;
+
+    /** Or null. */
+    private GetDocumentResult document;
+
+    /** Why {@link #docId} could not be read; or null. */
+    private String error;
+
+    /** The document asked for last; a reply for another one is dropped. Empty before. */
+    private OptionalInt wanted = OptionalInt.empty();
+
+    /** The rows of the field table, as indexes into {@code document.fields()}. */
+    private final List<Integer> rows = new ArrayList<>();
+
+    /** The selected row; -1 without rows. */
+    private int row = -1;
+
+    private final TableState table = new TableState();
+
+    /** Whether fields in which the document has nothing are left out. */
+    private boolean hideEmpty;
+
+    private NumberFormat numbers = NumberFormat.LONG;
+
+    /** Term vectors of the shown document, by field name. */
+    private final Map<String, TermVector> termVectors = new HashMap<>();
+
+    private Focus focus = Focus.FIELDS;
+
+    /** The first line of the details panel that is shown. */
+    private int detailsScroll;
+
+    /** Or null. */
+    private DocIdPrompt prompt;
+
+    /** The text typed into the field seek while it is open; null otherwise. */
+    private StringBuilder seek;
+
+    /** The term and document that the terms screen opened; or null. */
+    private TermHit hit;
+
+    /** Whether the search screen opened the document, so {@code [}/{@code ]} step through its hits. */
+    private boolean searchHits;
+
+    /** Where the hit's term occurs in its document, once fetched; or null. */
+    private Positions positions;
+
+    /** The field to select once the next document is in; or null. */
+    private String selectField;
+
+    /** The values of the selected field, viewed over the whole screen; or null. */
+    private Viewer viewer;
+
+    /** The value the viewer opens on once its document is in; or null. */
+    private PendingView pendingView;
+
+    /** The delimiters the viewer last split values at, for the next viewer. */
+    private Viewer.Delimiters delimiters = Viewer.Delimiters.DEFAULT;
+
+    /**
+     * With several index directories, where each starts and its name as shown, in order (ADR 0021);
+     * empty with one.
+     */
+    private List<IndexStart> indexes = List.of();
+
+    public Documents(List<IndexField> fields, int maxDoc) {
+        this.schema = fields.stream()
+                .collect(Collectors.toMap(IndexField::name, Function.identity(), (a, b) -> a, HashMap::new));
+        this.maxDoc = maxDoc;
+    }
+
+    /**
+     * Shows which index directory a document is in: each with the document id it starts at and its
+     * name, in order. With one, nothing is shown.
+     */
+    public Documents withIndexes(List<IndexStart> indexes) {
+        this.indexes = indexes.size() > 1 ? List.copyOf(indexes) : List.of();
+        return this;
+    }
+
+    /** The name of the index directory that {@code docId} is in, with several of them. */
+    public Optional<String> indexOf(int docId) {
+        IndexStart in = null;
+        for (IndexStart index : indexes) {
+            if (index.docBase() > docId) {
+                break;
+            }
+            in = index;
+        }
+        return Optional.ofNullable(in).map(IndexStart::name);
+    }
+
+    /**
+     * The screen for the reopened index (ADR 0019): the same document id, clamped to the new {@code
+     * maxDoc}, with the same field selected, and values shown as before. The document is fetched
+     * again; walks through term docs or hits end.
+     */
+    public Documents reopened(List<IndexField> fields, int maxDoc) {
+        Documents documents = new Documents(fields, maxDoc);
+        documents.indexes = indexes;
+        documents.docId = Math.max(Math.min(docId, maxDoc - 1), 0);
+        documents.selectField = selectedField().map(DocumentField::name).orElse(null);
+        documents.hideEmpty = hideEmpty;
+        documents.numbers = numbers;
+        documents.delimiters = delimiters;
+        return documents;
+    }
+
+    /** The first document to fetch when the screen is shown, if nothing was fetched yet. */
+    public Optional<Request> initialRequest() {
+        return document == null && error == null && maxDoc > 0 && wanted.isEmpty()
+                ? Optional.of(new Request.Document(docId))
+                : Optional.empty();
+    }
+
+    /** {@code docId} is fetched: a reply for any other document is dropped from now on. */
+    public void want(int docId) {
+        wanted = OptionalInt.of(docId);
+    }
+
+    /** Whether a reply for {@code docId} is the one wanted. */
+    private boolean isWanted(int docId) {
+        return wanted.isEmpty() || wanted.getAsInt() == docId;
+    }
+
+    /**
+     * Shows the document of {@code hit} once it is loaded, with the hit's field selected and where its
+     * term occurs in it.
+     */
+    public void showHit(TermHit hit) {
+        selectField = hit.field();
+        this.hit = hit;
+        searchHits = false;
+        positions = null;
+    }
+
+    /** Forgets the term hit: the search screen opened the next document, so {@code [}/{@code ]} step through its hits. */
+    public void showSearchHit() {
+        hit = null;
+        searchHits = true;
+        positions = null;
+    }
+
+    /**
+     * Views a stored value of {@code docId} with its matches highlighted, as the regex scan of the
+     * search screen asks for: at once if the document is shown, otherwise once it is loaded. Returns
+     * the document to fetch, or the whole value if it is cut.
+     */
+    public Optional<Request> viewMatches(int docId, String field, int index, List<MatchSpan> spans, int matchCount) {
+        selectField = field;
+        pendingView = new PendingView(docId, field, index, spans, matchCount);
+        if (!shows(docId)) {
+            return Optional.of(new Request.Document(docId));
+        }
+        String select = selectField;
+        selectField = null;
+        updateRows(select);
+        return openPendingView();
+    }
+
+    /**
+     * Opens the viewer on the value that {@link #viewMatches} asked for, if the shown document is its
+     * document. Returns the fetch of the whole value, if it is cut.
+     */
+    public Optional<Request> openPendingView() {
+        PendingView pending = pendingView;
+        pendingView = null;
+        if (pending == null || !shows(pending.docId())) {
+            return Optional.empty();
+        }
+        Optional<DocumentField> selected = selectedField();
+        if (selected.isEmpty() || !selected.get().name().equals(pending.field())) {
+            return Optional.empty();
+        }
+        List<Viewer.Value> values = viewerValues(selected.get());
+        closeViewer();
+        viewer = Viewer.withMatches(
+                pending.docId(),
+                pending.field(),
+                values,
+                delimiters,
+                pending.index(),
+                pending.spans(),
+                pending.matchCount());
+        return viewer.fetch().flatMap(Documents::viewerRequest);
+    }
+
+    /** What {@code [}/{@code ]} step through, if anything. */
+    public Optional<Walk> walk() {
+        if (hit != null) {
+            return Optional.of(Walk.TERM_DOCS);
+        }
+        return searchHits ? Optional.of(Walk.SEARCH_HITS) : Optional.empty();
+    }
+
+    /** The positions to fetch, if the shown document is the hit's and they are not in yet. */
+    public Optional<Request> positionsRequest() {
+        if (hit == null || !shows(hit.docId()) || positions != null) {
+            return Optional.empty();
+        }
+        return Optional.of(new Request.Positions(hit.docId(), hit.field(), hit.term()));
+    }
+
+    public void positionsLoaded(int docId, String field, BytesValue term, List<TermPosition> positions) {
+        if (isHit(docId, field, term)) {
+            this.positions = new Positions.Loaded(positions);
+        }
+    }
+
+    public void positionsFailed(int docId, String field, BytesValue term, String error) {
+        if (isHit(docId, field, term)) {
+            positions = new Positions.Failed(error);
+        }
+    }
+
+    private boolean isHit(int docId, String field, BytesValue term) {
+        return hit != null
+                && hit.docId() == docId
+                && hit.field().equals(field)
+                && hit.term().equals(term);
+    }
+
+    /** The hit, if the shown document is its document. */
+    private Optional<TermHit> shownHit() {
+        return hit != null && shows(hit.docId()) ? Optional.of(hit) : Optional.empty();
+    }
+
+    /**
+     * Shows {@code document}, unless another one is wanted. The selection stays on its field if the
+     * new document shows it. Returns whether it is shown.
+     */
+    public boolean loaded(GetDocumentResult document) {
+        if (!isWanted(document.docId())) {
+            return false;
+        }
+        String selected = selectField != null
+                ? selectField
+                : selectedField().map(DocumentField::name).orElse(null);
+        selectField = null;
+        docId = document.docId();
+        this.document = document;
+        error = null;
+        closeViewer();
+        termVectors.clear();
+        detailsScroll = 0;
+        updateRows(selected);
+        return true;
+    }
+
+    /** Shows why {@code docId} could not be read, unless another document is wanted. */
+    public void failed(int docId, String error) {
+        if (!isWanted(docId)) {
+            return;
+        }
+        this.docId = docId;
+        document = null;
+        this.error = error;
+        closeViewer();
+        termVectors.clear();
+        rows.clear();
+        row = -1;
+        detailsScroll = 0;
+    }
+
+    public void termVectorLoaded(int docId, String field, List<TermVectorTerm> terms) {
+        if (shows(docId)) {
+            termVectors.put(field, new TermVector.Loaded(terms));
+        }
+    }
+
+    public void termVectorFailed(int docId, String field, String error) {
+        if (shows(docId)) {
+            termVectors.put(field, new TermVector.Failed(error));
+        }
+    }
+
+    public void storedValueLoaded(int docId, String field, int index, StoredValue value) {
+        if (viewer != null) {
+            viewer.loaded(docId, field, index, value);
+        }
+    }
+
+    public void storedValueFailed(int docId, String field, int index, String error) {
+        if (viewer != null) {
+            viewer.failed(docId, field, index, error);
+        }
+    }
+
+    private boolean shows(int docId) {
+        return document != null && document.docId() == docId;
+    }
+
+    /** Fills the rows from the document, and selects the field {@code selected} if it is among them. */
+    private void updateRows(String selected) {
+        rows.clear();
+        row = -1;
+        if (document == null) {
+            return;
+        }
+        // The hit's field has the term, even if nothing else is in it.
+        String hitField = shownHit().map(TermHit::field).orElse(null);
+        List<DocumentField> fields = document.fields();
+        for (int i = 0; i < fields.size(); i++) {
+            DocumentField field = fields.get(i);
+            if (!hideEmpty || !isEmpty(field) || field.name().equals(hitField)) {
+                rows.add(i);
+            }
+        }
+        if (rows.isEmpty()) {
+            return;
+        }
+        row = 0;
+        for (int i = 0; i < rows.size(); i++) {
+            if (fields.get(rows.get(i)).name().equals(selected)) {
+                row = i;
+                break;
+            }
+        }
+    }
+
+    /** The field under the selection. */
+    Optional<DocumentField> selectedField() {
+        if (document == null || row < 0) {
+            return Optional.empty();
+        }
+        return Optional.of(document.fields().get(rows.get(row)));
+    }
+
+    /** Whether the go-to-document prompt, the field seek or the viewer takes the keys, Esc included. */
+    public boolean prompting() {
+        return prompt != null || seek != null || viewer != null;
+    }
+
+    /** Whether the field seek takes the keys. */
+    public boolean seeking() {
+        return seek != null;
+    }
+
+    /**
+     * Edits the field seek, and selects the first shown field whose name starts with its text,
+     * ignoring case, or else the first that contains it. Enter and Esc close it.
+     */
+    private void seekKey(KeyEvent key) {
+        switch (key.code()) {
+            case ENTER, ESCAPE -> {
+                seek = null;
+                return;
+            }
+            case CHAR -> seek.appendCodePoint(key.codePoint());
+            case BACKSPACE -> {
+                if (!seek.isEmpty()) {
+                    seek.setLength(seek.offsetByCodePoints(seek.length(), -1));
+                }
+            }
+            default -> {
+                return;
+            }
+        }
+        OptionalInt match = seekMatch();
+        if (match.isPresent()) {
+            if (match.getAsInt() != row) {
+                detailsScroll = 0;
+            }
+            row = match.getAsInt();
+        }
+    }
+
+    /** The row that the field seek's text finds, if it finds one. An empty text finds nothing. */
+    private OptionalInt seekMatch() {
+        if (seek == null || seek.isEmpty() || document == null) {
+            return OptionalInt.empty();
+        }
+        String text = seek.toString().toLowerCase(Locale.ROOT);
+        List<String> names = rows.stream()
+                .map(i -> document.fields().get(i).name().toLowerCase(Locale.ROOT))
+                .toList();
+        for (int i = 0; i < names.size(); i++) {
+            if (names.get(i).startsWith(text)) {
+                return OptionalInt.of(i);
+            }
+        }
+        for (int i = 0; i < names.size(); i++) {
+            if (names.get(i).contains(text)) {
+                return OptionalInt.of(i);
+            }
+        }
+        return OptionalInt.empty();
+    }
+
+    /** The viewer, if it is open. */
+    public Optional<Viewer> viewer() {
+        return Optional.ofNullable(viewer);
+    }
+
+    /** Closes the viewer, keeping its delimiters for the next one. */
+    private void closeViewer() {
+        if (viewer != null) {
+            delimiters = viewer.delimiters();
+            viewer = null;
+        }
+    }
+
+    /** Opens the viewer on the selected field's stored values and doc values, if it has any. */
+    private Optional<Request> view() {
+        Optional<DocumentField> field = selectedField();
+        if (field.isEmpty()) {
+            return Optional.empty();
+        }
+        List<Viewer.Value> values = viewerValues(field.get());
+        if (values.isEmpty()) {
+            return Optional.empty();
+        }
+        viewer = new Viewer(docId, field.get().name(), values, delimiters);
+        return viewer.fetch().flatMap(Documents::viewerRequest);
+    }
+
+    /** A field's stored values and doc values, as the viewer shows them. */
+    private List<Viewer.Value> viewerValues(DocumentField field) {
+        List<Viewer.Value> values = new ArrayList<>();
+        for (int i = 0; i < field.stored().size(); i++) {
+            values.add(Viewer.Value.stored(i, field.stored().get(i)));
+        }
+        field.docValues().ifPresent(docValues -> {
+            String kind = Overview.docValues(docValues.type());
+            for (long number : docValues.numbers()) {
+                values.add(Viewer.Value.docValueNumber(kind, number, numbers.format(number)));
+            }
+            for (BytesValue value : docValues.values()) {
+                values.add(Viewer.Value.docValue(kind, value));
+            }
+        });
+        return values;
+    }
+
+    /**
+     * The selected field's doc values, for a search for the documents that share any of them (ADR
+     * 0033): numbers in the shown format, bytes as text unless one of them is not UTF-8.
+     */
+    private Optional<Request> searchDocValues() {
+        Optional<DocumentField> field = selectedField();
+        if (field.isEmpty() || field.get().docValues().isEmpty()) {
+            return Optional.empty();
+        }
+        DocValues docValues = field.get().docValues().get();
+        boolean hex = docValues.values().stream().anyMatch(BytesValue::binary);
+        List<String> values = new ArrayList<>();
+        for (long number : docValues.numbers()) {
+            // Rust's names for the infinities, as Java's parser reads them.
+            values.add(
+                    switch (numbers.format(number)) {
+                        case "inf" -> "Infinity";
+                        case "-inf" -> "-Infinity";
+                        case String text -> text;
+                    });
+        }
+        for (BytesValue value : docValues.values()) {
+            values.add(
+                    hex && !value.binary()
+                            ? TextFormat.hex(value.value().getBytes(java.nio.charset.StandardCharsets.UTF_8))
+                            : value.value());
+        }
+        // Rust's dedup: repeats that follow each other.
+        List<String> deduped = new ArrayList<>();
+        for (String value : values) {
+            if (deduped.isEmpty() || !deduped.getLast().equals(value)) {
+                deduped.add(value);
+            }
+        }
+        if (deduped.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(new Request.SearchDocValues(field.get().name(), numbers.docValuesNumber(), hex, deduped));
+    }
+
+    /** The selected field's first stored text, for the analysis screen; the viewer analyzes any other value. */
+    private Optional<Request> analyze() {
+        return selectedField()
+                .flatMap(field -> field.stored().stream()
+                        .filter(value -> value.type() == StoredType.STRING
+                                || (value.type() == StoredType.BINARY && !value.binary()))
+                        .findFirst()
+                        .map(value -> new Request.Analyze(docId, field.name(), value.value())));
+    }
+
+    /**
+     * Goes to another document with ←/→, the {@code i} prompt, or {@code [}/{@code ]} through the
+     * documents of the hit's term; loads the selected field's term vector with Enter, views its
+     * values with {@code v}, analyzes its stored text with {@code a}, searches for its doc values with
+     * {@code s}, cycles the number format with {@code x}, hides empty fields with {@code e}, searches
+     * for documents like this one with {@code m}, switches the focus with Tab, and moves the selection
+     * or scrolls the details.
+     */
+    public Optional<Request> handleKey(KeyEvent key) {
+        if (viewer != null) {
+            Optional<Viewer.Event> event = viewer.handleKey(key);
+            if (event.isPresent() && event.get() instanceof Viewer.Event.Close) {
+                closeViewer();
+            }
+            return event.flatMap(Documents::viewerRequest);
+        }
+        if (seek != null) {
+            seekKey(key);
+            return Optional.empty();
+        }
+        if (prompt != null) {
+            if (key.code() == KeyCode.ESCAPE) {
+                prompt = null;
+                return Optional.empty();
+            }
+            OptionalInt chosen = promptKey(prompt, key, maxDoc);
+            if (chosen.isEmpty()) {
+                return Optional.empty();
+            }
+            prompt = null;
+            return Optional.of(new Request.Document(chosen.getAsInt()));
+        }
+        KeyCode code = key.code();
+        if (code == KeyCode.LEFT || key.isChar('p')) {
+            return docId > 0 ? Optional.of(new Request.Document(docId - 1)) : Optional.empty();
+        }
+        if (code == KeyCode.RIGHT || key.isChar('n')) {
+            return docId < maxDoc - 1 ? Optional.of(new Request.Document(docId + 1)) : Optional.empty();
+        }
+        if (code == KeyCode.ENTER) {
+            Optional<DocumentField> field = selectedField();
+            if (field.isEmpty()
+                    || !field.get().hasTermVector()
+                    || termVectors.containsKey(field.get().name())) {
+                return Optional.empty();
+            }
+            return Optional.of(new Request.TermVector(docId, field.get().name()));
+        }
+        if (code == KeyCode.TAB) {
+            focus = focus == Focus.FIELDS ? Focus.DETAILS : Focus.FIELDS;
+            return Optional.empty();
+        }
+        if (code == KeyCode.CHAR) {
+            switch (key.codePoint()) {
+                case 'i' -> {
+                    if (maxDoc > 0) {
+                        prompt = new DocIdPrompt();
+                    }
+                    return Optional.empty();
+                }
+                case '/' -> {
+                    if (!rows.isEmpty()) {
+                        seek = new StringBuilder();
+                        focus = Focus.FIELDS;
+                    }
+                    return Optional.empty();
+                }
+                case '[', ']' -> {
+                    boolean forward = key.codePoint() == ']';
+                    return walk().map(walk -> new Request.Step(walk, forward));
+                }
+                case 'v' -> {
+                    return view();
+                }
+                case 'a' -> {
+                    return analyze();
+                }
+                case 'm' -> {
+                    return maxDoc > 0 ? Optional.of(new Request.MoreLikeThis(docId)) : Optional.empty();
+                }
+                case 'x' -> {
+                    numbers = numbers.next();
+                    return Optional.empty();
+                }
+                case 's' -> {
+                    return searchDocValues();
+                }
+                case 'e' -> {
+                    hideEmpty = !hideEmpty;
+                    updateRows(selectedField().map(DocumentField::name).orElse(null));
+                    return Optional.empty();
+                }
+                default -> {}
+            }
+        }
+        if (focus == Focus.DETAILS) {
+            scrollDetails(key);
+        } else if (!rows.isEmpty()) {
+            OptionalInt moved = Selection.moved(row, rows.size(), key);
+            if (moved.isPresent() && moved.getAsInt() != row) {
+                row = moved.getAsInt();
+                detailsScroll = 0;
+            }
+        }
+        return Optional.empty();
+    }
+
+    private void scrollDetails(KeyEvent key) {
+        switch (key.code()) {
+            case DOWN -> scrollBy(1);
+            case UP -> scrollBy(-1);
+            case PAGE_DOWN -> scrollBy(Selection.PAGE);
+            case PAGE_UP -> scrollBy(-Selection.PAGE);
+            case HOME -> detailsScroll = 0;
+            case END -> detailsScroll = Integer.MAX_VALUE;
+            case CHAR -> {
+                switch (key.codePoint()) {
+                    case 'j' -> scrollBy(1);
+                    case 'k' -> scrollBy(-1);
+                    case 'g' -> detailsScroll = 0;
+                    case 'G' -> detailsScroll = Integer.MAX_VALUE;
+                    default -> {}
+                }
+            }
+            default -> {}
+        }
+    }
+
+    private void scrollBy(int lines) {
+        detailsScroll = Math.clamp((long) detailsScroll + lines, 0, Integer.MAX_VALUE);
+    }
+
+    /** Edits the prompt. Returns the document id once a valid one is submitted. */
+    private static OptionalInt promptKey(DocIdPrompt prompt, KeyEvent key, int maxDoc) {
+        switch (key.code()) {
+            case CHAR -> {
+                int c = key.codePoint();
+                if (c >= '0' && c <= '9' && prompt.input.length() < 10) {
+                    prompt.input.append((char) c);
+                    prompt.error = null;
+                }
+            }
+            case BACKSPACE -> {
+                if (!prompt.input.isEmpty()) {
+                    prompt.input.setLength(prompt.input.length() - 1);
+                }
+                prompt.error = null;
+            }
+            case ENTER -> {
+                try {
+                    int docId = Integer.parseInt(prompt.input.toString());
+                    if (docId < maxDoc) {
+                        return OptionalInt.of(docId);
+                    }
+                } catch (NumberFormatException e) {
+                    // Said below.
+                }
+                prompt.error = "Enter a number from 0 to " + (maxDoc - 1) + ".";
+            }
+            default -> {}
+        }
+        return OptionalInt.empty();
+    }
+
+    /** What a viewer event asks of the caller. */
+    private static Optional<Request> viewerRequest(Viewer.Event event) {
+        return switch (event) {
+            case Viewer.Event.Fetch fetch ->
+                Optional.of(new Request.StoredValue(fetch.docId(), fetch.field(), fetch.index()));
+            case Viewer.Event.Copy copy -> Optional.of(new Request.Copy(copy.text()));
+            case Viewer.Event.Analyze analyze ->
+                Optional.of(new Request.Analyze(analyze.docId(), analyze.field(), analyze.text()));
+            case Viewer.Event.Close _ -> Optional.empty();
+        };
+    }
+
+    public void render(Frame frame, Rect area) {
+        List<Rect> parts = Layout.vertical()
+                .constraints(Constraint.length(3), Constraint.fill())
+                .split(area);
+        frame.renderWidget(
+                Paragraph.builder()
+                        .text(Text.from(header()))
+                        .block(Block.builder()
+                                .borders(Borders.ALL)
+                                .title(" Document ")
+                                .build())
+                        .build(),
+                parts.get(0));
+        Rect bottom = parts.get(1);
+        List<Rect> panels = bottom.width() >= SIDE_BY_SIDE_WIDTH
+                ? Layout.horizontal()
+                        .constraints(Constraint.fill(), Constraint.length(DETAILS_PANEL_WIDTH))
+                        .split(bottom)
+                : Layout.vertical()
+                        .constraints(Constraint.fill(), Constraint.percentage(50))
+                        .split(bottom);
+        renderFields(frame, panels.get(0));
+        renderDetails(frame, panels.get(1));
+        if (prompt != null) {
+            renderPrompt(frame, area, prompt, maxDoc);
+        }
+        if (viewer != null) {
+            viewer.render(frame, area);
+        }
+    }
+
+    private Line header() {
+        if (maxDoc == 0) {
+            return Line.from("The index has no documents.");
+        }
+        List<Span> spans = new ArrayList<>();
+        spans.add(Span.styled("#" + docId, Style.EMPTY.bold()));
+        spans.add(Span.raw(" of 0–" + (maxDoc - 1)));
+        indexOf(docId)
+                .ifPresent(index ->
+                        spans.add(Span.raw("   in " + TextFormat.firstChars(TextFormat.escapeControl(index), 60))));
+        if (error != null) {
+            spans.add(Span.raw("   Cannot read it: " + error));
+        } else if (document != null && document.deleted()) {
+            spans.add(Span.raw("   "));
+            spans.add(Span.styled("deleted", Style.EMPTY.red().bold()));
+        }
+        if (hit != null) {
+            // Dimmed while another document is shown.
+            spans.add(Span.styled(
+                    "   " + TextFormat.firstChars(TextFormat.escapeControl(hit.field()), 30) + ":"
+                            + TextFormat.firstChars(
+                                    TextFormat.bytesText(
+                                            hit.term().value(), hit.term().binary()),
+                                    40)
+                            + "  " + (hit.index() + 1) + " of " + hit.docFreq() + "  [ ] steps",
+                    shows(hit.docId()) ? Style.EMPTY : Style.EMPTY.dim()));
+        }
+        return Line.from(spans);
+    }
+
+    private void renderFields(Frame frame, Rect area) {
+        boolean focused = focus == Focus.FIELDS;
+        if (document == null) {
+            frame.renderWidget(panel(" Fields ", focused), area);
+            return;
+        }
+        List<String[]> cells = new ArrayList<>();
+        List<Boolean> empty = new ArrayList<>();
+        for (int i : rows) {
+            DocumentField field = document.fields().get(i);
+            empty.add(isEmpty(field));
+            cells.add(new String[] {
+                TextFormat.escapeControl(field.name()),
+                flags(Optional.ofNullable(schema.get(field.name())), field),
+                field.norm().isPresent() ? Long.toString(field.norm().getAsLong()) : "-",
+                valueSummary(field, numbers)
+            });
+        }
+        String[] titles = {"Field", "Flags", "Norm", "Value"};
+        int[] widths = new int[3];
+        for (int column = 0; column < 3; column++) {
+            int width = titles[column].length();
+            for (String[] row : cells) {
+                width = Math.max(width, row[column].codePointCount(0, row[column].length()));
+            }
+            widths[column] = width;
+        }
+        Row header = Row.from(Cell.from("Field"), Cell.from("Flags"), right("Norm", widths[2]), Cell.from("Value"))
+                .style(Style.EMPTY.bold());
+        List<Row> tableRows = new ArrayList<>();
+        for (int i = 0; i < cells.size(); i++) {
+            String[] row = cells.get(i);
+            Row tableRow = Row.from(Cell.from(row[0]), Cell.from(row[1]), right(row[2], widths[2]), Cell.from(row[3]));
+            tableRows.add(empty.get(i) ? tableRow.style(Style.EMPTY.dim()) : tableRow);
+        }
+        int shown = rows.size();
+        int total = document.fields().size();
+        String count = shown == total ? Integer.toString(total) : shown + " of " + total + ", e shows all";
+        String title;
+        if (seek == null) {
+            title = " Fields (" + count + ", / seeks) ";
+        } else if (!seek.isEmpty() && seekMatch().isEmpty()) {
+            title = " Fields (" + count + ") /" + TextFormat.escapeControl(seek.toString()) + "▏ no match ";
+        } else {
+            title = " Fields (" + count + ") /" + TextFormat.escapeControl(seek.toString()) + "▏ ";
+        }
+        if (row >= 0) {
+            table.select(row);
+        } else {
+            table.clearSelection();
+        }
+        Table widget = Table.builder()
+                .rows(tableRows)
+                .header(header)
+                .widths(
+                        Constraint.length(Math.min(widths[0], NAME_MAX_WIDTH)),
+                        Constraint.length(widths[1]),
+                        Constraint.length(widths[2]),
+                        Constraint.fill())
+                .columnSpacing(COLUMN_SPACING)
+                .highlightStyle(highlight(focused))
+                .highlightSymbol("")
+                .highlightSpacing(Table.HighlightSpacing.NEVER)
+                .block(panel(title, focused))
+                .build();
+        frame.renderStatefulWidget(widget, area, table);
+    }
+
+    private void renderDetails(Frame frame, Rect area) {
+        boolean focused = focus == Focus.DETAILS;
+        Optional<DocumentField> selected = selectedField();
+        if (selected.isEmpty()) {
+            frame.renderWidget(panel(" Details ", focused), area);
+            return;
+        }
+        DocumentField field = selected.get();
+        String title = " " + TextFormat.firstChars(TextFormat.escapeControl(field.name()), 40) + " ";
+        Optional<TermHit> fieldHit = shownHit().filter(shown -> shown.field().equals(field.name()));
+        List<Line> lines = detailLines(
+                Optional.ofNullable(schema.get(field.name())),
+                field,
+                fieldHit,
+                positions,
+                termVectors.get(field.name()),
+                numbers);
+        // TamboUI scrolls no further than to show the last line at the bottom, so the scroll stops
+        // there too: the next key after End moves.
+        Block block = panel(title, focused);
+        Rect inner = block.inner(area);
+        int wrapped = lines.stream()
+                .mapToInt(line -> TextFormat.wrap(line.rawContent(), inner.width(), Integer.MAX_VALUE)
+                        .size())
+                .sum();
+        detailsScroll = Math.min(detailsScroll, Math.max(wrapped - inner.height(), 0));
+        frame.renderWidget(
+                Paragraph.builder()
+                        .text(Text.from(lines))
+                        .overflow(Overflow.WRAP_WORD)
+                        .scroll(detailsScroll)
+                        .block(block)
+                        .build(),
+                area);
+    }
+
+    /** Whether the document has nothing that {@code getDocument} reports in the field. It may still have postings there. */
+    static boolean isEmpty(DocumentField field) {
+        return field.norm().isEmpty()
+                && field.stored().isEmpty()
+                && field.docValues().isEmpty()
+                && !field.hasTermVector();
+    }
+
+    /**
+     * {@code I} indexed, {@code N} norm, {@code P} payloads, {@code S} stored, {@code V} term vector,
+     * {@code D} doc values, {@code T} points, {@code K} KNN vectors; {@code -} where absent. {@code
+     * N}, {@code S}, {@code V} and {@code D} are about this document, the others about the field.
+     */
+    static String flags(Optional<IndexField> schema, DocumentField field) {
+        boolean[] set = {
+            schema.filter(f -> f.indexOptions() != IndexOptions.NONE).isPresent(),
+            field.norm().isPresent(),
+            schema.filter(IndexField::hasPayloads).isPresent(),
+            !field.stored().isEmpty(),
+            field.hasTermVector(),
+            field.docValues().isPresent(),
+            schema.filter(f -> f.pointDimensionCount() > 0).isPresent(),
+            schema.filter(f -> f.vectorDimension() > 0).isPresent()
+        };
+        String names = "INPSVDTK";
+        StringBuilder flags = new StringBuilder();
+        for (int i = 0; i < set.length; i++) {
+            flags.append(set[i] ? names.charAt(i) : '-');
+        }
+        return flags.toString();
+    }
+
+    /** One line for the value column: the first stored value, or else the doc values. */
+    private static String valueSummary(DocumentField field, NumberFormat numbers) {
+        if (!field.stored().isEmpty()) {
+            String text = TextFormat.escapeControl(
+                    TextFormat.firstChars(storedText(field.stored().getFirst()), SUMMARY_CHARS));
+            int count = field.stored().size();
+            return count == 1 ? text : text + " (+" + (count - 1) + " more)";
+        }
+        return field.docValues()
+                .map(values -> "dv: "
+                        + TextFormat.escapeControl(TextFormat.firstChars(
+                                String.join(", ", docValueTexts(values, numbers)), SUMMARY_CHARS)))
+                .orElse("");
+    }
+
+    /** A stored value as text, unescaped: binary values that are not UTF-8 as {@code 0x} and their hex. */
+    private static String storedText(StoredValue value) {
+        return value.binary() ? "0x" + value.value() : value.value();
+    }
+
+    /** Each doc value as text: numbers in {@code numbers}' format, byte strings as text or hex. */
+    private static List<String> docValueTexts(DocValues values, NumberFormat numbers) {
+        List<String> texts = new ArrayList<>();
+        for (long number : values.numbers()) {
+            texts.add(numbers.format(number));
+        }
+        for (BytesValue value : values.values()) {
+            texts.add(TextFormat.bytesText(value.value(), value.binary()));
+        }
+        return texts;
+    }
+
+    private static Span label(String text) {
+        return Span.styled(String.format(Locale.ROOT, "%-12s", text), Style.EMPTY.bold());
+    }
+
+    private static Line labelled(String label, String text) {
+        return Line.from(label(label), Span.raw(text));
+    }
+
+    /** Everything about the selected field: how it is indexed, then what the document has in it. */
+    private static List<Line> detailLines(
+            Optional<IndexField> schema,
+            DocumentField field,
+            Optional<TermHit> hit,
+            Positions positions,
+            TermVector termVector,
+            NumberFormat numbers) {
+        List<Line> lines = new ArrayList<>();
+        if (schema.isPresent()) {
+            IndexField index = schema.get();
+            List<String> indexed = new ArrayList<>();
+            indexed.add(
+                    index.indexOptions() == IndexOptions.NONE
+                            ? "not indexed"
+                            : Overview.postings(index.indexOptions()));
+            if (index.hasPayloads()) {
+                indexed.add("payloads");
+            }
+            lines.add(labelled("Indexed", String.join(", ", indexed)));
+            List<String> other = new ArrayList<>();
+            if (index.hasNorms()) {
+                other.add("norms");
+            }
+            if (index.hasTermVectors()) {
+                other.add("term vectors");
+            }
+            if (index.docValuesType() != DocValuesType.NONE) {
+                other.add(Overview.docValues(index.docValuesType()) + " doc values");
+            }
+            if (index.pointDimensionCount() > 0) {
+                other.add("points " + index.pointDimensionCount() + "×" + index.pointNumBytes() + "B");
+            }
+            if (index.vectorDimension() > 0) {
+                other.add("vectors " + index.vectorDimension() + "d");
+            }
+            if (!other.isEmpty()) {
+                lines.add(labelled("Field has", String.join(", ", other)));
+            }
+        }
+        lines.add(labelled(
+                "Norm", field.norm().isPresent() ? normText(field.norm().getAsLong()) : "-"));
+        if (hit.isPresent()) {
+            lines.add(Line.empty());
+            lines.addAll(hitLines(hit.get(), positions));
+        }
+
+        lines.add(Line.empty());
+        if (field.stored().isEmpty()) {
+            lines.add(labelled("Stored", "-"));
+        } else {
+            lines.add(labelled("Stored", TextFormat.count(field.stored().size(), "value")));
+            Style dim = Style.EMPTY.dim();
+            for (StoredValue value : field.stored()) {
+                // Multi-line text keeps its lines, indented under the first; a long value shows its
+                // beginning, and the viewer the rest.
+                String text = storedText(value);
+                String shown = TextFormat.firstChars(text, DETAIL_VALUE_CHARS);
+                boolean more = !shown.equals(text);
+                if (more) {
+                    shown = shown.substring(0, shown.length() - 1);
+                }
+                String[] valueLines = shown.split("\n", -1);
+                for (int i = 0; i < valueLines.length; i++) {
+                    if (i == DETAIL_VALUE_LINES) {
+                        more = true;
+                        break;
+                    }
+                    String prefix = i == 0
+                            ? String.format(Locale.ROOT, "  %-8s", Viewer.storedType(value.type()))
+                            : " ".repeat(10);
+                    lines.add(Line.from(Span.styled(prefix, dim), Span.raw(TextFormat.escapeControl(valueLines[i]))));
+                }
+                if (value.fullLength().isPresent()) {
+                    lines.add(Line.styled(
+                            " ".repeat(10) + "cut at " + Viewer.cutSize() + " of "
+                                    + TextFormat.size(value.fullLength().getAsLong()) + ", v views it whole",
+                            dim));
+                } else if (more) {
+                    lines.add(Line.styled(" ".repeat(10) + "… v views it whole", dim));
+                }
+            }
+        }
+
+        lines.add(Line.empty());
+        if (field.docValues().isEmpty()) {
+            lines.add(labelled("Doc values", "-"));
+        } else {
+            DocValues values = field.docValues().get();
+            String heading = Overview.docValues(values.type());
+            if (!values.numbers().isEmpty()) {
+                heading += ", as " + numbers.label() + " (x)";
+            }
+            lines.add(labelled("Doc values", heading));
+            for (String text : docValueTexts(values, numbers)) {
+                lines.add(Line.from("  " + text));
+            }
+        }
+
+        lines.add(Line.empty());
+        if (!field.hasTermVector()) {
+            lines.add(labelled("Term vector", "-"));
+        } else {
+            switch (termVector) {
+                case null -> lines.add(labelled("Term vector", "⏎ loads it"));
+                case TermVector.Failed failed ->
+                    lines.add(labelled("Term vector", "cannot read it: " + failed.error()));
+                case TermVector.Loaded loaded -> {
+                    lines.add(labelled(
+                            "Term vector", TextFormat.count(loaded.terms().size(), "term")));
+                    lines.addAll(termLines(loaded.terms(), true));
+                }
+            }
+        }
+        return lines;
+    }
+
+    /** One line per term: the term, {@code ×freq} if {@code freqs}, and where it occurs if known. */
+    static List<Line> termLines(List<TermVectorTerm> terms, boolean freqs) {
+        List<Line> lines = new ArrayList<>();
+        for (TermVectorTerm term : terms) {
+            List<Span> spans = new ArrayList<>();
+            spans.add(Span.raw("  " + TextFormat.bytesText(term.term(), term.binary())));
+            if (freqs) {
+                spans.add(Span.styled(" ×" + term.freq(), Style.EMPTY.dim()));
+            }
+            if (!term.positions().isEmpty()) {
+                spans.add(Span.raw("  "
+                        + term.positions().stream().map(Documents::positionText).collect(Collectors.joining(", "))));
+            }
+            lines.add(Line.from(spans));
+        }
+        return lines;
+    }
+
+    /** The term of the hit, how often it occurs, and where. */
+    private static List<Line> hitLines(TermHit hit, Positions positions) {
+        List<Span> heading = new ArrayList<>();
+        heading.add(label("Term"));
+        heading.add(Span.raw(TextFormat.bytesText(hit.term().value(), hit.term().binary())));
+        if (hit.freq().isPresent()) {
+            heading.add(Span.styled(" ×" + hit.freq().getAsInt(), Style.EMPTY.dim()));
+        }
+        heading.add(Span.raw(", doc " + (hit.index() + 1) + " of " + hit.docFreq() + " ([ ])"));
+        List<Line> lines = new ArrayList<>();
+        lines.add(Line.from(heading));
+        switch (positions) {
+            // Fetched right after the document, so this shows only for a moment.
+            case null -> {}
+            case Positions.Failed failed -> lines.add(Line.from("  cannot read the positions: " + failed.error()));
+            case Positions.Loaded loaded
+            when loaded.positions().isEmpty() -> lines.add(Line.from("  no positions indexed"));
+            case Positions.Loaded loaded ->
+                lines.add(Line.from("  "
+                        + loaded.positions().stream()
+                                .map(Documents::positionText)
+                                .collect(Collectors.joining(", "))));
+        }
+        return lines;
+    }
+
+    /** {@code 3}, {@code 3 [9–12]}, {@code [9–12]} or with a payload {@code 3 [9–12] ⟨0a0b⟩}. */
+    static String positionText(TermPosition position) {
+        List<String> parts = new ArrayList<>();
+        position.position().ifPresent(at -> parts.add(Integer.toString(at)));
+        if (position.startOffset().isPresent() && position.endOffset().isPresent()) {
+            parts.add("[" + position.startOffset().getAsInt() + "–"
+                    + position.endOffset().getAsInt() + "]");
+        }
+        position.payload().ifPresent(payload -> parts.add("⟨" + payload + "⟩"));
+        return String.join(" ", parts);
+    }
+
+    /** The norm, and the field length it stands for if Lucene's similarities wrote it. */
+    static String normText(long norm) {
+        return normLength(norm)
+                .map(length -> length.low() == length.high()
+                        ? norm + " → length " + length.low()
+                        : norm + " → length " + length.low() + "–" + length.high())
+                .orElse(Long.toString(norm));
+    }
+
+    /** The field lengths a norm stands for, from {@code low} to {@code high}. */
+    record NormLength(long low, long high) {}
+
+    /**
+     * The field lengths a norm stands for if Lucene's similarities wrote it: they all encode the
+     * number of terms with {@code SmallFloat.intToByte4}, which is exact below 40 and a range above.
+     * Empty for a norm that is not a byte, which some other similarity wrote.
+     */
+    static Optional<NormLength> normLength(long norm) {
+        if (norm < Byte.MIN_VALUE || norm > Byte.MAX_VALUE) {
+            return Optional.empty();
+        }
+        int b = (int) norm & 0xff;
+        long low = byte4ToInt(b);
+        long high = b < 0xff ? byte4ToInt(b + 1) - 1 : low;
+        return Optional.of(new NormLength(low, high));
+    }
+
+    /**
+     * {@code SmallFloat.byte4ToInt}: values below 24 stand for themselves, the others are a 4-bit
+     * float ({@code int4ToLong}) on top of 24.
+     */
+    private static long byte4ToInt(int b) {
+        int numFreeValues = 24;
+        if (b < numFreeValues) {
+            return b;
+        }
+        long int4 = b - numFreeValues;
+        long bits = int4 & 0x07;
+        long exponent = int4 >>> 3;
+        long decoded = exponent == 0 ? bits : (bits | 0x08) << (exponent - 1);
+        return numFreeValues + decoded;
+    }
+
+    private static void renderPrompt(Frame frame, Rect area, DocIdPrompt prompt, int maxDoc) {
+        int width = Math.min(area.width(), 48);
+        int height = 4;
+        Rect popup = new Rect(
+                area.x() + (area.width() - width) / 2,
+                area.y() + Math.max(area.height() - height, 0) / 2,
+                width,
+                Math.min(height, area.height()));
+        String message =
+                prompt.error != null ? prompt.error : "0 to " + (maxDoc - 1) + "; Enter goes there, Esc cancels.";
+        frame.renderWidget(Clear.INSTANCE, popup);
+        frame.renderWidget(
+                Paragraph.builder()
+                        .text(Text.from(Line.from(prompt.input + "▏"), Line.styled(message, Style.EMPTY.dim())))
+                        .block(Block.builder()
+                                .borders(Borders.ALL)
+                                .title(" Go to document ")
+                                .build())
+                        .build(),
+                popup);
+    }
+}

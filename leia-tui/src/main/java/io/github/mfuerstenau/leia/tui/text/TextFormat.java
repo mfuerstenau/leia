@@ -1,10 +1,12 @@
 package io.github.mfuerstenau.leia.tui.text;
 
+import dev.tamboui.style.Style;
 import dev.tamboui.text.CharWidth;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 
@@ -14,7 +16,15 @@ import java.util.Locale;
  */
 public final class TextFormat {
 
+    /** How a match of a pattern is highlighted: black on yellow. */
+    public static final Style MATCH = Style.EMPTY.black().onYellow();
+
     private TextFormat() {}
+
+    /** {@code bytes} in lowercase hex, two digits each. */
+    public static String hex(byte[] bytes) {
+        return HexFormat.of().formatHex(bytes);
+    }
 
     /** {@code text} with control characters, line breaks included, escaped as Rust's {@code escape_default} does. */
     public static String escapeControl(String text) {

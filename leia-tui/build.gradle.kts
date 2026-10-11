@@ -19,6 +19,9 @@ dependencies {
     // The backend, called in-process (ADR 0034); core and Lucene are only on the runtime classpath.
     implementation(project(":leia-server"))
     implementation(project(":leia-protocol"))
+    // The viewer checks JSON with it, and the document export writes it (ADR 0034 §10).
+    implementation(platform(libs.jackson.bom))
+    implementation(libs.jackson.databind)
     implementation(platform(libs.tamboui.bom))
     implementation(libs.tamboui.tui)
     implementation(libs.tamboui.widgets)

@@ -9,10 +9,10 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 - [ ] Port the screens, each with TamboUI Pilot tests in place of the Rust tests, keeping keys and behaviour:
   - [x] app shell: tabs, open prompt (directory choice, no-reader, recent paths), status line, help, reopen (`R`), the logo; the screens are placeholders until they are ported
   - [x] overview (index stats, fields, term scans); Enter and `/` on a top term come back with the terms and search screens
-  - [ ] documents: viewer, stored values, term vectors, doc values, reconstruct, export, filter (ADR 0031/0032); then Enter on a posting of the terms screen, `[`/`]` through the term's docs (`Terms.step`) and `b` on the terms screen (`Terms.setFilter`) come back
+  - [ ] documents: reconstruct, export, filter (ADR 0031/0032); then `b` on the terms screen (`Terms.setFilter`) comes back. Done: the screen, the viewer, stored values, term vectors, doc values, Enter on a posting of the terms screen and `[`/`]` through the term's docs
   - [x] terms: fields, terms, postings, seek; Enter on an overview top term opens it here
-  - [ ] search: parser options, scoring/similarity, sort, More-Like-This, explain, stored scan, doc-values search, hit fields; then `/` on an overview top term searches for it, and the first polls of a new job at 10 ms
-  - [ ] analysis: analyzer builder, presets and word sets, analyze
+  - [ ] search: parser options, scoring/similarity, sort, More-Like-This, explain, stored scan, doc-values search, hit fields; then `/` on an overview top term searches for it, the first polls of a new job at 10 ms, and on the documents screen `s` search value, `m` similar, `[`/`]` through the hits (`Walk.SEARCH_HITS`) and starting a filter (`Documents.Request.SearchDocValues`, `MoreLikeThis`, `App.startFilter`)
+  - [ ] analysis: analyzer builder, presets and word sets, analyze; then `a` on the documents screen and in the value viewer comes back (`Documents.Request.Analyze`, `Viewer.keys()`)
   - [x] commits and segments
   - [ ] tools: check index, export terms; then `e` on the terms screen (`Terms.Request.Export`) comes back
   - [ ] jars: `X`, the default folder; then the about screen's "X to add jars", the `X jars` key, and "add a jar that has it with X" in the missing-codec hint come back (`Session.withJarHint`)

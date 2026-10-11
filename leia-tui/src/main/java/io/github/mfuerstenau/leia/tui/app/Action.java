@@ -4,7 +4,9 @@ import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.terms.PostingsFilter;
+import java.util.List;
 import java.util.Optional;
+import java.util.OptionalLong;
 
 /**
  * What the {@link Session} has to do after a key: {@link App} makes no calls itself. Each action
@@ -70,4 +72,33 @@ public sealed interface Action {
      */
     record LoadPostings(String field, BytesValue term, int fromDoc, boolean more, Optional<PostingsFilter> filter)
             implements Action {}
+
+    /**
+     * Cancel the jobs in {@code cancel}, fetch this document, and report back with {@link
+     * App#documentLoaded} or {@link App#documentFailed}.
+     *
+     * @param locate the filter to locate the document in once it is in, if any (ADR 0031)
+     */
+    record LoadDocument(int docId, List<Long> cancel, OptionalLong locate) implements Action {}
+
+    /**
+     * Fetch a stored value whole, and report back with {@link App#storedValueLoaded} or {@link
+     * App#storedValueFailed}.
+     */
+    record LoadStoredValue(int docId, String field, int index) implements Action {}
+
+    /**
+     * Fetch the term vector of a field of a document, and report back with {@link
+     * App#termVectorLoaded} or {@link App#termVectorFailed}.
+     */
+    record LoadTermVector(int docId, String field) implements Action {}
+
+    /**
+     * Fetch where a term occurs in a document, and report back with {@link App#positionsLoaded} or
+     * {@link App#positionsFailed}.
+     */
+    record LoadPositions(int docId, String field, BytesValue term) implements Action {}
+
+    /** Put this text on the terminal's clipboard (OSC 52); nothing is reported back. */
+    record Copy(String text) implements Action {}
 }
