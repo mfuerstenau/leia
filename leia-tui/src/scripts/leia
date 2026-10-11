@@ -1,0 +1,98 @@
+#!/bin/sh
+# Starts leia: chooses the JVM and runs the leia.jar next to this script (ADR 0034 §8).
+#
+# The JVM is -j/--java <PATH> (a java executable or a JDK/JRE directory), then $JAVA_HOME/bin/java,
+# then java on PATH. LEIA_OPTS holds options for the JVM, such as -Dleia.log.level=FINE. leia.jar
+# checks the Java version and parses the other arguments.
+
+die() {
+  status=$1
+  shift
+  printf 'leia: %s\n' "$*" >&2
+  exit "$status"
+}
+
+usage_error() {
+  printf 'leia: %s\nUsage: leia [OPTIONS] [INDEX_PATH]\n%s\n' "$1" "For more information, try '--help'." >&2
+  exit 2
+}
+
+# The script's own folder, with symlinks resolved, so that a link in ~/bin still finds leia.jar.
+# Without readlink -f, which older macOS lacks.
+script=$0
+while [ -L "$script" ]; do
+  target=$(readlink "$script")
+  case $target in
+    /*) script=$target ;;
+    *) script=$(dirname "$script")/$target ;;
+  esac
+done
+dir=$(cd -P "$(dirname "$script")" && pwd) || exit 1
+
+# Takes -j/--java out of the arguments and keeps the others in order. Each one is shifted off the
+# front and, unless it is -j/--java, appended at the back. The values of --jar and --directory, and
+# everything after --, are passed on as they are, even if they look like -j.
+java=
+n=$#
+while [ "$n" -gt 0 ]; do
+  arg=$1
+  shift
+  n=$((n - 1))
+  case $arg in
+    -j | --java)
+      [ "$n" -gt 0 ] && [ -n "$1" ] || usage_error "$arg needs a value <PATH>"
+      java=$1
+      shift
+      n=$((n - 1))
+      ;;
+    --java=*)
+      java=${arg#--java=}
+      [ -n "$java" ] || usage_error "--java needs a value <PATH>"
+      ;;
+    --jar | --directory)
+      set -- "$@" "$arg"
+      if [ "$n" -gt 0 ]; then
+        set -- "$@" "$1"
+        shift
+        n=$((n - 1))
+      fi
+      ;;
+    --)
+      set -- "$@" "$arg"
+      while [ "$n" -gt 0 ]; do
+        set -- "$@" "$1"
+        shift
+        n=$((n - 1))
+      done
+      ;;
+    *) set -- "$@" "$arg" ;;
+  esac
+done
+
+if [ -n "$java" ]; then
+  if [ -d "$java" ]; then
+    [ -f "$java/bin/java" ] && [ -x "$java/bin/java" ] ||
+      die 1 "--java $java: the directory has no bin/java; pass a JDK/JRE directory or a java executable"
+    java=$java/bin/java
+  elif [ -f "$java" ] && [ -x "$java" ]; then
+    # A bare file name is a file here, not a command on PATH.
+    case $java in
+      */*) ;;
+      *) java=./$java ;;
+    esac
+  else
+    die 1 "--java $java: no such executable; pass a JDK/JRE directory or a java executable"
+  fi
+elif [ -n "${JAVA_HOME-}" ] && [ -f "$JAVA_HOME/bin/java" ] && [ -x "$JAVA_HOME/bin/java" ]; then
+  java=$JAVA_HOME/bin/java
+else
+  java=$(command -v java) || die 1 "no java found: pass -j/--java, set JAVA_HOME or put java on PATH"
+fi
+
+jar=$dir/leia.jar
+[ -f "$jar" ] || die 1 "leia.jar not found next to the leia script (looked for $jar)"
+
+# LEIA_OPTS is split at spaces, without globbing.
+set -f
+# shellcheck disable=SC2086
+exec "$java" ${LEIA_OPTS-} -jar "$jar" "$@"

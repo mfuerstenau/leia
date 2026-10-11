@@ -55,7 +55,12 @@ What has to carry over:
    - Until the UI takes the terminal, messages go to stderr: a bad argument, jars that fail to load, `--version`. An error exits with a non-zero code.
    - While the UI runs, `System.out` and `System.err` go into the log, so a stray print can't break the screen. The terminal takes its streams before that.
 8. **The launch.**
-   - Two scripts, `leia` (sh) and `leia.cmd`, find the JVM as `tui/src/java.rs` does now: `-j/--java` (a `java` executable, or a JDK/JRE directory), then `$JAVA_HOME/bin/java`, then `java` on `PATH`. They run `leia.jar` from the script's own folder, symlinks resolved, and pass the other arguments on.
+   - Two scripts, `leia` (sh) and `leia.cmd`, find the JVM as `tui/src/java.rs` does now: `-j/--java` (a `java` executable, or a JDK/JRE directory), then `$JAVA_HOME/bin/java`, then `java` on `PATH`. They run `leia.jar` from the script's own folder, symlinks resolved, and pass the other arguments on. *Settled with the scripts:*
+     - *The environment variable `LEIA_OPTS` holds options for the JVM, such as `-Dleia.log.level=FINE`. It is split at spaces, without globbing, and goes before `-jar`.*
+     - *The values of `--jar` and `--directory`, and everything after `--`, are passed on even if they look like `-j`.*
+     - *A wrong command line exits with 2, as in `leia.jar`. A JVM or `leia.jar` the script can't find exits with 1. Otherwise the script passes on Java's exit status.*
+     - *`leia.cmd` doesn't resolve symlinks. It runs the `leia.jar` in its own folder (`%~dp0`). On Windows, people put the folder on `PATH`.*
+     - *The scripts are in `leia-tui/src/scripts/`, and `./gradlew :leia-tui:leiaFolder` puts them next to `leia.jar` in `leia-tui/build/leia/`.*
    - The Java side parses the rest of the CLI contract, unchanged: `--jar`, `--no-default-jars`, `--directory`, `--no-reader`, `INDEX_PATH` and `--version`.
    - **The Java version is checked by an entry class compiled for an old `--release`.** It compares `Runtime.version()` with 25 and says what is needed, instead of an `UnsupportedClassVersionError`, before it loads the rest. The spike checks that this works.
 9. **Distribution, amending ADR 0004.** Still Linux and Windows on x86_64, unpacked folders and no bundled Java. Each folder holds `leia.jar`, `leia` and `leia.cmd`, and the jar is the same in both. `build-dist.sh` needs no cargo, cargo-zigbuild or zig. macOS would work through the sh script, but stays untested and unsupported.

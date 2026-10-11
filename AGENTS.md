@@ -63,6 +63,7 @@ Keep these in sync with the build:
 ./gradlew spotlessApply      # format Java
 ./gradlew :leia-server:shadowJar   # fat jar → leia-server/build/libs/leia-server.jar
 ./gradlew :leia-tui:shadowJar      # TamboUI spike (ADR 0034) → leia-tui/build/libs/leia.jar
+./gradlew :leia-tui:leiaFolder     # leia.jar with the leia and leia.cmd scripts → leia-tui/build/leia/
 ./gradlew :leia-core:demoIndex     # demo index for manual testing → leia-core/build/test-indexes/demo (docs/demo-index.md)
 ./gradlew :leia-server:analysisModules   # Lucene's unbundled analysis modules → leia-server/build/analysis-modules/<module>/ (ADR 0016)
 ./build-dist.sh              # jar + TUI for Linux and Windows → dist/leia-<version>-<os>-x86_64/

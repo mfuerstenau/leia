@@ -99,6 +99,7 @@ class CliTest {
                         "--version",
                         "--help",
                         "[INDEX_PATH]",
-                        "leia.log");
+                        "leia.log",
+                        "LEIA_OPTS");
     }
 }

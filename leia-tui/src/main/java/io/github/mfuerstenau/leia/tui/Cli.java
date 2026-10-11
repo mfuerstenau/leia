@@ -68,7 +68,8 @@ record Cli(
 
             The log is $XDG_STATE_HOME/leia/leia.log (~/.local/state/leia/leia.log) on Linux,
             %LOCALAPPDATA%\\leia\\leia.log on Windows, written anew at each start. Its level comes
-            from the JVM option -Dleia.log.level (INFO without it).
+            from the JVM option -Dleia.log.level (INFO without it). The environment variable
+            LEIA_OPTS passes options to the JVM, for example LEIA_OPTS=-Dleia.log.level=FINE.
             """;
 
     Cli {

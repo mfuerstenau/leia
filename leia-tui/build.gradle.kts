@@ -36,6 +36,12 @@ application {
     mainClass = "io.github.mfuerstenau.leia.tui.Launcher"
 }
 
+tasks.test {
+    // LaunchScriptTest runs the leia script from here.
+    inputs.dir("src/scripts")
+    systemProperty("leia.scripts", file("src/scripts").absolutePath)
+}
+
 tasks.named<JavaExec>("run") {
     classpath += launcher.output
     standardInput = System.`in`
@@ -62,4 +68,17 @@ tasks.shadowJar {
             "Enable-Native-Access" to "ALL-UNNAMED",
         )
     }
+}
+
+// The folder leia runs from: leia.jar and the scripts that start it (ADR 0034 §8).
+val leiaFolder by tasks.registering(Sync::class) {
+    from(tasks.shadowJar)
+    from("src/scripts") {
+        filesMatching("leia") { permissions { unix("rwxr-xr-x") } }
+    }
+    into(layout.buildDirectory.dir("leia"))
+}
+
+tasks.assemble {
+    dependsOn(leiaFolder)
 }
