@@ -17,6 +17,7 @@ class PlatformTest {
 
         assertThat(platform.stateDir()).hasValue(Path.of("/state/leia"));
         assertThat(platform.logFile()).hasValue(Path.of("/state/leia/leia.log"));
+        assertThat(platform.historyFile()).hasValue(Path.of("/state/leia/history"));
         assertThat(platform.defaultJarsDir()).hasValue(Path.of("/config/leia/jars"));
     }
 
@@ -41,6 +42,7 @@ class PlatformTest {
         Platform platform = linux(Map.of(), Optional.empty());
 
         assertThat(platform.logFile()).isEmpty();
+        assertThat(platform.historyFile()).isEmpty();
         assertThat(platform.defaultJarsDir()).isEmpty();
     }
 
@@ -51,6 +53,7 @@ class PlatformTest {
                 Map.of("LOCALAPPDATA", "/local", "APPDATA", "/roaming", "XDG_STATE_HOME", "/state")::get, HOME, true);
 
         assertThat(platform.logFile()).hasValue(Path.of("/local/leia/leia.log"));
+        assertThat(platform.historyFile()).hasValue(Path.of("/local/leia/history"));
         assertThat(platform.defaultJarsDir()).hasValue(Path.of("/roaming/leia/jars"));
     }
 

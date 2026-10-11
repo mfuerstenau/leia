@@ -23,10 +23,12 @@ dependencies {
     implementation(libs.tamboui.tui)
     implementation(libs.tamboui.widgets)
     implementation(libs.tamboui.jline3.backend)
-    // The spike compares both backends; -Dtamboui.backend=panama selects this one.
+    // Tried first, with JLine as the fallback (ADR 0034 §1).
     runtimeOnly(libs.tamboui.panama.backend)
 
     testImplementation(launcher.output)
+    // The Pilot tests write the indexes they open, as leia-server's tests do.
+    testImplementation(libs.lucene.core)
     testImplementation(platform(libs.tamboui.bom))
     testImplementation(testFixtures(libs.tamboui.tui))
     testImplementation(testFixtures(libs.tamboui.core))

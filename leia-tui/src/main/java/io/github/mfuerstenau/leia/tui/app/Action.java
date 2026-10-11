@@ -1,0 +1,30 @@
+package io.github.mfuerstenau.leia.tui.app;
+
+import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
+import io.github.mfuerstenau.leia.protocol.index.OpenMode;
+
+/**
+ * What the {@link Session} has to do after a key: {@link App} makes no calls itself. Each action
+ * says how the outcome is reported back to the app.
+ */
+public sealed interface Action {
+
+    /** Quit leia. */
+    record Quit() implements Action {}
+
+    /**
+     * Open this index through this {@code Directory}, with or without a reader, and fetch its
+     * statistics if it has a reader. The prompt shows "Opening…" until {@link App#opened}, {@link
+     * App#openedWithoutReader} or {@link App#openFailed} reports the outcome.
+     */
+    record Open(String path, DirectoryImpl directory, OpenMode mode) implements Action {}
+
+    /** Close the open index, and report back with {@link App#closed}. */
+    record Close() implements Action {}
+
+    /**
+     * Reopen the open index if it changed, and report back with {@link App#reopened}, {@link
+     * App#reopenUnchanged} or {@link App#reopenFailed} (ADR 0019).
+     */
+    record Reopen() implements Action {}
+}

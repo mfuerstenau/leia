@@ -1,4 +1,4 @@
-package io.github.mfuerstenau.leia.tui.spike;
+package io.github.mfuerstenau.leia.tui;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;

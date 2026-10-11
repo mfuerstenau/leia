@@ -40,6 +40,11 @@ record Platform(Function<String, String> env, Optional<Path> home, boolean windo
         return stateDir().map(dir -> dir.resolve("leia.log"));
     }
 
+    /** The recently opened paths (ADR 0020), {@code history} in the {@linkplain #stateDir() state folder}. */
+    Optional<Path> historyFile() {
+        return stateDir().map(dir -> dir.resolve("history"));
+    }
+
     /**
      * The default folder of jars: {@code %APPDATA%\leia\jars} on Windows; elsewhere {@code
      * $XDG_CONFIG_HOME/leia/jars}, or {@code ~/.config/leia/jars} without it. Empty if the

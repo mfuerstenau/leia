@@ -7,7 +7,7 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 **Feature freeze:** nothing from the backlog below starts until this section is done. Fixes to the Rust TUI are fine; new features are not, in either UI. Settled on 2026-10-09: one JVM, with the TamboUI app calling the server's handlers in-process; launcher scripts `leia`/`leia.cmd` that run `java -jar leia.jar`; no Rust left.
 
 - [ ] Port the screens, each with TamboUI Pilot tests in place of the Rust tests, keeping keys and behaviour:
-  - [ ] app shell: tabs, open prompt (directory choice, no-reader, recent paths), status line, help, reopen (`R`), the logo
+  - [x] app shell: tabs, open prompt (directory choice, no-reader, recent paths), status line, help, reopen (`R`), the logo; the screens are placeholders until they are ported
   - [ ] overview (index stats, fields)
   - [ ] documents: viewer, stored values, term vectors, doc values, reconstruct, export, filter (ADR 0031/0032)
   - [ ] terms: terms, postings, positions, field term scan
@@ -15,7 +15,7 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
   - [ ] analysis: analyzer builder, presets and word sets, analyze
   - [ ] commits and segments
   - [ ] tools: check index, export terms
-  - [ ] jars: `X`, the default folder
+  - [ ] jars: `X`, the default folder; then the about screen's "X to add jars", the `X jars` key, and "add a jar that has it with X" in the missing-codec hint come back (`Session.withJarHint`)
 - [ ] Parity check against `docs/demo-index.md` and the real-server tests that `cargo test -- --ignored` runs now
 - [ ] Remove the old path: the whole `tui/` crate (and the Rust steps of the build), `protocol/fixtures/` and the fixture tests, the JSON-RPC transport (`RpcServer`, `Dispatcher`, `RequestScanner`, `LeiaServer`'s stdio loop), the envelope and Jackson setup in `leia-protocol` (`Request`, `Response`, `JsonRpcVersion`, `ProtocolJson`, `ProtocolAnnotationIntrospector`, the Jackson annotations), `protocol/error-codes.json`, and Jackson if nothing else needs it (ADR 0034 §6)
 - [ ] Update `AGENTS.md` (architecture, hard rules 2–4 → the one rule of ADR 0034 §6, tech stack, commands, CLI contract), `README.md` and `build-dist.sh` (one `leia.jar` plus `leia` and `leia.cmd`; no cargo, cargo-zigbuild or zig)

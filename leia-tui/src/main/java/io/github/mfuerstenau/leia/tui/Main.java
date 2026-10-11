@@ -1,16 +1,18 @@
 package io.github.mfuerstenau.leia.tui;
 
-import dev.tamboui.backend.jline3.JLineBackend;
-import dev.tamboui.terminal.Backend;
 import dev.tamboui.tui.TuiConfig;
 import dev.tamboui.tui.TuiRunner;
 import io.github.mfuerstenau.leia.protocol.Methods;
+import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.version.JavaRuntime;
 import io.github.mfuerstenau.leia.protocol.version.VersionParams;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import io.github.mfuerstenau.leia.server.LeiaBackend;
 import io.github.mfuerstenau.leia.server.RpcException;
-import io.github.mfuerstenau.leia.tui.spike.SpikeApp;
+import io.github.mfuerstenau.leia.tui.app.Action;
+import io.github.mfuerstenau.leia.tui.app.App;
+import io.github.mfuerstenau.leia.tui.app.History;
+import io.github.mfuerstenau.leia.tui.app.Session;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -26,9 +28,9 @@ import java.util.logging.Logger;
  * Starts leia, after {@link Launcher} has checked the Java version: parses the command line, loads
  * the jars into the backend and runs the TUI (ADR 0034). Until the TUI takes the terminal, problems
  * go to stderr, and exit with a non-zero status; after that, everything goes into {@code leia.log}
- * (§7). For now the TUI is the spike of ADR 0034.
+ * (§7).
  *
- * <p>With {@code -Dleia.spike.exitAfterFirstFrame=true} it quits as soon as the first frame is on
+ * <p>With {@code -Dleia.exitAfterFirstFrame=true} it quits as soon as the first frame is on
  * the screen and prints the startup times, so that they can be measured without a person.
  */
 public final class Main {
@@ -98,10 +100,9 @@ public final class Main {
                 return 1;
             }
             try (backend) {
-                runTui(log, out, started);
+                return runTui(cli, platform, backend, log, out, err, started);
             }
         }
-        return 0;
     }
 
     /**
@@ -124,8 +125,30 @@ public final class Main {
         }
     }
 
-    private static void runTui(PrintStream log, PrintStream out, Instant started) throws Exception {
-        boolean exitAfterFirstFrame = Boolean.getBoolean("leia.spike.exitAfterFirstFrame");
+    /**
+     * Runs the TUI until the user quits. Opens {@code cli}'s index path, if any, once the first frame
+     * is on the screen.
+     *
+     * @return the exit status: 1 if something unexpected ended it
+     */
+    private static int runTui(
+            Cli cli,
+            Platform platform,
+            LeiaBackend backend,
+            PrintStream log,
+            PrintStream out,
+            PrintStream err,
+            Instant started)
+            throws Exception {
+        boolean exitAfterFirstFrame = Boolean.getBoolean("leia.exitAfterFirstFrame");
+        VersionResult version =
+                backend.call(Methods.VERSION, new VersionParams()).get();
+        History history = platform.historyFile().map(History::load).orElseGet(History::inMemory);
+        App app = new App(version, platform.home(), history, cli.directory());
+        Session session = new Session(app, backend);
+        OpenMode mode = cli.noReader() ? OpenMode.DIRECTORY_ONLY : OpenMode.READER;
+        // The first frame shows the path being opened.
+        cli.indexPath().ifPresent(path -> app.opening(path, mode));
         selectBackend();
         PrintStream stdout = System.out;
         PrintStream stderr = System.err;
@@ -141,19 +164,18 @@ public final class Main {
             // instead of over the screen (ADR 0034 §7).
             System.setOut(log);
             System.setErr(log);
-            try (SpikeApp app =
-                    new SpikeApp(describe(runner.backend()), Path.of("leia-spike-keys.log"), started, terminalReady)) {
-                // Runs right after the first frame is drawn and flushed.
-                runner.runLater(() -> {
-                    firstFrame[0] = Instant.now();
-                    if (exitAfterFirstFrame) {
-                        runner.quit();
-                    } else {
-                        runner.dispatch(new SpikeApp.FirstFrame(firstFrame[0]));
-                    }
-                });
-                runner.run(app::handle, app::render);
-            }
+            // Runs right after the first frame is drawn and flushed.
+            runner.runLater(() -> {
+                firstFrame[0] = Instant.now();
+                if (exitAfterFirstFrame) {
+                    runner.quit();
+                } else {
+                    cli.indexPath()
+                            .ifPresent(path ->
+                                    runner.dispatch(Session.perform(new Action.Open(path, app.directory(), mode))));
+                }
+            });
+            runner.run(session::handle, session::render);
         } finally {
             System.setOut(stdout);
             System.setErr(stderr);
@@ -166,6 +188,11 @@ public final class Main {
                             ? -1
                             : Duration.between(started, firstFrame[0]).toMillis());
         }
+        if (session.failure().isPresent()) {
+            err.println("leia: internal error: " + session.failure().get() + " (see leia.log)");
+            return 1;
+        }
+        return 0;
     }
 
     /**
@@ -179,13 +206,5 @@ public final class Main {
         if ((property == null || property.isEmpty()) && (env == null || env.isEmpty())) {
             System.setProperty("tamboui.backend", "panama,jline3");
         }
-    }
-
-    private static String describe(Backend backend) {
-        if (backend instanceof JLineBackend jline) {
-            var terminal = jline.jlineTerminal();
-            return "jline3 (" + terminal.getType() + ", " + terminal.getClass().getSimpleName() + ")";
-        }
-        return backend.getClass().getSimpleName();
     }
 }

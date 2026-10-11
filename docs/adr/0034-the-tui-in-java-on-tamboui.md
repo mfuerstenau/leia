@@ -74,6 +74,12 @@ What has to carry over:
       - startup time;
       - Windows Terminal;
       - the version-check entry class.
+    - *Settled with the app shell:*
+      - *`App` (`leia-tui`, package `…tui.app`) keeps the shape of `app.rs`: a key returns an `Action`, and the outcome comes back through `App`'s methods. `Session` makes the calls on `LeiaBackend` and dispatches each outcome to the UI thread as a `Reply` event, so `App` is only touched there.*
+      - *The Rust TUI blocked on its calls, so no key came in between. While an open, reopen or close runs, `App` is busy and takes no key but Ctrl+C.*
+      - *A screen that isn't ported yet shows a placeholder under its tab. The overview's lists the basics of the open index.*
+      - *The Rust tests are ported as unit tests that render through `Frame.forTesting`. Pilot tests run whole flows against a real `LeiaBackend`. `Pilot.press` only dispatches the key and sleeps 50 ms, so they wait on a barrier event instead.*
+      - *The about screen shows leia's own lines and Java's. The backend's line is gone, since they are one build.*
 
 ## Alternatives considered
 
