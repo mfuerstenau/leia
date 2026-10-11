@@ -246,3 +246,4 @@ Finished items, moved here from `docs/tasklist.md` (the open work queue).
 ## TamboUI migration — done
 
 - [x] ADR 0034 (Proposed until the spike): the TUI in Java on TamboUI 0.5.0 with JLine 3, one JVM calling the handlers in-process on one backend thread, the protocol records as the API, a new `leia-tui` module, logs to a file per session, `leia`/`leia.cmd` scripts and a version-check entry class
+- [x] Spike, go/no-go: `leia-tui` with `leia.jar`, the Java 8 version-check entry class and a four-tab spike app with Pilot tests; Linux (tmux) and Windows Terminal (PowerShell, cmd) pass on both backends → **go**, ADR 0034 Accepted, with Panama as the backend and JLine as the fallback; notes in ADR 0001, 0003, 0004 and 0005

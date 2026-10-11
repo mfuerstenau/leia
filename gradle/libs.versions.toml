@@ -10,6 +10,8 @@ assertj = "3.27.7"
 palantirJavaFormat = "2.102.0"
 spotless = "8.10.3"
 shadow = "9.6.1"
+# Pinned: an upgrade is a change of its own (ADR 0034)
+tamboui = "0.5.0"
 
 [libraries]
 lucene-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene" }
@@ -36,6 +38,12 @@ junit-bom = { module = "org.junit:junit-bom", version.ref = "junit" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 assertj-core = { module = "org.assertj:assertj-core", version.ref = "assertj" }
+tamboui-bom = { module = "dev.tamboui:tamboui-bom", version.ref = "tamboui" }
+tamboui-core = { module = "dev.tamboui:tamboui-core" }
+tamboui-widgets = { module = "dev.tamboui:tamboui-widgets" }
+tamboui-tui = { module = "dev.tamboui:tamboui-tui" }
+tamboui-jline3-backend = { module = "dev.tamboui:tamboui-jline3-backend" }
+tamboui-panama-backend = { module = "dev.tamboui:tamboui-panama-backend" }
 # Gradle plugins used as libraries by build-logic
 spotless-gradle-plugin = { module = "com.diffplug.spotless:spotless-plugin-gradle", version.ref = "spotless" }
 

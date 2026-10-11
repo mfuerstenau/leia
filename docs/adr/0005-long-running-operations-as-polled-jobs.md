@@ -1,6 +1,6 @@
 # ADR 0005 — Long-running operations as polled server jobs
 
-- **Status:** Accepted
+- **Status:** Accepted; decision 2 superseded by ADR 0034
 - **Date:** 2026-10-06
 
 ## Context
@@ -21,7 +21,7 @@ Constraints:
    - `cancelJob {jobId}` stops a job of any kind and forgets it. It is idempotent: an unknown or already finished id is not an error. The result says whether a running job was stopped.
 
    Polling per operation keeps every result typed by its method (no polymorphic job result on the wire). The first operation is `startFieldTermScan` / `getFieldTermScan`.
-2. **No transport change.** No notifications and no concurrent requests: the stdin loop still handles one request at a time, and every request is answered quickly. The TUI keeps its synchronous client. While a job runs, it waits for keys with `event::poll` and a 100 ms timeout instead of `event::read`, and polls the job in between.
+2. **No transport change.** No notifications and no concurrent requests: the stdin loop still handles one request at a time, and every request is answered quickly. The TUI keeps its synchronous client. While a job runs, it waits for keys with `event::poll` and a 100 ms timeout instead of `event::read`, and polls the job in between. *Superseded by ADR 0034: the UI calls the handlers in-process, in order on one backend thread, and polls `get<Op>` on a timer. The job model stays.*
 3. **Jobs run on their own daemon threads** (`Jobs` in the server, one platform thread per job). Lucene readers are thread-safe, so a job and the request loop can read the same index at the same time.
 4. **Cancellation is cooperative.** A job reports progress through a callback (`ScanProgress` in `leia-core`). Every 1024 terms, the callback checks the job's cancelled flag and throws `CancellationException` if it is set. Threads are never interrupted (see the `NIOFSDirectory` constraint above).
 5. **Jobs belong to the open index.** `closeIndex`, and an `openIndex` that replaces the index, cancel every job and wait for it to stop (at most 5 s each) before the old reader is closed. Stdin EOF closes the index, so it stops the jobs too.

@@ -21,6 +21,7 @@ leia (Rust TUI)  ──spawns──▶  <java> -jar leia-server.jar
 | `leia-core/` | Java library with the Lucene functionality. No JSON-RPC, Jackson or I/O-transport code. |
 | `leia-protocol/` | Java DTOs (records) for every JSON-RPC method's params/result, and Jackson configuration. |
 | `leia-server/` | JSON-RPC server over stdin/stdout, with Dagger wiring. Maps core results to protocol DTOs. Builds the **fat jar** `leia-server.jar`. |
+| `leia-tui/` | The TamboUI UI of ADR 0034, which replaces `tui/`. For now it holds only the spike (package `…tui.spike`). Builds the **fat jar** `leia.jar`. |
 | `tui/` | Rust crate `leia` (library + binary): ratatui frontend that spawns the server and holds the protocol DTOs as serde structs in `tui/src/protocol/`. |
 | `protocol/fixtures/` | Golden JSON files shared by both sides: the wire contract (naming: `protocol/fixtures/README.md`). |
 | `protocol/error-codes.json` | The error-code catalogue that both `ErrorCode` enums are checked against. |
@@ -61,6 +62,7 @@ Keep these in sync with the build:
 ./gradlew build              # compile, test, spotlessCheck
 ./gradlew spotlessApply      # format Java
 ./gradlew :leia-server:shadowJar   # fat jar → leia-server/build/libs/leia-server.jar
+./gradlew :leia-tui:shadowJar      # TamboUI spike (ADR 0034) → leia-tui/build/libs/leia.jar
 ./gradlew :leia-core:demoIndex     # demo index for manual testing → leia-core/build/test-indexes/demo (docs/demo-index.md)
 ./gradlew :leia-server:analysisModules   # Lucene's unbundled analysis modules → leia-server/build/analysis-modules/<module>/ (ADR 0016)
 ./build-dist.sh              # jar + TUI for Linux and Windows → dist/leia-<version>-<os>-x86_64/

@@ -1,6 +1,6 @@
 # ADR 0034 — The TUI in Java on TamboUI
 
-- **Status:** Proposed (the spike of `docs/tasklist.md` decides: Accepted on go, Rejected on no-go)
+- **Status:** Accepted on 2026-10-09, after the spike ("Spike results"); decision 1 changed by it: Panama, with JLine as the fallback
 - **Date:** 2026-10-09
 - **Supersedes, once accepted:** ADR 0001, ADR 0003
 - **Amends, once accepted:** ADR 0004 (the folders and the launch), ADR 0005 decision 2 (the transport)
@@ -30,7 +30,7 @@ What has to carry over:
 
 ## Decision
 
-1. **The TUI moves to Java, on TamboUI 0.5.0 with the JLine 3 backend.** The version is pinned, and an upgrade is a change of its own. Panama stays a later option, if the spike gives a reason, such as startup time.
+1. **The TUI moves to Java, on TamboUI 0.5.0 with the JLine 3 backend.** The version is pinned, and an upgrade is a change of its own. Panama stays a later option, if the spike gives a reason, such as startup time. *Changed by the spike: the Panama backend, with JLine 3 as the fallback. Both are in the jar, and `tamboui.backend` defaults to `panama,jline3`, which TamboUI tries in order. An explicit `-Dtamboui.backend` or `TAMBOUI_BACKEND` still wins. Panama is about 70 ms faster to the first frame on Windows and passed every check on both platforms.*
 2. **One JVM, no transport.** The UI calls the handlers in-process, through `call(RpcMethod<P, R>, P)` over the Dagger-built `Set<MethodHandler<?, ?>>`. The `leia-protocol` records are its model. There is no JSON, no envelope, no request ids and no fixtures.
    - An expected failure is still an `RpcException` with its `ErrorCode`, and the UI shows it as the Rust TUI shows an error response now.
    - Any other `RuntimeException` becomes an `INTERNAL_ERROR` and is logged, as `Dispatcher.invoke` does.
@@ -75,7 +75,7 @@ What has to carry over:
 - **Keep Rust and ratatui.** It works. But the DTOs stay written twice, with the fixture machinery, two toolchains and the Windows cross-build. Rejected.
 - **TamboUI over the JSON-RPC child process.** Nothing in the backend changes, but it keeps two JVMs and all the serialization when both sides are Java. Rejected.
 - **Another Java library: Lanterna, or JLine alone.** Lanterna's widget model is far from ratatui's, so the port would be a rewrite. JLine alone means writing the widgets. TamboUI's model maps onto the current screens one by one. Rejected.
-- **The Panama backend.** No extra dependency, but less proven, and its Windows support isn't documented. Deferred until the spike has numbers.
+- **The Panama backend.** No extra dependency, but less proven, and its Windows support isn't documented. Deferred until the spike has numbers. *Chosen after the spike, with JLine as the fallback (decision 1).*
 - **The UI and `leia-server` in one module.** One module less, but nothing would stop the UI from importing core or Lucene. Rejected.
 - **A jlink-bundled runtime, now that everything is Java.** ADR 0004's reasons still hold. Rejected.
 - **The scripts check the version from `java -version`.** Its output differs between vendors, and the check would be written twice, in sh and in cmd. Rejected for the entry class.
@@ -86,10 +86,74 @@ What has to carry over:
 - **The backend thread could later run calls side by side**, for example two screens loading at once. Not used for now.
 - **Risks:**
   - TamboUI is experimental and young, so an upgrade may break the UI; the pin contains this.
-  - How it behaves in Windows terminals is unknown until the spike.
+  - How it behaves in Windows terminals was unknown until the spike. It passed in Windows Terminal, with PowerShell and cmd. Older consoles (conhost) were not tried.
 - **On acceptance:**
   - ADR 0001 and ADR 0003 get "Superseded by ADR 0034".
   - ADR 0004 gets "Amended by ADR 0034" for the folders and the launch.
   - ADR 0005 gets a note on its decision 2.
   - `AGENTS.md` changes with the removal of the old path: the architecture, hard rules 2–4, the tech stack, the commands and the CLI contract.
 - **Lost:** talking to the server by piping a fixture into it. A JUnit test, or the log at `FINE`, takes its place.
+
+## Spike results
+
+The spike is the `leia-tui` module: the build, the fat jar `leia.jar`, the version-check entry class, and a four-tab app in the package `…tui.spike` that the port of the app shell deletes. The Windows half is `docs/spike-tamboui-windows.md`.
+
+### Linux (2026-10-09, WSL2, tmux and `script`, Temurin 25.0.4)
+
+Both backends pass every check:
+
+- **Keys:** the keys leia binds arrive once each, with the right modifiers:
+  - Ctrl+D/N/U/K/W/A/E/Y and Alt+B;
+  - Esc, Tab, Shift+Tab (a `TAB` with shift, since TamboUI has no `BACK_TAB`), Enter, Backspace and Delete;
+  - the arrows, PgUp/PgDn and Home/End;
+  - F1/F5/F12, and `ü @ \ { € 漢 字 🔍` as typed characters.
+
+  Both backends read the same VT byte stream through TamboUI's `EventParser`, so there are no press/release pairs as with crossterm on Windows.
+  - Esc waits 50 ms for a following byte. Esc and a control key within those 50 ms become one `UNKNOWN` event; a printable key becomes Alt+key. This is the usual VT ambiguity and is not blocking.
+  - Ctrl+H and Backspace are the same byte, as are Ctrl+I and Tab, and Ctrl+M and Enter. leia binds none of them.
+- **Wide characters:** CJK, Hangul, simple emoji and combining accents keep the columns aligned, in a paragraph and in table cells. ZWJ emoji and flags count as one cluster of width 2. That is right for Windows Terminal, but tmux draws them as separate glyphs. ratatui's `unicode-width` counts them the same way, so nothing changes.
+- **Resize:** follows, and redraws.
+- **10,000-row table:** 0.5–2.5 ms per frame at any position, End included. `Table` walks the rows before the offset on every frame, as ratatui does, and that is cheap at this size.
+- **OSC 52:** `Backend.writeRaw` gets `grüße 漢字 🔍` into tmux's clipboard (with `set-clipboard on`), on both backends.
+- **Threads (§3, §4):**
+  - A call on a single backend thread comes back through `TuiRunner.dispatch` with an event of its own, and the UI redraws for it. `runLater` alone doesn't redraw.
+  - A 100 ms `tickRate` gives the job poll.
+- **Logs (§7):** with `System.out`/`System.err` redirected once the terminal is up, stray prints land in the log and never on the screen. Both backends keep their own streams.
+- **Version check (§8):**
+  - The entry class compiles with `--release 8` on JDK 25. It needs `-Xlint:-options` against the "obsolete" warning.
+  - It reads `java.specification.version`, because `Runtime.version()` is Java 9+.
+  - Java 21 gets "leia needs Java 25 or newer; this is Java 21.0.12.1 (…)" and exit code 1.
+- **Startup**, as the median of 10 runs at 120×40, until the first frame is drawn and flushed:
+
+  | | from the launcher | process, end to end |
+  |---|---|---|
+  | JLine 3 | 208 ms (terminal ready at 110 ms) | 250 ms |
+  | Panama | 216 ms (terminal ready at 125 ms) | 285 ms |
+  | today: `leia-server.jar` up to its `version` response | – | 285 ms |
+
+  The in-process backend will add the server's Dagger graph and its classes to this. Those load at startup today too, in the child process.
+- **Pilot:** `TuiTestRunner`/`TuiPilot` from the `tamboui-tui` test fixtures (plus `TestBackend` from the `tamboui-core` ones) drive the app under JUnit 6. They press keys, including Ctrl+Alt, wait, and read `TestBackend.rawOutput()` for the OSC 52 bytes.
+- **Packaging:** Shadow needs `DuplicatesStrategy.INCLUDE` to merge the two backends' `BackendProvider` services, as `leia-server` needs it for the codecs. Without it, only the first backend is found.
+- **Pitfall in measuring:** `ProcessHandle.info().startInstant()` is off by hundreds of milliseconds on WSL, so the spike times from the launcher. Under `script`, the pty must have a size (`stty cols … rows …`), or Panama fails with "Failed to get terminal size". JLine then saw one Ctrl+Space (NUL) at startup, under `script` only.
+
+### Windows (2026-10-09, Windows 11, Windows Terminal, Temurin 25.0.3)
+
+The checklist `docs/spike-tamboui-windows.md` was run four times: PowerShell and cmd, each with both backends. JLine picked its native console terminal (`windows-vtp`, `NativeWinSysTerminal`), not a dumb one. Every run passed:
+
+- **Keys:** each key of the list arrives once, with the right modifiers; there are no press/release pairs. F1/F5/F12 arrive too (not pressed in the PowerShell/JLine run).
+  - AltGr on a German layout gives plain characters with no modifiers: `@ \ { [ ] } ~ | €`. So do `äöüß`, and pasted CJK, Hangul and emoji.
+  - An emoji with a skin tone comes as two characters (`🙏`, `🏻`).
+- **Wide text, resize and maximise, OSC 52 into Notepad, `p` with nothing on the screen, a clean terminal after Ctrl+C:** all right, checked by eye.
+- **10,000-row table:** 2.4–10 ms per frame after scrolling to the end, as measured at the end of each run. The max, 159–175 ms, is the first visit, which builds the rows.
+- **Startup,** from the launcher, 5 runs each in PowerShell:
+
+  | | terminal ready | first frame |
+  |---|---|---|
+  | JLine 3 | 116–135 ms | 218–242 ms |
+  | Panama | 73–78 ms | 159–165 ms |
+
+### Outcome
+
+**Go.** Nothing blocks on either platform, so the status is Accepted. The backend is Panama, with JLine as the fallback (decision 1): Panama is faster on Windows, needs no extra library, and was as correct as JLine everywhere.
+
+The fallback covers only a backend that fails to create its terminal. A terminal that reports no size (a pty with 0×0, as under `script` without `stty`) makes Panama fail later, on the first size query, with "Failed to get terminal size". That doesn't happen in real terminals and is left as it is.

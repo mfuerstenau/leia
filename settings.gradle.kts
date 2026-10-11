@@ -17,4 +17,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "leia"
 
-include("leia-core", "leia-protocol", "leia-server")
+include("leia-core", "leia-protocol", "leia-server", "leia-tui")

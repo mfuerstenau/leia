@@ -1,6 +1,6 @@
 # ADR 0003 — Typed JSON-RPC envelope and DTO conventions
 
-- **Status:** Accepted
+- **Status:** Accepted; superseded by ADR 0034 (the protocol records stay as the in-process API, the wire conventions go). This ADR applies until the JSON-RPC path is removed
 - **Date:** 2026-10-05
 
 ## Context

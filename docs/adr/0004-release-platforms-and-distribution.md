@@ -1,6 +1,6 @@
 # ADR 0004 — Release platforms and distribution
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by ADR 0034 (one `leia.jar` with the scripts `leia` and `leia.cmd`, and no Rust build; still Linux and Windows on x86_64, and no bundled Java)
 - **Date:** 2026-10-05
 
 ## Context
