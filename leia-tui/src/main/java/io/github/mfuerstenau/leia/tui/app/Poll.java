@@ -14,4 +14,16 @@ public sealed interface Poll {
 
     /** Report back with {@link App#documentExportProgress} or {@link App#exportFailed}, under {@code exportId}. */
     record DocumentExport(long exportId, long jobId) implements Poll {}
+
+    /** Report back with {@link App#searchProgress} or {@link App#searchFailed}, under {@code searchId}. */
+    record Search(long searchId, long jobId) implements Poll {}
+
+    /** Report back with {@link App#explainProgress} or {@link App#explainFailed}, under {@code explainId}. */
+    record Explain(long explainId, long jobId) implements Poll {}
+
+    /**
+     * Ask for the hits from {@code fromHit} on, and report back with {@link App#storedScanProgress} or
+     * {@link App#storedScanFailed}, under {@code scanId}.
+     */
+    record StoredScan(long scanId, long jobId, int fromHit) implements Poll {}
 }

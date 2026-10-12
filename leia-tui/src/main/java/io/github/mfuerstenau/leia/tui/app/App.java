@@ -35,11 +35,15 @@ import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
 import io.github.mfuerstenau.leia.protocol.index.IndexCommitStats;
 import io.github.mfuerstenau.leia.protocol.index.IndexEntry;
+import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
+import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
+import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
+import io.github.mfuerstenau.leia.protocol.search.GetStoredScanResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
@@ -56,6 +60,7 @@ import io.github.mfuerstenau.leia.tui.prompt.ExportPrompt;
 import io.github.mfuerstenau.leia.tui.prompt.ExportPrompt.ExportTarget;
 import io.github.mfuerstenau.leia.tui.prompt.PathCompletion;
 import io.github.mfuerstenau.leia.tui.prompt.PathPrompt;
+import io.github.mfuerstenau.leia.tui.search.Search;
 import io.github.mfuerstenau.leia.tui.terms.Terms;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.widgets.Logo;
@@ -111,6 +116,9 @@ public final class App {
 
     /** The documents screen of the open index; null without one, or without a reader. */
     private Documents documents;
+
+    /** The search screen of the open index; null without one, or without a reader. */
+    private Search search;
 
     /** The analysis screen, which needs no index; its analyzer is kept when another index is opened. */
     private final Analysis analysis = new Analysis();
@@ -252,10 +260,36 @@ public final class App {
         commits = new Commits(indexNames(opened));
         terms = new Terms(stats.fields());
         documents = newDocuments(stats, opened);
+        search = newSearch(stats);
         prompt = null;
         forgetExport();
         busy = false;
         return initialRequest();
+    }
+
+    /** The search screen of {@code stats}, which parses with the analysis screen's analyzer. */
+    private Search newSearch(GetIndexStatsResult stats) {
+        Search fresh = new Search(stats.fields(), stats.maxDoc());
+        fresh.setAnalyzer(analysis.settings());
+        return fresh;
+    }
+
+    /** The fields as far as they make up the schema: without their term statistics. */
+    private static List<IndexField> schema(List<IndexField> fields) {
+        return fields.stream()
+                .map(field -> new IndexField(
+                        field.name(),
+                        field.number(),
+                        field.indexOptions(),
+                        field.hasNorms(),
+                        field.hasPayloads(),
+                        field.hasTermVectors(),
+                        field.docValuesType(),
+                        field.pointDimensionCount(),
+                        field.pointNumBytes(),
+                        field.vectorDimension(),
+                        Optional.empty()))
+                .toList();
     }
 
     /**
@@ -268,6 +302,7 @@ public final class App {
         overview = null;
         terms = null;
         documents = null;
+        search = null;
         forgetScans();
         opened = new Opened(
                 result.path(),
@@ -308,6 +343,8 @@ public final class App {
             }
             reopened = changed + " of " + indexes.size() + " indexes";
         }
+        boolean sameFields = schema(overview.stats().fields()).equals(schema(stats.fields()));
+        search = search != null ? search.reopened(stats.fields(), stats.maxDoc(), sameFields) : newSearch(stats);
         overview = overview.reopened(stats, topN);
         terms = terms != null ? terms.reopened(stats.fields()) : new Terms(stats.fields());
         forgetScans();
@@ -385,6 +422,7 @@ public final class App {
         commits = null;
         terms = null;
         documents = null;
+        search = null;
         forgetScans();
         forgetExport();
         busy = false;
@@ -445,6 +483,9 @@ public final class App {
     public Optional<Action> analyzed(String text, AnalyzeResult result) {
         analysisCalls--;
         analysis.analyzed(text, result);
+        if (search != null) {
+            search.setAnalyzer(analysis.settings());
+        }
         return analysisAction(analysis.initialRequest());
     }
 
@@ -508,6 +549,99 @@ public final class App {
     }
 
     /**
+     * Turns what the search screen needs into an action; a document or value to show, or a filter to
+     * browse, switches to the documents screen.
+     */
+    private Optional<Action> searchAction(Optional<Search.Request> request) {
+        return request.flatMap(next -> switch (next) {
+            case Search.Request.Start start ->
+                Optional.of(new Action.StartSearch(start.searchId(), start.params(), start.cancel()));
+            case Search.Request.Explain explain ->
+                Optional.of(new Action.StartExplain(explain.explainId(), explain.params(), explain.cancel()));
+            case Search.Request.StoredScan scan ->
+                Optional.of(new Action.StartStoredScan(scan.scanId(), scan.params(), scan.cancel()));
+            case Search.Request.Cancel cancel -> Optional.of(new Action.CancelSearch(cancel.jobs()));
+            case Search.Request.Filter filter -> startFilter(filter.label(), filter.params(), filter.startDoc());
+            case Search.Request.Document document -> {
+                if (documents == null) {
+                    yield Optional.<Action>empty();
+                }
+                documents.showSearchHit();
+                screen = Screen.DOCUMENTS;
+                yield loadDocument(document.docId());
+            }
+            case Search.Request.View view -> {
+                if (documents == null) {
+                    yield Optional.<Action>empty();
+                }
+                documents.showSearchHit();
+                screen = Screen.DOCUMENTS;
+                yield documentsAction(documents.viewMatches(
+                        view.docId(), view.field(), view.index(), view.spans(), view.matchCount()));
+            }
+        });
+    }
+
+    /** Whether the search screen runs a search, an explanation or a regex scan. */
+    boolean searching() {
+        return search != null && search.running();
+    }
+
+    private static Optional<Action> cancelSearchJob(OptionalLong job) {
+        return job.isPresent() ? Optional.of(new Action.CancelSearch(List.of(job.getAsLong()))) : Optional.empty();
+    }
+
+    /** The job of search {@code searchId} has started; the job of a search that is gone is cancelled. */
+    public Optional<Action> searchStarted(long searchId, long jobId) {
+        return cancelSearchJob(search == null ? OptionalLong.of(jobId) : search.searchStarted(searchId, jobId));
+    }
+
+    /** Shows the progress of search {@code searchId}, or its hits. Returns the next page to fetch, or the document to step to. */
+    public Optional<Action> searchProgress(long searchId, GetSearchResult result) {
+        return search == null ? Optional.empty() : searchAction(search.searchProgress(searchId, result));
+    }
+
+    public void searchFailed(long searchId, String error) {
+        if (search != null) {
+            search.searchFailed(searchId, error);
+        }
+    }
+
+    /** The job of explanation {@code explainId} has started; the job of one that is gone is cancelled. */
+    public Optional<Action> explainStarted(long explainId, long jobId) {
+        return cancelSearchJob(search == null ? OptionalLong.of(jobId) : search.explainStarted(explainId, jobId));
+    }
+
+    public void explainProgress(long explainId, GetExplainResult result) {
+        if (search != null) {
+            search.explainProgress(explainId, result);
+        }
+    }
+
+    public void explainFailed(long explainId, String error) {
+        if (search != null) {
+            search.explainFailed(explainId, error);
+        }
+    }
+
+    /** The job of regex scan {@code scanId} has started; the job of one that is gone is cancelled. */
+    public Optional<Action> storedScanStarted(long scanId, long jobId) {
+        return cancelSearchJob(search == null ? OptionalLong.of(jobId) : search.storedScanStarted(scanId, jobId));
+    }
+
+    public void storedScanProgress(long scanId, GetStoredScanResult result) {
+        if (search != null) {
+            search.storedScanProgress(scanId, result);
+        }
+    }
+
+    public void storedScanFailed(long scanId, String error) {
+        if (search != null) {
+            search.storedScanFailed(scanId, error);
+        }
+    }
+
+    /**
      * Fetches a document for the documents screen, which stops rebuilding a field of the shown one,
      * and finds out whether it matches the filter if that isn't known yet.
      */
@@ -522,8 +656,8 @@ public final class App {
 
     /**
      * Starts a filter on the documents screen (ADR 0031) on {@code label}, built from {@code params},
-     * which starts on {@code startDoc} once it is built, and shows that screen. The search screen
-     * calls it, once it is ported.
+     * which starts on {@code startDoc} once it is built, and shows that screen, as {@code b} on the
+     * search screen asks for.
      */
     public Optional<Action> startFilter(String label, StartFilterParams params, int startDoc) {
         if (documents == null) {
@@ -551,10 +685,7 @@ public final class App {
         }
     }
 
-    /**
-     * Turns what the documents screen needs into an action. What leads to the search screen is
-     * dropped until it is ported (ADR 0034 §10).
-     */
+    /** Turns what the documents screen needs into an action; a search or an analysis switches to that screen. */
     private Optional<Action> documentsAction(Optional<Documents.Request> request) {
         // A key or a step may have built, failed or cleared the filter.
         syncTermsFilter();
@@ -602,8 +733,23 @@ public final class App {
                 yield analysisAction(
                         analysis.analyzeValue("doc " + analyze.docId() + " · " + analyze.field(), analyze.text()));
             }
-            case Documents.Request.Step _, Documents.Request.MoreLikeThis _, Documents.Request.SearchDocValues _ ->
-                Optional.empty();
+            case Documents.Request.Step step ->
+                search == null ? Optional.empty() : searchAction(search.step(step.forward()));
+            case Documents.Request.MoreLikeThis like -> {
+                if (search == null) {
+                    yield Optional.<Action>empty();
+                }
+                screen = Screen.SEARCH;
+                yield searchAction(search.moreLikeThis(like.docId()));
+            }
+            case Documents.Request.SearchDocValues values -> {
+                if (search == null) {
+                    yield Optional.<Action>empty();
+                }
+                screen = Screen.SEARCH;
+                yield searchAction(
+                        search.docValuesQuery(values.field(), values.number(), values.hex(), values.values()));
+            }
         };
     }
 
@@ -972,6 +1118,12 @@ public final class App {
         if (export instanceof Rebuilding rebuilding && rebuilding.jobId() != null) {
             polls.add(new Poll.DocumentExport(rebuilding.id(), rebuilding.jobId()));
         }
+        if (search != null) {
+            search.searchJob().ifPresent(job -> polls.add(new Poll.Search(job[0], job[1])));
+            search.explainJob().ifPresent(job -> polls.add(new Poll.Explain(job[0], job[1])));
+            search.storedScanJob()
+                    .ifPresent(job -> polls.add(new Poll.StoredScan(job[0], job[1], search.storedScanFromHit())));
+        }
         return polls;
     }
 
@@ -1066,6 +1218,14 @@ public final class App {
                     .filter(overview::needsScan)
                     .flatMap(field -> requestScans(List.of(field.name())));
         }
+        if (key.isChar('/')) {
+            Optional<Overview.FieldTerm> top = overview.selectedTopTerm();
+            if (top.isPresent() && search != null) {
+                screen = Screen.SEARCH;
+                return searchAction(
+                        search.termQuery(top.get().field(), top.get().term()));
+            }
+        }
         if (key.isChar('a')) {
             return requestScans(overview.fieldsToScan());
         }
@@ -1123,6 +1283,9 @@ public final class App {
         if (screen == Screen.ANALYSIS && analysis.prompting()) {
             return analysisAction(analysis.handleKey(key));
         }
+        if (screen == Screen.SEARCH && search != null && search.prompting()) {
+            return searchAction(search.handleKey(key));
+        }
         if (key.code() == KeyCode.ESCAPE) {
             // Esc stops the scans first, then the export, then the shown screen's jobs, and quits only
             // when there are none.
@@ -1133,6 +1296,11 @@ public final class App {
                 Long job = export instanceof Rebuilding rebuilding ? rebuilding.jobId() : null;
                 export = null;
                 return job != null ? Optional.of(new Action.CancelExport(job)) : Optional.empty();
+            }
+            if (screen == Screen.SEARCH && searching()) {
+                // A job that hasn't started yet is cancelled once it starts.
+                List<Long> jobs = search.cancel();
+                return jobs.isEmpty() ? Optional.empty() : Optional.of(new Action.CancelSearch(jobs));
             }
             if (screen == Screen.DOCUMENTS && documents != null && documents.rebuilding()) {
                 OptionalLong job = documents.stopRebuild();
@@ -1222,6 +1390,9 @@ public final class App {
         if (screen == Screen.ANALYSIS) {
             return analysisAction(analysis.handleKey(key));
         }
+        if (screen == Screen.SEARCH && search != null) {
+            return searchAction(search.handleKey(key));
+        }
         return Optional.empty();
     }
 
@@ -1283,6 +1454,14 @@ public final class App {
             renderWithoutReader(frame, body);
             return " q quit   o open   c close   1-7 screen";
         }
+        if (screen == Screen.SEARCH) {
+            search.render(frame, body);
+            if (search.prompting()) {
+                return search.keys();
+            }
+            String stop = scan != null || search.running() ? "Esc cancel   " : "";
+            return " " + stop + "q quit   o open   c close   1-7 screen   " + search.keys();
+        }
         if (screen == Screen.TERMS) {
             terms.render(frame, body);
             if (terms.prompting()) {
@@ -1312,10 +1491,9 @@ public final class App {
                 cancel = "Esc stop filter   ";
             }
             String step = documents.filtered() ? "←→ match   b unfilter   " : "←→ doc   ";
-            // s search value and m similar come back with the search screen.
             return " " + cancel + "q quit   o open   c close   1-7 screen   " + step + steps
-                    + "i go to   ⏎ term vector   v view   a analyze   x numbers   e empty   r rebuild   E export   "
-                    + "Tab panel   ↑↓";
+                    + "i go to   ⏎ term vector   v view   a analyze   s search value   x numbers   e empty   m similar   "
+                    + "r rebuild   E export   Tab panel   ↑↓";
         }
         if (screen != Screen.OVERVIEW) {
             renderNotPorted(frame, body, screen);
@@ -1325,10 +1503,9 @@ public final class App {
         if (scan != null) {
             return " Esc cancel scan   q quit   o open   c close   R reopen   1-7 screen   s/S sort   Tab panel   ↑↓";
         }
-        // / on a top term comes back with the search screen.
         if (overview.selectedTopTerm().isPresent()) {
-            return " q quit   o open   c close   R reopen   1-7 screen   ⏎ term's docs   +/- top N   s/S sort   "
-                    + "Tab panel   ↑↓";
+            return " q quit   o open   c close   R reopen   1-7 screen   ⏎ term's docs   / search term   +/- top N   "
+                    + "s/S sort   Tab panel   ↑↓";
         }
         return " q quit   o open   c close   R reopen   1-7 screen   ⏎ terms   a all terms   +/- top N   s/S sort   "
                 + "Tab panel   ↑↓";

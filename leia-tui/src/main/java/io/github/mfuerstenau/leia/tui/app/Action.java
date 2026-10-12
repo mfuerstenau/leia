@@ -6,6 +6,9 @@ import io.github.mfuerstenau.leia.protocol.filter.StartFilterParams;
 import io.github.mfuerstenau.leia.protocol.filter.StepFilterParams;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
+import io.github.mfuerstenau.leia.protocol.search.StartExplainParams;
+import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
+import io.github.mfuerstenau.leia.protocol.search.StartStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.terms.PostingsFilter;
 import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
@@ -167,4 +170,25 @@ public sealed interface Action {
 
     /** Analyze a text, and report back with {@link App#analyzed} or {@link App#analyzeFailed}. */
     record Analyze(AnalyzeParams params) implements Action {}
+
+    /**
+     * Cancel the jobs in {@code cancel}, then start search {@code searchId}, and report back with
+     * {@link App#searchStarted} or {@link App#searchFailed}.
+     */
+    record StartSearch(long searchId, StartSearchParams params, List<Long> cancel) implements Action {}
+
+    /**
+     * Cancel the jobs in {@code cancel}, then start explanation {@code explainId}, and report back
+     * with {@link App#explainStarted} or {@link App#explainFailed}.
+     */
+    record StartExplain(long explainId, StartExplainParams params, List<Long> cancel) implements Action {}
+
+    /**
+     * Cancel the jobs in {@code cancel}, then start regex scan {@code scanId}, and report back with
+     * {@link App#storedScanStarted} or {@link App#storedScanFailed}.
+     */
+    record StartStoredScan(long scanId, StartStoredScanParams params, List<Long> cancel) implements Action {}
+
+    /** Cancel these search, explanation and scan jobs; the app has forgotten them, so nothing is reported back. */
+    record CancelSearch(List<Long> jobs) implements Action {}
 }

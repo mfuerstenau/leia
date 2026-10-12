@@ -103,6 +103,11 @@ What has to carry over:
       - *Its calls, `getAnalysisComponents` and `analyze`, are not jobs. The backend answers them in order, so the reply to the last analysis asked for comes last, and the screen needs no ids. An analyzer that the builder applied becomes the current one only once its analysis comes back, as in the Rust TUI.*
       - *The screen lives on `App` for the whole session, as in the Rust TUI, so its analyzer and text are kept when an index is opened or closed. Fetching the components again after `X` adds jars comes back with the jars screen.*
       - *The popups of the analysis and search screens share `…tui.widgets.Form`, the port of `form.rs`.*
+    - *Settled with the search screen:*
+      - *Each search (each page of hits), explanation and regex scan has an id, which its start, its polls and its replies carry. A reply for one that was replaced or stopped is dropped, and a job that starts for one is cancelled.*
+      - *Esc stops at once: the screen marks its search, explanation and scan as stopped, and cancels the jobs that have started. A job that starts later is cancelled when it starts. So Esc doesn't quit while a search runs whose job hasn't started yet. The Rust TUI reported a cancel back with `search_cancelled`; nothing reports back here.*
+      - *The first polls at 10 ms: when the jobs that `App.polls()` lists change, `Session` sends up to 10 first-poll events 10 ms apart from a daemon timer thread. A regex scan's next page of hits doesn't count as a change. The 100 ms tick goes on, and at most one call per job is in flight, as before.*
+      - *The settings popups (parser options, More-Like-This, similarity and sort, hit fields) each edit a copy of their settings, and the screen takes it only when it changed, which searches again.*
 
 ## Alternatives considered
 

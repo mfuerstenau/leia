@@ -27,6 +27,8 @@ import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexParams;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
+import io.github.mfuerstenau.leia.protocol.job.JobStarted;
+import io.github.mfuerstenau.leia.protocol.search.GetStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetPositionsParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsParams;
@@ -39,6 +41,8 @@ import io.github.mfuerstenau.leia.tui.documents.Documents;
 import io.github.mfuerstenau.leia.tui.terms.Terms;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -47,7 +51,12 @@ import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.LongFunction;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -63,6 +72,32 @@ public final class Session {
 
     /** Something to do with the app on the UI thread, and the action that follows, if any. */
     public record Reply(Function<App, Optional<Action>> apply) implements Event {}
+
+    /**
+     * How many polls of a new job come at {@link #FIRST_POLL_INTERVAL}, before the 100 ms tick: most
+     * searches take a few milliseconds (Rust's {@code FIRST_POLLS}).
+     */
+    private static final int FIRST_POLLS = 10;
+
+    private static final Duration FIRST_POLL_INTERVAL = Duration.ofMillis(10);
+
+    /** A first poll of the jobs, from the timer; one of an older round is ignored. */
+    private record FirstPoll(long round) implements Event {}
+
+    /** Sends the first polls; a daemon, so that it never keeps leia running. */
+    private final ScheduledExecutorService timer = Executors.newSingleThreadScheduledExecutor(task -> {
+        Thread thread = new Thread(task, "leia-first-polls");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    /** The jobs polled after the last event, to see a new one: on the UI thread. */
+    private List<Poll> polled = List.of();
+
+    /** The round of first polls, new with each change of the jobs, and how many are left of it. */
+    private long round;
+
+    private int firstPolls;
 
     private final App app;
     private final LeiaBackend backend;
@@ -90,6 +125,47 @@ public final class Session {
 
     /** Handles an event on the UI thread; returns whether to redraw. */
     public boolean handle(Event event, TuiRunner runner) {
+        if (event instanceof FirstPoll first) {
+            if (first.round() == round && firstPolls > 0) {
+                firstPolls--;
+                poll(runner);
+                scheduleFirstPoll(runner);
+            }
+            return false;
+        }
+        boolean redraw = handleEvent(event, runner);
+        startFirstPolls(runner);
+        return redraw;
+    }
+
+    /**
+     * Polls a job that has just started, or a set of jobs that changed, every 10 ms for the first
+     * {@link #FIRST_POLLS} polls, as the Rust TUI did; the tick polls every 100 ms after that (ADR
+     * 0034 §10). A regex scan's next hit doesn't count as a change.
+     */
+    private void startFirstPolls(TuiRunner runner) {
+        List<Poll> polls = new ArrayList<>();
+        for (Poll poll : app.polls()) {
+            polls.add(
+                    poll instanceof Poll.StoredScan scan ? new Poll.StoredScan(scan.scanId(), scan.jobId(), 0) : poll);
+        }
+        if (polls.equals(polled)) {
+            return;
+        }
+        polled = polls;
+        round++;
+        firstPolls = polls.isEmpty() ? 0 : FIRST_POLLS;
+        scheduleFirstPoll(runner);
+    }
+
+    private void scheduleFirstPoll(TuiRunner runner) {
+        if (firstPolls > 0) {
+            FirstPoll next = new FirstPoll(round);
+            timer.schedule(() -> runner.dispatch(next), FIRST_POLL_INTERVAL.toMillis(), TimeUnit.MILLISECONDS);
+        }
+    }
+
+    private boolean handleEvent(Event event, TuiRunner runner) {
         return switch (event) {
             case KeyEvent key -> {
                 perform(app.handleKey(key), runner);
@@ -324,6 +400,31 @@ public final class Session {
                             }
                         });
             case Action.Copy copy -> copy(copy.text(), runner);
+            case Action.StartSearch start -> {
+                cancelJobs(start.cancel(), runner);
+                startJob(
+                        backend.call(Methods.START_SEARCH, start.params()),
+                        runner,
+                        app -> jobId -> app.searchStarted(start.searchId(), jobId),
+                        app -> message -> app.searchFailed(start.searchId(), message));
+            }
+            case Action.StartExplain start -> {
+                cancelJobs(start.cancel(), runner);
+                startJob(
+                        backend.call(Methods.START_EXPLAIN, start.params()),
+                        runner,
+                        app -> jobId -> app.explainStarted(start.explainId(), jobId),
+                        app -> message -> app.explainFailed(start.explainId(), message));
+            }
+            case Action.StartStoredScan start -> {
+                cancelJobs(start.cancel(), runner);
+                startJob(
+                        backend.call(Methods.START_STORED_SCAN, start.params()),
+                        runner,
+                        app -> jobId -> app.storedScanStarted(start.scanId(), jobId),
+                        app -> message -> app.storedScanFailed(start.scanId(), message));
+            }
+            case Action.CancelSearch cancel -> cancelJobs(cancel.jobs(), runner);
             case Action.StartReconstruct start -> {
                 cancelJobs(start.cancel(), runner);
                 backend.call(
@@ -473,6 +574,31 @@ public final class Session {
         };
     }
 
+    /**
+     * Reports a job that started with {@code started}, or why it didn't with {@code failed}, on the UI
+     * thread.
+     */
+    private void startJob(
+            CompletionStage<JobStarted> call,
+            TuiRunner runner,
+            Function<App, LongFunction<Optional<Action>>> started,
+            Function<App, Consumer<String>> failed) {
+        call.whenComplete((job, error) -> {
+            if (error == null) {
+                reply(runner, app -> started.apply(app).apply(job.jobId()));
+                return;
+            }
+            RpcException rpc = rpcException(error, runner);
+            if (rpc != null) {
+                String message = describe(rpc);
+                reply(runner, app -> {
+                    failed.apply(app).accept(message);
+                    return Optional.empty();
+                });
+            }
+        });
+    }
+
     /** Cancels these jobs; nothing is reported back. The backend answers in order, so this comes before any later call. */
     private void cancelJobs(List<Long> jobs, TuiRunner runner) {
         for (long jobId : jobs) {
@@ -559,6 +685,60 @@ public final class Session {
                                     String message = describe(rpc);
                                     polled(runner, poll, app -> {
                                         app.filterFailed(filter.serial(), message);
+                                        return Optional.empty();
+                                    });
+                                }
+                            });
+                case Poll.Search searching ->
+                    backend.call(Methods.GET_SEARCH, new JobParams(searching.jobId()))
+                            .whenComplete((result, error) -> {
+                                if (error == null) {
+                                    polled(runner, poll, app -> app.searchProgress(searching.searchId(), result));
+                                    return;
+                                }
+                                RpcException rpc = rpcException(error, runner);
+                                if (rpc != null) {
+                                    String message = describe(rpc);
+                                    polled(runner, poll, app -> {
+                                        app.searchFailed(searching.searchId(), message);
+                                        return Optional.empty();
+                                    });
+                                }
+                            });
+                case Poll.Explain explaining ->
+                    backend.call(Methods.GET_EXPLAIN, new JobParams(explaining.jobId()))
+                            .whenComplete((result, error) -> {
+                                if (error == null) {
+                                    polled(runner, poll, app -> {
+                                        app.explainProgress(explaining.explainId(), result);
+                                        return Optional.empty();
+                                    });
+                                    return;
+                                }
+                                RpcException rpc = rpcException(error, runner);
+                                if (rpc != null) {
+                                    String message = describe(rpc);
+                                    polled(runner, poll, app -> {
+                                        app.explainFailed(explaining.explainId(), message);
+                                        return Optional.empty();
+                                    });
+                                }
+                            });
+                case Poll.StoredScan scanning ->
+                    backend.call(Methods.GET_STORED_SCAN, new GetStoredScanParams(scanning.jobId(), scanning.fromHit()))
+                            .whenComplete((result, error) -> {
+                                if (error == null) {
+                                    polled(runner, poll, app -> {
+                                        app.storedScanProgress(scanning.scanId(), result);
+                                        return Optional.empty();
+                                    });
+                                    return;
+                                }
+                                RpcException rpc = rpcException(error, runner);
+                                if (rpc != null) {
+                                    String message = describe(rpc);
+                                    polled(runner, poll, app -> {
+                                        app.storedScanFailed(scanning.scanId(), message);
                                         return Optional.empty();
                                     });
                                 }

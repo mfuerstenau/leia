@@ -15,6 +15,7 @@ import io.github.mfuerstenau.leia.protocol.commits.Commit;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
+import io.github.mfuerstenau.leia.protocol.document.DocValues;
 import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
 import io.github.mfuerstenau.leia.protocol.document.GetReconstructResult;
@@ -39,6 +40,19 @@ import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
+import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
+import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
+import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
+import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
+import io.github.mfuerstenau.leia.protocol.search.GetStoredScanResult;
+import io.github.mfuerstenau.leia.protocol.search.Hit;
+import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
+import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
+import io.github.mfuerstenau.leia.protocol.search.SearchResults;
+import io.github.mfuerstenau.leia.protocol.search.Snippet;
+import io.github.mfuerstenau.leia.protocol.search.StoredScanHit;
+import io.github.mfuerstenau.leia.protocol.search.TermQuery;
+import io.github.mfuerstenau.leia.protocol.search.TotalHitsRelation;
 import io.github.mfuerstenau.leia.protocol.terms.FieldTerms;
 import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
@@ -56,6 +70,7 @@ import io.github.mfuerstenau.leia.tui.documents.DocumentExport.DocumentData;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -223,6 +238,262 @@ class AppTest {
         assertThat(app.handleKey(key('c'))).hasValue(new Action.Close());
         app.closed();
         assertThat(app.hasIndex()).isFalse();
+    }
+
+    /** The search screen of an index of three documents with {@code id} and {@code body}, after {@code query} was submitted and its job started. */
+    private App searching(String query) {
+        App app = app();
+        app.opened(withDocs(stats("/data/idx"), 3, field("id", 0), field("body", 1)), List.of());
+        assertThat(app.handleKey(key('5'))).isEmpty();
+        app.handleKey(key('/'));
+        typed(app, query);
+        Optional<Action> start = app.handleKey(key(KeyCode.ENTER));
+        assertThat(start).containsInstanceOf(Action.StartSearch.class);
+        searchId = ((Action.StartSearch) start.orElseThrow()).searchId();
+        assertThat(((Action.StartSearch) start.orElseThrow()).cancel()).isEmpty();
+        assertThat(app.searchStarted(searchId, 1)).isEmpty();
+        return app;
+    }
+
+    /** The id of the search that {@link #searching} started. */
+    private long searchId;
+
+    private static GetSearchResult page(int... docIds) {
+        return new GetSearchResult(
+                3,
+                Optional.of(new SearchResults(
+                        "body:q",
+                        "body:q",
+                        docIds.length,
+                        TotalHitsRelation.EQUAL_TO,
+                        Arrays.stream(docIds)
+                                .mapToObj(docId -> new Hit(docId, 1f, List.of(), List.of()))
+                                .toList(),
+                        1,
+                        Optional.empty())));
+    }
+
+    @Test
+    void theQueryLineTakesEveryKey() {
+        // q and 1 are typed, not handled as quit and screen keys.
+        App app = searching("q1");
+
+        assertThat(render(app)).contains("5 Search", "│q1", "Esc cancel");
+        assertThat(app.polls()).containsExactly(new Poll.Search(searchId, 1));
+    }
+
+    @Test
+    void escStopsTheSearchJobsBeforeItQuits() {
+        App app = searching("q");
+        app.searchProgress(searchId, page(2));
+        Optional<Action> explain = app.handleKey(key('x'));
+        assertThat(explain).containsInstanceOf(Action.StartExplain.class);
+        long explainId = ((Action.StartExplain) explain.orElseThrow()).explainId();
+        assertThat(app.explainStarted(explainId, 2)).isEmpty();
+        assertThat(app.polls()).containsExactly(new Poll.Explain(explainId, 2));
+
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.CancelSearch(List.of(2L)));
+        assertThat(app.polls()).isEmpty();
+        assertThat(render(app)).contains("Cancelled.");
+        // A late reply changes nothing.
+        app.explainProgress(explainId, new GetExplainResult(Optional.empty()));
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.Quit());
+    }
+
+    @Test
+    void aSearchJobThatStartsAfterEscIsCancelled() {
+        App app = app();
+        app.opened(withDocs(stats("/data/idx"), 3, field("id", 0)), List.of());
+        app.handleKey(key('5'));
+        app.handleKey(key('/'));
+        typed(app, "q");
+        long id = ((Action.StartSearch) app.handleKey(key(KeyCode.ENTER)).orElseThrow()).searchId();
+
+        // Esc before the job has started: nothing to cancel yet, but nothing quits either.
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).isEmpty();
+        assertThat(app.searchStarted(id, 7)).hasValue(new Action.CancelSearch(List.of(7L)));
+        assertThat(app.polls()).isEmpty();
+    }
+
+    @Test
+    void enterOnAHitOpensItsDocumentAndTheBracketsStepThroughTheHits() {
+        App app = searching("q");
+        assertThat(app.searchProgress(searchId, page(2, 0))).isEmpty();
+
+        assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(load(2));
+        app.documentLoaded(document(2));
+        assertThat(wide(app)).contains("2 Documents", "[ ] hits").doesNotContain("[ ] term docs");
+
+        assertThat(app.handleKey(key(']'))).isEqualTo(load(0));
+        app.documentLoaded(document(0));
+        assertThat(app.handleKey(key(']'))).isEmpty();
+        assertThat(app.handleKey(key('['))).isEqualTo(load(2));
+    }
+
+    @Test
+    void bBrowsesTheDocumentsThroughTheQuery() {
+        App app = searching("q");
+        app.searchProgress(searchId, page(2, 0));
+
+        Optional<Action> filter = app.handleKey(key('b'));
+        assertThat(filter).containsInstanceOf(Action.StartFilter.class);
+        assertThat(((Action.StartFilter) filter.orElseThrow()).params().includeDeleted())
+                .isFalse();
+        assertThat(render(app)).contains("2 Documents");
+    }
+
+    @Test
+    void aRegexScanIsPolledFromItsLastHitAndOpensAValue() {
+        App app = app();
+        app.opened(withDocs(stats("/data/idx"), 3, field("id", 0), field("body", 1)), List.of());
+        app.handleKey(key('5'));
+        for (int i = 0; i < 6; i++) {
+            assertThat(app.handleKey(key('m'))).isEmpty();
+        }
+        app.handleKey(key('/'));
+        typed(app, "q+");
+        Optional<Action> start = app.handleKey(key(KeyCode.ENTER));
+        assertThat(start).containsInstanceOf(Action.StartStoredScan.class);
+        Action.StartStoredScan scan = (Action.StartStoredScan) start.orElseThrow();
+        assertThat(scan.params().pattern()).isEqualTo("q+");
+        assertThat(scan.cancel()).isEmpty();
+        app.storedScanStarted(scan.scanId(), 3);
+        assertThat(app.polls()).containsExactly(new Poll.StoredScan(scan.scanId(), 3, 0));
+
+        StoredScanHit hit =
+                new StoredScanHit(2, false, "body", 0, 2, 1, List.of(new MatchSpan(0, 2)), new Snippet(0, "qq"));
+        app.storedScanProgress(scan.scanId(), new GetStoredScanResult(1, 1, 1, List.of(hit), Optional.empty()));
+        assertThat(app.polls()).containsExactly(new Poll.StoredScan(scan.scanId(), 3, 1));
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.CancelSearch(List.of(3L)));
+        assertThat(app.polls()).isEmpty();
+
+        assertThat(app.handleKey(key('v'))).isEqualTo(load(2));
+        assertThat(render(app)).contains("2 Documents");
+    }
+
+    @Test
+    void reopeningKeepsTheQueryOfTheSearchScreenWithoutRunningIt() {
+        App app = searching("red");
+        app.handleKey(key('R'));
+
+        // id would be the default field of a new search screen, as it is the first with postings.
+        app.reopened(withDocs(stats("/data/idx"), 3, field("title", 0), field("id", 1)));
+
+        assertThat(app.polls()).isEmpty();
+        app.handleKey(key('/'));
+        Optional<Action> start = app.handleKey(key(KeyCode.ENTER));
+        ClassicQuery classic = ((Action.StartSearch) start.orElseThrow())
+                .params()
+                .query()
+                .classic()
+                .orElseThrow();
+        assertThat(classic.expression()).isEqualTo("red");
+        assertThat(classic.defaultField()).isEqualTo("id");
+    }
+
+    @Test
+    void mOnADocumentSearchesForDocumentsLikeIt() {
+        App app = app();
+        app.opened(withDocs(stats("/data/idx"), 3, field("id", 0), field("body", 1)), List.of());
+        assertThat(app.handleKey(key('2'))).isEqualTo(load(0));
+        app.documentLoaded(document(0));
+
+        Optional<Action> start = app.handleKey(key('m'));
+        assertThat(start).containsInstanceOf(Action.StartSearch.class);
+        assertThat(((Action.StartSearch) start.orElseThrow()).cancel()).isEmpty();
+        MoreLikeThisQuery like = ((Action.StartSearch) start.orElseThrow())
+                .params()
+                .query()
+                .moreLikeThis()
+                .orElseThrow();
+        assertThat(like.docId()).hasValue(0);
+        // No field has positions: the first indexed one.
+        assertThat(like.fields()).containsExactly("id");
+        assertThat(render(app)).contains("More like this document · field id");
+    }
+
+    @Test
+    void sOnADocValueSearchesForTheDocumentsWithIt() {
+        App app = app();
+        IndexField id = new IndexField(
+                "id",
+                0,
+                IndexOptions.DOCS,
+                false,
+                false,
+                false,
+                DocValuesType.SORTED,
+                0,
+                0,
+                0,
+                Optional.of(new TermStats(1, 1, 1)));
+        app.opened(withDocs(stats("/data/idx"), 3, id), List.of());
+        assertThat(app.handleKey(key('2'))).isEqualTo(load(0));
+        app.documentLoaded(new GetDocumentResult(
+                0,
+                false,
+                List.of(new DocumentField(
+                        "id",
+                        OptionalLong.empty(),
+                        List.of(new StoredValue(StoredType.STRING, "doc-0", false)),
+                        Optional.of(
+                                new DocValues(DocValuesType.SORTED, List.of(), List.of(new BytesValue("a b", false)))),
+                        false))));
+
+        Optional<Action> start = app.handleKey(key('s'));
+        assertThat(start).containsInstanceOf(Action.StartSearch.class);
+        DocValuesQuery query = ((Action.StartSearch) start.orElseThrow())
+                .params()
+                .query()
+                .docValues()
+                .orElseThrow();
+        assertThat(query.field()).isEqualTo("id");
+        assertThat(query.values()).hasValue(List.of(new BytesValue("a b", false)));
+        assertThat(render(app)).contains("Doc values · field id (SORTED) · text");
+    }
+
+    @Test
+    void slashOnATopTermSearchesForIt() {
+        App app = appWithFields();
+        app.handleKey(key(KeyCode.DOWN));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(start(1, "body"));
+        app.scanStarted(1, 1);
+        app.scanProgress(
+                1,
+                new GetFieldTermScanResult(
+                        1, Optional.of(new FieldTerms("body", 1, List.of(new TopTerm("ff", true, 1, 1))))));
+        app.handleKey(key(KeyCode.TAB));
+        assertThat(wide(app)).contains("/ search term");
+
+        Optional<Action> start = app.handleKey(key('/'));
+        assertThat(start).containsInstanceOf(Action.StartSearch.class);
+        assertThat(((Action.StartSearch) start.orElseThrow()).params().query().term())
+                .hasValue(new TermQuery("body", new BytesValue("ff", true)));
+        assertThat(render(app)).contains("Term · field body · hex");
+    }
+
+    @Test
+    void anAnalyzerAppliedOnTheAnalysisScreenParsesTheQueries() {
+        App app = searching("q");
+        app.handleKey(key('6'));
+        app.componentsFailed("down");
+        app.handleKey(key('b'));
+        app.handleKey(key(KeyCode.LEFT));
+        Action.Analyze analyze =
+                (Action.Analyze) app.handleKey(key(KeyCode.ENTER)).orElseThrow();
+        app.analyzed(analyze.params().text(), new AnalyzeResult(List.of(), List.of()));
+
+        app.handleKey(key('5'));
+        app.handleKey(key('/'));
+        Optional<Action> start = app.handleKey(key(KeyCode.ENTER));
+        assertThat(((Action.StartSearch) start.orElseThrow())
+                        .params()
+                        .query()
+                        .classic()
+                        .orElseThrow()
+                        .analyzer()
+                        .custom())
+                .isPresent();
     }
 
     @Test
@@ -549,7 +820,7 @@ class AppTest {
         assertThat(buffer.get(search, 0).style().addModifiers()).contains(dev.tamboui.style.Modifier.REVERSED);
         assertThat(buffer.get(tabs.indexOf("1 Overview"), 0).style().addModifiers())
                 .doesNotContain(dev.tamboui.style.Modifier.REVERSED);
-        assertThat(render(app)).contains("search screen");
+        assertThat(render(app)).contains("Classic query · default field");
     }
 
     @Test
@@ -1124,7 +1395,7 @@ class AppTest {
         app.handleKey(key(KeyCode.TAB));
         app.handleKey(key(KeyCode.END));
         assertThat(render(app)).contains("Esc stop rebuild", "rebuilding… 1024 of 3000 terms");
-        assertThat(TestScreens.render(app::render, 200, 20)).contains("e empty   r rebuild   E export   Tab panel");
+        assertThat(TestScreens.render(app::render, 200, 20)).contains("m similar   r rebuild   E export   Tab panel");
 
         // Another document stops it.
         assertThat(app.handleKey(key(KeyCode.RIGHT)))

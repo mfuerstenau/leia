@@ -6,7 +6,7 @@ import dev.tamboui.tui.event.KeyEvent;
 import java.util.function.ToIntFunction;
 
 /**
- * A one-line text editor, shared by the open-index prompt and, later, the search query: the cursor
+ * A one-line text editor, shared by the open-index prompt, the search query and the popups: the cursor
  * moves by character, and Ctrl+A/E/U/K/W edit as in a shell.
  */
 public final class LineInput {

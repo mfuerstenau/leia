@@ -1,6 +1,5 @@
 package io.github.mfuerstenau.leia.tui.app;
 
-import static io.github.mfuerstenau.leia.tui.TestFilters.filterParams;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -136,7 +135,8 @@ class SessionPilotTest {
                 || app.loadingDocuments()
                 || app.documentJobs()
                 || app.exporting()
-                || app.analyzing();
+                || app.analyzing()
+                || app.searching();
     }
 
     private String screen() {
@@ -513,10 +513,84 @@ class SessionPilotTest {
         }
     }
 
-    /** Starts a filter for the pattern {@code red}, as the search screen will. */
+    /** Searches for {@code red} on the search screen, and browses its hits with {@code b}. */
     private void startFilter() throws InterruptedException {
-        test.runner().dispatch(new Session.Reply(app -> app.startFilter("red", filterParams(false), 0)));
+        search("red");
+        pilot.press('b');
         settle();
+    }
+
+    /** Searches for {@code query} on the search screen, and waits for the hits. */
+    private void search(String query) throws InterruptedException {
+        pilot.press('5');
+        pilot.press('/');
+        for (char c : query.toCharArray()) {
+            pilot.press(c);
+        }
+        pilot.press(KeyCode.ENTER);
+        settle();
+    }
+
+    @Test
+    void searchesExplainsAndStepsThroughTheHits() throws Exception {
+        openAtStart(writeBodies(tmp.resolve("index"), "red fox", "blue fox", "red lamp"), OpenMode.READER);
+
+        search("red");
+        assertThat(screen()).contains("2 hits in", "body=red fox", "Parsed     body:red");
+
+        pilot.press('x');
+        settle();
+        assertThat(screen()).contains("Explanation of doc 0");
+
+        pilot.press(KeyCode.ENTER);
+        settle();
+        assertThat(screen()).contains("#0 of 0–2", "[ ] hits");
+        pilot.press(']');
+        settle();
+        assertThat(screen()).contains("#2 of 0–2", "red lamp");
+    }
+
+    @Test
+    void slashOnATopTermSearchesForIt() throws Exception {
+        openAtStart(writeIndex(tmp.resolve("index"), 3), OpenMode.READER);
+        pilot.press(KeyCode.ENTER);
+        settle();
+        pilot.press(KeyCode.TAB);
+
+        pilot.press('/');
+        settle();
+        assertThat(screen()).contains("Term · field id", "1 hit in", "id=doc-0");
+    }
+
+    @Test
+    void mOnADocumentSearchesForDocumentsLikeIt() throws Exception {
+        openAtStart(writeBodies(tmp.resolve("index"), "red fox", "red fox", "blue lamp"), OpenMode.READER);
+        pilot.press('2');
+        settle();
+
+        pilot.press('m');
+        settle();
+        assertThat(screen()).contains("More like this document · field body", "Parsed");
+    }
+
+    @Test
+    void aRegexScanFindsValuesAndViewsOne() throws Exception {
+        openAtStart(writeBodies(tmp.resolve("index"), "red fox", "blue fox", "red lamp"), OpenMode.READER);
+        pilot.press('5');
+        for (int i = 0; i < 6; i++) {
+            pilot.press('m');
+        }
+        pilot.press('/');
+        for (char c : "re+d".toCharArray()) {
+            pilot.press(c);
+        }
+        pilot.press(KeyCode.ENTER);
+        settle();
+        assertThat(screen()).contains("2 values in 2 docs in", "red fox", "red lamp");
+
+        pilot.press('v');
+        settle();
+        assertThat(screen()).contains("2 Documents", "Esc close");
     }
 
     @Test
