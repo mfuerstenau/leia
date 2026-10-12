@@ -1,9 +1,13 @@
 package io.github.mfuerstenau.leia.tui.app;
 
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
+import io.github.mfuerstenau.leia.protocol.filter.StartFilterParams;
+import io.github.mfuerstenau.leia.protocol.filter.StepFilterParams;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.terms.PostingsFilter;
+import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
+import io.github.mfuerstenau.leia.tui.documents.Documents;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -75,11 +79,11 @@ public sealed interface Action {
 
     /**
      * Cancel the jobs in {@code cancel}, fetch this document, and report back with {@link
-     * App#documentLoaded} or {@link App#documentFailed}.
-     *
-     * @param locate the filter to locate the document in once it is in, if any (ADR 0031)
+     * App#documentLoaded} or {@link App#documentFailed}. With {@code locate}, first find out whether
+     * it matches that filter, and report back with {@link App#filterStepped} or {@link
+     * App#filterFailed} (ADR 0031).
      */
-    record LoadDocument(int docId, List<Long> cancel, OptionalLong locate) implements Action {}
+    record LoadDocument(int docId, List<Long> cancel, Optional<Documents.Locate> locate) implements Action {}
 
     /**
      * Fetch a stored value whole, and report back with {@link App#storedValueLoaded} or {@link
@@ -101,4 +105,34 @@ public sealed interface Action {
 
     /** Put this text on the terminal's clipboard (OSC 52); nothing is reported back. */
     record Copy(String text) implements Action {}
+
+    /**
+     * Cancel the jobs in {@code cancel}, then start rebuilding the terms {@code field} of a document
+     * was indexed with, and report back with {@link App#reconstructStarted} or {@link
+     * App#reconstructStartFailed} (ADR 0029).
+     */
+    record StartReconstruct(int docId, String field, List<Long> cancel) implements Action {}
+
+    /** Cancel this rebuild job. The app has forgotten the rebuild already, so nothing is reported back. */
+    record CancelReconstruct(long jobId) implements Action {}
+
+    /**
+     * Cancel the job {@code cancel} and release the filter {@code release}, which this filter
+     * replaces, then start building filter {@code serial}, and report back with {@link
+     * App#filterStarted} or {@link App#filterFailed} (ADR 0031).
+     */
+    record StartFilter(long serial, StartFilterParams params, OptionalLong cancel, OptionalLong release)
+            implements Action {}
+
+    /**
+     * Find a match of filter {@code serial}, and report back with {@link App#filterStepped} or {@link
+     * App#filterStepFailed}.
+     */
+    record StepFilter(long serial, StepFilterParams params, FilterStep step) implements Action {}
+
+    /**
+     * Cancel the job that builds a filter, or release the filter. The app has forgotten it already,
+     * so nothing is reported back.
+     */
+    record ClearFilter(OptionalLong cancel, OptionalLong release) implements Action {}
 }

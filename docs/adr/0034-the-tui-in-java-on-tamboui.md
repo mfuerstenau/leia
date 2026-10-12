@@ -95,6 +95,9 @@ What has to carry over:
       - *A document can come after another one was asked for, and would use up the field to select and the value to view that belong to the later one. So the screen remembers the document it asked for last, and drops a reply for any other. Term vectors, positions and whole stored values are checked against the shown document, hit or viewed value.*
       - *Copying (OSC 52) writes through the terminal backend's `writeRaw` on the UI thread, between two frames.*
       - *Java prints a float in its shortest form but with at least two digits in exponent form; the number formats print as Rust's `{:?}` does, with one digit where it reads back the same.*
+      - *The rebuild of a field (ADR 0029) belongs to its document and field, and asking for another document stops it at once. A job that starts for a rebuild no longer wanted is cancelled, and progress of any job but the running one is dropped. Each filter (ADR 0031) has a serial, new for one built again after a reopen, that its start, polls and steps carry: a reply for a filter that was replaced or cleared is dropped, and its job is cancelled. Locating a loaded document in the filter comes back in one reply with the document.*
+      - *`App.startFilter` is the entry point that the search screen will call; until then, the filter is reached only by the tests. After a reopen, `Session` starts the filter's rebuild after `App.reopened`, as `main.rs` did.*
+      - *A handler can end one call and start the next (a filter step that shows a document), so the Pilot tests' barrier notes whether a call runs on the UI thread, not on the test thread.*
 
 ## Alternatives considered
 

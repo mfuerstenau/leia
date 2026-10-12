@@ -1,5 +1,7 @@
 package io.github.mfuerstenau.leia.tui.app;
 
+import static io.github.mfuerstenau.leia.tui.TestFilters.built;
+import static io.github.mfuerstenau.leia.tui.TestFilters.filterParams;
 import static io.github.mfuerstenau.leia.tui.TestScreens.ctrl;
 import static io.github.mfuerstenau.leia.tui.TestScreens.key;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -13,8 +15,15 @@ import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
+import io.github.mfuerstenau.leia.protocol.document.GetReconstructResult;
+import io.github.mfuerstenau.leia.protocol.document.ReconstructResult;
+import io.github.mfuerstenau.leia.protocol.document.ReconstructSource;
+import io.github.mfuerstenau.leia.protocol.document.ReconstructedField;
 import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
+import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
+import io.github.mfuerstenau.leia.protocol.filter.FilterMatch;
+import io.github.mfuerstenau.leia.protocol.filter.StepFilterParams;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
@@ -33,11 +42,14 @@ import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.Posting;
+import io.github.mfuerstenau.leia.protocol.terms.PostingsFilter;
 import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
 import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
 import io.github.mfuerstenau.leia.protocol.version.JavaRuntime;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import io.github.mfuerstenau.leia.tui.TestScreens;
+import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
+import io.github.mfuerstenau.leia.tui.documents.Documents;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import java.nio.file.Path;
 import java.util.List;
@@ -830,7 +842,7 @@ class AppTest {
     }
 
     private static Optional<Action> load(int docId) {
-        return Optional.of(new Action.LoadDocument(docId, List.of(), OptionalLong.empty()));
+        return Optional.of(new Action.LoadDocument(docId, List.of(), Optional.empty()));
     }
 
     private static GetIndexStatsResult withDocs(GetIndexStatsResult stats, int maxDoc, IndexField... fields) {
@@ -1045,5 +1057,178 @@ class AppTest {
         app.handleKey(key(KeyCode.RIGHT));
         assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(load(0));
         assertThat(app.documentLoaded(document(0))).hasValue(new Action.LoadPositions(0, "id", text("2")));
+    }
+
+    /** On the documents screen of an index of three documents, with document 0 shown. */
+    private static App appShowingADocument() {
+        App app = appWithDocuments();
+        app.handleKey(key('2'));
+        app.documentLoaded(document(0));
+        return app;
+    }
+
+    @Test
+    void rebuildsAFieldAndStopsWhenTheDocumentChanges() {
+        App app = appShowingADocument();
+
+        assertThat(app.handleKey(key('r'))).hasValue(new Action.StartReconstruct(0, "id", List.of()));
+        assertThat(app.reconstructStarted(0, "id", 7)).isEmpty();
+        assertThat(app.polls()).containsExactly(new Poll.Reconstruct(7));
+        app.reconstructProgress(7, new GetReconstructResult(1024, OptionalLong.of(3000), Optional.empty()));
+        // The details panel at its end.
+        app.handleKey(key(KeyCode.TAB));
+        app.handleKey(key(KeyCode.END));
+        assertThat(render(app)).contains("Esc stop rebuild", "rebuilding… 1024 of 3000 terms");
+        assertThat(TestScreens.render(app::render, 200, 20)).contains("e empty   r rebuild   Tab panel");
+
+        // Another document stops it.
+        assertThat(app.handleKey(key(KeyCode.RIGHT)))
+                .hasValue(new Action.LoadDocument(1, List.of(7L), Optional.empty()));
+        assertThat(app.polls()).isEmpty();
+        app.documentLoaded(document(1));
+
+        // So does Esc, before it quits.
+        app.handleKey(key('r'));
+        app.reconstructStarted(1, "id", 8);
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.CancelReconstruct(8));
+        assertThat(app.polls()).isEmpty();
+        app.handleKey(key(KeyCode.END));
+        assertThat(render(app)).contains("r rebuilds the terms");
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.Quit());
+    }
+
+    @Test
+    void aRebuildStoppedBeforeItsJobStartedIsCancelledOnceItHas() {
+        App app = appShowingADocument();
+        app.handleKey(key('r'));
+
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).isEmpty();
+        assertThat(app.reconstructStarted(0, "id", 7)).hasValue(new Action.CancelReconstruct(7));
+        assertThat(app.polls()).isEmpty();
+    }
+
+    @Test
+    void showsTheRebuiltField() {
+        App app = appShowingADocument();
+        app.handleKey(key('r'));
+        app.reconstructStarted(0, "id", 7);
+
+        app.reconstructProgress(
+                7,
+                new GetReconstructResult(
+                        3,
+                        OptionalLong.of(3),
+                        Optional.of(new ReconstructResult(
+                                List.of(new ReconstructedField(
+                                        "id",
+                                        IndexOptions.DOCS,
+                                        ReconstructSource.POSTINGS,
+                                        List.of(new TermVectorTerm("doc-0", false, 1, List.of())))),
+                                2))));
+
+        assertThat(app.polls()).isEmpty();
+        app.handleKey(key(KeyCode.TAB));
+        app.handleKey(key(KeyCode.END));
+        String screen = render(app);
+        assertThat(screen).contains("1 term, from the postings", "  doc-0").doesNotContain("×1");
+        // Rebuilt once is enough.
+        assertThat(app.handleKey(key('r'))).isEmpty();
+    }
+
+    @Test
+    void aFilterStepsThroughItsMatchesAndTheTermsScreenReadsThePostingsThroughIt() {
+        App app = appShowingADocument();
+        app.handleKey(key('1'));
+
+        assertThat(app.startFilter("red", filterParams(false), 0))
+                .hasValue(new Action.StartFilter(1, filterParams(false), OptionalLong.empty(), OptionalLong.empty()));
+        assertThat(render(app)).contains("2 Documents");
+        assertThat(app.filterStarted(1, 4)).isEmpty();
+        assertThat(app.polls()).containsExactly(new Poll.Filter(1, 4));
+        assertThat(render(app)).contains("Esc stop filter", "filter red: finding matches… 0%");
+        // Esc stops building it.
+        assertThat(app.handleKey(key(KeyCode.ESCAPE)))
+                .hasValue(new Action.ClearFilter(OptionalLong.of(4), OptionalLong.empty()));
+        assertThat(app.polls()).isEmpty();
+
+        app.startFilter("red", filterParams(false), 2);
+        app.filterStarted(2, 5);
+        StepFilterParams params = new StepFilterParams(5, 2, true);
+        // Once it is built, it starts on its document.
+        assertThat(app.filterProgress(2, built(5, 2, 3)))
+                .hasValue(new Action.StepFilter(2, params, FilterStep.NEAREST));
+        assertThat(app.loadingDocuments()).isTrue();
+        assertThat(app.filterStepped(2, params, FilterStep.NEAREST, Optional.of(new FilterMatch(2, 1))))
+                .isEqualTo(load(2));
+        app.documentLoaded(document(2));
+        assertThat(app.loadingDocuments()).isFalse();
+        assertThat(render(app)).contains("filter red: 2 of 2", "←→ match   b unfilter");
+
+        // The terms screen reads the postings through it.
+        assertThat(app.handleKey(key('3'))).hasValue(loadTerms("id", null));
+        Action.LoadPostings marked =
+                new Action.LoadPostings("id", text("1"), 0, false, Optional.of(new PostingsFilter(5, false)));
+        assertThat(app.termsLoaded(loadTerms("id", null), termPage("1", "2"))).hasValue(marked);
+        app.postingsLoaded(marked, postingsOf());
+        assertThat(render(app)).contains("b filter only");
+
+        // A document shown some other way is located in it.
+        app.handleKey(key(KeyCode.ENTER));
+        app.handleKey(key(KeyCode.ENTER));
+        assertThat(app.handleKey(key(KeyCode.ENTER)))
+                .hasValue(new Action.LoadDocument(0, List.of(), Optional.of(new Documents.Locate(2, 5))));
+        StepFilterParams located = new StepFilterParams(5, 0, true);
+        app.filterLocated(2, located, Optional.of(new FilterMatch(2, 1)));
+        app.documentLoaded(document(0));
+        assertThat(render(app)).contains("filter red: not a match, 2 in all");
+
+        assertThat(app.handleKey(key('b'))).hasValue(new Action.ClearFilter(OptionalLong.empty(), OptionalLong.of(5)));
+        // The terms screen shows all postings again.
+        app.handleKey(key('3'));
+        assertThat(render(app)).doesNotContain("b filter only");
+    }
+
+    @Test
+    void aFilterClearedBeforeItsJobStartedIsCancelledOnceItHas() {
+        App app = appShowingADocument();
+        app.startFilter("red", filterParams(false), 0);
+
+        assertThat(app.handleKey(key('b')))
+                .hasValue(new Action.ClearFilter(OptionalLong.empty(), OptionalLong.empty()));
+        assertThat(app.filterStarted(1, 4)).hasValue(new Action.ClearFilter(OptionalLong.of(4), OptionalLong.empty()));
+        // Nor does what the job finds count.
+        assertThat(app.filterProgress(1, built(4, 2, 3))).isEmpty();
+        app.filterFailed(1, "too late");
+        assertThat(render(app)).doesNotContain("filter red");
+    }
+
+    @Test
+    void aReopenThatFoundANewCommitBuildsTheFilterAgain() {
+        App app = appShowingADocument();
+        app.startFilter("red", filterParams(false), 1);
+        app.filterStarted(1, 5);
+        Optional<Action> step = app.filterProgress(1, built(5, 2, 3));
+        StepFilterParams params = new StepFilterParams(5, 1, true);
+        assertThat(step).hasValue(new Action.StepFilter(1, params, FilterStep.NEAREST));
+        assertThat(app.filterStepped(1, params, FilterStep.NEAREST, Optional.of(new FilterMatch(1, 0))))
+                .isEqualTo(load(1));
+        app.documentLoaded(document(1));
+        assertThat(app.rebuildFilter()).isEmpty();
+
+        assertThat(app.reopened(withDocs(stats("/data/idx"), 3, field("id", 0))))
+                .isEqualTo(load(1));
+
+        assertThat(render(app)).contains("Reopened: segments_1; rebuilding");
+        assertThat(app.rebuildFilter())
+                .hasValue(new Action.StartFilter(2, filterParams(false), OptionalLong.empty(), OptionalLong.empty()));
+        // A poll of the old job, which the reopen stopped, changes nothing.
+        assertThat(app.filterProgress(1, built(5, 2, 3))).isEmpty();
+        app.filterStarted(2, 9);
+        assertThat(app.rebuildFilter()).isEmpty();
+        assertThat(app.polls()).containsExactly(new Poll.Filter(2, 9));
+        app.documentLoaded(document(1));
+        // Once built, it only locates the document shown.
+        assertThat(app.filterProgress(2, built(9, 2, 3)))
+                .hasValue(new Action.StepFilter(2, new StepFilterParams(9, 1, true), FilterStep.LOCATE));
     }
 }

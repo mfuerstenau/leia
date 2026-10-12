@@ -5,4 +5,10 @@ public sealed interface Poll {
 
     /** Report back with {@link App#scanProgress} or {@link App#scanFailed}, under {@code scanId}. */
     record Scan(long scanId, long jobId) implements Poll {}
+
+    /** Report back with {@link App#reconstructProgress} or {@link App#reconstructFailed}. */
+    record Reconstruct(long jobId) implements Poll {}
+
+    /** Report back with {@link App#filterProgress} or {@link App#filterFailed}, under {@code serial}. */
+    record Filter(long serial, long jobId) implements Poll {}
 }

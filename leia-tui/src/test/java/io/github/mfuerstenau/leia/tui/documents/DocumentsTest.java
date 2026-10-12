@@ -1,5 +1,6 @@
 package io.github.mfuerstenau.leia.tui.documents;
 
+import static io.github.mfuerstenau.leia.tui.TestFilters.filterParams;
 import static io.github.mfuerstenau.leia.tui.TestScreens.key;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -8,23 +9,34 @@ import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.DocValues;
 import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
+import io.github.mfuerstenau.leia.protocol.document.GetReconstructResult;
+import io.github.mfuerstenau.leia.protocol.document.ReconstructResult;
+import io.github.mfuerstenau.leia.protocol.document.ReconstructSource;
+import io.github.mfuerstenau.leia.protocol.document.ReconstructedField;
 import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.document.TermPosition;
 import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
+import io.github.mfuerstenau.leia.protocol.filter.FilterMatch;
+import io.github.mfuerstenau.leia.protocol.filter.GetFilterResult;
+import io.github.mfuerstenau.leia.protocol.filter.StepFilterParams;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
 import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
+import io.github.mfuerstenau.leia.tui.TestFilters;
 import io.github.mfuerstenau.leia.tui.TestScreens;
+import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.documents.Documents.Request;
 import io.github.mfuerstenau.leia.tui.terms.Terms.TermHit;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
@@ -552,7 +564,9 @@ class DocumentsTest {
         documents.handleKey(key(KeyCode.END));
         String screen = render(documents, 140, 12);
         // Scrolled to the last line, at the bottom of the panel.
-        assertThat(screen).doesNotContain("Indexed").contains("Doc values  -", "Term vector -");
+        assertThat(screen)
+                .doesNotContain("Indexed")
+                .contains("Doc values  -", "Term vector -", "Rebuilt     r rebuilds");
 
         documents.handleKey(key(KeyCode.HOME));
         assertThat(render(documents, 140, 12)).contains("Indexed");
@@ -626,5 +640,184 @@ class DocumentsTest {
         Documents documents = documents();
         documents.want(0);
         assertThat(documents.initialRequest()).isEmpty();
+    }
+
+    private static Optional<Request> step(long filterId, int fromDoc, boolean forward, FilterStep step) {
+        return Optional.of(new Request.StepFilter(1, new StepFilterParams(filterId, fromDoc, forward), step));
+    }
+
+    private static GetFilterResult built(long filterId, int matchCount) {
+        return TestFilters.built(filterId, matchCount, 5);
+    }
+
+    @Test
+    void stepsThroughTheMatchesOfAFilter() {
+        Documents documents = documents();
+        documents.loaded(document(0));
+        assertThat(documents.startFilter("red", filterParams(false), 2))
+                .isEqualTo(new Request.StartFilter(1, filterParams(false), OptionalLong.empty(), OptionalLong.empty()));
+        assertThat(documents.filterStarted(1, 9)).isTrue();
+        assertThat(documents.filterJob()).hasValue(9);
+
+        // While the filter is built, ←/→ wait for it.
+        assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEmpty();
+        assertThat(render(documents, 100, 20)).contains("filter red: finding matches… 0%");
+
+        assertThat(documents.filterProgress(1, built(9, 2))).isEqualTo(step(9, 2, true, FilterStep.NEAREST));
+        assertThat(documents.filterJob()).isEmpty();
+        StepFilterParams params = new StepFilterParams(9, 2, true);
+        assertThat(documents.filterStepped(1, params, FilterStep.NEAREST, Optional.of(new FilterMatch(3, 1))))
+                .isEqualTo(load(3));
+        documents.loaded(document(3));
+        assertThat(documents.filterToLocate(3)).isEmpty();
+        assertThat(render(documents, 100, 20)).contains("filter red: 2 of 2");
+
+        assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEqualTo(step(9, 4, true, FilterStep.MOVE));
+        assertThat(documents.handleKey(key('p'))).isEqualTo(step(9, 2, false, FilterStep.MOVE));
+        documents.handleKey(key('i'));
+        documents.handleKey(key('1'));
+        assertThat(documents.handleKey(key(KeyCode.ENTER))).isEqualTo(step(9, 1, true, FilterStep.NEAREST));
+
+        // A document shown some other way is located.
+        assertThat(documents.filterToLocate(4)).contains(new Documents.Locate(1, 9));
+
+        assertThat(documents.handleKey(key('b')))
+                .contains(new Request.ClearFilter(OptionalLong.empty(), OptionalLong.of(9)));
+        assertThat(documents.filtered()).isFalse();
+        assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEqualTo(load(4));
+    }
+
+    @Test
+    void aNewFilterReplacesTheOldOneAndAFailedOneStepsThroughEveryDocument() {
+        Documents documents = documents();
+        documents.loaded(document(1));
+        documents.startFilter("red", filterParams(false), 0);
+        documents.filterStarted(1, 9);
+        assertThat(documents.startFilter("blue", filterParams(true), 0))
+                .isEqualTo(new Request.StartFilter(2, filterParams(true), OptionalLong.of(9), OptionalLong.empty()));
+        // The job of the replaced filter is not wanted any more, nor is what it reports.
+        assertThat(documents.filterStarted(1, 11)).isFalse();
+        documents.filterFailed(1, "too late");
+        assertThat(documents.filterStarted(2, 10)).isTrue();
+
+        documents.filterFailed(2, "Invalid query: oops");
+        assertThat(render(documents, 100, 20)).contains("filter blue, deleted too: Invalid query: oops");
+        assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEqualTo(load(2));
+        // What the replaced filter found is ignored.
+        assertThat(documents.filterStepped(1, new StepFilterParams(9, 0, true), FilterStep.MOVE, Optional.empty()))
+                .isEmpty();
+        assertThat(documents.handleKey(key('b')))
+                .contains(new Request.ClearFilter(OptionalLong.empty(), OptionalLong.empty()));
+    }
+
+    @Test
+    void aReopenBuildsTheFilterAgainUnderANewSerial() {
+        Documents documents = documents();
+        documents.loaded(document(1));
+        documents.startFilter("red", filterParams(false), 0);
+        documents.filterStarted(1, 9);
+        documents.filterProgress(1, built(9, 2));
+        assertThat(documents.filterToRebuild()).isEmpty();
+
+        Documents reopened = documents.reopened(List.of(schema("id", 0)), 5);
+
+        assertThat(reopened.filterToRebuild())
+                .contains(new Request.StartFilter(2, filterParams(false), OptionalLong.empty(), OptionalLong.empty()));
+        // The old index's job is gone.
+        assertThat(reopened.filterProgress(1, built(9, 2))).isEmpty();
+        assertThat(reopened.filterStarted(2, 12)).isTrue();
+        assertThat(reopened.filterToRebuild()).isEmpty();
+        reopened.loaded(document(1));
+        // Once built, it only locates the document shown.
+        assertThat(reopened.filterProgress(2, built(12, 2)))
+                .contains(new Request.StepFilter(2, new StepFilterParams(12, 1, true), FilterStep.LOCATE));
+        assertThat(reopened.filterStepped(
+                        2, new StepFilterParams(12, 1, true), FilterStep.LOCATE, Optional.of(new FilterMatch(1, 0))))
+                .isEmpty();
+        assertThat(render(reopened, 100, 20)).contains("filter red: 1 of 2");
+    }
+
+    private static GetReconstructResult rebuilt(String field, Map<String, int[]> terms) {
+        List<TermVectorTerm> rebuilt = terms.entrySet().stream()
+                .map(term -> new TermVectorTerm(
+                        term.getKey(),
+                        false,
+                        term.getValue().length,
+                        IntStream.of(term.getValue())
+                                .mapToObj(at -> position(at, null, null, null))
+                                .toList()))
+                .toList();
+        return new GetReconstructResult(
+                10,
+                OptionalLong.of(10),
+                Optional.of(new ReconstructResult(
+                        List.of(new ReconstructedField(
+                                field, IndexOptions.DOCS_AND_FREQS_AND_POSITIONS, ReconstructSource.POSTINGS, rebuilt)),
+                        1)));
+    }
+
+    @Test
+    void rebuildsOneIndexedFieldAtATime() {
+        Documents documents = new Documents(
+                List.of(
+                        schema("id", 0),
+                        schema("body", 1),
+                        schema("rank", 2, IndexOptions.NONE, false),
+                        schema("extra", 3)),
+                5);
+        documents.loaded(document(0));
+
+        assertThat(documents.handleKey(key('r'))).contains(new Request.Reconstruct(0, "id", List.of()));
+        // Progress of no running job changes nothing.
+        documents.reconstructProgress(3, rebuilt("id", Map.of()));
+        assertThat(documents.reconstructJob()).isEmpty();
+        assertThat(documents.reconstructStarted(0, "id", 3)).isTrue();
+        assertThat(documents.reconstructJob()).hasValue(3);
+
+        // Another field stops the running rebuild.
+        documents.handleKey(key(KeyCode.DOWN));
+        assertThat(documents.handleKey(key('r'))).contains(new Request.Reconstruct(0, "body", List.of(3L)));
+        documents.reconstructStarted(0, "body", 4);
+        // Progress of the stopped job is dropped.
+        documents.reconstructProgress(3, rebuilt("id", Map.of()));
+        documents.reconstructProgress(4, rebuilt("body", new TreeMap<>(Map.of("blue", new int[] {1}, "red", new int[] {
+            0, 3
+        }))));
+        assertThat(documents.reconstructJob()).isEmpty();
+        String screen = render(documents, 140, 50);
+        assertThat(screen).contains("Rebuilt     2 terms, from the postings", "  red blue · red", "  red ×2  0, 3");
+        assertThat(documents.handleKey(key('r'))).isEmpty();
+
+        // A field that isn't indexed has nothing to rebuild.
+        documents.handleKey(key(KeyCode.DOWN));
+        assertThat(documents.handleKey(key('r'))).isEmpty();
+        assertThat(render(documents, 140, 50)).doesNotContain("Rebuilt");
+    }
+
+    @Test
+    void aRebuildStoppedBeforeItsJobStartedIsNotWanted() {
+        Documents documents = documents();
+        documents.loaded(document(0));
+        documents.handleKey(key('r'));
+        assertThat(documents.rebuilding()).isTrue();
+
+        // Its job is not known yet: the start that comes later is to be cancelled.
+        assertThat(documents.stopRebuild()).isEmpty();
+        assertThat(documents.rebuilding()).isFalse();
+        assertThat(documents.reconstructStarted(0, "id", 5)).isFalse();
+        documents.reconstructStartFailed(0, "id", "late");
+        assertThat(render(documents, 140, 50)).contains("Rebuilt     r rebuilds");
+
+        // Nor is one for a document no longer shown.
+        documents.handleKey(key('r'));
+        documents.loaded(document(1));
+        assertThat(documents.reconstructStarted(0, "id", 6)).isFalse();
+
+        // A failed rebuild can start again.
+        documents.handleKey(key('r'));
+        documents.reconstructStarted(1, "id", 7);
+        documents.reconstructFailed(7, "Job cancelled");
+        assertThat(render(documents, 140, 50)).contains("cannot rebuild it: Job cancelled");
+        assertThat(documents.handleKey(key('r'))).contains(new Request.Reconstruct(1, "id", List.of()));
     }
 }

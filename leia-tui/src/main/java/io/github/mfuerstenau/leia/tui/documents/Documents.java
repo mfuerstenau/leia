@@ -18,6 +18,7 @@ import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.widgets.Clear;
 import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.block.Borders;
+import dev.tamboui.widgets.block.Title;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import dev.tamboui.widgets.table.Cell;
 import dev.tamboui.widgets.table.Row;
@@ -27,15 +28,21 @@ import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.DocValues;
 import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
+import io.github.mfuerstenau.leia.protocol.document.GetReconstructResult;
 import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.document.TermPosition;
 import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
+import io.github.mfuerstenau.leia.protocol.filter.FilterMatch;
+import io.github.mfuerstenau.leia.protocol.filter.GetFilterResult;
+import io.github.mfuerstenau.leia.protocol.filter.StartFilterParams;
+import io.github.mfuerstenau.leia.protocol.filter.StepFilterParams;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
 import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
+import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.terms.Terms.TermHit;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
@@ -47,6 +54,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.OptionalLong;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -55,7 +63,13 @@ import java.util.stream.Collectors;
  * getDocument} reports it (ADR 0006), with a panel for the selected field's values and its term
  * vector. A document opened from the terms screen also shows where the term occurs in it, and
  * {@code [}/{@code ]} step through the term's other documents. {@code v} opens the selected field's
- * values in the {@link Viewer}.
+ * values in the {@link Viewer}, and {@code r} rebuilds the terms the field was indexed with (ADR
+ * 0029). Through a {@link DocFilter}, ←/→ step through the documents that match a query only (ADR
+ * 0031).
+ *
+ * <p>A rebuild belongs to its document and field, and stops as soon as another document is asked
+ * for; a job that starts for a rebuild no longer wanted is cancelled, and progress of any job but the
+ * running one is dropped. Likewise, the filter's calls carry its serial.
  *
  * <p>The Rust TUI got each reply before the next key; here a document can come after another one
  * was asked for. So the screen remembers the document it asked for last ({@link #want}), and drops
@@ -133,7 +147,36 @@ public final class Documents {
          */
         record SearchDocValues(String field, DocValuesNumber number, boolean hex, List<String> values)
                 implements Request {}
+
+        /**
+         * Cancel the jobs in {@code cancel}, then rebuild the terms a field of the document was
+         * indexed with (ADR 0029), reported back with {@link #reconstructStarted} or {@link
+         * #reconstructStartFailed}; the job with {@link #reconstructProgress} or {@link
+         * #reconstructFailed}.
+         */
+        record Reconstruct(int docId, String field, List<Long> cancel) implements Request {}
+
+        /**
+         * Cancel the job {@code cancel} and release the filter {@code release} of the filter this one
+         * replaces, then build filter {@code serial} (ADR 0031), reported back with {@link
+         * #filterStarted} or {@link #filterFailed}; the job with {@link #filterProgress} or {@link
+         * #filterFailed}.
+         */
+        record StartFilter(long serial, StartFilterParams params, OptionalLong cancel, OptionalLong release)
+                implements Request {}
+
+        /**
+         * Find a match of filter {@code serial}, reported back with {@link #filterStepped} or {@link
+         * #filterFailed}.
+         */
+        record StepFilter(long serial, StepFilterParams params, FilterStep step) implements Request {}
+
+        /** Forget the filter: cancel the job that builds it, or release the filter the backend keeps. */
+        record ClearFilter(OptionalLong cancel, OptionalLong release) implements Request {}
     }
+
+    /** The filter to locate a document in once it is loaded: its serial and the backend's id. */
+    public record Locate(long serial, long filterId) {}
 
     /** The term vector of a field of the shown document. */
     private sealed interface TermVector {
@@ -201,6 +244,15 @@ public final class Documents {
 
     /** Term vectors of the shown document, by field name. */
     private final Map<String, TermVector> termVectors = new HashMap<>();
+
+    /** The rebuilt fields of the shown document, by field name; at most one is active. */
+    private final Map<String, Reconstruction> reconstructions = new HashMap<>();
+
+    /** The filter that ←/→ step through (ADR 0031); or null. */
+    private DocFilter filter;
+
+    /** The serial of the next filter. */
+    private long nextFilterSerial = 1;
 
     private Focus focus = Focus.FIELDS;
 
@@ -270,7 +322,8 @@ public final class Documents {
     /**
      * The screen for the reopened index (ADR 0019): the same document id, clamped to the new {@code
      * maxDoc}, with the same field selected, and values shown as before. The document is fetched
-     * again; walks through term docs or hits end.
+     * again; walks through term docs or hits end. The backend forgets the filter, which is built
+     * again under a new serial (ADR 0032).
      */
     public Documents reopened(List<IndexField> fields, int maxDoc) {
         Documents documents = new Documents(fields, maxDoc);
@@ -280,6 +333,10 @@ public final class Documents {
         documents.hideEmpty = hideEmpty;
         documents.numbers = numbers;
         documents.delimiters = delimiters;
+        documents.nextFilterSerial = nextFilterSerial;
+        if (filter != null) {
+            documents.filter = filter.rebuild(documents.nextFilterSerial++);
+        }
         return documents;
     }
 
@@ -370,6 +427,159 @@ public final class Documents {
         return searchHits ? Optional.of(Walk.SEARCH_HITS) : Optional.empty();
     }
 
+    /**
+     * Starts a filter (ADR 0031) on {@code label}, built from {@code params}, which starts on {@code
+     * startDoc} once it is built. Returns its start, with the job to cancel and the filter to release
+     * of the filter it replaces.
+     */
+    public Request.StartFilter startFilter(String label, StartFilterParams params, int startDoc) {
+        DocFilter old = filter;
+        filter = new DocFilter(nextFilterSerial++, label, params, startDoc);
+        return new Request.StartFilter(
+                filter.serial(),
+                params,
+                old != null ? old.jobId() : OptionalLong.empty(),
+                old != null ? old.filterId() : OptionalLong.empty());
+    }
+
+    /** Whether ←/→ step through a filter, or would once it is built. */
+    public boolean filtered() {
+        return filter != null;
+    }
+
+    /** The filter the backend keeps, once it is built. */
+    public OptionalLong filterId() {
+        return filter != null ? filter.filterId() : OptionalLong.empty();
+    }
+
+    /** The job that builds the filter, while it runs. */
+    public OptionalLong filterJob() {
+        return filter != null ? filter.jobId() : OptionalLong.empty();
+    }
+
+    /** The serial of the filter, if there is one. */
+    public OptionalLong filterSerial() {
+        return filter != null ? OptionalLong.of(filter.serial()) : OptionalLong.empty();
+    }
+
+    /** Whether the filter is being built. */
+    public boolean filterBuilding() {
+        return filter != null && filter.building();
+    }
+
+    /**
+     * The filter to locate {@code docId} in once it is loaded, if it is built and doesn't know yet
+     * whether the document matches.
+     */
+    public Optional<Locate> filterToLocate(int docId) {
+        if (filter == null || !filter.needsLocating(docId)) {
+            return Optional.empty();
+        }
+        return Optional.of(new Locate(filter.serial(), filter.filterId().getAsLong()));
+    }
+
+    /**
+     * The job of filter {@code serial} has started. Returns whether it is still wanted: if the filter
+     * was replaced or cleared meanwhile, the job is to be cancelled.
+     */
+    public boolean filterStarted(long serial, long jobId) {
+        if (!isFilter(serial) || !filter.building() || filter.jobId().isPresent()) {
+            return false;
+        }
+        filter.started(jobId);
+        return true;
+    }
+
+    /**
+     * Takes the progress of the job that builds filter {@code serial}. Once it is built, returns the
+     * step to the document it starts on, or for a filter built again after a reopen, the step that
+     * locates the shown document in it.
+     */
+    public Optional<Request> filterProgress(long serial, GetFilterResult result) {
+        if (!isFilter(serial)) {
+            return Optional.empty();
+        }
+        return filter.progress(result)
+                .map(built -> new Request.StepFilter(
+                        serial,
+                        new StepFilterParams(
+                                built.filterId(), built.step() == FilterStep.LOCATE ? docId : built.startDoc(), true),
+                        built.step()));
+    }
+
+    /** What to build the filter from again after a reopen (ADR 0032), until it is started. */
+    public Optional<Request.StartFilter> filterToRebuild() {
+        if (filter == null) {
+            return Optional.empty();
+        }
+        return filter.toRebuild()
+                .map(params ->
+                        new Request.StartFilter(filter.serial(), params, OptionalLong.empty(), OptionalLong.empty()));
+    }
+
+    /**
+     * Building or stepping through filter {@code serial} failed: the title says why until {@code b}
+     * clears it, and ←/→ step through every document again.
+     */
+    public void filterFailed(long serial, String error) {
+        if (isFilter(serial)) {
+            filter.failed(error);
+        }
+    }
+
+    /**
+     * Takes what {@code stepFilter} found, unless the filter was replaced since. Returns the document
+     * to show, or the step back that {@code NEAREST} takes when nothing matches forward.
+     */
+    public Optional<Request> filterStepped(
+            long serial, StepFilterParams params, FilterStep step, Optional<FilterMatch> found) {
+        if (!isFilter(serial) || !filter.filterId().equals(OptionalLong.of(params.filterId()))) {
+            return Optional.empty();
+        }
+        return switch (filter.stepped(params.fromDoc(), params.forward(), step, found)) {
+            case DocFilter.Stepped.Show show -> Optional.of(new Request.Document(show.docId()));
+            case DocFilter.Stepped.LookBack back ->
+                Optional.of(new Request.StepFilter(
+                        serial, new StepFilterParams(params.filterId(), back.docId(), false), FilterStep.MOVE));
+            case DocFilter.Stepped.Nothing _ -> Optional.empty();
+        };
+    }
+
+    /** Forgets the filter. Returns what clears it in the backend, if there is a filter. */
+    public Optional<Request> clearFilter() {
+        if (filter == null) {
+            return Optional.empty();
+        }
+        DocFilter old = filter;
+        filter = null;
+        return Optional.of(new Request.ClearFilter(old.jobId(), old.filterId()));
+    }
+
+    private boolean isFilter(long serial) {
+        return filter != null && filter.serial() == serial;
+    }
+
+    /**
+     * Whether ←/→ and {@code i} go through the filter: it is built or being built. Without one, or
+     * with a failed one, they go through every document.
+     */
+    private boolean stepsThroughFilter() {
+        return filter != null && (filter.building() || filter.filterId().isPresent());
+    }
+
+    /**
+     * What ←/→ and {@code i} do with a filter that {@link #stepsThroughFilter}: step to a match of a
+     * built one from {@code fromDoc}; nothing while it is built.
+     */
+    private Optional<Request> filterStep(int fromDoc, boolean forward, FilterStep step) {
+        OptionalLong filterId = filter.filterId();
+        if (filterId.isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(new Request.StepFilter(
+                filter.serial(), new StepFilterParams(filterId.getAsLong(), fromDoc, forward), step));
+    }
+
     /** The positions to fetch, if the shown document is the hit's and they are not in yet. */
     public Optional<Request> positionsRequest() {
         if (hit == null || !shows(hit.docId()) || positions != null) {
@@ -419,6 +629,7 @@ public final class Documents {
         error = null;
         closeViewer();
         termVectors.clear();
+        reconstructions.clear();
         detailsScroll = 0;
         updateRows(selected);
         return true;
@@ -434,6 +645,7 @@ public final class Documents {
         this.error = error;
         closeViewer();
         termVectors.clear();
+        reconstructions.clear();
         rows.clear();
         row = -1;
         detailsScroll = 0;
@@ -448,6 +660,100 @@ public final class Documents {
     public void termVectorFailed(int docId, String field, String error) {
         if (shows(docId)) {
             termVectors.put(field, new TermVector.Failed(error));
+        }
+    }
+
+    /** The rebuild that is asked for or running, with its field; or null. */
+    private Map.Entry<String, Reconstruction> activeReconstruction() {
+        return reconstructions.entrySet().stream()
+                .filter(entry -> entry.getValue().active())
+                .findFirst()
+                .orElse(null);
+    }
+
+    /** The rebuild job, while one runs. */
+    public OptionalLong reconstructJob() {
+        Map.Entry<String, Reconstruction> active = activeReconstruction();
+        return active != null ? active.getValue().job() : OptionalLong.empty();
+    }
+
+    /** Whether a rebuild is asked for or runs. */
+    public boolean rebuilding() {
+        return activeReconstruction() != null;
+    }
+
+    /**
+     * Forgets the rebuild that is asked for or runs, so that {@code r} can start it again. Returns
+     * its job to cancel, if it has started; otherwise {@link #reconstructStarted} says to cancel it
+     * once it has.
+     */
+    public OptionalLong stopRebuild() {
+        OptionalLong job = reconstructJob();
+        reconstructions.values().removeIf(Reconstruction::active);
+        return job;
+    }
+
+    /** Rebuilds the selected field, if it is indexed and not rebuilt yet; a rebuild of another field stops. */
+    private Optional<Request> reconstruct() {
+        Optional<DocumentField> selected = selectedField();
+        if (selected.isEmpty()) {
+            return Optional.empty();
+        }
+        String field = selected.get().name();
+        IndexField index = schema.get(field);
+        boolean indexed = index != null && index.indexOptions() != IndexOptions.NONE;
+        Reconstruction rebuilt = reconstructions.get(field);
+        if (!indexed || (rebuilt != null && !(rebuilt instanceof Reconstruction.Failed))) {
+            return Optional.empty();
+        }
+        List<Long> cancel = new ArrayList<>();
+        stopRebuild().ifPresent(cancel::add);
+        reconstructions.put(field, new Reconstruction.Starting());
+        return Optional.of(new Request.Reconstruct(docId, field, List.copyOf(cancel)));
+    }
+
+    /**
+     * The job of the rebuild of {@code field} of {@code docId} has started. Returns whether it is
+     * still wanted: if it was stopped meanwhile, the job is to be cancelled.
+     */
+    public boolean reconstructStarted(int docId, String field, long jobId) {
+        if (!shows(docId) || !(reconstructions.get(field) instanceof Reconstruction.Starting)) {
+            return false;
+        }
+        reconstructions.put(field, new Reconstruction.Running(jobId, 0, OptionalLong.empty()));
+        return true;
+    }
+
+    /** Shows why the rebuild of {@code field} of {@code docId} couldn't start, if it is still wanted. */
+    public void reconstructStartFailed(int docId, String field, String error) {
+        if (shows(docId) && reconstructions.get(field) instanceof Reconstruction.Starting) {
+            reconstructions.put(field, new Reconstruction.Failed(error));
+        }
+    }
+
+    /** Shows the progress of rebuild job {@code jobId}, or the rebuilt field, if it is the running one. */
+    public void reconstructProgress(long jobId, GetReconstructResult result) {
+        Map.Entry<String, Reconstruction> active = activeReconstruction();
+        if (active == null || active.getValue().job().orElse(-1) != jobId) {
+            return;
+        }
+        Reconstruction next;
+        if (result.result().isPresent()) {
+            next = result.result().get().fields().stream()
+                    .findFirst()
+                    .<Reconstruction>map(Reconstruction.Done::new)
+                    .orElse(new Reconstruction.Failed("the server rebuilt no field"));
+        } else {
+            next = new Reconstruction.Running(jobId, result.scannedTerms(), result.totalTerms());
+        }
+        active.setValue(next);
+    }
+
+    /** Shows why rebuild job {@code jobId} failed, if it is the running one. */
+    public void reconstructFailed(long jobId, String error) {
+        Map.Entry<String, Reconstruction> active = activeReconstruction();
+        if (active != null && active.getValue().job().orElse(-1) == jobId) {
+            active.setValue(new Reconstruction.Failed(error));
         }
     }
 
@@ -661,11 +967,12 @@ public final class Documents {
 
     /**
      * Goes to another document with ←/→, the {@code i} prompt, or {@code [}/{@code ]} through the
-     * documents of the hit's term; loads the selected field's term vector with Enter, views its
-     * values with {@code v}, analyzes its stored text with {@code a}, searches for its doc values with
-     * {@code s}, cycles the number format with {@code x}, hides empty fields with {@code e}, searches
-     * for documents like this one with {@code m}, switches the focus with Tab, and moves the selection
-     * or scrolls the details.
+     * documents of the hit's term; with a filter, ←/→ and {@code i} go to its matches only, and {@code
+     * b} clears it. Loads the selected field's term vector with Enter, views its values with {@code
+     * v}, analyzes its stored text with {@code a}, searches for its doc values with {@code s}, cycles
+     * the number format with {@code x}, hides empty fields with {@code e}, searches for documents like
+     * this one with {@code m}, rebuilds the field's indexed terms with {@code r}, switches the focus
+     * with Tab, and moves the selection or scrolls the details.
      */
     public Optional<Request> handleKey(KeyEvent key) {
         if (viewer != null) {
@@ -689,13 +996,24 @@ public final class Documents {
                 return Optional.empty();
             }
             prompt = null;
-            return Optional.of(new Request.Document(chosen.getAsInt()));
+            return stepsThroughFilter()
+                    ? filterStep(chosen.getAsInt(), true, FilterStep.NEAREST)
+                    : Optional.of(new Request.Document(chosen.getAsInt()));
+        }
+        if (filter != null) {
+            filter.clearNote();
         }
         KeyCode code = key.code();
         if (code == KeyCode.LEFT || key.isChar('p')) {
+            if (stepsThroughFilter()) {
+                return filterStep(docId - 1, false, FilterStep.MOVE);
+            }
             return docId > 0 ? Optional.of(new Request.Document(docId - 1)) : Optional.empty();
         }
         if (code == KeyCode.RIGHT || key.isChar('n')) {
+            if (stepsThroughFilter()) {
+                return filterStep(docId + 1, true, FilterStep.MOVE);
+            }
             return docId < maxDoc - 1 ? Optional.of(new Request.Document(docId + 1)) : Optional.empty();
         }
         if (code == KeyCode.ENTER) {
@@ -732,6 +1050,12 @@ public final class Documents {
                 }
                 case 'v' -> {
                     return view();
+                }
+                case 'r' -> {
+                    return reconstruct();
+                }
+                case 'b' -> {
+                    return clearFilter();
                 }
                 case 'a' -> {
                     return analyze();
@@ -844,7 +1168,7 @@ public final class Documents {
                         .text(Text.from(header()))
                         .block(Block.builder()
                                 .borders(Borders.ALL)
-                                .title(" Document ")
+                                .title(Title.from(title()))
                                 .build())
                         .build(),
                 parts.get(0));
@@ -864,6 +1188,16 @@ public final class Documents {
         if (viewer != null) {
             viewer.render(frame, area);
         }
+    }
+
+    /** The title of the document's panel, with what the filter says: in red if it failed. */
+    private Line title() {
+        if (filter == null) {
+            return Line.from(" Document ");
+        }
+        DocFilter.Title title = filter.title(docId, maxDoc);
+        Style style = (title.error() ? Style.EMPTY.red() : Style.EMPTY.yellow()).bold();
+        return Line.from(Span.raw(" Document "), Span.styled(title.text() + " ", style));
     }
 
     private Line header() {
@@ -980,6 +1314,7 @@ public final class Documents {
                 fieldHit,
                 positions,
                 termVectors.get(field.name()),
+                reconstructions.get(field.name()),
                 numbers);
         // TamboUI scrolls no further than to show the last line at the bottom, so the scroll stops
         // there too: the next key after End moves.
@@ -1079,6 +1414,7 @@ public final class Documents {
             Optional<TermHit> hit,
             Positions positions,
             TermVector termVector,
+            Reconstruction reconstruction,
             NumberFormat numbers) {
         List<Line> lines = new ArrayList<>();
         if (schema.isPresent()) {
@@ -1185,6 +1521,29 @@ public final class Documents {
                     lines.addAll(termLines(loaded.terms(), true));
                 }
             }
+        }
+
+        if (schema.filter(index -> index.indexOptions() != IndexOptions.NONE).isPresent()) {
+            lines.add(Line.empty());
+            lines.addAll(reconstructionLines(reconstruction));
+        }
+        return lines;
+    }
+
+    /** The terms the field was indexed with, once rebuilt: in position order if they have positions, then term by term. */
+    private static List<Line> reconstructionLines(Reconstruction reconstruction) {
+        if (reconstruction == null) {
+            return List.of(labelled("Rebuilt", "r rebuilds the terms it was indexed with"));
+        }
+        List<Line> lines = new ArrayList<>();
+        lines.add(labelled("Rebuilt", reconstruction.summary()));
+        if (reconstruction instanceof Reconstruction.Done done) {
+            Optional<String> tokens = Reconstruction.tokenLine(done.field().terms());
+            if (tokens.isPresent()) {
+                lines.add(Line.from("  " + tokens.get()));
+                lines.add(Line.empty());
+            }
+            lines.addAll(termLines(done.field().terms(), Reconstruction.hasFreqs(done.field())));
         }
         return lines;
     }

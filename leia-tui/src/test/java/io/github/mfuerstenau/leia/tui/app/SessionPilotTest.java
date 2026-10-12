@@ -1,5 +1,6 @@
 package io.github.mfuerstenau.leia.tui.app;
 
+import static io.github.mfuerstenau.leia.tui.TestFilters.filterParams;
 import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -26,6 +27,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
@@ -50,8 +52,15 @@ class SessionPilotTest {
     private static final int WIDTH = 100;
     private static final int HEIGHT = 30;
 
-    /** Handled after every event dispatched before it. */
-    private record Barrier(CountDownLatch handled) implements Event {}
+    /**
+     * Handled after every event dispatched before it; it notes whether a call runs then, on the UI
+     * thread, since a handler can end one call and start the next.
+     */
+    private record Barrier(CountDownLatch handled, AtomicBoolean running) implements Event {
+        Barrier() {
+            this(new CountDownLatch(1), new AtomicBoolean());
+        }
+    }
 
     @TempDir
     Path tmp;
@@ -88,8 +97,9 @@ class SessionPilotTest {
         backend.close();
     }
 
-    private static boolean handle(Session session, Event event, TuiRunner runner) {
+    private boolean handle(Session session, Event event, TuiRunner runner) {
         if (event instanceof Barrier barrier) {
+            barrier.running().set(running());
             barrier.handled().countDown();
             return false;
         }
@@ -98,22 +108,28 @@ class SessionPilotTest {
 
     /**
      * Waits until the events dispatched so far are handled, and no open, reopen, close, term scan,
-     * fetch of commits, terms or documents runs.
+     * fetch of commits, terms or documents, rebuild or filter build runs.
      */
     private void settle() throws InterruptedException {
         long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+        Barrier barrier;
         do {
-            Barrier barrier = new Barrier(new CountDownLatch(1));
+            barrier = new Barrier();
             test.runner().dispatch(barrier);
             assertThat(barrier.handled().await(20, SECONDS))
                     .as("the UI thread handles the events")
                     .isTrue();
-        } while (running() && System.nanoTime() < deadline);
-        assertThat(running()).as("the calls are done").isFalse();
+        } while (barrier.running().get() && System.nanoTime() < deadline);
+        assertThat(barrier.running().get()).as("the calls are done").isFalse();
     }
 
     private boolean running() {
-        return app.busy() || app.scanning() || app.loadingCommits() || app.loadingTerms() || app.loadingDocuments();
+        return app.busy()
+                || app.scanning()
+                || app.loadingCommits()
+                || app.loadingTerms()
+                || app.loadingDocuments()
+                || app.documentJobs();
     }
 
     private String screen() {
@@ -131,7 +147,7 @@ class SessionPilotTest {
 
     /** Waits until the events dispatched so far are handled. */
     private void handled() throws InterruptedException {
-        Barrier barrier = new Barrier(new CountDownLatch(1));
+        Barrier barrier = new Barrier();
         test.runner().dispatch(barrier);
         assertThat(barrier.handled().await(20, SECONDS)).isTrue();
     }
@@ -350,5 +366,89 @@ class SessionPilotTest {
         pilot.press(']');
         settle();
         assertThat(screen()).contains("#1 of 0–2", "body:red  2 of 3");
+    }
+
+    /** Writes documents with {@code texts} in the stored and indexed field {@code body}, in a commit of their own. */
+    private static Path writeBodies(Path dir, String... texts) throws IOException {
+        try (FSDirectory directory = FSDirectory.open(dir);
+                IndexWriter writer = new IndexWriter(directory, new IndexWriterConfig())) {
+            for (String text : texts) {
+                Document document = new Document();
+                document.add(new TextField("body", text, Field.Store.YES));
+                writer.addDocument(document);
+            }
+        }
+        return dir;
+    }
+
+    @Test
+    void rebuildsTheTermsAFieldWasIndexedWith() throws Exception {
+        openAtStart(writeBodies(tmp.resolve("index"), "Red fox and red"), OpenMode.READER);
+        pilot.press('2');
+        settle();
+
+        pilot.press('r');
+        settle();
+        pilot.press(KeyCode.TAB);
+        pilot.press(KeyCode.END);
+        settle();
+        assertThat(screen()).contains("Rebuilt     3 terms, from the postings", "  red fox and red", "  red ×2  0, 3");
+    }
+
+    /** Starts a filter for the pattern {@code red}, as the search screen will. */
+    private void startFilter() throws InterruptedException {
+        test.runner().dispatch(new Session.Reply(app -> app.startFilter("red", filterParams(false), 0)));
+        settle();
+    }
+
+    @Test
+    void stepsThroughTheMatchesOfAFilterAndMarksThePostingsInIt() throws Exception {
+        openAtStart(writeBodies(tmp.resolve("index"), "blue 0", "red 1", "blue 2", "red 3"), OpenMode.READER);
+        pilot.press('2');
+        settle();
+
+        startFilter();
+        assertThat(screen()).contains("filter red: 1 of 2", "#1 of 0–3", "←→ match   b unfilter");
+        pilot.press(KeyCode.RIGHT);
+        settle();
+        assertThat(screen()).contains("filter red: 2 of 2", "#3 of 0–3");
+        pilot.press(KeyCode.RIGHT);
+        settle();
+        assertThat(screen()).contains("filter red: 2 of 2 · no next match");
+
+        // The terms of body: 0, 1, 2, 3, blue, red; the postings of 0 are marked.
+        pilot.press('3');
+        settle();
+        assertThat(screen()).contains("Postings (1) · • filter", "b filter only");
+
+        pilot.press('2');
+        pilot.press('b');
+        settle();
+        assertThat(screen()).doesNotContain("filter red").contains("←→ doc");
+        pilot.press('3');
+        settle();
+        assertThat(screen()).doesNotContain("• filter", "b filter only");
+    }
+
+    @Test
+    void buildsTheFilterAgainAfterAReopen() throws Exception {
+        Path index = writeBodies(tmp.resolve("index"), "blue 0", "red 1", "blue 2", "red 3");
+        openAtStart(index, OpenMode.READER);
+        pilot.press('2');
+        settle();
+        startFilter();
+        pilot.press(KeyCode.RIGHT);
+        settle();
+        assertThat(screen()).contains("filter red: 2 of 2", "#3 of 0–3");
+
+        writeBodies(index, "red 4");
+        pilot.press('R');
+        settle();
+
+        // It locates the document shown in the new matches.
+        assertThat(screen()).contains("filter red: 2 of 3", "#3 of 0–4");
+        pilot.press(KeyCode.RIGHT);
+        settle();
+        assertThat(screen()).contains("filter red: 3 of 3", "#4 of 0–4");
     }
 }

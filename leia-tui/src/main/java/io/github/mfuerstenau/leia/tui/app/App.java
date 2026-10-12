@@ -20,9 +20,14 @@ import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
+import io.github.mfuerstenau.leia.protocol.document.GetReconstructResult;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.document.TermPosition;
 import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
+import io.github.mfuerstenau.leia.protocol.filter.FilterMatch;
+import io.github.mfuerstenau.leia.protocol.filter.GetFilterResult;
+import io.github.mfuerstenau.leia.protocol.filter.StartFilterParams;
+import io.github.mfuerstenau.leia.protocol.filter.StepFilterParams;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
 import io.github.mfuerstenau.leia.protocol.index.IndexCommitStats;
@@ -37,6 +42,7 @@ import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import io.github.mfuerstenau.leia.tui.commits.Commits;
+import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
 import io.github.mfuerstenau.leia.tui.overview.FieldScan;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
@@ -221,15 +227,17 @@ public final class App {
 
     /**
      * Shows the reopened index (ADR 0019) where the user was. The backend stopped the jobs of the old
-     * index. Returns what the shown screen has to fetch first.
+     * index, and forgot the filter, which {@link #rebuildFilter} builds again. Returns what the shown
+     * screen has to fetch first.
      */
     public Optional<Action> reopened(GetIndexStatsResult stats) {
         if (overview == null) {
             return opened(stats, List.of());
         }
         List<IndexCommitStats> indexes = stats.indexes();
+        String reopened;
         if (indexes.size() == 1) {
-            notice = new Notice.Reopened(indexes.getFirst().segmentsFile());
+            reopened = indexes.getFirst().segmentsFile();
         } else {
             List<IndexCommitStats> old = overview.stats().indexes();
             int changed = 0;
@@ -238,7 +246,7 @@ public final class App {
                     changed++;
                 }
             }
-            notice = new Notice.Reopened(changed + " of " + indexes.size() + " indexes");
+            reopened = changed + " of " + indexes.size() + " indexes";
         }
         overview = overview.reopened(stats, topN);
         terms = terms != null ? terms.reopened(stats.fields()) : new Terms(stats.fields());
@@ -252,6 +260,11 @@ public final class App {
         commits = new Commits(indexNames(opened));
         documents =
                 documents != null ? documents.reopened(stats.fields(), stats.maxDoc()) : newDocuments(stats, opened);
+        syncTermsFilter();
+        if (documents.filterToRebuild().isPresent()) {
+            reopened += "; rebuilding the filter";
+        }
+        notice = new Notice.Reopened(reopened);
         busy = false;
         return initialRequest();
     }
@@ -387,13 +400,47 @@ public final class App {
     }
 
     /**
-     * Fetches a document for the documents screen. The rebuild and the filter of the documents
-     * screen come with their port.
+     * Fetches a document for the documents screen, which stops rebuilding a field of the shown one,
+     * and finds out whether it matches the filter if that isn't known yet.
      */
     private Optional<Action> loadDocument(int docId) {
+        List<Long> cancel = new ArrayList<>();
+        documents.stopRebuild().ifPresent(cancel::add);
+        Optional<Documents.Locate> locate = documents.filterToLocate(docId);
         documents.want(docId);
         documentFetches++;
-        return Optional.of(new Action.LoadDocument(docId, List.of(), OptionalLong.empty()));
+        return Optional.of(new Action.LoadDocument(docId, List.copyOf(cancel), locate));
+    }
+
+    /**
+     * Starts a filter on the documents screen (ADR 0031) on {@code label}, built from {@code params},
+     * which starts on {@code startDoc} once it is built, and shows that screen. The search screen
+     * calls it, once it is ported.
+     */
+    public Optional<Action> startFilter(String label, StartFilterParams params, int startDoc) {
+        if (documents == null) {
+            return Optional.empty();
+        }
+        screen = Screen.DOCUMENTS;
+        return documentsAction(Optional.of(documents.startFilter(label, params, startDoc)));
+    }
+
+    /**
+     * Builds the filter of the documents screen again after a reopen (ADR 0032): the backend forgot
+     * it with the old index. Reported back with {@link #filterStarted} or {@link #filterFailed}.
+     */
+    public Optional<Action> rebuildFilter() {
+        if (documents == null) {
+            return Optional.empty();
+        }
+        return documentsAction(documents.filterToRebuild().map(Documents.Request.class::cast));
+    }
+
+    /** Hands the filter of the documents screen, once it is built, to the terms screen, which marks its postings with it (ADR 0032). */
+    private void syncTermsFilter() {
+        if (terms != null) {
+            terms.setFilter(documents != null ? documents.filterId() : OptionalLong.empty());
+        }
     }
 
     /**
@@ -401,6 +448,8 @@ public final class App {
      * screens is dropped until they are ported (ADR 0034 §10).
      */
     private Optional<Action> documentsAction(Optional<Documents.Request> request) {
+        // A key or a step may have built, failed or cleared the filter.
+        syncTermsFilter();
         if (request.isEmpty() || documents == null) {
             return Optional.empty();
         }
@@ -419,6 +468,16 @@ public final class App {
                 yield Optional.of(new Action.LoadStoredValue(load.docId(), load.field(), load.index()));
             }
             case Documents.Request.Copy copy -> Optional.of(new Action.Copy(copy.text()));
+            case Documents.Request.Reconstruct rebuild ->
+                Optional.of(new Action.StartReconstruct(rebuild.docId(), rebuild.field(), rebuild.cancel()));
+            case Documents.Request.StartFilter start ->
+                Optional.of(new Action.StartFilter(start.serial(), start.params(), start.cancel(), start.release()));
+            case Documents.Request.StepFilter step -> {
+                documentFetches++;
+                yield Optional.of(new Action.StepFilter(step.serial(), step.params(), step.step()));
+            }
+            case Documents.Request.ClearFilter clear ->
+                Optional.of(new Action.ClearFilter(clear.cancel(), clear.release()));
             case Documents.Request.Step step
             when step.walk() == Documents.Walk.TERM_DOCS ->
                 terms == null ? Optional.empty() : termsAction(terms.step(step.forward()));
@@ -493,6 +552,96 @@ public final class App {
         return documentFetches > 0;
     }
 
+    /** Whether the documents screen rebuilds a field, or builds its filter. */
+    boolean documentJobs() {
+        return documents != null && (documents.rebuilding() || documents.filterBuilding());
+    }
+
+    /**
+     * The job of the rebuild of {@code field} of {@code docId} has started. If that rebuild was
+     * stopped meanwhile, returns the action that cancels the job.
+     */
+    public Optional<Action> reconstructStarted(int docId, String field, long jobId) {
+        if (documents != null && documents.reconstructStarted(docId, field, jobId)) {
+            return Optional.empty();
+        }
+        return Optional.of(new Action.CancelReconstruct(jobId));
+    }
+
+    public void reconstructStartFailed(int docId, String field, String error) {
+        if (documents != null) {
+            documents.reconstructStartFailed(docId, field, error);
+        }
+    }
+
+    /** Shows the progress of rebuild job {@code jobId}, or the rebuilt field. */
+    public void reconstructProgress(long jobId, GetReconstructResult result) {
+        if (documents != null) {
+            documents.reconstructProgress(jobId, result);
+        }
+    }
+
+    public void reconstructFailed(long jobId, String error) {
+        if (documents != null) {
+            documents.reconstructFailed(jobId, error);
+        }
+    }
+
+    /**
+     * The job that builds filter {@code serial} has started. If that filter was replaced or cleared
+     * meanwhile, returns the action that cancels the job.
+     */
+    public Optional<Action> filterStarted(long serial, long jobId) {
+        if (documents != null && documents.filterStarted(serial, jobId)) {
+            return Optional.empty();
+        }
+        return Optional.of(new Action.ClearFilter(OptionalLong.of(jobId), OptionalLong.empty()));
+    }
+
+    /**
+     * Takes the progress of the job that builds filter {@code serial}. Returns the step to the first
+     * document to show once it is built.
+     */
+    public Optional<Action> filterProgress(long serial, GetFilterResult result) {
+        return documents == null ? Optional.empty() : documentsAction(documents.filterProgress(serial, result));
+    }
+
+    /** Building filter {@code serial}, or locating a document in it, failed. */
+    public void filterFailed(long serial, String error) {
+        if (documents != null) {
+            documents.filterFailed(serial, error);
+        }
+        syncTermsFilter();
+    }
+
+    /** Takes what {@code stepFilter} found. Returns the document to show, if any. */
+    public Optional<Action> filterStepped(
+            long serial, StepFilterParams params, FilterStep step, Optional<FilterMatch> found) {
+        documentFetches--;
+        return filterFound(serial, params, step, found);
+    }
+
+    /** Stepping through filter {@code serial} failed. */
+    public void filterStepFailed(long serial, String error) {
+        documentFetches--;
+        filterFailed(serial, error);
+    }
+
+    /**
+     * Takes what {@code stepFilter} found for a document being loaded, which is counted with the
+     * document (ADR 0031).
+     */
+    public void filterLocated(long serial, StepFilterParams params, Optional<FilterMatch> found) {
+        filterFound(serial, params, FilterStep.LOCATE, found);
+    }
+
+    private Optional<Action> filterFound(
+            long serial, StepFilterParams params, FilterStep step, Optional<FilterMatch> found) {
+        return documents == null
+                ? Optional.empty()
+                : documentsAction(documents.filterStepped(serial, params, step, found));
+    }
+
     private static Terms.Request.LoadTerms request(Action.LoadTerms load) {
         return new Terms.Request.LoadTerms(load.field(), load.from(), load.more());
     }
@@ -541,12 +690,20 @@ public final class App {
         return terms != null && terms.loading();
     }
 
-    /** The jobs to poll: the running term scan, once its job has started. */
+    /** The jobs to poll, once they have started: the running term scan, and the rebuild and the filter of the documents screen. */
     public List<Poll> polls() {
-        if (scan == null || scan.jobId() == null) {
-            return List.of();
+        List<Poll> polls = new ArrayList<>();
+        if (scan != null && scan.jobId() != null) {
+            polls.add(new Poll.Scan(scan.id(), scan.jobId()));
         }
-        return List.of(new Poll.Scan(scan.id(), scan.jobId()));
+        if (documents != null) {
+            documents.reconstructJob().ifPresent(jobId -> polls.add(new Poll.Reconstruct(jobId)));
+            documents
+                    .filterJob()
+                    .ifPresent(jobId ->
+                            polls.add(new Poll.Filter(documents.filterSerial().getAsLong(), jobId)));
+        }
+        return polls;
     }
 
     /**
@@ -685,8 +842,18 @@ public final class App {
             return documentsAction(documents.handleKey(key));
         }
         if (key.code() == KeyCode.ESCAPE) {
-            // Esc stops the scans first, and quits only when there are none.
-            return scan != null ? cancelScans() : Optional.of(new Action.Quit());
+            // Esc stops the scans first, then the shown screen's jobs, and quits only when there are none.
+            if (scan != null) {
+                return cancelScans();
+            }
+            if (screen == Screen.DOCUMENTS && documents != null && documents.rebuilding()) {
+                OptionalLong job = documents.stopRebuild();
+                return job.isPresent() ? Optional.of(new Action.CancelReconstruct(job.getAsLong())) : Optional.empty();
+            }
+            if (screen == Screen.DOCUMENTS && documents != null && documents.filterBuilding()) {
+                return documentsAction(documents.clearFilter());
+            }
+            return Optional.of(new Action.Quit());
         }
         if (!isChar) {
             return screenKey(key);
@@ -834,9 +1001,16 @@ public final class App {
                     .walk()
                     .map(walk -> walk == Documents.Walk.TERM_DOCS ? "[ ] term docs   " : "[ ] hits   ")
                     .orElse("");
+            // Esc stops the scan first.
+            if (cancel.isEmpty() && documents.rebuilding()) {
+                cancel = "Esc stop rebuild   ";
+            } else if (cancel.isEmpty() && documents.filterBuilding()) {
+                cancel = "Esc stop filter   ";
+            }
+            String step = documents.filtered() ? "←→ match   b unfilter   " : "←→ doc   ";
             // a analyze, s search value and m similar come back with the analysis and search screens.
-            return " " + cancel + "q quit   o open   c close   1-7 screen   ←→ doc   " + steps
-                    + "i go to   ⏎ term vector   v view   x numbers   e empty   Tab panel   ↑↓";
+            return " " + cancel + "q quit   o open   c close   1-7 screen   " + step + steps
+                    + "i go to   ⏎ term vector   v view   x numbers   e empty   r rebuild   Tab panel   ↑↓";
         }
         if (screen != Screen.OVERVIEW) {
             renderNotPorted(frame, body, screen);

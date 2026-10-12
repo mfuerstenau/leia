@@ -10,8 +10,12 @@ import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
+import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
 import io.github.mfuerstenau.leia.protocol.document.GetStoredValueParams;
 import io.github.mfuerstenau.leia.protocol.document.GetTermVectorParams;
+import io.github.mfuerstenau.leia.protocol.document.StartReconstructParams;
+import io.github.mfuerstenau.leia.protocol.filter.ReleaseFilterParams;
+import io.github.mfuerstenau.leia.protocol.filter.StepFilterParams;
 import io.github.mfuerstenau.leia.protocol.index.CloseIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
@@ -25,11 +29,14 @@ import io.github.mfuerstenau.leia.protocol.terms.StartFieldTermScanParams;
 import io.github.mfuerstenau.leia.server.LeiaBackend;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.tui.Osc52;
+import io.github.mfuerstenau.leia.tui.documents.Documents;
 import io.github.mfuerstenau.leia.tui.terms.Terms;
 import java.io.IOException;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.CompletionException;
 import java.util.function.Function;
@@ -196,11 +203,16 @@ public final class Session {
                                 });
                             }
                         });
-            case Action.LoadDocument load ->
+            case Action.LoadDocument load -> {
+                cancelJobs(load.cancel(), runner);
                 backend.call(Methods.GET_DOCUMENT, new GetDocumentParams(load.docId()))
                         .whenComplete((result, error) -> {
                             if (error == null) {
-                                reply(runner, app -> app.documentLoaded(result));
+                                if (load.locate().isPresent()) {
+                                    locate(load.locate().get(), result, runner);
+                                } else {
+                                    reply(runner, app -> app.documentLoaded(result));
+                                }
                                 return;
                             }
                             RpcException rpc = rpcException(error, runner);
@@ -212,6 +224,7 @@ public final class Session {
                                 });
                             }
                         });
+            }
             case Action.LoadStoredValue load ->
                 backend.call(
                                 Methods.GET_STORED_VALUE,
@@ -272,13 +285,111 @@ public final class Session {
                             }
                         });
             case Action.Copy copy -> copy(copy.text(), runner);
-            case Action.CancelScan cancel ->
-                backend.call(Methods.CANCEL_JOB, new JobParams(cancel.jobId())).whenComplete((cancelled, error) -> {
+            case Action.StartReconstruct start -> {
+                cancelJobs(start.cancel(), runner);
+                backend.call(
+                                Methods.START_RECONSTRUCT,
+                                new StartReconstructParams(start.docId(), Optional.of(List.of(start.field()))))
+                        .whenComplete((job, error) -> {
+                            if (error == null) {
+                                reply(runner, app -> app.reconstructStarted(start.docId(), start.field(), job.jobId()));
+                                return;
+                            }
+                            RpcException rpc = rpcException(error, runner);
+                            if (rpc != null) {
+                                String message = describe(rpc);
+                                reply(runner, app -> {
+                                    app.reconstructStartFailed(start.docId(), start.field(), message);
+                                    return Optional.empty();
+                                });
+                            }
+                        });
+            }
+            case Action.CancelReconstruct cancel -> cancelJobs(List.of(cancel.jobId()), runner);
+            case Action.StartFilter start -> {
+                clearFilter(start.cancel(), start.release(), runner);
+                backend.call(Methods.START_FILTER, start.params()).whenComplete((job, error) -> {
+                    if (error == null) {
+                        reply(runner, app -> app.filterStarted(start.serial(), job.jobId()));
+                        return;
+                    }
+                    RpcException rpc = rpcException(error, runner);
+                    if (rpc != null) {
+                        String message = describe(rpc);
+                        reply(runner, app -> {
+                            app.filterFailed(start.serial(), message);
+                            return Optional.empty();
+                        });
+                    }
+                });
+            }
+            case Action.StepFilter step ->
+                backend.call(Methods.STEP_FILTER, step.params()).whenComplete((result, error) -> {
+                    if (error == null) {
+                        reply(
+                                runner,
+                                app -> app.filterStepped(step.serial(), step.params(), step.step(), result.match()));
+                        return;
+                    }
+                    RpcException rpc = rpcException(error, runner);
+                    if (rpc != null) {
+                        String message = describe(rpc);
+                        reply(runner, app -> {
+                            app.filterStepFailed(step.serial(), message);
+                            return Optional.empty();
+                        });
+                    }
+                });
+            case Action.ClearFilter clear -> clearFilter(clear.cancel(), clear.release(), runner);
+            case Action.CancelScan cancel -> cancelJobs(List.of(cancel.jobId()), runner);
+        }
+    }
+
+    /**
+     * Finds out whether the loaded {@code document} matches the filter of {@code locate}, then shows
+     * it: both in one reply, so the title knows which match it is when the document shows.
+     */
+    private void locate(Documents.Locate locate, GetDocumentResult document, TuiRunner runner) {
+        StepFilterParams params = new StepFilterParams(locate.filterId(), document.docId(), true);
+        backend.call(Methods.STEP_FILTER, params).whenComplete((result, error) -> {
+            if (error == null) {
+                reply(runner, app -> {
+                    app.filterLocated(locate.serial(), params, result.match());
+                    return app.documentLoaded(document);
+                });
+                return;
+            }
+            RpcException rpc = rpcException(error, runner);
+            if (rpc != null) {
+                String message = describe(rpc);
+                reply(runner, app -> {
+                    app.filterFailed(locate.serial(), message);
+                    return app.documentLoaded(document);
+                });
+            }
+        });
+    }
+
+    /** Cancels these jobs; nothing is reported back. The backend answers in order, so this comes before any later call. */
+    private void cancelJobs(List<Long> jobs, TuiRunner runner) {
+        for (long jobId : jobs) {
+            backend.call(Methods.CANCEL_JOB, new JobParams(jobId)).whenComplete((cancelled, error) -> {
+                if (error != null) {
+                    rpcException(error, runner);
+                }
+            });
+        }
+    }
+
+    /** Cancels the job that builds a filter, and releases a built one; nothing is reported back. */
+    private void clearFilter(OptionalLong cancel, OptionalLong release, TuiRunner runner) {
+        cancel.ifPresent(jobId -> cancelJobs(List.of(jobId), runner));
+        release.ifPresent(filterId -> backend.call(Methods.RELEASE_FILTER, new ReleaseFilterParams(filterId))
+                .whenComplete((released, error) -> {
                     if (error != null) {
                         rpcException(error, runner);
                     }
-                });
-        }
+                }));
     }
 
     /**
@@ -312,6 +423,41 @@ public final class Session {
                                 if (rpc != null) {
                                     String message = describe(rpc);
                                     polled(runner, poll, app -> app.scanFailed(scan.scanId(), message));
+                                }
+                            });
+                case Poll.Reconstruct rebuild ->
+                    backend.call(Methods.GET_RECONSTRUCT, new JobParams(rebuild.jobId()))
+                            .whenComplete((result, error) -> {
+                                if (error == null) {
+                                    polled(runner, poll, app -> {
+                                        app.reconstructProgress(rebuild.jobId(), result);
+                                        return Optional.empty();
+                                    });
+                                    return;
+                                }
+                                RpcException rpc = rpcException(error, runner);
+                                if (rpc != null) {
+                                    String message = describe(rpc);
+                                    polled(runner, poll, app -> {
+                                        app.reconstructFailed(rebuild.jobId(), message);
+                                        return Optional.empty();
+                                    });
+                                }
+                            });
+                case Poll.Filter filter ->
+                    backend.call(Methods.GET_FILTER, new JobParams(filter.jobId()))
+                            .whenComplete((result, error) -> {
+                                if (error == null) {
+                                    polled(runner, poll, app -> app.filterProgress(filter.serial(), result));
+                                    return;
+                                }
+                                RpcException rpc = rpcException(error, runner);
+                                if (rpc != null) {
+                                    String message = describe(rpc);
+                                    polled(runner, poll, app -> {
+                                        app.filterFailed(filter.serial(), message);
+                                        return Optional.empty();
+                                    });
                                 }
                             });
             }
@@ -388,7 +534,12 @@ public final class Session {
             }
             backend.call(Methods.GET_INDEX_STATS, new GetIndexStatsParams()).whenComplete((stats, statsError) -> {
                 if (statsError == null) {
-                    reply(runner, app -> app.reopened(stats));
+                    reply(runner, app -> {
+                        Optional<Action> next = app.reopened(stats);
+                        // The backend forgot the filter with the old index: build it again (ADR 0032).
+                        app.rebuildFilter().ifPresent(rebuild -> perform(rebuild, runner));
+                        return next;
+                    });
                 } else {
                     closeUnseen(statsError, runner);
                 }
