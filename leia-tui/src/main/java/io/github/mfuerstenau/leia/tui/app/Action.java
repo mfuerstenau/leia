@@ -135,4 +135,26 @@ public sealed interface Action {
      * so nothing is reported back.
      */
     record ClearFilter(OptionalLong cancel, OptionalLong release) implements Action {}
+
+    /**
+     * Fetch document {@code docId} whole for export {@code exportId} (ADR 0030), and report back with
+     * {@link App#documentExportLoaded} or {@link App#exportFailed}.
+     */
+    record LoadDocumentExport(long exportId, int docId) implements Action {}
+
+    /**
+     * Start rebuilding the indexed terms of the document of export {@code exportId}, and report back
+     * with {@link App#exportStarted} or {@link App#exportFailed}.
+     */
+    record StartDocumentExport(long exportId, int docId) implements Action {}
+
+    /** Cancel this export job. The app has forgotten the export already, so nothing is reported back. */
+    record CancelExport(long jobId) implements Action {}
+
+    /**
+     * Write the exported document to {@code path}, never into {@code indexDirs}, and report back with
+     * {@link App#documentExported} or {@link App#exportFailed}.
+     */
+    record WriteExport(long exportId, int docId, String path, String text, boolean overwrite, List<String> indexDirs)
+            implements Action {}
 }

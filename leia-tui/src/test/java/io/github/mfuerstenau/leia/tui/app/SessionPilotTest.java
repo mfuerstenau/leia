@@ -14,12 +14,17 @@ import dev.tamboui.tui.event.KeyModifiers;
 import dev.tamboui.tui.pilot.Pilot;
 import dev.tamboui.tui.pilot.TuiTestRunner;
 import io.github.mfuerstenau.leia.protocol.Methods;
+import io.github.mfuerstenau.leia.protocol.document.StoredValue;
+import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.version.VersionParams;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import io.github.mfuerstenau.leia.server.LeiaBackend;
 import io.github.mfuerstenau.leia.tui.TestScreens;
+import io.github.mfuerstenau.leia.tui.documents.DocumentExport;
+import io.github.mfuerstenau.leia.tui.documents.DocumentExport.ExportedDocument;
+import io.github.mfuerstenau.leia.tui.documents.DocumentExport.ExportedField;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -77,7 +82,7 @@ class SessionPilotTest {
         VersionResult version =
                 backend.call(Methods.VERSION, new VersionParams()).get();
         historyFile = tmp.resolve("state").resolve("history");
-        app = new App(version, Optional.empty(), History.load(historyFile), DirectoryImpl.FS);
+        app = new App(version, Optional.empty(), History.load(historyFile), DirectoryImpl.FS).withCwd(tmp);
         Session session = new Session(app, backend);
         test = TuiTestRunner.runTest(
                 (event, runner) -> handle(session, event, runner),
@@ -108,7 +113,7 @@ class SessionPilotTest {
 
     /**
      * Waits until the events dispatched so far are handled, and no open, reopen, close, term scan,
-     * fetch of commits, terms or documents, rebuild or filter build runs.
+     * fetch of commits, terms or documents, rebuild, filter build or export runs.
      */
     private void settle() throws InterruptedException {
         long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
@@ -129,7 +134,8 @@ class SessionPilotTest {
                 || app.loadingCommits()
                 || app.loadingTerms()
                 || app.loadingDocuments()
-                || app.documentJobs();
+                || app.documentJobs()
+                || app.exporting();
     }
 
     private String screen() {
@@ -393,6 +399,89 @@ class SessionPilotTest {
         pilot.press(KeyCode.END);
         settle();
         assertThat(screen()).contains("Rebuilt     3 terms, from the postings", "  red fox and red", "  red ×2  0, 3");
+    }
+
+    @Test
+    void exportsTheShownDocumentWithItsIndexedTerms() throws Exception {
+        openAtStart(writeBodies(tmp.resolve("index"), "Red fox and red"), OpenMode.READER);
+        pilot.press('2');
+        settle();
+
+        pilot.press('E');
+        settle();
+        assertThat(screen()).contains("Export document 0 as JSON", "doc-0.json", "Tab indexed terms: on");
+        pilot.press(KeyCode.ENTER);
+        settle();
+
+        assertThat(screen()).contains("Exported document 0 to doc-0.json").doesNotContain("as JSON");
+        ExportedDocument export = DocumentExport.fromJson(Files.readString(tmp.resolve("doc-0.json")));
+        assertThat(export.format()).isEqualTo(DocumentExport.FORMAT);
+        assertThat(export.index()).isEqualTo(tmp.resolve("index").toString());
+        assertThat(export.indexedTerms()).isTrue();
+        ExportedField body = export.fields().getFirst();
+        assertThat(body.name()).isEqualTo("body");
+        assertThat(body.stored()).extracting(StoredValue::value).containsExactly("Red fox and red");
+        assertThat(body.indexed().orElseThrow().terms())
+                .extracting(TermVectorTerm::term)
+                .containsExactly("and", "fox", "red");
+    }
+
+    @Test
+    void copiesTheDocumentAndWritesItWithoutItsIndexedTerms() throws Exception {
+        openAtStart(writeBodies(tmp.resolve("index"), "Red fox"), OpenMode.READER);
+        pilot.press('2');
+        settle();
+
+        pilot.press('E');
+        pilot.press('y', KeyModifiers.CTRL);
+        settle();
+        assertThat(screen()).contains("Copied document 0 as JSON, ").doesNotContain("Export document");
+
+        pilot.press('E');
+        pilot.press(KeyCode.TAB);
+        pilot.press(KeyCode.ENTER);
+        settle();
+        ExportedDocument export = DocumentExport.fromJson(Files.readString(tmp.resolve("doc-0.json")));
+        assertThat(export.indexedTerms()).isFalse();
+        assertThat(export.fields()).allMatch(field -> field.indexed().isEmpty());
+
+        // A second export to the same file asks first.
+        pilot.press('E');
+        pilot.press(KeyCode.ENTER);
+        settle();
+        assertThat(screen()).contains("File exists: ", "again overwrites it.");
+        pilot.press(KeyCode.ENTER);
+        settle();
+        assertThat(screen()).contains("Exported document 0 to doc-0.json");
+        assertThat(DocumentExport.fromJson(Files.readString(tmp.resolve("doc-0.json")))
+                        .indexedTerms())
+                .isTrue();
+    }
+
+    @Test
+    void doesNotExportIntoTheIndexDirectory() throws Exception {
+        Path index = writeBodies(tmp.resolve("index"), "Red fox");
+        openAtStart(index, OpenMode.READER);
+        pilot.press('2');
+        settle();
+        List<String> files = listFiles(index);
+
+        pilot.press('E');
+        pilot.press('u', KeyModifiers.CTRL);
+        for (char c : "index/doc-0.json".toCharArray()) {
+            pilot.press(c);
+        }
+        pilot.press(KeyCode.ENTER);
+        settle();
+
+        assertThat(screen()).contains("Not writing into the index directory", "Export document 0 as JSON");
+        assertThat(listFiles(index)).isEqualTo(files);
+    }
+
+    private static List<String> listFiles(Path dir) throws IOException {
+        try (Stream<Path> files = Files.list(dir)) {
+            return files.map(Path::toString).sorted().toList();
+        }
     }
 
     /** Starts a filter for the pattern {@code red}, as the search screen will. */

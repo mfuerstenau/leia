@@ -173,6 +173,9 @@ public final class Documents {
 
         /** Forget the filter: cancel the job that builds it, or release the filter the backend keeps. */
         record ClearFilter(OptionalLong cancel, OptionalLong release) implements Request {}
+
+        /** Ask where to export this document to as JSON (ADR 0030). */
+        record Export(int docId) implements Request {}
     }
 
     /** The filter to locate a document in once it is loaded: its serial and the backend's id. */
@@ -305,6 +308,11 @@ public final class Documents {
     public Documents withIndexes(List<IndexStart> indexes) {
         this.indexes = indexes.size() > 1 ? List.copyOf(indexes) : List.of();
         return this;
+    }
+
+    /** What the index says about the field {@code name}; empty if it doesn't know it. */
+    public Optional<IndexField> field(String name) {
+        return Optional.ofNullable(schema.get(name));
     }
 
     /** The name of the index directory that {@code docId} is in, with several of them. */
@@ -1069,6 +1077,9 @@ public final class Documents {
                 }
                 case 's' -> {
                     return searchDocValues();
+                }
+                case 'E' -> {
+                    return Optional.ofNullable(document).map(doc -> new Request.Export(doc.docId()));
                 }
                 case 'e' -> {
                     hideEmpty = !hideEmpty;

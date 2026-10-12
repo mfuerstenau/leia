@@ -1,0 +1,264 @@
+package io.github.mfuerstenau.leia.tui.prompt;
+
+import dev.tamboui.layout.Constraint;
+import dev.tamboui.layout.Layout;
+import dev.tamboui.layout.Rect;
+import dev.tamboui.style.Overflow;
+import dev.tamboui.style.Style;
+import dev.tamboui.terminal.Frame;
+import dev.tamboui.text.Line;
+import dev.tamboui.text.Span;
+import dev.tamboui.text.Text;
+import dev.tamboui.tui.event.KeyEvent;
+import dev.tamboui.widgets.Clear;
+import dev.tamboui.widgets.block.Block;
+import dev.tamboui.widgets.block.Borders;
+import dev.tamboui.widgets.block.Title;
+import dev.tamboui.widgets.paragraph.Paragraph;
+import io.github.mfuerstenau.leia.tui.documents.DocumentExport;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * The export prompt of the documents screen (ADR 0030), for the file that a document is written to
+ * as JSON and whether its indexed terms are rebuilt. The UI writes the document, so the prompt
+ * checks the path first (rule 1), and asks before overwriting a file that exists. The terms export
+ * of ADR 0022 becomes another {@link Kind} with the tools screen.
+ */
+public final class ExportPrompt {
+
+    /** The popup is at most this wide, borders included. */
+    private static final int MAX_WIDTH = 100;
+
+    /** What a key did to the prompt. */
+    public sealed interface Event {}
+
+    /** Nothing for the caller to do. */
+    public record Nothing() implements Event {}
+
+    /** Start the export. */
+    public record Submit(ExportRequest request) implements Event {}
+
+    /** Esc: close the prompt. */
+    public record Cancel() implements Event {}
+
+    /** The export a prompt asks for. */
+    public sealed interface ExportRequest {
+
+        /** A document as JSON, written by the UI (ADR 0030), with its indexed terms rebuilt if {@code indexedTerms}. */
+        record Document(int docId, boolean indexedTerms, ExportTarget target) implements ExportRequest {}
+    }
+
+    /** Where a document export goes. */
+    public sealed interface ExportTarget {
+
+        /** This absolute file, which exists if {@code overwrite}. */
+        record File(String path, boolean overwrite) implements ExportTarget {}
+
+        /** The clipboard, through OSC 52. */
+        record Clipboard() implements ExportTarget {}
+    }
+
+    /** What is exported, and the prompt's choices for it. */
+    private sealed interface Kind {}
+
+    /**
+     * A document.
+     *
+     * @param indexDirs the index directories of the open path, opened or skipped, which it never writes to
+     */
+    private record DocumentKind(int docId, boolean indexedTerms, List<String> indexDirs) implements Kind {}
+
+    private Kind kind;
+    private final LineInput input;
+
+    /** Why the last export couldn't start, or that the file exists; or null. */
+    private String error;
+
+    /** The file that the prompt said exists: Enter on it again overwrites it. Or null. */
+    private String overwrite;
+
+    /** Set while the export is being started. */
+    private boolean busy;
+
+    /** The directory that {@code ~} stands for. */
+    private final Optional<Path> home;
+
+    /** The directory a relative path is resolved against. */
+    private final Optional<Path> cwd;
+
+    private ExportPrompt(Kind kind, String file, Optional<Path> home, Optional<Path> cwd) {
+        this.kind = kind;
+        this.input = new LineInput(file);
+        this.home = home;
+        this.cwd = cwd;
+    }
+
+    /**
+     * The prompt for document {@code docId}, prefilled with {@code doc-<id>.json}, with its indexed
+     * terms rebuilt. It never writes into {@code indexDirs}.
+     */
+    public static ExportPrompt document(int docId, List<String> indexDirs, Optional<Path> home, Optional<Path> cwd) {
+        return new ExportPrompt(
+                new DocumentKind(docId, true, List.copyOf(indexDirs)), DocumentExport.defaultFile(docId), home, cwd);
+    }
+
+    public String input() {
+        return input.text();
+    }
+
+    public Optional<String> error() {
+        return Optional.ofNullable(error);
+    }
+
+    public boolean busy() {
+        return busy;
+    }
+
+    public void setBusy() {
+        busy = true;
+    }
+
+    /** Shows why the export couldn't start; the prompt can be edited again. */
+    public void setError(String error) {
+        busy = false;
+        overwrite = null;
+        this.error = error;
+    }
+
+    public Event handleKey(KeyEvent key) {
+        if (busy) {
+            return new Nothing();
+        }
+        switch (key.code()) {
+            case ESCAPE -> {
+                return new Cancel();
+            }
+            case ENTER -> {
+                if (!input.text().isBlank()) {
+                    return submit();
+                }
+            }
+            case TAB -> {
+                if (kind instanceof DocumentKind document) {
+                    kind = new DocumentKind(document.docId(), !document.indexedTerms(), document.indexDirs());
+                }
+                return new Nothing();
+            }
+            case CHAR -> {
+                if (key.hasCtrl() && key.codePoint() == 'y') {
+                    if (kind instanceof DocumentKind document) {
+                        return new Submit(new ExportRequest.Document(
+                                document.docId(), document.indexedTerms(), new ExportTarget.Clipboard()));
+                    }
+                    return new Nothing();
+                }
+            }
+            default -> {}
+        }
+        if (input.handleKey(key, PathCompletion::componentStart) == LineInput.Edit.CHANGED) {
+            error = null;
+            overwrite = null;
+        }
+        return new Nothing();
+    }
+
+    /**
+     * The export of the typed path, or first the question whether to overwrite it. A document isn't
+     * written where it mustn't be.
+     */
+    private Event submit() {
+        Path path;
+        try {
+            path = resolved();
+        } catch (InvalidPathException e) {
+            overwrite = null;
+            error = "Not a path: " + e.getMessage();
+            return new Nothing();
+        }
+        String shown = path.toString();
+        if (kind instanceof DocumentKind document) {
+            Optional<String> refused = DocumentExport.checkTarget(path, true, document.indexDirs());
+            if (refused.isPresent()) {
+                overwrite = null;
+                error = refused.get();
+                return new Nothing();
+            }
+        }
+        boolean exists = Files.exists(path, LinkOption.NOFOLLOW_LINKS);
+        if (exists && !shown.equals(overwrite)) {
+            error = "File exists: " + shown + ". ⏎ again overwrites it.";
+            overwrite = shown;
+            return new Nothing();
+        }
+        return switch (kind) {
+            case DocumentKind document ->
+                new Submit(new ExportRequest.Document(
+                        document.docId(), document.indexedTerms(), new ExportTarget.File(shown, exists)));
+        };
+    }
+
+    /** The typed path with {@code ~} expanded, against the working directory if it is relative. */
+    private Path resolved() {
+        Path typed = Path.of(PathCompletion.expandHome(input.text().strip(), home));
+        return cwd.isPresent() && !typed.isAbsolute() ? cwd.get().resolve(typed) : typed;
+    }
+
+    /** Draws the popup, centered in {@code area}. */
+    public void render(Frame frame, Rect area) {
+        int width = Math.min(Math.max(area.width() - 4, 0), MAX_WIDTH);
+        int innerWidth = Math.max(width - 2, 1);
+        Paragraph errorParagraph = error == null ? null : errorParagraph(error, overwrite != null);
+        int errorLines = errorParagraph == null ? 0 : PathPrompt.lineCount(errorParagraph, innerWidth);
+        // Input, error, hint, and the top and bottom border.
+        int height = Math.min(1 + errorLines + 1 + 2, area.height());
+        Rect popup =
+                new Rect(area.x() + (area.width() - width) / 2, area.y() + (area.height() - height) / 2, width, height);
+        frame.renderWidget(Clear.INSTANCE, popup);
+        String title;
+        String choice;
+        String keys;
+        switch (kind) {
+            case DocumentKind document -> {
+                title = " Export document " + document.docId() + " as JSON ";
+                choice = " Tab indexed terms: " + (document.indexedTerms() ? "on" : "off") + " ";
+                keys = "Enter export   Ctrl+Y copy   Tab indexed terms   Esc cancel";
+            }
+        }
+        Block block = Block.builder()
+                .borders(Borders.ALL)
+                .title(title)
+                .titleBottom(Title.from(Line.from(choice)).right())
+                .build();
+        Rect inner = block.inner(popup);
+        frame.renderWidget(block, popup);
+
+        List<Rect> parts = Layout.vertical()
+                .constraints(Constraint.length(1), Constraint.fill(), Constraint.length(1))
+                .split(inner);
+        Rect inputArea = parts.get(0);
+        LineInput.Visible visible = input.visible(inputArea.width());
+        frame.renderWidget(Paragraph.from(Line.from(visible.text())), inputArea);
+        if (!busy) {
+            frame.setCursorPosition(inputArea.x() + visible.cursorColumn(), inputArea.y());
+        }
+        if (errorParagraph != null) {
+            frame.renderWidget(errorParagraph, parts.get(1));
+        }
+        String hint = busy ? "Exporting…" : keys;
+        frame.renderWidget(Paragraph.from(Line.from(Span.raw(hint).dim())), parts.get(2));
+    }
+
+    /** The error in red, or the question whether to overwrite in yellow. */
+    private static Paragraph errorParagraph(String error, boolean question) {
+        Style style = question ? Style.EMPTY.yellow() : Style.EMPTY.red();
+        return Paragraph.builder()
+                .text(Text.from(List.of(Line.styled(error, style))))
+                .overflow(Overflow.WRAP_WORD)
+                .build();
+    }
+}

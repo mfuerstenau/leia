@@ -12,8 +12,12 @@ import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
 import io.github.mfuerstenau.leia.protocol.document.GetStoredValueParams;
+import io.github.mfuerstenau.leia.protocol.document.GetStoredValueResult;
 import io.github.mfuerstenau.leia.protocol.document.GetTermVectorParams;
+import io.github.mfuerstenau.leia.protocol.document.GetTermVectorResult;
 import io.github.mfuerstenau.leia.protocol.document.StartReconstructParams;
+import io.github.mfuerstenau.leia.protocol.document.StoredValue;
+import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
 import io.github.mfuerstenau.leia.protocol.filter.ReleaseFilterParams;
 import io.github.mfuerstenau.leia.protocol.filter.StepFilterParams;
 import io.github.mfuerstenau.leia.protocol.index.CloseIndexParams;
@@ -29,9 +33,11 @@ import io.github.mfuerstenau.leia.protocol.terms.StartFieldTermScanParams;
 import io.github.mfuerstenau.leia.server.LeiaBackend;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.tui.Osc52;
+import io.github.mfuerstenau.leia.tui.documents.DocumentExport;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
 import io.github.mfuerstenau.leia.tui.terms.Terms;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -39,6 +45,7 @@ import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -342,6 +349,48 @@ public final class Session {
                 });
             case Action.ClearFilter clear -> clearFilter(clear.cancel(), clear.release(), runner);
             case Action.CancelScan cancel -> cancelJobs(List.of(cancel.jobId()), runner);
+            case Action.LoadDocumentExport load ->
+                DocumentExport.load(exportFetch(), load.docId()).whenComplete((data, error) -> {
+                    if (error == null) {
+                        reply(runner, app -> app.documentExportLoaded(load.exportId(), data));
+                        return;
+                    }
+                    RpcException rpc = rpcException(error, runner);
+                    if (rpc != null) {
+                        String message = describe(rpc);
+                        reply(runner, app -> {
+                            app.exportFailed(load.exportId(), message);
+                            return Optional.empty();
+                        });
+                    }
+                });
+            case Action.StartDocumentExport start ->
+                backend.call(Methods.START_RECONSTRUCT, new StartReconstructParams(start.docId(), Optional.empty()))
+                        .whenComplete((job, error) -> {
+                            if (error == null) {
+                                reply(runner, app -> app.exportStarted(start.exportId(), job.jobId()));
+                                return;
+                            }
+                            RpcException rpc = rpcException(error, runner);
+                            if (rpc != null) {
+                                String message = describe(rpc);
+                                reply(runner, app -> {
+                                    app.exportFailed(start.exportId(), message);
+                                    return Optional.empty();
+                                });
+                            }
+                        });
+            case Action.CancelExport cancel -> cancelJobs(List.of(cancel.jobId()), runner);
+            case Action.WriteExport write -> {
+                // On the UI thread, as the Rust TUI wrote it in its loop: a few writes of text.
+                Optional<String> error = DocumentExport.writeFile(
+                        Path.of(write.path()), write.text(), write.overwrite(), write.indexDirs());
+                if (error.isPresent()) {
+                    app.exportFailed(write.exportId(), error.get());
+                } else {
+                    app.documentExported(write.exportId(), write.docId(), write.path());
+                }
+            }
         }
     }
 
@@ -368,6 +417,28 @@ public final class Session {
                 });
             }
         });
+    }
+
+    /** The calls a document export fetches the document with (ADR 0030). */
+    private DocumentExport.Fetch exportFetch() {
+        return new DocumentExport.Fetch() {
+            @Override
+            public CompletionStage<GetDocumentResult> document(int docId) {
+                return backend.call(Methods.GET_DOCUMENT, new GetDocumentParams(docId));
+            }
+
+            @Override
+            public CompletionStage<StoredValue> storedValue(int docId, String field, int index) {
+                return backend.call(Methods.GET_STORED_VALUE, new GetStoredValueParams(docId, field, index))
+                        .thenApply(GetStoredValueResult::value);
+            }
+
+            @Override
+            public CompletionStage<List<TermVectorTerm>> termVector(int docId, String field) {
+                return backend.call(Methods.GET_TERM_VECTOR, new GetTermVectorParams(docId, field))
+                        .thenApply(GetTermVectorResult::terms);
+            }
+        };
     }
 
     /** Cancels these jobs; nothing is reported back. The backend answers in order, so this comes before any later call. */
@@ -456,6 +527,25 @@ public final class Session {
                                     String message = describe(rpc);
                                     polled(runner, poll, app -> {
                                         app.filterFailed(filter.serial(), message);
+                                        return Optional.empty();
+                                    });
+                                }
+                            });
+                case Poll.DocumentExport exporting ->
+                    backend.call(Methods.GET_RECONSTRUCT, new JobParams(exporting.jobId()))
+                            .whenComplete((result, error) -> {
+                                if (error == null) {
+                                    polled(
+                                            runner,
+                                            poll,
+                                            app -> app.documentExportProgress(exporting.exportId(), result));
+                                    return;
+                                }
+                                RpcException rpc = rpcException(error, runner);
+                                if (rpc != null) {
+                                    String message = describe(rpc);
+                                    polled(runner, poll, app -> {
+                                        app.exportFailed(exporting.exportId(), message);
                                         return Optional.empty();
                                     });
                                 }

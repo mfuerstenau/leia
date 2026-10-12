@@ -263,6 +263,17 @@ class DocumentsTest {
         assertThat(selected(documents)).isEqualTo("id");
     }
 
+    @Test
+    void exportsTheShownDocument() {
+        Documents documents = documents();
+        assertThat(documents.handleKey(key('E'))).as("no document yet").isEmpty();
+
+        documents.want(2);
+        documents.loaded(document(2));
+
+        assertThat(documents.handleKey(key('E'))).contains(new Request.Export(2));
+    }
+
     private static Optional<Request> search(DocValuesNumber number, boolean hex, String... values) {
         return Optional.of(new Request.SearchDocValues("rank", number, hex, List.of(values)));
     }

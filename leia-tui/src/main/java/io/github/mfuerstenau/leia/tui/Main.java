@@ -144,7 +144,8 @@ public final class Main {
         VersionResult version =
                 backend.call(Methods.VERSION, new VersionParams()).get();
         History history = platform.historyFile().map(History::load).orElseGet(History::inMemory);
-        App app = new App(version, platform.home(), history, cli.directory());
+        App app = new App(version, platform.home(), history, cli.directory())
+                .withCwd(Path.of("").toAbsolutePath());
         Session session = new Session(app, backend);
         OpenMode mode = cli.noReader() ? OpenMode.DIRECTORY_ONLY : OpenMode.READER;
         // The first frame shows the path being opened.

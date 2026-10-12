@@ -1,0 +1,140 @@
+{
+  "format": "leia-document",
+  "version": 1,
+  "index": "/i/demo",
+  "docId": 3,
+  "deleted": false,
+  "indexedTerms": true,
+  "fields": [
+    {
+      "name": "id",
+      "number": 0,
+      "flags": "I--S----",
+      "indexOptions": "DOCS",
+      "stored": [
+        {
+          "type": "STRING",
+          "value": "doc-3",
+          "binary": false
+        }
+      ],
+      "indexed": {
+        "source": "POSTINGS",
+        "terms": [
+          {
+            "term": "c3282d33",
+            "binary": true,
+            "freq": 1,
+            "positions": []
+          }
+        ]
+      }
+    },
+    {
+      "name": "body",
+      "number": 1,
+      "flags": "IN-SV---",
+      "indexOptions": "DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS",
+      "norm": 2,
+      "stored": [
+        {
+          "type": "STRING",
+          "value": "red blue.",
+          "binary": false
+        }
+      ],
+      "termVector": [
+        {
+          "term": "blue",
+          "binary": false,
+          "freq": 1,
+          "positions": [
+            {
+              "position": 1,
+              "startOffset": 4,
+              "endOffset": 8
+            }
+          ]
+        },
+        {
+          "term": "red",
+          "binary": false,
+          "freq": 1,
+          "positions": [
+            {
+              "position": 0,
+              "startOffset": 0,
+              "endOffset": 3
+            }
+          ]
+        }
+      ],
+      "indexed": {
+        "source": "TERM_VECTOR",
+        "terms": [
+          {
+            "term": "blue",
+            "binary": false,
+            "freq": 1,
+            "positions": [
+              {
+                "position": 1,
+                "startOffset": 4,
+                "endOffset": 8
+              }
+            ]
+          },
+          {
+            "term": "red",
+            "binary": false,
+            "freq": 1,
+            "positions": [
+              {
+                "position": 0,
+                "startOffset": 0,
+                "endOffset": 3
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "labels",
+      "number": 2,
+      "flags": "IN------",
+      "indexOptions": "DOCS_AND_FREQS_AND_POSITIONS",
+      "norm": 1,
+      "stored": [],
+      "indexed": {
+        "source": "POSTINGS",
+        "terms": [
+          {
+            "term": "new",
+            "binary": false,
+            "freq": 1,
+            "positions": [
+              {
+                "position": 0
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "year",
+      "number": 3,
+      "flags": "-----D--",
+      "indexOptions": "NONE",
+      "stored": [],
+      "docValues": {
+        "type": "NUMERIC",
+        "numbers": [
+          2024
+        ],
+        "values": []
+      }
+    }
+  ]
+}

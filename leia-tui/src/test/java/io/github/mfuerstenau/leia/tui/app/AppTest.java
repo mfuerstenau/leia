@@ -49,6 +49,7 @@ import io.github.mfuerstenau.leia.protocol.version.JavaRuntime;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import io.github.mfuerstenau.leia.tui.TestScreens;
 import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
+import io.github.mfuerstenau.leia.tui.documents.DocumentExport.DocumentData;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import java.nio.file.Path;
@@ -58,6 +59,7 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /** The shell of {@code app.rs}: its tests, ported, and what the asynchronous calls add. */
 class AppTest {
@@ -1079,7 +1081,7 @@ class AppTest {
         app.handleKey(key(KeyCode.TAB));
         app.handleKey(key(KeyCode.END));
         assertThat(render(app)).contains("Esc stop rebuild", "rebuilding… 1024 of 3000 terms");
-        assertThat(TestScreens.render(app::render, 200, 20)).contains("e empty   r rebuild   Tab panel");
+        assertThat(TestScreens.render(app::render, 200, 20)).contains("e empty   r rebuild   E export   Tab panel");
 
         // Another document stops it.
         assertThat(app.handleKey(key(KeyCode.RIGHT)))
@@ -1230,5 +1232,136 @@ class AppTest {
         // Once built, it only locates the document shown.
         assertThat(app.filterProgress(2, built(9, 2, 3)))
                 .hasValue(new Action.StepFilter(2, new StepFilterParams(9, 1, true), FilterStep.LOCATE));
+    }
+
+    /** The documents screen on document 0, with relative export paths against {@code dir}. */
+    private static App appExporting(Path dir) {
+        return appShowingADocument().withCwd(dir);
+    }
+
+    private static DocumentData data(int docId) {
+        return new DocumentData(document(docId), Map.of());
+    }
+
+    private static GetReconstructResult rebuiltId(int docId) {
+        return new GetReconstructResult(
+                3,
+                OptionalLong.of(3),
+                Optional.of(new ReconstructResult(
+                        List.of(new ReconstructedField(
+                                "id",
+                                IndexOptions.DOCS,
+                                ReconstructSource.POSTINGS,
+                                List.of(new TermVectorTerm("doc-" + docId, false, 1, List.of())))),
+                        2)));
+    }
+
+    private static String wide(App app) {
+        return TestScreens.render(app::render, 140, 20);
+    }
+
+    @Test
+    void exportsADocumentWithItsIndexedTerms(@TempDir Path dir) {
+        App app = appExporting(dir);
+        assertThat(app.handleKey(key('E'))).isEmpty();
+        assertThat(render(app)).contains("Export document 0 as JSON", "Tab indexed terms: on");
+
+        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.LoadDocumentExport(1, 0));
+        assertThat(render(app)).contains("Exporting…");
+        assertThat(app.documentExportLoaded(1, data(0))).hasValue(new Action.StartDocumentExport(1, 0));
+        assertThat(app.exportStarted(1, 7)).isEmpty();
+        assertThat(app.polls()).containsExactly(new Poll.DocumentExport(1, 7));
+        assertThat(app.documentExportProgress(
+                        1, new GetReconstructResult(1024, OptionalLong.of(3000), Optional.empty())))
+                .isEmpty();
+        assertThat(wide(app)).contains("Exporting doc 0: 1024/3000 terms", "Esc cancel export");
+        // One export at a time.
+        app.handleKey(key('E'));
+        assertThat(wide(app)).contains("An export runs; Esc cancels it").doesNotContain("as JSON");
+
+        Optional<Action> write = app.documentExportProgress(1, rebuiltId(0));
+        assertThat(write).containsInstanceOf(Action.WriteExport.class);
+        Action.WriteExport written = (Action.WriteExport) write.get();
+        assertThat(written.exportId()).isEqualTo(1);
+        assertThat(written.docId()).isZero();
+        assertThat(written.path()).isEqualTo(dir.resolve("doc-0.json").toString());
+        assertThat(written.overwrite()).isFalse();
+        assertThat(written.indexDirs()).containsExactly("/data/idx");
+        assertThat(written.text()).contains("\"indexedTerms\": true", "\"source\": \"POSTINGS\"");
+        assertThat(app.polls()).isEmpty();
+
+        app.documentExported(1, 0, written.path());
+        assertThat(render(app)).contains(" Exported document 0 to doc-0.json");
+        // A late poll of the finished export changes nothing.
+        assertThat(app.documentExportProgress(1, rebuiltId(0))).isEmpty();
+    }
+
+    @Test
+    void copiesADocumentWithoutItsIndexedTerms(@TempDir Path dir) {
+        App app = appExporting(dir);
+        app.handleKey(key('E'));
+        app.handleKey(key(KeyCode.TAB));
+        assertThat(render(app)).contains("Tab indexed terms: off");
+
+        assertThat(app.handleKey(ctrl('y'))).hasValue(new Action.LoadDocumentExport(1, 0));
+        Optional<Action> copy = app.documentExportLoaded(1, data(0));
+        assertThat(copy).containsInstanceOf(Action.Copy.class);
+        assertThat(((Action.Copy) copy.get()).text()).contains("\"indexedTerms\": false", "\"value\": \"doc-0\"");
+        assertThat(render(app)).doesNotContain("Export document").contains(" Copied document 0 as JSON, ");
+        assertThat(app.polls()).isEmpty();
+    }
+
+    @Test
+    void aDocumentExportThatFailsSaysWhy(@TempDir Path dir) {
+        App app = appExporting(dir);
+        // Without indexed terms, the prompt stays open until the file is written.
+        app.handleKey(key('E'));
+        app.handleKey(key(KeyCode.TAB));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.LoadDocumentExport(1, 0));
+        assertThat(app.documentExportLoaded(1, data(0))).containsInstanceOf(Action.WriteExport.class);
+        app.exportFailed(1, "Cannot write doc-0.json: disk full");
+        assertThat(render(app)).contains("Cannot write doc-0.json: disk full");
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).isEmpty();
+        assertThat(render(app)).doesNotContain("Export document");
+
+        // With them, Esc stops the rebuild.
+        app.handleKey(key('E'));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.LoadDocumentExport(2, 0));
+        app.documentExportLoaded(2, data(0));
+        app.exportStarted(2, 4);
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.CancelExport(4));
+        assertThat(app.polls()).isEmpty();
+        assertThat(app.documentExportProgress(2, rebuiltId(0))).isEmpty();
+
+        // A write that fails after the rebuild is a notice.
+        app.handleKey(key('E'));
+        app.handleKey(key(KeyCode.ENTER));
+        app.documentExportLoaded(3, data(0));
+        app.exportStarted(3, 5);
+        assertThat(app.documentExportProgress(3, rebuiltId(0))).containsInstanceOf(Action.WriteExport.class);
+        assertThat(wide(app)).contains("Exporting doc 0: writing…");
+        app.exportFailed(3, "Cannot write doc-0.json: disk full");
+        assertThat(render(app)).contains("Export failed: Cannot write doc-0.json: disk full");
+    }
+
+    @Test
+    void aReopenStopsTheExportAndItsJobIsCancelledOnceItStarts(@TempDir Path dir) {
+        App app = appExporting(dir);
+        app.handleKey(key('E'));
+        app.handleKey(key(KeyCode.ENTER));
+        assertThat(app.documentExportLoaded(1, data(0))).hasValue(new Action.StartDocumentExport(1, 0));
+
+        assertThat(app.reopened(withDocs(stats("/data/idx"), 3, field("id", 0))))
+                .isEqualTo(load(0));
+        app.documentLoaded(document(0));
+
+        assertThat(wide(app)).contains("Reopened: segments_1; export stopped").doesNotContain("Export document");
+        assertThat(app.exportStarted(1, 9)).hasValue(new Action.CancelExport(9));
+        assertThat(app.polls()).isEmpty();
+        // The next export is a new one.
+        app.handleKey(key('E'));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.LoadDocumentExport(2, 0));
+        app.exportFailed(1, "too late");
+        assertThat(render(app)).doesNotContain("too late").contains("Exporting…");
     }
 }
