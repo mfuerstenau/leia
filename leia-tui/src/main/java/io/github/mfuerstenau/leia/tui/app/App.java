@@ -18,6 +18,7 @@ import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeResult;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsResult;
+import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
@@ -44,11 +45,13 @@ import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanResult;
+import io.github.mfuerstenau.leia.protocol.terms.GetExportTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import io.github.mfuerstenau.leia.tui.analysis.Analysis;
+import io.github.mfuerstenau.leia.tui.check.Check;
 import io.github.mfuerstenau.leia.tui.commits.Commits;
 import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.documents.DocumentExport;
@@ -69,7 +72,6 @@ import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import java.util.OptionalLong;
 
@@ -120,6 +122,9 @@ public final class App {
     /** The search screen of the open index; null without one, or without a reader. */
     private Search search;
 
+    /** The check screen of the open path, with or without a reader; null without one. */
+    private Check check;
+
     /** The analysis screen, which needs no index; its analyzer is kept when another index is opened. */
     private final Analysis analysis = new Analysis();
 
@@ -169,7 +174,7 @@ public final class App {
     /** The directory that a relative export path is resolved against. */
     private Optional<Path> cwd = Optional.empty();
 
-    /** Where to export a document to, while it is asked (ADR 0030); or null. */
+    /** Where to export the terms of a field (ADR 0022) or a document (ADR 0030) to, while it is asked; or null. */
     private ExportPrompt exportPrompt;
 
     /**
@@ -178,9 +183,14 @@ public final class App {
      */
     private sealed interface RunningExport {
         long id();
-
-        int docId();
     }
+
+    /**
+     * The terms of a field, written by the backend (ADR 0022).
+     *
+     * @param jobId null until the backend has started the job
+     */
+    private record TermsExport(long id, String field, Long jobId, long termsWritten) implements RunningExport {}
 
     /** The document is being fetched; the prompt says so. */
     private record Loading(long id, int docId, boolean indexedTerms, ExportTarget target) implements RunningExport {}
@@ -258,6 +268,7 @@ public final class App {
                 stats.indexes().stream().map(IndexCommitStats::path).toList(),
                 skipped.stream().map(SkippedIndex::path).toList());
         commits = new Commits(indexNames(opened));
+        check = new Check(stats.path());
         terms = new Terms(stats.fields());
         documents = newDocuments(stats, opened);
         search = newSearch(stats);
@@ -311,6 +322,7 @@ public final class App {
                 result.indexes().stream().map(IndexEntry::path).toList(),
                 result.skipped().stream().map(SkippedIndex::path).toList());
         commits = new Commits(indexNames(opened));
+        check = new Check(result.path());
         if (screen != Screen.ANALYSIS && screen != Screen.CHECK) {
             screen = Screen.COMMITS;
         }
@@ -358,6 +370,9 @@ public final class App {
         documents =
                 documents != null ? documents.reopened(stats.fields(), stats.maxDoc()) : newDocuments(stats, opened);
         syncTermsFilter();
+        if (check != null) {
+            check.stoppedByReopen();
+        }
         if (export != null) {
             reopened += "; export stopped";
         }
@@ -420,6 +435,7 @@ public final class App {
         opened = null;
         overview = null;
         commits = null;
+        check = null;
         terms = null;
         documents = null;
         search = null;
@@ -527,7 +543,7 @@ public final class App {
 
     /**
      * Turns what the terms screen needs into an action; a document to show switches to the documents
-     * screen. An export comes back with the tools screen.
+     * screen, and an export opens its prompt.
      */
     private Optional<Action> termsAction(Optional<Terms.Request> request) {
         return request.flatMap(next -> switch (next) {
@@ -544,7 +560,14 @@ public final class App {
                 screen = Screen.DOCUMENTS;
                 yield loadDocument(document.hit().docId());
             }
-            case Terms.Request.Export _ -> Optional.<Action>empty();
+            case Terms.Request.Export asked -> {
+                if (export != null) {
+                    notice = new Notice.ExportRunning();
+                } else {
+                    exportPrompt = ExportPrompt.terms(asked.field(), home, cwd);
+                }
+                yield Optional.<Action>empty();
+            }
         });
     }
 
@@ -817,7 +840,7 @@ public final class App {
         return documentFetches > 0;
     }
 
-    /** Whether a document export runs, from its fetch to its write. */
+    /** Whether an export runs: of terms, or of a document from its fetch to its write. */
     boolean exporting() {
         return export != null;
     }
@@ -912,9 +935,15 @@ public final class App {
                 : documentsAction(documents.filterStepped(serial, params, step, found));
     }
 
-    /** Starts the export the prompt asks for: the prompt says "Exporting…" until it is fetched. */
+    /** Starts the export the prompt asks for: the prompt says "Exporting…" until it has started. */
     private Optional<Action> startExport(ExportPrompt.ExportRequest request) {
         return switch (request) {
+            case ExportPrompt.ExportRequest.Terms terms -> {
+                exportPrompt.setBusy();
+                long id = nextExportId++;
+                export = new TermsExport(id, terms.params().field(), null, 0);
+                yield Optional.of(new Action.StartExportTerms(id, terms.params()));
+            }
             case ExportPrompt.ExportRequest.Document document -> {
                 exportPrompt.setBusy();
                 long id = nextExportId++;
@@ -960,11 +989,16 @@ public final class App {
     }
 
     /**
-     * The rebuild of export {@code exportId} runs: the prompt closes, and the tab line shows the
-     * progress. If that export was stopped or forgotten meanwhile, returns the action that cancels
-     * the job.
+     * The job of export {@code exportId} runs, which writes the terms or rebuilds the document's: the
+     * prompt closes, and the tab line shows the progress. If that export was stopped or forgotten
+     * meanwhile, returns the action that cancels the job.
      */
     public Optional<Action> exportStarted(long exportId, long jobId) {
+        if (export instanceof TermsExport terms && terms.id() == exportId && terms.jobId() == null) {
+            exportPrompt = null;
+            export = new TermsExport(exportId, terms.field(), jobId, 0);
+            return Optional.empty();
+        }
         if (!(export instanceof Rebuilding rebuilding) || rebuilding.id() != exportId || rebuilding.jobId() != null) {
             return Optional.of(new Action.CancelExport(jobId));
         }
@@ -978,6 +1012,21 @@ public final class App {
                 rebuilding.scanned(),
                 rebuilding.total());
         return Optional.empty();
+    }
+
+    /** Shows the progress of terms export {@code exportId}, or where it wrote the terms. */
+    public void termsExportProgress(long exportId, GetExportTermsResult result) {
+        if (!(export instanceof TermsExport terms) || terms.id() != exportId) {
+            return;
+        }
+        if (result.result().isPresent()) {
+            forgetExport();
+            notice = new Notice.Exported(
+                    "Exported " + TextFormat.count(result.result().get().terms(), "term") + " to "
+                            + shownPath(result.result().get().path()));
+            return;
+        }
+        export = new TermsExport(exportId, terms.field(), terms.jobId(), result.termsWritten());
     }
 
     /** Shows the progress of the rebuild. Returns where the export goes once it is done. */
@@ -1101,7 +1150,7 @@ public final class App {
 
     /**
      * The jobs to poll, once they have started: the running term scan, the rebuild and the filter of
-     * the documents screen, and the export.
+     * the documents screen, the export, the search screen's jobs and the check.
      */
     public List<Poll> polls() {
         List<Poll> polls = new ArrayList<>();
@@ -1118,13 +1167,46 @@ public final class App {
         if (export instanceof Rebuilding rebuilding && rebuilding.jobId() != null) {
             polls.add(new Poll.DocumentExport(rebuilding.id(), rebuilding.jobId()));
         }
+        if (export instanceof TermsExport terms && terms.jobId() != null) {
+            polls.add(new Poll.ExportTerms(terms.id(), terms.jobId()));
+        }
         if (search != null) {
             search.searchJob().ifPresent(job -> polls.add(new Poll.Search(job[0], job[1])));
             search.explainJob().ifPresent(job -> polls.add(new Poll.Explain(job[0], job[1])));
             search.storedScanJob()
                     .ifPresent(job -> polls.add(new Poll.StoredScan(job[0], job[1], search.storedScanFromHit())));
         }
+        if (check != null) {
+            check.job().ifPresent(job -> polls.add(new Poll.Check(job[0], job[1], check.fromLine())));
+        }
         return polls;
+    }
+
+    /** Whether the check screen runs a check. */
+    boolean checking() {
+        return check != null && check.running();
+    }
+
+    /** The job of check {@code checkId} has started; the job of a check that was stopped is cancelled. */
+    public Optional<Action> checkStarted(long checkId, long jobId) {
+        if (check == null) {
+            return Optional.of(new Action.CancelCheck(jobId));
+        }
+        OptionalLong cancel = check.started(checkId, jobId);
+        return cancel.isPresent() ? Optional.of(new Action.CancelCheck(cancel.getAsLong())) : Optional.empty();
+    }
+
+    /** Shows the new output lines of check {@code checkId}, and its outcome once it is there. */
+    public void checkProgress(long checkId, GetCheckIndexResult result) {
+        if (check != null) {
+            check.progress(checkId, result);
+        }
+    }
+
+    public void checkFailed(long checkId, String error) {
+        if (check != null) {
+            check.failed(checkId, error);
+        }
     }
 
     /**
@@ -1293,7 +1375,11 @@ public final class App {
                 return cancelScans();
             }
             if (export != null) {
-                Long job = export instanceof Rebuilding rebuilding ? rebuilding.jobId() : null;
+                Long job = switch (export) {
+                    case Rebuilding rebuilding -> rebuilding.jobId();
+                    case TermsExport terms -> terms.jobId();
+                    default -> null;
+                };
                 export = null;
                 return job != null ? Optional.of(new Action.CancelExport(job)) : Optional.empty();
             }
@@ -1308,6 +1394,11 @@ public final class App {
             }
             if (screen == Screen.DOCUMENTS && documents != null && documents.filterBuilding()) {
                 return documentsAction(documents.clearFilter());
+            }
+            if (screen == Screen.CHECK && checking()) {
+                // A job that hasn't started yet is cancelled once it starts.
+                OptionalLong job = check.cancel();
+                return job.isPresent() ? Optional.of(new Action.CancelCheck(job.getAsLong())) : Optional.empty();
             }
             return Optional.of(new Action.Quit());
         }
@@ -1342,7 +1433,7 @@ public final class App {
                 screen = Screen.ANALYSIS;
                 return initialRequest();
             }
-            case '7' -> showIf(hasIndex(), Screen.CHECK);
+            case '7' -> showIf(check != null, Screen.CHECK);
             case 'o' -> {
                 // Starts from the path that failed to open, then from the open index, so a sibling
                 // is a Ctrl+W away.
@@ -1392,6 +1483,11 @@ public final class App {
         }
         if (screen == Screen.SEARCH && search != null) {
             return searchAction(search.handleKey(key));
+        }
+        if (screen == Screen.CHECK && check != null) {
+            return check.handleKey(key).map(start -> switch (start) {
+                case Check.Request.Start request -> new Action.StartCheck(request.checkId(), request.level());
+            });
         }
         return Optional.empty();
     }
@@ -1446,9 +1542,9 @@ public final class App {
             return " " + cancel + "q quit   o open   c close   " + reopen
                     + "1-7 screen   r read again   ⏎ segments   Tab panel   ↑↓";
         }
-        if (screen == Screen.CHECK) {
-            renderNotPorted(frame, body, screen);
-            return " " + cancel + "q quit   o open   c close   " + reopen + "1-7 screen";
+        if (screen == Screen.CHECK && check != null) {
+            check.render(frame, body);
+            return " " + cancel + "q quit   o open   c close   " + reopen + "1-7 screen   " + check.keys();
         }
         if (overview == null) {
             renderWithoutReader(frame, body);
@@ -1468,9 +1564,8 @@ public final class App {
                 return " type to seek   ⏎/Esc done";
             }
             String filter = !terms.filtered() ? "" : terms.onlyFiltered() ? "b all postings   " : "b filter only   ";
-            // e export comes back with the tools screen.
             return " " + cancel + "q quit   o open   c close   1-7 screen   / seek   ⏎ open doc   " + filter
-                    + "←/→ column   ↑↓";
+                    + "e export   ←/→ column   ↑↓";
         }
         if (screen == Screen.DOCUMENTS) {
             documents.render(frame, body);
@@ -1494,10 +1589,6 @@ public final class App {
             return " " + cancel + "q quit   o open   c close   1-7 screen   " + step + steps
                     + "i go to   ⏎ term vector   v view   a analyze   s search value   x numbers   e empty   m similar   "
                     + "r rebuild   E export   Tab panel   ↑↓";
-        }
-        if (screen != Screen.OVERVIEW) {
-            renderNotPorted(frame, body, screen);
-            return " " + cancel + "q quit   o open   c close   R reopen   1-7 screen";
         }
         overview.render(frame, body);
         if (scan != null) {
@@ -1555,15 +1646,6 @@ public final class App {
         frame.renderWidget(wrapped(lines, title), body);
     }
 
-    private static void renderNotPorted(Frame frame, Rect body, Screen screen) {
-        frame.renderWidget(
-                wrapped(
-                        List.of(Line.from("The " + screen.name.toLowerCase(Locale.ROOT)
-                                + " screen isn't ported to the Java TUI yet (ADR 0034).")),
-                        " " + screen.name + " "),
-                body);
-    }
-
     /** What the tab line says about the running export, once its prompt is closed. */
     private Optional<String> exportLine() {
         if (exportPrompt != null) {
@@ -1572,6 +1654,8 @@ public final class App {
         return switch (export) {
             case null -> Optional.empty();
             case Loading _ -> Optional.empty();
+            case TermsExport terms ->
+                Optional.of("Exporting " + terms.field() + ": " + TextFormat.count(terms.termsWritten(), "term"));
             case Rebuilding rebuilding ->
                 Optional.of("Exporting doc " + rebuilding.docId() + ": " + rebuilding.scanned()
                         + (rebuilding.total().isPresent()

@@ -11,6 +11,7 @@ import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.tui.event.KeyModifiers;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeParams;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeResult;
+import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexResult;
 import io.github.mfuerstenau.leia.protocol.commits.Commit;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
@@ -53,12 +54,16 @@ import io.github.mfuerstenau.leia.protocol.search.Snippet;
 import io.github.mfuerstenau.leia.protocol.search.StoredScanHit;
 import io.github.mfuerstenau.leia.protocol.search.TermQuery;
 import io.github.mfuerstenau.leia.protocol.search.TotalHitsRelation;
+import io.github.mfuerstenau.leia.protocol.terms.ExportTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.FieldTerms;
+import io.github.mfuerstenau.leia.protocol.terms.GetExportTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.Posting;
 import io.github.mfuerstenau.leia.protocol.terms.PostingsFilter;
+import io.github.mfuerstenau.leia.protocol.terms.StartExportTermsParams;
+import io.github.mfuerstenau.leia.protocol.terms.TermDelimiter;
 import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
 import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
 import io.github.mfuerstenau.leia.protocol.version.JavaRuntime;
@@ -1085,10 +1090,8 @@ class AppTest {
         App app = appOnTerms();
 
         String screen = render(app);
-        assertThat(screen).contains("3 Terms", "id (/ seeks)", "Postings (2)", "/ seek", "⏎ open doc", "←/→ column");
-        // The tools screen isn't ported yet, so e exports nothing.
-        assertThat(app.handleKey(key('e'))).isEmpty();
-        assertThat(render(app)).contains("Postings (2)");
+        assertThat(screen)
+                .contains("3 Terms", "id (/ seeks)", "Postings (2)", "/ seek", "⏎ open doc", "e export", "←/→ column");
         // The terms screen has everything it shows.
         app.handleKey(key('1'));
         assertThat(app.handleKey(key('3'))).isEmpty();
@@ -1677,5 +1680,151 @@ class AppTest {
         assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.LoadDocumentExport(2, 0));
         app.exportFailed(1, "too late");
         assertThat(render(app)).doesNotContain("too late").contains("Exporting…");
+    }
+
+    @Test
+    void checksTheIndexOnScreen7() {
+        App app = appWithFields();
+        assertThat(app.handleKey(key('7'))).isEmpty();
+        String screen = render(app);
+        assertThat(screen).contains("Lucene's CheckIndex", "⏎ check   l level: 1 checksums");
+
+        app.handleKey(key('l'));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.StartCheck(1, 2));
+        assertThat(app.checking()).isTrue();
+        assertThat(app.polls()).isEmpty();
+        assertThat(app.checkStarted(1, 5)).isEmpty();
+        assertThat(app.polls()).containsExactly(new Poll.Check(1, 5, 0));
+        app.checkProgress(
+                1, new GetCheckIndexResult(2, List.of("Checking /data/idx", "1 of 1: name=_0"), Optional.empty()));
+        assertThat(app.polls()).containsExactly(new Poll.Check(1, 5, 2));
+        assertThat(render(app)).contains("Esc cancel check");
+
+        // Esc cancels the check rather than quitting.
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.CancelCheck(5));
+        assertThat(app.polls()).isEmpty();
+        assertThat(render(app)).contains("Cancelled.");
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.Quit());
+    }
+
+    @Test
+    void escBeforeTheCheckStartsStopsItAndItsJobIsCancelledOnceItStarts() {
+        App app = appWithFields();
+        app.handleKey(key('7'));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.StartCheck(1, 1));
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).isEmpty();
+        assertThat(app.checking()).isFalse();
+        assertThat(app.checkStarted(1, 8)).hasValue(new Action.CancelCheck(8));
+        assertThat(app.polls()).isEmpty();
+        // A failure of the stopped check doesn't show.
+        app.checkFailed(1, "too late");
+        assertThat(render(app)).contains("Cancelled.").doesNotContain("too late");
+    }
+
+    @Test
+    void checksWithoutAReaderAndStopsOnReopen() {
+        App app = app();
+        openedWithoutReader(app);
+        app.handleKey(key('1'));
+        assertThat(render(app)).contains("only the commits (4) and check (7) work");
+        app.handleKey(key('7'));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.StartCheck(1, 1));
+        app.checkStarted(1, 1);
+
+        // Opening the path again keeps the screen, with a new check.
+        openedWithoutReader(app);
+        assertThat(app.polls()).isEmpty();
+        assertThat(render(app)).contains("Lucene's CheckIndex");
+        // The job of the old check is cancelled if it starts late.
+        assertThat(app.checkStarted(1, 2)).hasValue(new Action.CancelCheck(2));
+
+        app = appWithFields();
+        app.handleKey(key('7'));
+        app.handleKey(key(KeyCode.ENTER));
+        app.checkStarted(1, 2);
+        app.reopened(stats("/data/idx"));
+        assertThat(app.polls()).isEmpty();
+        assertThat(render(app)).contains("Stopped: the index was reopened.");
+
+        // Closed, there is no check screen.
+        app.closed();
+        app.handleKey(key('7'));
+        assertThat(render(app)).doesNotContain("CheckIndex");
+    }
+
+    @Test
+    void exportsTheTermsOfTheSelectedField(@TempDir Path dir) {
+        App app = appOnTerms().withCwd(dir);
+        assertThat(app.handleKey(key('e'))).isEmpty();
+        assertThat(render(app)).contains("Export the terms of id", "Tab delimiter: tab");
+        app.handleKey(ctrl('u'));
+        typed(app, "ids.out");
+
+        assertThat(app.handleKey(key(KeyCode.ENTER)))
+                .hasValue(new Action.StartExportTerms(
+                        1,
+                        new StartExportTermsParams(
+                                "id",
+                                dir.resolve("ids.out").toString(),
+                                Optional.of(TermDelimiter.TAB),
+                                Optional.of(false))));
+        assertThat(app.exporting()).isTrue();
+        assertThat(render(app)).contains("Exporting…");
+        assertThat(app.exportStarted(1, 9)).isEmpty();
+        assertThat(app.polls()).containsExactly(new Poll.ExportTerms(1, 9));
+        app.termsExportProgress(1, new GetExportTermsResult(1024, Optional.empty()));
+        assertThat(wide(app)).contains("Exporting id: 1024 terms", "Esc cancel export");
+        // One export at a time.
+        app.handleKey(key('e'));
+        assertThat(wide(app)).contains("An export runs; Esc cancels it").doesNotContain("Export the terms");
+
+        app.termsExportProgress(
+                1,
+                new GetExportTermsResult(
+                        2,
+                        Optional.of(new ExportTermsResult(dir.resolve("ids.out").toString(), 2, 6))));
+        assertThat(app.polls()).isEmpty();
+        assertThat(app.exporting()).isFalse();
+        assertThat(render(app)).contains(" Exported 2 terms to ids.out");
+        // Until the next key.
+        app.handleKey(key(KeyCode.DOWN));
+        assertThat(render(app)).doesNotContain("Exported");
+    }
+
+    @Test
+    void aTermsExportThatCantStartSaysWhyInItsPrompt(@TempDir Path dir) {
+        App app = appOnTerms().withCwd(dir);
+        app.handleKey(key('e'));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).containsInstanceOf(Action.StartExportTerms.class);
+        app.exportFailed(1, "Not writing into the index directory " + dir);
+        assertThat(wide(app)).contains("Not writing into the index directory");
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).isEmpty();
+        assertThat(render(app)).doesNotContain("Export the terms");
+    }
+
+    @Test
+    void escCancelsARunningTermsExportAndAFailureIsShown(@TempDir Path dir) {
+        App app = appOnTerms().withCwd(dir);
+        app.handleKey(key('e'));
+        app.handleKey(key(KeyCode.ENTER));
+        app.exportStarted(1, 4);
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.CancelExport(4));
+        assertThat(app.polls()).isEmpty();
+        // A late poll changes nothing.
+        app.termsExportProgress(1, new GetExportTermsResult(5, Optional.empty()));
+        assertThat(app.exporting()).isFalse();
+
+        app.handleKey(key('e'));
+        app.handleKey(key(KeyCode.ENTER));
+        app.exportStarted(2, 5);
+        app.exportFailed(2, "Cannot write x: disk full");
+        assertThat(app.polls()).isEmpty();
+        assertThat(render(app)).contains("Export failed: Cannot write x: disk full");
+
+        // A job that starts for an export that a close forgot is cancelled.
+        app.handleKey(key('e'));
+        app.handleKey(key(KeyCode.ENTER));
+        app.closed();
+        assertThat(app.exportStarted(3, 6)).hasValue(new Action.CancelExport(6));
     }
 }

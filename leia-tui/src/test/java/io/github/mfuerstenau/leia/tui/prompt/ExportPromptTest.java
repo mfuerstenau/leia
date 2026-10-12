@@ -6,6 +6,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
+import io.github.mfuerstenau.leia.protocol.terms.StartExportTermsParams;
+import io.github.mfuerstenau.leia.protocol.terms.TermDelimiter;
 import io.github.mfuerstenau.leia.tui.TestScreens;
 import io.github.mfuerstenau.leia.tui.prompt.ExportPrompt.ExportRequest;
 import io.github.mfuerstenau.leia.tui.prompt.ExportPrompt.ExportTarget;
@@ -17,7 +19,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-/** The document tests of {@code export.rs}, ported. */
+/** The tests of {@code export.rs}, ported. */
 class ExportPromptTest {
 
     @TempDir
@@ -109,5 +111,65 @@ class ExportPromptTest {
         prompt.setError("Cannot write doc-1.json: disk full");
         assertThat(render(prompt)).contains("Cannot write doc-1.json: disk full");
         assertThat(prompt.handleKey(key(KeyCode.ESCAPE))).isEqualTo(new ExportPrompt.Cancel());
+    }
+
+    @Test
+    void namesTheTermsFileAfterTheFieldAndTheTime() {
+        assertThat(ExportPrompt.defaultFile("body", 1_791_369_000_000L)).isEqualTo("terms_body_20261007T103000Z.out");
+        assertThat(ExportPrompt.defaultFile("a/b c", 0)).isEqualTo("terms_a_b_c_19700101T000000Z.out");
+    }
+
+    @Test
+    void resolvesTheTermsPathAndCyclesTheDelimiter() throws IOException {
+        Path home = Files.createDirectories(dir.resolve("home"));
+        ExportPrompt prompt = ExportPrompt.terms("body", Optional.of(home), Optional.of(dir));
+        assertThat(prompt.input()).startsWith("terms_body_");
+        assertThat(render(prompt)).contains("Export the terms of body", "Tab delimiter: tab");
+        clear(prompt);
+        typed(prompt, "out/t.txt");
+        prompt.handleKey(key(KeyCode.TAB));
+        assertThat(render(prompt)).contains("Tab delimiter: comma");
+
+        assertThat(prompt.handleKey(key(KeyCode.ENTER)))
+                .isEqualTo(new ExportPrompt.Submit(new ExportRequest.Terms(new StartExportTermsParams(
+                        "body",
+                        dir.resolve("out/t.txt").toString(),
+                        Optional.of(TermDelimiter.COMMA),
+                        Optional.of(false)))));
+
+        clear(prompt);
+        typed(prompt, "~/t.txt");
+        prompt.handleKey(key(KeyCode.TAB));
+        prompt.handleKey(key(KeyCode.TAB));
+        ExportPrompt.Submit submit = (ExportPrompt.Submit) prompt.handleKey(key(KeyCode.ENTER));
+        StartExportTermsParams params = ((ExportRequest.Terms) submit.request()).params();
+        assertThat(params.path()).isEqualTo(home.resolve("t.txt").toString());
+        assertThat(params.delimiter()).contains(TermDelimiter.TAB);
+    }
+
+    @Test
+    void asksBeforeOverwritingATermsFile() throws IOException {
+        Files.writeString(dir.resolve("t.out"), "old");
+        ExportPrompt prompt = ExportPrompt.terms("body", Optional.empty(), Optional.of(dir));
+        clear(prompt);
+        typed(prompt, "t.out");
+
+        assertThat(prompt.handleKey(key(KeyCode.ENTER))).isEqualTo(new ExportPrompt.Nothing());
+        assertThat(prompt.error()).contains("File exists: " + dir.resolve("t.out") + ". ⏎ again overwrites it.");
+        ExportPrompt.Submit submit = (ExportPrompt.Submit) prompt.handleKey(key(KeyCode.ENTER));
+        assertThat(((ExportRequest.Terms) submit.request()).params().overwrite())
+                .contains(true);
+
+        // Editing the path asks again.
+        typed(prompt, "x");
+        prompt.handleKey(key(KeyCode.BACKSPACE));
+        assertThat(prompt.handleKey(key(KeyCode.ENTER))).isEqualTo(new ExportPrompt.Nothing());
+    }
+
+    @Test
+    void theTermsPromptHasNoCopy() {
+        ExportPrompt prompt = ExportPrompt.terms("body", Optional.empty(), Optional.empty());
+        assertThat(prompt.handleKey(ctrl('y'))).isEqualTo(new ExportPrompt.Nothing());
+        assertThat(render(prompt)).contains("Enter export   Tab delimiter   Esc cancel");
     }
 }

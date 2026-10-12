@@ -8,6 +8,8 @@ import dev.tamboui.tui.event.TickEvent;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsParams;
+import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexParams;
+import io.github.mfuerstenau.leia.protocol.check.StartCheckIndexParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
@@ -141,13 +143,17 @@ public final class Session {
     /**
      * Polls a job that has just started, or a set of jobs that changed, every 10 ms for the first
      * {@link #FIRST_POLLS} polls, as the Rust TUI did; the tick polls every 100 ms after that (ADR
-     * 0034 §10). A regex scan's next hit doesn't count as a change.
+     * 0034 §10). A regex scan's next hit and a check's next output line don't count as a change.
      */
     private void startFirstPolls(TuiRunner runner) {
         List<Poll> polls = new ArrayList<>();
         for (Poll poll : app.polls()) {
             polls.add(
-                    poll instanceof Poll.StoredScan scan ? new Poll.StoredScan(scan.scanId(), scan.jobId(), 0) : poll);
+                    switch (poll) {
+                        case Poll.StoredScan scan -> new Poll.StoredScan(scan.scanId(), scan.jobId(), 0);
+                        case Poll.Check check -> new Poll.Check(check.checkId(), check.jobId(), 0);
+                        default -> poll;
+                    });
         }
         if (polls.equals(polled)) {
             return;
@@ -425,6 +431,20 @@ public final class Session {
                         app -> message -> app.storedScanFailed(start.scanId(), message));
             }
             case Action.CancelSearch cancel -> cancelJobs(cancel.jobs(), runner);
+            case Action.StartCheck start ->
+                startJob(
+                        backend.call(
+                                Methods.START_CHECK_INDEX, new StartCheckIndexParams(OptionalInt.of(start.level()))),
+                        runner,
+                        app -> jobId -> app.checkStarted(start.checkId(), jobId),
+                        app -> message -> app.checkFailed(start.checkId(), message));
+            case Action.CancelCheck cancel -> cancelJobs(List.of(cancel.jobId()), runner);
+            case Action.StartExportTerms start ->
+                startJob(
+                        backend.call(Methods.START_EXPORT_TERMS, start.params()),
+                        runner,
+                        app -> jobId -> app.exportStarted(start.exportId(), jobId),
+                        app -> message -> app.exportFailed(start.exportId(), message));
             case Action.StartReconstruct start -> {
                 cancelJobs(start.cancel(), runner);
                 backend.call(
@@ -751,6 +771,46 @@ public final class Session {
                                             runner,
                                             poll,
                                             app -> app.documentExportProgress(exporting.exportId(), result));
+                                    return;
+                                }
+                                RpcException rpc = rpcException(error, runner);
+                                if (rpc != null) {
+                                    String message = describe(rpc);
+                                    polled(runner, poll, app -> {
+                                        app.exportFailed(exporting.exportId(), message);
+                                        return Optional.empty();
+                                    });
+                                }
+                            });
+                case Poll.Check checking ->
+                    backend.call(
+                                    Methods.GET_CHECK_INDEX,
+                                    new GetCheckIndexParams(checking.jobId(), checking.fromLine()))
+                            .whenComplete((result, error) -> {
+                                if (error == null) {
+                                    polled(runner, poll, app -> {
+                                        app.checkProgress(checking.checkId(), result);
+                                        return Optional.empty();
+                                    });
+                                    return;
+                                }
+                                RpcException rpc = rpcException(error, runner);
+                                if (rpc != null) {
+                                    String message = describe(rpc);
+                                    polled(runner, poll, app -> {
+                                        app.checkFailed(checking.checkId(), message);
+                                        return Optional.empty();
+                                    });
+                                }
+                            });
+                case Poll.ExportTerms exporting ->
+                    backend.call(Methods.GET_EXPORT_TERMS, new JobParams(exporting.jobId()))
+                            .whenComplete((result, error) -> {
+                                if (error == null) {
+                                    polled(runner, poll, app -> {
+                                        app.termsExportProgress(exporting.exportId(), result);
+                                        return Optional.empty();
+                                    });
                                     return;
                                 }
                                 RpcException rpc = rpcException(error, runner);

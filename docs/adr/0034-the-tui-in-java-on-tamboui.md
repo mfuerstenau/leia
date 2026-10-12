@@ -108,6 +108,11 @@ What has to carry over:
       - *Esc stops at once: the screen marks its search, explanation and scan as stopped, and cancels the jobs that have started. A job that starts later is cancelled when it starts. So Esc doesn't quit while a search runs whose job hasn't started yet. The Rust TUI reported a cancel back with `search_cancelled`; nothing reports back here.*
       - *The first polls at 10 ms: when the jobs that `App.polls()` lists change, `Session` sends up to 10 first-poll events 10 ms apart from a daemon timer thread. A regex scan's next page of hits doesn't count as a change. The 100 ms tick goes on, and at most one call per job is in flight, as before.*
       - *The settings popups (parser options, More-Like-This, similarity and sort, hit fields) each edit a copy of their settings, and the screen takes it only when it changed, which searches again.*
+    - *Settled with the tools screen (check and terms export):*
+      - *Each check has an id, as each search does. Esc stops it at once, with no `check_cancelled` reply, and a job that starts for a stopped check is cancelled. A reopen stops it, and an open or close makes the screen anew.*
+      - *The terms export is one more kind of the running export, with its own id. Its prompt stays busy until the job has started, so Esc there waits for the start, as in the Rust TUI.*
+      - *A check's next output lines don't count as a change of the polled jobs, as a regex scan's next hits don't.*
+      - *TamboUI's `Paragraph` doesn't scroll sideways, so the check screen cuts the output lines at the column itself.*
 
 ## Alternatives considered
 

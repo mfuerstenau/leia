@@ -112,7 +112,7 @@ class SessionPilotTest {
 
     /**
      * Waits until the events dispatched so far are handled, and no open, reopen, close, term scan,
-     * fetch of commits, terms or documents, rebuild, filter build or export runs.
+     * fetch of commits, terms or documents, rebuild, filter build, export or check runs.
      */
     private void settle() throws InterruptedException {
         long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
@@ -135,6 +135,7 @@ class SessionPilotTest {
                 || app.loadingDocuments()
                 || app.documentJobs()
                 || app.exporting()
+                || app.checking()
                 || app.analyzing()
                 || app.searching();
     }
@@ -505,6 +506,69 @@ class SessionPilotTest {
 
         assertThat(screen()).contains("Not writing into the index directory", "Export document 0 as JSON");
         assertThat(listFiles(index)).isEqualTo(files);
+    }
+
+    @Test
+    void checksTheIndex() throws Exception {
+        openAtStart(writeIndex(tmp.resolve("index"), 3), OpenMode.READER);
+        pilot.press('7');
+        pilot.press('l');
+        pilot.press(KeyCode.ENTER);
+        settle();
+
+        assertThat(screen())
+                .contains("Check (level 2, integrity)", "OK: no problems found in 1 index", "Output: lines");
+    }
+
+    @Test
+    void checksACorruptIndexWithoutAReader() throws Exception {
+        Path index = writeIndex(tmp.resolve("broken"), 2);
+        try (Stream<Path> files = Files.list(index)) {
+            for (Path si : files.filter(file -> file.toString().endsWith(".si")).toList()) {
+                Files.delete(si);
+            }
+        }
+        openAtStart(index, OpenMode.DIRECTORY_ONLY);
+        pilot.press('7');
+        pilot.press(KeyCode.ENTER);
+        settle();
+
+        assertThat(screen()).contains("BAD: problems in 1 of 1 index", "✗ ");
+    }
+
+    @Test
+    void exportsTheTermsOfAField() throws Exception {
+        openAtStart(writeIndex(tmp.resolve("index"), 3), OpenMode.READER);
+        pilot.press('3');
+        settle();
+
+        pilot.press('e');
+        pilot.press('u', KeyModifiers.CTRL);
+        for (char c : "terms.out".toCharArray()) {
+            pilot.press(c);
+        }
+        pilot.press(KeyCode.TAB);
+        pilot.press(KeyCode.ENTER);
+        settle();
+
+        assertThat(screen()).contains("Exported 3 terms to terms.out").doesNotContain("Export the terms");
+        assertThat(Files.readAllLines(tmp.resolve("terms.out")))
+                .hasSize(3)
+                .allMatch(line -> line.startsWith("doc-") && line.contains(","));
+
+        // A second export to the same file asks first.
+        pilot.press('e');
+        pilot.press('u', KeyModifiers.CTRL);
+        for (char c : "terms.out".toCharArray()) {
+            pilot.press(c);
+        }
+        pilot.press(KeyCode.ENTER);
+        settle();
+        assertThat(screen()).contains("File exists: ", "again overwrites it.");
+        pilot.press(KeyCode.ENTER);
+        settle();
+        assertThat(screen()).contains("Exported 3 terms to terms.out");
+        assertThat(Files.readAllLines(tmp.resolve("terms.out"))).allMatch(line -> line.contains("\t"));
     }
 
     private static List<String> listFiles(Path dir) throws IOException {

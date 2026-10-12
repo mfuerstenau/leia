@@ -26,4 +26,13 @@ public sealed interface Poll {
      * {@link App#storedScanFailed}, under {@code scanId}.
      */
     record StoredScan(long scanId, long jobId, int fromHit) implements Poll {}
+
+    /**
+     * Ask for the lines from {@code fromLine} on, and report back with {@link App#checkProgress} or
+     * {@link App#checkFailed}, under {@code checkId}.
+     */
+    record Check(long checkId, long jobId, int fromLine) implements Poll {}
+
+    /** Report back with {@link App#termsExportProgress} or {@link App#exportFailed}, under {@code exportId}. */
+    record ExportTerms(long exportId, long jobId) implements Poll {}
 }

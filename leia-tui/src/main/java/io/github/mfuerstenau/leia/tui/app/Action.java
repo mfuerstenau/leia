@@ -10,6 +10,7 @@ import io.github.mfuerstenau.leia.protocol.search.StartExplainParams;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.StartStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.terms.PostingsFilter;
+import io.github.mfuerstenau.leia.protocol.terms.StartExportTermsParams;
 import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
 import java.util.List;
@@ -152,6 +153,12 @@ public sealed interface Action {
      */
     record StartDocumentExport(long exportId, int docId) implements Action {}
 
+    /**
+     * Start export {@code exportId} of the terms of a field (ADR 0022), and report back with {@link
+     * App#exportStarted} or {@link App#exportFailed}.
+     */
+    record StartExportTerms(long exportId, StartExportTermsParams params) implements Action {}
+
     /** Cancel this export job. The app has forgotten the export already, so nothing is reported back. */
     record CancelExport(long jobId) implements Action {}
 
@@ -191,4 +198,13 @@ public sealed interface Action {
 
     /** Cancel these search, explanation and scan jobs; the app has forgotten them, so nothing is reported back. */
     record CancelSearch(List<Long> jobs) implements Action {}
+
+    /**
+     * Start check {@code checkId} of the open path at this level, and report back with {@link
+     * App#checkStarted} or {@link App#checkFailed} (ADR 0022).
+     */
+    record StartCheck(long checkId, int level) implements Action {}
+
+    /** Cancel this check job. The app has stopped the check already, so nothing is reported back. */
+    record CancelCheck(long jobId) implements Action {}
 }

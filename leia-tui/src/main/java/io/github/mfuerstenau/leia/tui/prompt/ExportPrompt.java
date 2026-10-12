@@ -15,24 +15,34 @@ import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.block.Title;
 import dev.tamboui.widgets.paragraph.Paragraph;
+import io.github.mfuerstenau.leia.protocol.terms.StartExportTermsParams;
+import io.github.mfuerstenau.leia.protocol.terms.TermDelimiter;
 import io.github.mfuerstenau.leia.tui.documents.DocumentExport;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 
 /**
- * The export prompt of the documents screen (ADR 0030), for the file that a document is written to
- * as JSON and whether its indexed terms are rebuilt. The UI writes the document, so the prompt
- * checks the path first (rule 1), and asks before overwriting a file that exists. The terms export
- * of ADR 0022 becomes another {@link Kind} with the tools screen.
+ * The export prompts: of the terms screen (ADR 0022), for the file that the terms of a field are
+ * written to and the delimiter, and of the documents screen (ADR 0030), for the file that a
+ * document is written to as JSON and whether its indexed terms are rebuilt. The backend writes the
+ * terms; the prompt only resolves the path and asks before overwriting a file that exists. The UI
+ * writes the document, so its prompt checks the path first (rule 1).
  */
 public final class ExportPrompt {
 
     /** The popup is at most this wide, borders included. */
     private static final int MAX_WIDTH = 100;
+
+    private static final DateTimeFormatter FILE_TIME =
+            DateTimeFormatter.ofPattern("uuuuMMdd'T'HHmmss'Z'", Locale.ROOT).withZone(ZoneOffset.UTC);
 
     /** What a key did to the prompt. */
     public sealed interface Event {}
@@ -48,6 +58,9 @@ public final class ExportPrompt {
 
     /** The export a prompt asks for. */
     public sealed interface ExportRequest {
+
+        /** The terms of a field, written by the backend (ADR 0022). */
+        record Terms(StartExportTermsParams params) implements ExportRequest {}
 
         /** A document as JSON, written by the UI (ADR 0030), with its indexed terms rebuilt if {@code indexedTerms}. */
         record Document(int docId, boolean indexedTerms, ExportTarget target) implements ExportRequest {}
@@ -65,6 +78,9 @@ public final class ExportPrompt {
 
     /** What is exported, and the prompt's choices for it. */
     private sealed interface Kind {}
+
+    /** The terms of a field. */
+    private record TermsKind(String field, TermDelimiter delimiter) implements Kind {}
 
     /**
      * A document.
@@ -96,6 +112,12 @@ public final class ExportPrompt {
         this.input = new LineInput(file);
         this.home = home;
         this.cwd = cwd;
+    }
+
+    /** The prompt for the terms of {@code field}, prefilled with {@code terms_<field>_<UTC time>.out}. */
+    public static ExportPrompt terms(String field, Optional<Path> home, Optional<Path> cwd) {
+        return new ExportPrompt(
+                new TermsKind(field, TermDelimiter.TAB), defaultFile(field, System.currentTimeMillis()), home, cwd);
     }
 
     /**
@@ -144,9 +166,18 @@ public final class ExportPrompt {
                 }
             }
             case TAB -> {
-                if (kind instanceof DocumentKind document) {
-                    kind = new DocumentKind(document.docId(), !document.indexedTerms(), document.indexDirs());
-                }
+                kind = switch (kind) {
+                    case TermsKind terms ->
+                        new TermsKind(
+                                terms.field(),
+                                switch (terms.delimiter()) {
+                                    case TAB -> TermDelimiter.COMMA;
+                                    case COMMA -> TermDelimiter.SPACE;
+                                    case SPACE -> TermDelimiter.TAB;
+                                });
+                    case DocumentKind document ->
+                        new DocumentKind(document.docId(), !document.indexedTerms(), document.indexDirs());
+                };
                 return new Nothing();
             }
             case CHAR -> {
@@ -196,6 +227,9 @@ public final class ExportPrompt {
             return new Nothing();
         }
         return switch (kind) {
+            case TermsKind terms ->
+                new Submit(new ExportRequest.Terms(new StartExportTermsParams(
+                        terms.field(), shown, Optional.of(terms.delimiter()), Optional.of(exists))));
             case DocumentKind document ->
                 new Submit(new ExportRequest.Document(
                         document.docId(), document.indexedTerms(), new ExportTarget.File(shown, exists)));
@@ -223,6 +257,11 @@ public final class ExportPrompt {
         String choice;
         String keys;
         switch (kind) {
+            case TermsKind terms -> {
+                title = " Export the terms of " + terms.field() + " ";
+                choice = " Tab delimiter: " + delimiterName(terms.delimiter()) + " ";
+                keys = "Enter export   Tab delimiter   Esc cancel";
+            }
             case DocumentKind document -> {
                 title = " Export document " + document.docId() + " as JSON ";
                 choice = " Tab indexed terms: " + (document.indexedTerms() ? "on" : "off") + " ";
@@ -251,6 +290,25 @@ public final class ExportPrompt {
         }
         String hint = busy ? "Exporting…" : keys;
         frame.renderWidget(Paragraph.from(Line.from(Span.raw(hint).dim())), parts.get(2));
+    }
+
+    public static String delimiterName(TermDelimiter delimiter) {
+        return switch (delimiter) {
+            case TAB -> "tab";
+            case COMMA -> "comma";
+            case SPACE -> "space";
+        };
+    }
+
+    /**
+     * {@code terms_<field>_<UTC time>.out}, as Luke names it, with every character of the field that
+     * doesn't belong in a file name as {@code _}.
+     */
+    static String defaultFile(String field, long millis) {
+        StringBuilder name = new StringBuilder();
+        field.codePoints()
+                .forEach(c -> name.appendCodePoint(Character.isLetterOrDigit(c) || c == '-' || c == '.' ? c : '_'));
+        return "terms_" + name + "_" + FILE_TIME.format(Instant.ofEpochMilli(millis)) + ".out";
     }
 
     /** The error in red, or the question whether to overwrite in yellow. */

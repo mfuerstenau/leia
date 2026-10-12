@@ -14,7 +14,7 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
   - [x] analysis: analyzer builder, presets and word sets, analyze; `a` on the documents screen and in the value viewer
   - [x] search: parser options, scoring/similarity, sort, More-Like-This, explain, stored scan, doc-values search, hit fields; `/` on an overview top term, the first polls of a new job at 10 ms, and on the documents screen `s` search value, `m` similar, `[`/`]` through the hits, and `b`/`B` on the search screen starting a filter
   - [x] commits and segments
-  - [ ] tools: check index, export terms; then `e` on the terms screen (`Terms.Request.Export`) comes back, with the terms kind of `ExportPrompt` (its document kind is ported)
+  - [x] tools: check index (`7`, with or without a reader), export terms (`e` on the terms screen, the terms kind of `ExportPrompt`)
   - [ ] jars: `X`, the default folder; then the about screen's "X to add jars", the `X jars` key, and "add a jar that has it with X" in the missing-codec hint come back (`Session.withJarHint`), and the analysis components are fetched again after jars are added (`app.rs` `jars_added`)
 - [ ] Parity check against `docs/demo-index.md` and the real-server tests that `cargo test -- --ignored` runs now
 - [ ] Remove the old path: the whole `tui/` crate (and the Rust steps of the build), `protocol/fixtures/` and the fixture tests, the JSON-RPC transport (`RpcServer`, `Dispatcher`, `RequestScanner`, `LeiaServer`'s stdio loop), the envelope and Jackson setup in `leia-protocol` (`Request`, `Response`, `JsonRpcVersion`, `ProtocolJson`, `ProtocolAnnotationIntrospector`, the Jackson annotations), `protocol/error-codes.json`, and Jackson if nothing else needs it (ADR 0034 §6)
