@@ -1,5 +1,7 @@
 package io.github.mfuerstenau.leia.tui.widgets;
 
+import dev.tamboui.buffer.Buffer;
+import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Style;
 import dev.tamboui.text.CharWidth;
 import dev.tamboui.text.Line;
@@ -7,6 +9,7 @@ import dev.tamboui.text.Span;
 import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.block.BorderType;
 import dev.tamboui.widgets.block.Borders;
+import dev.tamboui.widgets.paragraph.Paragraph;
 import dev.tamboui.widgets.table.Cell;
 import dev.tamboui.widgets.table.Row;
 import java.util.Locale;
@@ -58,5 +61,21 @@ public final class Panels {
             return Optional.empty();
         }
         return Optional.of(Row.from(Cell.from(text)).style(Style.EMPTY.dim()));
+    }
+
+    /** How many lines {@code paragraph} takes at {@code width}: drawn aside, as it will be drawn. */
+    public static int lineCount(Paragraph paragraph, int width) {
+        int maxLines = 200;
+        Buffer scratch = Buffer.empty(new Rect(0, 0, width, maxLines));
+        paragraph.render(scratch.area(), scratch);
+        for (int y = maxLines - 1; y >= 0; y--) {
+            for (int x = 0; x < width; x++) {
+                String symbol = scratch.get(x, y).symbol();
+                if (!symbol.isBlank()) {
+                    return y + 1;
+                }
+            }
+        }
+        return 0;
     }
 }

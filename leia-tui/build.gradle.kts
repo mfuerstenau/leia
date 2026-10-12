@@ -45,6 +45,43 @@ tasks.test {
     // LaunchScriptTest runs the leia script from here.
     inputs.dir("src/scripts")
     systemProperty("leia.scripts", file("src/scripts").absolutePath)
+    useJUnitPlatform { excludeTags("jars") }
+}
+
+// The Pilot tests that add a jar (ADR 0024). Loading one changes Lucene's global lists of codecs
+// and formats, so they run in a JVM of their own, as leia-core's jarsTest does. They use the core's
+// test codec jar and the index that needs it.
+val testCodecJar = configurations.create("testCodecJar") { isCanBeConsumed = false }
+val testCodecIndex = configurations.create("testCodecIndex") { isCanBeConsumed = false }
+
+dependencies {
+    testCodecJar(project(path = ":leia-core", configuration = "testCodecJarElements"))
+    testCodecIndex(project(path = ":leia-core", configuration = "testCodecIndexElements"))
+}
+
+val jarsTest = tasks.register<Test>("jarsTest") {
+    description = "Runs the Pilot tests that add jars, in a JVM of their own."
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform { includeTags("jars") }
+    // Locals, so that the configuration cache doesn't capture the script.
+    val codecJar: FileCollection = testCodecJar
+    val codecIndex: FileCollection = testCodecIndex
+    inputs.files(codecJar).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("codecJar")
+    inputs.files(codecIndex).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("codecIndex")
+    // Relative to the test's working directory (this project), so the build cache stays relocatable.
+    val projectPath = projectDir.toPath()
+    jvmArgumentProviders.add(CommandLineArgumentProvider {
+        listOf(
+            "-Dleia.test.codec.jar=" + projectPath.relativize(codecJar.singleFile.toPath()),
+            "-Dleia.test.index.custom-codec=" + projectPath.relativize(codecIndex.singleFile.toPath()),
+        )
+    })
+}
+
+tasks.check {
+    dependsOn(jarsTest)
 }
 
 tasks.named<JavaExec>("run") {

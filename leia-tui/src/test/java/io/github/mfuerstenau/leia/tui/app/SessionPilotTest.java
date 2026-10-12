@@ -42,6 +42,7 @@ import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.store.FSDirectory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
@@ -137,7 +138,8 @@ class SessionPilotTest {
                 || app.exporting()
                 || app.checking()
                 || app.analyzing()
-                || app.searching();
+                || app.searching()
+                || app.jarsWaiting();
     }
 
     private String screen() {
@@ -569,6 +571,63 @@ class SessionPilotTest {
         settle();
         assertThat(screen()).contains("Exported 3 terms to terms.out");
         assertThat(Files.readAllLines(tmp.resolve("terms.out"))).allMatch(line -> line.contains("\t"));
+    }
+
+    private void type(String text) {
+        text.codePoints().forEach(c -> pilot.press((char) c));
+    }
+
+    @Test
+    void listsTheJarsAndSaysWhyOneCannotBeAdded() throws Exception {
+        pilot.press('X');
+        settle();
+        assertThat(screen()).contains("Default folder: none (no home directory)", "No jars loaded");
+
+        type(tmp.resolve("missing.jar").toString());
+        pilot.press(KeyCode.ENTER);
+        settle();
+        assertThat(screen()).contains("Cannot add the jars: no such jar or directory: ", "INVALID_JAR");
+
+        pilot.press(KeyCode.ESCAPE);
+        handled();
+        assertThat(screen()).doesNotContain(" Jars ").contains("X jars");
+    }
+
+    /** Loads the test codec jar, which changes Lucene's global lists: run by jarsTest only. */
+    @Test
+    @Tag("jars")
+    void addsTheJarThatAnIndexNeedsAndOpensIt() throws Exception {
+        String index = System.getProperty("leia.test.index.custom-codec");
+        String jar = System.getProperty("leia.test.codec.jar");
+        assertThat(index).as("the custom-codec index, from jarsTest").isNotNull();
+
+        openAtStart(Path.of(index), OpenMode.READER);
+        assertThat(screen()).contains("MISSING_CODEC", "add a jar that has", "it with X, or start leia with --jar");
+        pilot.press(KeyCode.ESCAPE);
+        pilot.press('X');
+        settle();
+        assertThat(screen()).contains("No jars loaded");
+
+        type(jar);
+        pilot.press(KeyCode.ENTER);
+        settle();
+        assertThat(screen())
+                .contains(
+                        "Loaded 1 jar:",
+                        "1 codec: LeiaTest",
+                        "1 postings format: LeiaTestPostings",
+                        "1 doc values format: LeiaTestDocValues",
+                        "1 KNN vectors format: LeiaTestKnnVectors",
+                        "Loaded: 1 jar",
+                        "leia-test-codec.jar");
+
+        // The prompt starts from the path that failed to open.
+        pilot.press(KeyCode.ESCAPE);
+        pilot.press('o');
+        pilot.press(KeyCode.ENTER);
+        settle();
+        assertThat(app.hasIndex()).isTrue();
+        assertThat(screen()).contains("1 Overview").doesNotContain("Open index", "MISSING_CODEC");
     }
 
     private static List<String> listFiles(Path dir) throws IOException {

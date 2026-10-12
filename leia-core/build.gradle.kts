@@ -100,6 +100,16 @@ tasks.withType<Test>().configureEach {
     }
 }
 
+// The test codec jar and the index that needs it, for leia-tui's jarsTest.
+val testCodecJarElements = configurations.consumable("testCodecJarElements")
+val testCodecIndexElements = configurations.consumable("testCodecIndexElements")
+artifacts {
+    add(testCodecJarElements.name, testCodecJar)
+    add(testCodecIndexElements.name, testIndexesDir.map { it.dir("custom-codec") }) {
+        builtBy(testCodecIndexes)
+    }
+}
+
 // Analysis jars (ADR 0016): Lucene modules that leia doesn't bundle, each with its dependencies in a
 // directory of its own under build/test-analysis-jars: two small ones, and Kuromoji and Nori for the
 // options of their analyzers (ADR 0023). Loading them, or the test codec jar, changes Lucene's

@@ -11,6 +11,7 @@ import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.tui.event.KeyModifiers;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeParams;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeResult;
+import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsResult;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexResult;
 import io.github.mfuerstenau.leia.protocol.commits.Commit;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
@@ -41,6 +42,9 @@ import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
+import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
+import io.github.mfuerstenau.leia.protocol.jars.AddJarsResult;
+import io.github.mfuerstenau.leia.protocol.jars.JarComponents;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
@@ -73,6 +77,7 @@ import io.github.mfuerstenau.leia.tui.analysis.AnalyzerSettings;
 import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.documents.DocumentExport.DocumentData;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
+import io.github.mfuerstenau.leia.tui.jars.DefaultJars;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import java.nio.file.Path;
 import java.util.Arrays;
@@ -1826,5 +1831,85 @@ class AppTest {
         app.handleKey(key(KeyCode.ENTER));
         app.closed();
         assertThat(app.exportStarted(3, 6)).hasValue(new Action.CancelExport(6));
+    }
+
+    private static final JarComponents NO_COMPONENTS =
+            new JarComponents(List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+
+    private static AddJarsResult jarsResult(String... jars) {
+        return new AddJarsResult(List.of(jars), List.of(), NO_COMPONENTS);
+    }
+
+    private static final GetAnalysisComponentsResult COMPONENTS =
+            new GetAnalysisComponentsResult(List.of(), List.of(), List.of(), List.of());
+
+    @Test
+    void xOpensTheJarsPopupFromAnyScreenAndAddsJars() {
+        Path home = Path.of("/home/me");
+        Path dir = home.resolve(".config/leia/jars");
+        App app = app(Optional.of(home)).withDefaultJars(new DefaultJars(Optional.of(dir), DefaultJars.State.LOADED));
+        assertThat(render(app)).contains("X jars", "or X to add jars");
+        assertThat(app.handleKey(key('6'))).hasValue(new Action.LoadAnalysisComponents());
+        app.componentsLoaded(COMPONENTS);
+
+        assertThat(app.handleKey(key('X'))).hasValue(new Action.LoadJars());
+        assertThat(app.jarsWaiting()).isTrue();
+        app.jarsLoaded(List.of(dir.resolve("mine.jar").toString()));
+        assertThat(render(app)).contains("mine.jar  default folder");
+        assertThat(app.jarsWaiting()).isFalse();
+        // The popup takes the keys.
+        assertThat(app.handleKey(key('q'))).isEmpty();
+        app.handleKey(key(KeyCode.BACKSPACE));
+        "~/kuromoji".chars().forEach(c -> app.handleKey(key((char) c)));
+
+        assertThat(app.handleKey(key(KeyCode.ENTER)))
+                .hasValue(new Action.AddJars(
+                        new AddJarsParams(List.of(home.resolve("kuromoji").toString()))));
+        assertThat(app.jarsWaiting()).isTrue();
+        // The analysis components are fetched again only if the jars were loaded.
+        assertThat(app.jarsAdded(jarsResult())).isEmpty();
+        assertThat(app.jarsAdded(jarsResult("/home/me/kuromoji/lucene-analysis-kuromoji.jar")))
+                .hasValue(new Action.LoadAnalysisComponents());
+        assertThat(app.analyzing()).isTrue();
+        app.componentsLoaded(COMPONENTS);
+        assertThat(app.analyzing()).isFalse();
+        assertThat(render(app)).contains("Loaded: 2 jars");
+        app.addJarsFailed("Cannot add the jars: not a jar: /x");
+        assertThat(render(app)).contains("not a jar: /x");
+
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).isEmpty();
+        assertThat(render(app)).doesNotContain("Default folder");
+        assertThat(app.handleKey(key('q'))).hasValue(new Action.Quit());
+    }
+
+    @Test
+    void xOpensTheJarsPopupOverAnIndex() {
+        App app = appWithFields();
+
+        assertThat(app.handleKey(key('X'))).hasValue(new Action.LoadJars());
+
+        assertThat(render(app)).contains(" Jars ", "Listing the jars…");
+    }
+
+    @Test
+    void jarsAddedBeforeTheAnalysisScreenWasShownFetchNothing() {
+        App app = app();
+        app.handleKey(key('X'));
+
+        assertThat(app.jarsAdded(jarsResult("/a.jar"))).isEmpty();
+    }
+
+    @Test
+    void repliesForAClosedJarsPopupAreDropped() {
+        App app = app();
+        app.handleKey(key('X'));
+        app.handleKey(key(KeyCode.ESCAPE));
+
+        app.jarsLoaded(List.of("/a.jar"));
+        app.jarsFailed("boom");
+        app.addJarsFailed("boom");
+
+        assertThat(app.jarsWaiting()).isFalse();
+        assertThat(render(app)).doesNotContain("a.jar", "boom");
     }
 }

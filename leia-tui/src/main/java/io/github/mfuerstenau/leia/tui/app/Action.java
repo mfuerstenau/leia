@@ -6,6 +6,7 @@ import io.github.mfuerstenau.leia.protocol.filter.StartFilterParams;
 import io.github.mfuerstenau.leia.protocol.filter.StepFilterParams;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
+import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
 import io.github.mfuerstenau.leia.protocol.search.StartExplainParams;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.StartStoredScanParams;
@@ -207,4 +208,16 @@ public sealed interface Action {
 
     /** Cancel this check job. The app has stopped the check already, so nothing is reported back. */
     record CancelCheck(long jobId) implements Action {}
+
+    /**
+     * Fetch the loaded jars, and report back with {@link App#jarsLoaded} or {@link App#jarsFailed}
+     * (ADR 0024).
+     */
+    record LoadJars() implements Action {}
+
+    /**
+     * Add these jars, and report back with {@link App#jarsAdded} or {@link App#addJarsFailed}. The
+     * popup shows "Loading…" until the outcome is reported.
+     */
+    record AddJars(AddJarsParams params) implements Action {}
 }

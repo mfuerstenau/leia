@@ -101,7 +101,7 @@ What has to carry over:
       - *Each document export (ADR 0030) has an id, which its fetch, its rebuild job, its polls and its write carry. A reply for an export that Esc, a close, an open or a reopen forgot is dropped, and a job that starts for one is cancelled. The fetch is a chain of calls (`getDocument`, then each cut stored value and each term vector) that ends in one reply. The UI writes the file on the UI thread, as the Rust TUI did in its loop. The JSON is written by a mapper of the export's own, not `ProtocolJson`, and the golden file moved to `leia-tui/src/test/resources/document-export.json`.*
     - *Settled with the analysis screen:*
       - *Its calls, `getAnalysisComponents` and `analyze`, are not jobs. The backend answers them in order, so the reply to the last analysis asked for comes last, and the screen needs no ids. An analyzer that the builder applied becomes the current one only once its analysis comes back, as in the Rust TUI.*
-      - *The screen lives on `App` for the whole session, as in the Rust TUI, so its analyzer and text are kept when an index is opened or closed. Fetching the components again after `X` adds jars comes back with the jars screen.*
+      - *The screen lives on `App` for the whole session, as in the Rust TUI, so its analyzer and text are kept when an index is opened or closed. Fetching the components again after `X` adds jars came back with the jars popup.*
       - *The popups of the analysis and search screens share `…tui.widgets.Form`, the port of `form.rs`.*
     - *Settled with the search screen:*
       - *Each search (each page of hits), explanation and regex scan has an id, which its start, its polls and its replies carry. A reply for one that was replaced or stopped is dropped, and a job that starts for one is cancelled.*
@@ -113,6 +113,11 @@ What has to carry over:
       - *The terms export is one more kind of the running export, with its own id. Its prompt stays busy until the job has started, so Esc there waits for the start, as in the Rust TUI.*
       - *A check's next output lines don't count as a change of the polled jobs, as a regex scan's next hits don't.*
       - *TamboUI's `Paragraph` doesn't scroll sideways, so the check screen cuts the output lines at the column itself.*
+    - *Settled with the jars popup (`X`, ADR 0024):*
+      - *Its calls, `getJars` and `addJars`, are not jobs, and need no ids: the backend answers in order, and a reply for a closed popup is dropped. While jars are being added the popup takes no key, as the export prompt does while its job starts; the Rust TUI blocked then. So a list that lands on a popup opened again after Esc is the same list, since nothing could be added in between.*
+      - *Jars that were loaded fetch the analysis components again if the analysis screen has fetched them, counted as one more analysis call.*
+      - *Loading a jar changes Lucene's global lists, so the Pilot test that adds one is tagged `jars` and runs in leia-tui's own `jarsTest`, as leia-core's do. It gets leia-core's test codec jar and `custom-codec` index through two consumable configurations.*
+      - *The missing-codec hint says "add a jar that has it with X, or start leia with --jar" again.*
 
 ## Alternatives considered
 

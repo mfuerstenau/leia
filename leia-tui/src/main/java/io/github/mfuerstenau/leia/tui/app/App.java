@@ -42,6 +42,8 @@ import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
+import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
+import io.github.mfuerstenau.leia.protocol.jars.AddJarsResult;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanResult;
@@ -57,6 +59,8 @@ import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.documents.DocumentExport;
 import io.github.mfuerstenau.leia.tui.documents.DocumentExport.DocumentData;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
+import io.github.mfuerstenau.leia.tui.jars.DefaultJars;
+import io.github.mfuerstenau.leia.tui.jars.JarsPopup;
 import io.github.mfuerstenau.leia.tui.overview.FieldScan;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.prompt.ExportPrompt;
@@ -168,6 +172,12 @@ public final class App {
      */
     private String failedPath;
 
+    /** The default folder of jars, and whether its jars were loaded (ADR 0024). */
+    private DefaultJars defaultJars = DefaultJars.none();
+
+    /** The jars popup, while it is open; or null. */
+    private JarsPopup jars;
+
     /** Whether an open, reopen or close runs. */
     private boolean busy;
 
@@ -222,6 +232,12 @@ public final class App {
     /** Resolves relative export paths against {@code cwd}. */
     public App withCwd(Path cwd) {
         this.cwd = Optional.of(cwd);
+        return this;
+    }
+
+    /** The jars popup shows the default folder, and marks the jars that came from it. */
+    public App withDefaultJars(DefaultJars defaultJars) {
+        this.defaultJars = defaultJars;
         return this;
     }
 
@@ -489,6 +505,43 @@ public final class App {
     /** Whether the analysis screen waits for a reply. */
     boolean analyzing() {
         return analysisCalls > 0;
+    }
+
+    public void jarsLoaded(List<String> loaded) {
+        if (jars != null) {
+            jars.jarsLoaded(loaded);
+        }
+    }
+
+    public void jarsFailed(String error) {
+        if (jars != null) {
+            jars.jarsFailed(error);
+        }
+    }
+
+    /**
+     * Shows what the jars added. Returns the analysis components to fetch again if new jars were
+     * loaded and the components had been fetched: the jars may have added some.
+     */
+    public Optional<Action> jarsAdded(AddJarsResult result) {
+        if (jars != null) {
+            jars.added(result);
+        }
+        if (result.jars().isEmpty() || !analysis.hasComponents()) {
+            return Optional.empty();
+        }
+        return analysisAction(Optional.of(new Analysis.Request.Components()));
+    }
+
+    public void addJarsFailed(String error) {
+        if (jars != null) {
+            jars.addFailed(error);
+        }
+    }
+
+    /** Whether the jars popup waits for the jars to be listed or added. */
+    boolean jarsWaiting() {
+        return jars != null && jars.waiting();
     }
 
     /**
@@ -1329,6 +1382,20 @@ public final class App {
             return Optional.empty();
         }
         notice = null;
+        if (jars != null) {
+            return switch (jars.handleKey(key)) {
+                case JarsPopup.Submit submit -> {
+                    jars.setBusy();
+                    yield Optional.of(new Action.AddJars(
+                            new AddJarsParams(List.of(PathCompletion.expandHome(submit.path(), home)))));
+                }
+                case JarsPopup.Close _ -> {
+                    jars = null;
+                    yield Optional.empty();
+                }
+                case JarsPopup.Nothing _ -> Optional.empty();
+            };
+        }
         if (prompt != null) {
             return switch (prompt.handleKey(key)) {
                 case PathPrompt.Submit submit -> {
@@ -1441,6 +1508,10 @@ public final class App {
                 failedPath = null;
                 prompt = pathPrompt(path);
             }
+            case 'X' -> {
+                jars = new JarsPopup(defaultJars, home);
+                return Optional.of(new Action.LoadJars());
+            }
             case 'c' -> {
                 if (hasIndex()) {
                     busy = true;
@@ -1518,6 +1589,9 @@ public final class App {
         if (prompt != null) {
             prompt.render(frame, body);
         }
+        if (jars != null) {
+            jars.render(frame, body);
+        }
     }
 
     /** Draws the shown screen into {@code body}, and returns the footer's keys for it. */
@@ -1535,7 +1609,7 @@ public final class App {
         }
         if (opened == null) {
             renderAbout(frame, body);
-            return " q quit   o open   6 analysis";
+            return " q quit   o open   6 analysis   X jars";
         }
         if (screen == Screen.COMMITS) {
             commits.render(frame, body);
@@ -1608,7 +1682,7 @@ public final class App {
         lines.add(Line.from("Java " + version.java().version() + " ("
                 + version.java().vendor() + ") in " + version.java().home()));
         lines.add(Line.empty());
-        lines.add(Line.from("No index open. Press o to open one, or 6 to try an analyzer."));
+        lines.add(Line.from("No index open. Press o to open one, 6 to try an analyzer, or X to add jars."));
         Block block = bordered(" leia ");
         Rect inner = block.inner(body);
         frame.renderWidget(block, body);

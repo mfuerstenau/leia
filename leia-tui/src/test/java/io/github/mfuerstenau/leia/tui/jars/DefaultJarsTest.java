@@ -1,4 +1,4 @@
-package io.github.mfuerstenau.leia.tui;
+package io.github.mfuerstenau.leia.tui.jars;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -42,5 +42,13 @@ class DefaultJarsTest {
         assertThat(DefaultJars.find(Optional.of(tmp.resolve("missing")), false).state())
                 .isEqualTo(DefaultJars.State.NO_JARS);
         assertThat(DefaultJars.find(Optional.empty(), false).loadedDir()).isEmpty();
+    }
+
+    @Test
+    void aJarNameEndsWithJarInAnyCase() {
+        assertThat(DefaultJars.isJarName("analysis.jar")).isTrue();
+        assertThat(DefaultJars.isJarName("Analysis.JAR")).isTrue();
+        assertThat(DefaultJars.isJarName("analysis.jar.txt")).isFalse();
+        assertThat(DefaultJars.none().dir()).isEmpty();
     }
 }

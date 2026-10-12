@@ -1,6 +1,5 @@
 package io.github.mfuerstenau.leia.tui.prompt;
 
-import dev.tamboui.buffer.Buffer;
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
@@ -19,6 +18,7 @@ import dev.tamboui.widgets.block.Title;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
+import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -222,7 +222,7 @@ public final class PathPrompt {
         int width = Math.min(Math.max(area.width() - 4, 0), MAX_WIDTH);
         int innerWidth = Math.max(width - 2, 1);
         Paragraph errorParagraph = error == null ? null : errorParagraph(error);
-        int errorLines = errorParagraph == null ? 0 : lineCount(errorParagraph, innerWidth);
+        int errorLines = errorParagraph == null ? 0 : Panels.lineCount(errorParagraph, innerWidth);
         int candidateLines = candidates.isEmpty() ? 0 : 1;
         // Input, candidates, error, hint, and the top and bottom border.
         int height = Math.min(1 + candidateLines + errorLines + 1 + 2, area.height());
@@ -278,22 +278,6 @@ public final class PathPrompt {
                 .text(Text.from(lines))
                 .overflow(Overflow.WRAP_WORD)
                 .build();
-    }
-
-    /** How many lines {@code paragraph} takes at {@code width}: drawn aside, as it will be drawn. */
-    static int lineCount(Paragraph paragraph, int width) {
-        int maxLines = 200;
-        Buffer scratch = Buffer.empty(new Rect(0, 0, width, maxLines));
-        paragraph.render(scratch.area(), scratch);
-        for (int y = maxLines - 1; y >= 0; y--) {
-            for (int x = 0; x < width; x++) {
-                String symbol = scratch.get(x, y).symbol();
-                if (!symbol.isBlank()) {
-                    return y + 1;
-                }
-            }
-        }
-        return 0;
     }
 
     /** How the prompt names a {@code Directory}. */

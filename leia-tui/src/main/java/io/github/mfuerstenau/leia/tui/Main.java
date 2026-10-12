@@ -13,6 +13,7 @@ import io.github.mfuerstenau.leia.tui.app.Action;
 import io.github.mfuerstenau.leia.tui.app.App;
 import io.github.mfuerstenau.leia.tui.app.History;
 import io.github.mfuerstenau.leia.tui.app.Session;
+import io.github.mfuerstenau.leia.tui.jars.DefaultJars;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -100,7 +101,7 @@ public final class Main {
                 return 1;
             }
             try (backend) {
-                return runTui(cli, platform, backend, log, out, err, started);
+                return runTui(cli, platform, defaultJars, backend, log, out, err, started);
             }
         }
     }
@@ -134,6 +135,7 @@ public final class Main {
     private static int runTui(
             Cli cli,
             Platform platform,
+            DefaultJars defaultJars,
             LeiaBackend backend,
             PrintStream log,
             PrintStream out,
@@ -145,7 +147,8 @@ public final class Main {
                 backend.call(Methods.VERSION, new VersionParams()).get();
         History history = platform.historyFile().map(History::load).orElseGet(History::inMemory);
         App app = new App(version, platform.home(), history, cli.directory())
-                .withCwd(Path.of("").toAbsolutePath());
+                .withCwd(Path.of("").toAbsolutePath())
+                .withDefaultJars(defaultJars);
         Session session = new Session(app, backend);
         OpenMode mode = cli.noReader() ? OpenMode.DIRECTORY_ONLY : OpenMode.READER;
         // The first frame shows the path being opened.

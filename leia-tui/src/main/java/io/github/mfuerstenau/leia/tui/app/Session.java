@@ -28,6 +28,7 @@ import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexParams;
+import io.github.mfuerstenau.leia.protocol.jars.GetJarsParams;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanParams;
@@ -534,6 +535,39 @@ public final class Session {
                             }
                         });
             case Action.CancelExport cancel -> cancelJobs(List.of(cancel.jobId()), runner);
+            case Action.LoadJars _ ->
+                backend.call(Methods.GET_JARS, new GetJarsParams()).whenComplete((result, error) -> {
+                    if (error == null) {
+                        reply(runner, app -> {
+                            app.jarsLoaded(result.jars());
+                            return Optional.empty();
+                        });
+                        return;
+                    }
+                    RpcException rpc = rpcException(error, runner);
+                    if (rpc != null) {
+                        String message = describe(rpc);
+                        reply(runner, app -> {
+                            app.jarsFailed(message);
+                            return Optional.empty();
+                        });
+                    }
+                });
+            case Action.AddJars add ->
+                backend.call(Methods.ADD_JARS, add.params()).whenComplete((result, error) -> {
+                    if (error == null) {
+                        reply(runner, app -> app.jarsAdded(result));
+                        return;
+                    }
+                    RpcException rpc = rpcException(error, runner);
+                    if (rpc != null) {
+                        String message = describe(rpc);
+                        reply(runner, app -> {
+                            app.addJarsFailed(message);
+                            return Optional.empty();
+                        });
+                    }
+                });
             case Action.WriteExport write -> {
                 // On the UI thread, as the Rust TUI wrote it in its loop: a few writes of text.
                 Optional<String> error = DocumentExport.writeFile(
@@ -963,14 +997,14 @@ public final class Session {
     }
 
     /**
-     * A codec or format that isn't loaded can come from a jar that leia is started with (ADR 0018,
-     * ADR 0024). The jars popup (X) comes back with its port.
+     * A codec or format that isn't loaded can come from a jar that X adds or leia is started with
+     * (ADR 0018, ADR 0024).
      */
     static RpcException withJarHint(RpcException error) {
         if (error.code() != ErrorCode.MISSING_CODEC) {
             return error;
         }
         return new RpcException(
-                error.code(), error.getMessage() + "; start leia with --jar and a jar that has it", error);
+                error.code(), error.getMessage() + "; add a jar that has it with X, or start leia with --jar", error);
     }
 }

@@ -18,6 +18,7 @@ import dev.tamboui.widgets.paragraph.Paragraph;
 import io.github.mfuerstenau.leia.protocol.terms.StartExportTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.TermDelimiter;
 import io.github.mfuerstenau.leia.tui.documents.DocumentExport;
+import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
@@ -247,7 +248,7 @@ public final class ExportPrompt {
         int width = Math.min(Math.max(area.width() - 4, 0), MAX_WIDTH);
         int innerWidth = Math.max(width - 2, 1);
         Paragraph errorParagraph = error == null ? null : errorParagraph(error, overwrite != null);
-        int errorLines = errorParagraph == null ? 0 : PathPrompt.lineCount(errorParagraph, innerWidth);
+        int errorLines = errorParagraph == null ? 0 : Panels.lineCount(errorParagraph, innerWidth);
         // Input, error, hint, and the top and bottom border.
         int height = Math.min(1 + errorLines + 1 + 2, area.height());
         Rect popup =

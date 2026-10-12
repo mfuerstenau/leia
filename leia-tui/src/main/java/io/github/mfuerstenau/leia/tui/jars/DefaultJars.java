@@ -1,4 +1,4 @@
-package io.github.mfuerstenau.leia.tui;
+package io.github.mfuerstenau.leia.tui.jars;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -13,9 +13,9 @@ import java.util.stream.Stream;
  *
  * @param dir the folder; empty if the platform doesn't say where it is
  */
-record DefaultJars(Optional<Path> dir, State state) {
+public record DefaultJars(Optional<Path> dir, State state) {
 
-    enum State {
+    public enum State {
         /** Loaded, as one more jar path after those of {@code --jar}. */
         LOADED,
         /** Missing, or without a jar directly in it. */
@@ -24,23 +24,33 @@ record DefaultJars(Optional<Path> dir, State state) {
         SKIPPED
     }
 
+    /** No default folder: the platform doesn't say where it is. */
+    public static DefaultJars none() {
+        return new DefaultJars(Optional.empty(), State.NO_JARS);
+    }
+
     /** Looks into {@code dir}: its jars are loaded if it has any, unless {@code skip}. */
-    static DefaultJars find(Optional<Path> dir, boolean skip) {
+    public static DefaultJars find(Optional<Path> dir, boolean skip) {
         State state =
                 skip ? State.SKIPPED : dir.filter(DefaultJars::hasJars).isPresent() ? State.LOADED : State.NO_JARS;
         return new DefaultJars(dir, state);
     }
 
     /** The folder to load, if its jars are loaded. */
-    Optional<Path> loadedDir() {
+    public Optional<Path> loadedDir() {
         return dir.filter(unused -> state == State.LOADED);
     }
 
-    /** Whether {@code dir} has a jar directly in it, as the server sees one: a name ending in .jar, in any case. */
+    /** Whether a file name is a jar's, as the server sees it: it ends with {@code .jar}, in any case. */
+    public static boolean isJarName(String name) {
+        return name.toLowerCase(Locale.ROOT).endsWith(".jar");
+    }
+
+    /** Whether {@code dir} has a jar directly in it. */
     private static boolean hasJars(Path dir) {
         try (Stream<Path> entries = Files.list(dir)) {
-            return entries.anyMatch(entry -> Files.isRegularFile(entry)
-                    && entry.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".jar"));
+            return entries.anyMatch(entry ->
+                    Files.isRegularFile(entry) && isJarName(entry.getFileName().toString()));
         } catch (IOException e) {
             return false;
         }
