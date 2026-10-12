@@ -8,7 +8,6 @@ import static io.github.mfuerstenau.leia.tui.widgets.Panels.right;
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Overflow;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.CharWidth;
@@ -33,6 +32,7 @@ import io.github.mfuerstenau.leia.protocol.index.TermStats;
 import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.widgets.Logo;
+import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -600,13 +600,7 @@ public final class Overview {
                                 Line.from("a does so for every field."))
                         : List.of(Line.from("No postings: the field is not indexed."));
         }
-        frame.renderWidget(
-                Paragraph.builder()
-                        .text(Text.from(message))
-                        .overflow(Overflow.WRAP_WORD)
-                        .block(panel(title, focused))
-                        .build(),
-                area);
+        frame.renderWidget(Panels.wrapped(message, panel(title, focused), area), area);
     }
 
     private static Table.Builder topTermsTable(List<TopTerm> topTerms) {

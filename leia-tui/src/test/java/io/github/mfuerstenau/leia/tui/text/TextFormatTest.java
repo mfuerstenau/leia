@@ -8,8 +8,10 @@ import static io.github.mfuerstenau.leia.tui.text.TextFormat.size;
 import static io.github.mfuerstenau.leia.tui.text.TextFormat.utcTime;
 import static io.github.mfuerstenau.leia.tui.text.TextFormat.wrap;
 import static io.github.mfuerstenau.leia.tui.text.TextFormat.wrapHanging;
+import static io.github.mfuerstenau.leia.tui.text.TextFormat.wrapRanges;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class TextFormatTest {
@@ -45,6 +47,35 @@ class TextFormatTest {
         assertThat(wrap("one two three four", 7, 2)).containsExactly("one two", "three…");
         assertThat(wrap("one two three four", 5, 2)).containsExactly("one", "two…");
         assertThat(wrap("abcdefghij", 5, 1)).containsExactly("abcd…");
+    }
+
+    @Test
+    void wrapsLikeRatatui() {
+        // A word that ends in the last column stays on the line.
+        assertThat(lines("aaaa bbbbb cc dd", 10)).containsExactly("aaaa bbbbb", "cc dd");
+        assertThat(lines("aaaa bbbb cc", 10)).containsExactly("aaaa bbbb", "cc");
+        assertThat(lines("", 10)).containsExactly("");
+        assertThat(lines("   ", 10)).containsExactly("   ");
+    }
+
+    @Test
+    void keepsTheIndentationOfTheFirstLineOnly() {
+        assertThat(lines("  string  one two", 10)).containsExactly("  string", "one two");
+        assertThat(lines("  ab  cd", 10)).containsExactly("  ab  cd");
+    }
+
+    @Test
+    void breaksWordsWiderThanTheLineInRanges() {
+        assertThat(lines("a /very/long/path b", 6)).containsExactly("a", "/very/", "long/p", "ath b");
+        assertThat(lines("File exists: /tmp/x/java-74.json. again", 12))
+                .containsExactly("File exists:", "/tmp/x/java-", "74.json.", "again");
+        assertThat(lines("索引索引 x", 4)).containsExactly("索引", "索引", "x");
+    }
+
+    private static List<String> lines(String text, int width) {
+        return wrapRanges(text, width).stream()
+                .map(range -> text.substring(range.start(), range.end()))
+                .toList();
     }
 
     @Test

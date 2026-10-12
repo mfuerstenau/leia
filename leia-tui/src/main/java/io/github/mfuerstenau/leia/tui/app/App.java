@@ -5,7 +5,6 @@ import static io.github.mfuerstenau.leia.tui.widgets.Panels.labelLine;
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Overflow;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
@@ -71,6 +70,7 @@ import io.github.mfuerstenau.leia.tui.search.Search;
 import io.github.mfuerstenau.leia.tui.terms.Terms;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.widgets.Logo;
+import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
@@ -835,7 +835,11 @@ public final class App {
         if (documents == null || !documents.loaded(document)) {
             return Optional.empty();
         }
-        Optional<Documents.Request> next = documents.positionsRequest();
+        // A ←/→ through the filter pressed while this one was fetched goes on from it.
+        Optional<Documents.Request> next = documents.queuedStep();
+        if (next.isEmpty()) {
+            next = documents.positionsRequest();
+        }
         return documentsAction(next.isPresent() ? next : documents.openPendingView());
     }
 
@@ -1690,7 +1694,7 @@ public final class App {
         if (inner.height() >= Logo.HEIGHT && inner.width() >= Logo.WIDTH + 2 + 40) {
             Logo.renderBeside(frame, inner, lines);
         } else {
-            frame.renderWidget(wrapped(lines, null), inner);
+            frame.renderWidget(wrapped(lines, null, inner), inner);
         }
     }
 
@@ -1717,7 +1721,7 @@ public final class App {
                     + "and check (7) screens work; o opens the index again, Ctrl+N switches the reader on."));
             title = " No reader ";
         }
-        frame.renderWidget(wrapped(lines, title), body);
+        frame.renderWidget(wrapped(lines, title, body), body);
     }
 
     /** What the tab line says about the running export, once its prompt is closed. */
@@ -1754,7 +1758,8 @@ public final class App {
                     .constraints(Constraint.length(tabsWidth), Constraint.fill())
                     .split(area);
             tabs = parts.get(0);
-            frame.renderWidget(Paragraph.from(line.right()), parts.get(1));
+            // TamboUI's paragraph ignores the alignment of a line, only its own counts.
+            frame.renderWidget(Paragraph.builder().text(Text.from(line)).right().build(), parts.get(1));
         }
         String padding = compact ? "" : " ";
         List<Span> spans = new ArrayList<>();
@@ -1813,12 +1818,10 @@ public final class App {
         return Block.builder().borders(Borders.ALL).title(title).build();
     }
 
-    /** {@code lines} wrapped at word boundaries, in a bordered block if {@code title} isn't null. */
-    private static Paragraph wrapped(List<Line> lines, String title) {
-        Paragraph.Builder paragraph = Paragraph.builder().text(Text.from(lines)).overflow(Overflow.WRAP_WORD);
-        if (title != null) {
-            paragraph.block(bordered(title));
-        }
-        return paragraph.build();
+    /** {@code lines} wrapped at word boundaries to fit {@code area}, in a bordered block if {@code title} isn't null. */
+    private static Paragraph wrapped(List<Line> lines, String title, Rect area) {
+        return title != null
+                ? Panels.wrapped(lines, bordered(title), area)
+                : Paragraph.from(Text.from(Panels.wrap(lines, area.width())));
     }
 }

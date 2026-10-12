@@ -7,7 +7,6 @@ import static io.github.mfuerstenau.leia.tui.widgets.Panels.right;
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Overflow;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
@@ -46,8 +45,11 @@ import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.terms.Terms.TermHit;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -231,6 +233,16 @@ public final class Documents {
 
     /** The document asked for last; a reply for another one is dropped. Empty before. */
     private OptionalInt wanted = OptionalInt.empty();
+
+    /**
+     * The serial of the filter that a ←/→ step goes through, until the document it finds is shown;
+     * empty if no step is under way. The keys pressed meanwhile wait in {@link #queuedSteps}, so that
+     * each one steps on from the match before it, as in the Rust TUI, where a step blocked the keys.
+     */
+    private OptionalLong steppingFilter = OptionalLong.empty();
+
+    /** The ←/→ steps through the filter pressed while one is under way: true for forward. */
+    private final Deque<Boolean> queuedSteps = new ArrayDeque<>();
 
     /** The rows of the field table, as indexes into {@code document.fields()}. */
     private final List<Integer> rows = new ArrayList<>();
@@ -532,6 +544,8 @@ public final class Documents {
     public void filterFailed(long serial, String error) {
         if (isFilter(serial)) {
             filter.failed(error);
+            steppingFilter = OptionalLong.empty();
+            queuedSteps.clear();
         }
     }
 
@@ -549,8 +563,41 @@ public final class Documents {
             case DocFilter.Stepped.LookBack back ->
                 Optional.of(new Request.StepFilter(
                         serial, new StepFilterParams(params.filterId(), back.docId(), false), FilterStep.MOVE));
-            case DocFilter.Stepped.Nothing _ -> Optional.empty();
+            case DocFilter.Stepped.Nothing _ -> {
+                steppingFilter = OptionalLong.empty();
+                yield queuedStep();
+            }
         };
+    }
+
+    /** A ←/→ step through the filter, or queued behind the one under way. */
+    private Optional<Request> moveThroughFilter(boolean forward) {
+        if (filter != null && steppingFilter.equals(OptionalLong.of(filter.serial()))) {
+            queuedSteps.add(forward);
+            return Optional.empty();
+        }
+        // Steps left from a filter that is gone.
+        queuedSteps.clear();
+        return stepThroughFilter(forward);
+    }
+
+    private Optional<Request> stepThroughFilter(boolean forward) {
+        Optional<Request> step = filterStep(forward ? docId + 1 : docId - 1, forward, FilterStep.MOVE);
+        steppingFilter = step.isPresent() ? OptionalLong.of(filter.serial()) : OptionalLong.empty();
+        return step;
+    }
+
+    /** The next queued ←/→ step through the filter, once the one before is done. */
+    public Optional<Request> queuedStep() {
+        if (filter != null && steppingFilter.equals(OptionalLong.of(filter.serial()))) {
+            return Optional.empty();
+        }
+        Boolean forward = queuedSteps.poll();
+        if (forward == null || !stepsThroughFilter()) {
+            queuedSteps.clear();
+            return Optional.empty();
+        }
+        return stepThroughFilter(forward);
     }
 
     /** Forgets the filter. Returns what clears it in the backend, if there is a filter. */
@@ -633,6 +680,7 @@ public final class Documents {
                 : selectedField().map(DocumentField::name).orElse(null);
         selectField = null;
         docId = document.docId();
+        steppingFilter = OptionalLong.empty();
         this.document = document;
         error = null;
         closeViewer();
@@ -651,6 +699,8 @@ public final class Documents {
         this.docId = docId;
         document = null;
         this.error = error;
+        steppingFilter = OptionalLong.empty();
+        queuedSteps.clear();
         closeViewer();
         termVectors.clear();
         reconstructions.clear();
@@ -1012,17 +1062,19 @@ public final class Documents {
             filter.clearNote();
         }
         KeyCode code = key.code();
+        // A key pressed before the last step's document is in goes on from that document.
+        int from = wanted.orElse(docId);
         if (code == KeyCode.LEFT || key.isChar('p')) {
             if (stepsThroughFilter()) {
-                return filterStep(docId - 1, false, FilterStep.MOVE);
+                return moveThroughFilter(false);
             }
-            return docId > 0 ? Optional.of(new Request.Document(docId - 1)) : Optional.empty();
+            return from > 0 ? Optional.of(new Request.Document(from - 1)) : Optional.empty();
         }
         if (code == KeyCode.RIGHT || key.isChar('n')) {
             if (stepsThroughFilter()) {
-                return filterStep(docId + 1, true, FilterStep.MOVE);
+                return moveThroughFilter(true);
             }
-            return docId < maxDoc - 1 ? Optional.of(new Request.Document(docId + 1)) : Optional.empty();
+            return from < maxDoc - 1 ? Optional.of(new Request.Document(from + 1)) : Optional.empty();
         }
         if (code == KeyCode.ENTER) {
             Optional<DocumentField> field = selectedField();
@@ -1331,15 +1383,11 @@ public final class Documents {
         // there too: the next key after End moves.
         Block block = panel(title, focused);
         Rect inner = block.inner(area);
-        int wrapped = lines.stream()
-                .mapToInt(line -> TextFormat.wrap(line.rawContent(), inner.width(), Integer.MAX_VALUE)
-                        .size())
-                .sum();
-        detailsScroll = Math.min(detailsScroll, Math.max(wrapped - inner.height(), 0));
+        List<Line> wrapped = Panels.wrap(lines, inner.width());
+        detailsScroll = Math.min(detailsScroll, Math.max(wrapped.size() - inner.height(), 0));
         frame.renderWidget(
                 Paragraph.builder()
-                        .text(Text.from(lines))
-                        .overflow(Overflow.WRAP_WORD)
+                        .text(Text.from(wrapped))
                         .scroll(detailsScroll)
                         .block(block)
                         .build(),
@@ -1478,9 +1526,6 @@ public final class Documents {
                 String text = storedText(value);
                 String shown = TextFormat.firstChars(text, DETAIL_VALUE_CHARS);
                 boolean more = !shown.equals(text);
-                if (more) {
-                    shown = shown.substring(0, shown.length() - 1);
-                }
                 String[] valueLines = shown.split("\n", -1);
                 for (int i = 0; i < valueLines.length; i++) {
                     if (i == DETAIL_VALUE_LINES) {

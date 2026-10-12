@@ -9,13 +9,10 @@ import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Color;
-import dev.tamboui.style.Overflow;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
-import dev.tamboui.text.Text;
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
-import dev.tamboui.widgets.paragraph.Paragraph;
 import dev.tamboui.widgets.table.Cell;
 import dev.tamboui.widgets.table.Row;
 import dev.tamboui.widgets.table.Table;
@@ -29,6 +26,7 @@ import io.github.mfuerstenau.leia.protocol.terms.Posting;
 import io.github.mfuerstenau.leia.protocol.terms.PostingsFilter;
 import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -763,12 +761,6 @@ public final class Terms {
     }
 
     private static void message(Frame frame, Rect area, String title, boolean focused, String text) {
-        frame.renderWidget(
-                Paragraph.builder()
-                        .text(Text.from(text))
-                        .overflow(Overflow.WRAP_WORD)
-                        .block(panel(title, focused))
-                        .build(),
-                area);
+        frame.renderWidget(Panels.wrapped(text, panel(title, focused), area), area);
     }
 }

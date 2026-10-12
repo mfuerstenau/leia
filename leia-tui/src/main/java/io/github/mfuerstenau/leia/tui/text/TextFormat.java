@@ -144,4 +144,73 @@ public final class TextFormat {
     private static boolean fits(List<String> lines, int columns, int first, int width) {
         return columns <= Math.max(lines.isEmpty() ? first : width, 1);
     }
+
+    /** A line of a wrapped text: the chars from {@code start} to {@code end}, exclusive. */
+    public record LineRange(int start, int end) {}
+
+    /**
+     * Where {@code text} breaks into lines at most {@code width} columns wide, as ratatui wraps a
+     * paragraph without trimming: at spaces, which the break drops, and inside a word only where the
+     * word alone is wider. The first line keeps its indentation. At least one line, empty for an
+     * empty text. TamboUI's own word wrap breaks a column early, before a word that ends in the last
+     * column.
+     */
+    public static List<LineRange> wrapRanges(String text, int width) {
+        int columns = Math.max(width, 1);
+        List<LineRange> lines = new ArrayList<>();
+        int start = 0;
+        int end = 0;
+        int lineWidth = 0;
+        // The line has a word on it; until then, the first line holds its indentation.
+        boolean open = false;
+        int pos = 0;
+        while (pos < text.length()) {
+            int spaces = pos;
+            while (pos < text.length() && text.charAt(pos) == ' ') {
+                pos++;
+            }
+            int wordStart = pos;
+            while (pos < text.length() && text.charAt(pos) != ' ') {
+                pos++;
+            }
+            if (wordStart == pos) {
+                break;
+            }
+            int gap = wordStart - spaces;
+            int wordWidth = CharWidth.of(text.substring(wordStart, pos));
+            boolean indented = !open && lines.isEmpty();
+            if ((open || indented) && lineWidth + gap + wordWidth <= columns) {
+                if (!open) {
+                    start = spaces;
+                }
+                end = pos;
+                lineWidth += gap + wordWidth;
+                open = true;
+                continue;
+            }
+            if (open) {
+                lines.add(new LineRange(start, end));
+            }
+            start = wordStart;
+            end = wordStart;
+            lineWidth = 0;
+            open = true;
+            for (int i = wordStart; i < pos; ) {
+                int c = text.codePointAt(i);
+                int charWidth = CharWidth.of(c);
+                if (lineWidth > 0 && lineWidth + charWidth > columns) {
+                    lines.add(new LineRange(start, end));
+                    start = i;
+                    lineWidth = 0;
+                }
+                i += Character.charCount(c);
+                end = i;
+                lineWidth += charWidth;
+            }
+        }
+        if (open || lines.isEmpty()) {
+            lines.add(open ? new LineRange(start, end) : new LineRange(0, text.length()));
+        }
+        return lines;
+    }
 }

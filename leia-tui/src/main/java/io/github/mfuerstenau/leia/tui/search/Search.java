@@ -8,7 +8,6 @@ import static io.github.mfuerstenau.leia.tui.widgets.Panels.tailRow;
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Overflow;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
@@ -56,6 +55,7 @@ import io.github.mfuerstenau.leia.tui.prompt.LineInput;
 import io.github.mfuerstenau.leia.tui.search.LikeSettings.LikeSource;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.widgets.Form;
+import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
 import java.util.ArrayList;
 import java.util.List;
@@ -1314,13 +1314,7 @@ public final class Search {
             String text = mode == Mode.DOC_VALUES
                     ? "No field has doc values, so there is nothing to search. m switches the mode."
                     : "No field has postings, so there is nothing to search.";
-            frame.renderWidget(
-                    Paragraph.builder()
-                            .text(Text.from(text))
-                            .overflow(Overflow.WRAP_WORD)
-                            .block(panel(" Query ", true))
-                            .build(),
-                    area);
+            frame.renderWidget(Panels.wrapped(text, panel(" Query ", true), area), area);
             return;
         }
         List<Rect> parts = Layout.vertical()
@@ -1486,13 +1480,7 @@ public final class Search {
     }
 
     private static void message(Frame frame, Rect area, String title, boolean focused, Line line) {
-        frame.renderWidget(
-                Paragraph.builder()
-                        .text(Text.from(line))
-                        .overflow(Overflow.WRAP_WORD)
-                        .block(panel(title, focused))
-                        .build(),
-                area);
+        frame.renderWidget(Panels.wrapped(List.of(line), panel(title, focused), area), area);
     }
 
     private void renderDetails(Frame frame, Rect area) {
@@ -1522,15 +1510,11 @@ public final class Search {
         // there too (ADR 0034 §10, the commits screen).
         Block block = panel(title, focused);
         Rect inner = block.inner(area);
-        int wrapped = lines.stream()
-                .mapToInt(line -> TextFormat.wrap(line.rawContent(), Math.max(inner.width(), 1), Integer.MAX_VALUE)
-                        .size())
-                .sum();
-        detailsScroll = Math.min(detailsScroll, Math.max(wrapped - inner.height(), 0));
+        List<Line> wrapped = Panels.wrap(lines, inner.width());
+        detailsScroll = Math.min(detailsScroll, Math.max(wrapped.size() - inner.height(), 0));
         frame.renderWidget(
                 Paragraph.builder()
-                        .text(Text.from(lines))
-                        .overflow(Overflow.WRAP_WORD)
+                        .text(Text.from(wrapped))
                         .scroll(detailsScroll)
                         .block(block)
                         .build(),

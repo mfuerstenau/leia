@@ -6,14 +6,11 @@ import static io.github.mfuerstenau.leia.tui.widgets.Panels.right;
 
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Overflow;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
 import dev.tamboui.text.Span;
-import dev.tamboui.text.Text;
 import dev.tamboui.tui.event.KeyEvent;
-import dev.tamboui.widgets.paragraph.Paragraph;
 import dev.tamboui.widgets.table.Cell;
 import dev.tamboui.widgets.table.Row;
 import dev.tamboui.widgets.table.Table;
@@ -26,6 +23,7 @@ import io.github.mfuerstenau.leia.protocol.search.StoredScanResult;
 import io.github.mfuerstenau.leia.protocol.search.ValueRef;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.widgets.Form;
+import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -210,13 +208,7 @@ public final class StoredScan {
             } else {
                 line = Line.empty();
             }
-            frame.renderWidget(
-                    Paragraph.builder()
-                            .text(Text.from(line))
-                            .overflow(Overflow.WRAP_WORD)
-                            .block(panel(title, focused))
-                            .build(),
-                    area);
+            frame.renderWidget(Panels.wrapped(List.of(line), panel(title, focused), area), area);
             return;
         }
         int rankWidth = Integer.toString(hits.size()).length();

@@ -6,7 +6,6 @@ import static io.github.mfuerstenau.leia.tui.widgets.Panels.panel;
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Overflow;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
@@ -30,6 +29,7 @@ import io.github.mfuerstenau.leia.protocol.analysis.TokenStage;
 import io.github.mfuerstenau.leia.tui.prompt.LineInput;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.widgets.Form;
+import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
 import java.util.ArrayList;
 import java.util.List;
@@ -352,10 +352,7 @@ public final class Analysis {
     public void render(Frame frame, Rect area) {
         List<Line> analyzerLines = analyzerLines();
         int innerWidth = Math.max(area.width() - 2, 1);
-        int analyzerHeight = analyzerLines.stream()
-                .mapToInt(line -> TextFormat.wrap(line.rawContent(), innerWidth, Integer.MAX_VALUE)
-                        .size())
-                .sum();
+        int analyzerHeight = Panels.wrap(analyzerLines, innerWidth).size();
         List<Rect> rows = Layout.vertical()
                 .constraints(
                         Constraint.length(Math.clamp(analyzerHeight, 1, 4) + 2),
@@ -363,38 +360,25 @@ public final class Analysis {
                         Constraint.fill())
                 .split(area);
         frame.renderWidget(
-                Paragraph.builder()
-                        .text(Text.from(analyzerLines))
-                        .overflow(Overflow.WRAP_WORD)
-                        .block(panel(" Analyzer · b builds it ", false))
-                        .build(),
-                rows.get(0));
+                Panels.wrapped(analyzerLines, panel(" Analyzer · b builds it ", false), rows.get(0)), rows.get(0));
         renderText(frame, rows.get(1));
         Rect body = rows.get(2);
         if (error != null) {
             frame.renderWidget(
-                    Paragraph.builder()
-                            .text(Text.from(Line.styled(error, Style.EMPTY.red())))
-                            .overflow(Overflow.WRAP_WORD)
-                            .block(panel(" Analysis failed ", false))
-                            .build(),
+                    Panels.wrapped(
+                            List.of(Line.styled(error, Style.EMPTY.red())), panel(" Analysis failed ", false), body),
                     body);
         } else if (shown == null) {
-            frame.renderWidget(
-                    Paragraph.builder()
-                            .text(Text.from(
-                                    Line.styled(
-                                            "Press / to type a text, then Enter to analyze it, or a on the documents "
-                                                    + "screen for a stored value.",
-                                            Form.dim()),
-                                    Line.styled(
-                                            "Each step shows what the analyzer has made of it so far, and each token "
-                                                    + "every attribute.",
-                                            Form.dim())))
-                            .overflow(Overflow.WRAP_WORD)
-                            .block(panel(" Analysis ", false))
-                            .build(),
-                    body);
+            List<Line> hint = List.of(
+                    Line.styled(
+                            "Press / to type a text, then Enter to analyze it, or a on the documents "
+                                    + "screen for a stored value.",
+                            Form.dim()),
+                    Line.styled(
+                            "Each step shows what the analyzer has made of it so far, and each token "
+                                    + "every attribute.",
+                            Form.dim()));
+            frame.renderWidget(Panels.wrapped(hint, panel(" Analysis ", false), body), body);
         } else {
             // The names, the counts, the borders and a column to spare.
             List<Rect> columns = Layout.horizontal()
@@ -513,11 +497,10 @@ public final class Analysis {
         if (selected.get() instanceof Step.CharFilter charFilter) {
             CharFilterStep filter = shown.result.charFilters().get(charFilter.index());
             frame.renderWidget(
-                    Paragraph.builder()
-                            .text(Text.from(TextFormat.escapeControl(filter.text())))
-                            .overflow(Overflow.WRAP_WORD)
-                            .block(panel(" Text after " + TextFormat.escapeControl(filter.name()) + " ", focused))
-                            .build(),
+                    Panels.wrapped(
+                            TextFormat.escapeControl(filter.text()),
+                            panel(" Text after " + TextFormat.escapeControl(filter.name()) + " ", focused),
+                            area),
                     area);
             return;
         }
@@ -584,13 +567,7 @@ public final class Analysis {
             String hint = step().orElse(null) instanceof Step.CharFilter
                     ? "A char filter changes the text, before any token."
                     : "";
-            frame.renderWidget(
-                    Paragraph.builder()
-                            .text(Text.from(Line.styled(hint, Form.dim())))
-                            .overflow(Overflow.WRAP_WORD)
-                            .block(block)
-                            .build(),
-                    area);
+            frame.renderWidget(Panels.wrapped(List.of(Line.styled(hint, Form.dim())), block, area), area);
             return;
         }
         Token shownToken = selected.get();
@@ -614,15 +591,11 @@ public final class Analysis {
         // TamboUI scrolls no further than to show the last line at the bottom, so the scroll stops
         // there too (ADR 0034 §10, the commits screen).
         Rect inner = block.inner(area);
-        int wrapped = lines.stream()
-                .mapToInt(line -> TextFormat.wrap(line.rawContent(), Math.max(inner.width(), 1), Integer.MAX_VALUE)
-                        .size())
-                .sum();
-        detailsScroll = Math.min(detailsScroll, Math.max(wrapped - inner.height(), 0));
+        List<Line> wrapped = Panels.wrap(lines, inner.width());
+        detailsScroll = Math.min(detailsScroll, Math.max(wrapped.size() - inner.height(), 0));
         frame.renderWidget(
                 Paragraph.builder()
-                        .text(Text.from(lines))
-                        .overflow(Overflow.WRAP_WORD)
+                        .text(Text.from(wrapped))
                         .scroll(detailsScroll)
                         .block(block)
                         .build(),

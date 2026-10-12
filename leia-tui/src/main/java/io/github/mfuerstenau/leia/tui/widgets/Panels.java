@@ -1,17 +1,20 @@
 package io.github.mfuerstenau.leia.tui.widgets;
 
-import dev.tamboui.buffer.Buffer;
 import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Style;
 import dev.tamboui.text.CharWidth;
 import dev.tamboui.text.Line;
 import dev.tamboui.text.Span;
+import dev.tamboui.text.Text;
 import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.block.BorderType;
 import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import dev.tamboui.widgets.table.Cell;
 import dev.tamboui.widgets.table.Row;
+import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 
@@ -32,6 +35,16 @@ public final class Panels {
     /** The selected row: reversed in the focused table, bold in the other. */
     public static Style highlight(boolean focused) {
         return focused ? Style.EMPTY.reversed() : Style.EMPTY.bold();
+    }
+
+    /**
+     * A {@code width} × {@code height} rectangle in the middle of {@code area}, as ratatui's {@code
+     * Rect::centered} placed it: an odd column or row to spare goes before it.
+     */
+    public static Rect centered(Rect area, int width, int height) {
+        int w = Math.min(width, area.width());
+        int h = Math.min(height, area.height());
+        return new Rect(area.x() + (area.width() - w + 1) / 2, area.y() + (area.height() - h + 1) / 2, w, h);
     }
 
     /** A label, bold and padded to 10 columns, and its value. */
@@ -63,19 +76,43 @@ public final class Panels {
         return Optional.of(Row.from(Cell.from(text)).style(Style.EMPTY.dim()));
     }
 
-    /** How many lines {@code paragraph} takes at {@code width}: drawn aside, as it will be drawn. */
-    public static int lineCount(Paragraph paragraph, int width) {
-        int maxLines = 200;
-        Buffer scratch = Buffer.empty(new Rect(0, 0, width, maxLines));
-        paragraph.render(scratch.area(), scratch);
-        for (int y = maxLines - 1; y >= 0; y--) {
-            for (int x = 0; x < width; x++) {
-                String symbol = scratch.get(x, y).symbol();
-                if (!symbol.isBlank()) {
-                    return y + 1;
+    /**
+     * {@code lines} wrapped at {@code width} columns by {@link TextFormat#wrapRanges}, each part of a
+     * line keeping the style of its span. Drawn without TamboUI's word wrap, they take as many rows
+     * as the list is long, which is what a panel scrolls by.
+     */
+    public static List<Line> wrap(List<Line> lines, int width) {
+        List<Line> wrapped = new ArrayList<>();
+        for (Line line : lines) {
+            String text = line.rawContent();
+            for (TextFormat.LineRange range : TextFormat.wrapRanges(text, width)) {
+                List<Span> spans = new ArrayList<>();
+                int offset = 0;
+                for (Span span : line.spans()) {
+                    String content = span.content();
+                    int from = Math.max(range.start(), offset);
+                    int to = Math.min(range.end(), offset + content.length());
+                    if (from < to) {
+                        spans.add(Span.styled(content.substring(from - offset, to - offset), span.style()));
+                    }
+                    offset += content.length();
                 }
+                wrapped.add(Line.from(spans));
             }
         }
-        return 0;
+        return wrapped;
+    }
+
+    /** A paragraph of {@code lines} in {@code block}, {@link #wrap wrapped} to fit inside it in {@code area}. */
+    public static Paragraph wrapped(List<Line> lines, Block block, Rect area) {
+        return Paragraph.builder()
+                .text(Text.from(wrap(lines, block.inner(area).width())))
+                .block(block)
+                .build();
+    }
+
+    /** {@link #wrapped(List, Block, Rect)} for a text, which may have several lines. */
+    public static Paragraph wrapped(String text, Block block, Rect area) {
+        return wrapped(Text.from(text).lines(), block, area);
     }
 }

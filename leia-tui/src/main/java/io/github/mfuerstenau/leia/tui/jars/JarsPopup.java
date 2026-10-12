@@ -3,7 +3,6 @@ package io.github.mfuerstenau.leia.tui.jars;
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Overflow;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
@@ -193,17 +192,15 @@ public final class JarsPopup {
     public void render(Frame frame, Rect area) {
         int width = Math.min(Math.max(area.width() - 4, 0), MAX_WIDTH);
         int innerWidth = Math.max(width - 2, 1);
-        Paragraph outcome = outcomeParagraph();
-        int outcomeLines = outcome == null ? 0 : Panels.lineCount(outcome, innerWidth);
+        List<Line> outcome = outcome(innerWidth);
         int candidateLines = candidates.isEmpty() ? 0 : 1;
         Line header = header();
         List<Line> jarLines = jarLines();
         // Default folder, header, input, candidates, outcome, hint, and the top and bottom border.
-        int fixed = 1 + 1 + 1 + candidateLines + outcomeLines + 1 + 2;
+        int fixed = 1 + 1 + 1 + candidateLines + outcome.size() + 1 + 2;
         int height = Math.min(fixed + jarLines.size(), area.height());
         int listHeight = Math.clamp(height - fixed, 0, jarLines.size());
-        Rect popup =
-                new Rect(area.x() + (area.width() - width) / 2, area.y() + (area.height() - height) / 2, width, height);
+        Rect popup = Panels.centered(area, width, height);
         frame.renderWidget(Clear.INSTANCE, popup);
         Block block = Block.builder().borders(Borders.ALL).title(" Jars ").build();
         Rect inner = block.inner(popup);
@@ -238,8 +235,8 @@ public final class JarsPopup {
         }
         frame.renderWidget(
                 Paragraph.from(Line.from(Span.raw(String.join("  ", candidates)).dim())), parts.get(4));
-        if (outcome != null) {
-            frame.renderWidget(outcome, parts.get(5));
+        if (!outcome.isEmpty()) {
+            frame.renderWidget(Paragraph.from(Text.from(outcome)), parts.get(5));
         }
         String hint;
         if (busy) {
@@ -321,20 +318,12 @@ public final class JarsPopup {
         return path.toString();
     }
 
-    /** What the last addition did, or why it failed; null before one. */
-    private Paragraph outcomeParagraph() {
-        List<Line> lines;
+    /** What the last addition did, or why it failed, wrapped at {@code width}; no line before one. */
+    private List<Line> outcome(int width) {
         if (addError != null) {
-            lines = List.of(Line.styled(addError, Style.EMPTY.red()));
-        } else if (added != null) {
-            lines = outcomeLines(added);
-        } else {
-            return null;
+            return Panels.wrap(List.of(Line.styled(addError, Style.EMPTY.red())), width);
         }
-        return Paragraph.builder()
-                .text(Text.from(lines))
-                .overflow(Overflow.WRAP_WORD)
-                .build();
+        return added != null ? Panels.wrap(outcomeLines(added), width) : List.of();
     }
 
     /** What an addition did: how many jars were loaded, then the names they added by kind. */

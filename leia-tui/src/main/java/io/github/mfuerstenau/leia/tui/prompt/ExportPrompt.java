@@ -3,7 +3,6 @@ package io.github.mfuerstenau.leia.tui.prompt;
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Overflow;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
@@ -247,12 +246,10 @@ public final class ExportPrompt {
     public void render(Frame frame, Rect area) {
         int width = Math.min(Math.max(area.width() - 4, 0), MAX_WIDTH);
         int innerWidth = Math.max(width - 2, 1);
-        Paragraph errorParagraph = error == null ? null : errorParagraph(error, overwrite != null);
-        int errorLines = errorParagraph == null ? 0 : Panels.lineCount(errorParagraph, innerWidth);
+        List<Line> errorLines = error == null ? List.of() : errorLines(error, overwrite != null, innerWidth);
         // Input, error, hint, and the top and bottom border.
-        int height = Math.min(1 + errorLines + 1 + 2, area.height());
-        Rect popup =
-                new Rect(area.x() + (area.width() - width) / 2, area.y() + (area.height() - height) / 2, width, height);
+        int height = Math.min(1 + errorLines.size() + 1 + 2, area.height());
+        Rect popup = Panels.centered(area, width, height);
         frame.renderWidget(Clear.INSTANCE, popup);
         String title;
         String choice;
@@ -286,8 +283,8 @@ public final class ExportPrompt {
         if (!busy) {
             frame.setCursorPosition(inputArea.x() + visible.cursorColumn(), inputArea.y());
         }
-        if (errorParagraph != null) {
-            frame.renderWidget(errorParagraph, parts.get(1));
+        if (!errorLines.isEmpty()) {
+            frame.renderWidget(Paragraph.from(Text.from(errorLines)), parts.get(1));
         }
         String hint = busy ? "Exporting…" : keys;
         frame.renderWidget(Paragraph.from(Line.from(Span.raw(hint).dim())), parts.get(2));
@@ -312,12 +309,9 @@ public final class ExportPrompt {
         return "terms_" + name + "_" + FILE_TIME.format(Instant.ofEpochMilli(millis)) + ".out";
     }
 
-    /** The error in red, or the question whether to overwrite in yellow. */
-    private static Paragraph errorParagraph(String error, boolean question) {
+    /** The error in red, or the question whether to overwrite in yellow, wrapped at {@code width}. */
+    private static List<Line> errorLines(String error, boolean question, int width) {
         Style style = question ? Style.EMPTY.yellow() : Style.EMPTY.red();
-        return Paragraph.builder()
-                .text(Text.from(List.of(Line.styled(error, style))))
-                .overflow(Overflow.WRAP_WORD)
-                .build();
+        return Panels.wrap(List.of(Line.styled(error, style)), width);
     }
 }

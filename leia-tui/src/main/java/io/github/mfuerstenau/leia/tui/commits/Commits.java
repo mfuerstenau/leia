@@ -7,7 +7,6 @@ import static io.github.mfuerstenau.leia.tui.widgets.Panels.right;
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Overflow;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
@@ -28,6 +27,7 @@ import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.commits.Segment;
 import io.github.mfuerstenau.leia.protocol.commits.UnreadableCommit;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -635,15 +635,11 @@ public final class Commits {
         // until it was at the top), so the scroll stops there too: the next key after End moves.
         Block block = panel(title, focused);
         Rect inner = block.inner(area);
-        int wrapped = lines.stream()
-                .mapToInt(line -> TextFormat.wrap(line.rawContent(), inner.width(), Integer.MAX_VALUE)
-                        .size())
-                .sum();
-        detailsScroll = Math.min(detailsScroll, Math.max(wrapped - inner.height(), 0));
+        List<Line> wrapped = Panels.wrap(lines, inner.width());
+        detailsScroll = Math.min(detailsScroll, Math.max(wrapped.size() - inner.height(), 0));
         frame.renderWidget(
                 Paragraph.builder()
-                        .text(Text.from(lines))
-                        .overflow(Overflow.WRAP_WORD)
+                        .text(Text.from(wrapped))
                         .scroll(detailsScroll)
                         .block(block)
                         .build(),
@@ -661,13 +657,7 @@ public final class Commits {
     }
 
     private static void message(Frame frame, Rect area, String title, boolean focused, String text) {
-        frame.renderWidget(
-                Paragraph.builder()
-                        .text(Text.from(text))
-                        .overflow(Overflow.WRAP_WORD)
-                        .block(panel(title, focused))
-                        .build(),
-                area);
+        frame.renderWidget(Panels.wrapped(text, panel(title, focused), area), area);
     }
 
     private static int textWidth(List<Segment> segments, Function<Segment, String> text, int min) {

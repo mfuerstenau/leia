@@ -34,6 +34,7 @@ import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.function.Function;
+import tools.jackson.core.json.JsonWriteFeature;
 import tools.jackson.core.util.DefaultIndenter;
 import tools.jackson.core.util.DefaultPrettyPrinter;
 import tools.jackson.core.util.Separators;
@@ -123,7 +124,8 @@ public final class DocumentExport {
 
     /**
      * serde's {@code to_string_pretty}, as the Rust TUI wrote the format: two spaces, {@code ": "},
-     * {@code []} for an empty array, and {@code \n} on every platform.
+     * {@code []} for an empty array, {@code \n} on every platform, and lowercase hex in
+     * the escape of a control character (the mapper's part).
      */
     private static final DefaultPrettyPrinter PRETTY = new DefaultPrettyPrinter(Separators.createDefaultInstance()
                     .withObjectNameValueSpacing(Separators.Spacing.AFTER)
@@ -135,6 +137,7 @@ public final class DocumentExport {
     private static final JsonMapper MAPPER = JsonMapper.builder()
             .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
             .disable(MapperFeature.SORT_PROPERTIES_ALPHABETICALLY)
+            .disable(JsonWriteFeature.WRITE_HEX_UPPER_CASE)
             .changeDefaultPropertyInclusion(inclusion -> inclusion.withValueInclusion(JsonInclude.Include.NON_ABSENT))
             .build();
 

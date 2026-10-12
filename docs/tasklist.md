@@ -6,16 +6,7 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 
 **Feature freeze:** nothing from the backlog below starts until this section is done. Fixes to the Rust TUI are fine; new features are not, in either UI. Settled on 2026-10-09: one JVM, with the TamboUI app calling the server's handlers in-process; launcher scripts `leia`/`leia.cmd` that run `java -jar leia.jar`; no Rust left.
 
-- [ ] Port the screens, each with TamboUI Pilot tests in place of the Rust tests, keeping keys and behaviour:
-  - [x] app shell: tabs, open prompt (directory choice, no-reader, recent paths), status line, help, reopen (`R`), the logo; the screens are placeholders until they are ported
-  - [x] overview (index stats, fields, term scans); Enter and `/` on a top term come back with the terms and search screens
-  - [x] documents: the screen, the viewer, stored values, term vectors, doc values, Enter on a posting of the terms screen and `[`/`]` through the term's docs; the rebuild (`r`, ADR 0029), the filter (ADR 0031/0032) with `b` on the terms screen (`Terms.setFilter`), and the export (`E`, ADR 0030)
-  - [x] terms: fields, terms, postings, seek; Enter on an overview top term opens it here
-  - [x] analysis: analyzer builder, presets and word sets, analyze; `a` on the documents screen and in the value viewer
-  - [x] search: parser options, scoring/similarity, sort, More-Like-This, explain, stored scan, doc-values search, hit fields; `/` on an overview top term, the first polls of a new job at 10 ms, and on the documents screen `s` search value, `m` similar, `[`/`]` through the hits, and `b`/`B` on the search screen starting a filter
-  - [x] commits and segments
-  - [x] tools: check index (`7`, with or without a reader), export terms (`e` on the terms screen, the terms kind of `ExportPrompt`)
-  - [x] jars: `X`, the default folder; then the about screen's "X to add jars", the `X jars` key, and "add a jar that has it with X" in the missing-codec hint come back (`Session.withJarHint`), and the analysis components are fetched again after jars are added (`app.rs` `jars_added`)
+- [ ] Commits screen at 100 columns: the Size column of the segments table gets too narrow for `508.2 KiB`. TamboUI shows `508.2`, the Rust TUI showed `8.2 KiB`; neither is right (found in the hand checks, left open)
 - [ ] Parity check against `docs/demo-index.md` and the real-server tests that `cargo test -- --ignored` runs now
 - [ ] Remove the old path: the whole `tui/` crate (and the Rust steps of the build), `protocol/fixtures/` and the fixture tests, the JSON-RPC transport (`RpcServer`, `Dispatcher`, `RequestScanner`, `LeiaServer`'s stdio loop), the envelope and Jackson setup in `leia-protocol` (`Request`, `Response`, `JsonRpcVersion`, `ProtocolJson`, `ProtocolAnnotationIntrospector`, the Jackson annotations), `protocol/error-codes.json`, and Jackson if nothing else needs it (ADR 0034 §6)
 - [ ] Update `AGENTS.md` (architecture, hard rules 2–4 → the one rule of ADR 0034 §6, tech stack, commands, CLI contract), `README.md` and `build-dist.sh` (one `leia.jar` plus `leia` and `leia.cmd`; no cargo, cargo-zigbuild or zig)

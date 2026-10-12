@@ -678,7 +678,8 @@ class AppTest {
         assertThat(app.handleKey(key('R'))).hasValue(new Action.Reopen());
         assertThat(render(app)).contains("Reopening…");
         app.reopenUnchanged(reopenResult(1));
-        assertThat(render(app)).contains("Unchanged: segments_1");
+        // At the right end of the tab line.
+        assertThat(render(app).lines().findFirst().orElseThrow()).endsWith("  Unchanged: segments_1");
 
         // The next key clears it.
         app.handleKey(key(KeyCode.DOWN));

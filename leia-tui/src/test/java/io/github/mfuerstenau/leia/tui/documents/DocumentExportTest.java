@@ -218,6 +218,14 @@ class DocumentExportTest {
     }
 
     @Test
+    void escapesControlCharactersInLowercaseHexAsSerdeDid() {
+        ExportedDocument export =
+                DocumentExport.assemble(loaded(), Optional.empty(), schema(), "/i/a\u001eb", Optional.empty());
+
+        assertThat(DocumentExport.toJson(export)).contains("\"index\": \"/i/a\\u001eb\"");
+    }
+
+    @Test
     void leavesOutEmptyFieldsAndSaysWhetherTermsWereRebuilt() {
         ExportedDocument export = DocumentExport.assemble(loaded(), Optional.empty(), schema(), "/i", Optional.of("b"));
 

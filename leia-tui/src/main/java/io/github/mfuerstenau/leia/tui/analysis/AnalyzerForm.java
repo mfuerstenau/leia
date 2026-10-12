@@ -9,7 +9,6 @@ import static io.github.mfuerstenau.leia.tui.analysis.AnalyzerSettings.unigramsT
 import static io.github.mfuerstenau.leia.tui.analysis.AnalyzerSettings.wordSetText;
 
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Overflow;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
@@ -37,6 +36,7 @@ import io.github.mfuerstenau.leia.tui.analysis.AnalyzerSettings.WordSetKind;
 import io.github.mfuerstenau.leia.tui.prompt.LineInput;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.widgets.Form;
+import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -1223,10 +1223,8 @@ public final class AnalyzerForm {
         frame.renderWidget(Paragraph.from(Line.from(visible.text())), new Rect(inner.x(), inner.y(), inner.width(), 1));
         if (edit.error != null && inner.height() > 1) {
             frame.renderWidget(
-                    Paragraph.builder()
-                            .text(Text.from(Line.styled(edit.error, Style.EMPTY.red())))
-                            .overflow(Overflow.WRAP_WORD)
-                            .build(),
+                    Paragraph.from(Text.from(
+                            Panels.wrap(List.of(Line.styled(edit.error, Style.EMPTY.red())), inner.width()))),
                     new Rect(inner.x(), inner.y() + 1, inner.width(), 1));
         }
         frame.setCursorPosition(inner.x() + visible.cursorColumn(), inner.y());

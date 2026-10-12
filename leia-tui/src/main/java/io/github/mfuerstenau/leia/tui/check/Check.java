@@ -5,7 +5,6 @@ import static io.github.mfuerstenau.leia.tui.widgets.Panels.panel;
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Overflow;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
@@ -22,6 +21,7 @@ import io.github.mfuerstenau.leia.protocol.check.SegmentCheck;
 import io.github.mfuerstenau.leia.protocol.check.StartCheckIndexParams;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -286,10 +286,8 @@ public final class Check {
         int maxSummary = Math.max(area.height() * SUMMARY_SHARE / 100, 3);
         // Wrapped, plus the borders.
         int innerWidth = Math.max(area.width() - 2, 1);
-        int summaryRows = summary.stream()
-                .mapToInt(line -> TextFormat.wrap(line.rawContent(), innerWidth, Integer.MAX_VALUE)
-                        .size())
-                .sum();
+        List<Line> wrapped = Panels.wrap(summary, innerWidth);
+        int summaryRows = wrapped.size();
         int summaryHeight = Math.min(summaryRows + 2, maxSummary);
         List<Rect> parts = Layout.vertical()
                 .constraints(Constraint.length(summaryHeight), Constraint.fill())
@@ -302,8 +300,7 @@ public final class Check {
         summaryScroll = Math.min(summaryScroll, Math.max(summaryRows - (summaryHeight - 2), 0));
         frame.renderWidget(
                 Paragraph.builder()
-                        .text(Text.from(summary))
-                        .overflow(Overflow.WRAP_WORD)
+                        .text(Text.from(wrapped))
                         .scroll(summaryScroll)
                         .block(panel(" Check (" + titleLevel() + ") ", focus == Focus.SUMMARY))
                         .build(),

@@ -602,7 +602,7 @@ class SessionPilotTest {
         assertThat(index).as("the custom-codec index, from jarsTest").isNotNull();
 
         openAtStart(Path.of(index), OpenMode.READER);
-        assertThat(screen()).contains("MISSING_CODEC", "add a jar that has", "it with X, or start leia with --jar");
+        assertThat(screen()).contains("MISSING_CODEC", "add a jar that has it", "with X, or start leia with --jar");
         pilot.press(KeyCode.ESCAPE);
         pilot.press('X');
         settle();

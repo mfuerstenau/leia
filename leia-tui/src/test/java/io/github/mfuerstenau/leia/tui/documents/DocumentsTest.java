@@ -530,6 +530,19 @@ class DocumentsTest {
     }
 
     @Test
+    void endsAValueCutAfterItsFirstCharactersWithAnEllipsis() {
+        Documents documents = documents();
+        documents.loaded(document(0, false, List.of(string("x".repeat(1999) + "yz")), List.of(), Optional.empty()));
+        documents.handleKey(key(KeyCode.TAB));
+        documents.handleKey(key(KeyCode.END));
+
+        assertThat(render(documents, 140, 40))
+                .contains("xxy…")
+                .doesNotContain("yz")
+                .contains("          … v views it whole");
+    }
+
+    @Test
     void showsTheBeginningOfALongValue() {
         Documents documents = documents();
         String lines = IntStream.rangeClosed(1, 30).mapToObj(n -> "line " + n).collect(Collectors.joining("\n"));
@@ -684,7 +697,8 @@ class DocumentsTest {
         assertThat(render(documents, 100, 20)).contains("filter red: 2 of 2");
 
         assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEqualTo(step(9, 4, true, FilterStep.MOVE));
-        assertThat(documents.handleKey(key('p'))).isEqualTo(step(9, 2, false, FilterStep.MOVE));
+        // Queued behind the step under way.
+        assertThat(documents.handleKey(key('p'))).isEmpty();
         documents.handleKey(key('i'));
         documents.handleKey(key('1'));
         assertThat(documents.handleKey(key(KeyCode.ENTER))).isEqualTo(step(9, 1, true, FilterStep.NEAREST));
@@ -696,6 +710,47 @@ class DocumentsTest {
                 .contains(new Request.ClearFilter(OptionalLong.empty(), OptionalLong.of(9)));
         assertThat(documents.filtered()).isFalse();
         assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEqualTo(load(4));
+    }
+
+    @Test
+    void stepsPressedWhileAStepIsUnderWayGoOnFromWhereItLands() {
+        Documents documents = documents();
+        documents.loaded(document(0));
+        documents.startFilter("red", filterParams(false), 0);
+        documents.filterStarted(1, 9);
+        documents.filterProgress(1, built(9, 5));
+        documents.filterStepped(
+                1, new StepFilterParams(9, 0, true), FilterStep.NEAREST, Optional.of(new FilterMatch(1, 1)));
+        documents.loaded(document(1));
+
+        assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEqualTo(step(9, 2, true, FilterStep.MOVE));
+        assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEmpty();
+        assertThat(documents.handleKey(key(KeyCode.LEFT))).isEmpty();
+        assertThat(documents.filterStepped(
+                        1, new StepFilterParams(9, 2, true), FilterStep.MOVE, Optional.of(new FilterMatch(3, 2))))
+                .isEqualTo(load(3));
+        assertThat(documents.queuedStep()).isEmpty();
+        documents.loaded(document(3));
+        assertThat(documents.queuedStep()).isEqualTo(step(9, 4, true, FilterStep.MOVE));
+        // Nothing further on: the next queued step goes on from the same document.
+        assertThat(documents.filterStepped(1, new StepFilterParams(9, 4, true), FilterStep.MOVE, Optional.empty()))
+                .isEqualTo(step(9, 2, false, FilterStep.MOVE));
+        documents.filterStepped(
+                1, new StepFilterParams(9, 2, false), FilterStep.MOVE, Optional.of(new FilterMatch(1, 1)));
+        documents.loaded(document(1));
+        assertThat(documents.queuedStep()).isEmpty();
+        assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEqualTo(step(9, 2, true, FilterStep.MOVE));
+    }
+
+    @Test
+    void docsPressedBeforeTheLastOneIsInGoOnFromIt() {
+        Documents documents = documents();
+        documents.loaded(document(1));
+        assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEqualTo(load(2));
+        documents.want(2);
+        assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEqualTo(load(3));
+        documents.want(3);
+        assertThat(documents.handleKey(key(KeyCode.LEFT))).isEqualTo(load(2));
     }
 
     @Test

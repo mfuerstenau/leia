@@ -118,6 +118,12 @@ What has to carry over:
       - *Jars that were loaded fetch the analysis components again if the analysis screen has fetched them, counted as one more analysis call.*
       - *Loading a jar changes Lucene's global lists, so the Pilot test that adds one is tagged `jars` and runs in leia-tui's own `jarsTest`, as leia-core's do. It gets leia-core's test codec jar and `custom-codec` index through two consumable configurations.*
       - *The missing-codec hint says "add a jar that has it with X, or start leia with --jar" again.*
+    - *Settled with the hand checks (each screen driven side by side with the Rust TUI in tmux):*
+      - *TamboUI's word wrap breaks a column early, before a word that ends in the last column, and after a `-` or `/` inside a long word, so the counts that the scrolled panels took from `TextFormat.wrap` were short and their last lines out of reach. Every wrapped paragraph now gets its lines wrapped by `Panels.wrap` (`TextFormat.wrapRanges`, ratatui's breaks, span styles kept) and is drawn without TamboUI's wrap; a panel scrolls by the length of that list.*
+      - *TamboUI's `Paragraph` ignores a `Line`'s alignment, so the notice on the tab line is right-aligned by the paragraph.*
+      - *The open, export and jars popups are placed as ratatui's `Rect::centered` placed them, with an odd row or column to spare before them (`Panels.centered`). The other popups took the floor in the Rust TUI too.*
+      - *←/→ pressed while a document is fetched go on from the document asked for last; through a filter, they wait until the step under way has shown its document, then step on from it. The blocking Rust loop never had a key in between.*
+      - *The document export writes `\u001e` with lowercase hex, as serde did, so its files are byte for byte the Rust TUI's.*
 
 ## Alternatives considered
 

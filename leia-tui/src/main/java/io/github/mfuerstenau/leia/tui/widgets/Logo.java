@@ -4,7 +4,6 @@ import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Color;
-import dev.tamboui.style.Overflow;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
@@ -132,11 +131,6 @@ public final class Logo {
                 .constraints(Constraint.length(offset), Constraint.fill())
                 .split(columns.get(2))
                 .get(1);
-        frame.renderWidget(
-                Paragraph.builder()
-                        .text(Text.from(text))
-                        .overflow(Overflow.WRAP_WORD)
-                        .build(),
-                textArea);
+        frame.renderWidget(Paragraph.from(Text.from(Panels.wrap(text, textArea.width()))), textArea);
     }
 }

@@ -3,7 +3,6 @@ package io.github.mfuerstenau.leia.tui.prompt;
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Overflow;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
@@ -221,13 +220,11 @@ public final class PathPrompt {
     public void render(Frame frame, Rect area) {
         int width = Math.min(Math.max(area.width() - 4, 0), MAX_WIDTH);
         int innerWidth = Math.max(width - 2, 1);
-        Paragraph errorParagraph = error == null ? null : errorParagraph(error);
-        int errorLines = errorParagraph == null ? 0 : Panels.lineCount(errorParagraph, innerWidth);
+        List<Line> errorLines = error == null ? List.of() : errorLines(error, innerWidth);
         int candidateLines = candidates.isEmpty() ? 0 : 1;
         // Input, candidates, error, hint, and the top and bottom border.
-        int height = Math.min(1 + candidateLines + errorLines + 1 + 2, area.height());
-        Rect popup =
-                new Rect(area.x() + (area.width() - width) / 2, area.y() + (area.height() - height) / 2, width, height);
+        int height = Math.min(1 + candidateLines + errorLines.size() + 1 + 2, area.height());
+        Rect popup = Panels.centered(area, width, height);
         frame.renderWidget(Clear.INSTANCE, popup);
         Span reader = mode == OpenMode.READER ? Span.raw("on") : Span.styled("off", Style.EMPTY.yellow());
         Line bottom = Line.from(
@@ -255,8 +252,8 @@ public final class PathPrompt {
         }
         frame.renderWidget(
                 Paragraph.from(Line.from(Span.raw(String.join("  ", candidates)).dim())), parts.get(1));
-        if (errorParagraph != null) {
-            frame.renderWidget(errorParagraph, parts.get(2));
+        if (!errorLines.isEmpty()) {
+            frame.renderWidget(Paragraph.from(Text.from(errorLines)), parts.get(2));
         }
         String hint;
         if (busy) {
@@ -269,15 +266,13 @@ public final class PathPrompt {
         frame.renderWidget(Paragraph.from(Line.from(Span.raw(hint).dim())), parts.get(3));
     }
 
-    private static Paragraph errorParagraph(String error) {
+    /** The error in red, wrapped at {@code width}. */
+    private static List<Line> errorLines(String error, int width) {
         List<Line> lines = new ArrayList<>();
         for (String line : error.split("\n", -1)) {
             lines.add(Line.styled(line, Style.EMPTY.red()));
         }
-        return Paragraph.builder()
-                .text(Text.from(lines))
-                .overflow(Overflow.WRAP_WORD)
-                .build();
+        return Panels.wrap(lines, width);
     }
 
     /** How the prompt names a {@code Directory}. */

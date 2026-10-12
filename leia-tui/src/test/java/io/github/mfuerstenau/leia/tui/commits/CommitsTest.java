@@ -246,8 +246,8 @@ class CommitsTest {
         assertThat(screen)
                 .contains("┌ segments_5 ")
                 // Wrapped in the details, not cut at their width, and the line break kept.
-                // TamboUI breaks the long word after a slash, where ratatui broke it at the width.
-                .contains("││products/broken/_0.si\"))")
+                // The long word breaks at the width, as ratatui broke it.
+                .contains("││roducts/broken/_0.si\"))")
                 .contains("││Suppressed: checksum failed");
 
         // Reading the commits again keeps the selection on it.
