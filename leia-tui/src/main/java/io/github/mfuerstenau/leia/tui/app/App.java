@@ -16,6 +16,8 @@ import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.paragraph.Paragraph;
+import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeResult;
+import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
@@ -42,6 +44,7 @@ import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
+import io.github.mfuerstenau.leia.tui.analysis.Analysis;
 import io.github.mfuerstenau.leia.tui.commits.Commits;
 import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.documents.DocumentExport;
@@ -108,6 +111,12 @@ public final class App {
 
     /** The documents screen of the open index; null without one, or without a reader. */
     private Documents documents;
+
+    /** The analysis screen, which needs no index; its analyzer is kept when another index is opened. */
+    private final Analysis analysis = new Analysis();
+
+    /** Calls of the analysis screen whose reply is still to come. */
+    private int analysisCalls;
 
     /** Document fetches (documents, stored values, term vectors, positions) whose reply is still to come. */
     private int documentFetches;
@@ -399,7 +408,50 @@ public final class App {
         if (screen == Screen.DOCUMENTS && documents != null) {
             return documentsAction(documents.initialRequest());
         }
+        if (screen == Screen.ANALYSIS) {
+            return analysisAction(analysis.initialRequest());
+        }
         return Optional.empty();
+    }
+
+    private Optional<Action> analysisAction(Optional<Analysis.Request> request) {
+        request.ifPresent(_ -> analysisCalls++);
+        return request.map(next -> switch (next) {
+            case Analysis.Request.Components _ -> new Action.LoadAnalysisComponents();
+            case Analysis.Request.Analyze analyze -> new Action.Analyze(analyze.params());
+        });
+    }
+
+    public void componentsLoaded(GetAnalysisComponentsResult components) {
+        analysisCalls--;
+        analysis.componentsLoaded(components);
+    }
+
+    public void componentsFailed(String error) {
+        analysisCalls--;
+        analysis.componentsFailed(error);
+    }
+
+    /** Whether the analysis screen waits for a reply. */
+    boolean analyzing() {
+        return analysisCalls > 0;
+    }
+
+    /**
+     * Shows what the analyzer made of {@code text}. An analyzer that the builder applied is now the
+     * current one. Returns the components to fetch if there are none yet, as when {@code a} on the
+     * documents screen opened the screen.
+     */
+    public Optional<Action> analyzed(String text, AnalyzeResult result) {
+        analysisCalls--;
+        analysis.analyzed(text, result);
+        return analysisAction(analysis.initialRequest());
+    }
+
+    public Optional<Action> analyzeFailed(String error) {
+        analysisCalls--;
+        analysis.analyzeFailed(error);
+        return analysisAction(analysis.initialRequest());
     }
 
     private static Optional<Action> commitsAction(Optional<Commits.Request> request) {
@@ -500,8 +552,8 @@ public final class App {
     }
 
     /**
-     * Turns what the documents screen needs into an action. What leads to the search and analysis
-     * screens is dropped until they are ported (ADR 0034 §10).
+     * Turns what the documents screen needs into an action. What leads to the search screen is
+     * dropped until it is ported (ADR 0034 §10).
      */
     private Optional<Action> documentsAction(Optional<Documents.Request> request) {
         // A key or a step may have built, failed or cleared the filter.
@@ -545,10 +597,13 @@ public final class App {
             case Documents.Request.Step step
             when step.walk() == Documents.Walk.TERM_DOCS ->
                 terms == null ? Optional.empty() : termsAction(terms.step(step.forward()));
-            case Documents.Request.Step _,
-                    Documents.Request.MoreLikeThis _,
-                    Documents.Request.Analyze _,
-                    Documents.Request.SearchDocValues _ -> Optional.empty();
+            case Documents.Request.Analyze analyze -> {
+                screen = Screen.ANALYSIS;
+                yield analysisAction(
+                        analysis.analyzeValue("doc " + analyze.docId() + " · " + analyze.field(), analyze.text()));
+            }
+            case Documents.Request.Step _, Documents.Request.MoreLikeThis _, Documents.Request.SearchDocValues _ ->
+                Optional.empty();
         };
     }
 
@@ -1065,6 +1120,9 @@ public final class App {
         if (screen == Screen.DOCUMENTS && documents != null && documents.prompting()) {
             return documentsAction(documents.handleKey(key));
         }
+        if (screen == Screen.ANALYSIS && analysis.prompting()) {
+            return analysisAction(analysis.handleKey(key));
+        }
         if (key.code() == KeyCode.ESCAPE) {
             // Esc stops the scans first, then the export, then the shown screen's jobs, and quits only
             // when there are none.
@@ -1112,7 +1170,10 @@ public final class App {
                 }
             }
             case '5' -> showIf(hasIndex(), Screen.SEARCH);
-            case '6' -> showIf(true, Screen.ANALYSIS);
+            case '6' -> {
+                screen = Screen.ANALYSIS;
+                return initialRequest();
+            }
             case '7' -> showIf(hasIndex(), Screen.CHECK);
             case 'o' -> {
                 // Starts from the path that failed to open, then from the open index, so a sibling
@@ -1158,6 +1219,9 @@ public final class App {
         if (screen == Screen.DOCUMENTS && documents != null) {
             return documentsAction(documents.handleKey(key));
         }
+        if (screen == Screen.ANALYSIS) {
+            return analysisAction(analysis.handleKey(key));
+        }
         return Optional.empty();
     }
 
@@ -1194,8 +1258,13 @@ public final class App {
         String reopen = overview != null ? "R reopen   " : "";
         String cancel = scan != null ? "Esc cancel scan   " : export != null ? "Esc cancel export   " : "";
         if (screen == Screen.ANALYSIS) {
-            renderNotPorted(frame, body, screen);
-            return hasIndex() ? " " + cancel + "q quit   o open   c close   1-7 screen" : " q quit   o open";
+            analysis.render(frame, body);
+            if (analysis.prompting()) {
+                return analysis.keys();
+            }
+            return hasIndex()
+                    ? " " + cancel + "q quit   o open   c close   1-7 screen   " + analysis.keys()
+                    : " q quit   o open   " + analysis.keys();
         }
         if (opened == null) {
             renderAbout(frame, body);
@@ -1243,9 +1312,10 @@ public final class App {
                 cancel = "Esc stop filter   ";
             }
             String step = documents.filtered() ? "←→ match   b unfilter   " : "←→ doc   ";
-            // a analyze, s search value and m similar come back with the analysis and search screens.
+            // s search value and m similar come back with the search screen.
             return " " + cancel + "q quit   o open   c close   1-7 screen   " + step + steps
-                    + "i go to   ⏎ term vector   v view   x numbers   e empty   r rebuild   E export   Tab panel   ↑↓";
+                    + "i go to   ⏎ term vector   v view   a analyze   x numbers   e empty   r rebuild   E export   "
+                    + "Tab panel   ↑↓";
         }
         if (screen != Screen.OVERVIEW) {
             renderNotPorted(frame, body, screen);

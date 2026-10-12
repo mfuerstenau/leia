@@ -9,6 +9,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.tui.event.KeyModifiers;
+import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeParams;
+import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeResult;
 import io.github.mfuerstenau.leia.protocol.commits.Commit;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
@@ -48,6 +50,7 @@ import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
 import io.github.mfuerstenau.leia.protocol.version.JavaRuntime;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import io.github.mfuerstenau.leia.tui.TestScreens;
+import io.github.mfuerstenau.leia.tui.analysis.AnalyzerSettings;
 import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.documents.DocumentExport.DocumentData;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
@@ -170,16 +173,56 @@ class AppTest {
         App app = app();
         assertThat(render(app)).contains("6 analysis");
 
-        assertThat(app.handleKey(key('6'))).isEmpty();
+        assertThat(app.handleKey(key('6'))).hasValue(new Action.LoadAnalysisComponents());
+        app.componentsFailed("down");
         String screen = render(app);
-        assertThat(screen).contains("6 Analysis", " q quit   o open");
+        assertThat(screen).contains("6 Analysis", "standard analyzer", "q quit   o open   / text");
         // The other screens need an index.
-        app.handleKey(key('5'));
-        assertThat(render(app)).contains("analysis screen");
+        assertThat(app.handleKey(key('5'))).isEmpty();
+        assertThat(render(app)).contains("standard analyzer");
+
+        // b builds a custom analyzer, which the backend tries first.
+        assertThat(app.handleKey(key('b'))).isEmpty();
+        assertThat(app.handleKey(key(KeyCode.LEFT))).isEmpty();
+        Optional<Action> applied = app.handleKey(key(KeyCode.ENTER));
+        assertThat(applied).containsInstanceOf(Action.Analyze.class);
+        AnalyzeParams params = ((Action.Analyze) applied.orElseThrow()).params();
+        assertThat(params.analyzer().custom()).isPresent();
+        assertThat(app.analyzed(params.text(), new AnalyzeResult(List.of(), List.of())))
+                .isEmpty();
+        assertThat(render(app)).contains("standard › lowercase");
 
         // An index opened now keeps the analysis screen shown.
-        app.opened(stats("/data/idx"), List.of());
-        assertThat(render(app)).contains("1-7 screen", "analysis screen");
+        assertThat(app.opened(stats("/data/idx"), List.of())).isEmpty();
+        assertThat(render(app)).contains("1-7 screen", "standard › lowercase");
+    }
+
+    @Test
+    void analyzesAStoredValueOnTheAnalysisScreen() {
+        App app = appWithDocuments();
+        app.handleKey(key('2'));
+        // The Rust test answered with another document, which the port drops (ADR 0034 §10).
+        app.documentLoaded(document(0));
+        assertThat(wide(app)).contains("a analyze");
+
+        Optional<Action> analyze = app.handleKey(key('a'));
+        assertThat(analyze)
+                .hasValue(new Action.Analyze(new AnalyzeParams(AnalyzerSettings.standardAnalyzer(), "doc-0")));
+        // The screen came without its components, which follow the analysis.
+        assertThat(app.analyzed("doc-0", new AnalyzeResult(List.of(), List.of())))
+                .hasValue(new Action.LoadAnalysisComponents());
+        String screen = render(app);
+        assertThat(screen).contains("6 Analysis", "Text · doc 0 · id");
+
+        // So does the viewer, for the value it shows.
+        assertThat(app.handleKey(key('2'))).isEmpty();
+        assertThat(app.handleKey(key('v'))).isEmpty();
+        assertThat(wide(app)).contains("a analyze");
+        assertThat(app.handleKey(key('a')))
+                .hasValue(new Action.Analyze(new AnalyzeParams(AnalyzerSettings.standardAnalyzer(), "doc-0")));
+        assertThat(app.handleKey(key('c'))).hasValue(new Action.Close());
+        app.closed();
+        assertThat(app.hasIndex()).isFalse();
     }
 
     @Test
@@ -453,7 +496,7 @@ class AppTest {
         App app = app();
         app.handleKey(key('6'));
         openedWithoutReader(app);
-        assertThat(render(app)).contains("analysis screen");
+        assertThat(render(app)).contains("Analyzer");
     }
 
     @Test

@@ -643,19 +643,17 @@ public final class Viewer {
         return delimiters;
     }
 
-    /**
-     * The keys for the footer. {@code a} analyze comes back with the analysis screen (ADR 0034
-     * §10).
-     */
+    /** The keys for the footer. */
     public String keys() {
         if (form != null) {
             return " type a delimiter   Tab/↑↓ other delimiter   ⏎ apply   Esc cancel";
         }
         if (!values.get(current).matches.isEmpty()) {
             return " Esc close   m/M next/previous match   ←/→ value   t text   h hex   J json   d delimited   y copy   "
-                    + "↑↓ PgUp/PgDn Home/End";
+                    + "a analyze   ↑↓ PgUp/PgDn Home/End";
         }
-        return " Esc close   ←/→ value   t text   h hex   J json   d delimited   y copy   ↑↓ PgUp/PgDn Home/End";
+        return " Esc close   ←/→ value   t text   h hex   J json   d delimited   y copy   a analyze   "
+                + "↑↓ PgUp/PgDn Home/End";
     }
 
     public Optional<Event> handleKey(KeyEvent key) {

@@ -7,6 +7,7 @@ import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.tui.event.TickEvent;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
+import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
@@ -178,6 +179,37 @@ public final class Session {
                                 });
                             }
                         });
+            case Action.LoadAnalysisComponents _ ->
+                backend.call(Methods.GET_ANALYSIS_COMPONENTS, new GetAnalysisComponentsParams())
+                        .whenComplete((result, error) -> {
+                            if (error == null) {
+                                reply(runner, app -> {
+                                    app.componentsLoaded(result);
+                                    return Optional.empty();
+                                });
+                                return;
+                            }
+                            RpcException rpc = rpcException(error, runner);
+                            if (rpc != null) {
+                                String message = describe(rpc);
+                                reply(runner, app -> {
+                                    app.componentsFailed(message);
+                                    return Optional.empty();
+                                });
+                            }
+                        });
+            case Action.Analyze analyze ->
+                backend.call(Methods.ANALYZE, analyze.params()).whenComplete((result, error) -> {
+                    if (error == null) {
+                        reply(runner, app -> app.analyzed(analyze.params().text(), result));
+                        return;
+                    }
+                    RpcException rpc = rpcException(error, runner);
+                    if (rpc != null) {
+                        String message = describe(rpc);
+                        reply(runner, app -> app.analyzeFailed(message));
+                    }
+                });
             case Action.LoadTerms load ->
                 backend.call(Methods.GET_TERMS, new GetTermsParams(load.field(), load.from(), Terms.TERMS_PAGE))
                         .whenComplete((result, error) -> {

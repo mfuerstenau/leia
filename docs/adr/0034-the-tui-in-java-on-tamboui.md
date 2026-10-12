@@ -99,6 +99,10 @@ What has to carry over:
       - *`App.startFilter` is the entry point that the search screen will call; until then, the filter is reached only by the tests. After a reopen, `Session` starts the filter's rebuild after `App.reopened`, as `main.rs` did.*
       - *A handler can end one call and start the next (a filter step that shows a document), so the Pilot tests' barrier notes whether a call runs on the UI thread, not on the test thread.*
       - *Each document export (ADR 0030) has an id, which its fetch, its rebuild job, its polls and its write carry. A reply for an export that Esc, a close, an open or a reopen forgot is dropped, and a job that starts for one is cancelled. The fetch is a chain of calls (`getDocument`, then each cut stored value and each term vector) that ends in one reply. The UI writes the file on the UI thread, as the Rust TUI did in its loop. The JSON is written by a mapper of the export's own, not `ProtocolJson`, and the golden file moved to `leia-tui/src/test/resources/document-export.json`.*
+    - *Settled with the analysis screen:*
+      - *Its calls, `getAnalysisComponents` and `analyze`, are not jobs. The backend answers them in order, so the reply to the last analysis asked for comes last, and the screen needs no ids. An analyzer that the builder applied becomes the current one only once its analysis comes back, as in the Rust TUI.*
+      - *The screen lives on `App` for the whole session, as in the Rust TUI, so its analyzer and text are kept when an index is opened or closed. Fetching the components again after `X` adds jars comes back with the jars screen.*
+      - *The popups of the analysis and search screens share `…tui.widgets.Form`, the port of `form.rs`.*
 
 ## Alternatives considered
 

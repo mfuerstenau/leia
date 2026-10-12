@@ -1,5 +1,6 @@
 package io.github.mfuerstenau.leia.tui.app;
 
+import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeParams;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.filter.StartFilterParams;
 import io.github.mfuerstenau.leia.protocol.filter.StepFilterParams;
@@ -157,4 +158,13 @@ public sealed interface Action {
      */
     record WriteExport(long exportId, int docId, String path, String text, boolean overwrite, List<String> indexDirs)
             implements Action {}
+
+    /**
+     * Fetch what custom analyzers can be built from, and report back with {@link
+     * App#componentsLoaded} or {@link App#componentsFailed}.
+     */
+    record LoadAnalysisComponents() implements Action {}
+
+    /** Analyze a text, and report back with {@link App#analyzed} or {@link App#analyzeFailed}. */
+    record Analyze(AnalyzeParams params) implements Action {}
 }

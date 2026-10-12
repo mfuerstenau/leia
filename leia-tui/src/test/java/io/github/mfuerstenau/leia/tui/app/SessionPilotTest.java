@@ -135,7 +135,8 @@ class SessionPilotTest {
                 || app.loadingTerms()
                 || app.loadingDocuments()
                 || app.documentJobs()
-                || app.exporting();
+                || app.exporting()
+                || app.analyzing();
     }
 
     private String screen() {
@@ -272,6 +273,34 @@ class SessionPilotTest {
         pilot.press(KeyCode.ENTER);
         settle();
         assertThat(screen()).contains("id from doc-2 (/ seeks)", "doc-2").doesNotContain("doc-0");
+    }
+
+    @Test
+    void analyzesATypedTextAndAStoredValue() throws Exception {
+        pilot.press('6');
+        settle();
+        pilot.press('/');
+        for (char c : "The Foxes".toCharArray()) {
+            pilot.press(c);
+        }
+        pilot.press(KeyCode.ENTER);
+        settle();
+        assertThat(screen()).contains("standard analyzer", "Tokens after StandardAnalyzer · 2", "foxes");
+
+        // b builds a preset; it becomes the current analyzer once the backend took it.
+        pilot.press('b');
+        pilot.press(' ');
+        pilot.press(KeyCode.ENTER);
+        settle();
+        assertThat(screen()).contains("EnglishAnalyzer", "fox").doesNotContain("foxes");
+
+        // a on the documents screen analyzes the stored value.
+        openAtStart(writeIndex(tmp.resolve("index"), 3), OpenMode.READER);
+        pilot.press('2');
+        settle();
+        pilot.press('a');
+        settle();
+        assertThat(screen()).contains("Text · doc 0 · id", "EnglishAnalyzer", "doc");
     }
 
     @Test
