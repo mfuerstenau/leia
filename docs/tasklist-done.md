@@ -242,6 +242,7 @@ Finished items, moved here from `docs/tasklist.md` (the open work queue).
 - [x] Search: find documents by doc values (ADR 0033): a fifth `SearchQuery` alternative `docValues {field, number?, values?, range?}`, so a search job runs it and `cancelJob` stops it
   - Lucene's slow exact/set/range queries for numeric, sorted-numeric, sorted and sorted-set fields; `BinaryDocValuesQuery` scans binary values, unsigned; numbers as text in one of five encodings (`LONG`, `DOUBLE`, `SORTABLE_DOUBLE`, `FLOAT`, `SORTABLE_FLOAT`), raw-bit ranges split at zero
   - TUI: a doc values mode on the search screen (`f` fields with doc values, `n` encoding, `h` hex, a line of values or a Lucene range); `s` on the documents screen searches for the selected field's doc values
+- [x] Search: a date resolution per field (ADR 0035, amends ADR 0026): `ParserOptions.fieldDateResolutions`, a list of `FieldDateResolution {field, resolution}` that wins over the resolution for every field, checked by the server (`FIELD_NOT_FOUND`, `INVALID_PARAMS` for a field listed twice); the parser popup has a row per indexed field; the demo index has `updated` at HOUR
 
 ## TamboUI migration — done
 

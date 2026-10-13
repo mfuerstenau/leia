@@ -9,6 +9,7 @@ import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.search.DateResolution;
+import io.github.mfuerstenau.leia.protocol.search.FieldDateResolution;
 import io.github.mfuerstenau.leia.protocol.search.PointField;
 import io.github.mfuerstenau.leia.protocol.search.PointType;
 import io.github.mfuerstenau.leia.tui.widgets.Form;
@@ -20,18 +21,12 @@ import org.junit.jupiter.api.Test;
 class ParserSettingsTest {
 
     private static IndexField field(String name, int dimensions, int bytes) {
+        return field(name, IndexOptions.NONE, dimensions, bytes);
+    }
+
+    private static IndexField field(String name, IndexOptions indexOptions, int dimensions, int bytes) {
         return new IndexField(
-                name,
-                0,
-                IndexOptions.NONE,
-                false,
-                false,
-                false,
-                DocValuesType.NONE,
-                dimensions,
-                bytes,
-                0,
-                Optional.empty());
+                name, 0, indexOptions, false, false, false, DocValuesType.NONE, dimensions, bytes, 0, Optional.empty());
     }
 
     private static ParserSettings settings() {
@@ -185,5 +180,38 @@ class ParserSettingsTest {
         assertThat(cleared.locale).isEmpty();
         assertThat(cleared.timeZone).isEmpty();
         assertThat(cleared.changed(false)).isEmpty();
+    }
+
+    @Test
+    void cyclesTheDateResolutionOfIndexedFields() {
+        ParserSettings settings = ParserSettings.of(List.of(
+                field("published", IndexOptions.DOCS, 0, 0),
+                field("quantity", 1, 4),
+                field("updated", IndexOptions.DOCS, 0, 0)));
+        assertThat(settings.dateFields).containsExactly("published", "updated");
+        OptionsForm form = new OptionsForm(settings, false);
+        // The 7 rows of the standard parser, then published and updated.
+        press(form, KeyCode.DOWN, 8);
+        press(form, key(KeyCode.RIGHT), key(KeyCode.RIGHT), key(KeyCode.RIGHT), key(KeyCode.RIGHT));
+        assertThat(form.draft().fieldDateResolutions).containsEntry("updated", DateResolution.HOUR);
+        press(form, key(KeyCode.UP), key(KeyCode.LEFT));
+        assertThat(form.draft().fieldDateResolutions).containsEntry("published", DateResolution.MILLISECOND);
+        // The point row comes after the date rows.
+        press(form, KeyCode.DOWN, 2);
+        press(form, key(KeyCode.RIGHT));
+        assertThat(form.draft().points.getFirst().pointType()).hasValue(PointType.FLOAT);
+        ParserSettings applied = applied(form);
+        assertThat(applied.options().fieldDateResolutions())
+                .containsExactly(
+                        new FieldDateResolution("published", DateResolution.MILLISECOND),
+                        new FieldDateResolution("updated", DateResolution.HOUR));
+        assertThat(applied.changed(true)).containsExactly("dates published:MILLISECOND", "dates updated:HOUR");
+
+        OptionsForm classic = new OptionsForm(applied, true);
+        // The 10 rows of the classic parser, then published: d sets it back to the default.
+        press(classic, KeyCode.DOWN, 10);
+        press(classic, key('d'));
+        assertThat(applied(classic).options().fieldDateResolutions())
+                .containsExactly(new FieldDateResolution("updated", DateResolution.HOUR));
     }
 }

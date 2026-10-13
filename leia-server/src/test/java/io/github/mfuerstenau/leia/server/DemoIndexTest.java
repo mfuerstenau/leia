@@ -49,6 +49,7 @@ import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesRange;
 import io.github.mfuerstenau.leia.protocol.search.Explanation;
+import io.github.mfuerstenau.leia.protocol.search.FieldDateResolution;
 import io.github.mfuerstenau.leia.protocol.search.FieldSort;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.LikeTerm;
@@ -269,8 +270,8 @@ class DemoIndexTest {
         void syntaxErrorsAndLeadingWildcards() throws Exception {
             backend.fails(Methods.START_SEARCH, params(classic("title:(lamp")), ErrorCode.INVALID_QUERY);
             backend.fails(Methods.START_SEARCH, params(classic("body:*a*")), ErrorCode.INVALID_QUERY);
-            ParserOptions leading =
-                    new ParserOptions(true, 0, 0, true, Optional.empty(), Optional.empty(), Optional.empty());
+            ParserOptions leading = new ParserOptions(
+                    true, 0, 0, true, Optional.empty(), List.of(), Optional.empty(), Optional.empty());
             assertThat(backend.search(classic("body:*a*", leading), 10).totalHits())
                     .isPositive();
         }
@@ -431,6 +432,37 @@ class DemoIndexTest {
         }
 
         @Test
+        void dateRangesWithAResolutionPerField() throws Exception {
+            ParserOptions hours = new ParserOptions(
+                    false,
+                    0,
+                    0,
+                    true,
+                    Optional.of(DateResolution.DAY),
+                    List.of(new FieldDateResolution("updated", DateResolution.HOUR)),
+                    Optional.of("en-US"),
+                    Optional.of("UTC"));
+
+            SearchResults both =
+                    backend.search(classic("+published:[1/1/26 TO 1/31/26] +updated:[1/10/26 TO 1/20/26]", hours), 10);
+
+            assertThat(both.query()).isEqualTo("+published:[20260101 TO 20260131] +updated:[2026011000 TO 2026012023]");
+            assertThat(both.totalHits()).isEqualTo(12);
+            SearchResults timestamps = backend.search(
+                    standard(
+                            "timestamp:[1768003200000 TO 1768953599999]",
+                            QueryOperator.OR,
+                            List.of(new PointField("timestamp", PointType.LONG))),
+                    10);
+            assertThat(timestamps.totalHits()).isEqualTo(12);
+            // At DAY, the upper bound 20260120 sorts before every hour of that day.
+            SearchResults days = backend.search(
+                    classic("+published:[1/1/26 TO 1/31/26] +updated:[1/10/26 TO 1/20/26]", dates("en-US", "UTC")), 10);
+            assertThat(days.query()).endsWith("+updated:[20260110 TO 20260120]");
+            assertThat(days.totalHits()).isEqualTo(10);
+        }
+
+        @Test
         void lampsWorstFirst() throws Exception {
             List<Hit> hits = backend.search(sorted(
                             classic("title:lamp"),
@@ -541,7 +573,14 @@ class DemoIndexTest {
 
         private static ParserOptions dates(String locale, String timeZone) {
             return new ParserOptions(
-                    false, 0, 0, true, Optional.of(DateResolution.DAY), Optional.of(locale), Optional.of(timeZone));
+                    false,
+                    0,
+                    0,
+                    true,
+                    Optional.of(DateResolution.DAY),
+                    List.of(),
+                    Optional.of(locale),
+                    Optional.of(timeZone));
         }
 
         private static SearchQuery docValues(String field, DocValuesNumber number, Optional<DocValuesRange> range) {

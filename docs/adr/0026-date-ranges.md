@@ -1,6 +1,6 @@
 # ADR 0026 — Date ranges: resolution, locale and time zone
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by ADR 0035 (a resolution per field)
 - **Date:** 2026-10-07
 
 ## Context
@@ -22,7 +22,7 @@ Several things were found while reading Lucene 10.5.2 (`QueryParserBase.getRange
    - `timeZone`: what `ZoneId.of` takes: `UTC`, `Europe/Berlin`, `+02:00`. Absent, the server JVM's default.
 
    They are optional, unlike the other options (ADR 0011), because absence means something no value can say: the JVM's defaults, or no conversion. The fixtures carry them in the classic request and leave them out of the standard one.
-2. **One resolution for every field**, as in Luke. Lucene's per-field resolutions can come later as another optional field without breaking this one.
+2. **One resolution for every field**, as in Luke. Lucene's per-field resolutions can come later as another optional field without breaking this one. *Amended by ADR 0035: `fieldDateResolutions`, a required list, gives single fields their own resolution.*
 3. **With a time zone, leia reads the bounds in that zone.** Both the parsing and the end of the day use it. The classic parser is a `QueryParser` subclass that overrides `getRangeQuery`. For the standard parser, a subclass of `TermRangeQueryNodeProcessor` replaces the stock one in the parser's pipeline. Both keep Lucene's code otherwise, including how each parser fails. **Without a time zone**, the parser's zone is the JVM's default, so leia reads the bounds exactly as Lucene does. A test compares both cases with Lucene's own parsers.
 4. **The server checks the locale and the zone** and answers `INVALID_PARAMS` for a malformed tag (`en_US`), a blank one, or an unknown zone (`Mars/Olympus`). Lucene would take an unknown zone id as GMT without a word (`TimeZone.getTimeZone(String)`). A well-formed tag that Java has no data for falls back to the root locale's format.
 5. **`DateTools` writes GMT**, so a field written from UTC dates needs the zone `UTC` to match day for day. The demo index's `published` field is such a field: the day of `timestamp` in UTC.

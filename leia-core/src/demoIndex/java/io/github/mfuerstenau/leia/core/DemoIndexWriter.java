@@ -282,6 +282,9 @@ public final class DemoIndexWriter {
         // The day of the timestamp in UTC, as DateTools writes it: for date ranges (ADR 0026).
         doc.add(new StringField(
                 "published", DateTools.timeToString(timestamp, DateTools.Resolution.DAY), Field.Store.YES));
+        // The hour of the timestamp in UTC: a second resolution for date ranges (ADR 0035).
+        doc.add(new StringField(
+                "updated", DateTools.timeToString(timestamp, DateTools.Resolution.HOUR), Field.Store.YES));
         for (int n = 0; n < 1 + random.nextInt(4); n++) {
             doc.add(new SortedNumericDocValuesField("scores", random.nextInt(201) - 100));
         }

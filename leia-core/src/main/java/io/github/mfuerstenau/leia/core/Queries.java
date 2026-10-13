@@ -57,6 +57,7 @@ public final class Queries {
             parser.setFuzzyPrefixLength(options.fuzzyPrefixLength());
             parser.setEnablePositionIncrements(options.enablePositionIncrements());
             options.dateResolution().ifPresent(parser::setDateResolution);
+            options.fieldDateResolutions().forEach(parser::setDateResolution);
             options.locale().ifPresent(parser::setLocale);
             options.timeZone().map(TimeZone::getTimeZone).ifPresent(parser::setTimeZone);
             parser.setFuzzyMinSim(classic.fuzzyMaxEdits());
@@ -102,6 +103,7 @@ public final class Queries {
             parser.setFuzzyPrefixLength(options.fuzzyPrefixLength());
             parser.setEnablePositionIncrements(options.enablePositionIncrements());
             options.dateResolution().ifPresent(parser::setDateResolution);
+            parser.setDateResolutionMap(new HashMap<>(options.fieldDateResolutions()));
             options.locale().ifPresent(parser::setLocale);
             options.timeZone().map(TimeZone::getTimeZone).ifPresent(parser::setTimeZone);
             Map<String, PointsConfig> configs = new HashMap<>();

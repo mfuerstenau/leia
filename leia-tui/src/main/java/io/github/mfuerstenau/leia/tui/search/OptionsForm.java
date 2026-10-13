@@ -28,7 +28,10 @@ public final class OptionsForm {
     /** The largest slop or prefix length the popup takes. */
     private static final int MAX_NUMBER = 999;
 
-    /** One line of the popup; {@link #POINT} and beyond are the point fields. */
+    /**
+     * One line of the popup; {@link #FIELD_DATE} is one per indexed field, then {@link #POINT} one per
+     * point field.
+     */
     private enum Row {
         LEADING_WILDCARD,
         PHRASE_SLOP,
@@ -40,6 +43,7 @@ public final class OptionsForm {
         DATE_RESOLUTION,
         LOCALE,
         TIME_ZONE,
+        FIELD_DATE,
         POINT
     }
 
@@ -91,20 +95,36 @@ public final class OptionsForm {
         return editingRow == null ? Optional.empty() : Optional.of(input.text());
     }
 
+    /** The rows before the field rows. */
+    private List<Row> fixedRows() {
+        return classic ? CLASSIC_ROWS : STANDARD_ROWS;
+    }
+
+    /** The index of the first point row; the standard parser's only. */
+    private int firstPoint() {
+        return fixedRows().size() + draft.dateFields.size();
+    }
+
     private int rowCount() {
-        return classic ? CLASSIC_ROWS.size() : STANDARD_ROWS.size() + draft.points.size();
+        return firstPoint() + (classic ? 0 : draft.points.size());
     }
 
     private Row row(int index) {
-        if (classic) {
-            return CLASSIC_ROWS.get(index);
+        if (index < fixedRows().size()) {
+            return fixedRows().get(index);
         }
-        return index < STANDARD_ROWS.size() ? STANDARD_ROWS.get(index) : Row.POINT;
+        return index < firstPoint() ? Row.FIELD_DATE : Row.POINT;
+    }
+
+    /** The field of a {@link Row#FIELD_DATE} row. */
+    private String dateField(int index) {
+        return draft.dateFields.get(index - fixedRows().size());
     }
 
     /**
      * ↑↓ select a row; ←→, Space, {@code -}/{@code +} change it; digits and Backspace edit a number;
-     * →, Space or {@code +} types a locale or time zone, {@code d} or Backspace clears it; Enter
+     * →, Space or {@code +} types a locale or time zone, {@code d} or Backspace clears it or a
+     * field's own date resolution; Enter
      * applies, Esc cancels.
      */
     public Form.Event<ParserSettings> handleKey(KeyEvent key) {
@@ -132,10 +152,10 @@ public final class OptionsForm {
                 if (isNumber(row)) {
                     setNumber(row, number(row) / 10);
                 } else {
-                    clearText(row);
+                    clear(row, index);
                 }
             }
-            case DELETE -> clearText(row);
+            case DELETE -> clear(row, index);
             case CHAR -> {
                 int c = key.codePoint();
                 switch (c) {
@@ -145,7 +165,7 @@ public final class OptionsForm {
                     case 'G' -> selected = last;
                     case 'h', '-' -> change(row, index, -1);
                     case 'l', '+', ' ' -> change(row, index, 1);
-                    case 'd' -> clearText(row);
+                    case 'd' -> clear(row, index);
                     default -> {
                         if (c >= '0' && c <= '9' && isNumber(row)) {
                             setNumber(row, Form.typeDigit(number(row), (char) c, max(row)));
@@ -187,9 +207,12 @@ public final class OptionsForm {
         }
     }
 
-    private void clearText(Row row) {
+    /** Clears a locale or time zone back to the backend's default, or a field's date resolution back to the one for every field. */
+    private void clear(Row row, int index) {
         if (isText(row)) {
             setText(row, Optional.empty());
+        } else if (row == Row.FIELD_DATE) {
+            draft.fieldDateResolutions.remove(dateField(index));
         }
     }
 
@@ -242,14 +265,20 @@ public final class OptionsForm {
                 draft.autoGeneratePhraseQueries = !draft.autoGeneratePhraseQueries;
                 draft.splitOnWhitespace |= draft.autoGeneratePhraseQueries;
             }
-            case DATE_RESOLUTION -> {
-                List<DateResolution> cycle = new ArrayList<>();
-                cycle.add(null);
-                cycle.addAll(List.of(DateResolution.values()));
-                draft.dateResolution = Optional.ofNullable(cycled(cycle, draft.dateResolution.orElse(null), step));
+            case DATE_RESOLUTION ->
+                draft.dateResolution =
+                        Optional.ofNullable(cycled(resolutions(), draft.dateResolution.orElse(null), step));
+            case FIELD_DATE -> {
+                String field = dateField(index);
+                DateResolution resolution = cycled(resolutions(), draft.fieldDateResolutions.get(field), step);
+                if (resolution == null) {
+                    draft.fieldDateResolutions.remove(field);
+                } else {
+                    draft.fieldDateResolutions.put(field, resolution);
+                }
             }
             case POINT -> {
-                int point = index - STANDARD_ROWS.size();
+                int point = index - firstPoint();
                 PointSetting setting = draft.points.get(point);
                 List<PointType> cycle = setting.bytes() == 4
                         ? Arrays.asList(PointType.INT, PointType.FLOAT, null)
@@ -259,6 +288,14 @@ public final class OptionsForm {
             }
             default -> {}
         }
+    }
+
+    /** No resolution, then each from the coarsest. */
+    private static List<DateResolution> resolutions() {
+        List<DateResolution> cycle = new ArrayList<>();
+        cycle.add(null);
+        cycle.addAll(List.of(DateResolution.values()));
+        return cycle;
     }
 
     /** The entry after (or before) {@code current} in {@code cycle}, wrapping around. */
@@ -285,7 +322,11 @@ public final class OptionsForm {
                 lines.add(Line.empty());
                 lines.add(Line.styled("Range bounds as dates", Form.dim()));
             }
-            if (!classic && i == STANDARD_ROWS.size()) {
+            if (i == fixedRows().size() && !draft.dateFields.isEmpty()) {
+                lines.add(Line.empty());
+                lines.add(Line.styled("Per field, over the resolution above", Form.dim()));
+            }
+            if (!classic && i == firstPoint()) {
                 lines.add(Line.empty());
                 lines.add(Line.styled("Point types, guessed: the index doesn't say", Form.dim()));
             }
@@ -332,8 +373,15 @@ public final class OptionsForm {
                     label = "Time zone";
                     value = textValue(draft.timeZone);
                 }
+                case FIELD_DATE -> {
+                    String field = dateField(i);
+                    label = TextFormat.escapeControl(field);
+                    value = Optional.ofNullable(draft.fieldDateResolutions.get(field))
+                            .map(Enum::name)
+                            .orElse("default");
+                }
                 case POINT -> {
-                    PointSetting point = draft.points.get(i - STANDARD_ROWS.size());
+                    PointSetting point = draft.points.get(i - firstPoint());
                     label = TextFormat.escapeControl(point.field());
                     value = ParserSettings.typeName(point.pointType());
                 }

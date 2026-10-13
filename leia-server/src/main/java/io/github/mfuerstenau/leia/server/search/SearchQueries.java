@@ -19,6 +19,7 @@ import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesRange;
+import io.github.mfuerstenau.leia.protocol.search.FieldDateResolution;
 import io.github.mfuerstenau.leia.protocol.search.FieldSort;
 import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
 import io.github.mfuerstenau.leia.protocol.search.PointField;
@@ -81,10 +82,11 @@ public final class SearchQueries {
      * that comes along, which the caller closes.
      *
      * @throws RpcException {@code INVALID_PARAMS} unless exactly one alternative is present, for a
-     *     parser option or More-Like-This setting out of range, a point type that doesn't fit its
+     *     parser option or More-Like-This setting out of range, a field whose date resolution is
+     *     listed twice, a point type that doesn't fit its
      *     field, a More-Like-This field that isn't indexed, a binary term that is not hex, or doc
      *     values that don't fit the field or its number encoding; {@code FIELD_NOT_FOUND} for an
-     *     unknown default, term, point, More-Like-This or doc values field; {@code
+     *     unknown default, date resolution, term, point, More-Like-This or doc values field; {@code
      *     DOC_NOT_FOUND} for a More-Like-This document outside 0 to maxDoc - 1; {@code INVALID_QUERY}
      *     if the expression doesn't parse; {@code INVALID_ANALYZER} if the query's analyzer can't be
      *     built
@@ -198,7 +200,7 @@ public final class SearchQueries {
 
     private static Query classic(ReadOnlyIndex index, ClassicQuery classic) throws RpcException, InvalidQueryException {
         checkField(index, classic.defaultField());
-        ParserOptions options = options(classic.defaultOperator(), classic.options());
+        ParserOptions options = options(index, classic.defaultOperator(), classic.options());
         ClassicOptions classicOptions;
         try {
             classicOptions = new ClassicOptions(
@@ -214,7 +216,7 @@ public final class SearchQueries {
     private static Query standard(ReadOnlyIndex index, StandardQuery standard)
             throws RpcException, InvalidQueryException {
         checkField(index, standard.defaultField());
-        ParserOptions options = options(standard.defaultOperator(), standard.options());
+        ParserOptions options = options(index, standard.defaultOperator(), standard.options());
         Map<String, PointType> points = new LinkedHashMap<>();
         for (PointField point : standard.points()) {
             FieldInfo field = index.fieldInfo(point.field())
@@ -345,8 +347,22 @@ public final class SearchQueries {
     }
 
     private static ParserOptions options(
-            QueryOperator operator, io.github.mfuerstenau.leia.protocol.search.ParserOptions options)
+            ReadOnlyIndex index,
+            QueryOperator operator,
+            io.github.mfuerstenau.leia.protocol.search.ParserOptions options)
             throws RpcException {
+        Map<String, DateTools.Resolution> fieldDateResolutions = new LinkedHashMap<>();
+        for (FieldDateResolution field : options.fieldDateResolutions()) {
+            checkField(index, field.field());
+            if (fieldDateResolutions.put(
+                            field.field(),
+                            DateTools.Resolution.valueOf(field.resolution().name()))
+                    != null) {
+                throw new RpcException(
+                        ErrorCode.INVALID_PARAMS,
+                        "Invalid params: the field '" + field.field() + "' has its date resolution listed twice");
+            }
+        }
         try {
             return new ParserOptions(
                     switch (operator) {
@@ -358,6 +374,7 @@ public final class SearchQueries {
                     options.fuzzyPrefixLength(),
                     options.enablePositionIncrements(),
                     options.dateResolution().map(resolution -> DateTools.Resolution.valueOf(resolution.name())),
+                    fieldDateResolutions,
                     options.locale().map(SearchQueries::locale),
                     options.timeZone().map(SearchQueries::timeZone));
         } catch (IllegalArgumentException e) {

@@ -1,21 +1,25 @@
 package io.github.mfuerstenau.leia.tui.search;
 
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
+import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.search.DateResolution;
+import io.github.mfuerstenau.leia.protocol.search.FieldDateResolution;
 import io.github.mfuerstenau.leia.protocol.search.ParserOptions;
 import io.github.mfuerstenau.leia.protocol.search.PointField;
 import io.github.mfuerstenau.leia.protocol.search.PointType;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
- * The query parser options of the search screen (ADR 0011, ADR 0026): the options both parsers
- * share, the classic parser's own, how range bounds are read as dates, and the type of each point
- * field for the standard parser. {@link OptionsForm} edits a copy.
+ * The query parser options of the search screen (ADR 0011, ADR 0026, ADR 0035): the options both
+ * parsers share, the classic parser's own, how range bounds are read as dates, also per field, and
+ * the type of each point field for the standard parser. {@link OptionsForm} edits a copy.
  */
 public final class ParserSettings {
 
@@ -37,6 +41,9 @@ public final class ParserSettings {
     Optional<String> locale = Optional.empty();
     Optional<String> timeZone = Optional.empty();
 
+    /** The resolutions of single fields, which win over {@link #dateResolution}. */
+    final Map<String, DateResolution> fieldDateResolutions = new HashMap<>();
+
     /** Classic only. */
     int fuzzyMaxEdits = MAX_FUZZY_EDITS;
 
@@ -46,10 +53,14 @@ public final class ParserSettings {
     /** Classic only; needs {@link #splitOnWhitespace}. */
     boolean autoGeneratePhraseQueries;
 
+    /** The indexed fields, in the index's order: the ones a date resolution of their own fits. */
+    final List<String> dateFields;
+
     /** The one-dimensional point fields of the index, for the standard parser. */
     final List<PointSetting> points;
 
-    private ParserSettings(List<PointSetting> points) {
+    private ParserSettings(List<String> dateFields, List<PointSetting> points) {
+        this.dateFields = List.copyOf(dateFields);
         this.points = new ArrayList<>(points);
     }
 
@@ -58,8 +69,12 @@ public final class ParserSettings {
      * longs, since the index doesn't say (ADR 0011).
      */
     public static ParserSettings of(List<IndexField> fields) {
+        List<String> dateFields = new ArrayList<>();
         List<PointSetting> points = new ArrayList<>();
         for (IndexField field : fields) {
+            if (field.indexOptions() != IndexOptions.NONE) {
+                dateFields.add(field.name());
+            }
             if (field.pointDimensionCount() != 1) {
                 continue;
             }
@@ -69,12 +84,12 @@ public final class ParserSettings {
                 default -> {}
             }
         }
-        return new ParserSettings(points);
+        return new ParserSettings(dateFields, points);
     }
 
     /** A copy that can be changed without changing this one. */
     ParserSettings copy() {
-        ParserSettings copy = new ParserSettings(points);
+        ParserSettings copy = new ParserSettings(dateFields, points);
         copy.allowLeadingWildcard = allowLeadingWildcard;
         copy.phraseSlop = phraseSlop;
         copy.fuzzyPrefixLength = fuzzyPrefixLength;
@@ -82,6 +97,7 @@ public final class ParserSettings {
         copy.dateResolution = dateResolution;
         copy.locale = locale;
         copy.timeZone = timeZone;
+        copy.fieldDateResolutions.putAll(fieldDateResolutions);
         copy.fuzzyMaxEdits = fuzzyMaxEdits;
         copy.splitOnWhitespace = splitOnWhitespace;
         copy.autoGeneratePhraseQueries = autoGeneratePhraseQueries;
@@ -96,6 +112,10 @@ public final class ParserSettings {
                 fuzzyPrefixLength,
                 enablePositionIncrements,
                 dateResolution,
+                dateFields.stream()
+                        .filter(fieldDateResolutions::containsKey)
+                        .map(field -> new FieldDateResolution(field, fieldDateResolutions.get(field)))
+                        .toList(),
                 locale,
                 timeZone);
     }
@@ -145,6 +165,10 @@ public final class ParserSettings {
             changed.add("auto phrases");
         }
         dateResolution.ifPresent(resolution -> changed.add("dates " + resolution.name()));
+        options()
+                .fieldDateResolutions()
+                .forEach(field -> changed.add("dates " + TextFormat.escapeControl(field.field()) + ":"
+                        + field.resolution().name()));
         locale.ifPresent(value -> changed.add("locale " + TextFormat.escapeControl(value)));
         timeZone.ifPresent(value -> changed.add("zone " + TextFormat.escapeControl(value)));
         return changed;

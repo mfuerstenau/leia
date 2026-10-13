@@ -245,6 +245,43 @@ class QueryParsersTest {
     }
 
     @Test
+    void aFieldsOwnResolutionWinsOverTheOthers() throws Exception {
+        ParserOptions hours = dates(DateTools.Resolution.DAY, Locale.US, "UTC")
+                .withFieldDateResolutions(Map.of("updated", DateTools.Resolution.HOUR));
+        ParserOptions onlyUpdated = DEFAULTS.withDates(
+                        Optional.empty(), Optional.of(Locale.US), Optional.of(ZoneId.of("UTC")))
+                .withFieldDateResolutions(Map.of("updated", DateTools.Resolution.HOUR));
+        String expression = "+published:[1/1/26 TO 1/31/26] +updated:[1/1/26 TO 1/1/26]";
+
+        for (Parser parser : Parser.values()) {
+            assertThat(parser.parse(expression, hours))
+                    .hasToString("+published:[20260101 TO 20260131] +updated:[2026010100 TO 2026010123]");
+            // Without a resolution for every field, only the field with its own converts.
+            assertThat(parser.parse(expression, onlyUpdated))
+                    .hasToString("+published:[1/1/26 TO 1/31/26] +updated:[2026010100 TO 2026010123]");
+        }
+    }
+
+    @Test
+    void withoutATimeZoneFieldResolutionsAreReadAsLuceneReadsThem() throws Exception {
+        ParserOptions options = DEFAULTS.withDates(
+                        Optional.of(DateTools.Resolution.DAY), Optional.of(Locale.US), Optional.empty())
+                .withFieldDateResolutions(Map.of("updated", DateTools.Resolution.MINUTE));
+        String expression = "published:[1/1/26 TO 1/31/26] OR updated:[1/1/26 TO 1/2/26]";
+
+        QueryParser classic = new QueryParser("body", ANALYZER);
+        classic.setDateResolution(DateTools.Resolution.DAY);
+        classic.setDateResolution("updated", DateTools.Resolution.MINUTE);
+        classic.setLocale(Locale.US);
+        assertThat(classic(expression, options)).isEqualTo(classic.parse(expression));
+        StandardQueryParser standard = new StandardQueryParser(ANALYZER);
+        standard.setDateResolution(DateTools.Resolution.DAY);
+        standard.setDateResolutionMap(Map.of("updated", DateTools.Resolution.MINUTE));
+        standard.setLocale(Locale.US);
+        assertThat(standard(expression, options, Map.of())).isEqualTo(standard.parse(expression, "body"));
+    }
+
+    @Test
     void dateRangesMatchDateToolsTerms() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             ParserOptions day = dates(DateTools.Resolution.DAY, Locale.US, "UTC");

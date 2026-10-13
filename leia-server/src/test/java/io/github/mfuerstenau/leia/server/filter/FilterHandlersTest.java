@@ -263,7 +263,7 @@ class FilterHandlersTest {
 
     private static SearchQuery classic(String expression, String defaultField) {
         ParserOptions options =
-                new ParserOptions(false, 0, 0, true, Optional.empty(), Optional.empty(), Optional.empty());
+                new ParserOptions(false, 0, 0, true, Optional.empty(), List.of(), Optional.empty(), Optional.empty());
         return new SearchQuery(
                 Optional.of(new ClassicQuery(
                         expression, defaultField, QueryOperator.OR, options, 2, false, false, STANDARD)),

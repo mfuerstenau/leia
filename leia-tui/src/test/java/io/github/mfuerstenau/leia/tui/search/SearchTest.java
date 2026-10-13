@@ -142,7 +142,8 @@ class SearchTest {
                         expression,
                         field,
                         operator,
-                        new ParserOptions(false, 0, 0, true, Optional.empty(), Optional.empty(), Optional.empty()),
+                        new ParserOptions(
+                                false, 0, 0, true, Optional.empty(), List.of(), Optional.empty(), Optional.empty()),
                         2,
                         false,
                         false,
@@ -757,7 +758,8 @@ class SearchTest {
                         "red",
                         "title",
                         QueryOperator.OR,
-                        new ParserOptions(false, 0, 0, true, Optional.empty(), Optional.empty(), Optional.empty()),
+                        new ParserOptions(
+                                false, 0, 0, true, Optional.empty(), List.of(), Optional.empty(), Optional.empty()),
                         List.of(new PointField("price", PointType.LONG), new PointField("quantity", PointType.INT)),
                         STANDARD));
         search.searchStarted(start.searchId(), 2);

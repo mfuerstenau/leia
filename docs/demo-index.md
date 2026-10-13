@@ -40,6 +40,7 @@ other tests use their own indexes and the Lucene 9 and 8 indexes from `LegacyInd
 | `rating` | float point + stored float + float doc values (float bits) |
 | `timestamp` | long point + stored long + sorted numeric doc values (epoch millis in 2026) |
 | `published` | keyword, stored: the day of `timestamp` in UTC as `DateTools` writes it (`20260131`), for date ranges |
+| `updated` | keyword, stored: the hour of `timestamp` in UTC as `DateTools` writes it (`2026013114`), for a date resolution per field |
 | `scores` | sorted numeric doc values, 1–4 values from -100 to 100 |
 | `weight` | sorted numeric doc values as sortable double bits (`x` decodes them) |
 | `location` | lat/lon point + lat/lon doc values |
@@ -108,6 +109,13 @@ other tests use their own indexes and the Lucene 9 and 8 indexes from `LegacyInd
   resolution, the bounds stay text: no hits. With `de-DE`, `[01.01.26 TO 31.01.26]` reads the same.
   `[2/1/26 TO 2/28/26]` has 44 hits in UTC; with the time zone cleared, a JVM in Berlin reads
   midnight as the day before in UTC, so the range starts at `20260131`: 46 hits.
+- `+published:[1/1/26 TO 1/31/26] +updated:[1/10/26 TO 1/20/26]`, with `p` setting the date
+  resolution to DAY, `updated` in the per-field group to HOUR, the locale to `en-US` and the time
+  zone to `UTC`: 12 hits, the query becomes `+published:[20260101 TO 20260131]
+  +updated:[2026011000 TO 2026012023]`, the same documents as
+  `timestamp:[1768003200000 TO 1768953599999]`. With `updated` at the default DAY, its bounds
+  become `[20260110 TO 20260120]`, and every hour of January 20 sorts after the upper bound: 10
+  hits.
 - `title:lamp` with `s` sorting by the score, worst first: the longest titles come first.
 - `title:lamp` with `s` set to classic TF-IDF: doc 51 scores 2.4358, and `x` shows the
   `ClassicSimilarity` explanation with the same value. Boolean scores every hit 1.

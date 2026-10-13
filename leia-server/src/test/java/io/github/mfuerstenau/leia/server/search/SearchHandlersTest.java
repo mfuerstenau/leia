@@ -24,6 +24,7 @@ import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesRange;
 import io.github.mfuerstenau.leia.protocol.search.Explanation;
+import io.github.mfuerstenau.leia.protocol.search.FieldDateResolution;
 import io.github.mfuerstenau.leia.protocol.search.FieldSort;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
@@ -344,6 +345,48 @@ class SearchHandlersTest {
                     () -> startSearch.handle(params(classic("red", options, 2, false, false), 0, 10, Optional.empty())),
                     ErrorCode.INVALID_PARAMS);
         }
+    }
+
+    @Test
+    void aFieldsOwnDateResolutionWins() throws Exception {
+        openIndex();
+        ParserOptions hours = dates(
+                Optional.of(DateResolution.DAY),
+                List.of(new FieldDateResolution("id", DateResolution.HOUR)),
+                Optional.of("en-US"),
+                Optional.of("UTC"));
+
+        assertThat(search(params(
+                                standard("+id:[1/1/26 TO 1/2/26] +body:[1/1/26 TO 1/31/26]", hours, List.of()),
+                                0,
+                                10,
+                                Optional.empty()))
+                        .query())
+                .isEqualTo("+id:[2026010100 TO 2026010223] +body:[20260101 TO 20260131]");
+    }
+
+    @Test
+    void rejectsDateResolutionsOfUnknownOrRepeatedFields() throws Exception {
+        openIndex();
+        ParserOptions unknown = dates(
+                Optional.empty(),
+                List.of(new FieldDateResolution("nothing", DateResolution.DAY)),
+                Optional.empty(),
+                Optional.empty());
+        ParserOptions twice = dates(
+                Optional.empty(),
+                List.of(
+                        new FieldDateResolution("id", DateResolution.DAY),
+                        new FieldDateResolution("id", DateResolution.HOUR)),
+                Optional.empty(),
+                Optional.empty());
+
+        assertFails(
+                () -> startSearch.handle(params(classic("red", unknown, 2, false, false), 0, 10, Optional.empty())),
+                ErrorCode.FIELD_NOT_FOUND);
+        assertFails(
+                () -> startSearch.handle(params(standard("red", twice, List.of()), 0, 10, Optional.empty())),
+                ErrorCode.INVALID_PARAMS);
     }
 
     @Test
@@ -745,6 +788,7 @@ class SearchHandlersTest {
                 fuzzyPrefixLength,
                 enablePositionIncrements,
                 Optional.empty(),
+                List.of(),
                 Optional.empty(),
                 Optional.empty());
     }
@@ -752,7 +796,16 @@ class SearchHandlersTest {
     /** Lucene's defaults, with these date settings. */
     private static ParserOptions dates(
             Optional<DateResolution> dateResolution, Optional<String> locale, Optional<String> timeZone) {
-        return new ParserOptions(false, 0, 0, true, dateResolution, locale, timeZone);
+        return dates(dateResolution, List.of(), locale, timeZone);
+    }
+
+    /** Lucene's defaults, with these date settings and resolutions per field. */
+    private static ParserOptions dates(
+            Optional<DateResolution> dateResolution,
+            List<FieldDateResolution> fieldDateResolutions,
+            Optional<String> locale,
+            Optional<String> timeZone) {
+        return new ParserOptions(false, 0, 0, true, dateResolution, fieldDateResolutions, locale, timeZone);
     }
 
     private static SearchQuery classic(String expression) {

@@ -63,7 +63,7 @@ final class RealBackend implements AutoCloseable {
             new Similarity(Optional.of(new Bm25Similarity(1.2f, 0.75f)), Optional.empty(), Optional.empty());
     /** Lucene's defaults, as the search screen starts with them. */
     static final ParserOptions DEFAULTS =
-            new ParserOptions(false, 0, 0, true, Optional.empty(), Optional.empty(), Optional.empty());
+            new ParserOptions(false, 0, 0, true, Optional.empty(), List.of(), Optional.empty(), Optional.empty());
 
     private final LeiaBackend backend;
 
