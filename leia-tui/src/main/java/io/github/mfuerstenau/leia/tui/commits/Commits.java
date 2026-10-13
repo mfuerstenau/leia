@@ -10,6 +10,7 @@ import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
+import dev.tamboui.text.Span;
 import dev.tamboui.text.Text;
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
@@ -622,12 +623,14 @@ public final class Commits {
         boolean focused = focus == Focus.DETAILS;
         String title = null;
         List<Line> lines = null;
+        // The borders don't depend on the title, so the inner width is known before it.
+        int width = panel(" Details ", focused).inner(area).width();
         Optional<GetCommitResult> result = selectedResult();
         if (result.isPresent() && segmentDetails) {
             Optional<Segment> segment = selectedSegment();
             if (segment.isPresent()) {
                 title = " Segment " + segment.get().name() + " ";
-                lines = segmentLines(segment.get(), result.get());
+                lines = segmentLines(segment.get(), result.get(), width);
             }
         } else if (result.isPresent()) {
             title = " " + result.get().commit().segmentsFile() + " ";
@@ -740,9 +743,10 @@ public final class Commits {
 
     /**
      * The details of a segment: its documents and versions, then its diagnostics, attributes, codec
-     * formats, the formats its fields use (ADR 0037) and its files.
+     * formats, the formats its fields use (ADR 0037) and its files. {@code width} is the panel's
+     * inner width, which the fields of a format wrap to.
      */
-    static List<Line> segmentLines(Segment segment, GetCommitResult details) {
+    static List<Line> segmentLines(Segment segment, GetCommitResult details, int width) {
         String docs = switch (segment.maxDoc()) {
             case 0 -> "No documents";
             case 1 -> "Document " + segment.docBase();
@@ -780,7 +784,7 @@ public final class Commits {
         formatPairs.put("live docs", formats.liveDocs());
         formatPairs.put("compound", formats.compound());
         section(lines, "Codec formats", formatPairs);
-        fieldFormatSection(lines, segment);
+        fieldFormatSection(lines, segment, width);
         List<CommitFile> files = details.files().stream()
                 .filter(file -> file.segment().filter(segment.name()::equals).isPresent())
                 .toList();
@@ -833,10 +837,11 @@ public final class Commits {
 
     /**
      * A blank line, the bold heading "Field formats", and for postings, doc values and KNN vectors a
-     * line per format with the fields that use it; "none" if no field uses one, and why in red if
-     * the field infos can't be read.
+     * line per format with its kind in bold and the format in cyan, then the fields that use it,
+     * indented by 2 and wrapped to {@code width} under that indent; "none" if no field uses one, and
+     * why in red if the field infos can't be read.
      */
-    private static void fieldFormatSection(List<Line> lines, Segment segment) {
+    private static void fieldFormatSection(List<Line> lines, Segment segment, int width) {
         lines.add(Line.empty());
         lines.add(Line.styled("Field formats", Style.EMPTY.bold()));
         if (segment.fieldInfosError().isPresent()) {
@@ -850,8 +855,7 @@ public final class Commits {
         kinds.put("postings", FieldFormats::postings);
         kinds.put("doc values", FieldFormats::docValues);
         kinds.put("KNN vectors", FieldFormats::knnVectors);
-        // Each row: the kind (blank after its first format), the format, its fields.
-        List<String[]> rows = new ArrayList<>();
+        Map<String, Map<String, List<String>>> formatsOfKind = new LinkedHashMap<>();
         kinds.forEach((kind, format) -> {
             Map<String, List<String>> fieldsOfFormat = new TreeMap<>();
             for (FieldFormats field : segment.fieldFormats()) {
@@ -860,32 +864,26 @@ public final class Commits {
                                 .computeIfAbsent(name, _ -> new ArrayList<>())
                                 .add(field.field()));
             }
-            String key = kind;
-            for (Map.Entry<String, List<String>> entry : fieldsOfFormat.entrySet()) {
-                rows.add(new String[] {
-                    key,
-                    TextFormat.escapeControl(entry.getKey()),
-                    entry.getValue().stream().map(TextFormat::escapeControl).collect(Collectors.joining(", "))
-                });
-                key = "";
+            if (!fieldsOfFormat.isEmpty()) {
+                formatsOfKind.put(kind, fieldsOfFormat);
             }
         });
-        if (rows.isEmpty()) {
+        if (formatsOfKind.isEmpty()) {
             lines.add(Line.styled("none", Style.EMPTY.dim()));
             return;
         }
-        int kindWidth = rows.stream().mapToInt(row -> row[0].length()).max().orElse(0);
-        int formatWidth = Math.min(
-                rows.stream()
-                        .mapToInt(row -> row[1].codePointCount(0, row[1].length()))
-                        .max()
-                        .orElse(0),
-                KEY_WIDTH);
-        for (String[] row : rows) {
-            int padding = Math.max(formatWidth - row[1].codePointCount(0, row[1].length()), 0);
-            lines.add(Line.from(row[0] + " ".repeat(kindWidth - row[0].length()) + "  " + row[1] + " ".repeat(padding)
-                    + "  " + row[2]));
-        }
+        int kindWidth =
+                formatsOfKind.keySet().stream().mapToInt(String::length).max().orElse(0);
+        formatsOfKind.forEach((kind, fieldsOfFormat) -> fieldsOfFormat.forEach((format, fields) -> {
+            lines.add(Line.from(
+                    Span.styled(kind, Style.EMPTY.bold()),
+                    Span.raw(" ".repeat(kindWidth - kind.length()) + "  "),
+                    Span.styled(TextFormat.escapeControl(format), Style.EMPTY.cyan())));
+            String names = fields.stream().map(TextFormat::escapeControl).collect(Collectors.joining(", "));
+            for (String part : TextFormat.wrap(names, width - 2, Integer.MAX_VALUE)) {
+                lines.add(Line.from("  " + part));
+            }
+        }));
     }
 
     /** The files with their sizes, and with {@code withSegment} the segment they belong to. */

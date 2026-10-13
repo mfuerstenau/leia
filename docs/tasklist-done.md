@@ -245,6 +245,7 @@ Finished items, moved here from `docs/tasklist.md` (the open work queue).
 - [x] Search: a date resolution per field (ADR 0035, amends ADR 0026): `ParserOptions.fieldDateResolutions`, a list of `FieldDateResolution {field, resolution}` that wins over the resolution for every field, checked by the server (`FIELD_NOT_FOUND`, `INVALID_PARAMS` for a field listed twice); the parser popup has a row per indexed field; the demo index has `updated` at HOUR
 - [x] Search: a prefix match on sorted, sorted-set and binary doc values (ADR 0036, amends ADR 0033): `DocValuesQuery.prefix`, a range from the prefix up to its successor, for fields of bytes only; `kit*` on the search line, a lone `*` for any value, `"kit*"` for the value
 - [x] Commits: per-field postings, doc values and KNN vectors formats (ADR 0037, amends ADR 0009 §4): `Segment.fieldFormats`, a `FieldFormats {field, postings?, docValues?, knnVectors?}` per field from the segment's `.fnm` (its update, or through the compound file), names only, so formats of jars that aren't loaded show too; `fieldInfosError` if it can't be read; the TUI groups the fields by format under "Field formats"
+- [x] Commits: the "Field formats" section reads well when a field list wraps (ADR 0037 §6, amended): each format on a line of its own, the kind bold and the format cyan, its fields below, indented by 2 and wrapped under that indent to the panel's inner width
 
 ## TamboUI migration — done
 

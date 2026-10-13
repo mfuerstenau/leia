@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.tui.commits;
 
 import static io.github.mfuerstenau.leia.tui.TestScreens.key;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 import dev.tamboui.style.Style;
 import dev.tamboui.text.Line;
@@ -229,7 +230,7 @@ class CommitsTest {
                 .contains("Documents 400–499 · 3 deleted")
                 .contains("timestamp  1000000000000 (2001-09-09 01:46:40 UTC)")
                 .contains("postings       PerField40")
-                .contains("KNN vectors  Lucene99HnswVectorsFormat  embedding")
+                .contains("KNN vectors  Lucene99HnswVectorsFormat")
                 // Only the segment's own files.
                 .contains("Files (1, size unknown)");
 
@@ -241,16 +242,51 @@ class CommitsTest {
     @Test
     void theSegmentDetailsGroupTheFieldsByFormat() {
         GetCommitResult details = details(4, true);
-        assertThat(Commits.segmentLines(details.segments().getFirst(), details))
+        assertThat(Commits.segmentLines(details.segments().getFirst(), details, 80))
                 .extracting(Line::rawContent)
                 .containsSubsequence(
                         "Field formats",
-                        "postings     FST50                      id",
-                        "             Lucene104                  body, category",
-                        "doc values   Lucene90                   category",
-                        "KNN vectors  Lucene99HnswVectorsFormat  embedding",
+                        "postings     FST50",
+                        "  id",
+                        "postings     Lucene104",
+                        "  body, category",
+                        "doc values   Lucene90",
+                        "  category",
+                        "KNN vectors  Lucene99HnswVectorsFormat",
+                        "  embedding",
                         "",
                         "Files (2, 2.0 KiB)");
+    }
+
+    @Test
+    void theFieldsOfAFormatWrapUnderTheirIndent() {
+        List<FieldFormats> fields = List.of("author", "body", "category", "published", "tags", "title", "url").stream()
+                .map(name -> new FieldFormats(name, Optional.of("Lucene104"), Optional.empty(), Optional.empty()))
+                .toList();
+        Segment segment = segment("_0", 0, 1, 2048, fields, Optional.empty());
+        GetCommitResult details = new GetCommitResult(commit(4, true), List.of(segment), List.of());
+        List<String> lines = Commits.segmentLines(segment, details, 24).stream()
+                .map(Line::rawContent)
+                .toList();
+        int header = lines.indexOf("postings  Lucene104");
+        List<String> fieldLines = lines.subList(header + 1, lines.indexOf("Files (0, 0 B)") - 1);
+        assertThat(fieldLines)
+                .containsExactly("  author, body,", "  category, published,", "  tags, title, url")
+                .allSatisfy(line -> assertThat(line).hasSizeLessThanOrEqualTo(24));
+    }
+
+    @Test
+    void theKindOfAFormatIsBoldAndTheFormatCyan() {
+        GetCommitResult details = details(4, true);
+        List<Line> lines = Commits.segmentLines(details.segments().getFirst(), details, 80);
+        int header = lines.stream().map(Line::rawContent).toList().indexOf("KNN vectors  Lucene99HnswVectorsFormat");
+        assertThat(lines.get(header).spans())
+                .extracting(Span::content, Span::style)
+                .containsExactly(
+                        tuple("KNN vectors", Style.EMPTY.bold()),
+                        tuple("  ", Style.EMPTY),
+                        tuple("Lucene99HnswVectorsFormat", Style.EMPTY.cyan()));
+        assertThat(lines.get(header + 1).spans()).extracting(Span::style).containsOnly(Style.EMPTY);
     }
 
     @Test
@@ -263,7 +299,7 @@ class CommitsTest {
                 List.of(new FieldFormats("stored", Optional.empty(), Optional.empty(), Optional.empty())),
                 Optional.empty());
         GetCommitResult details = new GetCommitResult(commit(4, true), List.of(segment), List.of());
-        assertThat(Commits.segmentLines(segment, details))
+        assertThat(Commits.segmentLines(segment, details, 80))
                 .extracting(Line::rawContent)
                 .containsSubsequence("Field formats", "none", "", "Files (0, 0 B)");
     }
@@ -272,7 +308,7 @@ class CommitsTest {
     void theSegmentDetailsSayWhyTheFieldInfosCouldNotBeRead() {
         Segment segment = segment("_0", 0, 1, 2048, List.of(), Optional.of("Corrupt index, missing file: _0.fnm"));
         GetCommitResult details = new GetCommitResult(commit(4, true), List.of(segment), List.of());
-        List<Line> lines = Commits.segmentLines(segment, details);
+        List<Line> lines = Commits.segmentLines(segment, details, 80);
         Line error = lines.get(lines.indexOf(Line.styled("Field formats", Style.EMPTY.bold())) + 1);
         assertThat(error.rawContent()).isEqualTo("Could not be read: Corrupt index, missing file: _0.fnm");
         assertThat(error.spans()).extracting(Span::style).containsOnly(Style.EMPTY.red());

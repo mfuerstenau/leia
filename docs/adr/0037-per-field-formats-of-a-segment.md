@@ -20,7 +20,9 @@ The per-field formats write the name of each field's format as a `FieldInfo` att
 
 ### The TUI
 
-6. **A "Field formats" section** in a segment's details, after "Codec formats": for postings, doc values and KNN vectors, a line per format with the fields that use it, joined with ", ". The kind names only its first line. "none" if no field has any of the three, and the error in red if the field infos can't be read.
+6. **A "Field formats" section** in a segment's details, after "Codec formats": for postings, doc values and KNN vectors, a line per format with its kind in bold and the format in cyan, the kinds padded to one width. Below it, the fields that use the format, joined with ", ", indented by 2 and wrapped under that indent to the panel's inner width. "none" if no field has any of the three, and the error in red if the field infos can't be read.
+
+   *Amended 2026-10-11:* at first each format was one row of a table (kind, format, fields), with the kind on its first row only. A long field list wrapped back to column 0, under the kind, so it was unclear where one format ended and the next began. A hanging indent under the field column doesn't fit: the details panel is about 46 columns wide at 120, and `Lucene99HnswVectorsFormat` alone takes 25.
 
 ## Alternatives considered
 
