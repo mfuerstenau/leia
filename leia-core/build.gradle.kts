@@ -61,8 +61,8 @@ tasks.test {
 // A codec and formats that leia doesn't bundle (ADR 0018): build/test-codec-jar/leia-test-codec.jar,
 // and two indexes written with them, custom-codec with the codec and custom-formats with Lucene's
 // codec and the jar's postings, doc values and KNN vectors formats. The plain tests check that
-// these indexes don't open without the jar, jarsTest that they do with it. The real-server tests in
-// tui/ use them too.
+// these indexes don't open without the jar, jarsTest that they do with it. The jarsTests of
+// leia-server and leia-tui use them too.
 val testCodec by sourceSets.creating
 
 dependencies {
@@ -100,13 +100,25 @@ tasks.withType<Test>().configureEach {
     }
 }
 
-// The test codec jar and the index that needs it, for leia-tui's jarsTest.
+// The test codec jar and the indexes that need it, for the jarsTests of leia-server and leia-tui.
 val testCodecJarElements = configurations.consumable("testCodecJarElements")
 val testCodecIndexElements = configurations.consumable("testCodecIndexElements")
+val customFormatsIndexElements = configurations.consumable("customFormatsIndexElements")
 artifacts {
     add(testCodecJarElements.name, testCodecJar)
     add(testCodecIndexElements.name, testIndexesDir.map { it.dir("custom-codec") }) {
         builtBy(testCodecIndexes)
+    }
+    add(customFormatsIndexElements.name, testIndexesDir.map { it.dir("custom-formats") }) {
+        builtBy(testCodecIndexes)
+    }
+}
+
+// The Lucene 9 index, for leia-server's tests through LeiaBackend.
+val lucene9TestIndexElements = configurations.consumable("lucene9TestIndexElements")
+artifacts {
+    add(lucene9TestIndexElements.name, testIndexesDir.map { it.dir("lucene9") }) {
+        builtBy(legacyIndexTasks.toMap().getValue("lucene9"))
     }
 }
 
@@ -114,7 +126,7 @@ artifacts {
 // directory of its own under build/test-analysis-jars: two small ones, and Kuromoji and Nori for the
 // options of their analyzers (ADR 0023). Loading them, or the test codec jar, changes Lucene's
 // global lists of factories, codecs and formats, so the tests that do run in a JVM of their own
-// (jarsTest). The real-server tests in tui/ use these directories too.
+// (jarsTest). leia-server's jarsTest uses these directories too.
 val testAnalysisModules = mapOf(
     "phonetic" to libs.lucene.analysis.phonetic,
     "stempel" to libs.lucene.analysis.stempel,
@@ -145,6 +157,13 @@ tasks.test {
     useJUnitPlatform { excludeTags("jars") }
 }
 
+val testAnalysisJarsElements = configurations.consumable("testAnalysisJarsElements")
+artifacts {
+    add(testAnalysisJarsElements.name, testAnalysisJarsDir) {
+        builtBy(testAnalysisJars)
+    }
+}
+
 val jarsTest = tasks.register<Test>("jarsTest") {
     description = "Runs the tests that load jars, in a JVM of their own."
     group = "verification"
@@ -169,14 +188,15 @@ tasks.check {
 }
 
 // A demo index for trying leia by hand (docs/demo-index.md): ./gradlew :leia-core:demoIndex writes
-// it to build/test-indexes/demo. Not used by the tests.
+// it to build/test-indexes/demo. leia-server's DemoIndexTest checks the numbers that the document
+// quotes.
 val demoIndex by sourceSets.creating
 
 dependencies {
     "demoIndexImplementation"(libs.lucene.core)
 }
 
-tasks.register<JavaExec>("demoIndex") {
+val demoIndexTask = tasks.register<JavaExec>("demoIndex") {
     description = "Writes a demo index for trying leia by hand."
     group = "leia"
     classpath = demoIndex.runtimeClasspath
@@ -185,4 +205,11 @@ tasks.register<JavaExec>("demoIndex") {
     val indexDir = testIndexesDir.map { it.dir("demo") }
     outputs.dir(indexDir).withPropertyName("index")
     argumentProviders.add(CommandLineArgumentProvider { listOf(indexDir.get().asFile.absolutePath) })
+}
+
+val demoIndexElements = configurations.consumable("demoIndexElements")
+artifacts {
+    add(demoIndexElements.name, testIndexesDir.map { it.dir("demo") }) {
+        builtBy(demoIndexTask)
+    }
 }

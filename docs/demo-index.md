@@ -4,14 +4,14 @@ A Lucene 10 index for trying leia by hand: a small product catalogue with a fiel
 everything leia shows. It is generated, not checked in:
 
 ```sh
-./gradlew :leia-core:demoIndex        # → leia-core/build/test-indexes/demo
-LEIA_SERVER_JAR=$PWD/leia-server/build/libs/leia-server.jar \
-  cargo run --manifest-path tui/Cargo.toml -- leia-core/build/test-indexes/demo
+./gradlew :leia-core:demoIndex :leia-tui:leiaFolder   # → leia-core/build/test-indexes/demo
+leia-tui/build/leia/leia leia-core/build/test-indexes/demo
 ```
 
 The content is random with a fixed seed, so every run writes the same index. The writer is
-`leia-core/src/demoIndex/java/…/DemoIndexWriter.java`. The tests don't use this index; they use
-their own indexes and the Lucene 9 and 8 indexes from `LegacyIndexWriter`.
+`leia-core/src/demoIndex/java/…/DemoIndexWriter.java`. `DemoIndexTest` in leia-server checks the
+numbers below through the backend, so a change to the writer that moves one fails the build; the
+other tests use their own indexes and the Lucene 9 and 8 indexes from `LegacyIndexWriter`.
 
 ## Index
 
@@ -128,10 +128,10 @@ their own indexes and the Lucene 9 and 8 indexes from `LegacyIndexWriter`.
   hits; `tags` `eco gift`: 101, `[a TO c}`: 92. On the documents screen, `s` on `checksum` (binary,
   8 random bytes) searches for it in hex: 1 hit, the document itself; `s` on `price` after `x`
   searches for its double.
-- A regex as the filter: `qu\w+` in regex mode, then `b`: 499 matches, starting on `1 of 499`.
-  Open a copy of the demo index without `segments_4`, put it back and press `R`: the tab line says
-  `Reopened: segments_4; rebuilding the filter`, and the title then says `2 of 486`, on the same
-  document.
+- A regex as the filter, on a copy of the demo index without `segments_4`, which has no deletions
+  yet: `qu\w+` in regex mode, then `b`: 499 matches (all but document 0), starting on `1 of 499`.
+  Put `segments_4` back and press `R`: the tab line says `Reopened: segments_4; rebuilding the
+  filter`, and the title then says `1 of 486`, on the same document.
 
 ## Analysis worth a try
 

@@ -21,6 +21,57 @@ val protocolDir = layout.settingsDirectory.dir("protocol")
 tasks.test {
     inputs.dir(protocolDir).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("protocol")
     systemProperty("leia.protocol.dir", projectDir.toPath().relativize(protocolDir.asFile.toPath()).toString())
+    useJUnitPlatform { excludeTags("jars") }
+}
+
+// The indexes and jars that leia-core's build writes, for the tests that go through LeiaBackend as
+// the UI does: the Lucene 9 index (AGENTS.md, hard rule 5) and the demo index (docs/demo-index.md)
+// for test, and the test codec jar, the indexes that need it and the analysis jars for jarsTest.
+fun coreTestFiles(name: String, configuration: String) =
+    configurations.create(name) { isCanBeConsumed = false }.also {
+        dependencies.add(it.name, dependencies.project(mapOf("path" to ":leia-core", "configuration" to configuration)))
+    }
+
+val testIndexFiles = mapOf(
+    "lucene9" to coreTestFiles("lucene9TestIndex", "lucene9TestIndexElements"),
+    "demo" to coreTestFiles("demoIndex", "demoIndexElements"),
+)
+val jarsTestIndexFiles = mapOf(
+    "custom-codec" to coreTestFiles("testCodecIndex", "testCodecIndexElements"),
+    "custom-formats" to coreTestFiles("customFormatsIndex", "customFormatsIndexElements"),
+)
+val testCodecJar = coreTestFiles("testCodecJar", "testCodecJarElements")
+val testAnalysisJars = coreTestFiles("testAnalysisJars", "testAnalysisJarsElements")
+
+/** Passes each file as a system property, relative to the test's working directory (this project). */
+fun Test.testFiles(properties: Map<String, FileCollection>) {
+    for ((property, files) in properties) {
+        inputs.files(files).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName(property)
+    }
+    val projectPath = projectDir.toPath()
+    jvmArgumentProviders.add(CommandLineArgumentProvider {
+        properties.map { (property, files) -> "-D$property=" + projectPath.relativize(files.singleFile.toPath()) }
+    })
+}
+
+tasks.test {
+    testFiles(testIndexFiles.mapKeys { "leia.test.index.${it.key}" })
+}
+
+val jarsTest = tasks.register<Test>("jarsTest") {
+    description = "Runs the tests that load jars, in a JVM of their own."
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform { includeTags("jars") }
+    testFiles(
+        jarsTestIndexFiles.mapKeys { "leia.test.index.${it.key}" } +
+            mapOf("leia.test.codec.jar" to testCodecJar, "leia.test.analysis.jars" to testAnalysisJars),
+    )
+}
+
+tasks.check {
+    dependsOn(jarsTest)
 }
 
 application {
