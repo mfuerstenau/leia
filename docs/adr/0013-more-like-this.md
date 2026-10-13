@@ -5,7 +5,7 @@
 
 ## Context
 
-Luke's Search tab can search for documents that are like a given document (`luke-features.md` §4.3). It builds the query with Lucene's `MoreLikeThis` (`lucene-queries`) from a document id, the fields to take terms from, a minimum and maximum document frequency, a minimum term frequency and an analyzer. It then searches with that query as with any other.
+Luke's Search tab can search for documents that are like a given document (`docs/luke-features.md` §4.3). It builds the query with Lucene's `MoreLikeThis` (`lucene-queries`) from a document id, the fields to take terms from, a minimum and maximum document frequency, a minimum term frequency and an analyzer. It then searches with that query as with any other.
 
 `MoreLikeThis.like(docId)` works like this (read in Lucene 10.5.2):
 

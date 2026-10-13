@@ -5,7 +5,7 @@
 
 ## Context
 
-Luke's Commits tab lists the commits of the index directory and, for one commit, its files with their sizes, its segments (name, maxDoc, deletions, delGen, Lucene version, codec, size, compound file) and, for one segment, its diagnostics, attributes or codec formats (`luke-features.md` §4.5). Luke reads each of these with its own call.
+Luke's Commits tab lists the commits of the index directory and, for one commit, its files with their sizes, its segments (name, maxDoc, deletions, delGen, Lucene version, codec, size, compound file) and, for one segment, its diagnostics, attributes or codec formats (`docs/luke-features.md` §4.5). Luke reads each of these with its own call.
 
 For leia this raises several questions:
 

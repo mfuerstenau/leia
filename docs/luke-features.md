@@ -101,6 +101,8 @@ Overview term → Documents (browse postings) or Search (TermQuery) · Documents
 - No cancellation of long operations (except export terms).
 
 ## 7. Read-only feature checklist
+leia has the features of this list except the ones in the backlog of `docs/tasklist.md`.
+
 | Area | Feature |
 |---|---|
 | Open | path (recursive multi-index), directory impl, no-reader mode, reopen/close, recent-path history |

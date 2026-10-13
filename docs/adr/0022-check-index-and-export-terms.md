@@ -5,7 +5,7 @@
 
 ## Context
 
-Luke's tools tab has two read-only tools (`luke-features.md` §3, "Tools"):
+Luke's tools tab has two read-only tools (`docs/luke-features.md` §4.7):
 
 - **Check index** runs Lucene's `CheckIndex` on the index and streams its output. The outcome is OK or BAD: missing segments, the number of bad segments, the documents that would be lost, or a tool that is older than the index. Luke also offers "Try to repair" (`exorciseIndex`), which drops broken segments. That writes, so it is out of scope (rule 1).
 - **Export terms** writes the terms of a field to `terms_<field>_<timestamp>.out`, one `term<delimiter>docFreq` per line, with a comma, space or tab as the delimiter.

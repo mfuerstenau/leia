@@ -5,7 +5,7 @@
 
 ## Context
 
-Luke's Analysis tab (`luke-features.md` §4.4) builds an analyzer and shows what it makes of a text:
+Luke's Analysis tab (`docs/luke-features.md` §4.4) builds an analyzer and shows what it makes of a text:
 
 - **The analyzer** is `StandardAnalyzer` by default, or a `CustomAnalyzer` that the user puts together from Lucene's factories, found by their SPI names: char filters in order, one tokenizer, then token filters in order. Each component has string parameters, and an optional config directory holds resource files such as stop words or synonyms. External jars can add factories.
 - **Analysis** lists the tokens with every attribute (`AttributeImpl.reflectWith`). For a custom analyzer, a step-by-step view shows the text after each char filter and the tokens after the tokenizer and each token filter.

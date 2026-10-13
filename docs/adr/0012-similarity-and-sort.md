@@ -5,7 +5,7 @@
 
 ## Context
 
-ADR 0010 scores every search with Lucene's default similarity, BM25 with `k1 = 1.2` and `b = 0.75`, and orders the hits by score. Luke's Search tab can change both (`luke-features.md` §4.3):
+ADR 0010 scores every search with Lucene's default similarity, BM25 with `k1 = 1.2` and `b = 0.75`, and orders the hits by score. Luke's Search tab can change both (`docs/luke-features.md` §4.3):
 
 - **Similarity:** BM25 with its `k1` and `b`, or classic TF-IDF, both with "discount overlaps".
 - **Sort:** a primary and a secondary sort on fields with doc values. The sort type is guessed from the doc values type: `INT`/`LONG`/`FLOAT`/`DOUBLE` for numeric doc values, `STRING`/`STRING_VAL` for sorted ones, and only the default for sorted sets.

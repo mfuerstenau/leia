@@ -5,7 +5,7 @@ It is one Java application: a TamboUI terminal UI that calls a backend in the sa
 
 - Work queue and milestones: `docs/tasklist.md`
 - Architecture decisions: `docs/adr/`
-- Future features (Luke feature analysis): `luke-features.md`. Only features *not* tagged `[write]` are in scope.
+- What Luke does, as a reference: `docs/luke-features.md`. Only features *not* tagged `[write]` are in scope; what is left to build is the backlog in `docs/tasklist.md`.
 
 ## Architecture
 
@@ -24,7 +24,7 @@ leia / leia.cmd  ──finds the JVM, runs──▶  <java> -jar leia.jar
 | `leia-protocol/` | Records for every method's params and result, `Methods` (the registry), `RpcMethod` and `ErrorCode`: the API between the UI and the backend. |
 | `leia-server/` | Library: a handler per method, with Dagger wiring, mapping core results to the records. `LeiaBackend` runs the calls in order on one thread; `RpcException` carries an expected failure's `ErrorCode`. |
 | `leia-tui/` | The application: the CLI (`Cli`, `Main`), the version-check entry class `Launcher` (compiled for Java 8), the log, and a package per screen (`…tui.overview`, `…tui.documents`, …). Builds the **fat jar** `leia.jar`; the scripts `leia` and `leia.cmd` are in `leia-tui/src/scripts/`. |
-| `docs/` | `adr/`, `tasklist.md`, `SESSION-SUMMARIES.md`, `demo-index.md` (the manual-testing index). |
+| `docs/` | `adr/`, `tasklist.md`, `SESSION-SUMMARIES.md`, `demo-index.md` (the manual-testing index), `luke-features.md` (the Luke analysis). |
 
 Dependency direction: `leia-server → leia-protocol` (api), `leia-server → leia-core`, `leia-tui → leia-server`, `leia-tui → leia-protocol` (`leia-tui` can't compile against core or Lucene). `leia-core` and `leia-protocol` do not depend on each other.
 

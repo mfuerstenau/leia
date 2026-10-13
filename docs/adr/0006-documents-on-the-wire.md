@@ -5,10 +5,10 @@
 
 ## Context
 
-The Documents area (`luke-features.md` §4.2) shows one document at a time: per field its norm, its stored values, its doc values and its term vector. Unlike the overview, this data is per document and much of it is untyped bytes. Several cross-cutting questions come up before the first method lands:
+The Documents area (`docs/luke-features.md` §4.2) shows one document at a time: per field its norm, its stored values, its doc values and its term vector. Unlike the overview, this data is per document and much of it is untyped bytes. Several cross-cutting questions come up before the first method lands:
 
 - **Where to read.** Luke reads through the composite reader: `MultiDocValues.getNormValues`, `getSortedDocValues`, and so on. For `SORTED` and `SORTED_SET`, `MultiDocValues` builds an `OrdinalMap` over the values of every segment. That costs time and memory proportional to the whole field, just to show the values of one document.
-- **Deleted documents.** Luke shows a deleted document as empty. Its stored fields, norms, doc values and term vectors are still in the segment until a merge, and `luke-features.md` §6 lists deleted-document inspection as a gap.
+- **Deleted documents.** Luke shows a deleted document as empty. Its stored fields, norms, doc values and term vectors are still in the segment until a merge, and `docs/luke-features.md` §6 lists deleted-document inspection as a gap.
 - **Values JSON can't hold as is.** Stored values are strings, bytes, `int`, `long`, `float` or `double`. JSON numbers have no `NaN` or `Infinity`, and a float formatted on one side and parsed on the other can change. Binary doc values, sorted values and term vector terms are bytes. These are usually UTF-8, but not always.
 - **Numeric doc values are opaque longs.** A `double` may be stored as raw bits (`DoubleDocValuesField`) or as a sortable long (`NumericUtils.doubleToSortableLong`). Nothing in the index records which encoding was used.
 - **Size.** A stored field or a term vector can be large, but a single document is bounded. A scan of the whole field is not.

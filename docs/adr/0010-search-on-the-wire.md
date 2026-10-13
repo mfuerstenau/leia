@@ -5,7 +5,7 @@
 
 ## Context
 
-Luke's Search tab parses a query expression, runs it and pages through the hits with their stored fields. A hit can be explained or opened in the Documents tab (`luke-features.md` §4.3). Settings cover the query parser, the analyzer, the similarity, the sort, the fields to load and More-Like-This. This ADR covers the first slice: classic query parser syntax, a raw term query, paging, exact or approximate total hits, stored fields per hit, and explain. Parser options beyond the default field and operator, the standard query parser with points, similarity, sort and More-Like-This come later, and each can be added without breaking the methods below.
+Luke's Search tab parses a query expression, runs it and pages through the hits with their stored fields. A hit can be explained or opened in the Documents tab (`docs/luke-features.md` §4.3). Settings cover the query parser, the analyzer, the similarity, the sort, the fields to load and More-Like-This. This ADR covers the first slice: classic query parser syntax, a raw term query, paging, exact or approximate total hits, stored fields per hit, and explain. Parser options beyond the default field and operator, the standard query parser with points, similarity, sort and More-Like-This come later, and each can be added without breaking the methods below.
 
 Several questions are new:
 

@@ -5,7 +5,7 @@
 
 ## Context
 
-leia opens one index directory, the one the path names, with a `DirectoryReader`. Luke has two more open options, which are the last of its read-only ones (`luke-features.md` §3):
+leia opens one index directory, the one the path names, with a `DirectoryReader`. Luke has two more open options, which are the last of its read-only ones (`docs/luke-features.md` §3):
 
 - **Multi-reader mode.** Luke walks the path recursively and opens every directory that holds an index. One index opens as usual, several open as one `MultiReader`. Applications often keep several indexes next to each other: one per tenant, per day, per Solr core. Their documents can then be searched, browsed and counted together.
 - **No-reader mode.** Luke opens only the `Directory`, without an `IndexReader`, for an index that a reader can't open: a corrupt segment, a missing file, a codec that isn't loaded. Only the commits (and check index) work. leia's commits screen (ADR 0009) reads `segments_N` and `.si` files from the directory and doesn't need a reader, so it can show what such an index holds and which file is missing.

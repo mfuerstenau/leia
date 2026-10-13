@@ -5,7 +5,7 @@
 
 ## Context
 
-ADR 0010 runs Lucene's classic `QueryParser` with its defaults. Only the default field and the default operator can be chosen. Luke's query parser settings cover more (`luke-features.md` §4.3, `QueryParserConfig`):
+ADR 0010 runs Lucene's classic `QueryParser` with its defaults. Only the default field and the default operator can be chosen. Luke's query parser settings cover more (`docs/luke-features.md` §4.3, `QueryParserConfig`):
 
 - leading wildcards;
 - phrase slop;

@@ -5,7 +5,7 @@
 
 ## Context
 
-Luke's Documents tab browses a field's terms (first term, next term, seek to a term) and the postings of the current term (first doc, next doc, with the positions table) (`luke-features.md` §4.2). Luke keeps a `TermsEnum` and a `PostingsEnum` open between calls: the model is a cursor that only moves forward.
+Luke's Documents tab browses a field's terms (first term, next term, seek to a term) and the postings of the current term (first doc, next doc, with the positions table) (`docs/luke-features.md` §4.2). Luke keeps a `TermsEnum` and a `PostingsEnum` open between calls: the model is a cursor that only moves forward.
 
 For leia this raises several questions:
 
