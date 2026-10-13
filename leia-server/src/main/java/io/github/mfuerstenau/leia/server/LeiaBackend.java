@@ -19,9 +19,8 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- * The server's methods, called in-process by the UI (ADR 0034): {@link #call} takes the place of a
- * JSON-RPC request. Every call runs on one backend thread, in the order of the calls, as the
- * requests of {@link RpcServer} do, so the UI thread never waits for Lucene.
+ * The server's methods, called in-process by the UI (ADR 0034): Every {@link #call} runs on one
+ * backend thread, in the order of the calls, so the UI thread never waits for Lucene.
  */
 public final class LeiaBackend implements AutoCloseable {
 

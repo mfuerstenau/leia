@@ -1,6 +1,6 @@
 package io.github.mfuerstenau.leia.protocol.analysis;
 
-/** Nori's {@code KoreanTokenizer.DecompoundMode} (ADR 0023); serialized as its name. */
+/** Nori's {@code KoreanTokenizer.DecompoundMode} (ADR 0023). */
 public enum KoreanDecompoundMode {
     /** Compounds are kept whole. */
     NONE,

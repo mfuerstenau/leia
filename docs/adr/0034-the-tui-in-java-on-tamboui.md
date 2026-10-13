@@ -2,8 +2,8 @@
 
 - **Status:** Accepted on 2026-10-09, after the spike ("Spike results"); decision 1 changed by it: Panama, with JLine as the fallback
 - **Date:** 2026-10-09
-- **Supersedes, once accepted:** ADR 0001, ADR 0003
-- **Amends, once accepted:** ADR 0004 (the folders and the launch), ADR 0005 decision 2 (the transport)
+- **Supersedes:** ADR 0001, ADR 0003
+- **Amends:** ADR 0004 (the folders and the launch), ADR 0005 decision 2 (the transport)
 
 ## Context
 
@@ -129,6 +129,11 @@ What has to carry over:
       - *Of the 35 real-server tests, 21 were covered by Java tests already. Two are only about the transport (the handshake and a call after shutdown), and `version_without_a_server_still_prints_leia` has no server jar left to miss; `LaunchScriptTest` checks a missing `leia.jar`. They go with the old path.*
       - *What the others checked that no Java test did now runs through `LeiaBackend`, as the UI calls it, on the indexes and jars that leia-core's build writes, which leia-server gets through consumable configurations as leia-tui does. `Lucene9BackendTest` reads the Lucene 9 index at that boundary (hard rule 5), and `JarsBackendTest` (tag `jars`, in leia-server's `jarsTest`) loads the codec jar for `custom-codec` and `custom-formats`, and checks a jar without its dependencies and a loaded jar that is gone. That last one is one flow, since a jar that is gone stops every later load in the JVM.*
       - *`DemoIndexTest` checks the numbers that `docs/demo-index.md` quotes, so the document stays true. What only the screens show was walked in TamboUI in tmux; it differed from the Rust TUI nowhere. Two sentences of the document were wrong in both UIs and are fixed: the regex filter's reopen ends on `1 of 486`, and its 499 matches are those of the copy without `segments_4`.*
+    - *Settled with the removal of the old path (2026-10-11):*
+      - *`tui/`, `protocol/`, the transport, the envelope and `leia-server.jar` went in one step. leia-server is a library only; `BuildInfo` and its generated properties stay, for `version`.*
+      - *The one rule of decision 6 is hard rule 2 of `AGENTS.md`. Rules 3 (explicit records per method) and 4 (the terminal belongs to the UI) carry on what is left of the old rules 3 and 2, so rules 5–7, which code and ADRs cite by number, keep their numbers.*
+      - *`ErrorCode` keeps its numbers, which the UI shows after the name, but loses `PARSE_ERROR`, `INVALID_REQUEST` and `METHOD_NOT_FOUND`, which only the transport sent. The handler tests that read an error fixture's code name the `ErrorCode` instead.*
+      - *The comments in leia-tui that compare with the Rust TUI stay: they say why the UI behaves as it does.*
 
 ## Alternatives considered
 

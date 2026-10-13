@@ -4,8 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
-import io.github.mfuerstenau.leia.protocol.ProtocolJson;
-import io.github.mfuerstenau.leia.protocol.Response;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalysisComponent;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeParams;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeResult;
@@ -27,7 +25,6 @@ import io.github.mfuerstenau.leia.protocol.analysis.TokenStage;
 import io.github.mfuerstenau.leia.protocol.analysis.WordSet;
 import io.github.mfuerstenau.leia.protocol.analysis.WordSetSupport;
 import io.github.mfuerstenau.leia.server.RpcException;
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -275,7 +272,6 @@ class AnalysisHandlersTest {
                 .isInstanceOfSatisfying(
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.INVALID_ANALYZER))
                 .hasMessage("Invalid analyzer: no tokenizer 'nope'");
-        assertThat(errorCodeOf("analyze.error-invalid-analyzer.json")).isEqualTo(ErrorCode.INVALID_ANALYZER);
 
         var noDir = custom(
                 List.of(),
@@ -357,13 +353,5 @@ class AnalysisHandlersTest {
         assertThatThrownBy(call)
                 .isInstanceOfSatisfying(
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(code));
-    }
-
-    private static ErrorCode errorCodeOf(String fixture) throws IOException {
-        String json = Files.readString(Path.of(System.getProperty("leia.protocol.dir"))
-                .resolve("fixtures")
-                .resolve(fixture));
-        Response<?> response = ProtocolJson.mapper().readValue(json, ProtocolJson.responseType(Object.class));
-        return response.error().orElseThrow().code();
     }
 }

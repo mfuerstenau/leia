@@ -5,8 +5,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
-import io.github.mfuerstenau.leia.protocol.ProtocolJson;
-import io.github.mfuerstenau.leia.protocol.Response;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.terms.FieldTerms;
 import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
@@ -17,7 +15,6 @@ import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -78,7 +75,6 @@ class FieldTermScanHandlersTest {
                 .isInstanceOfSatisfying(
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.FIELD_NOT_FOUND))
                 .hasMessage("No field 'bdy' in the index");
-        assertThat(errorCodeOf("startFieldTermScan.error-field-not-found.json")).isEqualTo(ErrorCode.FIELD_NOT_FOUND);
     }
 
     @ParameterizedTest
@@ -102,7 +98,6 @@ class FieldTermScanHandlersTest {
     @Test
     void failsForUnknownJob() throws IOException {
         assertFails(() -> get.handle(new JobParams(99)), ErrorCode.JOB_NOT_FOUND);
-        assertThat(errorCodeOf("getFieldTermScan.error-job-not-found.json")).isEqualTo(ErrorCode.JOB_NOT_FOUND);
     }
 
     @Test
@@ -150,13 +145,5 @@ class FieldTermScanHandlersTest {
         assertThatThrownBy(call)
                 .isInstanceOfSatisfying(
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(code));
-    }
-
-    private static ErrorCode errorCodeOf(String fixture) throws IOException {
-        String json = Files.readString(Path.of(System.getProperty("leia.protocol.dir"))
-                .resolve("fixtures")
-                .resolve(fixture));
-        Response<?> response = ProtocolJson.mapper().readValue(json, ProtocolJson.responseType(Object.class));
-        return response.error().orElseThrow().code();
     }
 }

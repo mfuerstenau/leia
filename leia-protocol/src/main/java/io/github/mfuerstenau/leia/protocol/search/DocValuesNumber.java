@@ -1,8 +1,7 @@
 package io.github.mfuerstenau.leia.protocol.search;
 
 /**
- * How a number field's doc values encode their numbers, which the index doesn't record (ADR 0033);
- * serialized as its name.
+ * How a number field's doc values encode their numbers, which the index doesn't record (ADR 0033).
  */
 public enum DocValuesNumber {
     /** The long itself, as {@code NumericDocValuesField} and {@code LongField} write it. */

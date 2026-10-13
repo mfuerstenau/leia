@@ -15,8 +15,8 @@ import java.util.logging.Logger;
 
 /**
  * The index that is open in this server, if any: a path opened with or without a reader (ADR 0021).
- * There is at most one. Requests are handled one at
- * a time ({@code RpcServer}, or the backend thread of {@code LeiaBackend}), so this needs no locking. Jobs read the open index from their own
+ * There is at most one. Calls are handled one at
+ * a time, on the backend thread of {@code LeiaBackend}, so this needs no locking. Jobs read the open index from their own
  * threads, so they are stopped before it is closed (ADR 0005). The kept filter holds document ids of
  * the open index, so it is forgotten with it (ADR 0031).
  */

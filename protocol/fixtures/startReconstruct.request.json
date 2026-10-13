@@ -1,9 +1,0 @@
-{
-  "jsonrpc": "2.0",
-  "id": 60,
-  "method": "startReconstruct",
-  "params": {
-    "docId": 3,
-    "fields": ["title", "keywords", "binary_key"]
-  }
-}

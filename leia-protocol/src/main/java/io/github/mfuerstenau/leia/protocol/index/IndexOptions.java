@@ -1,6 +1,6 @@
 package io.github.mfuerstenau.leia.protocol.index;
 
-/** What the postings of a field hold, as Lucene's {@code IndexOptions}; serialized as its name. */
+/** What the postings of a field hold, as Lucene's {@code IndexOptions}. */
 public enum IndexOptions {
     NONE,
     DOCS,

@@ -1,8 +1,0 @@
-{
-  "jsonrpc": "2.0",
-  "id": 34,
-  "method": "getExportTerms",
-  "params": {
-    "jobId": 13
-  }
-}

@@ -1,8 +1,0 @@
-{
-  "jsonrpc": "2.0",
-  "id": 5,
-  "error": {
-    "code": -32015,
-    "message": "Opened without a reader: only the commits can be read"
-  }
-}

@@ -62,7 +62,7 @@ import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import java.util.List;
 import java.util.Optional;
 
-/** The registry of all JSON-RPC methods. Each one needs fixtures in {@code protocol/fixtures/}. */
+/** The registry of all methods. Each one needs a handler in leia-server (AGENTS.md, hard rule 3). */
 public final class Methods {
 
     public static final RpcMethod<VersionParams, VersionResult> VERSION =

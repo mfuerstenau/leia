@@ -7,8 +7,6 @@ import io.github.mfuerstenau.leia.core.DocFilter;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.core.ScanProgress;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
-import io.github.mfuerstenau.leia.protocol.ProtocolJson;
-import io.github.mfuerstenau.leia.protocol.Response;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.TermPosition;
 import io.github.mfuerstenau.leia.protocol.terms.GetPositionsParams;
@@ -24,8 +22,6 @@ import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
@@ -133,7 +129,7 @@ class TermHandlersTest {
         assertFails(
                 () -> getPostings.handle(
                         new GetPostingsParams("body", text("blue"), 0, 10, Optional.of(new PostingsFilter(8, false)))),
-                errorCodeOf("getPostings.error-filter-not-found.json"));
+                ErrorCode.FILTER_NOT_FOUND);
     }
 
     @Test
@@ -177,9 +173,6 @@ class TermHandlersTest {
                 () -> getPositions.handle(new GetPositionsParams(9, "body", text("red"))),
                 ErrorCode.DOC_NOT_FOUND,
                 "No document 9 in the index: maxDoc is 3");
-        assertThat(errorCodeOf("getTerms.error-field-not-found.json")).isEqualTo(ErrorCode.FIELD_NOT_FOUND);
-        assertThat(errorCodeOf("getPostings.error-term-not-found.json")).isEqualTo(ErrorCode.TERM_NOT_FOUND);
-        assertThat(errorCodeOf("getPositions.error-doc-not-found.json")).isEqualTo(ErrorCode.DOC_NOT_FOUND);
     }
 
     @Test
@@ -251,13 +244,5 @@ class TermHandlersTest {
                 .isInstanceOfSatisfying(
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(code))
                 .hasMessage(message);
-    }
-
-    private static ErrorCode errorCodeOf(String fixture) throws IOException {
-        String json = Files.readString(Path.of(System.getProperty("leia.protocol.dir"))
-                .resolve("fixtures")
-                .resolve(fixture));
-        Response<?> response = ProtocolJson.mapper().readValue(json, ProtocolJson.responseType(Object.class));
-        return response.error().orElseThrow().code();
     }
 }

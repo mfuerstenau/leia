@@ -6,8 +6,6 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.github.mfuerstenau.leia.core.IndexDocument;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
-import io.github.mfuerstenau.leia.protocol.ProtocolJson;
-import io.github.mfuerstenau.leia.protocol.Response;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.DocValues;
 import io.github.mfuerstenau.leia.protocol.document.DocumentField;
@@ -26,8 +24,6 @@ import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
@@ -166,7 +162,6 @@ class DocumentHandlersTest {
         assertFails(() -> getStoredValue.handle(new GetStoredValueParams(1, "body", 0)), ErrorCode.VALUE_NOT_FOUND);
         assertFails(() -> getStoredValue.handle(new GetStoredValueParams(1, "bdy", 0)), ErrorCode.FIELD_NOT_FOUND);
         assertFails(() -> getStoredValue.handle(new GetStoredValueParams(3, "id", 0)), ErrorCode.DOC_NOT_FOUND);
-        assertThat(errorCodeOf("getStoredValue.error-value-not-found.json")).isEqualTo(ErrorCode.VALUE_NOT_FOUND);
     }
 
     @Test
@@ -186,7 +181,6 @@ class DocumentHandlersTest {
                 .hasMessage("No document 3 in the index: maxDoc is 3");
         assertFails(() -> getDocument.handle(new GetDocumentParams(-1)), ErrorCode.DOC_NOT_FOUND);
         assertFails(() -> getTermVector.handle(new GetTermVectorParams(3, "body")), ErrorCode.DOC_NOT_FOUND);
-        assertThat(errorCodeOf("getDocument.error-doc-not-found.json")).isEqualTo(ErrorCode.DOC_NOT_FOUND);
     }
 
     @Test
@@ -197,7 +191,6 @@ class DocumentHandlersTest {
                 .isInstanceOfSatisfying(
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.FIELD_NOT_FOUND))
                 .hasMessage("No field 'bdy' in the index");
-        assertThat(errorCodeOf("getTermVector.error-field-not-found.json")).isEqualTo(ErrorCode.FIELD_NOT_FOUND);
     }
 
     @Test
@@ -265,13 +258,5 @@ class DocumentHandlersTest {
         assertThatThrownBy(call)
                 .isInstanceOfSatisfying(
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(code));
-    }
-
-    private static ErrorCode errorCodeOf(String fixture) throws IOException {
-        String json = Files.readString(Path.of(System.getProperty("leia.protocol.dir"))
-                .resolve("fixtures")
-                .resolve(fixture));
-        Response<?> response = ProtocolJson.mapper().readValue(json, ProtocolJson.responseType(Object.class));
-        return response.error().orElseThrow().code();
     }
 }

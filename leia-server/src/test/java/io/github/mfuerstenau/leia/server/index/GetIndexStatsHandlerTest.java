@@ -4,9 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
-import io.github.mfuerstenau.leia.protocol.Methods;
-import io.github.mfuerstenau.leia.protocol.ProtocolJson;
-import io.github.mfuerstenau.leia.protocol.Response;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
@@ -19,7 +16,6 @@ import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -114,18 +110,11 @@ class GetIndexStatsHandlerTest {
     }
 
     @Test
-    void failsWithoutOpenIndex() throws IOException {
+    void failsWithoutOpenIndex() {
         assertThatThrownBy(() -> handler.handle(new GetIndexStatsParams()))
                 .isInstanceOfSatisfying(
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.NO_INDEX_OPEN))
                 .hasMessage("No index is open");
-
-        Response<?> fixture = ProtocolJson.mapper()
-                .readValue(
-                        fixture("getIndexStats.error-no-index-open.json"),
-                        ProtocolJson.responseType(Methods.GET_INDEX_STATS));
-        assertThat(fixture.error())
-                .hasValueSatisfying(error -> assertThat(error.code()).isEqualTo(ErrorCode.NO_INDEX_OPEN));
     }
 
     @ParameterizedTest
@@ -155,11 +144,5 @@ class GetIndexStatsHandlerTest {
             writer.commit();
         }
         return dir;
-    }
-
-    private static String fixture(String name) throws IOException {
-        return Files.readString(Path.of(System.getProperty("leia.protocol.dir"))
-                .resolve("fixtures")
-                .resolve(name));
     }
 }

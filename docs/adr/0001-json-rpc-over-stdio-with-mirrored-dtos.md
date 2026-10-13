@@ -1,6 +1,6 @@
 # ADR 0001 — JSON-RPC over stdio with mirrored, fixture-checked DTOs
 
-- **Status:** Accepted; superseded by ADR 0034 (one JVM, no transport). This ADR applies until the TamboUI port reaches parity and the JSON-RPC path is removed
+- **Status:** Superseded by ADR 0034 (one JVM, no transport); the JSON-RPC path was removed on 2026-10-11
 - **Date:** 2026-10-05
 
 ## Context

@@ -49,9 +49,10 @@ The rest of Luke's read-only features are still to come (see
 
 ## Requirements
 
-- **Java 25 or newer** to run `leia-server.jar`, which does all the Lucene work. Any JRE will do.
-- Linux or Windows on x86_64 for the prebuilt TUI. There is no macOS build; on macOS, build the
-  TUI from source (see below). leia doesn't bundle a Java runtime.
+- **Java 25 or newer** to run `leia.jar`. Any JRE will do. leia doesn't bundle a Java runtime;
+  started with an older Java, it says which version it needs.
+- Linux or Windows. The release folders are built for x86_64, but `leia.jar` is plain Java. macOS
+  may work through the `leia` script, but isn't tested or supported.
 
 ## Usage
 
@@ -63,14 +64,19 @@ leia [OPTIONS] [INDEX_PATH]
 |---|---|
 | `INDEX_PATH` | the index directory to open on start, or a directory with indexes below it (see [Several indexes](#several-indexes)); without one, leia starts with no index open |
 | `-j, --java <PATH>` | the JVM, given as a `java` executable or a JDK/JRE directory; default: `$JAVA_HOME/bin/java`, then `java` on `PATH` |
-| `-V, --version` | print the versions of leia, leia-server and the Java in use |
+| `-V, --version` | print the version and build of leia, and the Java in use |
 | `--jar <PATH>` | a jar with analysis components, codecs or formats of its own, or a directory of such jars; can be repeated (see [Jars](#jars)) |
 | `--no-default-jars` | don't load the jars of the default folder (see [Jars](#jars)) |
 | `--directory <IMPL>` | the Lucene `Directory` to read indexes through: `fs` (default) lets Lucene choose, which is `MMapDirectory` on 64-bit; `mmap` is `MMapDirectory`, `nio` is `NIOFSDirectory`. `Ctrl+D` in the open prompt changes it |
 | `--no-reader` | open `INDEX_PATH` without a reader, for an index that a reader can't open (see [Without a reader](#without-a-reader)); `Ctrl+N` in the open prompt does the same |
 
-`leia-server.jar` has to be next to the `leia` executable. leia resolves symlinks, so a link to
-`leia` in `~/bin` works.
+`leia` (or `leia.cmd` on Windows) is a script that finds the JVM and runs the `leia.jar` next to
+it. `leia` resolves symlinks, so a link to it in `~/bin` works; on Windows, put the folder on
+`PATH`. The environment variable `LEIA_OPTS` holds options for the JVM, such as `-Xmx4g`.
+
+leia logs to `~/.local/state/leia/leia.log` (`$XDG_STATE_HOME/leia/leia.log` if that is set), or
+`%LOCALAPPDATA%\leia\leia.log` on Windows, written anew on each start. `LEIA_OPTS=-Dleia.log.level=FINE`
+logs every call to the backend with its result.
 
 leia keeps the last 10 opened index paths for the open prompt in `~/.local/state/leia/history`
 (`$XDG_STATE_HOME/leia/history` if that is set), or `%LOCALAPPDATA%\leia\history` on Windows.
@@ -181,7 +187,7 @@ where it is: if it is deleted or replaced, no more jars can be added until leia 
 | `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the field table or the top terms |
 
 Counting terms reads every term of the field, which can take a while on a large index. The scan
-runs in the server while leia shows its progress, and `Esc` stops it. Once every field has been
+runs in the background while leia shows its progress, and `Esc` stops it. Once every field has been
 counted, the field table's title shows the total and the `%` column each field's share of it.
 Like Lucene's own statistics, the counts include deleted documents that no merge has removed yet.
 
@@ -240,7 +246,7 @@ viewer fetches them whole.
 
 `b` on the search screen narrows the documents screen to the documents that match the query
 (ADR 0031), or that have a stored value the regex finds (ADR 0032), `B` to those including the
-deleted ones. The server finds every match once, without
+deleted ones. leia finds every match once, without
 scoring, and keeps them as one bit per document. The documents screen then starts on the selected
 hit, `←` `→` step to the previous or next match in document id order, and the title says
 `filter <query>: 3 of 19`. A document shown some other way, such as from a hit of another search,
@@ -367,7 +373,7 @@ prefix length and position increments for both parsers, and fuzzy max edits, whi
 and auto-generated phrases for the classic one. For date ranges written with `DateTools`, such as
 `published:[1/1/26 TO 1/31/26]`, the popup sets the date resolution, the locale the dates are
 written in (`en-US`, `de-DE`) and the time zone they are read in (`UTC`, `Europe/Berlin`). Without
-a resolution, the bounds stay text. Without a time zone, they are read in the server JVM's zone,
+a resolution, the bounds stay text. Without a time zone, they are read in the JVM's zone,
 as Lucene does (ADR 0026). A term query searches the field for
 the line exactly as typed, `:` and spaces included, without analysis. A changed setting searches
 again.
@@ -421,7 +427,7 @@ the first 10,000. Each hit shows its stored fields, all of them or those chosen 
 values cut. A document opened from a hit steps through the hits with `[` and `]` on the documents
 screen, fetching the next page as needed. The details panel shows
 the parsed and the rewritten query, or after `x` the explanation of the selected hit as Lucene
-computes it; parts that don't match are dimmed. Searches and explanations run in the server, so
+computes it; parts that don't match are dimmed. Searches and explanations run in the background, so
 `Esc` stops a slow one, such as a fuzzy query on a large index. A numeric range in classic syntax
 doesn't match point fields: use the standard syntax.
 
@@ -488,7 +494,7 @@ the tokens are kept, and the filler) and then in a token limit (`LimitTokenCount
 turns either on or off, and each is one more step after the analyzer's own. The custom chain starts as the
 standard tokenizer and lowercase, which is what the `StandardAnalyzer` does. Resource files, such
 as `words` of `stop` or `synonyms` of `synonymGraph`, are read from the config directory first and
-then from the classpath and the jars, which have Lucene's own word lists. The server builds the analyzer before
+then from the classpath and the jars, which have Lucene's own word lists. leia builds the analyzer before
 it takes it: if it can't, the builder stays open and says why.
 
 The steps are the text after each char filter and the tokens after the tokenizer and each token
@@ -509,24 +515,13 @@ stays open.
 
 ## Building
 
-| Part | Needs |
-|---|---|
-| server (`leia-core`, `leia-protocol`, `leia-server`) | a Java 17+ runtime to start the Gradle wrapper; Gradle downloads the Java 25 toolchain itself |
-| TUI (`tui/`) | a stable Rust toolchain via rustup (`tui/rust-toolchain.toml`) |
-| Windows cross-build | [`cargo-zigbuild`](https://github.com/rust-cross/cargo-zigbuild) and [zig](https://ziglang.org) |
+Building needs a Java 17+ runtime to start the Gradle wrapper; Gradle downloads the Java 25
+toolchain itself.
 
 ```sh
 ./gradlew build                      # compile, test, check formatting
-./gradlew :leia-server:shadowJar     # → leia-server/build/libs/leia-server.jar
-
-cd tui
-cargo build --release                # → tui/target/release/leia
-```
-
-To run a development build, point leia at the jar:
-
-```sh
-LEIA_SERVER_JAR=$PWD/leia-server/build/libs/leia-server.jar cargo run --manifest-path tui/Cargo.toml -- <index>
+./gradlew :leia-tui:leiaFolder       # → leia-tui/build/leia/ (leia.jar, leia, leia.cmd)
+leia-tui/build/leia/leia <index>     # run it
 ```
 
 For an index to try things on, `./gradlew :leia-core:demoIndex` writes a demo index with a field for
@@ -539,29 +534,15 @@ nearly everything leia shows to `leia-core/build/test-indexes/demo`; see
 ./build-dist.sh
 ```
 
-This builds the jar and the TUI for Linux and Windows (x86_64) into
-`dist/leia-<version>-linux-x86_64/` and `dist/leia-<version>-windows-x86_64/`. Each folder holds the
-executable and `leia-server.jar`, and can be copied anywhere.
+This builds `dist/leia-<version>-linux-x86_64/` and `dist/leia-<version>-windows-x86_64/`. Each
+folder holds `leia.jar` and the scripts `leia` and `leia.cmd`, and can be copied anywhere.
 
 ## How it works
 
-```
-leia (Rust TUI)  ──spawns──▶  java -jar leia-server.jar
-   child stdin   ── JSON-RPC 2.0 request,  one per line ──▶
-   child stdout  ◀── JSON-RPC 2.0 response, one per line ──
-   child stderr  ── server logs, kept out of the terminal
-```
-
-The Java server (Lucene 10, plus the backward codecs for Lucene 9 indexes) does all the index work,
-and the Rust TUI ([ratatui](https://ratatui.rs)) only displays it. Every method has typed DTOs on
-both sides, which are checked against the shared golden files in
-[`protocol/fixtures/`](protocol/fixtures/).
-
-To talk to the server by hand:
-
-```sh
-jq -c . protocol/fixtures/version.request.json | java -jar leia-server/build/libs/leia-server.jar
-```
+leia is one Java application. The terminal UI ([TamboUI](https://tamboui.dev)) calls a backend in
+the same JVM, which does all the index work with Lucene 10, plus the backward codecs for Lucene 9
+indexes. Each call takes a params record and returns a result record, and runs on one backend
+thread, so the UI never waits for Lucene; long scans run as jobs that the UI polls and can cancel.
 
 More detail for contributors: [`AGENTS.md`](AGENTS.md) (layout, rules, commands) and the
 architecture decisions in [`docs/adr/`](docs/adr/).

@@ -1,6 +1,6 @@
 package io.github.mfuerstenau.leia.protocol.analysis;
 
-/** Kuromoji's {@code JapaneseTokenizer.Mode} (ADR 0023); serialized as its name. */
+/** Kuromoji's {@code JapaneseTokenizer.Mode} (ADR 0023). */
 public enum JapaneseMode {
     /** Ordinary segmentation, without decompounding. */
     NORMAL,

@@ -2,18 +2,9 @@
 
 The work queue for leia. Check items off (`[x]`) as they land, and keep it aligned with the "Remaining / next" section of the latest entry in `docs/SESSION-SUMMARIES.md`. Finished items move to `docs/tasklist-done.md`.
 
-## Now — move the TUI to TamboUI (feature freeze)
-
-**Feature freeze:** nothing from the backlog below starts until this section is done. Fixes to the Rust TUI are fine; new features are not, in either UI. Settled on 2026-10-09: one JVM, with the TamboUI app calling the server's handlers in-process; launcher scripts `leia`/`leia.cmd` that run `java -jar leia.jar`; no Rust left.
-
-- [ ] Remove the old path: the whole `tui/` crate (and the Rust steps of the build), `protocol/fixtures/` and the fixture tests, the JSON-RPC transport (`RpcServer`, `Dispatcher`, `RequestScanner`, `LeiaServer`'s stdio loop), the envelope and Jackson setup in `leia-protocol` (`Request`, `Response`, `JsonRpcVersion`, `ProtocolJson`, `ProtocolAnnotationIntrospector`, the Jackson annotations), `protocol/error-codes.json`, and Jackson if nothing else needs it (ADR 0034 §6)
-- [ ] Update `AGENTS.md` (architecture, hard rules 2–4 → the one rule of ADR 0034 §6, tech stack, commands, CLI contract), `README.md` and `build-dist.sh` (one `leia.jar` plus `leia` and `leia.cmd`; no cargo, cargo-zigbuild or zig)
-
 ## Backlog — future capabilities
 
-Frozen until the TamboUI migration above is done.
-
-From the read-only checklist in `luke-features.md` §7. Ordered roughly by value. Each area will need its own protocol methods, fixtures and probably an ADR for the cross-cutting parts.
+From the read-only checklist in `luke-features.md` §7. Ordered roughly by value. Each area will need its own records, handlers and probably an ADR for the cross-cutting parts.
 
 - [ ] Search: a date resolution per field (ADR 0026 has one for all fields)
 - [ ] Search: a prefix match on sorted, sorted-set and binary doc values (left out of ADR 0033)

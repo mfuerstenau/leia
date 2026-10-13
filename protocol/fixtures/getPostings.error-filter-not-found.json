@@ -1,8 +1,0 @@
-{
-  "jsonrpc": "2.0",
-  "id": 11,
-  "error": {
-    "code": -32018,
-    "message": "No filter 31: unknown, released, replaced, or of an index that was closed or reopened"
-  }
-}

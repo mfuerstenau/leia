@@ -8,10 +8,6 @@ import io.github.mfuerstenau.leia.core.DirectoryOnlyIndex;
 import io.github.mfuerstenau.leia.core.IndexOpenException;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
-import io.github.mfuerstenau.leia.protocol.Methods;
-import io.github.mfuerstenau.leia.protocol.ProtocolJson;
-import io.github.mfuerstenau.leia.protocol.Request;
-import io.github.mfuerstenau.leia.protocol.Response;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
 import io.github.mfuerstenau.leia.protocol.index.IndexEntry;
@@ -26,8 +22,8 @@ import io.github.mfuerstenau.leia.server.job.Jobs;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import java.util.OptionalInt;
 import org.apache.lucene.document.Document;
@@ -42,7 +38,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-import org.junit.jupiter.params.provider.EnumSource;
 
 class OpenIndexHandlerTest {
 
@@ -203,49 +198,12 @@ class OpenIndexHandlerTest {
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.INVALID_PARAMS));
     }
 
-    /**
-     * Each reason has its own error code, and an error fixture named after that code: {@code
-     * openIndex.error-index-not-found.json} for {@code INDEX_NOT_FOUND}.
-     */
-    @ParameterizedTest
-    @EnumSource(IndexOpenException.Reason.class)
-    void everyReasonHasAnErrorCodeAndFixture(IndexOpenException.Reason reason) throws IOException {
-        ErrorCode code = OpenIndexHandler.errorCode(reason);
-        String fixture =
-                "openIndex.error-" + code.name().toLowerCase(Locale.ROOT).replace('_', '-') + ".json";
-
-        Response<?> response =
-                ProtocolJson.mapper().readValue(fixture(fixture), ProtocolJson.responseType(Methods.OPEN_INDEX));
-
-        assertThat(response.error())
-                .hasValueSatisfying(error -> assertThat(error.code()).isEqualTo(code));
-    }
-
+    /** Each reason has an error code of its own. */
     @Test
-    void requestFixtureIsReadAsOpenIndexParams() throws IOException {
-        Request<OpenIndexParams> request = ProtocolJson.mapper()
-                .readValue(fixture("openIndex.request.json"), ProtocolJson.requestType(Methods.OPEN_INDEX));
-
-        assertThat(request.params().path()).isEqualTo("/data/indexes/products");
-        assertThat(request.params().directoryImpl()).isEmpty();
-        assertThat(request.params().mode()).isEmpty();
-    }
-
-    @Test
-    void directoryFixtureIsReadAsOpenIndexParams() throws IOException {
-        Request<OpenIndexParams> request = ProtocolJson.mapper()
-                .readValue(fixture("openIndex.request-directory.json"), ProtocolJson.requestType(Methods.OPEN_INDEX));
-
-        assertThat(request.params().directoryImpl()).contains(DirectoryImpl.NIO);
-    }
-
-    @Test
-    void directoryOnlyFixtureIsReadAsOpenIndexParams() throws IOException {
-        Request<OpenIndexParams> request = ProtocolJson.mapper()
-                .readValue(
-                        fixture("openIndex.request-directory-only.json"), ProtocolJson.requestType(Methods.OPEN_INDEX));
-
-        assertThat(request.params().mode()).contains(OpenMode.DIRECTORY_ONLY);
+    void everyReasonHasAnErrorCodeOfItsOwn() {
+        assertThat(Arrays.stream(IndexOpenException.Reason.values()).map(OpenIndexHandler::errorCode))
+                .doesNotHaveDuplicates()
+                .hasSize(IndexOpenException.Reason.values().length);
     }
 
     private static Path writeIndex(Path dir, int docs) throws IOException {
@@ -259,11 +217,5 @@ class OpenIndexHandlerTest {
             writer.commit();
         }
         return dir;
-    }
-
-    private static String fixture(String name) throws IOException {
-        return Files.readString(Path.of(System.getProperty("leia.protocol.dir"))
-                .resolve("fixtures")
-                .resolve(name));
     }
 }

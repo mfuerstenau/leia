@@ -1,7 +1,7 @@
 # AGENTS.md — leia
 
 leia is a **read-only Lucene index inspector**, an alternative to Luke (the Swing tool shipped with Lucene).
-It has two parts: a Java backend that does all the Lucene work, and a Rust/ratatui terminal UI that talks to it over JSON-RPC on a pipe.
+It is one Java application: a TamboUI terminal UI that calls a backend in the same JVM, which does all the Lucene work (ADR 0034).
 
 - Work queue and milestones: `docs/tasklist.md`
 - Architecture decisions: `docs/adr/`
@@ -10,47 +10,37 @@ It has two parts: a Java backend that does all the Lucene work, and a Rust/ratat
 ## Architecture
 
 ```
-leia (Rust TUI)  ──spawns──▶  <java> -jar leia-server.jar
-   child stdin   ── JSON-RPC 2.0 request  (one JSON object per line) ──▶
-   child stdout  ◀── JSON-RPC 2.0 response (one JSON object per line) ──
-   child stderr  ── server logs (never protocol data)
+leia / leia.cmd  ──finds the JVM, runs──▶  <java> -jar leia.jar
+   leia-tui (TamboUI, UI thread)
+      │ LeiaBackend.call(RpcMethod<P, R>, P) → CompletableFuture<R>
+      ▼
+   leia-server (one backend thread, Dagger-built handlers) ──▶ leia-core (Lucene)
+   logs → leia.log (ADR 0034 §7), never the terminal
 ```
 
 | Path | Role |
 |---|---|
-| `leia-core/` | Java library with the Lucene functionality. No JSON-RPC, Jackson or I/O-transport code. |
-| `leia-protocol/` | Java DTOs (records) for every JSON-RPC method's params/result, and Jackson configuration. |
-| `leia-server/` | JSON-RPC server over stdin/stdout, with Dagger wiring. Maps core results to protocol DTOs. Builds the **fat jar** `leia-server.jar`. Also the library that `leia-tui` calls in-process, through `LeiaBackend` (ADR 0034). |
-| `leia-tui/` | The TamboUI UI of ADR 0034, which replaces `tui/`. So far it holds the app shell (`…tui.app`, `…tui.prompt`), with placeholders for the screens that aren't ported yet. Builds the **fat jar** `leia.jar`. |
-| `tui/` | Rust crate `leia` (library + binary): ratatui frontend that spawns the server and holds the protocol DTOs as serde structs in `tui/src/protocol/`. |
-| `protocol/fixtures/` | Golden JSON files shared by both sides: the wire contract (naming: `protocol/fixtures/README.md`). |
-| `protocol/error-codes.json` | The error-code catalogue that both `ErrorCode` enums are checked against. |
+| `leia-core/` | Java library with the Lucene functionality. No UI or protocol code. |
+| `leia-protocol/` | Records for every method's params and result, `Methods` (the registry), `RpcMethod` and `ErrorCode`: the API between the UI and the backend. |
+| `leia-server/` | Library: a handler per method, with Dagger wiring, mapping core results to the records. `LeiaBackend` runs the calls in order on one thread; `RpcException` carries an expected failure's `ErrorCode`. |
+| `leia-tui/` | The application: the CLI (`Cli`, `Main`), the version-check entry class `Launcher` (compiled for Java 8), the log, and a package per screen (`…tui.overview`, `…tui.documents`, …). Builds the **fat jar** `leia.jar`; the scripts `leia` and `leia.cmd` are in `leia-tui/src/scripts/`. |
 | `docs/` | `adr/`, `tasklist.md`, `SESSION-SUMMARIES.md`, `demo-index.md` (the manual-testing index). |
 
-Dependency direction: `leia-server → leia-protocol`, `leia-server → leia-core`, `leia-tui → leia-server`, `leia-tui → leia-protocol` (`leia-tui` can't compile against core or Lucene). `leia-core` and `leia-protocol` do not depend on each other.
+Dependency direction: `leia-server → leia-protocol` (api), `leia-server → leia-core`, `leia-tui → leia-server`, `leia-tui → leia-protocol` (`leia-tui` can't compile against core or Lucene). `leia-core` and `leia-protocol` do not depend on each other.
 
 ## Hard rules
 
 1. **Read-only.** Never open an `IndexWriter`, never write a lock, and never modify files in an index directory. Luke's `[write]` features are out of scope.
-2. **stdout belongs to the protocol.** In the server, nothing may write to `System.out` except the JSON-RPC writer. All logging goes to stderr.
-3. **No ad-hoc serialization.** Every method has explicit DTOs on both sides: a Java record in `leia-protocol` and a serde struct/enum in `tui/src/protocol/`. Don't use `JsonNode`/`Map<String, Object>` or `serde_json::Value`/`json!` for params or results.
-4. **Protocol changes are atomic.** If you add or change a method or DTO, update in the same change:
-   - the Java DTO
-   - the Rust DTO
-   - `protocol/fixtures/<method>.request.json` and `<method>.response.json` (plus error fixtures where relevant)
-   - the round-trip tests on both sides
-   - the method registries: `Methods` (Java), and `METHOD_NAMES` plus the dispatch in `tui/src/protocol/fixture_tests.rs` (Rust)
-
-   Both test suites deserialize each fixture, re-serialize it and compare it to the fixture as JSON, so drift fails the build. Optional fields are `Optional*` in Java and `Option<T>` in Rust. Every other field is required. See ADR 0001 and ADR 0003.
-5. **Lucene 9 and 10 indexes must open.** Keep `lucene-backward-codecs` on the server classpath and keep a test that opens a Lucene 9 index.
-6. **Keep core Lucene-only.** UI concepts belong in the TUI, and wire concepts belong in protocol/server.
-7. **Long-running work is a job** (ADR 0005). Anything that can take long (a term scan, check index, …) runs as a server job behind `start<Op>` / `get<Op>`, with `cancelJob` to stop it, and never blocks the request loop. Cancellation is cooperative through `ScanProgress`: never call `Thread.interrupt` on a thread that reads an index (it breaks `NIOFSDirectory`).
+2. **The UI reaches an index only through `LeiaBackend.call` and the protocol records** (ADR 0034 §6). The build keeps core and Lucene off `leia-tui`'s compile classpath.
+3. **Every method has explicit records.** A method is a params and a result record in `leia-protocol`, an entry in `Methods`, and a handler in `leia-server` bound in `HandlerModule` (`Handlers` fails if one is missing). A field is optional exactly when it is `Optional*`; every other field is required. No `Map<String, Object>` or other untyped params or results.
+4. **The terminal belongs to the UI.** Logs go to `leia.log` (ADR 0034 §7). While the UI runs, `System.out` and `System.err` go into the log too, so nothing may rely on printing to them.
+5. **Lucene 9 and 10 indexes must open.** Keep `lucene-backward-codecs` on the runtime classpath and keep a test that opens a Lucene 9 index.
+6. **Keep core Lucene-only.** UI concepts belong in the TUI, and API concepts belong in protocol/server.
+7. **Long-running work is a job** (ADR 0005). Anything that can take long (a term scan, check index, …) runs as a backend job behind `start<Op>` / `get<Op>`, with `cancelJob` to stop it, and never blocks the backend thread. Cancellation is cooperative through `ScanProgress`: never call `Thread.interrupt` on a thread that reads an index (it breaks `NIOFSDirectory`).
 
 ## Tech stack
 
-**Java:** Java 25 via a Gradle toolchain · Gradle 9 (Kotlin DSL, version catalog in `gradle/libs.versions.toml`) · Lucene 10 (+ backward-codecs, queryparser) · Dagger 2.60 (annotation processor, no reflection DI) · Jackson 3 (`tools.jackson.*`) · JUnit 6 + AssertJ · Spotless with Palantir Java Format · Shadow for the fat jar. Base package and group: `io.github.mfuerstenau.leia` (`.core`, `.protocol`, `.server`). Shared build config lives in the `build-logic/` convention plugins (`leia.java-conventions`, `leia.java-library-conventions`); see ADR 0002.
-
-**Rust:** standard tooling — stable toolchain, edition 2024, `rustfmt`, `clippy` (warnings are errors in CI), `cargo test`. Crates: ratatui, serde/serde_json, anyhow, clap. Release builds for Linux and Windows on x86_64; no macOS, no bundled Java (ADR 0004).
+Java 25 via a Gradle toolchain · Gradle 9 (Kotlin DSL, version catalog in `gradle/libs.versions.toml`) · Lucene 10 (+ backward-codecs, queryparser) · Dagger 2.60 (annotation processor, no reflection DI) · TamboUI 0.5.0, pinned (the Panama backend, with JLine 3 as the fallback) · Jackson 3 (`tools.jackson.*`), only in `leia-tui`, for the viewer's JSON and the document export · JUnit 6 + AssertJ, and TamboUI's Pilot for UI flows · Spotless with Palantir Java Format · Shadow for the fat jar. Base package and group: `io.github.mfuerstenau.leia` (`.core`, `.protocol`, `.server`, `.tui`). Shared build config lives in the `build-logic/` convention plugins (`leia.java-conventions`, `leia.java-library-conventions`); see ADR 0002. Release folders for Linux and Windows on x86_64; no macOS, no bundled Java (ADR 0004, amended by ADR 0034).
 
 ## Commands
 
@@ -59,45 +49,36 @@ The Gradle wrapper only needs some Java 17+ runtime to start, for example `JAVA_
 Keep these in sync with the build:
 
 ```sh
-./gradlew build              # compile, test, spotlessCheck
+./gradlew build              # compile, test (also each module's jarsTest), spotlessCheck
 ./gradlew spotlessApply      # format Java
-./gradlew :leia-server:shadowJar   # fat jar → leia-server/build/libs/leia-server.jar
-./gradlew :leia-tui:shadowJar      # the TamboUI TUI (ADR 0034) → leia-tui/build/libs/leia.jar
+./gradlew :leia-tui:shadowJar      # fat jar → leia-tui/build/libs/leia.jar
 ./gradlew :leia-tui:leiaFolder     # leia.jar with the leia and leia.cmd scripts → leia-tui/build/leia/
 ./gradlew :leia-core:demoIndex     # demo index for manual testing → leia-core/build/test-indexes/demo (docs/demo-index.md)
 ./gradlew :leia-server:analysisModules   # Lucene's unbundled analysis modules → leia-server/build/analysis-modules/<module>/ (ADR 0016)
-./build-dist.sh              # jar + TUI for Linux and Windows → dist/leia-<version>-<os>-x86_64/
-                             # (Windows via cargo-zigbuild + zig, from PATH or ~/.local/opt/zig-*)
+./build-dist.sh              # leia.jar, leia and leia.cmd → dist/leia-<version>-{linux,windows}-x86_64/
 
-cd tui
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
-cargo test
-cargo test -- --ignored   # against the real server: needs LEIA_SERVER_JAR, a Java 25 JAVA_HOME, the
-                          # test indexes, the test analysis jars and the test codec jar from ./gradlew build
-                          # (leia-core/build/test-indexes/, test-analysis-jars/, test-codec-jar/)
-cargo build --release
+leia-tui/build/leia/leia <index>   # run a development build (needs a Java 25 JAVA_HOME or --java)
 ```
 
 Run the formatters and linters before calling work done.
 
-To talk to the server by hand: `jq -c . protocol/fixtures/version.request.json | java -Dleia.log.level=FINE -jar leia-server/build/libs/leia-server.jar`. At `FINE`, every request and response is also logged to stderr.
+To see every call and its result, start leia with `LEIA_OPTS=-Dleia.log.level=FINE` and read the log: `$XDG_STATE_HOME/leia/leia.log` (`~/.local/state/leia/leia.log`), or `%LOCALAPPDATA%\leia\leia.log` on Windows. It is written anew on each start. Tests that go through `LeiaBackend` as the UI does (`RealBackend`, `DemoIndexTest`, `Lucene9BackendTest`, `JarsBackendTest`) are the way to try a method without the UI.
 
 ## TUI CLI contract
 
 - `leia [OPTIONS] [INDEX_PATH]`
-- `-j, --java <PATH>`: the JVM, given as a `java` executable or a JDK/JRE directory. Default: `$JAVA_HOME/bin/java`, then `java` on `PATH`.
-- `--jar <PATH>` (repeatable): a jar with analysis components, codecs or formats of its own, or a directory of such jars. The TUI checks that the path exists and passes it to the server as `--jar <PATH>`, which loads it at startup (ADR 0016, ADR 0018). `--version` starts the server without them.
-- `--no-default-jars`: don't load the jars of the default folder, `$XDG_CONFIG_HOME/leia/jars` (`~/.config/leia/jars`) or `%APPDATA%\leia\jars` on Windows. Without it, the TUI passes the folder to the server as one more `--jar` after the others, if it has a jar in it (ADR 0024). `X` adds more jars at runtime through `addJars`.
+- `-j, --java <PATH>`: the JVM, given as a `java` executable or a JDK/JRE directory. Default: `$JAVA_HOME/bin/java`, then `java` on `PATH`. The scripts handle it; `leia.jar` never sees it.
+- The scripts run the `leia.jar` in their own folder (`leia` resolves symlinks, `leia.cmd` doesn't). `LEIA_OPTS` holds options for the JVM, split at spaces and put before `-jar`. A wrong command line exits with 2; a JVM or `leia.jar` the script can't find exits with 1; otherwise the script passes on Java's exit status (ADR 0034 §8).
+- `leia.jar` checks for Java 25 first, through `Launcher`, and says what is needed.
+- `--jar <PATH>` (repeatable): a jar with analysis components, codecs or formats of its own, or a directory of such jars. leia checks that the path exists and loads it at startup (ADR 0016, ADR 0018). `--version` doesn't load them.
+- `--no-default-jars`: don't load the jars of the default folder, `$XDG_CONFIG_HOME/leia/jars` (`~/.config/leia/jars`) or `%APPDATA%\leia\jars` on Windows. Without it, the folder is loaded after the jars of `--jar`, if it has a jar in it (ADR 0024). `X` adds more jars at runtime through `addJars`.
 - `--directory <fs|mmap|nio>`: the Lucene `Directory` to open indexes through (ADR 0020). Default: `fs`, which is Lucene's `FSDirectory.open`. The open prompt can change it with Ctrl+D.
 - `--no-reader`: open `INDEX_PATH` without a reader, so that only its commits can be read and its indexes checked (ADR 0021, ADR 0022). The open prompt does the same with Ctrl+N.
 - `INDEX_PATH` may be a directory with indexes below it, which open as one (ADR 0021).
-- `leia-server.jar` is looked up next to the executable (symlinks resolved). For development, `LEIA_SERVER_JAR=<path>` overrides it.
-- `--version` prints the name, version and build of leia, plus the Java version actually in use. The Java version comes from the server, which needs a `version` RPC method.
+- `--version` prints the name, version and build of leia, plus the Java version actually in use (through the `version` method).
 
-## Reference material (read-only, sibling directories)
+## Reference material (read-only, sibling directory)
 
-- `../json-rpc-sample`: working example of the transport, JVM discovery (`--java`) and cross-builds. Reuse its patterns, but replace its `serde_json::Value` params with typed DTOs.
 - `../lucene-cli/lucene/luke`: source for *what* to compute (`models/**`, `models/util/IndexUtils.java`). Do **not** copy its architecture (Swing, global state, eager term counting).
 
 ## Project workflow

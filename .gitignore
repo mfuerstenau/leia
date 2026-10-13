@@ -7,11 +7,6 @@ build/
 hs_err_pid*
 replay_pid*
 
-# --- Rust ---
-target/
-**/*.rs.bk
-*.pdb
-
 # --- Distribution output ---
 dist/
 

@@ -7,8 +7,6 @@ import io.github.mfuerstenau.leia.core.DirectoryImpl;
 import io.github.mfuerstenau.leia.core.DirectoryOnlyIndex;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
-import io.github.mfuerstenau.leia.protocol.ProtocolJson;
-import io.github.mfuerstenau.leia.protocol.Response;
 import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.StandardAnalyzer;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
@@ -28,8 +26,6 @@ import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -166,15 +162,13 @@ class FilterHandlersTest {
     void checksThePatternAtOnce() throws Exception {
         openIndex();
 
-        assertFails(
-                () -> start.handle(byPattern("(red", false, Optional.empty(), false)),
-                errorCodeOf("startStoredScan.error-invalid-query.json"));
+        assertFails(() -> start.handle(byPattern("(red", false, Optional.empty(), false)), ErrorCode.INVALID_QUERY);
         assertFails(
                 () -> start.handle(byPattern("red", false, Optional.of(List.of("missing")), false)),
                 ErrorCode.FIELD_NOT_FOUND);
         assertFails(
                 () -> start.handle(new StartFilterParams(Optional.empty(), Optional.empty(), false)),
-                errorCodeOf("startFilter.error-invalid-params.json"));
+                ErrorCode.INVALID_PARAMS);
         assertFails(
                 () -> start.handle(new StartFilterParams(
                         Optional.of(classic("red")),
@@ -224,9 +218,7 @@ class FilterHandlersTest {
         assertFails(() -> start.handle(byQuery(classic("red"), false)), ErrorCode.NO_INDEX_OPEN);
         openIndex();
 
-        assertFails(
-                () -> start.handle(byQuery(classic("title:(lamp"), false)),
-                errorCodeOf("startFilter.error-invalid-query.json"));
+        assertFails(() -> start.handle(byQuery(classic("title:(lamp"), false)), ErrorCode.INVALID_QUERY);
         assertFails(() -> start.handle(byQuery(classic("red", "missing"), false)), ErrorCode.FIELD_NOT_FOUND);
 
         currentIndex.replace(DirectoryOnlyIndex.open(tmp.resolve("index"), DirectoryImpl.FS));
@@ -236,7 +228,7 @@ class FilterHandlersTest {
 
     @Test
     void anUnknownFilterIsNotFound() throws Exception {
-        assertFails(() -> step(42, 0, true), errorCodeOf("stepFilter.error-filter-not-found.json"));
+        assertFails(() -> step(42, 0, true), ErrorCode.FILTER_NOT_FOUND);
     }
 
     private Optional<FilterMatch> step(long filterId, int fromDoc, boolean forward) throws RpcException {
@@ -306,13 +298,5 @@ class FilterHandlersTest {
         assertThatThrownBy(call)
                 .isInstanceOfSatisfying(
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(code));
-    }
-
-    private static ErrorCode errorCodeOf(String fixture) throws IOException {
-        String json = Files.readString(Path.of(System.getProperty("leia.protocol.dir"))
-                .resolve("fixtures")
-                .resolve(fixture));
-        Response<?> response = ProtocolJson.mapper().readValue(json, ProtocolJson.responseType(Object.class));
-        return response.error().orElseThrow().code();
     }
 }

@@ -1,6 +1,6 @@
 package io.github.mfuerstenau.leia.protocol.analysis;
 
-/** Whether a preset analyzer takes stop words or stem exclusions (ADR 0017); serialized as its name. */
+/** Whether a preset analyzer takes stop words or stem exclusions (ADR 0017). */
 public enum WordSetSupport {
     /** It doesn't take the set. */
     NONE,

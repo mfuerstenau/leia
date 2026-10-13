@@ -19,7 +19,7 @@ import java.util.logging.StreamHandler;
  * belongs to the UI, or to stderr for {@code --version}.
  *
  * <p>The level comes from the system property {@code leia.log.level}, and the format from {@code
- * java.util.logging.SimpleFormatter.format} if it is set, as in the server.
+ * java.util.logging.SimpleFormatter.format} if it is set.
  */
 final class LeiaLog {
 

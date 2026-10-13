@@ -1,8 +1,0 @@
-{
-  "jsonrpc": "2.0",
-  "id": 62,
-  "method": "getFilter",
-  "params": {
-    "jobId": 31
-  }
-}

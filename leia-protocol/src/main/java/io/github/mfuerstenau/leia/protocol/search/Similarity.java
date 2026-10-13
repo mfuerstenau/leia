@@ -1,6 +1,5 @@
 package io.github.mfuerstenau.leia.protocol.search;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.Optional;
 
 /**
@@ -8,10 +7,9 @@ import java.util.Optional;
  *
  * @param bm25 Lucene's default, {@code BM25Similarity}
  * @param classic TF-IDF, {@code ClassicSimilarity}
- * @param booleanSimilarity {@code BooleanSimilarity}: a matching term scores its boost; {@code
- *     boolean} on the wire
+ * @param booleanSimilarity {@code BooleanSimilarity}: a matching term scores its boost
  */
 public record Similarity(
         Optional<Bm25Similarity> bm25,
         Optional<ClassicSimilarity> classic,
-        @JsonProperty("boolean") Optional<BooleanSimilarity> booleanSimilarity) {}
+        Optional<BooleanSimilarity> booleanSimilarity) {}

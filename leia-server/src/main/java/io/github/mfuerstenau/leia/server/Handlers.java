@@ -6,23 +6,18 @@ import io.github.mfuerstenau.leia.protocol.RpcMethod;
 import jakarta.inject.Inject;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
 
-/**
- * The handler of every method in {@link Methods}, for both ways in: {@link Dispatcher} looks them up
- * by name, {@link LeiaBackend} by {@link RpcMethod} (ADR 0034).
- */
+/** The handler of every method in {@link Methods}, which {@link LeiaBackend} looks up by {@link RpcMethod}. */
 final class Handlers {
 
     private static final Logger LOG = Logger.getLogger(Handlers.class.getName());
 
     private final Map<RpcMethod<?, ?>, MethodHandler<?, ?>> byMethod;
-    private final Map<String, MethodHandler<?, ?>> byName;
 
     /**
      * @throws IllegalStateException if a method in {@link Methods} has no handler
@@ -30,9 +25,6 @@ final class Handlers {
     @Inject
     Handlers(Set<MethodHandler<?, ?>> handlers) {
         byMethod = handlers.stream().collect(Collectors.toUnmodifiableMap(MethodHandler::method, Function.identity()));
-        byName = handlers.stream()
-                .collect(
-                        Collectors.toUnmodifiableMap(handler -> handler.method().name(), Function.identity()));
         List<String> unhandled = Methods.ALL.stream()
                 .filter(method -> !byMethod.containsKey(method))
                 .map(RpcMethod::name)
@@ -52,11 +44,6 @@ final class Handlers {
         @SuppressWarnings("unchecked")
         MethodHandler<P, R> typed = (MethodHandler<P, R>) handler;
         return typed;
-    }
-
-    /** The handler of the method called {@code name}, if there is one. */
-    Optional<MethodHandler<?, ?>> named(String name) {
-        return Optional.ofNullable(byName.get(name));
     }
 
     /**

@@ -1,6 +1,6 @@
 package io.github.mfuerstenau.leia.protocol.document;
 
-/** Where the terms of a {@link ReconstructedField} come from; serialized as its name. */
+/** Where the terms of a {@link ReconstructedField} come from. */
 public enum ReconstructSource {
     /** The document's term vector, which holds all that the postings hold. */
     TERM_VECTOR,

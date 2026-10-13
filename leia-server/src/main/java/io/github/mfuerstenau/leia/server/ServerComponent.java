@@ -9,8 +9,6 @@ import jakarta.inject.Singleton;
 @Component(modules = {ServerModule.class, HandlerModule.class})
 interface ServerComponent {
 
-    RpcServer server();
-
     Handlers handlers();
 
     CurrentIndex currentIndex();

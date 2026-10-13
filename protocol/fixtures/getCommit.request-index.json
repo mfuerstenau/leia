@@ -1,9 +1,0 @@
-{
-  "jsonrpc": "2.0",
-  "id": 13,
-  "method": "getCommit",
-  "params": {
-    "generation": 4,
-    "index": 1
-  }
-}

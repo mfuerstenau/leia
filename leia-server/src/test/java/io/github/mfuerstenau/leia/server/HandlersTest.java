@@ -20,13 +20,11 @@ class HandlersTest {
     }
 
     @Test
-    void findsTheHandlerByMethodAndByName() {
+    void findsTheHandlerByMethod() {
         MethodHandler<VersionParams, VersionResult> version = TestHandlers.handler(Methods.VERSION, params -> null);
         Handlers handlers = TestHandlers.with(version);
 
         assertThat(handlers.get(Methods.VERSION)).isSameAs(version);
-        assertThat(handlers.named("version")).containsSame(version);
-        assertThat(handlers.named("frobnicate")).isEmpty();
     }
 
     @Test

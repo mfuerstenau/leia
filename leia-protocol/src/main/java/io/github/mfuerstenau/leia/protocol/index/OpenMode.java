@@ -1,6 +1,6 @@
 package io.github.mfuerstenau.leia.protocol.index;
 
-/** How {@code openIndex} opens the indexes of a path (ADR 0021); serialized as its name. */
+/** How {@code openIndex} opens the indexes of a path (ADR 0021). */
 public enum OpenMode {
     /** With a reader: everything can be read. */
     READER,

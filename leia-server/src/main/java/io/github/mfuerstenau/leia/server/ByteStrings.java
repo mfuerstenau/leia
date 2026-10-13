@@ -8,13 +8,13 @@ import java.util.HexFormat;
 import org.apache.lucene.util.BytesRef;
 
 /**
- * Byte strings on the wire (ADR 0006): as text if the bytes are valid UTF-8, otherwise as lowercase
+ * Byte strings in the records (ADR 0006): as text if the bytes are valid UTF-8, otherwise as lowercase
  * hex, marked as binary.
  */
 public final class ByteStrings {
 
     /**
-     * A byte string as it goes on the wire.
+     * A byte string as it goes into a record.
      *
      * @param value the text, or the hex if {@code binary}
      * @param binary whether the bytes are not valid UTF-8
@@ -43,7 +43,7 @@ public final class ByteStrings {
     }
 
     /**
-     * The bytes of a byte string from the wire: the UTF-8 of the text, or else the bytes in hex.
+     * The bytes of a byte string from a record: the UTF-8 of the text, or else the bytes in hex.
      *
      * @throws IllegalArgumentException if {@code binary} and {@code value} is not valid hex
      */

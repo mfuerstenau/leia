@@ -1,6 +1,6 @@
 package io.github.mfuerstenau.leia.protocol.analysis;
 
-/** What a preset analyzer takes besides its word sets (ADR 0023); serialized as its name. */
+/** What a preset analyzer takes besides its word sets (ADR 0023). */
 public enum PresetOption {
     /** {@code maxTokenLength}. */
     MAX_TOKEN_LENGTH,

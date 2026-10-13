@@ -55,7 +55,7 @@ public final class AddJarsHandler implements MethodHandler<AddJarsParams, AddJar
         }
         if (!added.jars().isEmpty()) {
             LOG.info(() -> "Added the jars " + added.jars());
-            // Job threads are started from this thread, and inherit its loader (as in LeiaServer).
+            // Job threads are started from this thread, and inherit its loader (as in LeiaBackend.start).
             Thread.currentThread().setContextClassLoader(ExtensionJars.classLoader());
         }
         io.github.mfuerstenau.leia.core.JarComponents components = added.added();

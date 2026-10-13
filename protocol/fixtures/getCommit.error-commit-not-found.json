@@ -1,8 +1,0 @@
-{
-  "jsonrpc": "2.0",
-  "id": 13,
-  "error": {
-    "code": -32011,
-    "message": "No commit of generation 7 in the index"
-  }
-}

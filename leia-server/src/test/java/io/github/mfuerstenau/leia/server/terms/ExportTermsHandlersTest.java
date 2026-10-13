@@ -7,8 +7,6 @@ import io.github.mfuerstenau.leia.core.DirectoryImpl;
 import io.github.mfuerstenau.leia.core.DirectoryOnlyIndex;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
-import io.github.mfuerstenau.leia.protocol.ProtocolJson;
-import io.github.mfuerstenau.leia.protocol.Response;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.terms.ExportTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetExportTermsResult;
@@ -18,7 +16,6 @@ import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
-import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -96,8 +93,6 @@ class ExportTermsHandlersTest {
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.OUTPUT_NOT_WRITABLE))
                 .hasMessage("Not writing into the index directory " + dir + ": leia never changes an index");
         assertThat(dir.resolve("terms.out")).doesNotExist();
-        assertThat(errorCodeOf("startExportTerms.error-output-not-writable.json"))
-                .isEqualTo(ErrorCode.OUTPUT_NOT_WRITABLE);
     }
 
     @Test
@@ -167,13 +162,5 @@ class ExportTermsHandlersTest {
         assertThatThrownBy(call)
                 .isInstanceOfSatisfying(
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(code));
-    }
-
-    private static ErrorCode errorCodeOf(String fixture) throws IOException {
-        String json = Files.readString(Path.of(System.getProperty("leia.protocol.dir"))
-                .resolve("fixtures")
-                .resolve(fixture));
-        Response<?> response = ProtocolJson.mapper().readValue(json, ProtocolJson.responseType(Object.class));
-        return response.error().orElseThrow().code();
     }
 }

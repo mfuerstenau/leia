@@ -6,8 +6,6 @@ import static org.assertj.core.api.Assertions.tuple;
 
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
-import io.github.mfuerstenau.leia.protocol.ProtocolJson;
-import io.github.mfuerstenau.leia.protocol.Response;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalysisComponent;
 import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.CustomAnalyzer;
@@ -55,8 +53,6 @@ import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -165,8 +161,6 @@ class SearchHandlersTest {
                 .hasMessageStartingWith("Invalid query: Cannot parse 'body:(red'")
                 .hasMessageNotContaining("\n");
         assertFails(() -> startExplain.handle(new StartExplainParams(broken, BM25, 0)), ErrorCode.INVALID_QUERY);
-        assertThat(errorCodeOf("startSearch.error-invalid-query.json")).isEqualTo(ErrorCode.INVALID_QUERY);
-        assertThat(errorCodeOf("getSearch.error-invalid-query.json")).isEqualTo(ErrorCode.INVALID_QUERY);
     }
 
     @Test
@@ -692,7 +686,6 @@ class SearchHandlersTest {
 
         assertFails(
                 () -> startExplain.handle(new StartExplainParams(classic("red"), BM25, 3)), ErrorCode.DOC_NOT_FOUND);
-        assertThat(errorCodeOf("startExplain.error-doc-not-found.json")).isEqualTo(ErrorCode.DOC_NOT_FOUND);
     }
 
     @Test
@@ -977,13 +970,5 @@ class SearchHandlersTest {
         assertThatThrownBy(call)
                 .isInstanceOfSatisfying(
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(code));
-    }
-
-    private static ErrorCode errorCodeOf(String fixture) throws IOException {
-        String json = Files.readString(Path.of(System.getProperty("leia.protocol.dir"))
-                .resolve("fixtures")
-                .resolve(fixture));
-        Response<?> response = ProtocolJson.mapper().readValue(json, ProtocolJson.responseType(Object.class));
-        return response.error().orElseThrow().code();
     }
 }

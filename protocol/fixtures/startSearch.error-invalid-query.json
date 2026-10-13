@@ -1,8 +1,0 @@
-{
-  "jsonrpc": "2.0",
-  "id": 20,
-  "error": {
-    "code": -32012,
-    "message": "Invalid query: Cannot parse 'title:(lamp': Encountered \"<EOF>\" at line 1, column 11."
-  }
-}

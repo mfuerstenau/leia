@@ -1,6 +1,6 @@
 package io.github.mfuerstenau.leia.protocol.document;
 
-/** The type a value was stored as; serialized as its name. */
+/** The type a value was stored as. */
 public enum StoredType {
     STRING,
     BINARY,

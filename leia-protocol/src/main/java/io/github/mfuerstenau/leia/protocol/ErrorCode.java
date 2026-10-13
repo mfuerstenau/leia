@@ -1,17 +1,10 @@
 package io.github.mfuerstenau.leia.protocol;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
-import com.fasterxml.jackson.annotation.JsonValue;
-
 /**
- * Every error code the server can send, serialized as its number. The JSON-RPC codes come first,
- * then leia's own codes from {@code -32000} downward. Mirrored by {@code ErrorCode} in {@code
- * tui/src/protocol/error.rs} and checked against {@code protocol/error-codes.json}.
+ * Every error code of an expected failure, with the number that the UI shows next to its name. The
+ * codes taken from JSON-RPC come first, then leia's own codes from {@code -32000} downward.
  */
 public enum ErrorCode {
-    PARSE_ERROR(-32700),
-    INVALID_REQUEST(-32600),
-    METHOD_NOT_FOUND(-32601),
     INVALID_PARAMS(-32602),
     INTERNAL_ERROR(-32603),
 
@@ -72,18 +65,7 @@ public enum ErrorCode {
         this.code = code;
     }
 
-    @JsonValue
     public int code() {
         return code;
-    }
-
-    @JsonCreator
-    public static ErrorCode of(int code) {
-        for (ErrorCode errorCode : values()) {
-            if (errorCode.code == code) {
-                return errorCode;
-            }
-        }
-        throw new IllegalArgumentException("Unknown error code " + code);
     }
 }

@@ -1,8 +1,0 @@
-{
-  "jsonrpc": "2.0",
-  "id": 41,
-  "error": {
-    "code": -32017,
-    "message": "Cannot add the jars: cannot load the analysis factories: java.lang.NoClassDefFoundError: org/apache/commons/codec/Encoder"
-  }
-}

@@ -1,7 +1,7 @@
 package io.github.mfuerstenau.leia.protocol.search;
 
 /**
- * Where documents without a value go in a field sort (ADR 0025); serialized as its name.
+ * Where documents without a value go in a field sort (ADR 0025).
  */
 public enum SortMissing {
     /** Lucene's default: as 0 in a numeric sort, first in an ascending {@code STRING} sort. */

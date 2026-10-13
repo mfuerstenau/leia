@@ -7,8 +7,6 @@ import io.github.mfuerstenau.leia.core.DirectoryImpl;
 import io.github.mfuerstenau.leia.core.DirectoryOnlyIndex;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
-import io.github.mfuerstenau.leia.protocol.ProtocolJson;
-import io.github.mfuerstenau.leia.protocol.Response;
 import io.github.mfuerstenau.leia.protocol.document.GetReconstructResult;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructSource;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructedField;
@@ -22,7 +20,6 @@ import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -119,8 +116,6 @@ class ReconstructHandlersTest {
                 .isInstanceOfSatisfying(
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.INVALID_PARAMS))
                 .hasMessage("Invalid params: the field 'number' is not indexed, so it has no terms to rebuild");
-        assertThat(errorCodeOf("startReconstruct.error-field-not-found.json")).isEqualTo(ErrorCode.FIELD_NOT_FOUND);
-        assertThat(errorCodeOf("startReconstruct.error-not-indexed.json")).isEqualTo(ErrorCode.INVALID_PARAMS);
     }
 
     @Test
@@ -176,13 +171,5 @@ class ReconstructHandlersTest {
         assertThatThrownBy(call)
                 .isInstanceOfSatisfying(
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(code));
-    }
-
-    private static ErrorCode errorCodeOf(String fixture) throws IOException {
-        String json = Files.readString(Path.of(System.getProperty("leia.protocol.dir"))
-                .resolve("fixtures")
-                .resolve(fixture));
-        Response<?> response = ProtocolJson.mapper().readValue(json, ProtocolJson.responseType(Object.class));
-        return response.error().orElseThrow().code();
     }
 }

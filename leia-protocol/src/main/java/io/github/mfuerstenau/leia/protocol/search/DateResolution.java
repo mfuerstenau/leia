@@ -2,7 +2,7 @@ package io.github.mfuerstenau.leia.protocol.search;
 
 /**
  * How precisely the dates of a range were indexed, as Lucene's {@code DateTools.Resolution}
- * (ADR 0026); serialized as its name.
+ * (ADR 0026).
  */
 public enum DateResolution {
     YEAR,

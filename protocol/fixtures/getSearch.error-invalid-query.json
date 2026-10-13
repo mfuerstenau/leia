@@ -1,8 +1,0 @@
-{
-  "jsonrpc": "2.0",
-  "id": 21,
-  "error": {
-    "code": -32012,
-    "message": "Invalid query: maxClauseCount is set to 1024"
-  }
-}
