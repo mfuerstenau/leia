@@ -1,5 +1,7 @@
 package io.github.mfuerstenau.leia.core;
 
+import java.io.IOException;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -31,6 +33,9 @@ public record CommitDetails(CommitInfo commit, List<Segment> segments, List<Comm
      * @param minVersion the oldest Lucene version that wrote a part of it; empty if unknown
      * @param codec the codec name
      * @param formats the formats of the codec
+     * @param fieldFormats the postings, doc values and KNN vectors format of each field, read from
+     *     the segment's field infos and sorted by field name (ADR 0037); empty if they can't be read
+     * @param fieldInfosError why the field infos can't be read; empty if they can
      * @param compound whether the segment is in a compound file
      * @param hasBlocks whether the segment has document blocks (parent and child documents)
      * @param indexSort the sort of the segment's documents; empty if it is not sorted
@@ -52,12 +57,34 @@ public record CommitDetails(CommitInfo commit, List<Segment> segments, List<Comm
             Optional<Version> minVersion,
             String codec,
             CodecFormats formats,
+            List<FieldFormats> fieldFormats,
+            Optional<IOException> fieldInfosError,
             boolean compound,
             boolean hasBlocks,
             Optional<String> indexSort,
             OptionalLong sizeInBytes,
             Map<String, String> diagnostics,
-            Map<String, String> attributes) {}
+            Map<String, String> attributes) {
+
+        /** Why the field infos can't be read, as opening an index would say; empty if they can. */
+        public Optional<String> fieldInfosMessage() {
+            // The path only shows in "not an index", which reading field infos never is.
+            return fieldInfosError.map(
+                    error -> ReadOnlyIndex.translate(Path.of(name), error).getMessage());
+        }
+    }
+
+    /**
+     * The formats of a field, as its field infos name them (ADR 0037). A format is the per-field
+     * attribute that Lucene's per-field formats write; without it, the codec's format.
+     *
+     * @param field the field name
+     * @param postings the postings format; empty if the field isn't indexed
+     * @param docValues the doc values format; empty if the field has no doc values
+     * @param knnVectors the KNN vectors format; empty if the field has no vectors
+     */
+    public record FieldFormats(
+            String field, Optional<String> postings, Optional<String> docValues, Optional<String> knnVectors) {}
 
     /**
      * The formats of a codec: the name of a named format, otherwise the simple class name.

@@ -16,17 +16,25 @@ import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.codecs.DocValuesFormat;
 import org.apache.lucene.codecs.KnnVectorsFormat;
 import org.apache.lucene.codecs.PostingsFormat;
+import org.apache.lucene.codecs.perfield.PerFieldDocValuesFormat;
+import org.apache.lucene.codecs.perfield.PerFieldKnnVectorsFormat;
+import org.apache.lucene.codecs.perfield.PerFieldPostingsFormat;
+import org.apache.lucene.index.DocValuesType;
+import org.apache.lucene.index.FieldInfo;
+import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.IndexFileNames;
+import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.index.SegmentCommitInfo;
 import org.apache.lucene.index.SegmentInfo;
 import org.apache.lucene.index.SegmentInfos;
 import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.IOContext;
 import org.apache.lucene.util.StringHelper;
 
 /**
- * Reads the commits of an index directory from their {@code segments_N} and {@code .si} files
- * (ADR 0009). Every call reads the directory again, so it sees commits written after the index was
- * opened. Nothing is written.
+ * Reads the commits of an index directory from their {@code segments_N}, {@code .si} and {@code
+ * .fnm} files (ADR 0009, ADR 0037). Every call reads the directory again, so it sees commits written
+ * after the index was opened. Nothing is written.
  */
 final class CommitReader {
 
@@ -80,7 +88,7 @@ final class CommitReader {
         List<CommitDetails.Segment> segments = new ArrayList<>();
         int docBase = 0;
         for (SegmentCommitInfo segment : infos) {
-            segments.add(segment(segment, docBase, files));
+            segments.add(segment(directory, segment, docBase, files));
             docBase += segment.info.maxDoc();
         }
         return Optional.of(
@@ -116,8 +124,15 @@ final class CommitReader {
     }
 
     private static CommitDetails.Segment segment(
-            SegmentCommitInfo segment, int docBase, List<CommitDetails.CommitFile> files) {
+            Directory directory, SegmentCommitInfo segment, int docBase, List<CommitDetails.CommitFile> files) {
         SegmentInfo info = segment.info;
+        List<CommitDetails.FieldFormats> fieldFormats = List.of();
+        Optional<IOException> fieldInfosError = Optional.empty();
+        try {
+            fieldFormats = fieldFormats(directory, segment);
+        } catch (IOException e) {
+            fieldInfosError = Optional.of(e);
+        }
         return new CommitDetails.Segment(
                 info.name,
                 StringHelper.idToString(info.getId()),
@@ -132,12 +147,67 @@ final class CommitReader {
                 Optional.ofNullable(info.getMinVersion()),
                 info.getCodec().getName(),
                 formats(info.getCodec()),
+                fieldFormats,
+                fieldInfosError,
                 info.getUseCompoundFile(),
                 info.getHasBlocks(),
                 Optional.ofNullable(info.getIndexSort()).map(Object::toString),
                 segmentSize(info.name, files),
                 new TreeMap<>(info.getDiagnostics()),
                 new TreeMap<>(info.getAttributes()));
+    }
+
+    /**
+     * The formats of each field, sorted by name, from the segment's field infos, read as {@code
+     * SegmentReader} reads them: the latest update if there is one, otherwise the segment's own,
+     * which may be in its compound file (ADR 0037). Only names are read, so a format that isn't
+     * loaded is no error.
+     */
+    private static List<CommitDetails.FieldFormats> fieldFormats(Directory directory, SegmentCommitInfo segment)
+            throws IOException {
+        SegmentInfo info = segment.info;
+        Codec codec = info.getCodec();
+        FieldInfos fieldInfos;
+        if (segment.hasFieldUpdates()) {
+            String suffix = Long.toString(segment.getFieldInfosGen(), Character.MAX_RADIX);
+            fieldInfos = codec.fieldInfosFormat().read(directory, info, suffix, IOContext.READONCE);
+        } else if (info.getUseCompoundFile()) {
+            try (Directory compound = codec.compoundFormat().getCompoundReader(directory, info)) {
+                fieldInfos = codec.fieldInfosFormat().read(compound, info, "", IOContext.READONCE);
+            }
+        } else {
+            fieldInfos = codec.fieldInfosFormat().read(directory, info, "", IOContext.READONCE);
+        }
+        List<CommitDetails.FieldFormats> formats = new ArrayList<>();
+        for (FieldInfo field : fieldInfos) {
+            formats.add(new CommitDetails.FieldFormats(
+                    field.name,
+                    format(
+                            field,
+                            field.getIndexOptions() != IndexOptions.NONE,
+                            PerFieldPostingsFormat.PER_FIELD_FORMAT_KEY,
+                            codec.postingsFormat()),
+                    format(
+                            field,
+                            field.getDocValuesType() != DocValuesType.NONE,
+                            PerFieldDocValuesFormat.PER_FIELD_FORMAT_KEY,
+                            codec.docValuesFormat()),
+                    format(
+                            field,
+                            field.hasVectorValues(),
+                            PerFieldKnnVectorsFormat.PER_FIELD_FORMAT_KEY,
+                            codec.knnVectorsFormat())));
+        }
+        formats.sort(Comparator.comparing(CommitDetails.FieldFormats::field));
+        return List.copyOf(formats);
+    }
+
+    /** The per-field attribute {@code key} if the field has the format, otherwise the codec's. */
+    private static Optional<String> format(FieldInfo field, boolean has, String key, Object codecFormat) {
+        if (!has) {
+            return Optional.empty();
+        }
+        return Optional.of(Optional.ofNullable(field.getAttribute(key)).orElseGet(() -> formatName(codecFormat)));
     }
 
     /** Lucene's generations are -1 when there is none. */

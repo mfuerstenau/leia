@@ -10,6 +10,7 @@ import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.commits.Commit;
 import io.github.mfuerstenau.leia.protocol.commits.CommitFile;
+import io.github.mfuerstenau.leia.protocol.commits.FieldFormats;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
@@ -74,12 +75,31 @@ class CommitHandlersTest {
         assertThat(first.luceneVersion()).isEqualTo(Version.LATEST.toString());
         assertThat(first.formats().postings()).isEqualTo("PerField40");
         assertThat(first.diagnostics()).containsEntry("source", "flush");
+        assertThat(first.fieldFormats())
+                .containsExactly(new FieldFormats("id", Optional.of("Lucene104"), Optional.empty(), Optional.empty()));
+        assertThat(first.fieldInfosError()).isEmpty();
         assertThat(result.segments().get(1).docBase()).isEqualTo(2);
         assertThat(result.files())
                 .filteredOn(file -> file.name().equals("segments_2"))
                 .singleElement()
                 .extracting(CommitFile::segment)
                 .isEqualTo(Optional.empty());
+    }
+
+    @Test
+    void fieldInfosThatCantBeReadAreAnErrorOfTheirSegment() throws Exception {
+        Path dir = openIndex();
+        Files.delete(dir.resolve("_1.cfs"));
+
+        GetCommitResult result = getCommit.handle(new GetCommitParams(2));
+
+        assertThat(result.segments().getFirst().fieldFormats()).hasSize(1);
+        Segment broken = result.segments().get(1);
+        assertThat(broken.fieldFormats()).isEmpty();
+        assertThat(broken.fieldInfosError())
+                .hasValueSatisfying(message -> assertThat(message)
+                        .startsWith("Corrupt index, missing file: ")
+                        .contains("_1.cfs"));
     }
 
     @Test

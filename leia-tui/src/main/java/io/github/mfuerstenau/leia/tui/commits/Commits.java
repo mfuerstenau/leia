@@ -22,6 +22,7 @@ import dev.tamboui.widgets.table.TableState;
 import io.github.mfuerstenau.leia.protocol.commits.CodecFormats;
 import io.github.mfuerstenau.leia.protocol.commits.Commit;
 import io.github.mfuerstenau.leia.protocol.commits.CommitFile;
+import io.github.mfuerstenau.leia.protocol.commits.FieldFormats;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.commits.Segment;
@@ -739,7 +740,7 @@ public final class Commits {
 
     /**
      * The details of a segment: its documents and versions, then its diagnostics, attributes, codec
-     * formats and files.
+     * formats, the formats its fields use (ADR 0037) and its files.
      */
     static List<Line> segmentLines(Segment segment, GetCommitResult details) {
         String docs = switch (segment.maxDoc()) {
@@ -779,6 +780,7 @@ public final class Commits {
         formatPairs.put("live docs", formats.liveDocs());
         formatPairs.put("compound", formats.compound());
         section(lines, "Codec formats", formatPairs);
+        fieldFormatSection(lines, segment);
         List<CommitFile> files = details.files().stream()
                 .filter(file -> file.segment().filter(segment.name()::equals).isPresent())
                 .toList();
@@ -827,6 +829,63 @@ public final class Commits {
             int padding = Math.max(width - escaped.codePointCount(0, escaped.length()), 0);
             lines.add(Line.from(escaped + " ".repeat(padding) + "  " + TextFormat.escapeControl(value)));
         });
+    }
+
+    /**
+     * A blank line, the bold heading "Field formats", and for postings, doc values and KNN vectors a
+     * line per format with the fields that use it; "none" if no field uses one, and why in red if
+     * the field infos can't be read.
+     */
+    private static void fieldFormatSection(List<Line> lines, Segment segment) {
+        lines.add(Line.empty());
+        lines.add(Line.styled("Field formats", Style.EMPTY.bold()));
+        if (segment.fieldInfosError().isPresent()) {
+            lines.add(Line.styled(
+                    "Could not be read: "
+                            + TextFormat.escapeControl(segment.fieldInfosError().get()),
+                    Style.EMPTY.red()));
+            return;
+        }
+        Map<String, Function<FieldFormats, Optional<String>>> kinds = new LinkedHashMap<>();
+        kinds.put("postings", FieldFormats::postings);
+        kinds.put("doc values", FieldFormats::docValues);
+        kinds.put("KNN vectors", FieldFormats::knnVectors);
+        // Each row: the kind (blank after its first format), the format, its fields.
+        List<String[]> rows = new ArrayList<>();
+        kinds.forEach((kind, format) -> {
+            Map<String, List<String>> fieldsOfFormat = new TreeMap<>();
+            for (FieldFormats field : segment.fieldFormats()) {
+                format.apply(field)
+                        .ifPresent(name -> fieldsOfFormat
+                                .computeIfAbsent(name, _ -> new ArrayList<>())
+                                .add(field.field()));
+            }
+            String key = kind;
+            for (Map.Entry<String, List<String>> entry : fieldsOfFormat.entrySet()) {
+                rows.add(new String[] {
+                    key,
+                    TextFormat.escapeControl(entry.getKey()),
+                    entry.getValue().stream().map(TextFormat::escapeControl).collect(Collectors.joining(", "))
+                });
+                key = "";
+            }
+        });
+        if (rows.isEmpty()) {
+            lines.add(Line.styled("none", Style.EMPTY.dim()));
+            return;
+        }
+        int kindWidth = rows.stream().mapToInt(row -> row[0].length()).max().orElse(0);
+        int formatWidth = Math.min(
+                rows.stream()
+                        .mapToInt(row -> row[1].codePointCount(0, row[1].length()))
+                        .max()
+                        .orElse(0),
+                KEY_WIDTH);
+        for (String[] row : rows) {
+            int padding = Math.max(formatWidth - row[1].codePointCount(0, row[1].length()), 0);
+            lines.add(Line.from(row[0] + " ".repeat(kindWidth - row[0].length()) + "  " + row[1] + " ".repeat(padding)
+                    + "  " + row[2]));
+        }
     }
 
     /** The files with their sizes, and with {@code withSegment} the segment they belong to. */

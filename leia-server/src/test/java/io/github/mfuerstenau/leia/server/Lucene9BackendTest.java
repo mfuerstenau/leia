@@ -10,6 +10,7 @@ import static org.assertj.core.api.Assertions.tuple;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.commits.Commit;
+import io.github.mfuerstenau.leia.protocol.commits.FieldFormats;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
@@ -157,6 +158,12 @@ class Lucene9BackendTest {
                 .isEqualTo(1);
         assertThat(details.segments())
                 .allSatisfy(segment -> assertThat(segment.codec()).startsWith("Lucene9"));
+        // Read through the backward codecs (hard rule 5).
+        assertThat(details.segments())
+                .allSatisfy(segment -> assertThat(segment.fieldFormats())
+                        .extracting(FieldFormats::field, FieldFormats::postings)
+                        .containsExactly(
+                                tuple("body", Optional.of("Lucene912")), tuple("id", Optional.of("Lucene912"))));
         assertThat(details.files()).anySatisfy(file -> {
             assertThat(file.name()).isEqualTo("segments_2");
             assertThat(file.segment()).isEmpty();

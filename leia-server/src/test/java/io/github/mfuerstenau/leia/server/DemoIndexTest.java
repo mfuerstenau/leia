@@ -15,6 +15,7 @@ import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeParams;
 import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.CustomAnalyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.Token;
+import io.github.mfuerstenau.leia.protocol.commits.FieldFormats;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
@@ -127,6 +128,33 @@ class DemoIndexTest {
                     .extracting(Segment::name, Segment::docBase, Segment::maxDoc, Segment::compound)
                     .containsExactly(
                             tuple("_0", 0, 200, true), tuple("_1", 200, 200, true), tuple("_2", 400, 100, false));
+            // The same formats per field, in a compound segment and a plain one.
+            for (Segment segment : List.of(segments.get(0), segments.get(2))) {
+                assertThat(segment.fieldInfosError()).as(segment.name()).isEmpty();
+                assertThat(segment.fieldFormats())
+                        .as(segment.name())
+                        .filteredOn(field -> List.of("category", "checksum", "embedding", "fingerprint", "_source")
+                                .contains(field.field()))
+                        .containsExactly(
+                                new FieldFormats("_source", Optional.empty(), Optional.empty(), Optional.empty()),
+                                new FieldFormats(
+                                        "category",
+                                        Optional.of("Lucene104"),
+                                        Optional.of("Lucene90"),
+                                        Optional.empty()),
+                                new FieldFormats(
+                                        "checksum", Optional.empty(), Optional.of("Lucene90"), Optional.empty()),
+                                new FieldFormats(
+                                        "embedding",
+                                        Optional.empty(),
+                                        Optional.empty(),
+                                        Optional.of("Lucene99HnswVectorsFormat")),
+                                new FieldFormats(
+                                        "fingerprint",
+                                        Optional.empty(),
+                                        Optional.empty(),
+                                        Optional.of("Lucene99HnswVectorsFormat")));
+            }
             List<Integer> deleted = new ArrayList<>();
             for (int doc = 37; doc < 500; doc += 37) {
                 deleted.add(doc);

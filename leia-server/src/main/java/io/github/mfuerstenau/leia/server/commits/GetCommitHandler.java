@@ -8,6 +8,7 @@ import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
 import io.github.mfuerstenau.leia.protocol.commits.CodecFormats;
 import io.github.mfuerstenau.leia.protocol.commits.CommitFile;
+import io.github.mfuerstenau.leia.protocol.commits.FieldFormats;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.Segment;
@@ -17,6 +18,8 @@ import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import jakarta.inject.Inject;
 import java.io.EOFException;
 import java.io.IOException;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.index.IndexFormatTooNewException;
 import org.apache.lucene.index.IndexFormatTooOldException;
@@ -24,6 +27,8 @@ import org.apache.lucene.util.Version;
 
 /** {@code getCommit}: one commit of the {@link CurrentIndex}'s directory whole (ADR 0009). */
 public final class GetCommitHandler implements MethodHandler<GetCommitParams, GetCommitResult> {
+
+    private static final Logger LOG = Logger.getLogger(GetCommitHandler.class.getName());
 
     private final CurrentIndex currentIndex;
 
@@ -66,6 +71,14 @@ public final class GetCommitHandler implements MethodHandler<GetCommitParams, Ge
                     "Cannot read the commit of generation " + generation + ": " + e.getMessage(),
                     e);
         }
+        for (CommitDetails.Segment segment : details.segments()) {
+            segment.fieldInfosError()
+                    .ifPresent(error -> LOG.log(
+                            Level.WARNING,
+                            error,
+                            () -> "Cannot read the field infos of segment " + segment.name() + " in commit "
+                                    + generation + ": " + error.getMessage()));
+        }
         return new GetCommitResult(
                 GetCommitsHandler.commit(details.commit()),
                 details.segments().stream().map(GetCommitHandler::segment).toList(),
@@ -101,6 +114,11 @@ public final class GetCommitHandler implements MethodHandler<GetCommitParams, Ge
                         formats.segmentInfo(),
                         formats.liveDocs(),
                         formats.compound()),
+                segment.fieldFormats().stream()
+                        .map(field -> new FieldFormats(
+                                field.field(), field.postings(), field.docValues(), field.knnVectors()))
+                        .toList(),
+                segment.fieldInfosMessage(),
                 segment.compound(),
                 segment.hasBlocks(),
                 segment.indexSort(),

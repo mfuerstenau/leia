@@ -3,12 +3,16 @@ package io.github.mfuerstenau.leia.tui.commits;
 import static io.github.mfuerstenau.leia.tui.TestScreens.key;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.tamboui.style.Style;
+import dev.tamboui.text.Line;
+import dev.tamboui.text.Span;
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.tui.event.KeyModifiers;
 import io.github.mfuerstenau.leia.protocol.commits.CodecFormats;
 import io.github.mfuerstenau.leia.protocol.commits.Commit;
 import io.github.mfuerstenau.leia.protocol.commits.CommitFile;
+import io.github.mfuerstenau.leia.protocol.commits.FieldFormats;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.commits.Segment;
@@ -41,6 +45,32 @@ class CommitsTest {
     }
 
     private static Segment segment(String name, int docBase, int maxDoc, long size) {
+        return segment(
+                name,
+                docBase,
+                maxDoc,
+                size,
+                List.of(
+                        new FieldFormats("body", Optional.of("Lucene104"), Optional.empty(), Optional.empty()),
+                        new FieldFormats(
+                                "category", Optional.of("Lucene104"), Optional.of("Lucene90"), Optional.empty()),
+                        new FieldFormats(
+                                "embedding",
+                                Optional.empty(),
+                                Optional.empty(),
+                                Optional.of("Lucene99HnswVectorsFormat")),
+                        new FieldFormats("id", Optional.of("FST50"), Optional.empty(), Optional.empty()),
+                        new FieldFormats("stored", Optional.empty(), Optional.empty(), Optional.empty())),
+                Optional.empty());
+    }
+
+    private static Segment segment(
+            String name,
+            int docBase,
+            int maxDoc,
+            long size,
+            List<FieldFormats> fieldFormats,
+            Optional<String> fieldInfosError) {
         return new Segment(
                 name,
                 "ab52725f4ed21286179cc2af33ded2b1",
@@ -66,6 +96,8 @@ class CommitsTest {
                         "Lucene99SegmentInfoFormat",
                         "Lucene90LiveDocsFormat",
                         "Lucene90CompoundFormat"),
+                fieldFormats,
+                fieldInfosError,
                 name.equals("_0"),
                 false,
                 Optional.empty(),
@@ -191,18 +223,59 @@ class CommitsTest {
 
         commits.handleKey(key(KeyCode.ENTER));
         commits.handleKey(key(KeyCode.DOWN));
-        screen = render(commits, 140, 40);
+        screen = render(commits, 140, 50);
         assertThat(screen)
                 .contains("Segment _1")
                 .contains("Documents 400–499 · 3 deleted")
                 .contains("timestamp  1000000000000 (2001-09-09 01:46:40 UTC)")
                 .contains("postings       PerField40")
+                .contains("KNN vectors  Lucene99HnswVectorsFormat  embedding")
                 // Only the segment's own files.
                 .contains("Files (1, size unknown)");
 
         // Tab to the details keeps the segment.
         commits.handleKey(key(KeyCode.TAB));
         assertThat(render(commits, 140, 40)).contains("Segment _1");
+    }
+
+    @Test
+    void theSegmentDetailsGroupTheFieldsByFormat() {
+        GetCommitResult details = details(4, true);
+        assertThat(Commits.segmentLines(details.segments().getFirst(), details))
+                .extracting(Line::rawContent)
+                .containsSubsequence(
+                        "Field formats",
+                        "postings     FST50                      id",
+                        "             Lucene104                  body, category",
+                        "doc values   Lucene90                   category",
+                        "KNN vectors  Lucene99HnswVectorsFormat  embedding",
+                        "",
+                        "Files (2, 2.0 KiB)");
+    }
+
+    @Test
+    void theSegmentDetailsSayWhenNoFieldHasAFormat() {
+        Segment segment = segment(
+                "_0",
+                0,
+                1,
+                2048,
+                List.of(new FieldFormats("stored", Optional.empty(), Optional.empty(), Optional.empty())),
+                Optional.empty());
+        GetCommitResult details = new GetCommitResult(commit(4, true), List.of(segment), List.of());
+        assertThat(Commits.segmentLines(segment, details))
+                .extracting(Line::rawContent)
+                .containsSubsequence("Field formats", "none", "", "Files (0, 0 B)");
+    }
+
+    @Test
+    void theSegmentDetailsSayWhyTheFieldInfosCouldNotBeRead() {
+        Segment segment = segment("_0", 0, 1, 2048, List.of(), Optional.of("Corrupt index, missing file: _0.fnm"));
+        GetCommitResult details = new GetCommitResult(commit(4, true), List.of(segment), List.of());
+        List<Line> lines = Commits.segmentLines(segment, details);
+        Line error = lines.get(lines.indexOf(Line.styled("Field formats", Style.EMPTY.bold())) + 1);
+        assertThat(error.rawContent()).isEqualTo("Could not be read: Corrupt index, missing file: _0.fnm");
+        assertThat(error.spans()).extracting(Span::style).containsOnly(Style.EMPTY.red());
     }
 
     @Test

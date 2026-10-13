@@ -8,7 +8,6 @@ From the read-only checklist in `docs/luke-features.md` §7. Ordered roughly by 
 
 - [ ] Analysis: `PerFieldAnalyzerWrapper`, `QueryAutoStopWordAnalyzer` (needs an `IndexReader`), the collation analyzers (need a `Collator`) and `JapaneseCompletionAnalyzer` (left out of ADR 0023)
 - [ ] Open options: Elasticsearch/OpenSearch indexes (left out of ADR 0018): their codecs need the server's `lib/`, which has its own `lucene-*.jar` of another version; skipping those jars, or saying which ones clash, untested without an installation
-- [ ] Commits: per-field postings, doc values and KNN vectors formats (from each segment's field infos; ADR 0009 leaves them out)
 - [ ] Tools: check only the selected index or segments, and the thread count (left out of ADR 0022)
 - [ ] Tools: export terms with `totalTermFreq` and a marker for binary terms (left out of ADR 0022, which keeps Luke's format)
 - [ ] Misc: log view with level filter, cross-screen navigation (`docs/luke-features.md` §5), themes, about

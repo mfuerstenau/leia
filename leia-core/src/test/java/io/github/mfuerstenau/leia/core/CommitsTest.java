@@ -6,16 +6,24 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
 import io.github.mfuerstenau.leia.core.CommitDetails.CommitFile;
+import io.github.mfuerstenau.leia.core.CommitDetails.FieldFormats;
 import io.github.mfuerstenau.leia.core.CommitDetails.Segment;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
+import org.apache.lucene.document.KnnFloatVectorField;
+import org.apache.lucene.document.NumericDocValuesField;
+import org.apache.lucene.document.SortedDocValuesField;
+import org.apache.lucene.document.StoredField;
 import org.apache.lucene.document.StringField;
+import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.NoDeletionPolicy;
@@ -24,6 +32,7 @@ import org.apache.lucene.index.Term;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.store.NoLockFactory;
+import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.Version;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -204,6 +213,82 @@ class CommitsTest {
         }
     }
 
+    @Test
+    void readsTheFormatsOfEachFieldInCompoundAndPlainSegments() throws Exception {
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(writeFormatsIndex())) {
+            CommitDetails details = index.commit(0, 2).orElseThrow();
+
+            assertThat(details.segments()).extracting(Segment::compound).containsExactly(true, false);
+            assertThat(details.segments()).allSatisfy(segment -> {
+                assertThat(segment.fieldInfosError()).isEmpty();
+                assertThat(segment.fieldFormats()).isEqualTo(DEFAULT_FIELD_FORMATS);
+            });
+        }
+    }
+
+    @Test
+    void readsTheFormatsOfEachFieldFromAFieldInfosUpdate() throws Exception {
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(writeFormatsIndex())) {
+            Segment updated = index.commit(0, 3).orElseThrow().segments().getFirst();
+
+            assertThat(updated.fieldInfosGen()).hasValue(1);
+            assertThat(updated.compound()).isTrue();
+            assertThat(updated.fieldFormats()).isEqualTo(DEFAULT_FIELD_FORMATS);
+        }
+    }
+
+    @Test
+    void fieldInfosThatCantBeReadDontFailTheCommit() throws Exception {
+        Path dir = writeFormatsIndex();
+        Files.delete(dir.resolve("_1.fnm"));
+        try (Directory directory = FSDirectory.open(dir, NoLockFactory.INSTANCE)) {
+            CommitDetails details = CommitReader.commit(directory, 2, 2).orElseThrow();
+
+            assertThat(details.segments().getFirst().fieldFormats()).isEqualTo(DEFAULT_FIELD_FORMATS);
+            Segment broken = details.segments().get(1);
+            assertThat(broken.fieldFormats()).isEmpty();
+            assertThat(broken.fieldInfosError()).containsInstanceOf(NoSuchFileException.class);
+            assertThat(broken.fieldInfosMessage())
+                    .hasValueSatisfying(message -> assertThat(message)
+                            .startsWith("Corrupt index, missing file: ")
+                            .contains("_1.fnm"));
+        }
+    }
+
+    @Test
+    void readsTheFormatsOfFieldsWhoseFormatsAreNotLoaded() throws Exception {
+        try (Directory directory = FSDirectory.open(testIndex("custom-formats"), NoLockFactory.INSTANCE)) {
+            CommitDetails details = CommitReader.commit(directory, 1, 1).orElseThrow();
+
+            assertThat(details.segments()).isNotEmpty().allSatisfy(segment -> {
+                assertThat(segment.fieldInfosError()).isEmpty();
+                assertThat(segment.fieldFormats()).isNotEmpty().allSatisfy(field -> {
+                    field.postings().ifPresent(name -> assertThat(name).isEqualTo("LeiaTestPostings"));
+                    field.docValues().ifPresent(name -> assertThat(name).isEqualTo("LeiaTestDocValues"));
+                    field.knnVectors().ifPresent(name -> assertThat(name).isEqualTo("LeiaTestKnnVectors"));
+                });
+                assertThat(segment.fieldFormats())
+                        .anySatisfy(field -> assertThat(field.postings()).isPresent())
+                        .anySatisfy(field -> assertThat(field.docValues()).isPresent())
+                        .anySatisfy(field -> assertThat(field.knnVectors()).isPresent());
+            });
+        }
+    }
+
+    @Test
+    void readsTheFieldFormatsOfALucene9Index() throws Exception {
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(testIndex("lucene9"))) {
+            long generation = index.commits(0).commits().getFirst().generation();
+
+            Segment segment =
+                    index.commit(0, generation).orElseThrow().segments().getFirst();
+            assertThat(segment.fieldInfosError()).isEmpty();
+            assertThat(segment.fieldFormats())
+                    .extracting(FieldFormats::field, FieldFormats::postings)
+                    .contains(tuple("body", Optional.of("Lucene912")), tuple("id", Optional.of("Lucene912")));
+        }
+    }
+
     private static CommitFile file(CommitDetails details, String name) {
         return details.files().stream()
                 .filter(file -> file.name().equals(name))
@@ -230,6 +315,46 @@ class CommitsTest {
             writer.commit();
         }
         return dir;
+    }
+
+    /** The formats of {@link #formatsDoc}'s fields in Lucene's default codec. */
+    private static final List<FieldFormats> DEFAULT_FIELD_FORMATS = List.of(
+            new FieldFormats("body", Optional.of("Lucene104"), Optional.empty(), Optional.empty()),
+            new FieldFormats("id", Optional.of("Lucene104"), Optional.empty(), Optional.empty()),
+            new FieldFormats("rank", Optional.empty(), Optional.of("Lucene90"), Optional.empty()),
+            new FieldFormats("stored", Optional.empty(), Optional.empty(), Optional.empty()),
+            new FieldFormats("tag", Optional.of("Lucene104"), Optional.of("Lucene90"), Optional.empty()),
+            new FieldFormats("vector", Optional.empty(), Optional.empty(), Optional.of("Lucene99HnswVectorsFormat")));
+
+    /**
+     * Three commits of documents with a field of each kind: {@code segments_1} with {@code _0}
+     * (compound), {@code segments_2} that adds {@code _1} (not compound), and {@code segments_3}
+     * that updates a doc value of {@code _0}, so that its field infos have an update.
+     */
+    private Path writeFormatsIndex() throws IOException {
+        Path dir = tmp.resolve("formats");
+        try (FSDirectory directory = FSDirectory.open(dir);
+                IndexWriter writer = new IndexWriter(directory, config())) {
+            writer.addDocument(formatsDoc("1"));
+            writer.commit();
+            writer.getConfig().setUseCompoundFile(false);
+            writer.addDocument(formatsDoc("2"));
+            writer.commit();
+            writer.updateNumericDocValue(new Term("id", "1"), "rank", 7);
+            writer.commit();
+        }
+        return dir;
+    }
+
+    private static Document formatsDoc(String id) {
+        Document doc = doc(id);
+        doc.add(new TextField("body", "a text " + id, Field.Store.NO));
+        doc.add(new StringField("tag", "t" + id, Field.Store.NO));
+        doc.add(new SortedDocValuesField("tag", new BytesRef("t" + id)));
+        doc.add(new NumericDocValuesField("rank", Long.parseLong(id)));
+        doc.add(new KnnFloatVectorField("vector", new float[] {1, Float.parseFloat(id)}));
+        doc.add(new StoredField("stored", id));
+        return doc;
     }
 
     private static IndexWriterConfig config() {

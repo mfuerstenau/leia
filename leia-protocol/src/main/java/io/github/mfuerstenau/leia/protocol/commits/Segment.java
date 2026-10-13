@@ -1,5 +1,6 @@
 package io.github.mfuerstenau.leia.protocol.commits;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -20,6 +21,9 @@ import java.util.OptionalLong;
  * @param minLuceneVersion the oldest Lucene version that wrote a part of it; absent if unknown
  * @param codec the codec name, such as {@code Lucene103}
  * @param formats the formats of the codec
+ * @param fieldFormats the postings, doc values and KNN vectors format of each field, sorted by
+ *     field name (ADR 0037); empty if the field infos can't be read
+ * @param fieldInfosError why the segment's field infos can't be read; absent if they can
  * @param compound whether the segment is in a compound file
  * @param hasBlocks whether the segment has document blocks (parent and child documents)
  * @param indexSort the sort of the segment's documents; absent if it is not sorted
@@ -41,6 +45,8 @@ public record Segment(
         Optional<String> minLuceneVersion,
         String codec,
         CodecFormats formats,
+        List<FieldFormats> fieldFormats,
+        Optional<String> fieldInfosError,
         boolean compound,
         boolean hasBlocks,
         Optional<String> indexSort,

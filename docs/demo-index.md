@@ -19,6 +19,10 @@ other tests use their own indexes and the Lucene 9 and 8 indexes from `LegacyInd
   are compound files, the third (`_2`) is not.
 - 4 commits, all kept (`NoDeletionPolicy`): `segments_1` to `segments_3` after each segment, and
   `segments_4`, the latest, with the deletions and the user data.
+- On the commits screen, the details of segment `_2` (or the compound `_0`) list the field formats:
+  postings `Lucene104` for the indexed fields, doc values `Lucene90` for `category`, `checksum`
+  and the other doc values fields, and KNN vectors `Lucene99HnswVectorsFormat` for `embedding` and
+  `fingerprint` (ADR 0037).
 - 13 deleted documents: every multiple of 37 (37, 74, …, 481).
 - Commit user data: `writer`, `source`, `docs`.
 
