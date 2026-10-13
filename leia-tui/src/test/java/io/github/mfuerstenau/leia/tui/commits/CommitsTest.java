@@ -37,6 +37,10 @@ class CommitsTest {
     }
 
     private static Segment segment(String name, int docBase, int maxDoc) {
+        return segment(name, docBase, maxDoc, 2048);
+    }
+
+    private static Segment segment(String name, int docBase, int maxDoc, long size) {
         return new Segment(
                 name,
                 "ab52725f4ed21286179cc2af33ded2b1",
@@ -65,7 +69,7 @@ class CommitsTest {
                 name.equals("_0"),
                 false,
                 Optional.empty(),
-                OptionalLong.of(2048),
+                OptionalLong.of(size),
                 Map.of("source", "flush", "timestamp", "1000000000000"),
                 Map.of());
     }
@@ -303,5 +307,45 @@ class CommitsTest {
                 .doesNotContain("Generation 4 · version 12");
         commits.handleKey(key('g'));
         assertThat(render(commits, 140, 17)).contains("Generation 4 · version 12");
+    }
+
+    /** The commit 4 with one segment of {@code size} bytes, read. */
+    private static Commits withSegmentOfSize(long size) {
+        Commits commits = new Commits(List.of("index"));
+        commits.commitsLoaded(0, list(commit(4, true)));
+        commits.commitLoaded(
+                0, 4, new GetCommitResult(commit(4, true), List.of(segment("_0", 0, 400, size)), List.of()));
+        return commits;
+    }
+
+    @Test
+    void leavesOutTheColumnsOnTheRightInsteadOfCuttingTheSize() {
+        // 508.2 KiB, as in the demo index.
+        Commits commits = withSegmentOfSize(520_397);
+
+        assertThat(render(commits, 140, 30))
+                .contains("508.2 KiB")
+                .contains("Lucene")
+                .contains("Codec")
+                .contains("CFS");
+        assertThat(render(commits, 100, 30))
+                .contains("Size")
+                .contains("508.2 KiB")
+                .contains("Codec")
+                .doesNotContain("CFS");
+        // Too narrow for the size: it is left out whole.
+        assertThat(render(commits, 60, 30))
+                .contains("Deleted")
+                .doesNotContain("Size")
+                .doesNotContain("508")
+                .doesNotContain("KiB");
+    }
+
+    @Test
+    void showsAGenerationOfFourDigitsWhole() {
+        Commits commits = new Commits(List.of("index"));
+        commits.commitsLoaded(0, list(commit(1234, true)));
+
+        assertThat(render(commits, 120, 24)).contains("●  1234  segments_1234");
     }
 }

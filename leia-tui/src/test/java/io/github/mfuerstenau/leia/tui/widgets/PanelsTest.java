@@ -16,6 +16,18 @@ import org.junit.jupiter.api.Test;
 class PanelsTest {
 
     @Test
+    void showsTheColumnsThatFitWhole() {
+        int[] widths = {4, 3, 5};
+
+        assertThat(Panels.shownColumns(widths, 2, 4 + 2 + 3 + 2 + 5, 1)).isEqualTo(3);
+        assertThat(Panels.shownColumns(widths, 2, 4 + 2 + 3 + 2 + 4, 1)).isEqualTo(2);
+        assertThat(Panels.shownColumns(widths, 2, 4 + 2 + 2, 1)).isEqualTo(1);
+        // The kept columns are shown even when they don't fit.
+        assertThat(Panels.shownColumns(widths, 2, 2, 1)).isEqualTo(1);
+        assertThat(Panels.shownColumns(widths, 2, 2, 2)).isEqualTo(2);
+    }
+
+    @Test
     void wrapsWithTheStylesOfTheSpans() {
         Style red = Style.EMPTY.red();
         List<Line> wrapped =

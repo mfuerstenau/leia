@@ -767,15 +767,9 @@ public final class Overview {
      * are always shown; the name counts with at most {@link #NAME_MIN_WIDTH}.
      */
     static int shownColumns(int[] widths, int available) {
-        int used = 0;
-        for (int i = 0; i < widths.length; i++) {
-            int width = i == NAME_COLUMN ? Math.min(widths[i], NAME_MIN_WIDTH) : widths[i];
-            used += (i == 0 ? 0 : COLUMN_SPACING) + width;
-            if (used > available && i > NAME_COLUMN) {
-                return i;
-            }
-        }
-        return widths.length;
+        int[] counted = widths.clone();
+        counted[NAME_COLUMN] = Math.min(counted[NAME_COLUMN], NAME_MIN_WIDTH);
+        return Panels.shownColumns(counted, COLUMN_SPACING, available, NAME_COLUMN + 1);
     }
 
     private static Cell cell(Column column, String text, int width) {

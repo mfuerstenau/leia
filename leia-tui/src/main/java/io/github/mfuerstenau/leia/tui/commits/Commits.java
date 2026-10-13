@@ -30,6 +30,7 @@ import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -475,7 +476,12 @@ public final class Commits {
             message(frame, area, title, focused, "No readable commit.");
             return;
         }
-        int genWidth = Math.min(Selection.numberWidth(commits.stream().mapToLong(Commit::generation)), 3);
+        int genWidth = Math.max(
+                commits.stream()
+                        .mapToInt(c -> Long.toString(c.generation()).length())
+                        .max()
+                        .orElse(0),
+                3);
         int fileWidth = IntStream.concat(
                         commits.stream().mapToInt(c -> c.segmentsFile().length()),
                         unreadableCommits.stream()
@@ -566,42 +572,47 @@ public final class Commits {
             message(frame, area, title, focused, "No segments.");
             return;
         }
-        int docsWidth = Selection.numberWidth(segments.stream().mapToLong(Segment::maxDoc));
-        int baseWidth = Selection.numberWidth(segments.stream().mapToLong(Segment::docBase));
-        Row header = Row.from(
-                        Cell.from("Name"),
-                        right("Docs", docsWidth),
-                        right("Base", baseWidth),
-                        right("Deleted", 7),
-                        right("Size", 10),
-                        Cell.from("Lucene"),
-                        Cell.from("Codec"),
-                        Cell.from("CFS"))
+        int[] widths = {
+            textWidth(segments, Segment::name, 4),
+            Selection.numberWidth(segments.stream().mapToLong(Segment::maxDoc)),
+            Selection.numberWidth(segments.stream().mapToLong(Segment::docBase)),
+            7,
+            textWidth(segments, segment -> sizeOr(segment.sizeInBytes(), "?"), 4),
+            textWidth(segments, Segment::luceneVersion, 6),
+            textWidth(segments, Segment::codec, 5),
+            3
+        };
+        // The columns on the right are also in the details, so they go first when the table is too wide.
+        Block block = panel(title, focused);
+        int shown =
+                Panels.shownColumns(widths, COLUMN_SPACING, block.inner(area).width(), 1);
+        Row header = segmentCells(
+                        new String[] {"Name", "Docs", "Base", "Deleted", "Size", "Lucene", "Codec", "CFS"},
+                        widths,
+                        shown)
                 .style(Style.EMPTY.bold());
         List<Row> rows = segments.stream()
-                .map(segment -> Row.from(
-                        Cell.from(segment.name()),
-                        right(Integer.toString(segment.maxDoc()), docsWidth),
-                        right(Integer.toString(segment.docBase()), baseWidth),
-                        right(Integer.toString(segment.delCount()), 7),
-                        right(sizeOr(segment.sizeInBytes(), "?"), 10),
-                        Cell.from(segment.luceneVersion()),
-                        Cell.from(segment.codec()),
-                        Cell.from(segment.compound() ? "yes" : "no")))
+                .map(segment -> segmentCells(
+                        new String[] {
+                            segment.name(),
+                            Integer.toString(segment.maxDoc()),
+                            Integer.toString(segment.docBase()),
+                            Integer.toString(segment.delCount()),
+                            sizeOr(segment.sizeInBytes(), "?"),
+                            segment.luceneVersion(),
+                            segment.codec(),
+                            segment.compound() ? "yes" : "no"
+                        },
+                        widths,
+                        shown))
                 .toList();
         segmentTable.select(segmentRow);
         Table table = table(rows, focused)
-                .widths(
-                        Constraint.length(textWidth(segments, Segment::name, 4)),
-                        Constraint.length(docsWidth),
-                        Constraint.length(baseWidth),
-                        Constraint.length(7),
-                        Constraint.length(10),
-                        Constraint.length(textWidth(segments, Segment::luceneVersion, 6)),
-                        Constraint.length(textWidth(segments, Segment::codec, 5)),
-                        Constraint.length(3))
+                .widths(Arrays.stream(widths, 0, shown)
+                        .mapToObj(Constraint::length)
+                        .toList())
                 .header(header)
-                .block(panel(title, focused))
+                .block(block)
                 .build();
         frame.renderStatefulWidget(table, area, segmentTable);
     }
@@ -654,6 +665,15 @@ public final class Commits {
                 .highlightStyle(highlight(focused))
                 .highlightSymbol("")
                 .highlightSpacing(Table.HighlightSpacing.NEVER);
+    }
+
+    /** The first {@code shown} cells of a segment row; the numbers, from Docs to Size, right-aligned. */
+    private static Row segmentCells(String[] texts, int[] widths, int shown) {
+        List<Cell> cells = new ArrayList<>();
+        for (int i = 0; i < shown; i++) {
+            cells.add(i >= 1 && i <= 4 ? right(texts[i], widths[i]) : Cell.from(texts[i]));
+        }
+        return Row.from(cells);
     }
 
     private static void message(Frame frame, Rect area, String title, boolean focused, String text) {

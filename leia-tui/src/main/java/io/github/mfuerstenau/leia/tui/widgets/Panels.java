@@ -61,6 +61,22 @@ public final class Panels {
     }
 
     /**
+     * How many columns of {@code widths}, from the left and {@code spacing} apart, fit into {@code
+     * available} cells, and at least {@code kept}. A column is shown whole or not at all, so that a
+     * number is never cut: on a narrow terminal the columns on the right go first.
+     */
+    public static int shownColumns(int[] widths, int spacing, int available, int kept) {
+        int used = 0;
+        for (int i = 0; i < widths.length; i++) {
+            used += (i == 0 ? 0 : spacing) + widths[i];
+            if (used > available && i >= kept) {
+                return i;
+            }
+        }
+        return widths.length;
+    }
+
+    /**
      * The row after the last one of a paged list: {@code …} while there are more, or why the next
      * page failed. Empty otherwise.
      */

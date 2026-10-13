@@ -124,6 +124,7 @@ What has to carry over:
       - *The open, export and jars popups are placed as ratatui's `Rect::centered` placed them, with an odd row or column to spare before them (`Panels.centered`). The other popups took the floor in the Rust TUI too.*
       - *←/→ pressed while a document is fetched go on from the document asked for last; through a filter, they wait until the step under way has shown its document, then step on from it. The blocking Rust loop never had a key in between.*
       - *The document export writes `\u001e` with lowercase hex, as serde did, so its files are byte for byte the Rust TUI's.*
+      - *A number is never cut. When the segments table on the commits screen is too wide for its panel, it leaves out whole columns from the right, as the overview's field table does (`Panels.shownColumns`). At 100 columns the Rust TUI cut `508.2 KiB` to `8.2 KiB`, and TamboUI cut it to `508.2`. CFS, codec and Lucene version go first, and the details still show them. The Size column is as wide as its widest value. The Gen column of the commits table is as wide as its widest generation; both UIs capped it at 3.*
 
 ## Alternatives considered
 
