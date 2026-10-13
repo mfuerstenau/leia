@@ -6,8 +6,9 @@ import java.util.Optional;
 
 /**
  * Documents by the doc values of one field (ADR 0033): those with a value equal to one of {@code
- * values}, or with a value in {@code range}. Exactly one of the two is present. A field with several
- * values per document matches if any of them does.
+ * values}, with a value in {@code range}, or with a value that starts with {@code prefix} (ADR
+ * 0036). Exactly one of the three is present. A field with several values per document matches if
+ * any of them does.
  *
  * @param field a field with doc values
  * @param number how the values of a {@code NUMERIC} or {@code SORTED_NUMERIC} field are encoded;
@@ -15,9 +16,12 @@ import java.util.Optional;
  * @param values the values to match, at least one: a number's decimal text for a number field (as
  *     text, never binary), the bytes otherwise
  * @param range the values to match, from a lower to an upper bound
+ * @param prefix the bytes a value starts with, for a field of bytes only; empty bytes match any
+ *     value
  */
 public record DocValuesQuery(
         String field,
         Optional<DocValuesNumber> number,
         Optional<List<BytesValue>> values,
-        Optional<DocValuesRange> range) {}
+        Optional<DocValuesRange> range,
+        Optional<BytesValue> prefix) {}

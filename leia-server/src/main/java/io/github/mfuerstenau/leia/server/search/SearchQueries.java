@@ -258,11 +258,21 @@ public final class SearchQueries {
         FieldInfo field = index.fieldInfo(query.field())
                 .orElseThrow(() ->
                         new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + query.field() + "' in the index"));
-        if (query.values().isPresent() == query.range().isPresent()) {
+        int matches = (query.values().isPresent() ? 1 : 0)
+                + (query.range().isPresent() ? 1 : 0)
+                + (query.prefix().isPresent() ? 1 : 0);
+        if (matches != 1) {
             throw new RpcException(
-                    ErrorCode.INVALID_PARAMS, "Invalid params: docValues needs exactly one of values and range");
+                    ErrorCode.INVALID_PARAMS,
+                    "Invalid params: docValues needs exactly one of values, range and prefix");
         }
         try {
+            if (query.prefix().isPresent()) {
+                if (query.number().isPresent()) {
+                    throw new IllegalArgumentException("a prefix matches doc values of bytes, not numbers");
+                }
+                return DocValuesQueries.prefix(field, bytes(query.prefix().get()));
+            }
             if (query.number().isPresent()) {
                 DocValuesMatch<String> match = docValuesMatch(query, value -> {
                     if (value.binary()) {
@@ -273,16 +283,19 @@ public final class SearchQueries {
                 return DocValuesQueries.numbers(
                         field, DocValuesNumber.valueOf(query.number().get().name()), match);
             }
-            DocValuesMatch<BytesRef> match = docValuesMatch(query, value -> {
-                try {
-                    return ByteStrings.decode(value.value(), value.binary());
-                } catch (IllegalArgumentException e) {
-                    throw new IllegalArgumentException("the binary value '" + value.value() + "' is not hex", e);
-                }
-            });
+            DocValuesMatch<BytesRef> match = docValuesMatch(query, SearchQueries::bytes);
             return DocValuesQueries.bytes(field, match);
         } catch (IllegalArgumentException e) {
             throw invalidParams(e);
+        }
+    }
+
+    /** @throws IllegalArgumentException if {@code value} is binary and not hex */
+    private static BytesRef bytes(BytesValue value) {
+        try {
+            return ByteStrings.decode(value.value(), value.binary());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException("the binary value '" + value.value() + "' is not hex", e);
         }
     }
 

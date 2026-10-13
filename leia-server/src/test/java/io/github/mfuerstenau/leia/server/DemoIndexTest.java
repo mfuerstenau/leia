@@ -551,6 +551,38 @@ class DemoIndexTest {
             assertThat(same.hits()).extracting(Hit::docId).containsExactly(5);
         }
 
+        @Test
+        void docValuesByAPrefix() throws Exception {
+            // office and outdoor
+            assertThat(backend.search(prefix("category", text("o")), 1000).totalHits())
+                    .isEqualTo(158)
+                    .isEqualTo(backend.search(classic("category:o*"), 1000).totalHits());
+            // limited and local
+            assertThat(backend.search(prefix("tags", text("l")), 1000).totalHits())
+                    .isEqualTo(179)
+                    .isEqualTo(backend.search(classic("tags:l*"), 1000).totalHits());
+            // The empty prefix matches every document with a value.
+            assertThat(backend.search(prefix("tags", text("")), 1000).totalHits())
+                    .isEqualTo(385)
+                    .isEqualTo(backend.search(docValues("tags", null, range(null, null, true, true)), 1000)
+                            .totalHits());
+            SearchResults hex = backend.search(prefix("checksum", new BytesValue("80", true)), 1000);
+            assertThat(hex.totalHits())
+                    .isEqualTo(1)
+                    .isEqualTo(backend.search(
+                                    docValues(
+                                            "checksum",
+                                            null,
+                                            Optional.of(new DocValuesRange(
+                                                    Optional.of(new BytesValue("80", true)),
+                                                    Optional.of(new BytesValue("81", true)),
+                                                    true,
+                                                    false))),
+                                    1000)
+                            .totalHits());
+            assertThat(hex.query()).isEqualTo("checksum:[[80] TO [81]}");
+        }
+
         private static StartSearchParams params(SearchQuery query) {
             return new StartSearchParams(query, BM25, List.of(), 0, 10, false, Optional.empty());
         }
@@ -605,7 +637,18 @@ class DemoIndexTest {
                     Optional.empty(),
                     Optional.empty(),
                     Optional.empty(),
-                    Optional.of(new DocValuesQuery(field, Optional.ofNullable(number), values, range)));
+                    Optional.of(
+                            new DocValuesQuery(field, Optional.ofNullable(number), values, range, Optional.empty())));
+        }
+
+        private static SearchQuery prefix(String field, BytesValue prefix) {
+            return new SearchQuery(
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.of(new DocValuesQuery(
+                            field, Optional.empty(), Optional.empty(), Optional.empty(), Optional.of(prefix))));
         }
 
         private static Optional<DocValuesRange> range(

@@ -1,6 +1,6 @@
 # ADR 0033 — Search by doc values
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by ADR 0036 (a prefix on bytes)
 - **Date:** 2026-10-08
 
 ## Context
@@ -62,7 +62,7 @@ Several questions are new:
 - **ADR 0012's sort types** (`INT`, `LONG`, `FLOAT`, `DOUBLE`, with raw bits in `NUMERIC` and sortable bits in `SORTED_NUMERIC`). There is less to choose, but they can't say that a `NUMERIC` field holds sortable bits, and they differ from what the documents screen shows. Rejected.
 - **Numbers as JSON numbers.** A long beyond 2^53 doesn't survive every JSON reader, and JSON has no infinities. The text is what the user typed anyway. Rejected.
 - **The doc values syntax inside the query parsers**, such as `dv:price:[1 TO 2]`. It would mean a parser of leia's own, mixed with Lucene's syntax. Rejected.
-- **A prefix match for bytes.** Lucene has no slow prefix query on doc values; it could be a range up to the prefix's successor. Deferred.
+- **A prefix match for bytes.** Lucene has no slow prefix query on doc values; it could be a range up to the prefix's successor. Deferred. *Amended by ADR 0036: `prefix` is such a range, typed as `kit*`.*
 
 ## Consequences
 

@@ -17,6 +17,7 @@ import org.apache.lucene.util.BytesRef;
  * Builds queries over the doc values of one field (ADR 0033). They read every value of the field
  * that the doc values skipper doesn't rule out, so they are slow, but they find what was never
  * indexed as terms or points. A field with several values per document matches if any of them does.
+ * A prefix of bytes is the range from the prefix up to its successor (ADR 0036).
  */
 public final class DocValuesQueries {
 
@@ -104,6 +105,39 @@ public final class DocValuesQueries {
                 throw new IllegalArgumentException("the field '" + field.name + "' has " + type
                         + " doc values, which hold numbers: say how they are encoded");
         };
+    }
+
+    /**
+     * Documents by the bytes of a {@code SORTED}, {@code SORTED_SET} or {@code BINARY} field that
+     * start with {@code prefix} (ADR 0036): the range from {@code prefix} up to, without, its {@link
+     * #successor}. Empty bytes match any value: the range {@code [* TO *]}.
+     *
+     * @throws IllegalArgumentException if the field has no doc values of bytes
+     */
+    public static Query prefix(FieldInfo field, BytesRef prefix) {
+        if (prefix.length == 0) {
+            return bytes(field, new DocValuesMatch.Range<>(Optional.empty(), Optional.empty(), true, true));
+        }
+        return bytes(field, new DocValuesMatch.Range<>(Optional.of(prefix), successor(prefix), true, false));
+    }
+
+    /**
+     * The least bytes above every bytes that start with {@code prefix}: the prefix without its
+     * trailing {@code 0xff} bytes, with its last byte one up. Empty if no byte is left, as for an
+     * empty prefix, since then no bytes lie above.
+     */
+    static Optional<BytesRef> successor(BytesRef prefix) {
+        int length = prefix.length;
+        while (length > 0 && prefix.bytes[prefix.offset + length - 1] == (byte) 0xff) {
+            length--;
+        }
+        if (length == 0) {
+            return Optional.empty();
+        }
+        byte[] next = new byte[length];
+        System.arraycopy(prefix.bytes, prefix.offset, next, 0, length);
+        next[length - 1]++;
+        return Optional.of(new BytesRef(next));
     }
 
     private static Query longRange(FieldInfo field, boolean sorted, DocValuesMatch.Range<String> range) {

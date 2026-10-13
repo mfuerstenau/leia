@@ -172,6 +172,46 @@ class DocValuesQueriesTest {
     }
 
     @Test
+    void findsValuesByAPrefix() throws Exception {
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
+            assertThat(prefix(index, "s", text("b"))).containsExactly(1);
+            assertThat(prefix(index, "s", text("ch"))).containsExactly(2);
+            assertThat(prefix(index, "s", text("bananas"))).isEmpty();
+            assertThat(prefix(index, "ss", text("c"))).containsExactly(1);
+            assertThat(prefix(index, "bin", bytes(0x80))).containsExactly(1, 2);
+            assertThat(prefix(index, "bin", bytes(0x80, 0))).containsExactly(2);
+            assertThat(prefix(index, "bin", bytes(0x7f))).containsExactly(0);
+            assertThat(prefix(index, "bin", bytes(0xff))).isEmpty();
+            // The empty prefix matches any value.
+            assertThat(prefix(index, "s", text(""))).containsExactly(0, 1, 2);
+            assertThat(prefix(index, "ss", text(""))).containsExactly(0, 1);
+            assertThat(prefix(index, "bin", text(""))).containsExactly(0, 1, 2);
+
+            assertThat(DocValuesQueries.prefix(field(index, "bin"), bytes(0x7f)).toString())
+                    .isEqualTo("bin:[[7f] TO [80]}");
+            assertThat(DocValuesQueries.prefix(field(index, "bin"), bytes(0xff)).toString())
+                    .isEqualTo("bin:[[ff] TO *}");
+            assertThat(DocValuesQueries.prefix(field(index, "bin"), text("")).toString())
+                    .isEqualTo("bin:[* TO *]");
+            assertThatThrownBy(() -> DocValuesQueries.prefix(field(index, "n"), text("1")))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("the field 'n' has NUMERIC doc values, which hold numbers: say how they are encoded");
+        }
+    }
+
+    @Test
+    void theSuccessorOfAPrefixIsTheLeastBytesAboveItsValues() {
+        assertThat(DocValuesQueries.successor(bytes(0x61, 0x62))).hasValue(bytes(0x61, 0x63));
+        assertThat(DocValuesQueries.successor(bytes(0x7f, 0xff, 0xff))).hasValue(bytes(0x80));
+        assertThat(DocValuesQueries.successor(bytes(0, 0xfe))).hasValue(bytes(0, 0xff));
+        assertThat(DocValuesQueries.successor(bytes(0xff, 0xff))).isEmpty();
+        assertThat(DocValuesQueries.successor(new BytesRef())).isEmpty();
+        // Only the prefix's own bytes count, not the rest of its array.
+        assertThat(DocValuesQueries.successor(new BytesRef(new byte[] {9, 0x10, (byte) 0xff, 7}, 1, 2)))
+                .hasValue(bytes(0x11));
+    }
+
+    @Test
     void searchesAndExplainsADocValuesQuery() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             Query query = DocValuesQueries.bytes(field(index, "bin"), range(bytes(0x80), null, true, true));
@@ -238,6 +278,11 @@ class DocValuesQueriesTest {
     private static List<Integer> bytes(ReadOnlyIndex index, String field, DocValuesMatch<BytesRef> match)
             throws IOException, InvalidQueryException {
         return matchIds(index.matches(DocValuesQueries.bytes(field(index, field), match), false, ScanProgress.NONE));
+    }
+
+    private static List<Integer> prefix(ReadOnlyIndex index, String field, BytesRef prefix)
+            throws IOException, InvalidQueryException {
+        return matchIds(index.matches(DocValuesQueries.prefix(field(index, field), prefix), false, ScanProgress.NONE));
     }
 
     private static FieldInfo field(ReadOnlyIndex index, String name) {

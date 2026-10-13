@@ -11,15 +11,18 @@ import java.util.Optional;
 
 /**
  * The query line of the search screen's doc values mode (ADR 0033): one value, several values (a
- * set), or a range in Lucene's syntax (Rust's {@code doc_values.rs}).
+ * set), a range in Lucene's syntax, or a prefix (ADR 0036).
  *
  * <pre>
  * 42          -1 0 1          "new york" boston
  * [10 TO 20]  {0 TO *]        [* TO "m"}
+ * kit*        *
  * </pre>
  *
  * <p>Values are separated by whitespace. A value in quotes may hold whitespace, {@code \"} and
- * {@code \\}; an unquoted {@code *} is an open bound. A line that can't be read throws an {@link
+ * {@code \\}; an unquoted {@code *} is an open bound. An unquoted value ending in {@code *} is a
+ * prefix, which stands alone on the line; a lone {@code *} is the empty prefix, which matches any
+ * value. A line that can't be read throws an {@link
  * IllegalArgumentException} with the message to show.
  */
 public final class DocValuesSyntax {
@@ -33,11 +36,17 @@ public final class DocValuesSyntax {
         /** A range; an empty bound is open. */
         record Range(Optional<String> lower, Optional<String> upper, boolean includeLower, boolean includeUpper)
                 implements Parsed {}
+
+        /** The start of a value, for a field of bytes (ADR 0036). */
+        record Prefix(String prefix) implements Parsed {}
     }
 
     /**
      * The query for {@code line} on {@code field}. {@code number} says how a number field encodes its
      * numbers, and is empty for a field of bytes, whose values are hex if {@code hex}.
+     *
+     * @throws IllegalArgumentException if the line doesn't read, is a prefix for a number field, or
+     *     has a value that is not hex
      */
     public static DocValuesQuery query(String field, Optional<DocValuesNumber> number, boolean hex, String line) {
         boolean binary = hex && number.isEmpty();
@@ -49,6 +58,7 @@ public final class DocValuesSyntax {
                         Optional.of(values.values().stream()
                                 .map(text -> value(text, binary))
                                 .toList()),
+                        Optional.empty(),
                         Optional.empty());
             case Parsed.Range range ->
                 new DocValuesQuery(
@@ -59,7 +69,15 @@ public final class DocValuesSyntax {
                                 range.lower().map(text -> value(text, binary)),
                                 range.upper().map(text -> value(text, binary)),
                                 range.includeLower(),
-                                range.includeUpper())));
+                                range.includeUpper())),
+                        Optional.empty());
+            case Parsed.Prefix prefix -> {
+                if (number.isPresent()) {
+                    throw new IllegalArgumentException("A prefix is for doc values of bytes; numbers take a range.");
+                }
+                yield new DocValuesQuery(
+                        field, number, Optional.empty(), Optional.empty(), Optional.of(value(prefix.prefix(), binary)));
+            }
         };
     }
 
@@ -93,17 +111,24 @@ public final class DocValuesSyntax {
             }
             return new Parsed.Range(tokens.get(0).bound(), tokens.get(2).bound(), includeLower, includeUpper);
         }
-        List<String> values = tokens(line).stream().map(Token::text).toList();
-        if (values.isEmpty()) {
-            throw new IllegalArgumentException("Type a value, several values, or a range.");
+        List<Token> tokens = tokens(line);
+        if (tokens.isEmpty()) {
+            throw new IllegalArgumentException("Type a value, several values, a range, or a prefix.");
         }
-        return new Parsed.Values(values);
+        if (tokens.stream().anyMatch(Token::prefix)) {
+            if (tokens.size() > 1) {
+                throw new IllegalArgumentException("A prefix (ending in *) stands alone on the line.");
+            }
+            String text = tokens.getFirst().text();
+            return new Parsed.Prefix(text.substring(0, text.length() - 1));
+        }
+        return new Parsed.Values(tokens.stream().map(Token::text).toList());
     }
 
     /** {@code value} as one value of the line: in quotes if it would read otherwise as it is. */
     public static String quote(String value) {
         boolean plain = !value.isEmpty()
-                && !value.equals("*")
+                && !value.endsWith("*")
                 && !value.startsWith("[")
                 && !value.startsWith("{")
                 && !value.startsWith("\"")
@@ -125,6 +150,11 @@ public final class DocValuesSyntax {
         /** The bound the token stands for: empty for an unquoted {@code *}. */
         Optional<String> bound() {
             return quoted || !text.equals("*") ? Optional.of(text) : Optional.empty();
+        }
+
+        /** Whether the token is a prefix outside a range: unquoted and ending in {@code *}. */
+        boolean prefix() {
+            return !quoted && text.endsWith("*");
         }
     }
 

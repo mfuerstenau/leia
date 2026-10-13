@@ -225,6 +225,22 @@ class SearchHandlersTest {
     }
 
     @Test
+    void searchesByAPrefixOfDocValues() throws Exception {
+        openIndex();
+
+        SearchResults cr = search(params(docValuesPrefix("color", null, text("cr")), 0, 10, Optional.of(List.of())));
+        SearchResults any = search(params(docValuesPrefix("color", null, text("")), 0, 10, Optional.of(List.of())));
+        SearchResults hex = search(
+                params(docValuesPrefix("color", null, new BytesValue("72", true)), 0, 10, Optional.of(List.of())));
+
+        // color: "red" (doc 0), "crimson" (doc 2)
+        assertThat(cr.hits()).extracting(Hit::docId).containsExactly(2);
+        assertThat(cr.query()).isEqualTo("color:[[63 72] TO [63 73]}");
+        assertThat(any.hits()).extracting(Hit::docId).containsExactly(0, 2);
+        assertThat(hex.hits()).extracting(Hit::docId).containsExactly(0);
+    }
+
+    @Test
     void checksTheDocValuesQuery() throws Exception {
         openIndex();
         Optional<List<BytesValue>> one = Optional.of(List.of(text("80")));
@@ -238,7 +254,7 @@ class SearchHandlersTest {
                 // numbers without an encoding, bytes with one
                 docValues("rank", null, one, Optional.empty()),
                 docValues("color", DocValuesNumber.LONG, one, Optional.empty()),
-                // not exactly one of values and range
+                // not exactly one of values, range and prefix
                 docValues("rank", DocValuesNumber.LONG, one, Optional.of(range("1", "2"))),
                 docValues("rank", DocValuesNumber.LONG, Optional.empty(), Optional.empty()),
                 docValues("rank", DocValuesNumber.LONG, Optional.of(List.of()), Optional.empty()),
@@ -250,7 +266,18 @@ class SearchHandlersTest {
                         DocValuesNumber.LONG,
                         Optional.of(List.of(new BytesValue("50", true))),
                         Optional.empty()),
-                docValues("color", null, Optional.of(List.of(new BytesValue("zz", true))), Optional.empty()))) {
+                docValues("color", null, Optional.of(List.of(new BytesValue("zz", true))), Optional.empty()),
+                // a prefix: with values, of numbers, in bad hex
+                new SearchQuery(
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.of(new DocValuesQuery(
+                                "color", Optional.empty(), one, Optional.empty(), Optional.of(text("r"))))),
+                docValuesPrefix("rank", DocValuesNumber.LONG, text("8")),
+                docValuesPrefix("rank", null, text("8")),
+                docValuesPrefix("color", null, new BytesValue("7", true)))) {
             assertFails(() -> startSearch.handle(params(query, 0, 10, Optional.empty())), ErrorCode.INVALID_PARAMS);
         }
         assertThatThrownBy(() -> startSearch.handle(
@@ -873,7 +900,17 @@ class SearchHandlersTest {
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
-                Optional.of(new DocValuesQuery(field, Optional.ofNullable(number), values, range)));
+                Optional.of(new DocValuesQuery(field, Optional.ofNullable(number), values, range, Optional.empty())));
+    }
+
+    private static SearchQuery docValuesPrefix(String field, DocValuesNumber number, BytesValue prefix) {
+        return new SearchQuery(
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(new DocValuesQuery(
+                        field, Optional.ofNullable(number), Optional.empty(), Optional.empty(), Optional.of(prefix))));
     }
 
     private static DocValuesRange range(String lower, String upper) {

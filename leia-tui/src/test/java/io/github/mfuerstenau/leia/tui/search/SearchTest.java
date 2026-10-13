@@ -481,7 +481,7 @@ class SearchTest {
         assertThat(render(search))
                 .contains(
                         "Doc values · field price (NUMERIC) · long · count to 1000",
-                        "Press / to type a value, several values, or a range.");
+                        "Press / to type a value, several values, a range, or a prefix.");
         assertThat(search.keys()).startsWith("/ values");
 
         press(search, '/');
@@ -491,7 +491,8 @@ class SearchTest {
                         "price",
                         Optional.of(DocValuesNumber.LONG),
                         Optional.empty(),
-                        Optional.of(new DocValuesRange(Optional.of(text("1")), Optional.empty(), false, true))));
+                        Optional.of(new DocValuesRange(Optional.of(text("1")), Optional.empty(), false, true)),
+                        Optional.empty()));
 
         // n steps the encoding of the numbers, and searches again.
         assertThat(docValuesOf(press(search, 'n')).number()).hasValue(DocValuesNumber.DOUBLE);
@@ -519,6 +520,21 @@ class SearchTest {
         assertThat(press(search, 'n')).isEmpty();
         // f goes round to price again.
         assertThat(docValuesOf(press(search, 'f')).field()).isEqualTo("price");
+    }
+
+    @Test
+    void docValuesModeSearchesByAPrefix() {
+        Search search = docValuesMode();
+        press(search, '/');
+        typed(search, "1*");
+        assertThat(press(search, KeyCode.ENTER)).isEmpty();
+        assertThat(render(search)).contains("A prefix is for doc values of bytes; numbers take a range.");
+
+        DocValuesQuery query = docValuesOf(press(search, 'f'));
+        assertThat(query.field()).isEqualTo("category");
+        assertThat(query.prefix()).hasValue(text("1"));
+        assertThat(query.values()).isEmpty();
+        assertThat(query.range()).isEmpty();
     }
 
     @Test
@@ -556,6 +572,11 @@ class SearchTest {
         assertThat(query.number()).isEmpty();
         assertThat(query.values()).hasValue(List.of(text("new york"), text("*")));
         assertThat(search.inputText()).isEqualTo("\"new york\" \"*\"");
+        // A value ending in * is quoted, so it is not a prefix.
+        assertThat(docValuesOf(search.docValuesQuery("category", DocValuesNumber.LONG, false, List.of("kit*")))
+                        .values())
+                .hasValue(List.of(text("kit*")));
+        assertThat(search.inputText()).isEqualTo("\"kit*\"");
         query = docValuesOf(search.docValuesQuery("price", DocValuesNumber.FLOAT, false, List.of("1.5")));
         assertThat(query.number()).hasValue(DocValuesNumber.FLOAT);
         assertThat(query.values()).hasValue(List.of(text("1.5")));

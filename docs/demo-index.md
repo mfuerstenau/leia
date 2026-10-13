@@ -136,6 +136,10 @@ other tests use their own indexes and the Lucene 9 and 8 indexes from `LegacyInd
   hits; `tags` `eco gift`: 101, `[a TO c}`: 92. On the documents screen, `s` on `checksum` (binary,
   8 random bytes) searches for it in hex: 1 hit, the document itself; `s` on `price` after `x`
   searches for its double.
+- A doc values prefix (ADR 0036): `category` `o*`: 158 hits (office and outdoor), the same as
+  `category:o*` in classic syntax, with `category:[[6f] TO [70]}` as the parsed query; `tags` `l*`:
+  179, `*`: 385 (every document with a tag); `checksum` with `h` and `80*`: 1, and `*`: 486. `price` `1*` says a
+  prefix is for doc values of bytes, and `o* toys` that a prefix stands alone.
 - A regex as the filter, on a copy of the demo index without `segments_4`, which has no deletions
   yet: `qu\w+` in regex mode, then `b`: 499 matches (all but document 0), starting on `1 of 499`.
   Put `segments_4` back and press `R`: the tab line says `Reopened: segments_4; rebuilding the

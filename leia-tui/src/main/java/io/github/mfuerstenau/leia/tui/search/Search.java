@@ -1368,7 +1368,7 @@ public final class Search {
                 case LIKE -> "Press / to type a document id, or m on the documents screen.";
                 case LIKE_TEXT -> "Press / to type a text to find documents like it.";
                 case REGEX -> "Press / to type a regular expression.";
-                case DOC_VALUES -> "Press / to type a value, several values, or a range.";
+                case DOC_VALUES -> "Press / to type a value, several values, a range, or a prefix.";
                 default -> "Press / to type a query.";
             };
             frame.renderWidget(Paragraph.from(Line.styled(hint, Form.dim())), inner);
@@ -1560,8 +1560,9 @@ public final class Search {
                             List.of("The line is one term of the field, as it is: nothing is analyzed or split.");
                         case DOC_VALUES ->
                             List.of(
-                                    "Doc values: one value, several values, or a range, for example:",
-                                    "  42   -1 0 1   [10 TO 20]   {0 TO *]   \"new york\" boston",
+                                    "Doc values: one value, several values, a range, or a prefix, for example:",
+                                    "  42   -1 0 1   [10 TO 20]   {0 TO *]   \"new york\" boston   kit*",
+                                    "A prefix is for bytes and stands alone; * matches any value, \"kit*\" is a value.",
                                     "Numbers are read as n says, as the documents screen's x shows them;",
                                     "h reads bytes as hex. A document matches if any of its values does.",
                                     "Every value of the field is read, and a BINARY field is scanned: Esc stops it.");

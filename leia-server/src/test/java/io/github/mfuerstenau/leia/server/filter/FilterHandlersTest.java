@@ -114,6 +114,7 @@ class FilterHandlersTest {
                         "color",
                         Optional.empty(),
                         Optional.of(List.of(new BytesValue("red", false))),
+                        Optional.empty(),
                         Optional.empty())));
 
         long jobId = start.handle(byQuery(query, true)).jobId();

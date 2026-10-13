@@ -27,7 +27,21 @@ class DocValuesSyntaxTest {
                 .isEqualTo(values("new york", "boston", "say \"hi\"", "a\\b", ""));
         // A quote inside a value is just a character.
         assertThat(DocValuesSyntax.parse("a\"b")).isEqualTo(values("a\"b"));
-        assertThat(DocValuesSyntax.parse("*")).isEqualTo(values("*"));
+        assertThat(DocValuesSyntax.parse("\"*\" \"a*\"")).isEqualTo(values("*", "a*"));
+    }
+
+    @Test
+    void readsAPrefix() {
+        assertThat(DocValuesSyntax.parse("kit*")).isEqualTo(new Parsed.Prefix("kit"));
+        assertThat(DocValuesSyntax.parse(" kit** ")).isEqualTo(new Parsed.Prefix("kit*"));
+        assertThat(DocValuesSyntax.parse("*")).isEqualTo(new Parsed.Prefix(""));
+        assertThatThrownBy(() -> DocValuesSyntax.parse("kit* garden"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("A prefix (ending in *) stands alone on the line.");
+        assertThatThrownBy(() -> DocValuesSyntax.parse("garden *")).isInstanceOf(IllegalArgumentException.class);
+        // In a range, a bound ending in * is a value.
+        assertThat(DocValuesSyntax.parse("[a* TO b]"))
+                .isEqualTo(new Parsed.Range(Optional.of("a*"), Optional.of("b"), true, true));
     }
 
     @Test
@@ -50,7 +64,7 @@ class DocValuesSyntaxTest {
 
     @Test
     void quotesWhatWouldReadOtherwise() {
-        for (String value : List.of("plain", "-1.5", "a\"b", "new york", "", "*", "[x", "{x", "\"q", "a\\b")) {
+        for (String value : List.of("plain", "-1.5", "a\"b", "new york", "", "*", "a*", "[x", "{x", "\"q", "a\\b")) {
             String line = DocValuesSyntax.quote(value);
             assertThat(DocValuesSyntax.parse(line)).as(line).isEqualTo(values(value));
         }
@@ -75,5 +89,18 @@ class DocValuesSyntaxTest {
         assertThat(DocValuesSyntax.query("category", Optional.empty(), false, "zz")
                         .values())
                 .isPresent();
+
+        query = DocValuesSyntax.query("checksum", Optional.empty(), true, "80FF*");
+        assertThat(query.prefix()).hasValue(new BytesValue("80ff", true));
+        assertThat(query.values()).isEmpty();
+        assertThat(query.range()).isEmpty();
+        assertThat(DocValuesSyntax.query("category", Optional.empty(), false, "*")
+                        .prefix())
+                .hasValue(new BytesValue("", false));
+        assertThatThrownBy(() -> DocValuesSyntax.query("checksum", Optional.empty(), true, "8*"))
+                .isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> DocValuesSyntax.query("price", Optional.of(DocValuesNumber.LONG), false, "1*"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("A prefix is for doc values of bytes; numbers take a range.");
     }
 }
