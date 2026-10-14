@@ -18,8 +18,9 @@ because Lucene 10 can't read them.
   point dimensions, vector dimensions with their encoding and similarity, and summed postings statistics (doc count, Σ doc freq, Σ term freq),
   plus on request each field's term count and top terms.
 - **Documents:** one document at a time, deleted ones included: norms with the field length they
-  encode, stored values, doc values, KNN vectors and term vectors, the terms a field was indexed with (rebuilt
-  from the postings), and a viewer for whole values as text, hex, pretty-printed JSON or delimited data.
+  encode, stored values, doc values, KNN vectors and term vectors, the terms and points a field was indexed
+  with (rebuilt from the postings and the points), and a viewer for whole values as text, hex, pretty-printed
+  JSON or delimited data.
 - **Terms:** the terms of a field with their frequencies, and the documents that contain a term,
   with the positions, offsets and payloads of each occurrence.
 - **Commits:** every commit in the index directory with its segments, and for each segment its
@@ -205,7 +206,8 @@ scans it again; a smaller N needs no new scan.
 | `/` | seek a field: type a text, and the first shown field whose name starts with it (ignoring case), or else contains it, is selected; `Enter` or `Esc` ends it |
 | `[` `]` | previous or next document of the term opened on the terms screen |
 | `Enter` | load the term vector of the selected field |
-| `r` | rebuild the terms the selected field was indexed with (`Esc` stops it) |
+| `r` | rebuild the terms and points the selected field was indexed with (`Esc` stops it) |
+| `t` | show the selected field's points as int, long, float, double, lat/lon, address or hex, as fit their size; the terms screen shows them the same way |
 | `v` | view the selected field's values (see below) |
 | `x` | show numeric doc values as long, double bits, sortable double, float bits or sortable float |
 | `s` | search for the documents with any of the selected field's doc values on the search screen, numbers as `x` shows them |
@@ -231,14 +233,20 @@ another document stops it. The result shows the tokens in position order (`a|b` 
 `·` where positions were skipped, such as for a removed stop word), then each term with its freq
 and positions.
 
+On a field with points, such as an `IntPoint` or a `LatLonPoint`, `r` also finds the document's
+points, by going through every point of the field in the segment (ADR 0041). The index doesn't
+record what a point encodes, so leia guesses from its size: int for 4 bytes, lat/lon for two
+dimensions of 4, long for 8, an address for 16. `t` cycles through the other encodings of that
+size and hex; a `DoublePoint` shows as a long until `t` makes it a double.
+
 `E` exports the whole document as JSON (ADR 0030): per field, the flags, the norm, the stored
-values (whole, never cut), the doc values, the KNN vector, the term vector and the rebuilt indexed
-terms (format version 2, ADR 0040); binary
-values are hex. The prompt offers `doc-<id>.json` in the working directory; `Tab` turns the
-rebuild of the indexed terms off, which is the slow part on a large index, and `Ctrl+Y` copies
-the JSON through OSC 52 instead of writing it (terminals and tmux may cut large copies). As with
-the terms export, a file that exists takes a second `Enter`, and leia never writes into an index
-directory. While the terms are rebuilt, the tab line shows the progress and `Esc` stops it.
+values (whole, never cut), the doc values, the KNN vector, the term vector, the rebuilt indexed
+terms and the points (format version 3, ADR 0041); binary values and points are hex. The prompt
+offers `doc-<id>.json` in the working directory; `Tab` turns the rebuild of the indexed terms and
+points off, which is the slow part on a large index, and `Ctrl+Y` copies the JSON through OSC 52
+instead of writing it (terminals and tmux may cut large copies). As with the terms export, a file
+that exists takes a second `Enter`, and leia never writes into an index directory. While the terms
+and points are rebuilt, the tab line shows the progress and `Esc` stops it.
 
 The norm is shown with the field length it encodes, such as `88 → length 1048–1175`: all of
 Lucene's similarities store the number of terms in one byte (`SmallFloat.intToByte4`), exactly up to
@@ -260,8 +268,8 @@ again, so its title also says how many values took too long and were skipped.
 
 Flags: `I` indexed, `N` has a norm, `P` payloads, `S` stored, `V` term vector, `D` doc values,
 `T` points, `K` KNN vector. `N`, `S`, `V`, `D` and `K` say what this document has; the others
-describe the field. Whether the document has terms in a field is not shown: finding out means reading the
-field's terms, which `r` does.
+describe the field. Whether the document has terms or points in a field is not shown: finding out
+means reading the field's terms and points, which `r` does.
 
 #### Viewer
 

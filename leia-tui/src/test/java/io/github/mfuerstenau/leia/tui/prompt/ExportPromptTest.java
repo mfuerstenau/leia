@@ -42,14 +42,14 @@ class ExportPromptTest {
         ExportPrompt prompt = ExportPrompt.document(7, List.of(), Optional.empty(), Optional.of(dir));
         assertThat(prompt.input()).isEqualTo("doc-7.json");
         String screen = render(prompt);
-        assertThat(screen).contains("Export document 7 as JSON").contains("Tab indexed terms: on");
+        assertThat(screen).contains("Export document 7 as JSON").contains("Tab terms and points: on");
 
         assertThat(prompt.handleKey(key(KeyCode.ENTER)))
                 .isEqualTo(new ExportPrompt.Submit(new ExportRequest.Document(
                         7, true, new ExportTarget.File(dir.resolve("doc-7.json").toString(), false))));
 
         prompt.handleKey(key(KeyCode.TAB));
-        assertThat(render(prompt)).contains("Tab indexed terms: off");
+        assertThat(render(prompt)).contains("Tab terms and points: off");
         assertThat(prompt.handleKey(ctrl('y')))
                 .isEqualTo(new ExportPrompt.Submit(new ExportRequest.Document(7, false, new ExportTarget.Clipboard())));
     }

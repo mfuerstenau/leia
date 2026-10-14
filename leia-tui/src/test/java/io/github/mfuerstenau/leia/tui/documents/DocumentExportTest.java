@@ -18,6 +18,7 @@ import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
+import io.github.mfuerstenau.leia.protocol.points.PointValue;
 import io.github.mfuerstenau.leia.tui.documents.DocumentExport.DocumentData;
 import io.github.mfuerstenau.leia.tui.documents.DocumentExport.ExportedDocument;
 import io.github.mfuerstenau.leia.tui.documents.DocumentExport.ExportedField;
@@ -56,8 +57,8 @@ class DocumentExportTest {
                 false,
                 name.equals("body"),
                 name.equals("year") ? DocValuesType.NUMERIC : DocValuesType.NONE,
-                0,
-                0,
+                name.equals("year") ? 1 : 0,
+                name.equals("year") ? 4 : 0,
                 0,
                 Optional.empty(),
                 Optional.empty(),
@@ -163,12 +164,14 @@ class DocumentExportTest {
                         "id",
                         IndexOptions.DOCS,
                         ReconstructSource.POSTINGS,
-                        List.of(new TermVectorTerm("c3282d33", true, 1, List.of()))),
+                        List.of(new TermVectorTerm("c3282d33", true, 1, List.of())),
+                        List.of()),
                 new ReconstructedField(
                         "body",
                         IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS,
                         ReconstructSource.TERM_VECTOR,
-                        bodyTerms()),
+                        bodyTerms(),
+                        List.of()),
                 new ReconstructedField(
                         "labels",
                         IndexOptions.DOCS_AND_FREQS_AND_POSITIONS,
@@ -181,7 +184,15 @@ class DocumentExportTest {
                                         OptionalInt.of(0),
                                         OptionalInt.empty(),
                                         OptionalInt.empty(),
-                                        Optional.empty()))))));
+                                        Optional.empty())))),
+                        List.of()),
+                // 2024 as an int point.
+                new ReconstructedField(
+                        "year",
+                        IndexOptions.NONE,
+                        ReconstructSource.POSTINGS,
+                        List.of(),
+                        List.of(new PointValue(List.of("800007e8")))));
     }
 
     /** Document 3, or a failure on the first whole stored value if {@code failing}; records the calls. */
@@ -255,6 +266,37 @@ class DocumentExportTest {
 
         assertThat(DocumentExport.toJson(export)).isEqualTo(golden());
         assertThat(DocumentExport.fromJson(golden())).isEqualTo(export);
+    }
+
+    @Test
+    void exportsThePointsOfAFieldWithoutPostingsWithoutIndexedTerms() {
+        ExportedDocument export =
+                DocumentExport.assemble(loaded(), Optional.of(rebuilt()), schema(), "/i", Optional.empty());
+
+        ExportedField year = export.fields().stream()
+                .filter(field -> field.name().equals("year"))
+                .findFirst()
+                .orElseThrow();
+        assertThat(year.indexed()).isEmpty();
+        assertThat(year.points()).contains(List.of(new PointValue(List.of("800007e8"))));
+        assertThat(export.fields().getFirst().points()).isEmpty();
+    }
+
+    @Test
+    void readsVersionsOneAndTwoWithoutPoints() throws IOException {
+        // The golden file as version 2 wrote it: without the points of "year".
+        String v2 = golden().replace("\"version\": 3", "\"version\": 2")
+                .replaceAll(
+                        ",\\s*\"points\": \\[\\s*\\{\\s*\"dimensions\": \\[\\s*\"800007e8\"\\s*\\]\\s*\\}\\s*\\]", "");
+        assertThat(v2).doesNotContain("points");
+
+        ExportedDocument read = DocumentExport.fromJson(v2);
+
+        assertThat(read.version()).isEqualTo(2);
+        assertThat(read.fields()).allSatisfy(field -> assertThat(field.points()).isEmpty());
+        String v1 = v2.replace("\"version\": 2", "\"version\": 1").replaceAll(",\\s*\"vector\": \\{[^}]*\\}", "");
+        assertThat(DocumentExport.fromJson(v1).fields())
+                .allSatisfy(field -> assertThat(field.vector()).isEmpty());
     }
 
     @Test

@@ -7,6 +7,7 @@ import io.github.mfuerstenau.leia.protocol.document.ReconstructedField;
 import io.github.mfuerstenau.leia.protocol.document.TermPosition;
 import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
+import io.github.mfuerstenau.leia.protocol.points.PointValue;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -78,22 +79,33 @@ class ReconstructionTest {
     @Test
     void summarizesTheState() {
         Reconstruction running = new Reconstruction.Running(4, 1024, OptionalLong.of(80000));
-        assertThat(running.summary()).isEqualTo("rebuilding… 1024 of 80000 terms, Esc stops");
+        assertThat(running.summary(true, false)).isEqualTo("rebuilding… 1024 of 80000 terms, Esc stops");
+        assertThat(running.summary(false, true)).isEqualTo("rebuilding… 1024 of 80000 points, Esc stops");
+        assertThat(running.summary(true, true)).isEqualTo("rebuilding… 1024 of 80000 terms and points, Esc stops");
         assertThat(running.job()).hasValue(4);
         assertThat(running.active()).isTrue();
-        assertThat(new Reconstruction.Running(4, 7, OptionalLong.empty()).summary())
+        assertThat(new Reconstruction.Running(4, 7, OptionalLong.empty()).summary(true, false))
                 .isEqualTo("rebuilding… 7 terms, Esc stops");
-        assertThat(new Reconstruction.Starting().summary()).isEqualTo("rebuilding…");
+        assertThat(new Reconstruction.Starting().summary(true, false)).isEqualTo("rebuilding…");
 
-        ReconstructedField field =
-                new ReconstructedField("title", IndexOptions.DOCS, ReconstructSource.POSTINGS, List.of(term("a")));
+        ReconstructedField field = new ReconstructedField(
+                "title", IndexOptions.DOCS, ReconstructSource.POSTINGS, List.of(term("a")), List.of());
         Reconstruction done = new Reconstruction.Done(field);
-        assertThat(done.summary()).isEqualTo("1 term, from the postings");
+        assertThat(done.summary(true, false)).isEqualTo("1 term, from the postings");
+        assertThat(done.summary(true, true)).isEqualTo("1 term, from the postings · 0 points");
         assertThat(done.active()).isFalse();
         assertThat(Reconstruction.hasFreqs(field)).isFalse();
-        assertThat(Reconstruction.hasFreqs(
-                        new ReconstructedField("title", IndexOptions.DOCS, ReconstructSource.TERM_VECTOR, List.of())))
+        assertThat(Reconstruction.hasFreqs(new ReconstructedField(
+                        "title", IndexOptions.DOCS, ReconstructSource.TERM_VECTOR, List.of(), List.of())))
                 .isTrue();
-        assertThat(new Reconstruction.Failed("gone").summary()).isEqualTo("cannot rebuild it: gone");
+        assertThat(new Reconstruction.Failed("gone").summary(true, false)).isEqualTo("cannot rebuild it: gone");
+
+        ReconstructedField points = new ReconstructedField(
+                "price",
+                IndexOptions.NONE,
+                ReconstructSource.POSTINGS,
+                List.of(),
+                List.of(new PointValue(List.of("80000001")), new PointValue(List.of("80000002"))));
+        assertThat(new Reconstruction.Done(points).summary(false, true)).isEqualTo("2 points");
     }
 }

@@ -1,6 +1,6 @@
 # ADR 0029 — Reconstruct a document's indexed values
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by ADR 0041 (fields with points are rebuilt too; the progress is `scanned`/`total` terms and points)
 - **Date:** 2026-10-07
 
 ## Context

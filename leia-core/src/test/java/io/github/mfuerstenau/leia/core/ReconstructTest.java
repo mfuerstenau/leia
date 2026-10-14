@@ -4,6 +4,7 @@ import static io.github.mfuerstenau.leia.core.TestIndexes.testIndex;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
+import static org.assertj.core.api.Assertions.within;
 
 import io.github.mfuerstenau.leia.core.Reconstruct.Source;
 import java.io.IOException;
@@ -24,10 +25,13 @@ import org.apache.lucene.analysis.tokenattributes.PositionIncrementAttribute;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.FieldType;
+import org.apache.lucene.document.IntPoint;
+import org.apache.lucene.document.LatLonPoint;
 import org.apache.lucene.document.NumericDocValuesField;
 import org.apache.lucene.document.StoredField;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
+import org.apache.lucene.geo.GeoEncodingUtils;
 import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
@@ -84,8 +88,7 @@ class ReconstructTest {
 
             assertThat(field.source()).isEqualTo(Source.TERM_VECTOR);
             assertThat(field.terms()).isEqualTo(index.termVector(0, "body"));
-            assertThat(index.reconstructTermCount(0, Optional.of(List.of("body"))))
-                    .isEqualTo(OptionalLong.of(0));
+            assertThat(index.reconstructCount(0, Optional.of(List.of("body")))).isEqualTo(OptionalLong.of(0));
         }
     }
 
@@ -108,8 +111,7 @@ class ReconstructTest {
                     .containsExactly(
                             tuple("apple", position(1, 4, 9, Optional.empty())),
                             tuple("red", position(0, 0, 3, Optional.empty())));
-            assertThat(index.reconstructTermCount(0, Optional.of(List.of("body"))))
-                    .isEqualTo(OptionalLong.of(2));
+            assertThat(index.reconstructCount(0, Optional.of(List.of("body")))).isEqualTo(OptionalLong.of(2));
         }
     }
 
@@ -192,7 +194,7 @@ class ReconstructTest {
                     .extracting(Reconstruct.Field::field)
                     .containsExactly("id", "title");
             // "id" has 1 term and "title" 2.
-            assertThat(index.reconstructTermCount(0, Optional.empty())).isEqualTo(OptionalLong.of(3));
+            assertThat(index.reconstructCount(0, Optional.empty())).isEqualTo(OptionalLong.of(3));
         }
     }
 
@@ -216,7 +218,7 @@ class ReconstructTest {
     }
 
     @Test
-    void rejectsUnknownDocumentsAndFieldsAndFieldsThatAreNotIndexed() throws Exception {
+    void rejectsUnknownDocumentsAndFieldsAndFieldsWithoutTermsOrPoints() throws Exception {
         Path dir = writeIndex(List.of(doc -> doc.add(new StoredField("stored_only", "x"))));
 
         try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
@@ -226,9 +228,115 @@ class ReconstructTest {
             assertThatThrownBy(() -> index.reconstruct(0, Optional.of(List.of("nope")), ScanProgress.NONE))
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessage("No field nope");
-            assertThatThrownBy(() -> index.reconstructTermCount(0, Optional.of(List.of("stored_only"))))
+            assertThatThrownBy(() -> index.reconstructCount(0, Optional.of(List.of("stored_only"))))
                     .isInstanceOf(IllegalArgumentException.class)
-                    .hasMessage("Field stored_only is not indexed");
+                    .hasMessage("Field stored_only has neither terms nor points");
+        }
+    }
+
+    @Test
+    void rebuildsThePointsOfAPointField() throws Exception {
+        Path dir = writeIndex(
+                List.of(doc -> doc.add(new IntPoint("number", 7))),
+                List.of(doc -> doc.add(new IntPoint("number", 1)), doc -> {
+                    // Multi-valued, a duplicate kept, in unsigned byte order: -2 before 3.
+                    doc.add(new IntPoint("number", 3));
+                    doc.add(new IntPoint("number", -2));
+                    doc.add(new IntPoint("number", 3));
+                }));
+
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
+            Reconstruct.Field field = reconstruct(index, 2, "number");
+
+            assertThat(field.indexOptions()).isEqualTo(IndexOptions.NONE);
+            assertThat(field.source()).isEqualTo(Source.POSTINGS);
+            assertThat(field.terms()).isEmpty();
+            assertThat(field.points()).map(ReconstructTest::intPoint).containsExactly(-2, 3, 3);
+            assertThat(reconstruct(index, 0, "number").points())
+                    .map(ReconstructTest::intPoint)
+                    .containsExactly(7);
+            // The 4 points of the document's segment.
+            assertThat(index.reconstructCount(2, Optional.of(List.of("number"))))
+                    .isEqualTo(OptionalLong.of(4));
+        }
+    }
+
+    @Test
+    void rebuildsPointsOfSeveralDimensions() throws Exception {
+        Path dir = writeIndex(List.of(
+                doc -> doc.add(new LatLonPoint("location", 52.52, 13.405)),
+                doc -> doc.add(new LatLonPoint("location", -33.87, 151.21))));
+
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
+            List<BytesRef> points = reconstruct(index, 1, "location").points();
+
+            assertThat(points).hasSize(1);
+            byte[] packed = BytesRef.deepCopyOf(points.getFirst()).bytes;
+            assertThat(GeoEncodingUtils.decodeLatitude(packed, 0)).isCloseTo(-33.87, within(1e-6));
+            assertThat(GeoEncodingUtils.decodeLongitude(packed, 4)).isCloseTo(151.21, within(1e-6));
+        }
+    }
+
+    @Test
+    void rebuildsTermsAndPointsOfOneField() throws Exception {
+        Path dir = writeIndex(List.of(doc -> {
+            doc.add(new StringField("code", "abc", Field.Store.NO));
+            doc.add(new IntPoint("code", 42));
+        }));
+
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
+            Reconstruct.Field field = reconstruct(index, 0, "code");
+
+            assertThat(field.terms())
+                    .extracting(term -> term.term().utf8ToString())
+                    .containsExactly("abc");
+            assertThat(field.points()).map(ReconstructTest::intPoint).containsExactly(42);
+            // Every field with terms or points, and 1 term each plus 1 point.
+            assertThat(index.reconstruct(0, Optional.empty(), ScanProgress.NONE))
+                    .extracting(Reconstruct.Field::field)
+                    .containsExactly("id", "code");
+            assertThat(index.reconstructCount(0, Optional.empty())).isEqualTo(OptionalLong.of(3));
+        }
+    }
+
+    @Test
+    void rebuildsThePointsOfADeletedDocument() throws Exception {
+        Path dir = writeIndex(
+                List.of(doc -> doc.add(new IntPoint("number", 5)), doc -> doc.add(new IntPoint("number", 6))));
+        try (IndexWriter writer = new IndexWriter(
+                FSDirectory.open(dir), new IndexWriterConfig().setMergePolicy(NoMergePolicy.INSTANCE))) {
+            writer.deleteDocuments(new Term("id", "0"));
+        }
+
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
+            assertThat(reconstruct(index, 0, "number").points())
+                    .map(ReconstructTest::intPoint)
+                    .containsExactly(5);
+        }
+    }
+
+    @Test
+    void reportsProgressThroughThePointsAndCanBeCancelled() throws Exception {
+        List<Fields> docs = IntStream.range(0, 3000)
+                .<Fields>mapToObj(i -> doc -> doc.add(new IntPoint("number", i)))
+                .toList();
+        Path dir = writeIndex(docs);
+
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
+            List<Long> reports = new ArrayList<>();
+            assertThat(index.reconstruct(5, Optional.of(List.of("number")), reports::add)
+                            .getFirst()
+                            .points())
+                    .map(ReconstructTest::intPoint)
+                    .containsExactly(5);
+
+            assertThat(reports).containsExactly(0L, 1024L, 2048L, 3000L);
+            assertThatThrownBy(() -> index.reconstruct(0, Optional.of(List.of("number")), scanned -> {
+                        if (scanned > 0) {
+                            throw new CancellationException();
+                        }
+                    }))
+                    .isInstanceOf(CancellationException.class);
         }
     }
 
@@ -246,6 +354,10 @@ class ReconstructTest {
     private static Reconstruct.Field reconstruct(ReadOnlyIndex index, int docId, String field) throws IOException {
         return index.reconstruct(docId, Optional.of(List.of(field)), ScanProgress.NONE)
                 .getFirst();
+    }
+
+    private static int intPoint(BytesRef packed) {
+        return IntPoint.decodeDimension(packed.bytes, packed.offset);
     }
 
     private static List<Integer> positions(TermVectorTerm term) {

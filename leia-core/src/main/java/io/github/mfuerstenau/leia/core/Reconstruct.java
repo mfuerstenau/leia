@@ -9,21 +9,24 @@ import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReader;
+import org.apache.lucene.index.PointValues;
 import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.util.BytesRef;
 
 /**
- * Rebuilds the terms a document was indexed with, field by field (ADR 0029). A field whose term
- * vector in the document holds all that its postings hold is read from the term vector. Any other
- * field is rebuilt from the postings: every term of the field in the document's segment is
- * advanced to the document, so it costs a pass over all the field's terms in the segment. The
- * postings don't skip deleted documents, so a deleted document is rebuilt too.
+ * Rebuilds the terms and points a document was indexed with, field by field (ADR 0029, ADR 0041).
+ * A field whose term vector in the document holds all that its postings hold is read from the term
+ * vector. Any other field is rebuilt from the postings: every term of the field in the document's
+ * segment is advanced to the document, so it costs a pass over all the field's terms in the
+ * segment. The points of a field are found by going through every point of the field in the
+ * segment. Neither the postings nor the points skip deleted documents, so a deleted document is
+ * rebuilt too.
  */
 public final class Reconstruct {
 
-    /** How many terms the scan reads between two progress reports. */
+    /** How many terms or points the scan reads between two progress reports. */
     public static final int PROGRESS_INTERVAL = 1024;
 
     /** Where the terms of a field come from. */
@@ -43,8 +46,15 @@ public final class Reconstruct {
      * @param source where the terms come from
      * @param terms the terms in term order, with their occurrences in the document; {@code freq} is 1
      *     for postings without freqs, and the positions are empty for postings without positions
+     * @param points the document's points in the field, as Lucene packs them, in unsigned byte order
+     *     with duplicates kept; empty if the field has no points
      */
-    public record Field(String field, IndexOptions indexOptions, Source source, List<TermVectorTerm> terms) {}
+    public record Field(
+            String field,
+            IndexOptions indexOptions,
+            Source source,
+            List<TermVectorTerm> terms,
+            List<BytesRef> points) {}
 
     private final ScanProgress progress;
     private long scanned;
@@ -54,10 +64,10 @@ public final class Reconstruct {
     }
 
     /**
-     * Rebuilds the terms of a document in each of {@code fields}, in that order.
+     * Rebuilds the terms and points of a document in each of {@code fields}, in that order.
      *
      * @throws CancellationException from {@code progress}, to stop the scan
-     * @throws IOException if reading the term vectors or postings fails
+     * @throws IOException if reading the term vectors, postings or points fails
      */
     static List<Field> reconstruct(IndexReader reader, int docId, List<String> fields, ScanProgress progress)
             throws IOException {
@@ -65,11 +75,11 @@ public final class Reconstruct {
     }
 
     /**
-     * How many terms {@link #reconstruct} goes through: the terms of the fields it rebuilds from the
-     * postings, in the document's segment. Empty if the segment doesn't know how many terms a field
-     * has.
+     * How many terms and points {@link #reconstruct} goes through: the terms of the fields it
+     * rebuilds from the postings and the points of the fields, in the document's segment. Empty if
+     * the segment doesn't know how many terms a field has.
      */
-    static OptionalLong termCount(IndexReader reader, int docId, List<String> fields) throws IOException {
+    static OptionalLong count(IndexReader reader, int docId, List<String> fields) throws IOException {
         SegmentDoc segmentDoc = SegmentDoc.of(reader, docId);
         long count = 0;
         for (String name : fields) {
@@ -80,6 +90,10 @@ public final class Reconstruct {
                     return OptionalLong.empty();
                 }
                 count += size;
+            }
+            PointValues points = segmentDoc.leaf().getPointValues(name);
+            if (points != null) {
+                count += points.size();
             }
         }
         return OptionalLong.of(count);
@@ -98,16 +112,20 @@ public final class Reconstruct {
         LeafReader leaf = segmentDoc.leaf();
         FieldInfo info = leaf.getFieldInfos().fieldInfo(name);
         IndexOptions options = info != null ? info.getIndexOptions() : IndexOptions.NONE;
-        if (options == IndexOptions.NONE) {
-            return new Field(name, options, Source.POSTINGS, List.of());
+        Source source = Source.POSTINGS;
+        List<TermVectorTerm> terms = List.of();
+        if (options != IndexOptions.NONE) {
+            Terms termVector = leaf.termVectors().get(segmentDoc.doc(), name);
+            if (termVector != null && covers(termVector, info)) {
+                source = Source.TERM_VECTOR;
+                terms = DocumentReader.terms(termVector);
+            } else {
+                Terms postings = leaf.terms(name);
+                terms = postings != null ? scan(postings, info, segmentDoc.doc()) : List.of();
+            }
         }
-        Terms termVector = leaf.termVectors().get(segmentDoc.doc(), name);
-        if (termVector != null && covers(termVector, info)) {
-            return new Field(name, options, Source.TERM_VECTOR, DocumentReader.terms(termVector));
-        }
-        Terms terms = leaf.terms(name);
-        return new Field(
-                name, options, Source.POSTINGS, terms != null ? scan(terms, info, segmentDoc.doc()) : List.of());
+        PointValues points = leaf.getPointValues(name);
+        return new Field(name, options, source, terms, points != null ? points(points, segmentDoc.doc()) : List.of());
     }
 
     /**
@@ -122,6 +140,35 @@ public final class Reconstruct {
         }
         Terms termVector = leaf.termVectors().get(segmentDoc.doc(), name);
         return termVector != null && covers(termVector, info) ? null : leaf.terms(name);
+    }
+
+    /** Goes through every point of a field in the segment, and keeps those of the document. */
+    private List<BytesRef> points(PointValues points, int doc) throws IOException {
+        List<BytesRef> result = new ArrayList<>();
+        points.getPointTree().visitDocValues(new PointValues.IntersectVisitor() {
+            @Override
+            public void visit(int docID) {
+                throw new IllegalStateException("A point without its value");
+            }
+
+            @Override
+            public void visit(int docID, byte[] packedValue) {
+                if (scanned % PROGRESS_INTERVAL == 0) {
+                    progress.scanned(scanned);
+                }
+                scanned++;
+                if (docID == doc) {
+                    result.add(new BytesRef(packedValue.clone()));
+                }
+            }
+
+            @Override
+            public PointValues.Relation compare(byte[] minPackedValue, byte[] maxPackedValue) {
+                return PointValues.Relation.CELL_CROSSES_QUERY;
+            }
+        });
+        result.sort(null);
+        return List.copyOf(result);
     }
 
     /** Whether a term vector holds all that the postings of its field hold. */

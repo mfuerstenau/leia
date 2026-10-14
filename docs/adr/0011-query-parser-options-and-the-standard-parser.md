@@ -1,6 +1,6 @@
 # ADR 0011 — Query parser options and the standard query parser
 
-- **Status:** Accepted, amended by ADR 0026 (date resolution, locale and time zone for date ranges)
+- **Status:** Accepted, amended by ADR 0026 (date resolution, locale and time zone for date ranges); ADR 0041 guesses how to show points on the documents and terms screens the same way, independently
 - **Date:** 2026-10-06
 
 ## Context

@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.stream.Stream;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
+import org.apache.lucene.document.IntPoint;
 import org.apache.lucene.document.KnnFloatVectorField;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
@@ -25,7 +26,7 @@ import org.apache.lucene.util.Version;
  * <p>Compiled against Lucene 9 and run with Lucene 8 or 9 on the classpath (see {@code
  * leia-core/build.gradle.kts}), so it only uses API that both have. The index has 3 documents, one
  * of them deleted, and commit user data. With Lucene 9, each document also has a KNN vector, which
- * Lucene 8 doesn't know.
+ * Lucene 8 doesn't know, and an int point (ADR 0041).
  */
 public final class LegacyIndexWriter {
 
@@ -53,6 +54,7 @@ public final class LegacyIndexWriter {
                 doc.add(new TextField("body", "document number " + i, Field.Store.YES));
                 if (Version.LATEST.major >= 9) {
                     Vectors.add(doc, i);
+                    doc.add(new IntPoint("number", i * 10));
                 }
                 writer.addDocument(doc);
             }

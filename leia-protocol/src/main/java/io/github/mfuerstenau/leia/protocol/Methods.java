@@ -150,11 +150,12 @@ public final class Methods {
             new RpcMethod<>("getTermVector", GetTermVectorParams.class, GetTermVectorResult.class);
 
     /**
-     * Starts a job that rebuilds the terms a document was indexed with, per field (ADR 0029): from
-     * its term vector where that holds all that the postings hold, else from the postings of every
-     * term of the field in the document's segment. Fails with {@code NO_INDEX_OPEN}, {@code
-     * NO_READER}, {@code DOC_NOT_FOUND}, {@code FIELD_NOT_FOUND}, or {@code INVALID_PARAMS} for a
-     * field that isn't indexed.
+     * Starts a job that rebuilds the terms and points a document was indexed with, per field (ADR
+     * 0029, ADR 0041): the terms from its term vector where that holds all that the postings hold,
+     * else from the postings of every term of the field in the document's segment; the points from
+     * every point of the field in the segment. Fails with {@code NO_INDEX_OPEN}, {@code NO_READER},
+     * {@code DOC_NOT_FOUND}, {@code FIELD_NOT_FOUND}, or {@code INVALID_PARAMS} for a field with
+     * neither postings nor points.
      */
     public static final RpcMethod<StartReconstructParams, JobStarted> START_RECONSTRUCT =
             new RpcMethod<>("startReconstruct", StartReconstructParams.class, JobStarted.class);

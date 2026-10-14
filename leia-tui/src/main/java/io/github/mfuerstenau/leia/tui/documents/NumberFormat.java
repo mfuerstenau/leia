@@ -71,7 +71,7 @@ public enum NumberFormat {
      * as the same value, with {@code .0} for whole numbers, in exponent form from 1e16 on and below
      * 1e-4, and {@code inf} for the infinities.
      */
-    static String debug(double value) {
+    public static String debug(double value) {
         if (Double.isNaN(value)) {
             return "NaN";
         }
@@ -88,7 +88,7 @@ public enum NumberFormat {
     }
 
     /** {@code value} as Rust's {@code {:?}} prints an {@code f32}, from its own shortest form. */
-    static String debug(float value) {
+    public static String debug(float value) {
         if (Float.isNaN(value)) {
             return "NaN";
         }

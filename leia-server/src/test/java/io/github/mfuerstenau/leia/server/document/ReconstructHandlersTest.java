@@ -15,6 +15,7 @@ import io.github.mfuerstenau.leia.protocol.document.TermPosition;
 import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
+import io.github.mfuerstenau.leia.protocol.points.PointValue;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
@@ -30,6 +31,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
+import org.apache.lucene.document.IntPoint;
 import org.apache.lucene.document.NumericDocValuesField;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
@@ -62,25 +64,45 @@ class ReconstructHandlersTest {
         GetReconstructResult result = awaitDone(jobId);
 
         // "title" has 2 terms in the segment, "id" 2.
-        assertThat(result.scannedTerms()).isEqualTo(4);
-        assertThat(result.totalTerms()).isEqualTo(OptionalLong.of(4));
+        assertThat(result.scanned()).isEqualTo(4);
+        assertThat(result.total()).isEqualTo(OptionalLong.of(4));
         assertThat(result.result().orElseThrow().fields())
                 .containsExactly(
                         new ReconstructedField(
                                 "title",
                                 IndexOptions.DOCS_AND_FREQS_AND_POSITIONS,
                                 ReconstructSource.POSTINGS,
-                                List.of(new TermVectorTerm("red", false, 1, List.of(position(0))))),
+                                List.of(new TermVectorTerm("red", false, 1, List.of(position(0)))),
+                                List.of()),
                         new ReconstructedField(
                                 "id",
                                 IndexOptions.DOCS,
                                 ReconstructSource.POSTINGS,
-                                List.of(new TermVectorTerm("1", false, 1, List.of()))));
+                                List.of(new TermVectorTerm("1", false, 1, List.of())),
+                                List.of()));
         assertFails(() -> get.handle(new JobParams(jobId)), ErrorCode.JOB_NOT_FOUND);
     }
 
     @Test
-    void rebuildsEveryIndexedFieldWithoutFields() throws Exception {
+    void rebuildsThePointsOfAPointField() throws Exception {
+        currentIndex.replace(ReadOnlyIndex.open(writeIndex()));
+
+        long jobId = start.handle(new StartReconstructParams(1, Optional.of(List.of("location", "id"))))
+                .jobId();
+        GetReconstructResult result = awaitDone(jobId);
+
+        // 2 points of "location" and 2 terms of "id" in the segment.
+        assertThat(result.scanned()).isEqualTo(4);
+        assertThat(result.total()).isEqualTo(OptionalLong.of(4));
+        ReconstructedField location = result.result().orElseThrow().fields().getFirst();
+        assertThat(location.indexOptions()).isEqualTo(IndexOptions.NONE);
+        assertThat(location.terms()).isEmpty();
+        // Each dimension apart: 2 and -1 as sortable ints.
+        assertThat(location.points()).containsExactly(new PointValue(List.of("80000002", "7fffffff")));
+    }
+
+    @Test
+    void rebuildsEveryFieldWithTermsOrPointsWithoutFields() throws Exception {
         currentIndex.replace(ReadOnlyIndex.open(writeIndex()));
 
         long jobId =
@@ -88,7 +110,7 @@ class ReconstructHandlersTest {
 
         assertThat(awaitDone(jobId).result().orElseThrow().fields())
                 .extracting(ReconstructedField::field)
-                .containsExactly("id", "title");
+                .containsExactly("id", "title", "location");
     }
 
     @Test
@@ -115,7 +137,7 @@ class ReconstructHandlersTest {
         assertThatThrownBy(() -> start.handle(new StartReconstructParams(0, Optional.of(List.of("number")))))
                 .isInstanceOfSatisfying(
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.INVALID_PARAMS))
-                .hasMessage("Invalid params: the field 'number' is not indexed, so it has no terms to rebuild");
+                .hasMessage("Invalid params: the field 'number' has no terms or points to rebuild");
     }
 
     @Test
@@ -134,7 +156,10 @@ class ReconstructHandlersTest {
         return new TermPosition(OptionalInt.of(position), OptionalInt.empty(), OptionalInt.empty(), Optional.empty());
     }
 
-    /** One segment: "red" with id 1, "blue" with id 2; "number" has doc values only. */
+    /**
+     * One segment: "red" with id 1, "blue" with id 2; "location" has points [id, -1] only, "number"
+     * doc values only.
+     */
     private Path writeIndex() throws IOException {
         return writeIndex("blue");
     }
@@ -148,6 +173,7 @@ class ReconstructHandlersTest {
                 Document doc = new Document();
                 doc.add(new StringField("id", Integer.toString(id++), Field.Store.NO));
                 doc.add(new TextField("title", title, Field.Store.NO));
+                doc.add(new IntPoint("location", id - 1, -1));
                 doc.add(new NumericDocValuesField("number", id));
                 writer.addDocument(doc);
             }

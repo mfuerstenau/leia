@@ -1,6 +1,6 @@
 {
   "format": "leia-document",
-  "version": 2,
+  "version": 3,
   "index": "/i/demo",
   "docId": 3,
   "deleted": false,
@@ -125,7 +125,7 @@
     {
       "name": "year",
       "number": 3,
-      "flags": "-----D--",
+      "flags": "-----DT-",
       "indexOptions": "NONE",
       "stored": [],
       "docValues": {
@@ -134,7 +134,14 @@
           2024
         ],
         "values": []
-      }
+      },
+      "points": [
+        {
+          "dimensions": [
+            "800007e8"
+          ]
+        }
+      ]
     },
     {
       "name": "embedding",

@@ -64,6 +64,7 @@ import io.github.mfuerstenau.leia.tui.jars.DefaultJars;
 import io.github.mfuerstenau.leia.tui.jars.JarsPopup;
 import io.github.mfuerstenau.leia.tui.overview.FieldScan;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
+import io.github.mfuerstenau.leia.tui.points.PointFormats;
 import io.github.mfuerstenau.leia.tui.prompt.ExportPrompt;
 import io.github.mfuerstenau.leia.tui.prompt.ExportPrompt.ExportTarget;
 import io.github.mfuerstenau.leia.tui.prompt.PathCompletion;
@@ -124,6 +125,9 @@ public final class App {
 
     /** The documents screen of the open index; null without one, or without a reader. */
     private Documents documents;
+
+    /** The format of each point field, which the terms and documents screens share (ADR 0041). */
+    private PointFormats pointFormats = new PointFormats();
 
     /** The search screen of the open index; null without one, or without a reader. */
     private Search search;
@@ -208,7 +212,7 @@ public final class App {
     private record Loading(long id, int docId, boolean indexedTerms, ExportTarget target) implements RunningExport {}
 
     /**
-     * The indexed terms of the document are being rebuilt.
+     * The indexed terms and points of the document are being rebuilt.
      *
      * @param jobId null until the backend has started the job
      */
@@ -287,6 +291,7 @@ public final class App {
                 skipped.stream().map(SkippedIndex::path).toList());
         commits = new Commits(indexNames(opened));
         check = new Check(stats.path());
+        pointFormats = new PointFormats();
         terms = new Terms(stats.fields());
         documents = newDocuments(stats, opened);
         analysis.indexChanged(indexedFields(stats), true, false);
@@ -409,13 +414,13 @@ public final class App {
     }
 
     /** The documents screen of {@code stats}, which says which index directory a document is in. */
-    private static Documents newDocuments(GetIndexStatsResult stats, Opened opened) {
+    private Documents newDocuments(GetIndexStatsResult stats, Opened opened) {
         List<String> names = indexNames(opened);
         List<Documents.IndexStart> starts = new ArrayList<>();
         for (int i = 0; i < Math.min(names.size(), stats.indexes().size()); i++) {
             starts.add(new Documents.IndexStart(stats.indexes().get(i).docBase(), names.get(i)));
         }
-        return new Documents(stats.fields(), stats.maxDoc()).withIndexes(starts);
+        return new Documents(stats.fields(), stats.maxDoc()).withIndexes(starts).withPointFormats(pointFormats);
     }
 
     /** The index has no newer commit; everything stays as it is. */
@@ -1158,8 +1163,8 @@ public final class App {
                 rebuilding.data(),
                 rebuilding.target(),
                 rebuilding.jobId(),
-                result.scannedTerms(),
-                result.totalTerms());
+                result.scanned(),
+                result.total());
         return Optional.empty();
     }
 
@@ -1720,7 +1725,7 @@ public final class App {
             }
             String step = documents.filtered() ? "←→ match   b unfilter   " : "←→ doc   ";
             return " " + cancel + "q quit   o open   c close   1-7 screen   " + step + steps
-                    + "i go to   ⏎ term vector   v view   a analyze   s search value   N nearest   x numbers   e empty   "
+                    + "i go to   ⏎ term vector   v view   a analyze   s search value   N nearest   x numbers   t points   e empty   "
                     + "m similar   "
                     + "r rebuild   E export   Tab panel   ↑↓";
         }
@@ -1794,7 +1799,7 @@ public final class App {
                 Optional.of("Exporting doc " + rebuilding.docId() + ": " + rebuilding.scanned()
                         + (rebuilding.total().isPresent()
                                 ? "/" + rebuilding.total().getAsLong()
-                                : "") + " terms");
+                                : "") + " terms and points");
             case Writing writing -> Optional.of("Exporting doc " + writing.docId() + ": writing…");
         };
     }

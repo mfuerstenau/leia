@@ -32,9 +32,9 @@ import java.util.Optional;
 /**
  * The export prompts: of the terms screen (ADR 0022), for the file that the terms of a field are
  * written to and the delimiter, and of the documents screen (ADR 0030), for the file that a
- * document is written to as JSON and whether its indexed terms are rebuilt. The backend writes the
- * terms; the prompt only resolves the path and asks before overwriting a file that exists. The UI
- * writes the document, so its prompt checks the path first (rule 1).
+ * document is written to as JSON and whether its indexed terms and points are rebuilt. The backend
+ * writes the terms; the prompt only resolves the path and asks before overwriting a file that
+ * exists. The UI writes the document, so its prompt checks the path first (rule 1).
  */
 public final class ExportPrompt {
 
@@ -262,8 +262,8 @@ public final class ExportPrompt {
             }
             case DocumentKind document -> {
                 title = " Export document " + document.docId() + " as JSON ";
-                choice = " Tab indexed terms: " + (document.indexedTerms() ? "on" : "off") + " ";
-                keys = "Enter export   Ctrl+Y copy   Tab indexed terms   Esc cancel";
+                choice = " Tab terms and points: " + (document.indexedTerms() ? "on" : "off") + " ";
+                keys = "Enter export   Ctrl+Y copy   Tab terms and points   Esc cancel";
             }
         }
         Block block = Block.builder()

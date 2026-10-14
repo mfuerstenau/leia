@@ -27,12 +27,15 @@ import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
+import io.github.mfuerstenau.leia.protocol.points.PointValue;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
 import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
 import io.github.mfuerstenau.leia.tui.TestFilters;
 import io.github.mfuerstenau.leia.tui.TestScreens;
 import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.documents.Documents.Request;
+import io.github.mfuerstenau.leia.tui.points.PointFormat;
+import io.github.mfuerstenau.leia.tui.points.PointFormats;
 import io.github.mfuerstenau.leia.tui.terms.Terms.TermHit;
 import java.util.List;
 import java.util.Map;
@@ -892,7 +895,11 @@ class DocumentsTest {
                 OptionalLong.of(10),
                 Optional.of(new ReconstructResult(
                         List.of(new ReconstructedField(
-                                field, IndexOptions.DOCS_AND_FREQS_AND_POSITIONS, ReconstructSource.POSTINGS, rebuilt)),
+                                field,
+                                IndexOptions.DOCS_AND_FREQS_AND_POSITIONS,
+                                ReconstructSource.POSTINGS,
+                                rebuilt,
+                                List.of())),
                         1)));
     }
 
@@ -932,6 +939,58 @@ class DocumentsTest {
         documents.handleKey(key(KeyCode.DOWN));
         assertThat(documents.handleKey(key('r'))).isEmpty();
         assertThat(render(documents, 140, 50)).doesNotContain("Rebuilt");
+    }
+
+    @Test
+    void rebuildsThePointsOfAPointFieldAndCyclesTheirFormat() {
+        IndexField price = new IndexField(
+                "price",
+                1,
+                IndexOptions.NONE,
+                false,
+                false,
+                false,
+                DocValuesType.NONE,
+                1,
+                8,
+                0,
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty());
+        PointFormats formats = new PointFormats();
+        Documents documents = new Documents(List.of(schema("id", 0), price), 5).withPointFormats(formats);
+        documents.loaded(new GetDocumentResult(
+                0,
+                false,
+                List.of(
+                        field("id", OptionalLong.empty(), List.of(string("doc-0")), Optional.empty(), false),
+                        field("price", OptionalLong.empty(), List.of(string("12.5")), Optional.empty(), false))));
+        documents.handleKey(key(KeyCode.DOWN));
+        assertThat(render(documents, 140, 50)).contains("Rebuilt     r rebuilds the points it was indexed with");
+
+        assertThat(documents.handleKey(key('r'))).contains(new Request.Reconstruct(0, "price", List.of()));
+        documents.reconstructStarted(0, "price", 3);
+        documents.reconstructProgress(3, new GetReconstructResult(1, OptionalLong.of(5), Optional.empty()));
+        assertThat(render(documents, 140, 50)).contains("rebuilding… 1 of 5 points, Esc stops");
+        documents.reconstructProgress(
+                3,
+                new GetReconstructResult(
+                        5,
+                        OptionalLong.of(5),
+                        Optional.of(new ReconstructResult(
+                                List.of(new ReconstructedField(
+                                        "price",
+                                        IndexOptions.NONE,
+                                        ReconstructSource.POSTINGS,
+                                        List.of(),
+                                        List.of(new PointValue(List.of("c029000000000000"))))),
+                                1))));
+
+        // Guessed as a long; t shows it as the double it is, for the terms screen too.
+        assertThat(render(documents, 140, 50)).contains("Rebuilt     1 point, as long (t)", "  4623226492472524800");
+        documents.handleKey(key('t'));
+        assertThat(render(documents, 140, 50)).contains("Rebuilt     1 point, as double (t)", "  12.5");
+        assertThat(formats.of(price)).isEqualTo(PointFormat.DOUBLE);
     }
 
     @Test

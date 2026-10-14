@@ -40,10 +40,13 @@ import io.github.mfuerstenau.leia.protocol.filter.StepFilterParams;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
+import io.github.mfuerstenau.leia.protocol.points.PointValue;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
 import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
 import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
+import io.github.mfuerstenau.leia.tui.points.PointFormat;
+import io.github.mfuerstenau.leia.tui.points.PointFormats;
 import io.github.mfuerstenau.leia.tui.terms.Terms.TermHit;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
@@ -264,6 +267,9 @@ public final class Documents {
 
     private NumberFormat numbers = NumberFormat.LONG;
 
+    /** The format of each point field, shared with the terms screen (ADR 0041). */
+    private PointFormats pointFormats = new PointFormats();
+
     /** Term vectors of the shown document, by field name. */
     private final Map<String, TermVector> termVectors = new HashMap<>();
 
@@ -329,6 +335,12 @@ public final class Documents {
         return this;
     }
 
+    /** Shows points in {@code formats}, which the terms screen shares. */
+    public Documents withPointFormats(PointFormats formats) {
+        this.pointFormats = formats;
+        return this;
+    }
+
     /** What the index says about the field {@code name}; empty if it doesn't know it. */
     public Optional<IndexField> field(String name) {
         return Optional.ofNullable(schema.get(name));
@@ -359,6 +371,7 @@ public final class Documents {
         documents.selectField = selectedField().map(DocumentField::name).orElse(null);
         documents.hideEmpty = hideEmpty;
         documents.numbers = numbers;
+        documents.pointFormats = pointFormats;
         documents.delimiters = delimiters;
         documents.nextFilterSerial = nextFilterSerial;
         if (filter != null) {
@@ -758,7 +771,10 @@ public final class Documents {
         return job;
     }
 
-    /** Rebuilds the selected field, if it is indexed and not rebuilt yet; a rebuild of another field stops. */
+    /**
+     * Rebuilds the selected field, if it has postings or points and is not rebuilt yet; a rebuild of
+     * another field stops.
+     */
     private Optional<Request> reconstruct() {
         Optional<DocumentField> selected = selectedField();
         if (selected.isEmpty()) {
@@ -766,7 +782,7 @@ public final class Documents {
         }
         String field = selected.get().name();
         IndexField index = schema.get(field);
-        boolean indexed = index != null && index.indexOptions() != IndexOptions.NONE;
+        boolean indexed = index != null && rebuildable(index);
         Reconstruction rebuilt = reconstructions.get(field);
         if (!indexed || (rebuilt != null && !(rebuilt instanceof Reconstruction.Failed))) {
             return Optional.empty();
@@ -796,6 +812,11 @@ public final class Documents {
         }
     }
 
+    /** Whether a field has postings or points to rebuild. */
+    private static boolean rebuildable(IndexField field) {
+        return field.indexOptions() != IndexOptions.NONE || field.pointDimensionCount() > 0;
+    }
+
     /** Shows the progress of rebuild job {@code jobId}, or the rebuilt field, if it is the running one. */
     public void reconstructProgress(long jobId, GetReconstructResult result) {
         Map.Entry<String, Reconstruction> active = activeReconstruction();
@@ -809,7 +830,7 @@ public final class Documents {
                     .<Reconstruction>map(Reconstruction.Done::new)
                     .orElse(new Reconstruction.Failed("the server rebuilt no field"));
         } else {
-            next = new Reconstruction.Running(jobId, result.scannedTerms(), result.totalTerms());
+            next = new Reconstruction.Running(jobId, result.scanned(), result.total());
         }
         active.setValue(next);
     }
@@ -1037,9 +1058,10 @@ public final class Documents {
      * b} clears it. Loads the selected field's term vector with Enter, views its values with {@code
      * v}, analyzes its stored text with {@code a}, searches for its doc values with {@code s} and for
      * the documents nearest to its vector with {@code N}, cycles
-     * the number format with {@code x}, hides empty fields with {@code e}, searches for documents like
-     * this one with {@code m}, rebuilds the field's indexed terms with {@code r}, switches the focus
-     * with Tab, and moves the selection or scrolls the details.
+     * the number format with {@code x} and the point format with {@code t}, hides empty fields with
+     * {@code e}, searches for documents like this one with {@code m}, rebuilds the field's indexed
+     * terms and points with {@code r}, switches the focus with Tab, and moves the selection or
+     * scrolls the details.
      */
     public Optional<Request> handleKey(KeyEvent key) {
         if (viewer != null) {
@@ -1134,6 +1156,13 @@ public final class Documents {
                 }
                 case 'x' -> {
                     numbers = numbers.next();
+                    return Optional.empty();
+                }
+                case 't' -> {
+                    selectedField()
+                            .map(field -> schema.get(field.name()))
+                            .filter(field -> field.pointDimensionCount() > 0)
+                            .ifPresent(pointFormats::cycle);
                     return Optional.empty();
                 }
                 case 's' -> {
@@ -1392,7 +1421,8 @@ public final class Documents {
                 positions,
                 termVectors.get(field.name()),
                 reconstructions.get(field.name()),
-                numbers);
+                numbers,
+                pointFormats);
         // TamboUI scrolls no further than to show the last line at the bottom, so the scroll stops
         // there too: the next key after End moves.
         Block block = panel(title, focused);
@@ -1541,7 +1571,8 @@ public final class Documents {
             Positions positions,
             TermVector termVector,
             Reconstruction reconstruction,
-            NumberFormat numbers) {
+            NumberFormat numbers,
+            PointFormats pointFormats) {
         List<Line> lines = new ArrayList<>();
         if (schema.isPresent()) {
             IndexField index = schema.get();
@@ -1667,27 +1698,51 @@ public final class Documents {
             }
         }
 
-        if (schema.filter(index -> index.indexOptions() != IndexOptions.NONE).isPresent()) {
+        if (schema.filter(Documents::rebuildable).isPresent()) {
             lines.add(Line.empty());
-            lines.addAll(reconstructionLines(reconstruction));
+            lines.addAll(reconstructionLines(reconstruction, schema.get(), pointFormats));
         }
         return lines;
     }
 
-    /** The terms the field was indexed with, once rebuilt: in position order if they have positions, then term by term. */
-    private static List<Line> reconstructionLines(Reconstruction reconstruction) {
+    /**
+     * The terms and points the field was indexed with, once rebuilt: the terms in position order if
+     * they have positions, then term by term; the points one per line, decoded.
+     */
+    private static List<Line> reconstructionLines(
+            Reconstruction reconstruction, IndexField field, PointFormats pointFormats) {
+        boolean terms = field.indexOptions() != IndexOptions.NONE;
+        boolean points = field.pointDimensionCount() > 0;
         if (reconstruction == null) {
-            return List.of(labelled("Rebuilt", "r rebuilds the terms it was indexed with"));
+            String what = terms && points ? "the terms and points" : points ? "the points" : "the terms";
+            return List.of(labelled("Rebuilt", "r rebuilds " + what + " it was indexed with"));
         }
         List<Line> lines = new ArrayList<>();
-        lines.add(labelled("Rebuilt", reconstruction.summary()));
+        PointFormat format = pointFormats.of(field);
+        String summary = reconstruction.summary(terms, points);
+        boolean onlyPoints = points && !terms && reconstruction instanceof Reconstruction.Done;
+        lines.add(labelled("Rebuilt", onlyPoints ? summary + ", as " + format.label() + " (t)" : summary));
         if (reconstruction instanceof Reconstruction.Done done) {
-            Optional<String> tokens = Reconstruction.tokenLine(done.field().terms());
-            if (tokens.isPresent()) {
-                lines.add(Line.from("  " + tokens.get()));
-                lines.add(Line.empty());
+            if (terms) {
+                Optional<String> tokens = Reconstruction.tokenLine(done.field().terms());
+                if (tokens.isPresent()) {
+                    lines.add(Line.from("  " + tokens.get()));
+                    lines.add(Line.empty());
+                }
+                lines.addAll(termLines(done.field().terms(), Reconstruction.hasFreqs(done.field())));
             }
-            lines.addAll(termLines(done.field().terms(), Reconstruction.hasFreqs(done.field())));
+            if (points) {
+                if (terms) {
+                    lines.add(Line.empty());
+                    lines.add(labelled(
+                            "Points",
+                            TextFormat.count(done.field().points().size(), "point") + ", as " + format.label()
+                                    + " (t)"));
+                }
+                for (PointValue point : done.field().points()) {
+                    lines.add(Line.from("  " + format.format(point)));
+                }
+            }
         }
         return lines;
     }

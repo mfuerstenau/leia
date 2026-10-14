@@ -52,6 +52,7 @@ import io.github.mfuerstenau.leia.protocol.index.ReopenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
+import io.github.mfuerstenau.leia.protocol.points.PointValue;
 import io.github.mfuerstenau.leia.protocol.search.BooleanSimilarity;
 import io.github.mfuerstenau.leia.protocol.search.ClassicSimilarity;
 import io.github.mfuerstenau.leia.protocol.search.DateResolution;
@@ -89,6 +90,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.text.Collator;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -96,6 +98,8 @@ import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.OptionalInt;
 import java.util.stream.Stream;
+import org.apache.lucene.document.DoublePoint;
+import org.apache.lucene.document.IntPoint;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Nested;
@@ -263,6 +267,35 @@ class DemoIndexTest {
             assertThat(rebuilt(74, List.of("deleted_only")).get("deleted_only").terms())
                     .extracting(TermVectorTerm::term)
                     .contains("deleted", "document");
+        }
+
+        @Test
+        void rebuildsThePointsOfAProductAsItsStoredValues() throws Exception {
+            Map<String, ReconstructedField> fields = rebuilt(1, List.of("quantity", "price", "location"));
+            GetDocumentResult document = document(1);
+
+            assertThat(fields.get("quantity").indexOptions()).isEqualTo(IndexOptions.NONE);
+            assertThat(fields.get("quantity").terms()).isEmpty();
+            assertThat(fields.get("quantity").points())
+                    .singleElement()
+                    .satisfies(point -> assertThat(IntPoint.decodeDimension(dimension(point, 0), 0))
+                            .isEqualTo(Integer.parseInt(
+                                    stored(document, "quantity").value())));
+            assertThat(fields.get("price").points())
+                    .singleElement()
+                    .satisfies(point -> assertThat(DoublePoint.decodeDimension(dimension(point, 0), 0))
+                            .isEqualTo(
+                                    Double.parseDouble(stored(document, "price").value())));
+            // Latitude and longitude, 4 bytes each.
+            assertThat(fields.get("location").points())
+                    .singleElement()
+                    .satisfies(point -> assertThat(point.dimensions())
+                            .hasSize(2)
+                            .allSatisfy(dimension -> assertThat(dimension).hasSize(8)));
+        }
+
+        private static byte[] dimension(PointValue point, int dimension) {
+            return HexFormat.of().parseHex(point.dimensions().get(dimension));
         }
 
         @Test

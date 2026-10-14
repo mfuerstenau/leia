@@ -16,6 +16,7 @@ import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.index.GetIndexStatsHandler;
 import io.github.mfuerstenau.leia.server.job.Jobs;
+import io.github.mfuerstenau.leia.server.points.PointMapper;
 import jakarta.inject.Inject;
 import java.io.IOException;
 import java.time.Duration;
@@ -26,9 +27,9 @@ import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.IndexOptions;
 
 /**
- * {@code startReconstruct}: checks the document and fields at once, counts the terms to go through,
- * then rebuilds the terms the document was indexed with in a job ({@link GetReconstructHandler},
- * ADR 0029).
+ * {@code startReconstruct}: checks the document and fields at once, counts the terms and points to
+ * go through, then rebuilds the terms and points the document was indexed with in a job ({@link
+ * GetReconstructHandler}, ADR 0029, ADR 0041).
  */
 public final class StartReconstructHandler implements MethodHandler<StartReconstructParams, JobStarted> {
 
@@ -42,7 +43,7 @@ public final class StartReconstructHandler implements MethodHandler<StartReconst
     }
 
     /** What a poll of the job needs besides its progress. */
-    record TermCount(OptionalLong terms) {}
+    record Count(OptionalLong total) {}
 
     @Override
     public RpcMethod<StartReconstructParams, JobStarted> method() {
@@ -60,16 +61,16 @@ public final class StartReconstructHandler implements MethodHandler<StartReconst
                 FieldInfo field = index.fieldInfo(name)
                         .orElseThrow(() ->
                                 new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + name + "' in the index"));
-                if (field.getIndexOptions() == IndexOptions.NONE) {
+                if (field.getIndexOptions() == IndexOptions.NONE && field.getPointDimensionCount() == 0) {
                     throw new RpcException(
                             ErrorCode.INVALID_PARAMS,
-                            "Invalid params: the field '" + name + "' is not indexed, so it has no terms to rebuild");
+                            "Invalid params: the field '" + name + "' has no terms or points to rebuild");
                 }
             }
         }
-        OptionalLong terms;
+        OptionalLong total;
         try {
-            terms = index.reconstructTermCount(docId, fields);
+            total = index.reconstructCount(docId, fields);
         } catch (IOException e) {
             throw notReadable(docId, e);
         }
@@ -77,7 +78,7 @@ public final class StartReconstructHandler implements MethodHandler<StartReconst
                 "reconstruct document " + docId
                         + fields.map(names -> ", fields " + names).orElse(""),
                 ReconstructResult.class,
-                new TermCount(terms),
+                new Count(total),
                 progress -> reconstruct(index, docId, fields, progress));
         return new JobStarted(jobId);
     }
@@ -87,7 +88,7 @@ public final class StartReconstructHandler implements MethodHandler<StartReconst
         long start = System.nanoTime();
         try {
             List<ReconstructedField> result = index.reconstruct(docId, fields, progress).stream()
-                    .map(StartReconstructHandler::field)
+                    .map(field -> field(field, index.fieldInfo(field.field()).orElseThrow()))
                     .toList();
             return new ReconstructResult(
                     result, Duration.ofNanos(System.nanoTime() - start).toMillis());
@@ -96,7 +97,7 @@ public final class StartReconstructHandler implements MethodHandler<StartReconst
         }
     }
 
-    private static ReconstructedField field(Reconstruct.Field field) {
+    private static ReconstructedField field(Reconstruct.Field field, FieldInfo info) {
         return new ReconstructedField(
                 field.field(),
                 GetIndexStatsHandler.indexOptions(field.indexOptions()),
@@ -104,13 +105,16 @@ public final class StartReconstructHandler implements MethodHandler<StartReconst
                     case TERM_VECTOR -> ReconstructSource.TERM_VECTOR;
                     case POSTINGS -> ReconstructSource.POSTINGS;
                 },
-                field.terms().stream().map(GetTermVectorHandler::term).toList());
+                field.terms().stream().map(GetTermVectorHandler::term).toList(),
+                field.points().stream()
+                        .map(point -> PointMapper.pointValue(point, info.getPointNumBytes()))
+                        .toList());
     }
 
     private static RpcException notReadable(int docId, IOException e) {
         return new RpcException(
                 ErrorCode.INDEX_NOT_READABLE,
-                "Cannot rebuild the terms of document " + docId + ": " + e.getMessage(),
+                "Cannot rebuild the terms and points of document " + docId + ": " + e.getMessage(),
                 e);
     }
 }

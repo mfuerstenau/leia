@@ -120,7 +120,8 @@ class IndexStatsTest {
                     .containsExactly(
                             tuple("id", IndexOptions.DOCS, 0),
                             tuple("body", IndexOptions.DOCS_AND_FREQS_AND_POSITIONS, 0),
-                            tuple("vector", IndexOptions.NONE, 3));
+                            tuple("vector", IndexOptions.NONE, 3),
+                            tuple("number", IndexOptions.NONE, 0));
         }
     }
 

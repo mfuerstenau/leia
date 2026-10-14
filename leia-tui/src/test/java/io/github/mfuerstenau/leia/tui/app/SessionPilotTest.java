@@ -441,7 +441,7 @@ class SessionPilotTest {
 
         pilot.press('E');
         settle();
-        assertThat(screen()).contains("Export document 0 as JSON", "doc-0.json", "Tab indexed terms: on");
+        assertThat(screen()).contains("Export document 0 as JSON", "doc-0.json", "Tab terms and points: on");
         pilot.press(KeyCode.ENTER);
         settle();
 

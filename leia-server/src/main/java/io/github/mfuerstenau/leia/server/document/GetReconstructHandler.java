@@ -28,9 +28,9 @@ public final class GetReconstructHandler implements MethodHandler<JobParams, Get
     @Override
     public GetReconstructResult handle(JobParams params) throws RpcException {
         // Read first: the poll that hands out the outcome forgets the job.
-        StartReconstructHandler.TermCount count =
-                jobs.attachment(params.jobId(), ReconstructResult.class, StartReconstructHandler.TermCount.class);
+        StartReconstructHandler.Count count =
+                jobs.attachment(params.jobId(), ReconstructResult.class, StartReconstructHandler.Count.class);
         Jobs.Poll<ReconstructResult> poll = jobs.poll(params.jobId(), ReconstructResult.class);
-        return new GetReconstructResult(poll.progress(), count.terms(), poll.result());
+        return new GetReconstructResult(poll.progress(), count.total(), poll.result());
     }
 }

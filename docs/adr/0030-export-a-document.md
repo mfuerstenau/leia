@@ -1,6 +1,6 @@
 # ADR 0030 — Export a document as JSON
 
-- **Status:** Accepted, amended by ADR 0040 (version 2: each field's KNN vector)
+- **Status:** Accepted, amended by ADR 0040 (version 2: each field's KNN vector) and ADR 0041 (version 3: each field's points)
 - **Date:** 2026-10-07
 
 ## Context

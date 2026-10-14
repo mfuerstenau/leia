@@ -272,7 +272,9 @@ class DocumentTest {
             IndexDocument doc = index.document(1);
 
             assertThat(doc.deleted()).isTrue();
-            assertThat(doc.fields()).extracting(IndexDocument.Field::name).containsExactly("id", "body", "vector");
+            assertThat(doc.fields())
+                    .extracting(IndexDocument.Field::name)
+                    .containsExactly("id", "body", "vector", "number");
             assertThat(field(doc, "id").stored()).containsExactly(new StoredValue.Text("2"));
             assertThat(field(doc, "body").stored()).containsExactly(new StoredValue.Text("document number 2"));
             assertThat(field(doc, "body").norm()).hasValue(3);

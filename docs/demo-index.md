@@ -78,11 +78,16 @@ other tests use their own indexes and the Lucene 9 and 8 indexes from `LegacyInd
   vector at once, and 42's 5000 words in position order (`東京` as `東 京`); `labels` with freqs and
   `keywords` with docs only, neither of them stored; `binary_key` as hex; `deleted_only` in the
   deleted document 74.
+- **Rebuilding points (`r`, ADR 0041):** on document 1, `quantity` shows `1 point, as int (t)` and
+  `302`, its stored value; `price` shows a long until `t` makes it a double, `313.97`; `location`
+  shows `52.52, 13.405` as lat/lon (`t` cycles to int, float and hex). The deleted document 74 has
+  its points too: `quantity` 697.
 - **Seeking a field (`/`):** `ts` selects `tsv`, `sep` selects `unit_separated` (it contains
   `sep`), and `bl` selects `blob` on document 42; on document 0 with `e`, `bl` finds no match.
-- **Exporting a document (`E`):** 42 gives a file of about 1.7 MB (format version 2): `blob` and
+- **Exporting a document (`E`):** 42 gives a file of about 1.7 MB (format version 3): `blob` and
   `_source` whole, not cut; `embedding` and `fingerprint` with their `vector`; `body` with `termVector` and `indexed` from the term vector; `labels` and `keywords` with
-  `indexed` from the postings only. `jq '.fields[] | {name, flags, src: .indexed.source}'` lists
+  `indexed` from the postings only; `price`, `quantity`, `rating`, `timestamp` and `location` with
+  `points` in hex, and no `indexed`. `jq '.fields[] | {name, flags, src: .indexed.source}'` lists
   them. A path in `leia-core/build/test-indexes/demo/` is refused. Document 0 gives only `id`.
 
 ## Searches worth a try

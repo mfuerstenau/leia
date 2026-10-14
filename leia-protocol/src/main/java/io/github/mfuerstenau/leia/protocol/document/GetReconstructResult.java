@@ -7,9 +7,10 @@ import java.util.OptionalLong;
  * Result of {@code getReconstruct} (ADR 0029): the progress of the job, and its outcome once it is
  * done.
  *
- * @param scannedTerms the terms gone through so far
- * @param totalTerms the terms the job goes through: those of the fields it rebuilds from the
- *     postings, in the document's segment; absent if the segment doesn't know
+ * @param scanned the terms and points gone through so far
+ * @param total the terms and points the job goes through: the terms of the fields it rebuilds from
+ *     the postings and the points of the fields, in the document's segment (ADR 0041); absent if the
+ *     segment doesn't know how many terms a field has
  * @param result the outcome; absent while the job is running
  */
-public record GetReconstructResult(long scannedTerms, OptionalLong totalTerms, Optional<ReconstructResult> result) {}
+public record GetReconstructResult(long scanned, OptionalLong total, Optional<ReconstructResult> result) {}

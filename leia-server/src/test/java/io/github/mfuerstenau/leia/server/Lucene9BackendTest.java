@@ -46,6 +46,7 @@ import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
+import io.github.mfuerstenau.leia.protocol.points.PointValue;
 import io.github.mfuerstenau.leia.protocol.search.ClassicSimilarity;
 import io.github.mfuerstenau.leia.protocol.search.DocSort;
 import io.github.mfuerstenau.leia.protocol.search.Explanation;
@@ -142,8 +143,9 @@ class Lucene9BackendTest {
                 .containsExactly(
                         tuple("id", IndexOptions.DOCS, DocValuesType.NONE),
                         tuple("body", IndexOptions.DOCS_AND_FREQS_AND_POSITIONS, DocValuesType.NONE),
-                        tuple("vector", IndexOptions.NONE, DocValuesType.NONE));
-        assertThat(stats.fields().getLast())
+                        tuple("vector", IndexOptions.NONE, DocValuesType.NONE),
+                        tuple("number", IndexOptions.NONE, DocValuesType.NONE));
+        assertThat(stats.fields().get(2))
                 .extracting(IndexField::vectorDimension, IndexField::vectorEncoding, IndexField::vectorSimilarity)
                 .containsExactly(3, Optional.of(VectorEncoding.FLOAT32), Optional.of(VectorSimilarity.EUCLIDEAN));
         // Postings statistics count the deleted document too.
@@ -200,6 +202,7 @@ class Lucene9BackendTest {
                         .containsExactly(
                                 tuple("body", Optional.of("Lucene912"), Optional.empty()),
                                 tuple("id", Optional.of("Lucene912"), Optional.empty()),
+                                tuple("number", Optional.empty(), Optional.empty()),
                                 tuple("vector", Optional.empty(), Optional.of("Lucene99HnswVectorsFormat"))));
         assertThat(details.files()).anySatisfy(file -> {
             assertThat(file.name()).isEqualTo("segments_2");
@@ -270,8 +273,16 @@ class Lucene9BackendTest {
                                         List.of(),
                                         Optional.empty(),
                                         false,
-                                        Optional.of(new KnnVector(
-                                                VectorEncoding.FLOAT32, List.of(2f, 0f, 1f), List.of()))))));
+                                        Optional.of(
+                                                new KnnVector(VectorEncoding.FLOAT32, List.of(2f, 0f, 1f), List.of()))),
+                                // A point only, which getDocument doesn't read (ADR 0041).
+                                new DocumentField(
+                                        "number",
+                                        OptionalLong.empty(),
+                                        List.of(),
+                                        Optional.empty(),
+                                        false,
+                                        Optional.empty()))));
         assertThat(backend.call(Methods.GET_TERM_VECTOR, new GetTermVectorParams(1, "body"))
                         .terms())
                 .isEmpty();
@@ -406,6 +417,16 @@ class Lucene9BackendTest {
                 Methods.START_RECONSTRUCT,
                 new StartReconstructParams(0, Optional.of(List.of("nope"))),
                 ErrorCode.FIELD_NOT_FOUND);
+    }
+
+    @Test
+    void rebuildsThePointsOfADeletedDocument() throws Exception {
+        ReconstructedField number =
+                backend.reconstruct(1, Optional.of(List.of("number"))).fields().getFirst();
+
+        // 20 as a sortable int.
+        assertThat(number.indexOptions()).isEqualTo(IndexOptions.NONE);
+        assertThat(number.points()).containsExactly(new PointValue(List.of("80000014")));
     }
 
     private static StartSearchParams params(SearchQuery query) {

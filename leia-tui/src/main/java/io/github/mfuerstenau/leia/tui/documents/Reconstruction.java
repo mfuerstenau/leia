@@ -12,15 +12,15 @@ import java.util.Optional;
 import java.util.OptionalLong;
 
 /**
- * Rebuilding what a field of the shown document was indexed with (ADR 0029): the state of the
- * rebuild on the documents screen, and the field's tokens put back in position order.
+ * Rebuilding what a field of the shown document was indexed with (ADR 0029, ADR 0041): the state
+ * of the rebuild on the documents screen, and the field's tokens put back in position order.
  */
 public sealed interface Reconstruction {
 
     /** Asked for; the backend hasn't started the job yet. */
     record Starting() implements Reconstruction {}
 
-    /** @param total the terms the job goes through, if the backend knows */
+    /** @param total the terms and points the job goes through, if the backend knows */
     record Running(long jobId, long scanned, OptionalLong total) implements Reconstruction {}
 
     record Done(ReconstructedField field) implements Reconstruction {}
@@ -37,18 +37,30 @@ public sealed interface Reconstruction {
         return this instanceof Running running ? OptionalLong.of(running.jobId()) : OptionalLong.empty();
     }
 
-    /** One line on where the rebuild stands, or what it found. */
-    default String summary() {
+    /**
+     * One line on where the rebuild stands, or what it found, for a field with postings ({@code
+     * terms}), points, or both.
+     */
+    default String summary(boolean hasTerms, boolean points) {
+        boolean terms = hasTerms || !points;
+        String unit = terms && points ? "terms and points" : points ? "points" : "terms";
         return switch (this) {
             case Starting _ -> "rebuilding…";
             case Running running
             when running.total().isPresent() ->
-                "rebuilding… " + running.scanned() + " of " + running.total().getAsLong() + " terms, Esc stops";
-            case Running running -> "rebuilding… " + running.scanned() + " terms, Esc stops";
+                "rebuilding… " + running.scanned() + " of " + running.total().getAsLong() + " " + unit + ", Esc stops";
+            case Running running -> "rebuilding… " + running.scanned() + " " + unit + ", Esc stops";
             case Done done -> {
-                String source =
-                        done.field().source() == ReconstructSource.TERM_VECTOR ? "the term vector" : "the postings";
-                yield TextFormat.count(done.field().terms().size(), "term") + ", from " + source;
+                List<String> parts = new ArrayList<>();
+                if (terms) {
+                    String source =
+                            done.field().source() == ReconstructSource.TERM_VECTOR ? "the term vector" : "the postings";
+                    parts.add(TextFormat.count(done.field().terms().size(), "term") + ", from " + source);
+                }
+                if (points) {
+                    parts.add(TextFormat.count(done.field().points().size(), "point"));
+                }
+                yield String.join(" · ", parts);
             }
             case Failed failed -> "cannot rebuild it: " + failed.error();
         };

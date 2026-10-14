@@ -11,7 +11,7 @@ From the read-only checklist in `docs/luke-features.md` §7. Ordered roughly by 
 - [ ] Tools: export terms with `totalTermFreq` and a marker for binary terms (left out of ADR 0022, which keeps Luke's format)
 - [ ] Misc: log view with level filter, cross-screen navigation (`docs/luke-features.md` §5), themes, about
 - [ ] Improvements over Luke (§6). Done already: deleted documents (ADR 0006, the filter's `includeDeleted`), binary values as text or hex (ADR 0006), cancellation of long operations (ADR 0005), KNN vectors (ADR 0040). Left:
-  - [ ] Point values: a document's own, decoded per type (which ADR 0029 and the export of ADR 0030 leave out), and a field's BKD tree per segment (min/max, count, cells)
+  - [ ] Point values: a field's BKD tree per segment (min/max, count, cells). A document's own points, decoded per type, landed with ADR 0041
   - [ ] Per-segment document view: a document's segment and local id, stepping within one segment, and a jump from a segment on the commits screen to its documents
   - [ ] Highlighting of hits in stored text (`UnifiedHighlighter`: offsets from postings or term vectors, else analysis)
   - [ ] KNN: HNSW graph inspection (a node's levels and neighbours through `HnswGraphProvider`), and a recall check of approximate against exact (left out of ADR 0040)

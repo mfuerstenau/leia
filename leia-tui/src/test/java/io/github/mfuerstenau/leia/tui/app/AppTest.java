@@ -1456,7 +1456,8 @@ class AppTest {
                                         "id",
                                         IndexOptions.DOCS,
                                         ReconstructSource.POSTINGS,
-                                        List.of(new TermVectorTerm("doc-0", false, 1, List.of())))),
+                                        List.of(new TermVectorTerm("doc-0", false, 1, List.of())),
+                                        List.of())),
                                 2))));
 
         assertThat(app.polls()).isEmpty();
@@ -1583,7 +1584,8 @@ class AppTest {
                                 "id",
                                 IndexOptions.DOCS,
                                 ReconstructSource.POSTINGS,
-                                List.of(new TermVectorTerm("doc-" + docId, false, 1, List.of())))),
+                                List.of(new TermVectorTerm("doc-" + docId, false, 1, List.of())),
+                                List.of())),
                         2)));
     }
 
@@ -1595,7 +1597,7 @@ class AppTest {
     void exportsADocumentWithItsIndexedTerms(@TempDir Path dir) {
         App app = appExporting(dir);
         assertThat(app.handleKey(key('E'))).isEmpty();
-        assertThat(render(app)).contains("Export document 0 as JSON", "Tab indexed terms: on");
+        assertThat(render(app)).contains("Export document 0 as JSON", "Tab terms and points: on");
 
         assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.LoadDocumentExport(1, 0));
         assertThat(render(app)).contains("Exporting…");
@@ -1632,7 +1634,7 @@ class AppTest {
         App app = appExporting(dir);
         app.handleKey(key('E'));
         app.handleKey(key(KeyCode.TAB));
-        assertThat(render(app)).contains("Tab indexed terms: off");
+        assertThat(render(app)).contains("Tab terms and points: off");
 
         assertThat(app.handleKey(ctrl('y'))).hasValue(new Action.LoadDocumentExport(1, 0));
         Optional<Action> copy = app.documentExportLoaded(1, data(0));
