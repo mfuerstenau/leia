@@ -5,6 +5,8 @@ import io.github.mfuerstenau.leia.core.DocValuesMatch;
 import io.github.mfuerstenau.leia.core.DocValuesNumber;
 import io.github.mfuerstenau.leia.core.DocValuesQueries;
 import io.github.mfuerstenau.leia.core.InvalidQueryException;
+import io.github.mfuerstenau.leia.core.KnnQueries;
+import io.github.mfuerstenau.leia.core.KnnVector;
 import io.github.mfuerstenau.leia.core.MoreLikeThisOptions;
 import io.github.mfuerstenau.leia.core.ParserOptions;
 import io.github.mfuerstenau.leia.core.PointType;
@@ -21,6 +23,7 @@ import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesRange;
 import io.github.mfuerstenau.leia.protocol.search.FieldDateResolution;
 import io.github.mfuerstenau.leia.protocol.search.FieldSort;
+import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
 import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
 import io.github.mfuerstenau.leia.protocol.search.PointField;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
@@ -33,6 +36,7 @@ import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.analysis.AnalyzerSpecs;
 import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.DateTimeException;
 import java.time.ZoneId;
@@ -57,7 +61,7 @@ import org.apache.lucene.util.BytesRef;
 
 /**
  * Turns the query, the similarity and the sort of {@code startSearch} and {@code startExplain} into
- * their Lucene counterparts (ADR 0010 to ADR 0014, ADR 0025, ADR 0033). {@code startFilter} takes the query
+ * their Lucene counterparts (ADR 0010 to ADR 0014, ADR 0025, ADR 0033, ADR 0040). {@code startFilter} takes the query
  * too (ADR 0031).
  */
 public final class SearchQueries {
@@ -85,25 +89,34 @@ public final class SearchQueries {
      *     parser option or More-Like-This setting out of range, a field whose date resolution is
      *     listed twice, a point type that doesn't fit its
      *     field, a More-Like-This field that isn't indexed, a binary term that is not hex, or doc
-     *     values that don't fit the field or its number encoding; {@code FIELD_NOT_FOUND} for an
-     *     unknown default, date resolution, term, point, More-Like-This or doc values field; {@code
-     *     DOC_NOT_FOUND} for a More-Like-This document outside 0 to maxDoc - 1; {@code INVALID_QUERY}
-     *     if the expression doesn't parse; {@code INVALID_ANALYZER} if the query's analyzer can't be
+     *     values that don't fit the field or its number encoding, or a KNN target or k that doesn't
+     *     fit (ADR 0040); {@code FIELD_NOT_FOUND} for an unknown default, date resolution, term, point,
+     *     More-Like-This, doc values or KNN field; {@code DOC_NOT_FOUND} for a More-Like-This or KNN
+     *     document outside 0 to maxDoc - 1; {@code INVALID_QUERY} if the expression or the KNN filter
+     *     doesn't parse; {@code INDEX_NOT_READABLE} if a KNN document's vector can't be read; {@code INVALID_ANALYZER} if the query's analyzer can't be
      *     built
      */
     public static AnalyzedQuery query(ReadOnlyIndex index, SearchQuery query) throws RpcException {
         long present = Stream.of(
-                        query.classic(), query.standard(), query.term(), query.moreLikeThis(), query.docValues())
+                        query.classic(),
+                        query.standard(),
+                        query.term(),
+                        query.moreLikeThis(),
+                        query.docValues(),
+                        query.knn())
                 .filter(alternative -> alternative.isPresent())
                 .count();
         if (present != 1) {
             throw new RpcException(
                     ErrorCode.INVALID_PARAMS,
-                    "Invalid params: the query needs exactly one of classic, standard, term, moreLikeThis and"
-                            + " docValues");
+                    "Invalid params: the query needs exactly one of classic, standard, term, moreLikeThis,"
+                            + " docValues and knn");
         }
         if (query.docValues().isPresent()) {
             return new AnalyzedQuery(docValues(index, query.docValues().get()), Optional.empty());
+        }
+        if (query.knn().isPresent()) {
+            return new AnalyzedQuery(knn(index, query.knn().get()), Optional.empty());
         }
         if (query.moreLikeThis().isPresent()) {
             return moreLikeThis(index, query.moreLikeThis().get());
@@ -288,6 +301,84 @@ public final class SearchQueries {
         } catch (IllegalArgumentException e) {
             throw invalidParams(e);
         }
+    }
+
+    private static Query knn(ReadOnlyIndex index, KnnQuery knn) throws RpcException {
+        FieldInfo field = index.fieldInfo(knn.field())
+                .orElseThrow(() ->
+                        new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + knn.field() + "' in the index"));
+        if (field.getVectorDimension() == 0) {
+            throw new RpcException(
+                    ErrorCode.INVALID_PARAMS, "Invalid params: the field '" + knn.field() + "' has no KNN vectors");
+        }
+        if (knn.docId().isPresent() == knn.vector().isPresent()) {
+            throw new RpcException(
+                    ErrorCode.INVALID_PARAMS, "Invalid params: knn needs exactly one of docId and vector");
+        }
+        if (knn.exact() && knn.k().isPresent()) {
+            throw new RpcException(
+                    ErrorCode.INVALID_PARAMS,
+                    "Invalid params: an exact knn query has no k: it scores every document with a vector");
+        }
+        if (!knn.exact()
+                && (knn.k().isEmpty() || knn.k().getAsInt() < 1 || knn.k().getAsInt() > KnnQuery.MAX_K)) {
+            throw new RpcException(
+                    ErrorCode.INVALID_PARAMS,
+                    "Invalid params: an approximate knn query needs k from 1 to " + KnnQuery.MAX_K
+                            + (knn.k().isPresent() ? ": " + knn.k().getAsInt() : ""));
+        }
+        KnnVector target;
+        try {
+            target = knn.vector().isPresent() ? vector(knn.vector().get()) : documentVector(index, knn);
+            KnnQueries.check(field, target);
+        } catch (IllegalArgumentException e) {
+            throw invalidParams(e);
+        }
+        Optional<Query> filter;
+        try {
+            filter = knn.filter().isPresent()
+                    ? Optional.of(classic(index, knn.filter().get()))
+                    : Optional.empty();
+        } catch (InvalidQueryException e) {
+            throw invalidQuery(e);
+        }
+        return knn.exact()
+                ? KnnQueries.exact(field, target, filter)
+                : KnnQueries.approximate(field, target, knn.k().getAsInt(), filter);
+    }
+
+    /** @throws IllegalArgumentException if the document has no vector in the field */
+    private static KnnVector documentVector(ReadOnlyIndex index, KnnQuery knn) throws RpcException {
+        int docId = knn.docId().getAsInt();
+        GetDocumentHandler.checkDocId(index, docId);
+        try {
+            return index.vector(docId, knn.field())
+                    .orElseThrow(() -> new IllegalArgumentException(
+                            "document " + docId + " has no vector in the field '" + knn.field() + "'"));
+        } catch (IOException e) {
+            throw new RpcException(
+                    ErrorCode.INDEX_NOT_READABLE, "Cannot read document " + docId + ": " + e.getMessage(), e);
+        }
+    }
+
+    /** The vector as core takes it. */
+    private static KnnVector vector(io.github.mfuerstenau.leia.protocol.document.KnnVector vector) {
+        return switch (vector.encoding()) {
+            case FLOAT32 -> {
+                float[] values = new float[vector.floats().size()];
+                for (int i = 0; i < values.length; i++) {
+                    values[i] = vector.floats().get(i);
+                }
+                yield new KnnVector.Floats(values);
+            }
+            case BYTE -> {
+                byte[] values = new byte[vector.bytes().size()];
+                for (int i = 0; i < values.length; i++) {
+                    values[i] = vector.bytes().get(i);
+                }
+                yield new KnnVector.Bytes(values);
+            }
+        };
     }
 
     /** @throws IllegalArgumentException if {@code value} is binary and not hex */

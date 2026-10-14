@@ -72,8 +72,15 @@ class DocumentHandlersTest {
                                         OptionalLong.empty(),
                                         List.of(new StoredValue(StoredType.STRING, "2", false)),
                                         Optional.empty(),
-                                        false),
-                                new DocumentField("body", OptionalLong.of(2), List.of(), Optional.empty(), true),
+                                        false,
+                                        Optional.empty()),
+                                new DocumentField(
+                                        "body",
+                                        OptionalLong.of(2),
+                                        List.of(),
+                                        Optional.empty(),
+                                        true,
+                                        Optional.empty()),
                                 new DocumentField(
                                         "tags",
                                         OptionalLong.empty(),
@@ -82,7 +89,8 @@ class DocumentHandlersTest {
                                                 DocValuesType.SORTED_SET,
                                                 List.of(),
                                                 List.of(new BytesValue("a", false), new BytesValue("ff", true)))),
-                                        false))));
+                                        false,
+                                        Optional.empty()))));
     }
 
     @Test

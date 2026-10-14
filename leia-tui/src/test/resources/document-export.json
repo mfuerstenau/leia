@@ -1,6 +1,6 @@
 {
   "format": "leia-document",
-  "version": 1,
+  "version": 2,
   "index": "/i/demo",
   "docId": 3,
   "deleted": false,
@@ -134,6 +134,21 @@
           2024
         ],
         "values": []
+      }
+    },
+    {
+      "name": "embedding",
+      "number": 5,
+      "flags": "-------K",
+      "indexOptions": "NONE",
+      "stored": [],
+      "vector": {
+        "encoding": "FLOAT32",
+        "floats": [
+          0.5,
+          -1.25
+        ],
+        "bytes": []
       }
     }
   ]

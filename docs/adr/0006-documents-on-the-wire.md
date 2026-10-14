@@ -1,6 +1,6 @@
 # ADR 0006 — Documents on the wire
 
-- **Status:** Accepted; decision 6 superseded by ADR 0008
+- **Status:** Accepted; decision 6 superseded by ADR 0008; amended by ADR 0040 (each field's KNN vector)
 - **Date:** 2026-10-06
 
 ## Context

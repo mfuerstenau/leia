@@ -194,12 +194,14 @@ final class RealBackend implements AutoCloseable {
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
+                Optional.empty(),
                 Optional.empty());
     }
 
     static SearchQuery classic(String expression, ParserOptions options) {
         return new SearchQuery(
                 Optional.of(new ClassicQuery(expression, "body", QueryOperator.OR, options, 2, false, false, STANDARD)),
+                Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
@@ -211,6 +213,7 @@ final class RealBackend implements AutoCloseable {
         return new SearchQuery(
                 Optional.empty(),
                 Optional.of(new StandardQuery(expression, "body", operator, DEFAULTS, points, STANDARD)),
+                Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty());

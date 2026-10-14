@@ -20,6 +20,7 @@ import io.github.mfuerstenau.leia.protocol.filter.StepFilterParams;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
+import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
 import io.github.mfuerstenau.leia.protocol.search.ParserOptions;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
 import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
@@ -30,14 +31,17 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
+import org.apache.lucene.document.KnnFloatVectorField;
 import org.apache.lucene.document.SortedDocValuesField;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.Term;
+import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
@@ -105,6 +109,27 @@ class FilterHandlersTest {
     }
 
     @Test
+    void buildsAFilterFromTheNearestVectors() throws Exception {
+        openIndex();
+        SearchQuery query = new SearchQuery(
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(new KnnQuery(
+                        "vec", OptionalInt.of(0), Optional.empty(), OptionalInt.of(2), false, Optional.empty())));
+
+        long jobId = start.handle(byQuery(query, false)).jobId();
+
+        // vec: [id, 1]; the nearest to document 0 are 0 and 1.
+        assertThat(await(jobId).result().orElseThrow().matchCount()).isEqualTo(2);
+        assertThat(step(jobId, 0, true)).contains(new FilterMatch(0, 0));
+        assertThat(step(jobId, 1, true)).contains(new FilterMatch(1, 1));
+        assertThat(step(jobId, 2, true)).isEmpty();
+    }
+
+    @Test
     void buildsAFilterFromDocValues() throws Exception {
         openIndex();
         SearchQuery query = new SearchQuery(
@@ -117,7 +142,8 @@ class FilterHandlersTest {
                         Optional.empty(),
                         Optional.of(List.of(new BytesValue("red", false))),
                         Optional.empty(),
-                        Optional.empty())));
+                        Optional.empty())),
+                Optional.empty());
 
         long jobId = start.handle(byQuery(query, true)).jobId();
         FilterResult filter = await(jobId).result().orElseThrow();
@@ -273,12 +299,13 @@ class FilterHandlersTest {
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
+                Optional.empty(),
                 Optional.empty());
     }
 
     /**
      * One segment: "red", "blue", "red", "red" (deleted) and "green", with the ids 0 to 4, each
-     * also as the sorted doc values {@code color}.
+     * also as the sorted doc values {@code color}, and the euclidean vector {@code vec}, [id, 1].
      */
     private void openIndex() throws Exception {
         Path dir = tmp.resolve("index");
@@ -290,6 +317,7 @@ class FilterHandlersTest {
                 doc.add(new StringField("id", Integer.toString(id), Field.Store.YES));
                 doc.add(new TextField("body", bodies.get(id), Field.Store.YES));
                 doc.add(new SortedDocValuesField("color", new BytesRef(bodies.get(id))));
+                doc.add(new KnnFloatVectorField("vec", new float[] {id, 1}, VectorSimilarityFunction.EUCLIDEAN));
                 writer.addDocument(doc);
             }
             writer.deleteDocuments(new Term("id", "3"));

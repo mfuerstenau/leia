@@ -25,6 +25,8 @@ import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.NoMergePolicy;
 import org.apache.lucene.index.Term;
+import org.apache.lucene.index.VectorEncoding;
+import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.Version;
 import org.junit.jupiter.api.Test;
@@ -114,9 +116,11 @@ class IndexStatsTest {
             assertThat(stats.indexes().getFirst().userData())
                     .containsExactly(Map.entry("writer", "leia LegacyIndexWriter"));
             assertThat(stats.fields())
-                    .extracting(FieldStats::name, FieldStats::indexOptions)
+                    .extracting(FieldStats::name, FieldStats::indexOptions, FieldStats::vectorDimension)
                     .containsExactly(
-                            tuple("id", IndexOptions.DOCS), tuple("body", IndexOptions.DOCS_AND_FREQS_AND_POSITIONS));
+                            tuple("id", IndexOptions.DOCS, 0),
+                            tuple("body", IndexOptions.DOCS_AND_FREQS_AND_POSITIONS, 0),
+                            tuple("vector", IndexOptions.NONE, 3));
         }
     }
 
@@ -147,7 +151,8 @@ class IndexStatsTest {
         doc.add(new IntPoint("price", id * 10));
         doc.add(new NumericDocValuesField("rank", id));
         doc.add(new StoredField("stored", "only stored"));
-        doc.add(new KnnFloatVectorField("vector", new float[] {id, 0, 1}));
+        doc.add(new KnnFloatVectorField(
+                "vector", new float[] {id, 0, 1}, VectorSimilarityFunction.MAXIMUM_INNER_PRODUCT));
         return doc;
     }
 
@@ -179,6 +184,10 @@ class IndexStatsTest {
                 pointDimensionCount,
                 pointNumBytes,
                 vectorDimension,
+                VectorEncoding.FLOAT32,
+                vectorDimension == 0
+                        ? VectorSimilarityFunction.EUCLIDEAN
+                        : VectorSimilarityFunction.MAXIMUM_INNER_PRODUCT,
                 terms);
     }
 

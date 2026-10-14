@@ -50,8 +50,8 @@ other tests use their own indexes and the Lucene 9 and 8 indexes from `LegacyInd
 | `weight` | sorted numeric doc values as sortable double bits (`x` decodes them) |
 | `location` | lat/lon point + lat/lon doc values |
 | `checksum` | binary doc values, 8 random bytes |
-| `embedding` | float KNN vector, 8 dimensions, cosine |
-| `fingerprint` | byte KNN vector, 16 dimensions, euclidean |
+| `embedding` | float KNN vector, 8 dimensions, cosine; in every document but 0. Its first component is shifted by 2, so it is never all zeros |
+| `fingerprint` | byte KNN vector, 16 dimensions, euclidean; in every document but 0 |
 | `_source` | the document as JSON, stored as UTF-8 bytes like in Elasticsearch: opens as JSON in the viewer |
 | `json` | 9 values: an object (big numbers, `2.50`, escapes, duplicate keys, empty `{}`/`[]`, nesting), an array, a string, a number, 20 levels deep, 200 levels deep, then three that aren't JSON |
 | `csv` | comma-separated, with one empty item |
@@ -80,8 +80,8 @@ other tests use their own indexes and the Lucene 9 and 8 indexes from `LegacyInd
   deleted document 74.
 - **Seeking a field (`/`):** `ts` selects `tsv`, `sep` selects `unit_separated` (it contains
   `sep`), and `bl` selects `blob` on document 42; on document 0 with `e`, `bl` finds no match.
-- **Exporting a document (`E`):** 42 gives a file of about 1.7 MB: `blob` and `_source` whole, not
-  cut; `body` with `termVector` and `indexed` from the term vector; `labels` and `keywords` with
+- **Exporting a document (`E`):** 42 gives a file of about 1.7 MB (format version 2): `blob` and
+  `_source` whole, not cut; `embedding` and `fingerprint` with their `vector`; `body` with `termVector` and `indexed` from the term vector; `labels` and `keywords` with
   `indexed` from the postings only. `jq '.fields[] | {name, flags, src: .indexed.source}'` lists
   them. A path in `leia-core/build/test-indexes/demo/` is refused. Document 0 gives only `id`.
 
@@ -145,6 +145,14 @@ other tests use their own indexes and the Lucene 9 and 8 indexes from `LegacyInd
   `category:o*` in classic syntax, with `category:[[6f] TO [70]}` as the parsed query; `tags` `l*`:
   179, `*`: 385 (every document with a tag); `checksum` with `h` and `80*`: 1, and `*`: 486. `price` `1*` says a
   prefix is for doc values of bytes, and `o* toys` that a prefix stands alone.
+- KNN (ADR 0040): the overview's Vector column says `8d f32 cos` for `embedding` and `16d byte euc`
+  for `fingerprint`. On document 42, the details of `embedding` list its 8 components and its
+  length, 2.63876; `N` searches its 10 nearest: doc 42 first with score 1.0, then 411, 98, 491.
+  `e` scores every document exactly instead: 486 hits (every live document but 0), with the same
+  first 10. `w` with `category:kitchen`: 80 hits exactly; with `e` again and `k` 3, the graph
+  finds 42, 98 and 278, the exact top 3, and `b` browses them on the documents screen (`1 of 3`).
+  `[1, 2]` on the line fails: `embedding` has 8 dimensions. With `f` on `fingerprint`, `[0.5]`
+  can't be read, since a vector of bytes takes whole numbers.
 - A regex as the filter, on a copy of the demo index without `segments_4`, which has no deletions
   yet: `qu\w+` in regex mode, then `b`: 499 matches (all but document 0), starting on `1 of 499`.
   Put `segments_4` back and press `R`: the tab line says `Reopened: segments_4; rebuilding the
@@ -180,12 +188,12 @@ The analysis screen (`6`) needs no index, but these go with the demo index's tex
 - A config directory with `syn.txt` (`wifi, wireless network`) and `synonymGraph` with
   `synonyms=syn.txt`: `fast wifi router` gives `wireless` and `network` at positions 1 and 2, and
   `wifi` in italics, stacked on `wireless` and spanning `1–2`; `router` moves to position 3.
-- More-Like-This for a text (`m` five times), `A vintage leather wallet with a wooden table`:
+- More-Like-This for a text (`m` six times), `A vintage leather wallet with a wooden table`:
   with Lucene's defaults only `a` occurs twice, so the query is `a` in four fields, as the term
   table shows. With `p`, a min term freq of 1 and the stop words `a with`: `vintage`, `wooden`,
   `wallet`, `table` and `leather`, in `title` first, where they are rarest. A min word length of 7
   leaves only `vintage` and `leather`.
-- Regex over stored values (`m` six times), `sku\d{4}`: 980 values in 486 documents, in `body`,
+- Regex over stored values (`m` seven times), `sku\d{4}`: 980 values in 486 documents, in `body`,
   `tagged` and `note`, each with its matches highlighted. `"event":` finds one value, the 108 KiB
   `_source` of doc 42, with 3000 matches: `v` opens it with the first 100 highlighted, and `m`/`M`
   jump between them. `DELETED` with `i` (ignore case) and `d` (deleted documents too): doc 74's

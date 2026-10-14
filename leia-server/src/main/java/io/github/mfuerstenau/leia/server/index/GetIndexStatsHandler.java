@@ -14,10 +14,14 @@ import io.github.mfuerstenau.leia.protocol.index.IndexCommitStats;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
+import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
+import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
 import jakarta.inject.Inject;
 import java.io.IOException;
+import java.util.Optional;
+import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.util.Version;
 
 /** {@code getIndexStats}: the cheap statistics of the {@link CurrentIndex}. */
@@ -86,6 +90,10 @@ public final class GetIndexStatsHandler implements MethodHandler<GetIndexStatsPa
                 field.pointDimensionCount(),
                 field.pointNumBytes(),
                 field.vectorDimension(),
+                field.vectorDimension() == 0 ? Optional.empty() : Optional.of(vectorEncoding(field.vectorEncoding())),
+                field.vectorDimension() == 0
+                        ? Optional.empty()
+                        : Optional.of(vectorSimilarity(field.vectorSimilarity())),
                 field.terms()
                         .map(terms -> new TermStats(terms.docCount(), terms.sumDocFreq(), terms.sumTotalTermFreq())));
     }
@@ -98,6 +106,22 @@ public final class GetIndexStatsHandler implements MethodHandler<GetIndexStatsPa
             case DOCS_AND_FREQS_AND_POSITIONS -> IndexOptions.DOCS_AND_FREQS_AND_POSITIONS;
             case DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS -> IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS;
             case DOCS_AND_CUSTOM_FREQS -> IndexOptions.DOCS_AND_CUSTOM_FREQS;
+        };
+    }
+
+    public static VectorEncoding vectorEncoding(org.apache.lucene.index.VectorEncoding encoding) {
+        return switch (encoding) {
+            case BYTE -> VectorEncoding.BYTE;
+            case FLOAT32 -> VectorEncoding.FLOAT32;
+        };
+    }
+
+    public static VectorSimilarity vectorSimilarity(VectorSimilarityFunction similarity) {
+        return switch (similarity) {
+            case EUCLIDEAN -> VectorSimilarity.EUCLIDEAN;
+            case DOT_PRODUCT -> VectorSimilarity.DOT_PRODUCT;
+            case COSINE -> VectorSimilarity.COSINE;
+            case MAXIMUM_INNER_PRODUCT -> VectorSimilarity.MAXIMUM_INNER_PRODUCT;
         };
     }
 

@@ -33,6 +33,7 @@ import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
 import io.github.mfuerstenau.leia.protocol.document.GetStoredValueParams;
 import io.github.mfuerstenau.leia.protocol.document.GetTermVectorParams;
+import io.github.mfuerstenau.leia.protocol.document.KnnVector;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructSource;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructedField;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
@@ -49,6 +50,8 @@ import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
+import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
+import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
 import io.github.mfuerstenau.leia.protocol.search.BooleanSimilarity;
 import io.github.mfuerstenau.leia.protocol.search.ClassicSimilarity;
 import io.github.mfuerstenau.leia.protocol.search.DateResolution;
@@ -60,6 +63,7 @@ import io.github.mfuerstenau.leia.protocol.search.Explanation;
 import io.github.mfuerstenau.leia.protocol.search.FieldDateResolution;
 import io.github.mfuerstenau.leia.protocol.search.FieldSort;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
+import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
 import io.github.mfuerstenau.leia.protocol.search.LikeTerm;
 import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
 import io.github.mfuerstenau.leia.protocol.search.ParserOptions;
@@ -754,7 +758,8 @@ class DemoIndexTest {
                     Optional.empty(),
                     Optional.empty(),
                     Optional.of(
-                            new DocValuesQuery(field, Optional.ofNullable(number), values, range, Optional.empty())));
+                            new DocValuesQuery(field, Optional.ofNullable(number), values, range, Optional.empty())),
+                    Optional.empty());
         }
 
         private static SearchQuery prefix(String field, BytesValue prefix) {
@@ -764,7 +769,8 @@ class DemoIndexTest {
                     Optional.empty(),
                     Optional.empty(),
                     Optional.of(new DocValuesQuery(
-                            field, Optional.empty(), Optional.empty(), Optional.empty(), Optional.of(prefix))));
+                            field, Optional.empty(), Optional.empty(), Optional.empty(), Optional.of(prefix))),
+                    Optional.empty());
         }
 
         private static Optional<DocValuesRange> range(
@@ -780,6 +786,102 @@ class DemoIndexTest {
             List<Explanation> all = new ArrayList<>(List.of(explanation));
             explanation.details().forEach(detail -> all.addAll(flatten(detail)));
             return all;
+        }
+    }
+
+    @Nested
+    @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+    class Vectors {
+
+        @Test
+        void fieldsKnowTheirEncodingAndSimilarity() throws Exception {
+            GetIndexStatsResult stats = backend.call(Methods.GET_INDEX_STATS, new GetIndexStatsParams());
+
+            assertThat(stats.fields())
+                    .filteredOn(field -> field.vectorDimension() > 0)
+                    .extracting(
+                            IndexField::name,
+                            IndexField::vectorDimension,
+                            IndexField::vectorEncoding,
+                            IndexField::vectorSimilarity)
+                    .containsExactly(
+                            tuple(
+                                    "embedding",
+                                    8,
+                                    Optional.of(VectorEncoding.FLOAT32),
+                                    Optional.of(VectorSimilarity.COSINE)),
+                            tuple(
+                                    "fingerprint",
+                                    16,
+                                    Optional.of(VectorEncoding.BYTE),
+                                    Optional.of(VectorSimilarity.EUCLIDEAN)));
+            assertThat(stats.fields())
+                    .filteredOn(field -> field.vectorDimension() == 0)
+                    .allSatisfy(field -> {
+                        assertThat(field.vectorEncoding()).isEmpty();
+                        assertThat(field.vectorSimilarity()).isEmpty();
+                    });
+        }
+
+        @Test
+        void documentFortyTwoHasBothVectors() throws Exception {
+            GetDocumentResult document = document(42);
+
+            KnnVector embedding = vector(document, "embedding").orElseThrow();
+            assertThat(embedding.encoding()).isEqualTo(VectorEncoding.FLOAT32);
+            assertThat(embedding.floats()).hasSize(8);
+            // The first component is shifted by 2, so it is never below 1.
+            assertThat(embedding.floats().getFirst()).isGreaterThanOrEqualTo(1f);
+            KnnVector fingerprint = vector(document, "fingerprint").orElseThrow();
+            assertThat(fingerprint.encoding()).isEqualTo(VectorEncoding.BYTE);
+            assertThat(fingerprint.bytes()).hasSize(16);
+            assertThat(vector(document(0), "embedding")).isEmpty();
+            // A deleted document keeps its vector.
+            assertThat(vector(document(74), "embedding")).isPresent();
+        }
+
+        @Test
+        void theNearestToDocumentFortyTwo() throws Exception {
+            SearchResults approximate = backend.search(knn("embedding", 42, OptionalInt.of(10), false), 100);
+            SearchResults exact = backend.search(knn("embedding", 42, OptionalInt.empty(), true), 10);
+
+            assertThat(approximate.totalHits()).isEqualTo(10);
+            assertThat(approximate.hits().getFirst().docId()).isEqualTo(42);
+            assertThat(approximate.hits().getFirst().score()).isEqualTo(1f);
+            assertThat(exact.hits().getFirst().docId()).isEqualTo(42);
+            // Every live document but 0, which has no vectors.
+            assertThat(exact.totalHits()).isEqualTo(486);
+            assertThat(approximate.hits())
+                    .extracting(Hit::docId)
+                    .containsExactlyElementsOf(
+                            exact.hits().stream().map(Hit::docId).toList());
+        }
+
+        @Test
+        void theNearestFingerprintsToDocumentFortyTwo() throws Exception {
+            SearchResults exact = backend.search(knn("fingerprint", 42, OptionalInt.empty(), true), 3);
+
+            assertThat(exact.hits().getFirst().docId()).isEqualTo(42);
+            assertThat(exact.hits().getFirst().score()).isEqualTo(1f);
+        }
+
+        private static Optional<KnnVector> vector(GetDocumentResult document, String field) {
+            return document.fields().stream()
+                    .filter(f -> f.name().equals(field))
+                    .findFirst()
+                    .orElseThrow()
+                    .vector();
+        }
+
+        private static SearchQuery knn(String field, int docId, OptionalInt k, boolean exact) {
+            return new SearchQuery(
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.of(
+                            new KnnQuery(field, OptionalInt.of(docId), Optional.empty(), k, exact, Optional.empty())));
         }
     }
 
@@ -1121,6 +1223,7 @@ class DemoIndexTest {
                         minWordLen,
                         OptionalInt.empty(),
                         stopWords)),
+                Optional.empty(),
                 Optional.empty());
     }
 

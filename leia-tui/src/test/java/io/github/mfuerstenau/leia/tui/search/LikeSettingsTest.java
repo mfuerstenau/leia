@@ -25,7 +25,19 @@ class LikeSettingsTest {
 
     static IndexField field(String name, IndexOptions indexOptions) {
         return new IndexField(
-                name, 0, indexOptions, false, false, false, DocValuesType.NONE, 0, 0, 0, Optional.empty());
+                name,
+                0,
+                indexOptions,
+                false,
+                false,
+                false,
+                DocValuesType.NONE,
+                0,
+                0,
+                0,
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty());
     }
 
     private static LikeSettings settings() {

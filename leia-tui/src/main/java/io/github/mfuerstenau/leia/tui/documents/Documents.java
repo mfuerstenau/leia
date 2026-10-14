@@ -28,6 +28,7 @@ import io.github.mfuerstenau.leia.protocol.document.DocValues;
 import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
 import io.github.mfuerstenau.leia.protocol.document.GetReconstructResult;
+import io.github.mfuerstenau.leia.protocol.document.KnnVector;
 import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.document.TermPosition;
@@ -94,6 +95,9 @@ public final class Documents {
 
     private static final int DETAIL_VALUE_LINES = 20;
 
+    /** Vector components on one line of the details. */
+    static final int VECTOR_LINE = 4;
+
     /** The name column is at most this wide. */
     private static final int NAME_MAX_WIDTH = 32;
 
@@ -149,6 +153,9 @@ public final class Documents {
          */
         record SearchDocValues(String field, DocValuesNumber number, boolean hex, List<String> values)
                 implements Request {}
+
+        /** Search the documents nearest to this one's vector in the field on the search screen (ADR 0040). */
+        record SearchKnn(String field, int docId) implements Request {}
 
         /**
          * Cancel the jobs in {@code cancel}, then rebuild the terms a field of the document was
@@ -970,6 +977,7 @@ public final class Documents {
                 values.add(Viewer.Value.docValue(kind, value));
             }
         });
+        field.vector().ifPresent(vector -> values.add(Viewer.Value.vector(vector)));
         return values;
     }
 
@@ -1027,7 +1035,8 @@ public final class Documents {
      * Goes to another document with ←/→, the {@code i} prompt, or {@code [}/{@code ]} through the
      * documents of the hit's term; with a filter, ←/→ and {@code i} go to its matches only, and {@code
      * b} clears it. Loads the selected field's term vector with Enter, views its values with {@code
-     * v}, analyzes its stored text with {@code a}, searches for its doc values with {@code s}, cycles
+     * v}, analyzes its stored text with {@code a}, searches for its doc values with {@code s} and for
+     * the documents nearest to its vector with {@code N}, cycles
      * the number format with {@code x}, hides empty fields with {@code e}, searches for documents like
      * this one with {@code m}, rebuilds the field's indexed terms with {@code r}, switches the focus
      * with Tab, and moves the selection or scrolls the details.
@@ -1129,6 +1138,11 @@ public final class Documents {
                 }
                 case 's' -> {
                     return searchDocValues();
+                }
+                case 'N' -> {
+                    return selectedField()
+                            .filter(field -> field.vector().isPresent())
+                            .map(field -> new Request.SearchKnn(field.name(), docId));
                 }
                 case 'E' -> {
                     return Optional.ofNullable(document).map(doc -> new Request.Export(doc.docId()));
@@ -1399,13 +1413,15 @@ public final class Documents {
         return field.norm().isEmpty()
                 && field.stored().isEmpty()
                 && field.docValues().isEmpty()
-                && !field.hasTermVector();
+                && !field.hasTermVector()
+                && field.vector().isEmpty();
     }
 
     /**
      * {@code I} indexed, {@code N} norm, {@code P} payloads, {@code S} stored, {@code V} term vector,
-     * {@code D} doc values, {@code T} points, {@code K} KNN vectors; {@code -} where absent. {@code
-     * N}, {@code S}, {@code V} and {@code D} are about this document, the others about the field.
+     * {@code D} doc values, {@code T} points, {@code K} KNN vector; {@code -} where absent. {@code N},
+     * {@code S}, {@code V}, {@code D} and {@code K} are about this document, the others about the
+     * field.
      */
     static String flags(Optional<IndexField> schema, DocumentField field) {
         boolean[] set = {
@@ -1416,7 +1432,7 @@ public final class Documents {
             field.hasTermVector(),
             field.docValues().isPresent(),
             schema.filter(f -> f.pointDimensionCount() > 0).isPresent(),
-            schema.filter(f -> f.vectorDimension() > 0).isPresent()
+            field.vector().isPresent()
         };
         String names = "INPSVDTK";
         StringBuilder flags = new StringBuilder();
@@ -1426,7 +1442,7 @@ public final class Documents {
         return flags.toString();
     }
 
-    /** One line for the value column: the first stored value, or else the doc values. */
+    /** One line for the value column: the first stored value, or else the doc values, or else the vector. */
     private static String valueSummary(DocumentField field, NumberFormat numbers) {
         if (!field.stored().isEmpty()) {
             String text = TextFormat.escapeControl(
@@ -1434,11 +1450,62 @@ public final class Documents {
             int count = field.stored().size();
             return count == 1 ? text : text + " (+" + (count - 1) + " more)";
         }
-        return field.docValues()
-                .map(values -> "dv: "
-                        + TextFormat.escapeControl(TextFormat.firstChars(
-                                String.join(", ", docValueTexts(values, numbers)), SUMMARY_CHARS)))
-                .orElse("");
+        if (field.docValues().isPresent()) {
+            return "dv: "
+                    + TextFormat.escapeControl(TextFormat.firstChars(
+                            String.join(", ", docValueTexts(field.docValues().get(), numbers)), SUMMARY_CHARS));
+        }
+        return field.vector().map(Documents::vectorSummary).orElse("");
+    }
+
+    /** A vector's first components and its dimension: {@code [0.734, -0.211, …] 8d}. */
+    static String vectorSummary(KnnVector vector) {
+        List<String> components = vectorTexts(vector);
+        StringBuilder text = new StringBuilder("[");
+        for (int i = 0; i < components.size(); i++) {
+            String next = (i == 0 ? "" : ", ") + components.get(i);
+            if (text.length() + next.length() > SUMMARY_CHARS) {
+                text.append(", …");
+                break;
+            }
+            text.append(next);
+        }
+        return text.append("] ").append(vector.dimension()).append('d').toString();
+    }
+
+    /** Each component of a vector as text: floats exactly, as Java writes them, and bytes as signed numbers. */
+    static List<String> vectorTexts(KnnVector vector) {
+        return switch (vector.encoding()) {
+            case FLOAT32 -> vector.floats().stream().map(f -> Float.toString(f)).toList();
+            case BYTE -> vector.bytes().stream().map(b -> Byte.toString(b)).toList();
+        };
+    }
+
+    /** A vector's euclidean length; a field compared by dot product holds vectors of length 1. */
+    static double vectorLength(KnnVector vector) {
+        double sum = 0;
+        for (float f : vector.floats()) {
+            sum += (double) f * f;
+        }
+        for (byte b : vector.bytes()) {
+            sum += (double) b * b;
+        }
+        return Math.sqrt(sum);
+    }
+
+    /** A vector's components, {@link #VECTOR_LINE} to a line, each line after the index of its first. */
+    static List<Line> vectorLines(KnnVector vector) {
+        List<String> components = vectorTexts(vector);
+        int width = Integer.toString(Math.max(components.size() - 1, 0)).length();
+        List<Line> lines = new ArrayList<>();
+        Style dim = Style.EMPTY.dim();
+        for (int from = 0; from < components.size(); from += VECTOR_LINE) {
+            List<String> line = components.subList(from, Math.min(from + VECTOR_LINE, components.size()));
+            lines.add(Line.from(
+                    Span.styled(String.format(Locale.ROOT, "  %" + width + "d  ", from), dim),
+                    Span.raw(String.join("  ", line))));
+        }
+        return lines;
     }
 
     /** A stored value as text, unescaped: binary values that are not UTF-8 as {@code 0x} and their hex. */
@@ -1501,7 +1568,13 @@ public final class Documents {
                 other.add("points " + index.pointDimensionCount() + "×" + index.pointNumBytes() + "B");
             }
             if (index.vectorDimension() > 0) {
-                other.add("vectors " + index.vectorDimension() + "d");
+                other.add("vectors " + index.vectorDimension() + "d"
+                        + index.vectorEncoding()
+                                .map(e -> " " + Overview.vectorEncoding(e))
+                                .orElse("")
+                        + index.vectorSimilarity()
+                                .map(s -> " " + Overview.vectorSimilarity(s))
+                                .orElse(""));
             }
             if (!other.isEmpty()) {
                 lines.add(labelled("Field has", String.join(", ", other)));
@@ -1560,6 +1633,21 @@ public final class Documents {
             lines.add(labelled("Doc values", heading));
             for (String text : docValueTexts(values, numbers)) {
                 lines.add(Line.from("  " + text));
+            }
+        }
+
+        if (field.vector().isPresent()
+                || schema.filter(index -> index.vectorDimension() > 0).isPresent()) {
+            lines.add(Line.empty());
+            if (field.vector().isEmpty()) {
+                lines.add(labelled("Vector", "-"));
+            } else {
+                KnnVector vector = field.vector().get();
+                lines.add(labelled(
+                        "Vector",
+                        vector.dimension() + "d " + Overview.vectorEncoding(vector.encoding()) + ", length "
+                                + String.format(Locale.ROOT, "%.6g", vectorLength(vector)) + ", N finds the nearest"));
+                lines.addAll(vectorLines(vector));
             }
         }
 

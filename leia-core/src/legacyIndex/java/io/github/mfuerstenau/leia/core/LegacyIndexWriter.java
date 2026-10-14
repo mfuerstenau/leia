@@ -7,21 +7,25 @@ import java.util.Map;
 import java.util.stream.Stream;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
+import org.apache.lucene.document.KnnFloatVectorField;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.NoMergePolicy;
 import org.apache.lucene.index.Term;
+import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.NIOFSDirectory;
+import org.apache.lucene.util.Version;
 
 /**
  * Writes a small test index with an older Lucene version (build tooling, not part of leia).
  *
  * <p>Compiled against Lucene 9 and run with Lucene 8 or 9 on the classpath (see {@code
  * leia-core/build.gradle.kts}), so it only uses API that both have. The index has 3 documents, one
- * of them deleted, and commit user data.
+ * of them deleted, and commit user data. With Lucene 9, each document also has a KNN vector, which
+ * Lucene 8 doesn't know.
  */
 public final class LegacyIndexWriter {
 
@@ -47,6 +51,9 @@ public final class LegacyIndexWriter {
                 Document doc = new Document();
                 doc.add(new StringField("id", Integer.toString(i), Field.Store.YES));
                 doc.add(new TextField("body", "document number " + i, Field.Store.YES));
+                if (Version.LATEST.major >= 9) {
+                    Vectors.add(doc, i);
+                }
                 writer.addDocument(doc);
             }
             // Committed first, so that the delete marks a document in a segment instead of dropping it
@@ -55,6 +62,18 @@ public final class LegacyIndexWriter {
             writer.deleteDocuments(new Term("id", "2"));
             writer.setLiveCommitData(Map.of("writer", "leia LegacyIndexWriter").entrySet());
             writer.commit();
+        }
+    }
+
+    /**
+     * Loaded only with Lucene 9: the verifier of a class that adds a {@link KnnFloatVectorField} to a
+     * document loads that class, which Lucene 8 doesn't have.
+     */
+    private static final class Vectors {
+
+        /** The euclidean float vector {@code vector}, [i, 0, 1]. */
+        static void add(Document doc, int i) {
+            doc.add(new KnnFloatVectorField("vector", new float[] {i, 0, 1}, VectorSimilarityFunction.EUCLIDEAN));
         }
     }
 }

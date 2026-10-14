@@ -69,7 +69,12 @@ class DocumentTest {
                             "id", "body", "stored", "rank", "prices", "category", "tags", "blob", "plain", "extra");
             assertThat(field(doc, "id"))
                     .isEqualTo(new IndexDocument.Field(
-                            "id", OptionalLong.empty(), List.of(new StoredValue.Text("1")), Optional.empty(), false));
+                            "id",
+                            OptionalLong.empty(),
+                            List.of(new StoredValue.Text("1")),
+                            Optional.empty(),
+                            false,
+                            Optional.empty()));
             IndexDocument.Field body = field(doc, "body");
             // Norms are the encoded field length: 3 terms.
             assertThat(body.norm()).hasValue(3);
@@ -113,8 +118,8 @@ class DocumentTest {
             assertThat(field(doc, "body").norm()).hasValue(1);
             // The first segment has no "extra" field.
             assertThat(field(index.document(0), "extra"))
-                    .isEqualTo(
-                            new IndexDocument.Field("extra", OptionalLong.empty(), List.of(), Optional.empty(), false));
+                    .isEqualTo(new IndexDocument.Field(
+                            "extra", OptionalLong.empty(), List.of(), Optional.empty(), false, Optional.empty()));
         }
     }
 
@@ -267,10 +272,12 @@ class DocumentTest {
             IndexDocument doc = index.document(1);
 
             assertThat(doc.deleted()).isTrue();
-            assertThat(doc.fields()).extracting(IndexDocument.Field::name).containsExactly("id", "body");
+            assertThat(doc.fields()).extracting(IndexDocument.Field::name).containsExactly("id", "body", "vector");
             assertThat(field(doc, "id").stored()).containsExactly(new StoredValue.Text("2"));
             assertThat(field(doc, "body").stored()).containsExactly(new StoredValue.Text("document number 2"));
             assertThat(field(doc, "body").norm()).hasValue(3);
+            // Through the backward codecs: [N, 0, 1].
+            assertThat(field(doc, "vector").vector()).hasValue(new KnnVector.Floats(new float[] {2, 0, 1}));
             assertThat(index.document(2).deleted()).isFalse();
         }
     }

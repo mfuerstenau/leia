@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import io.github.mfuerstenau.leia.protocol.document.DocValues;
 import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
+import io.github.mfuerstenau.leia.protocol.document.KnnVector;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructSource;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructedField;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
@@ -56,7 +57,7 @@ public final class DocumentExport {
     public static final String FORMAT = "leia-document";
 
     /** The {@code version} of the format; a change to it, or to a protocol record in it, bumps it. */
-    public static final int VERSION = 1;
+    public static final int VERSION = 2;
 
     /**
      * A document as leia exports it.
@@ -83,6 +84,7 @@ public final class DocumentExport {
      * @param flags as the documents screen shows them
      * @param indexOptions what the postings of the field hold, over the whole index
      * @param stored the stored values, in the order they were added, whole
+     * @param vector the KNN vector; empty if the document has none in the field (version 2, ADR 0040)
      * @param termVector the term vector, in term order; empty if the document has none in the field
      * @param indexed the terms the field was indexed with; empty if the field isn't indexed or the
      *     terms weren't rebuilt
@@ -95,6 +97,7 @@ public final class DocumentExport {
             OptionalLong norm,
             List<StoredValue> stored,
             Optional<DocValues> docValues,
+            Optional<KnnVector> vector,
             Optional<List<TermVectorTerm>> termVector,
             Optional<IndexedTerms> indexed) {}
 
@@ -173,7 +176,8 @@ public final class DocumentExport {
                                 field.norm(),
                                 List.copyOf(stored),
                                 field.docValues(),
-                                field.hasTermVector())));
+                                field.hasTermVector(),
+                                field.vector())));
                 if (field.hasTermVector()) {
                     chain = chain.thenCompose(_ -> fetch.termVector(docId, field.name()))
                             .thenAccept(terms -> termVectors.put(field.name(), terms));
@@ -213,6 +217,7 @@ public final class DocumentExport {
                     field.norm(),
                     field.stored(),
                     field.docValues(),
+                    field.vector(),
                     Optional.ofNullable(data.termVectors().get(field.name())),
                     indexed.map(f -> new IndexedTerms(f.source(), f.terms()))));
         }

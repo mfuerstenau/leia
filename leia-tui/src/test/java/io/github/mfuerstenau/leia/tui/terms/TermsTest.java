@@ -40,6 +40,8 @@ class TermsTest {
                 0,
                 0,
                 0,
+                Optional.empty(),
+                Optional.empty(),
                 Optional.of(new TermStats(1, 1, 1)));
     }
 

@@ -12,6 +12,8 @@ import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
+import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
+import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
 import io.github.mfuerstenau.leia.protocol.terms.FieldTerms;
 import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
 import io.github.mfuerstenau.leia.protocol.version.JavaRuntime;
@@ -32,7 +34,19 @@ class OverviewTest {
 
     private static IndexField field(String name, int number) {
         return new IndexField(
-                name, number, IndexOptions.NONE, false, false, false, DocValuesType.NONE, 0, 0, 0, Optional.empty());
+                name,
+                number,
+                IndexOptions.NONE,
+                false,
+                false,
+                false,
+                DocValuesType.NONE,
+                0,
+                0,
+                0,
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty());
     }
 
     private static IndexField indexed(String name, int number) {
@@ -47,6 +61,8 @@ class OverviewTest {
                 0,
                 0,
                 0,
+                Optional.empty(),
+                Optional.empty(),
                 Optional.of(new TermStats(3, 3, 3)));
     }
 
@@ -118,6 +134,41 @@ class OverviewTest {
     }
 
     @Test
+    void theVectorColumnSaysDimensionEncodingAndSimilarity() {
+        IndexField vectors = new IndexField(
+                "embedding",
+                0,
+                IndexOptions.NONE,
+                false,
+                false,
+                false,
+                DocValuesType.NONE,
+                0,
+                0,
+                768,
+                Optional.of(VectorEncoding.BYTE),
+                Optional.of(VectorSimilarity.MAXIMUM_INNER_PRODUCT),
+                Optional.empty());
+        IndexField none = new IndexField(
+                "id",
+                1,
+                IndexOptions.DOCS,
+                false,
+                false,
+                false,
+                DocValuesType.NONE,
+                0,
+                0,
+                0,
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty());
+
+        assertThat(Overview.vector(vectors)).isEqualTo("768d byte mip");
+        assertThat(Overview.vector(none)).isEqualTo("-");
+    }
+
+    @Test
     void showsTheLogoNextToTheSummaryWhereItFits() {
         Overview overview = overview(List.of(field("id", 0)), 50);
 
@@ -151,6 +202,8 @@ class OverviewTest {
                 0,
                 0,
                 0,
+                Optional.empty(),
+                Optional.empty(),
                 Optional.of(new TermStats(3, 6, 9)));
         IndexField price = new IndexField(
                 "price",
@@ -163,6 +216,8 @@ class OverviewTest {
                 1,
                 4,
                 0,
+                Optional.empty(),
+                Optional.empty(),
                 Optional.empty());
         Overview overview = overview(List.of(field("id", 0), body, price), 50);
 

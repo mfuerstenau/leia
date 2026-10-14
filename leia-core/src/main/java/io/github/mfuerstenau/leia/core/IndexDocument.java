@@ -25,13 +25,15 @@ public record IndexDocument(int docId, boolean deleted, List<Field> fields) {
      * @param stored the stored values, in the order they were added
      * @param docValues the document's doc values; empty if it has none in this field
      * @param hasTermVector whether the document has a term vector for the field
+     * @param vector the document's KNN vector; empty if it has none in this field (ADR 0040)
      */
     public record Field(
             String name,
             OptionalLong norm,
             List<StoredValue> stored,
             Optional<DocValues> docValues,
-            boolean hasTermVector) {}
+            boolean hasTermVector,
+            Optional<KnnVector> vector) {}
 
     /** A stored value, with the type it was stored as. */
     public sealed interface StoredValue {

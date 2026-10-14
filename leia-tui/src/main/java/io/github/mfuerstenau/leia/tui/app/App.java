@@ -318,6 +318,8 @@ public final class App {
                         field.pointDimensionCount(),
                         field.pointNumBytes(),
                         field.vectorDimension(),
+                        field.vectorEncoding(),
+                        field.vectorSimilarity(),
                         Optional.empty()))
                 .toList();
     }
@@ -862,6 +864,13 @@ public final class App {
                 }
                 screen = Screen.SEARCH;
                 yield searchAction(search.moreLikeThis(like.docId()));
+            }
+            case Documents.Request.SearchKnn knn -> {
+                if (search == null) {
+                    yield Optional.<Action>empty();
+                }
+                screen = Screen.SEARCH;
+                yield searchAction(search.knnQuery(knn.field(), knn.docId()));
             }
             case Documents.Request.SearchDocValues values -> {
                 if (search == null) {
@@ -1711,7 +1720,8 @@ public final class App {
             }
             String step = documents.filtered() ? "←→ match   b unfilter   " : "←→ doc   ";
             return " " + cancel + "q quit   o open   c close   1-7 screen   " + step + steps
-                    + "i go to   ⏎ term vector   v view   a analyze   s search value   x numbers   e empty   m similar   "
+                    + "i go to   ⏎ term vector   v view   a analyze   s search value   N nearest   x numbers   e empty   "
+                    + "m similar   "
                     + "r rebuild   E export   Tab panel   ↑↓";
         }
         overview.render(frame, body);

@@ -700,7 +700,7 @@ class SessionPilotTest {
     void aRegexScanFindsValuesAndViewsOne() throws Exception {
         openAtStart(writeBodies(tmp.resolve("index"), "red fox", "blue fox", "red lamp"), OpenMode.READER);
         pilot.press('5');
-        for (int i = 0; i < 6; i++) {
+        for (int i = 0; i < 7; i++) {
             pilot.press('m');
         }
         pilot.press('/');

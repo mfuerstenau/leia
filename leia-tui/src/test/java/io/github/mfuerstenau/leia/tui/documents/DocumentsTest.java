@@ -10,6 +10,7 @@ import io.github.mfuerstenau.leia.protocol.document.DocValues;
 import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
 import io.github.mfuerstenau.leia.protocol.document.GetReconstructResult;
+import io.github.mfuerstenau.leia.protocol.document.KnnVector;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructResult;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructSource;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructedField;
@@ -24,6 +25,8 @@ import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
+import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
+import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
 import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
 import io.github.mfuerstenau.leia.tui.TestFilters;
@@ -60,12 +63,14 @@ class DocumentsTest {
                 0,
                 0,
                 0,
+                Optional.empty(),
+                Optional.empty(),
                 Optional.of(new TermStats(1, 1, 1)));
     }
 
     private static DocumentField field(
             String name, OptionalLong norm, List<StoredValue> stored, Optional<DocValues> docValues, boolean vector) {
-        return new DocumentField(name, norm, stored, docValues, vector);
+        return new DocumentField(name, norm, stored, docValues, vector, Optional.empty());
     }
 
     private static DocumentField empty(String name) {
@@ -308,6 +313,75 @@ class DocumentsTest {
         documents.handleKey(key(KeyCode.DOWN));
 
         assertThat(documents.handleKey(key('s'))).isEqualTo(search(DocValuesNumber.LONG, true, "6162", "ff00"));
+    }
+
+    /** A document with a float vector in {@code vec}, and none in {@code nothing}. */
+    private static Documents withVector() {
+        Documents documents = new Documents(
+                List.of(
+                        schema("id", 0),
+                        new IndexField(
+                                "vec",
+                                1,
+                                IndexOptions.NONE,
+                                false,
+                                false,
+                                false,
+                                DocValuesType.NONE,
+                                0,
+                                0,
+                                3,
+                                Optional.of(VectorEncoding.FLOAT32),
+                                Optional.of(VectorSimilarity.DOT_PRODUCT),
+                                Optional.empty())),
+                5);
+        documents.loaded(new GetDocumentResult(
+                4,
+                false,
+                List.of(
+                        field("id", OptionalLong.empty(), List.of(string("doc-4")), Optional.empty(), false),
+                        new DocumentField(
+                                "vec",
+                                OptionalLong.empty(),
+                                List.of(),
+                                Optional.empty(),
+                                false,
+                                Optional.of(
+                                        new KnnVector(VectorEncoding.FLOAT32, List.of(0.6f, -0.8f, 0f), List.of()))))));
+        return documents;
+    }
+
+    @Test
+    void showsAVectorAndSearchesItsNearest() {
+        Documents documents = withVector();
+        assertThat(documents.handleKey(key('N'))).as("id has no vector").isEmpty();
+        documents.handleKey(key(KeyCode.DOWN));
+
+        String screen = render(documents, 120, 30);
+        assertThat(screen)
+                .contains(
+                        "-------K  ",
+                        "[0.6, -0.8, 0.0] 3d",
+                        "vectors 3d float dot product",
+                        "Vector      3d float, length 1.00000, N finds the nearest",
+                        "0  0.6  -0.8  0.0");
+        assertThat(documents.handleKey(key('N'))).hasValue(new Request.SearchKnn("vec", 4));
+
+        assertThat(documents.handleKey(key('v'))).isEmpty();
+        assertThat(render(documents, 100, 20)).contains("vec · 1 of 1 · float vector · 12 B", "│0.6", "│-0.8");
+    }
+
+    @Test
+    void vectorLinesNumberTheirFirstComponent() {
+        KnnVector bytes = new KnnVector(
+                VectorEncoding.BYTE, List.of(), List.of((byte) 1, (byte) -2, (byte) 3, (byte) 4, (byte) 5));
+
+        assertThat(Documents.vectorLines(bytes))
+                .extracting(line ->
+                        line.spans().stream().map(span -> span.content()).collect(Collectors.joining()))
+                .containsExactly("  0  1  -2  3  4", "  4  5");
+        assertThat(Documents.vectorLength(bytes)).isCloseTo(Math.sqrt(55), org.assertj.core.data.Offset.offset(1e-9));
+        assertThat(Documents.vectorSummary(bytes)).isEqualTo("[1, -2, 3, 4, 5] 5d");
     }
 
     @Test

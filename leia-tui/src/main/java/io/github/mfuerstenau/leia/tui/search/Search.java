@@ -11,6 +11,7 @@ import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
+import dev.tamboui.text.Span;
 import dev.tamboui.text.Text;
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
@@ -27,6 +28,7 @@ import io.github.mfuerstenau.leia.protocol.filter.StartFilterParams;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
+import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
@@ -36,6 +38,7 @@ import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanResult;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.HitField;
+import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
 import io.github.mfuerstenau.leia.protocol.search.LikeTerm;
 import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
 import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
@@ -51,6 +54,7 @@ import io.github.mfuerstenau.leia.protocol.search.StoredScanHit;
 import io.github.mfuerstenau.leia.protocol.search.TermQuery;
 import io.github.mfuerstenau.leia.protocol.search.TotalHitsRelation;
 import io.github.mfuerstenau.leia.tui.analysis.AnalysisSettings;
+import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.prompt.LineInput;
 import io.github.mfuerstenau.leia.tui.search.LikeSettings.LikeSource;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
@@ -89,6 +93,9 @@ public final class Search {
 
     /** The widest the sort values of a hit get in the hit list. */
     private static final int MAX_SORT_WIDTH = 32;
+
+    /** The k of a KNN query until another is typed. */
+    static final int DEFAULT_K = 10;
 
     /** Marks the source document among the hits of a More-Like-This query. */
     private static final String SOURCE_MARK = "◆";
@@ -146,7 +153,19 @@ public final class Search {
         /** A regular expression over the stored values of every document (ADR 0027). */
         REGEX,
         /** Values of the selected field's doc values: one, several or a range (ADR 0033). */
-        DOC_VALUES
+        DOC_VALUES,
+        /** The documents whose vectors are nearest to a document's or a typed vector (ADR 0040). */
+        KNN
+    }
+
+    /** The line that the keys edit while {@link #editing}. */
+    private enum EditLine {
+        /** The query line. */
+        QUERY,
+        /** The filter line of the KNN mode. */
+        FILTER,
+        /** The k of the KNN mode. */
+        K
     }
 
     private enum Focus {
@@ -293,7 +312,27 @@ public final class Search {
     /** Whether the values of a doc values query on bytes are hex; edits keep it. */
     private boolean hex;
 
-    /** Why the doc values line could not be read, until the next search; or null. */
+    /** The fields with KNN vectors, in field number order (ADR 0040). */
+    private final List<IndexField> vectorFields;
+
+    /** The field of a KNN query. */
+    private int vectorField;
+
+    /** How many nearest documents an approximate KNN query finds. */
+    private int k = DEFAULT_K;
+
+    /** Whether a KNN query scores every document with a vector instead of searching the graph. */
+    private boolean knnExact;
+
+    /** The filter of a KNN query, in classic syntax with the classic mode's default field; blank for none. */
+    private LineInput knnFilter = new LineInput("");
+
+    /** The k being typed. */
+    private LineInput kInput = new LineInput("");
+
+    private EditLine editLine = EditLine.QUERY;
+
+    /** Why the doc values or KNN line could not be read, until the next search; or null. */
     private String lineError;
 
     private boolean editing;
@@ -338,6 +377,8 @@ public final class Search {
         this.docValuesFields = indexFields.stream()
                 .filter(f -> f.docValuesType() != DocValuesType.NONE)
                 .toList();
+        this.vectorFields =
+                indexFields.stream().filter(f -> f.vectorDimension() > 0).toList();
     }
 
     /**
@@ -361,6 +402,16 @@ public final class Search {
                 }
             }
         });
+        vectorField().ifPresent(old -> {
+            for (int i = 0; i < search.vectorFields.size(); i++) {
+                if (search.vectorFields.get(i).name().equals(old.name())) {
+                    search.vectorField = i;
+                }
+            }
+        });
+        search.k = k;
+        search.knnExact = knnExact;
+        search.knnFilter = new LineInput(knnFilter.text());
         search.number = number;
         search.hex = hex;
         search.mode = mode;
@@ -505,6 +556,36 @@ public final class Search {
         return submit();
     }
 
+    /**
+     * Searches for the documents whose vectors in {@code fieldName} are nearest to document {@code
+     * docId}'s (ADR 0040), as the documents screen asks for, with the k, exactness and filter set
+     * before.
+     */
+    public Optional<Request> knnQuery(String fieldName, int docId) {
+        int row = -1;
+        for (int i = 0; i < vectorFields.size(); i++) {
+            if (vectorFields.get(i).name().equals(fieldName)) {
+                row = i;
+                break;
+            }
+        }
+        if (row < 0) {
+            return Optional.empty();
+        }
+        vectorField = row;
+        mode = Mode.KNN;
+        input.set(Integer.toString(docId));
+        binary = false;
+        editing = false;
+        focus = Focus.HITS;
+        return submit();
+    }
+
+    /** The vector field of the KNN mode. */
+    private Optional<IndexField> vectorField() {
+        return vectorField < vectorFields.size() ? Optional.of(vectorFields.get(vectorField)) : Optional.empty();
+    }
+
     /** The doc values field of the doc values mode. */
     private Optional<IndexField> docValuesField() {
         return docValuesField < docValuesFields.size()
@@ -524,6 +605,7 @@ public final class Search {
     private boolean hasFields() {
         return switch (mode) {
             case DOC_VALUES -> !docValuesFields.isEmpty();
+            case KNN -> !vectorFields.isEmpty();
             case REGEX -> true;
             default -> !fields.isEmpty();
         };
@@ -540,7 +622,52 @@ public final class Search {
                 Optional.ofNullable(standard),
                 Optional.ofNullable(term),
                 Optional.ofNullable(moreLikeThis),
-                Optional.ofNullable(docValues));
+                Optional.ofNullable(docValues),
+                Optional.empty());
+    }
+
+    /** A classic query of {@code text}, with the classic mode's operator, options and analyzer. */
+    private ClassicQuery classic(String text, String defaultField) {
+        return new ClassicQuery(
+                text,
+                defaultField,
+                operator,
+                parser.options(),
+                parser.fuzzyMaxEdits(),
+                parser.splitOnWhitespace(),
+                parser.autoGeneratePhraseQueries(),
+                analyzer.analyzer());
+    }
+
+    /**
+     * The KNN query of the line and the filter line (ADR 0040); empty while the line is blank.
+     *
+     * @throws IllegalArgumentException if the line doesn't read, with the message to show
+     */
+    private Optional<SearchQuery> knnLine() {
+        Optional<IndexField> vectors = vectorField();
+        if (vectors.isEmpty() || input.text().isBlank()) {
+            return Optional.empty();
+        }
+        KnnSyntax.Target target =
+                KnnSyntax.target(input.text(), vectors.get().vectorEncoding().orElse(VectorEncoding.FLOAT32));
+        Optional<ClassicQuery> filter = knnFilter.text().isBlank() || field >= fields.size()
+                ? Optional.empty()
+                : Optional.of(classic(knnFilter.text(), fields.get(field)));
+        KnnQuery knn = new KnnQuery(
+                vectors.get().name(),
+                target instanceof KnnSyntax.Target.Doc doc ? OptionalInt.of(doc.docId()) : OptionalInt.empty(),
+                target instanceof KnnSyntax.Target.Vector vector ? Optional.of(vector.vector()) : Optional.empty(),
+                knnExact ? OptionalInt.empty() : OptionalInt.of(k),
+                knnExact,
+                filter);
+        return Optional.of(new SearchQuery(
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(knn)));
     }
 
     /**
@@ -560,12 +687,13 @@ public final class Search {
 
     /**
      * The query that the query line and the settings describe; empty while the line is blank, in
-     * More-Like-This mode while it is no document id, or in doc values mode while it doesn't read.
+     * More-Like-This mode while it is no document id, or in doc values or KNN mode while it doesn't
+     * read.
      */
     private Optional<SearchQuery> query() {
-        if (mode == Mode.DOC_VALUES) {
+        if (mode == Mode.DOC_VALUES || mode == Mode.KNN) {
             try {
-                return docValuesLine();
+                return mode == Mode.KNN ? knnLine() : docValuesLine();
             } catch (IllegalArgumentException e) {
                 return Optional.empty();
             }
@@ -579,21 +707,7 @@ public final class Search {
             return Optional.empty();
         }
         return switch (mode) {
-            case CLASSIC ->
-                Optional.of(query(
-                        new ClassicQuery(
-                                text,
-                                defaultField,
-                                operator,
-                                parser.options(),
-                                parser.fuzzyMaxEdits(),
-                                parser.splitOnWhitespace(),
-                                parser.autoGeneratePhraseQueries(),
-                                analyzer.analyzer()),
-                        null,
-                        null,
-                        null,
-                        null));
+            case CLASSIC -> Optional.of(query(classic(text, defaultField), null, null, null, null));
             case STANDARD ->
                 Optional.of(query(
                         null,
@@ -621,7 +735,7 @@ public final class Search {
             }
             case LIKE_TEXT ->
                 like.query(new LikeSource.Text(text), analyzer.analyzer()).map(q -> query(null, null, null, q, null));
-            case REGEX, DOC_VALUES -> Optional.empty();
+            case REGEX, DOC_VALUES, KNN -> Optional.empty();
         };
     }
 
@@ -641,6 +755,11 @@ public final class Search {
         String label = switch (mode) {
             case TERM -> fields.get(field) + ":" + text;
             case DOC_VALUES -> docValuesField().map(IndexField::name).orElse("") + ":" + text;
+            case KNN ->
+                "nearest " + vectorField().map(IndexField::name).orElse("") + " " + text
+                        + (knnFilter.text().isBlank()
+                                ? ""
+                                : " where " + knnFilter.text().strip());
             case LIKE -> "like #" + text;
             case LIKE_TEXT -> "like \"" + text + "\"";
             default -> text;
@@ -675,9 +794,13 @@ public final class Search {
             return submitScan();
         }
         lineError = null;
-        if (mode == Mode.DOC_VALUES) {
+        if (mode == Mode.DOC_VALUES || mode == Mode.KNN) {
             try {
-                docValuesLine();
+                if (mode == Mode.KNN) {
+                    knnLine();
+                } else {
+                    docValuesLine();
+                }
             } catch (IllegalArgumentException e) {
                 List<Long> cancel = jobs();
                 forgetHits();
@@ -1010,16 +1133,29 @@ public final class Search {
             switch (key.code()) {
                 case ENTER -> {
                     editing = false;
+                    if (editLine == EditLine.K) {
+                        k = parseK(kInput.text());
+                    }
                     return submit();
                 }
                 case ESCAPE -> editing = false;
                 default -> {
                     String typed = LineInput.typed(key);
-                    // A document id has digits only.
+                    // A document id and k have digits only.
                     boolean nonDigit = typed != null && !typed.chars().allMatch(c -> c >= '0' && c <= '9');
-                    if (!(mode == Mode.LIKE && nonDigit)
-                            && input.handleKey(key, LineInput::wordStart) == LineInput.Edit.CHANGED) {
-                        binary = false;
+                    switch (editLine) {
+                        case FILTER -> knnFilter.handleKey(key, LineInput::wordStart);
+                        case K -> {
+                            if (!nonDigit) {
+                                kInput.handleKey(key, LineInput::wordStart);
+                            }
+                        }
+                        case QUERY -> {
+                            if (!(mode == Mode.LIKE && nonDigit)
+                                    && input.handleKey(key, LineInput::wordStart) == LineInput.Edit.CHANGED) {
+                                binary = false;
+                            }
+                        }
                     }
                 }
             }
@@ -1064,17 +1200,56 @@ public final class Search {
         return nextPage();
     }
 
+    /** {@code text} as a k: from 1 to {@link KnnQuery#MAX_K}, the nearest of those if out of range, {@link #k} if blank. */
+    private int parseK(String text) {
+        if (text.isBlank()) {
+            return k;
+        }
+        try {
+            return Math.clamp(Long.parseLong(text.strip()), 1, KnnQuery.MAX_K);
+        } catch (NumberFormatException e) {
+            // More digits than a long has.
+            return KnnQuery.MAX_K;
+        }
+    }
+
     /** The character keys of every mode but the regex one; empty for a key they don't take. */
     private Optional<Optional<Request>> charKey(int c) {
         Optional<Request> none = Optional.empty();
-        boolean parsers = mode == Mode.CLASSIC || mode == Mode.STANDARD;
+        // The KNN filter is a classic query, with the classic mode's parser options and operator.
+        boolean parsers = mode == Mode.CLASSIC || mode == Mode.STANDARD || mode == Mode.KNN;
         boolean likes = mode == Mode.LIKE || mode == Mode.LIKE_TEXT;
+        boolean knn = mode == Mode.KNN;
         switch (c) {
             case '/' -> {
                 if (hasFields()) {
                     editing = true;
+                    editLine = EditLine.QUERY;
                 }
                 return Optional.of(none);
+            }
+            case 'w' -> {
+                if (knn && hasFields()) {
+                    editing = true;
+                    editLine = EditLine.FILTER;
+                }
+                return Optional.of(none);
+            }
+            case 'k' -> {
+                if (knn && hasFields()) {
+                    editing = true;
+                    editLine = EditLine.K;
+                    kInput = new LineInput(Integer.toString(k));
+                    return Optional.of(none);
+                }
+                return Optional.empty();
+            }
+            case 'e' -> {
+                if (knn) {
+                    knnExact = !knnExact;
+                    return Optional.of(resubmit());
+                }
+                return Optional.empty();
             }
             case 'm' -> {
                 return Optional.of(switchMode(
@@ -1082,7 +1257,8 @@ public final class Search {
                             case CLASSIC -> Mode.STANDARD;
                             case STANDARD -> Mode.TERM;
                             case TERM -> Mode.DOC_VALUES;
-                            case DOC_VALUES -> Mode.LIKE;
+                            case DOC_VALUES -> Mode.KNN;
+                            case KNN -> Mode.LIKE;
                             case LIKE -> Mode.LIKE_TEXT;
                             case LIKE_TEXT -> Mode.REGEX;
                             case REGEX -> Mode.CLASSIC;
@@ -1092,7 +1268,7 @@ public final class Search {
                 if (likes) {
                     form = new LikeForm(like);
                 } else if (parsers) {
-                    form = new OptionsForm(parser, mode == Mode.CLASSIC);
+                    form = new OptionsForm(parser, mode != Mode.STANDARD);
                 }
                 return Optional.of(none);
             }
@@ -1110,7 +1286,12 @@ public final class Search {
                     docValuesField = c == 'f' ? (docValuesField + 1) % len : (docValuesField + len - 1) % len;
                     return Optional.of(resubmit());
                 }
-                if (!fields.isEmpty() && !likes && mode != Mode.DOC_VALUES) {
+                if (knn && !vectorFields.isEmpty()) {
+                    int len = vectorFields.size();
+                    vectorField = c == 'f' ? (vectorField + 1) % len : (vectorField + len - 1) % len;
+                    return Optional.of(resubmit());
+                }
+                if (!fields.isEmpty() && !likes && mode != Mode.DOC_VALUES && !knn) {
                     int len = fields.size();
                     field = c == 'f' ? (field + 1) % len : (field + len - 1) % len;
                     return Optional.of(resubmit());
@@ -1287,6 +1468,9 @@ public final class Search {
             }
             case null, default -> {}
         }
+        if (editing && editLine == EditLine.K) {
+            return " ⏎ set k and search   Esc cancel   digits only";
+        }
         if (editing) {
             return " ⏎ search   Esc done   ←→ Ctrl+A/E/U/K/W edit";
         }
@@ -1300,6 +1484,9 @@ public final class Search {
             case DOC_VALUES ->
                 "/ values   m mode   s/l settings   f/F field   n number   h hex   t count   x explain   ⏎ open doc   "
                         + "b/B browse   Tab panel   ↑↓";
+            case KNN ->
+                "/ target   w filter   m mode   p/s/l settings   f/F field   k k   e exact   a AND/OR   t count   "
+                        + "x explain   ⏎ open doc   b/B browse   Tab panel   ↑↓";
             case TERM ->
                 "/ term   m mode   s/l settings   f/F field   t count   x explain   ⏎ open doc   b/B browse   Tab panel   "
                         + "↑↓";
@@ -1311,14 +1498,17 @@ public final class Search {
 
     public void render(Frame frame, Rect area) {
         if (!hasFields()) {
-            String text = mode == Mode.DOC_VALUES
-                    ? "No field has doc values, so there is nothing to search. m switches the mode."
-                    : "No field has postings, so there is nothing to search.";
+            String text = switch (mode) {
+                case DOC_VALUES -> "No field has doc values, so there is nothing to search. m switches the mode.";
+                case KNN -> "No field has KNN vectors, so there is nothing to search. m switches the mode.";
+                default -> "No field has postings, so there is nothing to search.";
+            };
             frame.renderWidget(Panels.wrapped(text, panel(" Query ", true), area), area);
             return;
         }
         List<Rect> parts = Layout.vertical()
-                .constraints(Constraint.length(3), Constraint.fill(3), Constraint.fill(2))
+                // The KNN mode has a second line, for the filter.
+                .constraints(Constraint.length(mode == Mode.KNN ? 4 : 3), Constraint.fill(3), Constraint.fill(2))
                 .split(area);
         renderQuery(frame, parts.get(0));
         renderHits(frame, parts.get(1));
@@ -1355,11 +1545,18 @@ public final class Search {
                 yield " Doc values · field " + name + " (" + (type == DocValuesType.NONE ? "none" : type.name())
                         + ") · " + encoding + " · " + count + " ";
             }
+            case KNN ->
+                " KNN · " + vectorField().map(Search::vectorText).orElse("") + " · "
+                        + (knnExact ? "exact" : "k " + k + " · approximate") + " ";
         };
         Block block = panel(title, editing);
         Rect inner = block.inner(area);
         frame.renderWidget(block, area);
-        if (editing) {
+        if (mode == Mode.KNN && inner.height() > 1) {
+            renderKnnSecondLine(frame, new Rect(inner.x(), inner.y() + 1, inner.width(), 1), fieldName);
+            inner = new Rect(inner.x(), inner.y(), inner.width(), 1);
+        }
+        if (editing && editLine == EditLine.QUERY) {
             LineInput.Visible visible = input.visible(inner.width());
             frame.renderWidget(Paragraph.from(Line.from(visible.text())), inner);
             frame.setCursorPosition(inner.x() + visible.cursorColumn(), inner.y());
@@ -1369,12 +1566,47 @@ public final class Search {
                 case LIKE_TEXT -> "Press / to type a text to find documents like it.";
                 case REGEX -> "Press / to type a regular expression.";
                 case DOC_VALUES -> "Press / to type a value, several values, a range, or a prefix.";
+                case KNN -> "Press / to type a document id or a vector in brackets, or N on the documents screen.";
                 default -> "Press / to type a query.";
             };
             frame.renderWidget(Paragraph.from(Line.styled(hint, Form.dim())), inner);
         } else {
             frame.renderWidget(Paragraph.from(Line.from(TextFormat.escapeControl(input.text()))), inner);
         }
+    }
+
+    /** The KNN mode's second line: the filter, or the k while it is typed. */
+    private void renderKnnSecondLine(Frame frame, Rect area, String defaultField) {
+        String label = editing && editLine == EditLine.K ? "k      " : "where  ";
+        LineInput line = editing && editLine == EditLine.K ? kInput : knnFilter;
+        Span labelSpan = Span.styled(label, Style.EMPTY.bold());
+        Rect rest = new Rect(area.x() + label.length(), area.y(), Math.max(area.width() - label.length(), 0), 1);
+        if (editing && editLine != EditLine.QUERY) {
+            LineInput.Visible visible = line.visible(rest.width());
+            frame.renderWidget(Paragraph.from(Line.from(labelSpan, Span.raw(visible.text()))), area);
+            frame.setCursorPosition(rest.x() + visible.cursorColumn(), rest.y());
+        } else if (knnFilter.text().isEmpty()) {
+            frame.renderWidget(
+                    Paragraph.from(Line.from(
+                            labelSpan,
+                            Span.styled(
+                                    "w types a filter in classic syntax, default field " + defaultField, Form.dim()))),
+                    area);
+        } else {
+            frame.renderWidget(
+                    Paragraph.from(Line.from(labelSpan, Span.raw(TextFormat.escapeControl(knnFilter.text())))), area);
+        }
+    }
+
+    /** A vector field for a title: {@code embedding (8d float, cosine)}. */
+    private static String vectorText(IndexField field) {
+        return TextFormat.escapeControl(field.name()) + " (" + field.vectorDimension() + "d"
+                + field.vectorEncoding()
+                        .map(e -> " " + Overview.vectorEncoding(e))
+                        .orElse("")
+                + field.vectorSimilarity()
+                        .map(s -> ", " + Overview.vectorSimilarity(s))
+                        .orElse("") + ")";
     }
 
     private void renderHits(Frame frame, Rect area) {
@@ -1393,7 +1625,8 @@ public final class Search {
             searching = "searching… " + percent + "%";
         }
         if (lineError != null) {
-            message(frame, area, " Cannot read the values ", focused, Line.styled(lineError, Style.EMPTY.red()));
+            String what = mode == Mode.KNN ? " Cannot read the target " : " Cannot read the values ";
+            message(frame, area, what, focused, Line.styled(lineError, Style.EMPTY.red()));
             return;
         }
         if (submitted == null) {
@@ -1566,6 +1799,14 @@ public final class Search {
                                     "Numbers are read as n says, as the documents screen's x shows them;",
                                     "h reads bytes as hex. A document matches if any of its values does.",
                                     "Every value of the field is read, and a BINARY field is scanned: Esc stops it.");
+                        case KNN ->
+                            List.of(
+                                    "KNN: the documents whose vectors are nearest to a target, for example:",
+                                    "  42   [0.5, -1, 2.25]   [12 -7 0 3]",
+                                    "A document id takes that document's vector; a vector in brackets has the field's",
+                                    "dimension, floats or bytes from -128 to 127. k sets how many the graph search",
+                                    "finds; e scores every document with a vector instead, exactly, best first.",
+                                    "w filters in classic syntax; p and a set its parser options and operator.");
                         case REGEX -> List.of();
                         case LIKE ->
                             List.of(
@@ -1623,6 +1864,7 @@ public final class Search {
             case REGEX -> "l fields to scan";
             case LIKE, LIKE_TEXT -> "p more like this · s similarity and sort · l stored fields per hit";
             case CLASSIC, STANDARD -> "p parser options · s similarity and sort · l stored fields per hit";
+            case KNN -> "p filter's parser options · s similarity and sort · l stored fields per hit";
         };
         return Line.styled(popups, Form.dim());
     }
@@ -1649,7 +1891,7 @@ public final class Search {
             }
             default -> {}
         }
-        List<String> changed = parser.changed(mode == Mode.CLASSIC);
+        List<String> changed = parser.changed(mode != Mode.STANDARD);
         if (!changed.isEmpty()) {
             lines.add(Line.from("Options    " + String.join(" · ", changed)));
         }

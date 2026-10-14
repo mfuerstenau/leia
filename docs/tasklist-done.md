@@ -250,6 +250,11 @@ Finished items, moved here from `docs/tasklist.md` (the open work queue).
   - collation and Japanese completion presets (ADR 0038): `PresetAnalyzer.collation {locale, strength?, decomposition?}` for an analyzer with a JDK or ICU `Collator` constructor, such as `CollationKeyAnalyzer` and `ICUCollationKeyAnalyzer`, and `japaneseCompletion {userDictionary?, mode?}`
   - analyzers per field and auto stop words (ADR 0039): `Analyzer.fields` (one level) and `Analyzer.autoStopWords`, `analyze` for a `field`; `startAutoStopWords`/`getAutoStopWords`, a job as `QueryAutoStopWordAnalyzer` scans, at most 10,000 words per field
   - TUI: collation and completion rows in the `b` popup; on the analysis screen `f`/`F` field, `b` its analyzer, `D` drops it, `w` the auto stop words popup; the demo index has `title_key`
+- [x] Improvements over Luke (§6): KNN vectors (ADR 0040, amends ADR 0006, 0010 and 0030)
+  - `IndexField.vectorEncoding?`/`vectorSimilarity?`; `DocumentField.vector?` (`KnnVector {encoding, floats, bytes}`), read per segment, deleted documents too
+  - a sixth `SearchQuery` alternative `knn {field, docId?, vector?, k?, exact, filter?}`: Lucene's `KnnFloatVectorQuery`/`KnnByteVectorQuery` with a classic pre-filter, or leia's `ExactKnnQuery` (a `FunctionScoreQuery` over `FieldExistsQuery`, scored by `similarityToQueryVector`) that ranks every document with a vector; cancellable in the search job
+  - TUI: the overview's Vector column (`8d f32 cos`); on the documents screen the vector in the value column, the details (four to a line, with its length), the viewer and `N` nearest; a KNN mode on the search screen (`f` field, `k`, `e` exact, `w` filter); the export is version 2 with `vector`
+  - the Lucene 9 test index has a float vector field, read and searched through the backward codecs
 
 ## TamboUI migration — done
 

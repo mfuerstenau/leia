@@ -33,7 +33,19 @@ class ScoringSettingsTest {
 
     private static IndexField field(String name, DocValuesType docValuesType) {
         return new IndexField(
-                name, 0, IndexOptions.NONE, false, false, false, docValuesType, 0, 0, 0, Optional.empty());
+                name,
+                0,
+                IndexOptions.NONE,
+                false,
+                false,
+                false,
+                docValuesType,
+                0,
+                0,
+                0,
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty());
     }
 
     /**

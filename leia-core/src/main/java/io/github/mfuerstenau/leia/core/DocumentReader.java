@@ -13,10 +13,13 @@ import java.util.OptionalLong;
 import java.util.function.Predicate;
 import java.util.stream.StreamSupport;
 import org.apache.lucene.index.BinaryDocValues;
+import org.apache.lucene.index.ByteVectorValues;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.Fields;
+import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.KnnVectorValues;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.NumericDocValues;
 import org.apache.lucene.index.PostingsEnum;
@@ -62,7 +65,8 @@ final class DocumentReader {
                     segmentField != null && segmentField.hasNorms() ? norm(leaf, name, doc) : OptionalLong.empty(),
                     List.copyOf(stored.values.getOrDefault(name, List.of())),
                     segmentField != null ? docValues(leaf, segmentField, doc) : Optional.empty(),
-                    termVectors != null && termVectors.terms(name) != null));
+                    termVectors != null && termVectors.terms(name) != null,
+                    segmentField != null ? vector(leaf, segmentField, doc) : Optional.empty()));
         }
         return new IndexDocument(docId, deleted, List.copyOf(result));
     }
@@ -117,6 +121,44 @@ final class DocumentReader {
                 yield bytes(field, bytes);
             }
         };
+    }
+
+    /** The document's vector in {@code field} of its segment, copied: the reader reuses its arrays. */
+    static Optional<KnnVector> vector(LeafReader leaf, FieldInfo field, int doc) throws IOException {
+        if (field.getVectorDimension() == 0) {
+            return Optional.empty();
+        }
+        return switch (field.getVectorEncoding()) {
+            case FLOAT32 -> {
+                FloatVectorValues values = leaf.getFloatVectorValues(field.name);
+                if (values == null) {
+                    yield Optional.empty();
+                }
+                KnnVectorValues.DocIndexIterator iterator = values.iterator();
+                yield iterator.advance(doc) == doc
+                        ? Optional.of(new KnnVector.Floats(
+                                values.vectorValue(iterator.index()).clone()))
+                        : Optional.empty();
+            }
+            case BYTE -> {
+                ByteVectorValues values = leaf.getByteVectorValues(field.name);
+                if (values == null) {
+                    yield Optional.empty();
+                }
+                KnnVectorValues.DocIndexIterator iterator = values.iterator();
+                yield iterator.advance(doc) == doc
+                        ? Optional.of(new KnnVector.Bytes(
+                                values.vectorValue(iterator.index()).clone()))
+                        : Optional.empty();
+            }
+        };
+    }
+
+    /** The vector of a document in {@code field}; empty if it has none. A deleted document is read too. */
+    static Optional<KnnVector> vector(IndexReader reader, int docId, String field) throws IOException {
+        SegmentDoc segmentDoc = SegmentDoc.of(reader, docId);
+        FieldInfo segmentField = segmentDoc.leaf().getFieldInfos().fieldInfo(field);
+        return segmentField != null ? vector(segmentDoc.leaf(), segmentField, segmentDoc.doc()) : Optional.empty();
     }
 
     private static Optional<DocValues> numbers(FieldInfo field, List<Long> numbers) {

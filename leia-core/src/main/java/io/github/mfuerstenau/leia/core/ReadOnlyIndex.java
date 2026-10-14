@@ -470,6 +470,8 @@ public final class ReadOnlyIndex implements OpenedIndex {
                 field.getPointDimensionCount(),
                 field.getPointNumBytes(),
                 field.getVectorDimension(),
+                field.getVectorEncoding(),
+                field.getVectorSimilarityFunction(),
                 termStats);
     }
 
@@ -661,6 +663,19 @@ public final class ReadOnlyIndex implements OpenedIndex {
         checkDocId(docId);
         checkField(field);
         return DocumentReader.storedValues(reader, docId, field);
+    }
+
+    /**
+     * The KNN vector of a document in a field (ADR 0040); empty if it has none there. A deleted
+     * document is read too.
+     *
+     * @throws IllegalArgumentException if there is no such document id or field
+     * @throws IOException if reading the vector fails
+     */
+    public Optional<KnnVector> vector(int docId, String field) throws IOException {
+        checkDocId(docId);
+        checkField(field);
+        return DocumentReader.vector(reader, docId, field);
     }
 
     /**

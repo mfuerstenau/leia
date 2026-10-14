@@ -10,6 +10,7 @@ import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.AutoStopWords;
 import io.github.mfuerstenau.leia.protocol.analysis.FieldStopWords;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
+import io.github.mfuerstenau.leia.protocol.document.KnnVector;
 import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.filter.FilterPattern;
@@ -18,6 +19,8 @@ import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
+import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
+import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
 import io.github.mfuerstenau.leia.protocol.search.Bm25Similarity;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
 import io.github.mfuerstenau.leia.protocol.search.ClassicSimilarity;
@@ -31,6 +34,7 @@ import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanResult;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.HitField;
+import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
 import io.github.mfuerstenau.leia.protocol.search.LikeTerm;
 import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
 import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
@@ -90,16 +94,43 @@ class SearchTest {
                 0,
                 0,
                 0,
+                Optional.empty(),
+                Optional.empty(),
                 Optional.of(new TermStats(1, 1, 1)));
     }
 
     private static IndexField point(String name, int bytes, DocValuesType docValues) {
         return new IndexField(
-                name, 0, IndexOptions.NONE, false, false, false, docValues, 1, bytes, 0, Optional.empty());
+                name,
+                0,
+                IndexOptions.NONE,
+                false,
+                false,
+                false,
+                docValues,
+                1,
+                bytes,
+                0,
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty());
     }
 
     private static IndexField docValues(String name, DocValuesType docValues) {
-        return new IndexField(name, 0, IndexOptions.NONE, false, false, false, docValues, 0, 0, 0, Optional.empty());
+        return new IndexField(
+                name,
+                0,
+                IndexOptions.NONE,
+                false,
+                false,
+                false,
+                docValues,
+                0,
+                0,
+                0,
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty());
     }
 
     /**
@@ -151,6 +182,7 @@ class SearchTest {
                         false,
                         false,
                         STANDARD)),
+                Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
@@ -230,7 +262,7 @@ class SearchTest {
 
     /** The search screen in regex mode, with {@code pattern} submitted. */
     private static Request.StoredScan regex(Search search, String pattern) {
-        for (int i = 0; i < 6; i++) {
+        for (int i = 0; i < 7; i++) {
             assertThat(press(search, 'm')).isEmpty();
         }
         press(search, '/');
@@ -321,7 +353,7 @@ class SearchTest {
         assertThat(search.mode()).isEqualTo(Mode.CLASSIC);
         assertThat(search.hasScan()).isFalse();
         // Back in regex mode, nothing runs by itself.
-        for (int i = 0; i < 6; i++) {
+        for (int i = 0; i < 7; i++) {
             assertThat(press(search, 'm')).isEmpty();
         }
         assertThat(search.hasScan()).isFalse();
@@ -627,6 +659,169 @@ class SearchTest {
         assertThat(reopened.hex()).isTrue();
     }
 
+    private static IndexField vector(String name, int dimension, VectorEncoding encoding, VectorSimilarity similarity) {
+        return new IndexField(
+                name,
+                0,
+                IndexOptions.NONE,
+                false,
+                false,
+                false,
+                DocValuesType.NONE,
+                0,
+                0,
+                dimension,
+                Optional.of(encoding),
+                Optional.of(similarity),
+                Optional.empty());
+    }
+
+    /** The fields of {@link #fields}, and a float and a byte vector field. */
+    private static Search knnSearch() {
+        List<IndexField> fields = new ArrayList<>(fields());
+        fields.add(vector("embedding", 3, VectorEncoding.FLOAT32, VectorSimilarity.COSINE));
+        fields.add(vector("fingerprint", 2, VectorEncoding.BYTE, VectorSimilarity.EUCLIDEAN));
+        return new Search(fields, 500);
+    }
+
+    /** {@link #knnSearch} in the KNN mode, after classic, standard, term and doc values. */
+    private static Search knnMode() {
+        Search search = knnSearch();
+        for (int i = 0; i < 4; i++) {
+            assertThat(press(search, 'm')).isEmpty();
+        }
+        assertThat(search.mode()).isEqualTo(Mode.KNN);
+        return search;
+    }
+
+    private static KnnQuery knnOf(Optional<Request> request) {
+        return started(request).params().query().knn().orElseThrow();
+    }
+
+    /** Replaces the query line with {@code text} and searches. */
+    private static Optional<Request> line(Search search, String text) {
+        press(search, '/');
+        press(search, ctrl('u'));
+        typed(search, text);
+        return press(search, KeyCode.ENTER);
+    }
+
+    @Test
+    void knnModeSearchesFromADocumentOrAVector() {
+        Search search = knnMode();
+        assertThat(render(search))
+                .contains(
+                        "KNN · embedding (3d float, cosine) · k 10 · approximate",
+                        "Press / to type a document id or a vector in brackets",
+                        "w types a filter in classic syntax, default field title");
+        assertThat(search.keys()).startsWith("/ target   w filter");
+
+        assertThat(knnOf(line(search, "42")))
+                .isEqualTo(new KnnQuery(
+                        "embedding",
+                        OptionalInt.of(42),
+                        Optional.empty(),
+                        OptionalInt.of(10),
+                        false,
+                        Optional.empty()));
+        assertThat(knnOf(line(search, "[0.5, -1 2]")).vector())
+                .hasValue(new KnnVector(VectorEncoding.FLOAT32, List.of(0.5f, -1f, 2f), List.of()));
+    }
+
+    @Test
+    void knnModeStepsTheFieldAndSaysWhyALineDoesntRead() {
+        Search search = knnMode();
+        line(search, "[0.5, -1, 2]");
+
+        // f goes on to the byte field, which can't take floats.
+        assertThat(press(search, 'f')).isEmpty();
+        assertThat(render(search))
+                .contains("KNN · fingerprint (2d byte, euclidean)", "Cannot read the target", "'0.5' is not a byte");
+        assertThat(knnOf(line(search, "[1, -2]")).vector())
+                .hasValue(new KnnVector(VectorEncoding.BYTE, List.of(), List.of((byte) 1, (byte) -2)));
+        assertThat(knnOf(press(search, 'F')).field()).isEqualTo("embedding");
+    }
+
+    @Test
+    void knnModeSetsKExactnessAndAFilter() {
+        Search search = knnMode();
+        line(search, "7");
+
+        // e scores every document instead, without k.
+        KnnQuery exact = knnOf(press(search, 'e'));
+        assertThat(exact.exact()).isTrue();
+        assertThat(exact.k()).isEmpty();
+        assertThat(render(search)).contains("KNN · embedding (3d float, cosine) · exact");
+        assertThat(knnOf(press(search, 'e')).k()).hasValue(10);
+
+        // k takes digits only, and stays within 1 to 10,000.
+        assertThat(press(search, 'k')).isEmpty();
+        assertThat(search.prompting()).isTrue();
+        assertThat(search.keys()).contains("set k");
+        press(search, ctrl('u'));
+        typed(search, "2x5");
+        assertThat(knnOf(press(search, KeyCode.ENTER)).k()).hasValue(25);
+        press(search, 'k');
+        press(search, ctrl('u'));
+        typed(search, "99999");
+        assertThat(knnOf(press(search, KeyCode.ENTER)).k()).hasValue(KnnQuery.MAX_K);
+
+        // w types the filter, which a and p set as a classic query.
+        press(search, 'w');
+        typed(search, "red blue");
+        ClassicQuery filter = knnOf(press(search, KeyCode.ENTER)).filter().orElseThrow();
+        assertThat(filter.expression()).isEqualTo("red blue");
+        assertThat(filter.defaultField()).isEqualTo("title");
+        assertThat(knnOf(press(search, 'a')).filter().orElseThrow().defaultOperator())
+                .isEqualTo(QueryOperator.AND);
+        assertThat(render(search)).contains("where  red blue");
+        press(search, 'p');
+        assertThat(search.prompting()).isTrue();
+        press(search, KeyCode.ESCAPE);
+
+        Request.Filter browse = (Request.Filter) press(search, 'b').orElseThrow();
+        assertThat(browse.label()).isEqualTo("nearest embedding 7 where red blue");
+        assertThat(browse.params().query().flatMap(SearchQuery::knn)).isPresent();
+    }
+
+    @Test
+    void knnFromTheDocumentsScreenAndAfterAReopen() {
+        Search search = knnSearch();
+        assertThat(search.knnQuery("nope", 3)).isEmpty();
+
+        KnnQuery query = knnOf(search.knnQuery("fingerprint", 3));
+        assertThat(query.field()).isEqualTo("fingerprint");
+        assertThat(query.docId()).hasValue(3);
+        assertThat(search.mode()).isEqualTo(Mode.KNN);
+        press(search, 'k');
+        press(search, ctrl('u'));
+        typed(search, "5");
+        press(search, KeyCode.ENTER);
+        press(search, 'w');
+        typed(search, "red");
+        press(search, KeyCode.ENTER);
+
+        Search reopened = search.reopened(
+                List.of(
+                        field("title", IndexOptions.DOCS_AND_FREQS_AND_POSITIONS),
+                        vector("fingerprint", 2, VectorEncoding.BYTE, VectorSimilarity.EUCLIDEAN)),
+                500,
+                false);
+        assertThat(render(reopened))
+                .contains("KNN · fingerprint (2d byte, euclidean) · k 5 · approximate", "where  red");
+    }
+
+    @Test
+    void knnModeWithoutVectorsSaysSo() {
+        Search search = search();
+        for (int i = 0; i < 4; i++) {
+            press(search, 'm');
+        }
+        assertThat(render(search)).contains("No field has KNN vectors");
+        press(search, '/');
+        assertThat(search.prompting()).isFalse();
+    }
+
     @Test
     void docValuesModeWithoutDocValuesSaysSo() {
         Search search = new Search(List.of(field("title", IndexOptions.DOCS_AND_FREQS_AND_POSITIONS)), 5);
@@ -665,7 +860,7 @@ class SearchTest {
     @Test
     void likeTextModeTakesTheLineAsATextAndShowsTheChosenTerms() {
         Search search = search();
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < 6; i++) {
             assertThat(press(search, 'm')).isEmpty();
         }
         assertThat(render(search))
@@ -717,7 +912,7 @@ class SearchTest {
     @Test
     void moreLikeThisModeTakesTheLineAsADocumentId() {
         Search search = search();
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 5; i++) {
             assertThat(press(search, 'm')).isEmpty();
         }
         assertThat(render(search))
@@ -782,9 +977,13 @@ class SearchTest {
         assertThat(started(running).cancel()).containsExactly(6L);
         start(search, running, 7);
 
-        // "red" is no document id: the doc values search's hits and job go.
+        // "red" is no KNN target (and there is no vector field here): the doc values search's hits and
+        // job go.
         assertThat(press(search, 'm')).hasValue(new Request.Cancel(List.of(7L)));
         assertThat(search.searchJob()).isEmpty();
+        assertThat(search.mode()).isEqualTo(Mode.KNN);
+        // Nor a document id: nothing comes back.
+        assertThat(press(search, 'm')).isEmpty();
         assertThat(render(search)).doesNotContain("Search failed").contains("More like this document");
         assertThat(render(search)).doesNotContain("doc-0");
     }

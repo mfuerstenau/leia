@@ -3,6 +3,8 @@ package io.github.mfuerstenau.leia.core;
 import java.util.Optional;
 import org.apache.lucene.index.DocValuesType;
 import org.apache.lucene.index.IndexOptions;
+import org.apache.lucene.index.VectorEncoding;
+import org.apache.lucene.index.VectorSimilarityFunction;
 
 /**
  * One field of an index: how it is indexed, from the merged {@link
@@ -18,6 +20,8 @@ import org.apache.lucene.index.IndexOptions;
  * @param pointDimensionCount dimensions of the point values; 0 if there are none
  * @param pointNumBytes bytes per point dimension; 0 if there are none
  * @param vectorDimension dimensions of the KNN vectors; 0 if there are none
+ * @param vectorEncoding how the KNN vectors are encoded; Lucene's default if there are none
+ * @param vectorSimilarity how the KNN vectors are compared; Lucene's default if there are none
  * @param terms postings statistics; empty if no segment has postings for the field
  */
 public record FieldStats(
@@ -31,6 +35,8 @@ public record FieldStats(
         int pointDimensionCount,
         int pointNumBytes,
         int vectorDimension,
+        VectorEncoding vectorEncoding,
+        VectorSimilarityFunction vectorSimilarity,
         Optional<TermStats> terms) {
 
     /**

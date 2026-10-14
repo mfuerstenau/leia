@@ -129,6 +129,8 @@ class AppTest {
                 0,
                 0,
                 0,
+                Optional.empty(),
+                Optional.empty(),
                 indexed ? Optional.of(new TermStats(1, 1, 1)) : Optional.empty());
     }
 
@@ -359,7 +361,7 @@ class AppTest {
         App app = app();
         app.opened(withDocs(stats("/data/idx"), 3, field("id", 0), field("body", 1)), List.of());
         app.handleKey(key('5'));
-        for (int i = 0; i < 6; i++) {
+        for (int i = 0; i < 7; i++) {
             assertThat(app.handleKey(key('m'))).isEmpty();
         }
         app.handleKey(key('/'));
@@ -438,6 +440,8 @@ class AppTest {
                 0,
                 0,
                 0,
+                Optional.empty(),
+                Optional.empty(),
                 Optional.of(new TermStats(1, 1, 1)));
         app.opened(withDocs(stats("/data/idx"), 3, id), List.of());
         assertThat(app.handleKey(key('2'))).isEqualTo(load(0));
@@ -450,7 +454,8 @@ class AppTest {
                         List.of(new StoredValue(StoredType.STRING, "doc-0", false)),
                         Optional.of(
                                 new DocValues(DocValuesType.SORTED, List.of(), List.of(new BytesValue("a b", false)))),
-                        false))));
+                        false,
+                        Optional.empty()))));
 
         Optional<Action> start = app.handleKey(key('s'));
         assertThat(start).containsInstanceOf(Action.StartSearch.class);
@@ -1192,7 +1197,8 @@ class AppTest {
         return new GetDocumentResult(
                 docId,
                 false,
-                List.of(new DocumentField("id", OptionalLong.empty(), List.of(id), Optional.empty(), false)));
+                List.of(new DocumentField(
+                        "id", OptionalLong.empty(), List.of(id), Optional.empty(), false, Optional.empty())));
     }
 
     /** An index of three documents with the field {@code id}. */
@@ -1406,7 +1412,7 @@ class AppTest {
         app.handleKey(key(KeyCode.TAB));
         app.handleKey(key(KeyCode.END));
         assertThat(render(app)).contains("Esc stop rebuild", "rebuilding… 1024 of 3000 terms");
-        assertThat(TestScreens.render(app::render, 200, 20)).contains("m similar   r rebuild   E export   Tab panel");
+        assertThat(TestScreens.render(app::render, 230, 20)).contains("m similar   r rebuild   E export   Tab panel");
 
         // Another document stops it.
         assertThat(app.handleKey(key(KeyCode.RIGHT)))

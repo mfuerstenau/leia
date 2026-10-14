@@ -15,9 +15,12 @@ import dev.tamboui.widgets.block.Title;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
+import io.github.mfuerstenau.leia.protocol.document.KnnVector;
 import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
+import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
+import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -335,6 +338,20 @@ public final class Viewer {
             byte[] bytes = ByteBuffer.allocate(8).putLong(number).array();
             return new Value(
                     -1, kind + " doc value", new Content(Content.Kind.NUMBER, text, bytes), OptionalLong.empty());
+        }
+
+        /** A KNN vector: a component to a line, and the bytes of each component, big-endian. */
+        public static Value vector(KnnVector vector) {
+            String text = String.join("\n", Documents.vectorTexts(vector));
+            ByteBuffer bytes = ByteBuffer.allocate(
+                    vector.encoding() == VectorEncoding.FLOAT32 ? 4 * vector.dimension() : vector.dimension());
+            vector.floats().forEach(bytes::putFloat);
+            vector.bytes().forEach(bytes::put);
+            return new Value(
+                    -1,
+                    Overview.vectorEncoding(vector.encoding()) + " vector",
+                    new Content(Content.Kind.NUMBER, text, bytes.array()),
+                    OptionalLong.empty());
         }
 
         String kind() {

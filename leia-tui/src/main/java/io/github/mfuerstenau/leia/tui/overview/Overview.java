@@ -29,6 +29,8 @@ import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
+import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
+import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
 import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.widgets.Logo;
@@ -781,7 +783,7 @@ public final class Overview {
         String points = field.pointDimensionCount() == 0
                 ? "-"
                 : field.pointDimensionCount() + "×" + field.pointNumBytes() + "B";
-        String vector = field.vectorDimension() == 0 ? "-" : field.vectorDimension() + "d";
+        String vector = vector(field);
         Optional<TermStats> stats = field.terms();
         String docs = stats.map(s -> Integer.toString(s.docCount())).orElse("-");
         String sumDocFreq = stats.map(s -> Long.toString(s.sumDocFreq())).orElse("-");
@@ -823,6 +825,49 @@ public final class Overview {
             docs,
             sumDocFreq,
             sumTotalTermFreq
+        };
+    }
+
+    /**
+     * A field's vectors as the Vector column shows them (ADR 0040): dimensions, encoding and
+     * similarity, such as {@code 8d f32 cos}; {@code -} if it has none.
+     */
+    static String vector(IndexField field) {
+        if (field.vectorDimension() == 0) {
+            return "-";
+        }
+        String encoding = field.vectorEncoding()
+                .map(e -> switch (e) {
+                    case FLOAT32 -> " f32";
+                    case BYTE -> " byte";
+                })
+                .orElse("");
+        String similarity = field.vectorSimilarity()
+                .map(sim -> switch (sim) {
+                    case EUCLIDEAN -> " euc";
+                    case DOT_PRODUCT -> " dot";
+                    case COSINE -> " cos";
+                    case MAXIMUM_INNER_PRODUCT -> " mip";
+                })
+                .orElse("");
+        return field.vectorDimension() + "d" + encoding + similarity;
+    }
+
+    /** A vector similarity in words, such as {@code cosine}. */
+    public static String vectorSimilarity(VectorSimilarity similarity) {
+        return switch (similarity) {
+            case EUCLIDEAN -> "euclidean";
+            case DOT_PRODUCT -> "dot product";
+            case COSINE -> "cosine";
+            case MAXIMUM_INNER_PRODUCT -> "maximum inner product";
+        };
+    }
+
+    /** A vector encoding in words: {@code float} or {@code byte}. */
+    public static String vectorEncoding(VectorEncoding encoding) {
+        return switch (encoding) {
+            case FLOAT32 -> "float";
+            case BYTE -> "byte";
         };
     }
 

@@ -1,6 +1,6 @@
 # ADR 0010 — Search on the wire
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by ADR 0040 (a KNN query alternative)
 - **Date:** 2026-10-06
 
 ## Context

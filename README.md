@@ -15,10 +15,10 @@ because Lucene 10 can't read them.
   segment count, live, deleted and max documents, the Lucene versions that created the index, wrote
   its commit and wrote its oldest segment, and the commit user data.
 - **Fields:** every field with its index options, norms, payloads, term vectors, doc values type,
-  point and vector dimensions, and summed postings statistics (doc count, Σ doc freq, Σ term freq),
+  point dimensions, vector dimensions with their encoding and similarity, and summed postings statistics (doc count, Σ doc freq, Σ term freq),
   plus on request each field's term count and top terms.
 - **Documents:** one document at a time, deleted ones included: norms with the field length they
-  encode, stored values, doc values and term vectors, the terms a field was indexed with (rebuilt
+  encode, stored values, doc values, KNN vectors and term vectors, the terms a field was indexed with (rebuilt
   from the postings), and a viewer for whole values as text, hex, pretty-printed JSON or delimited data.
 - **Terms:** the terms of a field with their frequencies, and the documents that contain a term,
   with the positions, offsets and payloads of each occurrence.
@@ -209,6 +209,7 @@ scans it again; a smaller N needs no new scan.
 | `v` | view the selected field's values (see below) |
 | `x` | show numeric doc values as long, double bits, sortable double, float bits or sortable float |
 | `s` | search for the documents with any of the selected field's doc values on the search screen, numbers as `x` shows them |
+| `N` | search for the documents whose vectors in the selected field are nearest to this document's (KNN) on the search screen |
 | `e` | hide or show the fields in which the document has nothing |
 | `m` | search for documents like this one (More-Like-This) on the search screen |
 | `E` | export the document as JSON to a file, or copy it (see below) |
@@ -216,8 +217,9 @@ scans it again; a smaller N needs no new scan.
 | `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the fields or scroll the details |
 
 The documents screen shows one document at a time, every field of the index in a row: its flags,
-its norm and its first stored value (or else its doc values). The details panel shows all of the
-selected field's stored values, doc values and, on `Enter`, its term vector with positions,
+its norm and its first stored value (or else its doc values, or else its KNN vector). The details
+panel shows all of the selected field's stored values, doc values, KNN vector (four components to a
+line, with its length) and, on `Enter`, its term vector with positions,
 offsets and payloads. Deleted documents can be read too, until a merge removes them; they are
 marked `deleted`. Byte strings that aren't UTF-8 are shown as `0x` and their hex.
 
@@ -230,7 +232,8 @@ another document stops it. The result shows the tokens in position order (`a|b` 
 and positions.
 
 `E` exports the whole document as JSON (ADR 0030): per field, the flags, the norm, the stored
-values (whole, never cut), the doc values, the term vector and the rebuilt indexed terms; binary
+values (whole, never cut), the doc values, the KNN vector, the term vector and the rebuilt indexed
+terms (format version 2, ADR 0040); binary
 values are hex. The prompt offers `doc-<id>.json` in the working directory; `Tab` turns the
 rebuild of the indexed terms off, which is the slow part on a large index, and `Ctrl+Y` copies
 the JSON through OSC 52 instead of writing it (terminals and tmux may cut large copies). As with
@@ -256,13 +259,13 @@ and then only says where the shown document stands in it. A regex filter reads e
 again, so its title also says how many values took too long and were skipped.
 
 Flags: `I` indexed, `N` has a norm, `P` payloads, `S` stored, `V` term vector, `D` doc values,
-`T` points, `K` KNN vectors. `N`, `S`, `V` and `D` say what this document has; the others describe
-the field. Whether the document has terms in a field is not shown: finding out means reading the
+`T` points, `K` KNN vector. `N`, `S`, `V`, `D` and `K` say what this document has; the others
+describe the field. Whether the document has terms in a field is not shown: finding out means reading the
 field's terms, which `r` does.
 
 #### Viewer
 
-`v` shows the selected field's stored values and doc values one at a time over the whole screen.
+`v` shows the selected field's stored values, doc values and KNN vector one at a time over the whole screen.
 
 | Key | Action |
 |---|---|
@@ -343,15 +346,18 @@ shows as missing. The documents and terms screens always show the opened commit.
 
 | Key | Action |
 |---|---|
-| `/` | edit the query, the doc values, or for More-Like-This the document id or the text; `Enter` searches, `Esc` leaves the line, and `←` `→`, `Ctrl+A` `E` `U` `K` `W` edit |
-| `m` | switch between classic query syntax, standard query syntax, a single term, doc values, More-Like-This for a document, More-Like-This for a text and a regex over stored values |
-| `p` | set the parser options, and for the standard syntax the type of each point field; for More-Like-This, its fields, limits, word lengths and stop words; `Enter` applies, `Esc` cancels |
+| `/` | edit the query, the doc values, the KNN target, or for More-Like-This the document id or the text; `Enter` searches, `Esc` leaves the line, and `←` `→`, `Ctrl+A` `E` `U` `K` `W` edit |
+| `m` | switch between classic query syntax, standard query syntax, a single term, doc values, KNN, More-Like-This for a document, More-Like-This for a text and a regex over stored values |
+| `p` | set the parser options (in KNN mode, the filter's), and for the standard syntax the type of each point field; for More-Like-This, its fields, limits, word lengths and stop words; `Enter` applies, `Esc` cancels |
 | `s` | set the similarity (BM25 with `k1` and `b`, classic TF-IDF or boolean) and the sort; `Enter` applies, `Esc` cancels |
 | `l` | choose the stored fields each hit shows; `Space` shows or hides one, `a` all, `n` none |
-| `f` `F` | step through the fields with postings: the default field of a query, or the field of a term; in doc values mode, the fields with doc values |
+| `f` `F` | step through the fields with postings: the default field of a query, or the field of a term; in doc values mode, the fields with doc values; in KNN mode, the fields with vectors |
 | `n` | doc values: read a number field as long, double bits, sortable double, float bits or sortable float |
 | `h` | doc values: read the values of a field of bytes as hex, or as text |
-| `a` | combine clauses without an operator with OR or AND |
+| `a` | combine clauses without an operator with OR or AND (in KNN mode, in the filter) |
+| `k` | KNN: type how many nearest documents the approximate search finds (1–10,000) |
+| `e` | KNN: search the graph approximately, or score every document with a vector exactly |
+| `w` | KNN: edit the filter, in classic syntax |
 | `t` | count every hit, or stop counting after 1000 |
 | `x` | explain how the selected hit scores |
 | `i` | regex: ignore case, or match it |
@@ -388,6 +394,16 @@ float bits, Lucene's `DoubleField` as a sortable double. Sorted and binary value
 unsigned bytes, and `h` takes them in hex. Binary doc values have no query of Lucene's, so every
 document's value is read; `Esc` stops it. `s` on the documents screen searches for the selected
 field's doc values.
+
+The KNN mode finds the documents whose vectors in one field are nearest to a target (ADR 0040).
+The line holds a document id, whose vector in the field is the target, or a vector in brackets:
+`42`, `[0.5, -1, 2.25]`, or `[12 -7 0]` for a field of bytes. `N` on the documents screen starts
+it for the shown document's vector. At first it searches the field's graph for the `k` nearest
+(10; `k` changes it), as Lucene's `KnnFloatVectorQuery` and `KnnByteVectorQuery` do. `e` scores
+every document with a vector exactly instead, best first, with the same scores: its first `k`
+hits are the true nearest, to compare the graph's with. `w` types a filter in classic syntax,
+with the classic mode's default field, which the graph search takes as Lucene's pre-filter. The
+title names the field with its dimension, encoding and similarity; `Esc` stops a long search.
 
 More-Like-This searches for the documents like the one whose id the line holds, as Lucene's
 `MoreLikeThis` does; `m` on the documents screen starts it for the document shown. It takes the

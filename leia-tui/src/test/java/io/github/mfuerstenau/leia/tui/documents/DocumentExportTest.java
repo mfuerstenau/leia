@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.github.mfuerstenau.leia.protocol.document.DocValues;
 import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
+import io.github.mfuerstenau.leia.protocol.document.KnnVector;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructSource;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructedField;
 import io.github.mfuerstenau.leia.protocol.document.StoredType;
@@ -15,6 +16,8 @@ import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
+import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
+import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
 import io.github.mfuerstenau.leia.tui.documents.DocumentExport.DocumentData;
 import io.github.mfuerstenau.leia.tui.documents.DocumentExport.ExportedDocument;
 import io.github.mfuerstenau.leia.tui.documents.DocumentExport.ExportedField;
@@ -56,16 +59,38 @@ class DocumentExportTest {
                 0,
                 0,
                 0,
+                Optional.empty(),
+                Optional.empty(),
                 Optional.empty());
     }
 
     private static Function<String, Optional<IndexField>> schema() {
         Map<String, IndexField> fields = Map.of(
-                "id", schemaField("id", 0, IndexOptions.DOCS),
-                "body", schemaField("body", 1, IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS),
-                "labels", schemaField("labels", 2, IndexOptions.DOCS_AND_FREQS_AND_POSITIONS),
-                "year", schemaField("year", 3, IndexOptions.NONE),
-                "empty", schemaField("empty", 4, IndexOptions.NONE));
+                "id",
+                schemaField("id", 0, IndexOptions.DOCS),
+                "body",
+                schemaField("body", 1, IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS),
+                "labels",
+                schemaField("labels", 2, IndexOptions.DOCS_AND_FREQS_AND_POSITIONS),
+                "year",
+                schemaField("year", 3, IndexOptions.NONE),
+                "empty",
+                schemaField("empty", 4, IndexOptions.NONE),
+                "embedding",
+                new IndexField(
+                        "embedding",
+                        5,
+                        IndexOptions.NONE,
+                        false,
+                        false,
+                        false,
+                        DocValuesType.NONE,
+                        0,
+                        0,
+                        2,
+                        Optional.of(VectorEncoding.FLOAT32),
+                        Optional.of(VectorSimilarity.COSINE),
+                        Optional.empty()));
         return name -> Optional.ofNullable(fields.get(name));
     }
 
@@ -74,7 +99,7 @@ class DocumentExportTest {
     }
 
     private static DocumentField field(String name) {
-        return new DocumentField(name, OptionalLong.empty(), List.of(), Optional.empty(), false);
+        return new DocumentField(name, OptionalLong.empty(), List.of(), Optional.empty(), false, Optional.empty());
     }
 
     private static TermVectorTerm term(String text, int position, int start, int end) {
@@ -96,21 +121,36 @@ class DocumentExportTest {
                 false,
                 List.of(
                         new DocumentField(
-                                "id", OptionalLong.empty(), List.of(string("doc-3")), Optional.empty(), false),
+                                "id",
+                                OptionalLong.empty(),
+                                List.of(string("doc-3")),
+                                Optional.empty(),
+                                false,
+                                Optional.empty()),
                         new DocumentField(
                                 "body",
                                 OptionalLong.of(2),
                                 List.of(new StoredValue(StoredType.STRING, "red b", false, OptionalLong.of(9))),
                                 Optional.empty(),
-                                true),
-                        new DocumentField("labels", OptionalLong.of(1), List.of(), Optional.empty(), false),
+                                true,
+                                Optional.empty()),
+                        new DocumentField(
+                                "labels", OptionalLong.of(1), List.of(), Optional.empty(), false, Optional.empty()),
                         new DocumentField(
                                 "year",
                                 OptionalLong.empty(),
                                 List.of(),
                                 Optional.of(new DocValues(DocValuesType.NUMERIC, List.of(2024L), List.of())),
-                                false),
-                        field("empty")));
+                                false,
+                                Optional.empty()),
+                        field("empty"),
+                        new DocumentField(
+                                "embedding",
+                                OptionalLong.empty(),
+                                List.of(),
+                                Optional.empty(),
+                                false,
+                                Optional.of(new KnnVector(VectorEncoding.FLOAT32, List.of(0.5f, -1.25f), List.of())))));
     }
 
     private static List<TermVectorTerm> bodyTerms() {
@@ -231,7 +271,9 @@ class DocumentExportTest {
 
         assertThat(export.indexedTerms()).isFalse();
         assertThat(export.indexDirectory()).contains("b");
-        assertThat(export.fields()).extracting(ExportedField::name).containsExactly("id", "body", "labels", "year");
+        assertThat(export.fields())
+                .extracting(ExportedField::name)
+                .containsExactly("id", "body", "labels", "year", "embedding");
         assertThat(export.fields()).allMatch(field -> field.indexed().isEmpty());
         String json = DocumentExport.toJson(export);
         assertThat(json).contains("\"indexDirectory\": \"b\"").contains("\"indexedTerms\": false");

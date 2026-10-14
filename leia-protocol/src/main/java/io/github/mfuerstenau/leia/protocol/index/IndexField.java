@@ -15,6 +15,10 @@ import java.util.Optional;
  * @param pointDimensionCount dimensions of the point values; 0 if there are none
  * @param pointNumBytes bytes per point dimension; 0 if there are none
  * @param vectorDimension dimensions of the KNN vectors; 0 if there are none
+ * @param vectorEncoding how the KNN vectors are encoded; present exactly when {@code
+ *     vectorDimension} is not 0 (ADR 0040)
+ * @param vectorSimilarity how the KNN vectors are compared; present exactly when {@code
+ *     vectorDimension} is not 0
  * @param terms postings statistics; absent if no segment has postings for the field
  */
 public record IndexField(
@@ -28,4 +32,6 @@ public record IndexField(
         int pointDimensionCount,
         int pointNumBytes,
         int vectorDimension,
+        Optional<VectorEncoding> vectorEncoding,
+        Optional<VectorSimilarity> vectorSimilarity,
         Optional<TermStats> terms) {}

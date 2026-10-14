@@ -26,7 +26,19 @@ class ParserSettingsTest {
 
     private static IndexField field(String name, IndexOptions indexOptions, int dimensions, int bytes) {
         return new IndexField(
-                name, 0, indexOptions, false, false, false, DocValuesType.NONE, dimensions, bytes, 0, Optional.empty());
+                name,
+                0,
+                indexOptions,
+                false,
+                false,
+                false,
+                DocValuesType.NONE,
+                dimensions,
+                bytes,
+                0,
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty());
     }
 
     private static ParserSettings settings() {

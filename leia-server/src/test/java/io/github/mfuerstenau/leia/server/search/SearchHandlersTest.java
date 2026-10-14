@@ -11,8 +11,10 @@ import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.CustomAnalyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.StandardAnalyzer;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
+import io.github.mfuerstenau.leia.protocol.document.KnnVector;
 import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
+import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.search.Bm25Similarity;
 import io.github.mfuerstenau.leia.protocol.search.BooleanSimilarity;
@@ -30,6 +32,7 @@ import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.HitField;
+import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
 import io.github.mfuerstenau.leia.protocol.search.LikeTerm;
 import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
 import io.github.mfuerstenau.leia.protocol.search.ParserOptions;
@@ -64,12 +67,15 @@ import java.util.OptionalLong;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.IntPoint;
+import org.apache.lucene.document.KnnByteVectorField;
+import org.apache.lucene.document.KnnFloatVectorField;
 import org.apache.lucene.document.NumericDocValuesField;
 import org.apache.lucene.document.SortedDocValuesField;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
@@ -94,6 +100,7 @@ class SearchHandlersTest {
             List.of());
     private static final Similarity BM25 =
             new Similarity(Optional.of(new Bm25Similarity(1.2f, 0.75f)), Optional.empty(), Optional.empty());
+    private static final Optional<List<String>> NONE = Optional.of(List.of());
     private static final Similarity BOOLEAN =
             new Similarity(Optional.empty(), Optional.empty(), Optional.of(new BooleanSimilarity()));
 
@@ -174,6 +181,7 @@ class SearchHandlersTest {
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
+                Optional.empty(),
                 Optional.empty());
 
         assertFails(
@@ -194,9 +202,15 @@ class SearchHandlersTest {
                 Optional.empty(),
                 Optional.of(new TermQuery("body", new BytesValue("red", false))),
                 Optional.empty(),
+                Optional.empty(),
                 Optional.empty());
         SearchQuery neither = new SearchQuery(
-                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty());
 
         assertFails(() -> startSearch.handle(params(both, 0, 10, Optional.empty())), ErrorCode.INVALID_PARAMS);
         assertFails(() -> startSearch.handle(params(neither, 0, 10, Optional.empty())), ErrorCode.INVALID_PARAMS);
@@ -276,7 +290,8 @@ class SearchHandlersTest {
                         Optional.empty(),
                         Optional.empty(),
                         Optional.of(new DocValuesQuery(
-                                "color", Optional.empty(), one, Optional.empty(), Optional.of(text("r"))))),
+                                "color", Optional.empty(), one, Optional.empty(), Optional.of(text("r")))),
+                        Optional.empty()),
                 docValuesPrefix("rank", DocValuesNumber.LONG, text("8")),
                 docValuesPrefix("rank", null, text("8")),
                 docValuesPrefix("color", null, new BytesValue("7", true)))) {
@@ -286,6 +301,131 @@ class SearchHandlersTest {
                         params(docValues("rank", null, one, Optional.empty()), 0, 10, Optional.empty())))
                 .hasMessage("Invalid params: the field 'rank' has NUMERIC doc values, which hold numbers: say how"
                         + " they are encoded");
+    }
+
+    @Test
+    void searchesByKnn() throws Exception {
+        openIndex();
+
+        SearchResults approximate =
+                search(params(knn("vec", OptionalInt.empty(), floats(3, 0), OptionalInt.of(1), false), 0, 10, NONE));
+        SearchResults exact =
+                search(params(knn("vec", OptionalInt.empty(), floats(3, 0), OptionalInt.empty(), true), 0, 10, NONE));
+        SearchResults fromDocument =
+                search(params(knn("bvec", OptionalInt.of(0), null, OptionalInt.empty(), true), 0, 10, NONE));
+
+        // vec: [1, 0] (doc 0), none (doc 1), [3, 0] (doc 2)
+        assertThat(approximate.hits()).extracting(Hit::docId).containsExactly(2);
+        assertThat(approximate.hits().getFirst().score()).isEqualTo(1f);
+        assertThat(approximate.query()).isEqualTo("KnnFloatVectorQuery:vec[3.0,...][1]");
+        assertThat(exact.hits()).extracting(Hit::docId).containsExactly(2, 0);
+        assertThat(exact.totalHits()).isEqualTo(2);
+        assertThat(exact.query()).isEqualTo("ExactKnnQuery:vec[3.0,...]");
+        // bvec: [1, 1], [2, 1], [3, 1], cosine; every document has one.
+        assertThat(fromDocument.hits()).extracting(Hit::docId).containsExactly(0, 1, 2);
+        assertThat(fromDocument.hits().getFirst().score()).isEqualTo(1f);
+    }
+
+    @Test
+    void searchesByKnnThroughAFilter() throws Exception {
+        openIndex();
+        // body: "red" (doc 0), "blue" (doc 1), "red …" (doc 2)
+        ClassicQuery red = new ClassicQuery("red", "body", QueryOperator.OR, DEFAULTS, 2, true, false, STANDARD);
+
+        for (boolean exact : List.of(true, false)) {
+            SearchQuery query = new SearchQuery(
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.of(new KnnQuery(
+                            "bvec",
+                            OptionalInt.of(1),
+                            Optional.empty(),
+                            exact ? OptionalInt.empty() : OptionalInt.of(3),
+                            exact,
+                            Optional.of(red))));
+            assertThat(search(params(query, 0, 10, NONE)).hits())
+                    .extracting(Hit::docId)
+                    .containsExactlyInAnyOrder(0, 2);
+        }
+    }
+
+    @Test
+    void explainsAKnnHit() throws Exception {
+        openIndex();
+
+        for (boolean exact : List.of(true, false)) {
+            SearchQuery query =
+                    knn("vec", OptionalInt.of(0), null, exact ? OptionalInt.empty() : OptionalInt.of(2), exact);
+            assertThat(explain(new StartExplainParams(query, BM25, 0)).match()).isTrue();
+            assertThat(explain(new StartExplainParams(query, BM25, 1)).match()).isFalse();
+        }
+    }
+
+    @Test
+    void checksTheKnnQuery() throws Exception {
+        openIndex();
+        OptionalInt none = OptionalInt.empty();
+        OptionalInt ten = OptionalInt.of(10);
+
+        assertFails(
+                () -> search(params(knn("nope", none, floats(1, 0), ten, false), 0, 10, NONE)),
+                ErrorCode.FIELD_NOT_FOUND);
+        assertFails(
+                () -> search(params(knn("vec", OptionalInt.of(3), null, ten, false), 0, 10, NONE)),
+                ErrorCode.DOC_NOT_FOUND);
+        for (SearchQuery query : List.of(
+                // no vectors
+                knn("body", none, floats(1, 0), ten, false),
+                // not exactly one target
+                knn("vec", OptionalInt.of(0), floats(1, 0), ten, false),
+                knn("vec", none, null, ten, false),
+                // k: missing, out of range, or with an exact query
+                knn("vec", none, floats(1, 0), none, false),
+                knn("vec", none, floats(1, 0), OptionalInt.of(0), false),
+                knn("vec", none, floats(1, 0), OptionalInt.of(KnnQuery.MAX_K + 1), false),
+                knn("vec", none, floats(1, 0), ten, true),
+                // a target that doesn't fit
+                knn("vec", none, floats(1, 0, 0), ten, false),
+                knn("vec", none, floats(1, Float.NaN), ten, false),
+                knn(
+                        "vec",
+                        none,
+                        new KnnVector(VectorEncoding.BYTE, List.of(), List.of((byte) 1, (byte) 0)),
+                        ten,
+                        false),
+                knn(
+                        "bvec",
+                        none,
+                        new KnnVector(VectorEncoding.BYTE, List.of(), List.of((byte) 0, (byte) 0)),
+                        ten,
+                        false),
+                // a document without a vector
+                knn("vec", OptionalInt.of(1), null, ten, false))) {
+            assertFails(() -> startSearch.handle(params(query, 0, 10, NONE)), ErrorCode.INVALID_PARAMS);
+        }
+        assertThatThrownBy(
+                        () -> startSearch.handle(params(knn("vec", OptionalInt.of(1), null, ten, false), 0, 10, NONE)))
+                .hasMessage("Invalid params: document 1 has no vector in the field 'vec'");
+        assertThatThrownBy(() -> startSearch.handle(params(knn("vec", none, floats(1, 0, 0), ten, false), 0, 10, NONE)))
+                .hasMessage("Invalid params: the field 'vec' has vectors of 2 dimensions, not 3");
+        SearchQuery badFilter = new SearchQuery(
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(new KnnQuery(
+                        "vec",
+                        OptionalInt.of(0),
+                        Optional.empty(),
+                        ten,
+                        false,
+                        Optional.of(new ClassicQuery(
+                                "red AND (", "body", QueryOperator.OR, DEFAULTS, 2, true, false, STANDARD)))));
+        assertFails(() -> startSearch.handle(params(badFilter, 0, 10, NONE)), ErrorCode.INVALID_QUERY);
     }
 
     @ParameterizedTest
@@ -882,6 +1022,7 @@ class SearchHandlersTest {
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
+                Optional.empty(),
                 Optional.empty());
     }
 
@@ -889,6 +1030,7 @@ class SearchHandlersTest {
         return new SearchQuery(
                 Optional.empty(),
                 Optional.of(new StandardQuery(expression, "body", QueryOperator.OR, options, points, STANDARD)),
+                Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty());
@@ -900,6 +1042,7 @@ class SearchHandlersTest {
                 Optional.empty(),
                 Optional.of(new TermQuery(field, term)),
                 Optional.empty(),
+                Optional.empty(),
                 Optional.empty());
     }
 
@@ -910,7 +1053,8 @@ class SearchHandlersTest {
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
-                Optional.of(new DocValuesQuery(field, Optional.ofNullable(number), values, range, Optional.empty())));
+                Optional.of(new DocValuesQuery(field, Optional.ofNullable(number), values, range, Optional.empty())),
+                Optional.empty());
     }
 
     private static SearchQuery docValuesPrefix(String field, DocValuesNumber number, BytesValue prefix) {
@@ -920,7 +1064,26 @@ class SearchHandlersTest {
                 Optional.empty(),
                 Optional.empty(),
                 Optional.of(new DocValuesQuery(
-                        field, Optional.ofNullable(number), Optional.empty(), Optional.empty(), Optional.of(prefix))));
+                        field, Optional.ofNullable(number), Optional.empty(), Optional.empty(), Optional.of(prefix))),
+                Optional.empty());
+    }
+
+    private static SearchQuery knn(String field, OptionalInt docId, KnnVector vector, OptionalInt k, boolean exact) {
+        return new SearchQuery(
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(new KnnQuery(field, docId, Optional.ofNullable(vector), k, exact, Optional.empty())));
+    }
+
+    private static KnnVector floats(float... values) {
+        List<Float> list = new java.util.ArrayList<>();
+        for (float value : values) {
+            list.add(value);
+        }
+        return new KnnVector(VectorEncoding.FLOAT32, list, List.of());
     }
 
     private static DocValuesRange range(String lower, String upper) {
@@ -974,7 +1137,12 @@ class SearchHandlersTest {
 
     private static SearchQuery moreLikeThis(MoreLikeThisQuery like) {
         return new SearchQuery(
-                Optional.empty(), Optional.empty(), Optional.empty(), Optional.of(like), Optional.empty());
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(like),
+                Optional.empty(),
+                Optional.empty());
     }
 
     private static Analyzer whitespace() {
@@ -1042,7 +1210,9 @@ class SearchHandlersTest {
     /**
      * One segment: "red" (id 1), "blue" (id 2) with the binary key 0xff00, and a long "red …" (id 3);
      * each with the int point {@code size}, 10 times its id, and the numeric doc values {@code rank},
-     * 100 minus that; and the sorted doc values {@code color}: "red" for id 1, "crimson" for id 3.
+     * 100 minus that; and the sorted doc values {@code color}: "red" for id 1, "crimson" for id 3;
+     * the euclidean float vector {@code vec}, [id, 0], for ids 1 and 3; and the cosine byte vector
+     * {@code bvec}, [id, 1], for each.
      */
     private void openIndex() throws Exception {
         Path dir = tmp.resolve("index");
@@ -1058,6 +1228,10 @@ class SearchHandlersTest {
                 if (id != 2) {
                     doc.add(new SortedDocValuesField("color", new BytesRef(id == 1 ? "red" : "crimson")));
                 }
+                if (id != 2) {
+                    doc.add(new KnnFloatVectorField("vec", new float[] {id, 0}, VectorSimilarityFunction.EUCLIDEAN));
+                }
+                doc.add(new KnnByteVectorField("bvec", new byte[] {(byte) id, 1}, VectorSimilarityFunction.COSINE));
                 if (id == 2) {
                     doc.add(new StringField("key", new BytesRef(new byte[] {(byte) 0xff, 0}), Field.Store.NO));
                 }

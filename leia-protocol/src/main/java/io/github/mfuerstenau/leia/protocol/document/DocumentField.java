@@ -13,10 +13,12 @@ import java.util.OptionalLong;
  * @param stored the stored values, in the order they were added
  * @param docValues the document's doc values; absent if it has none in this field
  * @param hasTermVector whether the document has a term vector for the field ({@code getTermVector})
+ * @param vector the document's KNN vector; absent if it has none in this field (ADR 0040)
  */
 public record DocumentField(
         String name,
         OptionalLong norm,
         List<StoredValue> stored,
         Optional<DocValues> docValues,
-        boolean hasTermVector) {}
+        boolean hasTermVector,
+        Optional<KnnVector> vector) {}

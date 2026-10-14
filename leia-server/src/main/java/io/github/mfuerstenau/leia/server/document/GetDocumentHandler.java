@@ -10,8 +10,10 @@ import io.github.mfuerstenau.leia.protocol.document.DocValues;
 import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
+import io.github.mfuerstenau.leia.protocol.document.KnnVector;
 import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
+import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
@@ -19,6 +21,8 @@ import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.index.GetIndexStatsHandler;
 import jakarta.inject.Inject;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.OptionalLong;
 import org.apache.lucene.util.BytesRef;
 
@@ -72,7 +76,28 @@ public final class GetDocumentHandler implements MethodHandler<GetDocumentParams
                         .map(value -> storedValue(value, GetDocumentResult.MAX_VALUE_LENGTH))
                         .toList(),
                 field.docValues().map(GetDocumentHandler::docValues),
-                field.hasTermVector());
+                field.hasTermVector(),
+                field.vector().map(GetDocumentHandler::vector));
+    }
+
+    /** A vector as the protocol carries it (ADR 0040). */
+    public static KnnVector vector(io.github.mfuerstenau.leia.core.KnnVector vector) {
+        return switch (vector) {
+            case io.github.mfuerstenau.leia.core.KnnVector.Floats floats -> {
+                List<Float> values = new ArrayList<>(floats.values().length);
+                for (float value : floats.values()) {
+                    values.add(value);
+                }
+                yield new KnnVector(VectorEncoding.FLOAT32, List.copyOf(values), List.of());
+            }
+            case io.github.mfuerstenau.leia.core.KnnVector.Bytes bytes -> {
+                List<Byte> values = new ArrayList<>(bytes.values().length);
+                for (byte value : bytes.values()) {
+                    values.add(value);
+                }
+                yield new KnnVector(VectorEncoding.BYTE, List.of(), List.copyOf(values));
+            }
+        };
     }
 
     /** The whole {@code value}, as {@code getStoredValue} sends it. */

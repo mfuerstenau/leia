@@ -25,6 +25,7 @@ import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
 import io.github.mfuerstenau.leia.protocol.document.GetStoredValueParams;
 import io.github.mfuerstenau.leia.protocol.document.GetTermVectorParams;
+import io.github.mfuerstenau.leia.protocol.document.KnnVector;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructResult;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructSource;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructedField;
@@ -43,11 +44,14 @@ import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
+import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
+import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
 import io.github.mfuerstenau.leia.protocol.search.ClassicSimilarity;
 import io.github.mfuerstenau.leia.protocol.search.DocSort;
 import io.github.mfuerstenau.leia.protocol.search.Explanation;
 import io.github.mfuerstenau.leia.protocol.search.FieldSort;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
+import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
 import io.github.mfuerstenau.leia.protocol.search.PointField;
 import io.github.mfuerstenau.leia.protocol.search.PointType;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
@@ -137,9 +141,35 @@ class Lucene9BackendTest {
                 .extracting(IndexField::name, IndexField::indexOptions, IndexField::docValuesType)
                 .containsExactly(
                         tuple("id", IndexOptions.DOCS, DocValuesType.NONE),
-                        tuple("body", IndexOptions.DOCS_AND_FREQS_AND_POSITIONS, DocValuesType.NONE));
+                        tuple("body", IndexOptions.DOCS_AND_FREQS_AND_POSITIONS, DocValuesType.NONE),
+                        tuple("vector", IndexOptions.NONE, DocValuesType.NONE));
+        assertThat(stats.fields().getLast())
+                .extracting(IndexField::vectorDimension, IndexField::vectorEncoding, IndexField::vectorSimilarity)
+                .containsExactly(3, Optional.of(VectorEncoding.FLOAT32), Optional.of(VectorSimilarity.EUCLIDEAN));
         // Postings statistics count the deleted document too.
         assertThat(stats.fields().getFirst().terms().map(TermStats::docCount)).hasValue(3);
+    }
+
+    @Test
+    void searchesTheNearestVectors() throws Exception {
+        for (boolean exact : List.of(false, true)) {
+            SearchQuery query = new SearchQuery(
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.of(new KnnQuery(
+                            "vector",
+                            OptionalInt.empty(),
+                            Optional.of(new KnnVector(VectorEncoding.FLOAT32, List.of(3f, 0f, 1f), List.of())),
+                            exact ? OptionalInt.empty() : OptionalInt.of(5),
+                            exact,
+                            Optional.empty())));
+
+            // [N, 0, 1] for N = 1..3, without the deleted 2.
+            assertThat(backend.search(query, 10).hits()).extracting(Hit::docId).containsExactly(2, 0);
+        }
     }
 
     @Test
@@ -166,9 +196,11 @@ class Lucene9BackendTest {
         // Read through the backward codecs (hard rule 5).
         assertThat(details.segments())
                 .allSatisfy(segment -> assertThat(segment.fieldFormats())
-                        .extracting(FieldFormats::field, FieldFormats::postings)
+                        .extracting(FieldFormats::field, FieldFormats::postings, FieldFormats::knnVectors)
                         .containsExactly(
-                                tuple("body", Optional.of("Lucene912")), tuple("id", Optional.of("Lucene912"))));
+                                tuple("body", Optional.of("Lucene912"), Optional.empty()),
+                                tuple("id", Optional.of("Lucene912"), Optional.empty()),
+                                tuple("vector", Optional.empty(), Optional.of("Lucene99HnswVectorsFormat"))));
         assertThat(details.files()).anySatisfy(file -> {
             assertThat(file.name()).isEqualTo("segments_2");
             assertThat(file.segment()).isEmpty();
@@ -223,9 +255,23 @@ class Lucene9BackendTest {
                                         OptionalLong.empty(),
                                         List.of(new StoredValue(StoredType.STRING, "2", false)),
                                         Optional.empty(),
-                                        false),
+                                        false,
+                                        Optional.empty()),
                                 new DocumentField(
-                                        "body", OptionalLong.of(3), List.of(body), Optional.empty(), false))));
+                                        "body",
+                                        OptionalLong.of(3),
+                                        List.of(body),
+                                        Optional.empty(),
+                                        false,
+                                        Optional.empty()),
+                                new DocumentField(
+                                        "vector",
+                                        OptionalLong.empty(),
+                                        List.of(),
+                                        Optional.empty(),
+                                        false,
+                                        Optional.of(new KnnVector(
+                                                VectorEncoding.FLOAT32, List.of(2f, 0f, 1f), List.of()))))));
         assertThat(backend.call(Methods.GET_TERM_VECTOR, new GetTermVectorParams(1, "body"))
                         .terms())
                 .isEmpty();

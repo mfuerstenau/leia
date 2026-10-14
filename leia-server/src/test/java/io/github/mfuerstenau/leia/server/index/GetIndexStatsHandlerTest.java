@@ -82,6 +82,8 @@ class GetIndexStatsHandlerTest {
                                         0,
                                         0,
                                         0,
+                                        Optional.empty(),
+                                        Optional.empty(),
                                         Optional.of(new TermStats(2, 2, 2))),
                                 new IndexField(
                                         "body",
@@ -94,6 +96,8 @@ class GetIndexStatsHandlerTest {
                                         0,
                                         0,
                                         0,
+                                        Optional.empty(),
+                                        Optional.empty(),
                                         Optional.of(new TermStats(2, 4, 4))),
                                 new IndexField(
                                         "rank",
@@ -106,6 +110,8 @@ class GetIndexStatsHandlerTest {
                                         0,
                                         0,
                                         0,
+                                        Optional.empty(),
+                                        Optional.empty(),
                                         Optional.empty()))));
     }
 
