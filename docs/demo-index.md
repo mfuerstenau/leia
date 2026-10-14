@@ -32,6 +32,7 @@ other tests use their own indexes and the Lucene 9 and 8 indexes from `LegacyInd
 |---|---|
 | `id` | `doc-0000` … `doc-0499`: a keyword with docs only and no norms; stored |
 | `title` | text with positions and norms; stored |
+| `title_key` | the title as one German collation key at primary strength (`CollationKeyAnalyzer`), docs only: a range on it needs that analyzer for the field |
 | `body` | text with positions and offsets, and term vectors with positions and offsets; stored. A rare `sku1234` term per sentence gives a long tail of terms (more than one 100-term page) |
 | `keywords` | docs only, with norms |
 | `labels` | docs and freqs, with norms |
@@ -161,6 +162,21 @@ The analysis screen (`6`) needs no index, but these go with the demo index's tex
   shows the analyzer.
 - Add `stop`: `the` and `are` are gone, and the next tokens' positions are marked `·`. With
   `words=nope.txt`, the builder stays open and says that the resource is not found.
+- The preset `CollationKeyAnalyzer` (`b`, `Space` to preset, `Space` on the class) with locale `de`
+  and strength `primary`: `Äpfel` and `apfel` both stay their own term, but the token details
+  show the same `bytes`, the collation key that an index of this analyzer holds. With `tertiary`
+  they differ. `ICUCollationKeyAnalyzer` comes with `--jar` and the `icu` module
+  (`./gradlew :leia-server:analysisModules`), and also reads tags like `de-u-ks-level1`.
+- A field's own analyzer: `f` until the field line says `title_key`, then `b`, the preset
+  `CollationKeyAnalyzer`, locale `de`, strength `primary`. On the search screen, the classic
+  `title_key:[a TO m]` then finds 206 documents; with the standard analyzer for every field it
+  compares the text's bytes with the keys and finds others. `D` on the analysis screen drops the
+  field's analyzer again.
+- Auto stop words (`w`): 40 % of the documents with `body` chosen finds the 16 words of `body`
+  in more than 194 of the 487 live documents (deleted ones count, as in Lucene), from `a` and
+  `and` to `the`, `to` and `with`; `v` on `body` lists them. With the field `body` on the
+  analysis screen, a text then gets one more stage, `AutoStopWords`, without them; the search
+  screen's info line counts them.
 - A config directory with `syn.txt` (`wifi, wireless network`) and `synonymGraph` with
   `synonyms=syn.txt`: `fast wifi router` gives `wireless` and `network` at positions 1 and 2, and
   `wifi` in italics, stacked on `wireless` and spanning `1–2`; `router` moves to position 3.

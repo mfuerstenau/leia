@@ -7,6 +7,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
 import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.AutoStopWords;
+import io.github.mfuerstenau.leia.protocol.analysis.FieldStopWords;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
@@ -54,6 +56,7 @@ import io.github.mfuerstenau.leia.protocol.search.StoredScanResult;
 import io.github.mfuerstenau.leia.protocol.search.TermQuery;
 import io.github.mfuerstenau.leia.protocol.search.TotalHitsRelation;
 import io.github.mfuerstenau.leia.tui.TestScreens;
+import io.github.mfuerstenau.leia.tui.analysis.AnalysisSettings;
 import io.github.mfuerstenau.leia.tui.analysis.AnalyzerSettings;
 import io.github.mfuerstenau.leia.tui.search.Search.Mode;
 import io.github.mfuerstenau.leia.tui.search.Search.Request;
@@ -336,6 +339,23 @@ class SearchTest {
         assertThat(search.jobs()).isEmpty();
         assertThat(search.running()).isFalse();
         assertThat(render(search)).contains("2 values so far · stopped", "the red lamp");
+    }
+
+    @Test
+    void parsesWithTheAnalysisOfTheAnalysisScreen() {
+        Search search = search();
+        var found = new AutoStopWords(1, List.of(new FieldStopWords("body", List.of("the"))));
+        AnalysisSettings analysis = new AnalysisSettings()
+                .withAnalyzer(Optional.of("title"), new AnalyzerSettings())
+                .withStopWords(Optional.of(found));
+        search.setAnalyzer(analysis);
+
+        assertThat(render(search, 130, 24))
+                .contains("Analyzer   standard analyzer · 1 field own · 1 auto stop word in 1 field");
+        press(search, '/');
+        typed(search, "fox");
+        Request.Start start = (Request.Start) press(search, KeyCode.ENTER).orElseThrow();
+        assertThat(start.params().query().classic().orElseThrow().analyzer()).isEqualTo(analysis.analyzer());
     }
 
     @Test

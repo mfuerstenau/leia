@@ -89,7 +89,9 @@ class SearchHandlersTest {
             Optional.empty(),
             Optional.empty(),
             Optional.empty(),
-            Optional.empty());
+            Optional.empty(),
+            List.of(),
+            List.of());
     private static final Similarity BM25 =
             new Similarity(Optional.of(new Bm25Similarity(1.2f, 0.75f)), Optional.empty(), Optional.empty());
     private static final Similarity BOOLEAN =
@@ -780,9 +782,17 @@ class SearchHandlersTest {
                 Optional.of(new CustomAnalyzer(
                         List.of(), new AnalysisComponent("nope", Map.of()), List.of(), Optional.empty())),
                 Optional.empty(),
-                Optional.empty());
+                Optional.empty(),
+                List.of(),
+                List.of());
         var both = new Analyzer(
-                STANDARD.standard(), Optional.empty(), whitespace().custom(), Optional.empty(), Optional.empty());
+                STANDARD.standard(),
+                Optional.empty(),
+                whitespace().custom(),
+                Optional.empty(),
+                Optional.empty(),
+                List.of(),
+                List.of());
 
         assertFails(
                 () -> startSearch.handle(params(classic("red", broken), 0, 10, Optional.empty())),
@@ -974,7 +984,9 @@ class SearchHandlersTest {
                 Optional.of(new CustomAnalyzer(
                         List.of(), new AnalysisComponent("whitespace", Map.of()), List.of(), Optional.empty())),
                 Optional.empty(),
-                Optional.empty());
+                Optional.empty(),
+                List.of(),
+                List.of());
     }
 
     private static StartSearchParams params(SearchQuery query, int offset, int limit, Optional<List<String>> fields) {

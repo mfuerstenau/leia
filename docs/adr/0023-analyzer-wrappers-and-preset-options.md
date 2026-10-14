@@ -1,6 +1,6 @@
 # ADR 0023 — Analyzer wrappers and preset options
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by ADR 0038 (collation and Japanese completion presets) and ADR 0039 (analyzers per field and auto stop words)
 - **Date:** 2026-10-07
 
 ## Context
@@ -39,10 +39,10 @@ A Lucene analyzer wrapper doesn't close the analyzer it wraps.
 - **`maxTokenLength` on the `standard` alternative.** The preset `StandardAnalyzer` takes it. Left out.
 - **Generic constructors** (rejected in ADR 0017) would cover Kuromoji and Nori, but with unnamed parameters of types from another module. Rejected again.
 - **Deferred:**
-  - `PerFieldAnalyzerWrapper`;
-  - `QueryAutoStopWordAnalyzer`, which needs an `IndexReader`;
-  - the collation analyzers, which need a `Collator`;
-  - `JapaneseCompletionAnalyzer`;
+  - `PerFieldAnalyzerWrapper`; *amended by ADR 0039: `Analyzer.fields`*;
+  - `QueryAutoStopWordAnalyzer`, which needs an `IndexReader`; *amended by ADR 0039: a job finds the words, and `Analyzer.autoStopWords` carries them*;
+  - the collation analyzers, which need a `Collator`; *amended by ADR 0038: presets with a `collation` option*;
+  - `JapaneseCompletionAnalyzer`; *amended by ADR 0038: its options, as `japaneseCompletion`*;
   - `SmartChineseAnalyzer(boolean)`, which is already covered: its stop words are `OPTIONAL`.
 
 ## Consequences

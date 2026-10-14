@@ -5,7 +5,7 @@ import java.util.OptionalInt;
 
 /**
  * An analyzer created by class name (ADR 0015), with its default settings and, if given, stop words
- * and stem exclusions of its own (ADR 0017), and the options it takes (ADR 0023).
+ * and stem exclusions of its own (ADR 0017), and the options it takes (ADR 0023, ADR 0038).
  *
  * @param className the fully qualified class name, one that {@code getAnalysisComponents} lists in
  *     {@code analyzers}
@@ -19,6 +19,10 @@ import java.util.OptionalInt;
  *     ({@link PresetOption#JAPANESE})
  * @param korean the options of Nori's {@code KoreanAnalyzer}; absent for its defaults ({@link
  *     PresetOption#KOREAN})
+ * @param collation the collator of a collation analyzer; absent for the root locale and the
+ *     collator's defaults ({@link PresetOption#COLLATION}, ADR 0038)
+ * @param japaneseCompletion the options of Kuromoji's {@code JapaneseCompletionAnalyzer}; absent for
+ *     its defaults ({@link PresetOption#JAPANESE_COMPLETION}, ADR 0038)
  */
 public record PresetAnalyzer(
         String className,
@@ -27,4 +31,6 @@ public record PresetAnalyzer(
         OptionalInt maxTokenLength,
         Optional<StemDictionary> stemOverride,
         Optional<JapaneseOptions> japanese,
-        Optional<KoreanOptions> korean) {}
+        Optional<KoreanOptions> korean,
+        Optional<Collation> collation,
+        Optional<JapaneseCompletionOptions> japaneseCompletion) {}

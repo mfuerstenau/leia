@@ -123,8 +123,8 @@ artifacts {
 }
 
 // Analysis jars (ADR 0016): Lucene modules that leia doesn't bundle, each with its dependencies in a
-// directory of its own under build/test-analysis-jars: two small ones, and Kuromoji and Nori for the
-// options of their analyzers (ADR 0023). Loading them, or the test codec jar, changes Lucene's
+// directory of its own under build/test-analysis-jars: two small ones, Kuromoji and Nori for the
+// options of their analyzers (ADR 0023), and ICU for its collators (ADR 0038, about 14 MB). Loading them, or the test codec jar, changes Lucene's
 // global lists of factories, codecs and formats, so the tests that do run in a JVM of their own
 // (jarsTest). leia-server's jarsTest uses these directories too.
 val testAnalysisModules = mapOf(
@@ -132,6 +132,7 @@ val testAnalysisModules = mapOf(
     "stempel" to libs.lucene.analysis.stempel,
     "kuromoji" to libs.lucene.analysis.kuromoji,
     "nori" to libs.lucene.analysis.nori,
+    "icu" to libs.lucene.analysis.icu,
 )
 val testAnalysisJarsDir = layout.buildDirectory.dir("test-analysis-jars")
 
@@ -194,6 +195,8 @@ val demoIndex by sourceSets.creating
 
 dependencies {
     "demoIndexImplementation"(libs.lucene.core)
+    // CollationKeyAnalyzer for title_key (ADR 0039).
+    "demoIndexImplementation"(libs.lucene.analysis.common)
 }
 
 val demoIndexTask = tasks.register<JavaExec>("demoIndex") {

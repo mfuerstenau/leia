@@ -440,6 +440,13 @@ public final class Session {
                         app -> jobId -> app.checkStarted(start.checkId(), jobId),
                         app -> message -> app.checkFailed(start.checkId(), message));
             case Action.CancelCheck cancel -> cancelJobs(List.of(cancel.jobId()), runner);
+            case Action.StartAutoStopWords start ->
+                startJob(
+                        backend.call(Methods.START_AUTO_STOP_WORDS, start.params()),
+                        runner,
+                        app -> jobId -> app.autoStopWordsStarted(start.id(), jobId),
+                        app -> message -> app.autoStopWordsFailed(start.id(), message));
+            case Action.CancelAutoStopWords cancel -> cancelJobs(List.of(cancel.jobId()), runner);
             case Action.StartExportTerms start ->
                 startJob(
                         backend.call(Methods.START_EXPORT_TERMS, start.params()),
@@ -755,6 +762,25 @@ public final class Session {
                                     String message = describe(rpc);
                                     polled(runner, poll, app -> {
                                         app.searchFailed(searching.searchId(), message);
+                                        return Optional.empty();
+                                    });
+                                }
+                            });
+                case Poll.AutoStopWords finding ->
+                    backend.call(Methods.GET_AUTO_STOP_WORDS, new JobParams(finding.jobId()))
+                            .whenComplete((result, error) -> {
+                                if (error == null) {
+                                    polled(runner, poll, app -> {
+                                        app.autoStopWordsProgress(finding.id(), result);
+                                        return Optional.empty();
+                                    });
+                                    return;
+                                }
+                                RpcException rpc = rpcException(error, runner);
+                                if (rpc != null) {
+                                    String message = describe(rpc);
+                                    polled(runner, poll, app -> {
+                                        app.autoStopWordsFailed(finding.id(), message);
                                         return Optional.empty();
                                     });
                                 }

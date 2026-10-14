@@ -1,6 +1,6 @@
 # ADR 0014 — Analysis on the wire
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by ADR 0039 (`analyze` for a field)
 - **Date:** 2026-10-06
 
 ## Context
@@ -39,7 +39,7 @@ Several things need deciding:
    - `charFilters`: one `{name, text}` per char filter of a custom analyzer, with the text after it and every char filter before it;
    - `stages`: one `{name, tokens, truncated}` for the tokenizer and one for each token filter of a custom analyzer. A standard analyzer has no char filter steps and one stage, `StandardAnalyzer`.
 
-   Neither method needs an open index.
+   Neither method needs an open index. *Amended by ADR 0039: `analyze` takes `field?`, analyzing for that field, with its own analyzer and its auto stop words; the analyzer can give fields their own analyzers and stop words.*
 4. **Each stage runs the chain again from the start,** from the factories that the analyzer was built with: the char filters, then the tokenizer, then the token filters up to that stage. That costs one pass per stage over a short text. Unlike Luke, which feeds the tokens it captured from one stage into the next filter, every stage is exactly what the analyzer would make with that chain: each stream is reset, ended and closed as usual. Offsets are offsets into the original text, because the tokenizer corrects them through the char filters.
 5. **A token has typed fields and a list of everything else:**
    - `term`;

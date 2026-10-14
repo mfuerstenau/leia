@@ -1,6 +1,7 @@
 package io.github.mfuerstenau.leia.core;
 
 import io.github.mfuerstenau.leia.core.AnalyzerSpec.Japanese;
+import io.github.mfuerstenau.leia.core.AnalyzerSpec.JapaneseCompletion;
 import io.github.mfuerstenau.leia.core.AnalyzerSpec.Korean;
 import java.io.Reader;
 import java.lang.reflect.Constructor;
@@ -16,17 +17,20 @@ import org.apache.lucene.analysis.CharArraySet;
 
 /**
  * Kuromoji's {@code JapaneseAnalyzer} and Nori's {@code KoreanAnalyzer} with options of their own
- * (ADR 0023). Their modules are extension jars (ADR 0016), so their types are found by name,
+ * (ADR 0023), and Kuromoji's {@code JapaneseCompletionAnalyzer} (ADR 0038). Their modules are extension jars (ADR 0016), so their types are found by name,
  * through the analyzer class's own loader.
  */
 final class KuromojiNori {
 
     static final String JAPANESE = "org.apache.lucene.analysis.ja.JapaneseAnalyzer";
     static final String KOREAN = "org.apache.lucene.analysis.ko.KoreanAnalyzer";
+    static final String JAPANESE_COMPLETION = "org.apache.lucene.analysis.ja.JapaneseCompletionAnalyzer";
 
     private static final String JAPANESE_DICTIONARY = "org.apache.lucene.analysis.ja.dict.UserDictionary";
     private static final String JAPANESE_TOKENIZER = "org.apache.lucene.analysis.ja.JapaneseTokenizer";
     private static final String JAPANESE_MODE = JAPANESE_TOKENIZER + "$Mode";
+    private static final String JAPANESE_COMPLETION_MODE =
+            "org.apache.lucene.analysis.ja.JapaneseCompletionFilter$Mode";
     private static final String KOREAN_DICTIONARY = "org.apache.lucene.analysis.ko.dict.UserDictionary";
     private static final String KOREAN_TOKENIZER = "org.apache.lucene.analysis.ko.KoreanTokenizer";
     private static final String KOREAN_MODE = KOREAN_TOKENIZER + "$DecompoundMode";
@@ -72,6 +76,43 @@ final class KuromojiNori {
                     boolean.class));
         } catch (ReflectiveOperationException | LinkageError e) {
             return Optional.empty();
+        }
+    }
+
+    /**
+     * {@code JapaneseCompletionAnalyzer(UserDictionary, JapaneseCompletionFilter.Mode)}, if {@code
+     * type} is that class.
+     */
+    static Optional<Constructor<? extends Analyzer>> japaneseCompletionConstructor(Class<? extends Analyzer> type) {
+        if (!type.getName().equals(JAPANESE_COMPLETION)) {
+            return Optional.empty();
+        }
+        try {
+            ClassLoader loader = type.getClassLoader();
+            return Optional.of(type.getConstructor(
+                    Class.forName(JAPANESE_DICTIONARY, false, loader),
+                    Class.forName(JAPANESE_COMPLETION_MODE, false, loader)));
+        } catch (ReflectiveOperationException | LinkageError e) {
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * The arguments of {@link #japaneseCompletionConstructor}: the options' values, or those of the
+     * analyzer's no-argument constructor.
+     */
+    static Object[] japaneseCompletionArguments(Constructor<? extends Analyzer> constructor, JapaneseCompletion options)
+            throws InvalidAnalyzerException {
+        ClassLoader loader = constructor.getDeclaringClass().getClassLoader();
+        try {
+            Object dictionary =
+                    userDictionary(Class.forName(JAPANESE_DICTIONARY, true, loader), options.userDictionary());
+            Object mode = constant(
+                    Class.forName(JAPANESE_COMPLETION_MODE, true, loader),
+                    options.mode().map(Enum::name).orElse("INDEX"));
+            return new Object[] {dictionary, mode};
+        } catch (ReflectiveOperationException | LinkageError e) {
+            throw new InvalidAnalyzerException("JapaneseCompletionAnalyzer: " + e, e);
         }
     }
 

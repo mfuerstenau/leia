@@ -56,7 +56,9 @@ class FilterHandlersTest {
             Optional.empty(),
             Optional.empty(),
             Optional.empty(),
-            Optional.empty());
+            Optional.empty(),
+            List.of(),
+            List.of());
 
     @TempDir
     Path tmp;

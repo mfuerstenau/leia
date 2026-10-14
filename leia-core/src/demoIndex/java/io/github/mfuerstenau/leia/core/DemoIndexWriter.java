@@ -4,9 +4,11 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.text.Collator;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 import java.util.stream.Collectors;
@@ -16,9 +18,11 @@ import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.LowerCaseFilter;
 import org.apache.lucene.analysis.TokenFilter;
 import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.analysis.miscellaneous.PerFieldAnalyzerWrapper;
 import org.apache.lucene.analysis.standard.StandardTokenizer;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 import org.apache.lucene.analysis.tokenattributes.PayloadAttribute;
+import org.apache.lucene.collation.CollationKeyAnalyzer;
 import org.apache.lucene.document.BinaryDocValuesField;
 import org.apache.lucene.document.DateTools;
 import org.apache.lucene.document.Document;
@@ -199,7 +203,7 @@ public final class DemoIndexWriter {
         try (Directory directory = FSDirectory.open(dir);
                 IndexWriter writer = new IndexWriter(
                         directory,
-                        new IndexWriterConfig(new DemoAnalyzer())
+                        new IndexWriterConfig(analyzer())
                                 // No merges: keep the segments and the deleted documents.
                                 .setMergePolicy(NoMergePolicy.INSTANCE)
                                 // Keep every commit, for the commits screen.
@@ -223,6 +227,16 @@ public final class DemoIndexWriter {
                     .entrySet());
             writer.commit();
         }
+    }
+
+    /**
+     * The demo analyzer, and for {@code title_key} German collation keys at primary strength, so
+     * that a range on it needs that analyzer (ADR 0039).
+     */
+    private static Analyzer analyzer() {
+        Collator german = Collator.getInstance(Locale.GERMAN);
+        german.setStrength(Collator.PRIMARY);
+        return new PerFieldAnalyzerWrapper(new DemoAnalyzer(), Map.of("title_key", new CollationKeyAnalyzer(german)));
     }
 
     /** Document 0: only an id, so nearly every field is empty. */
@@ -252,6 +266,7 @@ public final class DemoIndexWriter {
         // Terms: every index option, norms or not.
         doc.add(new StringField("id", id(i), Field.Store.YES));
         doc.add(new TextField("title", title, Field.Store.YES));
+        doc.add(new Field("title_key", title, DOCS_WITH_NORMS));
         doc.add(new Field("body", body, BODY));
         doc.add(new Field("keywords", words(random, 3 + random.nextInt(4)), DOCS_WITH_NORMS));
         doc.add(new Field("labels", words(random, 2 + random.nextInt(6)), DOCS_AND_FREQS));

@@ -13,7 +13,14 @@ import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalysisComponent;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeParams;
 import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.AutoStopWords;
+import io.github.mfuerstenau.leia.protocol.analysis.Collation;
+import io.github.mfuerstenau.leia.protocol.analysis.CollationStrength;
 import io.github.mfuerstenau.leia.protocol.analysis.CustomAnalyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.FieldAnalyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.GetAutoStopWordsResult;
+import io.github.mfuerstenau.leia.protocol.analysis.PresetAnalyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.StartAutoStopWordsParams;
 import io.github.mfuerstenau.leia.protocol.analysis.Token;
 import io.github.mfuerstenau.leia.protocol.commits.FieldFormats;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitParams;
@@ -76,10 +83,13 @@ import io.github.mfuerstenau.leia.protocol.terms.Posting;
 import io.github.mfuerstenau.leia.protocol.terms.PostingsFilter;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.text.Collator;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalDouble;
 import java.util.OptionalInt;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterAll;
@@ -287,6 +297,84 @@ class DemoIndexTest {
             assertThat(explanation.match()).isTrue();
             assertThat(flatten(explanation))
                     .anySatisfy(detail -> assertThat(detail.description()).contains("body:qu"));
+        }
+
+        @Test
+        void aRangeOnCollationKeysNeedsTheirAnalyzer() throws Exception {
+            // German collation keys at primary strength: a to m, accents and case aside (ADR 0039).
+            Analyzer collation = new Analyzer(
+                    Optional.empty(),
+                    Optional.of(new PresetAnalyzer(
+                            "org.apache.lucene.collation.CollationKeyAnalyzer",
+                            Optional.empty(),
+                            Optional.empty(),
+                            OptionalInt.empty(),
+                            Optional.empty(),
+                            Optional.empty(),
+                            Optional.empty(),
+                            Optional.of(new Collation("de", Optional.of(CollationStrength.PRIMARY), Optional.empty())),
+                            Optional.empty())),
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    List.of(),
+                    List.of());
+            Analyzer perField = new Analyzer(
+                    STANDARD.standard(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    List.of(new FieldAnalyzer("title_key", collation)),
+                    List.of());
+            String range = "title_key:[a TO m]";
+
+            long collated = backend.search(classic(range, perField), 10).totalHits();
+            // docs/demo-index.md quotes it.
+            assertThat(collated).isEqualTo(206).isEqualTo(liveTitlesFromAToM());
+            assertThat(backend.search(classic(range), 10).totalHits()).isNotEqualTo(collated);
+        }
+
+        @Test
+        void autoStopWordsOfTheBody() throws Exception {
+            // docs/demo-index.md quotes these (ADR 0039).
+            AutoStopWords found = backend.job(
+                    Methods.START_AUTO_STOP_WORDS,
+                    new StartAutoStopWordsParams(List.of("body"), OptionalInt.empty(), OptionalDouble.of(0.4)),
+                    Methods.GET_AUTO_STOP_WORDS,
+                    GetAutoStopWordsResult::stopWords);
+
+            assertThat(found.maxDocFreq()).isEqualTo(194);
+            assertThat(found.fields())
+                    .singleElement()
+                    .satisfies(body -> assertThat(body.words())
+                            .containsExactly(
+                                    "a", "and", "brown", "for", "fox", "green", "in", "is", "lazy", "of", "on", "quick",
+                                    "red", "the", "to", "with"));
+        }
+
+        /** The live documents whose stored title is from a to m by the German collator at primary strength. */
+        private long liveTitlesFromAToM() throws Exception {
+            Collator german = Collator.getInstance(Locale.GERMAN);
+            german.setStrength(Collator.PRIMARY);
+            long count = 0;
+            for (int docId = 0; docId < 500; docId++) {
+                GetDocumentResult document = document(docId);
+                if (document.deleted()) {
+                    continue;
+                }
+                Optional<String> title = document.fields().stream()
+                        .filter(field -> field.name().equals("title"))
+                        .flatMap(field -> field.stored().stream())
+                        .map(StoredValue::value)
+                        .findFirst();
+                if (title.isPresent()
+                        && german.compare(title.get(), "a") >= 0
+                        && german.compare(title.get(), "m") <= 0) {
+                    count++;
+                }
+            }
+            return count;
         }
 
         @Test
@@ -836,7 +924,8 @@ class DemoIndexTest {
                     Methods.ANALYZE,
                     new AnalyzeParams(
                             custom(List.of(), List.of(new AnalysisComponent("stop", Map.of("words", "nope.txt")))),
-                            ROUTERS),
+                            ROUTERS,
+                            Optional.empty()),
                     ErrorCode.INVALID_ANALYZER);
             assertThat(missing.getMessage()).contains("nope.txt");
         }
@@ -855,7 +944,9 @@ class DemoIndexTest {
                                     new AnalysisComponent("synonymGraph", Map.of("synonyms", "syn.txt"))),
                             Optional.of(config.toString()))),
                     Optional.empty(),
-                    Optional.empty());
+                    Optional.empty(),
+                    List.of(),
+                    List.of());
 
             List<Token> tokens = analyze(synonyms, "fast wifi router");
 
@@ -968,7 +1059,7 @@ class DemoIndexTest {
         }
 
         private List<Token> analyze(Analyzer analyzer, String text) throws Exception {
-            return backend.call(Methods.ANALYZE, new AnalyzeParams(analyzer, text))
+            return backend.call(Methods.ANALYZE, new AnalyzeParams(analyzer, text, Optional.empty()))
                     .stages()
                     .getLast()
                     .tokens();
@@ -984,7 +1075,9 @@ class DemoIndexTest {
                     Optional.empty(),
                     Optional.of(new CustomAnalyzer(charFilters, component("standard"), tokenFilters, Optional.empty())),
                     Optional.empty(),
-                    Optional.empty());
+                    Optional.empty(),
+                    List.of(),
+                    List.of());
         }
 
         private static AnalysisComponent component(String name) {

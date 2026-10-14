@@ -5,6 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.mfuerstenau.leia.core.AnalysisComponents.Available;
 import io.github.mfuerstenau.leia.core.AnalysisComponents.AvailableAnalyzer;
+import io.github.mfuerstenau.leia.core.AnalyzerSpec.Collation;
+import io.github.mfuerstenau.leia.core.AnalyzerSpec.CollationDecomposition;
+import io.github.mfuerstenau.leia.core.AnalyzerSpec.CollationStrength;
 import io.github.mfuerstenau.leia.core.AnalyzerSpec.Component;
 import io.github.mfuerstenau.leia.core.AnalyzerSpec.LimitTokenCount;
 import io.github.mfuerstenau.leia.core.AnalyzerSpec.Shingles;
@@ -16,18 +19,23 @@ import io.github.mfuerstenau.leia.core.TextAnalysis.TokenAttribute;
 import io.github.mfuerstenau.leia.core.TextAnalysis.TokenStage;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.text.Collator;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
+import org.apache.lucene.util.BytesRef;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class AnalyzersTest {
+
+    private static final String COLLATION = "org.apache.lucene.collation.CollationKeyAnalyzer";
 
     @TempDir
     Path tmp;
@@ -207,7 +215,14 @@ class AnalyzersTest {
                                 "org.apache.lucene.analysis.nl.DutchAnalyzer",
                                 WordSetSupport.OPTIONAL,
                                 WordSetSupport.OPTIONAL,
-                                List.of(PresetOption.STEM_OVERRIDE)));
+                                List.of(PresetOption.STEM_OVERRIDE)),
+                        // Only a collator constructor (ADR 0038).
+                        new AvailableAnalyzer(
+                                "CollationKeyAnalyzer",
+                                COLLATION,
+                                WordSetSupport.NONE,
+                                WordSetSupport.NONE,
+                                List.of(PresetOption.COLLATION)));
         assertThat(analyzers)
                 .extracting(AvailableAnalyzer::name)
                 // Abstract, without a no-argument or stop words constructor, or built by a builder.
@@ -397,6 +412,8 @@ class AnalyzersTest {
                 OptionalInt.of(3),
                 Optional.empty(),
                 Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
                 Optional.empty());
         assertThat(terms(standard, "abcdefg")).containsExactly("def", "g");
 
@@ -441,10 +458,97 @@ class AnalyzersTest {
                 OptionalInt.empty(),
                 Optional.of(new StemDictionary.Entries(Map.of())),
                 Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
                 Optional.empty());
         assertThatThrownBy(() -> Analyzers.build(english))
                 .isInstanceOf(InvalidAnalyzerException.class)
                 .hasMessage("EnglishAnalyzer takes no stem overrides");
+    }
+
+    @Test
+    void aCollationAnalyzerIndexesTheCollationKey() throws Exception {
+        var german = new Collation("de", Optional.empty(), Optional.empty());
+        Token token = analyze(collation(Optional.of(german)), "Äpfel", 100)
+                .stages()
+                .getFirst()
+                .tokens()
+                .getFirst();
+
+        // The term is the text; the bytes the key of the JDK's German collator.
+        assertThat(token.term()).isEqualTo("Äpfel");
+        assertThat(token.attributes())
+                .contains(new TokenAttribute("TermToBytesRefAttribute", "bytes", key(Locale.GERMAN, "Äpfel")));
+    }
+
+    @Test
+    void aCollationAnalyzerTakesTheStrengthAndDecomposition() throws Exception {
+        var primary = new Collation("de", Optional.of(CollationStrength.PRIMARY), Optional.empty());
+        assertThat(bytes(collation(Optional.of(primary)), "Äpfel"))
+                .isEqualTo(bytes(collation(Optional.of(primary)), "apfel"));
+        var tertiary = new Collation("de", Optional.of(CollationStrength.TERTIARY), Optional.empty());
+        assertThat(bytes(collation(Optional.of(tertiary)), "Äpfel"))
+                .isNotEqualTo(bytes(collation(Optional.of(tertiary)), "apfel"));
+        var full = new Collation("de", Optional.empty(), Optional.of(CollationDecomposition.FULL));
+        Collator fullCollator = Collator.getInstance(Locale.GERMAN);
+        fullCollator.setDecomposition(Collator.FULL_DECOMPOSITION);
+        // The compatibility form of ﬁ is fi.
+        assertThat(bytes(collation(Optional.of(full)), "ﬁ"))
+                .isEqualTo(new BytesRef(fullCollator.getCollationKey("fi").toByteArray()).toString());
+        // None given: the root locale.
+        assertThat(bytes(collation(Optional.empty()), "Äpfel")).isEqualTo(key(Locale.ROOT, "Äpfel"));
+    }
+
+    @Test
+    void aCollationThatCantBeUsedFails() {
+        var quaternary = new Collation("de", Optional.of(CollationStrength.QUATERNARY), Optional.empty());
+        assertThatThrownBy(() -> Analyzers.build(collation(Optional.of(quaternary))))
+                .isInstanceOf(InvalidAnalyzerException.class)
+                .hasMessage("collation: the JDK's collator has no strength QUATERNARY");
+        var illFormed = new Collation("not a tag", Optional.empty(), Optional.empty());
+        assertThatThrownBy(() -> Analyzers.build(collation(Optional.of(illFormed))))
+                .isInstanceOf(InvalidAnalyzerException.class)
+                .hasMessageStartingWith("collation: 'not a tag' is not a language tag: ");
+        var english = new AnalyzerSpec.Preset(
+                "org.apache.lucene.analysis.en.EnglishAnalyzer",
+                Optional.empty(),
+                Optional.empty(),
+                OptionalInt.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(new Collation("de", Optional.empty(), Optional.empty())),
+                Optional.empty());
+        assertThatThrownBy(() -> Analyzers.build(english))
+                .isInstanceOf(InvalidAnalyzerException.class)
+                .hasMessage("EnglishAnalyzer takes no collation");
+    }
+
+    private static AnalyzerSpec.Preset collation(Optional<Collation> collation) {
+        return new AnalyzerSpec.Preset(
+                COLLATION,
+                Optional.empty(),
+                Optional.empty(),
+                OptionalInt.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                collation,
+                Optional.empty());
+    }
+
+    /** The bytes of the first token, as the analysis shows them. */
+    private static String bytes(AnalyzerSpec spec, String text) throws Exception {
+        return analyze(spec, text, 100).stages().getFirst().tokens().getFirst().attributes().stream()
+                .filter(attribute -> attribute.key().equals("bytes"))
+                .findFirst()
+                .orElseThrow()
+                .value();
+    }
+
+    /** The JDK's collation key of {@code text}, as the analysis shows it. */
+    private static String key(Locale locale, String text) {
+        return new BytesRef(Collator.getInstance(locale).getCollationKey(text).toByteArray()).toString();
     }
 
     private static Shingles shingles(int min, int max) {
@@ -459,6 +563,8 @@ class AnalyzersTest {
                 OptionalInt.of(length),
                 Optional.empty(),
                 Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
                 Optional.empty());
     }
 
@@ -469,6 +575,8 @@ class AnalyzersTest {
                 stemExclusion,
                 OptionalInt.empty(),
                 Optional.of(stemOverride),
+                Optional.empty(),
+                Optional.empty(),
                 Optional.empty(),
                 Optional.empty());
     }

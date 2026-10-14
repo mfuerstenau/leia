@@ -8,7 +8,11 @@ import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.tui.event.KeyModifiers;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeParams;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeResult;
+import io.github.mfuerstenau.leia.protocol.analysis.AutoStopWords;
 import io.github.mfuerstenau.leia.protocol.analysis.CharFilterStep;
+import io.github.mfuerstenau.leia.protocol.analysis.FieldStopWords;
+import io.github.mfuerstenau.leia.protocol.analysis.GetAutoStopWordsResult;
+import io.github.mfuerstenau.leia.protocol.analysis.StartAutoStopWordsParams;
 import io.github.mfuerstenau.leia.protocol.analysis.Token;
 import io.github.mfuerstenau.leia.protocol.analysis.TokenAttribute;
 import io.github.mfuerstenau.leia.protocol.analysis.TokenStage;
@@ -17,6 +21,8 @@ import io.github.mfuerstenau.leia.tui.analysis.Analysis.Request;
 import io.github.mfuerstenau.leia.tui.analysis.Analysis.Step;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalDouble;
+import java.util.OptionalInt;
 import org.junit.jupiter.api.Test;
 
 /** The tests of {@code analysis.rs}, ported. */
@@ -60,7 +66,7 @@ class AnalysisTest {
     }
 
     private static Request analyze(String text) {
-        return new Request.Analyze(new AnalyzeParams(AnalyzerSettings.standardAnalyzer(), text));
+        return new Request.Analyze(new AnalyzeParams(AnalyzerSettings.standardAnalyzer(), text, Optional.empty()));
     }
 
     @Test
@@ -122,19 +128,19 @@ class AnalysisTest {
         assertThat(applied).containsInstanceOf(Request.Analyze.class);
         assertThat(((Request.Analyze) applied.orElseThrow()).params().analyzer().custom())
                 .isPresent();
-        assertThat(analysis.settings().isCustom()).isFalse();
+        assertThat(analysis.settings().defaultAnalyzer().isCustom()).isFalse();
 
         // Refused: the form stays open with the error, the analyzer stays as it was.
         analysis.analyzeFailed("Invalid analyzer: no tokenizer 'x'");
         assertThat(analysis.prompting()).isTrue();
-        assertThat(analysis.settings().isCustom()).isFalse();
+        assertThat(analysis.settings().defaultAnalyzer().isCustom()).isFalse();
         assertThat(render(analysis, 100)).contains("no tokenizer 'x'");
 
         // Taken: the form closes and the analyzer is the current one.
         press(analysis, key(KeyCode.ENTER));
         analysis.analyzed("", empty());
         assertThat(analysis.prompting()).isFalse();
-        assertThat(analysis.settings().isCustom()).isTrue();
+        assertThat(analysis.settings().defaultAnalyzer().isCustom()).isTrue();
         assertThat(render(analysis, 100)).contains("standard › lowercase");
 
         // Esc closes the form without a change.
@@ -142,7 +148,7 @@ class AnalysisTest {
         press(analysis, key(' '));
         assertThat(press(analysis, key(KeyCode.ESCAPE))).isEmpty();
         assertThat(analysis.prompting()).isFalse();
-        assertThat(analysis.settings().isCustom()).isTrue();
+        assertThat(analysis.settings().defaultAnalyzer().isCustom()).isTrue();
     }
 
     @Test
@@ -192,5 +198,115 @@ class AnalysisTest {
         // The next key after End moves at once.
         press(analysis, key(KeyCode.UP));
         assertThat(render(analysis, 100)).contains("KeywordAttribute");
+    }
+
+    @Test
+    void analyzesForAFieldWithItsOwnAnalyzer() {
+        Analysis analysis = new Analysis();
+        // Without an index, f picks nothing.
+        assertThat(press(analysis, key('f'))).isEmpty();
+        analysis.indexChanged(List.of("body", "title"), true, false);
+        analysis.input().set("The Fox");
+        analysis.analyzed("The Fox", result());
+
+        assertThat(press(analysis, key('f')))
+                .hasValueSatisfying(request ->
+                        assertThat(((Request.Analyze) request).params().field()).hasValue("body"));
+        assertThat(press(analysis, key('F')))
+                .hasValueSatisfying(request ->
+                        assertThat(((Request.Analyze) request).params().field()).isEmpty());
+        press(analysis, key('F'));
+        assertThat(analysis.field()).hasValue("title");
+        assertThat(render(analysis, 130)).contains("title: standard analyzer", "the default one");
+
+        // b builds title's own analyzer, from the default one: ← to custom, Enter applies it.
+        press(analysis, key('b'));
+        press(analysis, key(KeyCode.LEFT));
+        Request.Analyze tried =
+                (Request.Analyze) press(analysis, key(KeyCode.ENTER)).orElseThrow();
+        assertThat(tried.params().field()).hasValue("title");
+        assertThat(tried.params().analyzer().fields()).singleElement().satisfies(field -> {
+            assertThat(field.field()).isEqualTo("title");
+            assertThat(field.analyzer().custom()).isPresent();
+        });
+        assertThat(tried.params().analyzer().standard()).isPresent();
+        analysis.analyzed("The Fox", result());
+        assertThat(analysis.settings().hasOwn("title")).isTrue();
+        assertThat(analysis.settings().defaultAnalyzer().isStandard()).isTrue();
+        assertThat(render(analysis, 130)).contains("title: standard › lowercase", "its own · D drops it");
+        assertThat(analysis.keys()).contains("D default");
+
+        // D drops it again.
+        assertThat(press(analysis, key('D'))).containsInstanceOf(Request.Analyze.class);
+        assertThat(analysis.settings().hasOwn("title")).isFalse();
+
+        // Another index without the field shows the default analyzer again.
+        analysis.indexChanged(List.of("body"), true, false);
+        assertThat(analysis.field()).isEmpty();
+    }
+
+    @Test
+    void findsAutoStopWordsInAJob() {
+        Analysis analysis = new Analysis();
+        analysis.indexChanged(List.of("body", "title"), true, false);
+        press(analysis, key('w'));
+        assertThat(analysis.prompting()).isTrue();
+        assertThat(render(analysis, 100)).contains("Auto stop words", "every indexed field");
+
+        Request.StartAutoStopWords start =
+                (Request.StartAutoStopWords) press(analysis, key(KeyCode.ENTER)).orElseThrow();
+        assertThat(start.params())
+                .isEqualTo(new StartAutoStopWordsParams(List.of(), OptionalInt.empty(), OptionalDouble.of(0.4)));
+        assertThat(analysis.autoStopWordsJob()).isEmpty();
+        // A stale start is stopped.
+        assertThat(analysis.autoStopWordsStarted(start.id() + 1, 8)).hasValue(new Request.CancelAutoStopWords(8));
+        assertThat(analysis.autoStopWordsStarted(start.id(), 7)).isEmpty();
+        assertThat(analysis.autoStopWordsJob())
+                .hasValueSatisfying(job -> assertThat(job[1]).isEqualTo(7));
+        analysis.autoStopWordsProgress(start.id(), new GetAutoStopWordsResult(5000, Optional.empty()));
+        assertThat(render(analysis, 100)).contains("5000 terms scanned");
+
+        var found = new AutoStopWords(
+                3, List.of(new FieldStopWords("body", List.of("a", "the")), new FieldStopWords("title", List.of())));
+        analysis.autoStopWordsProgress(start.id(), new GetAutoStopWordsResult(6000, Optional.of(found)));
+        assertThat(analysis.autoStopWordsJob()).isEmpty();
+        assertThat(analysis.settings().stopWords()).hasValue(found);
+        assertThat(analysis.settings().analyzer().autoStopWords())
+                .containsExactly(new FieldStopWords("body", List.of("a", "the")));
+        assertThat(render(analysis, 100)).contains("2 words", "more than 3 documents");
+
+        // Esc closes the popup; the field's words show with it.
+        press(analysis, key(KeyCode.ESCAPE));
+        assertThat(analysis.prompting()).isFalse();
+        press(analysis, key('f'));
+        assertThat(render(analysis, 130)).contains("2 auto stop words of body");
+
+        // A reopen keeps them, another index drops them.
+        analysis.indexChanged(List.of("body", "title"), true, true);
+        assertThat(analysis.settings().text()).endsWith("(from before the reopen)");
+        analysis.indexChanged(List.of("body"), true, false);
+        assertThat(analysis.settings().stopWords()).isEmpty();
+    }
+
+    @Test
+    void escStopsARunningSearch() {
+        Analysis analysis = new Analysis();
+        analysis.indexChanged(List.of("body"), true, false);
+        press(analysis, key('w'));
+        Request.StartAutoStopWords start =
+                (Request.StartAutoStopWords) press(analysis, key(KeyCode.ENTER)).orElseThrow();
+        analysis.autoStopWordsStarted(start.id(), 7);
+
+        assertThat(press(analysis, key(KeyCode.ESCAPE))).hasValue(new Request.CancelAutoStopWords(7));
+        assertThat(analysis.prompting()).isTrue();
+        assertThat(render(analysis, 100)).contains("Stopped.");
+        assertThat(press(analysis, key(KeyCode.ESCAPE))).isEmpty();
+        assertThat(analysis.prompting()).isFalse();
+
+        // Without a reader, the popup says so.
+        analysis.indexChanged(List.of(), false, false);
+        press(analysis, key('w'));
+        assertThat(press(analysis, key(KeyCode.ENTER))).isEmpty();
+        assertThat(render(analysis, 100)).contains("needs an index opened with a reader");
     }
 }

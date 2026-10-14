@@ -50,7 +50,7 @@ import io.github.mfuerstenau.leia.protocol.search.StartStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.search.StoredScanHit;
 import io.github.mfuerstenau.leia.protocol.search.TermQuery;
 import io.github.mfuerstenau.leia.protocol.search.TotalHitsRelation;
-import io.github.mfuerstenau.leia.tui.analysis.AnalyzerSettings;
+import io.github.mfuerstenau.leia.tui.analysis.AnalysisSettings;
 import io.github.mfuerstenau.leia.tui.prompt.LineInput;
 import io.github.mfuerstenau.leia.tui.search.LikeSettings.LikeSource;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
@@ -256,7 +256,7 @@ public final class Search {
     private HitFields hitFields;
 
     /** Analyzes classic and standard queries and More-Like-This text. */
-    private AnalyzerSettings analyzer = new AnalyzerSettings();
+    private AnalysisSettings analyzer = new AnalysisSettings();
 
     /** The popup that takes the keys, while it is open: one of the four forms, or null. */
     private Object form;
@@ -382,7 +382,7 @@ public final class Search {
     }
 
     /** From now on, queries are analyzed with {@code settings}; the shown hits stay as they are. */
-    public void setAnalyzer(AnalyzerSettings settings) {
+    public void setAnalyzer(AnalysisSettings settings) {
         this.analyzer = settings;
     }
 

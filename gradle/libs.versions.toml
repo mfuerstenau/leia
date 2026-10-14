@@ -28,6 +28,8 @@ lucene-analysis-stempel = { module = "org.apache.lucene:lucene-analysis-stempel"
 # Kuromoji and Nori, for the options of their analyzers (ADR 0023)
 lucene-analysis-kuromoji = { module = "org.apache.lucene:lucene-analysis-kuromoji", version.ref = "lucene" }
 lucene-analysis-nori = { module = "org.apache.lucene:lucene-analysis-nori", version.ref = "lucene" }
+# ICU, for the collators of its collation analyzer (ADR 0038)
+lucene-analysis-icu = { module = "org.apache.lucene:lucene-analysis-icu", version.ref = "lucene" }
 lucene9-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene9" }
 lucene8-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene8" }
 dagger = { module = "com.google.dagger:dagger", version.ref = "dagger" }

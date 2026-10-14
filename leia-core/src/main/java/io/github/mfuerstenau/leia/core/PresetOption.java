@@ -9,5 +9,9 @@ public enum PresetOption {
     /** The options of Kuromoji's {@code JapaneseAnalyzer}. */
     JAPANESE,
     /** The options of Nori's {@code KoreanAnalyzer}. */
-    KOREAN
+    KOREAN,
+    /** A collator, through a {@code (java.text.Collator)} or {@code (com.ibm.icu.text.Collator)} constructor (ADR 0038). */
+    COLLATION,
+    /** The options of Kuromoji's {@code JapaneseCompletionAnalyzer} (ADR 0038). */
+    JAPANESE_COMPLETION
 }

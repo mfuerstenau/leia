@@ -5,6 +5,8 @@ import dagger.Module;
 import dagger.multibindings.IntoSet;
 import io.github.mfuerstenau.leia.server.analysis.AnalyzeHandler;
 import io.github.mfuerstenau.leia.server.analysis.GetAnalysisComponentsHandler;
+import io.github.mfuerstenau.leia.server.analysis.GetAutoStopWordsHandler;
+import io.github.mfuerstenau.leia.server.analysis.StartAutoStopWordsHandler;
 import io.github.mfuerstenau.leia.server.check.GetCheckIndexHandler;
 import io.github.mfuerstenau.leia.server.check.StartCheckIndexHandler;
 import io.github.mfuerstenau.leia.server.commits.GetCommitHandler;
@@ -163,6 +165,14 @@ interface HandlerModule {
     @Binds
     @IntoSet
     MethodHandler<?, ?> analyze(AnalyzeHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> startAutoStopWords(StartAutoStopWordsHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> getAutoStopWords(GetAutoStopWordsHandler handler);
 
     @Binds
     @IntoSet

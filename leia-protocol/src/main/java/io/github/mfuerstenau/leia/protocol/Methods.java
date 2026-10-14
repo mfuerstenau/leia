@@ -4,6 +4,8 @@ import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeParams;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeResult;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsParams;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsResult;
+import io.github.mfuerstenau.leia.protocol.analysis.GetAutoStopWordsResult;
+import io.github.mfuerstenau.leia.protocol.analysis.StartAutoStopWordsParams;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexParams;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexResult;
 import io.github.mfuerstenau.leia.protocol.check.StartCheckIndexParams;
@@ -302,13 +304,30 @@ public final class Methods {
 
     /**
      * What an analyzer makes of a text: the text after each char filter, and the tokens with their
-     * attributes after the tokenizer and each token filter (ADR 0014). Needs no open index. Fails
-     * with {@code INVALID_ANALYZER} if the analyzer can't be built, or {@code INVALID_PARAMS} for an
-     * analyzer without exactly one alternative or a text longer than {@code
-     * AnalyzeParams.MAX_TEXT_LENGTH}.
+     * attributes after the tokenizer and each token filter (ADR 0014), for a field if one is given
+     * (ADR 0039). Needs no open index. Fails with {@code INVALID_ANALYZER} if the analyzer can't be
+     * built, or {@code INVALID_PARAMS} for an analyzer without exactly one alternative, with fields
+     * named twice or nested, or a text longer than {@code AnalyzeParams.MAX_TEXT_LENGTH}.
      */
     public static final RpcMethod<AnalyzeParams, AnalyzeResult> ANALYZE =
             new RpcMethod<>("analyze", AnalyzeParams.class, AnalyzeResult.class);
+
+    /**
+     * Starts a job that finds the stop words of fields of the open index as Lucene's {@code
+     * QueryAutoStopWordAnalyzer} does: the terms in more documents than a threshold (ADR 0039). An
+     * {@code Analyzer} then carries them in {@code autoStopWords}. Fails with {@code NO_INDEX_OPEN},
+     * {@code NO_READER}, {@code FIELD_NOT_FOUND} for a field that is missing or not indexed, or {@code
+     * INVALID_PARAMS} unless exactly one threshold is given, in range.
+     */
+    public static final RpcMethod<StartAutoStopWordsParams, JobStarted> START_AUTO_STOP_WORDS =
+            new RpcMethod<>("startAutoStopWords", StartAutoStopWordsParams.class, JobStarted.class);
+
+    /**
+     * The progress of a search for stop words, and its outcome once it is done. A field with more
+     * than {@code StartAutoStopWordsParams.MAX_WORDS} words fails the job with {@code INVALID_PARAMS}.
+     */
+    public static final RpcMethod<JobParams, GetAutoStopWordsResult> GET_AUTO_STOP_WORDS =
+            new RpcMethod<>("getAutoStopWords", JobParams.class, GetAutoStopWordsResult.class);
 
     /**
      * Starts a job that checks every index of the open path with Lucene's {@code CheckIndex}, with or
@@ -389,6 +408,8 @@ public final class Methods {
             RELEASE_FILTER,
             GET_ANALYSIS_COMPONENTS,
             ANALYZE,
+            START_AUTO_STOP_WORDS,
+            GET_AUTO_STOP_WORDS,
             START_CHECK_INDEX,
             GET_CHECK_INDEX,
             START_EXPORT_TERMS,

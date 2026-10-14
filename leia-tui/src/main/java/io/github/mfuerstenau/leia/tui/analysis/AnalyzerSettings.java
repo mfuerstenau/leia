@@ -2,7 +2,12 @@ package io.github.mfuerstenau.leia.tui.analysis;
 
 import io.github.mfuerstenau.leia.protocol.analysis.AnalysisComponent;
 import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.Collation;
+import io.github.mfuerstenau.leia.protocol.analysis.CollationDecomposition;
+import io.github.mfuerstenau.leia.protocol.analysis.CollationStrength;
 import io.github.mfuerstenau.leia.protocol.analysis.CustomAnalyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.JapaneseCompletionMode;
+import io.github.mfuerstenau.leia.protocol.analysis.JapaneseCompletionOptions;
 import io.github.mfuerstenau.leia.protocol.analysis.JapaneseMode;
 import io.github.mfuerstenau.leia.protocol.analysis.JapaneseOptions;
 import io.github.mfuerstenau.leia.protocol.analysis.KoreanDecompoundMode;
@@ -28,7 +33,7 @@ import java.util.stream.Stream;
  * The current analyzer (ADR 0014): the analysis screen tries it, and the search screen parses
  * queries and analyzes More-Like-This text with it. It is Lucene's {@code StandardAnalyzer}, a preset
  * analyzer by class name (ADR 0015) with stop words and stem exclusions of its own if it takes them
- * (ADR 0017) and the options it takes (ADR 0023), or a custom analyzer of char filters, a tokenizer
+ * (ADR 0017) and the options it takes (ADR 0023, ADR 0038), or a custom analyzer of char filters, a tokenizer
  * and token filters, each with its parameters, and a config directory for resource files. Any of them
  * can be wrapped in shingles, then in a token limit (ADR 0023). {@link AnalyzerForm} builds it.
  *
@@ -44,6 +49,9 @@ public final class AnalyzerSettings {
     static final String JAPANESE_ANALYZER = "org.apache.lucene.analysis.ja.JapaneseAnalyzer";
 
     static final String KOREAN_ANALYZER = "org.apache.lucene.analysis.ko.KoreanAnalyzer";
+
+    /** Kuromoji's completion analyzer, which takes options of its own (ADR 0038). */
+    static final String JAPANESE_COMPLETION_ANALYZER = "org.apache.lucene.analysis.ja.JapaneseCompletionAnalyzer";
 
     /** Which alternative of the analyzer is chosen. */
     enum Kind {
@@ -81,10 +89,14 @@ public final class AnalyzerSettings {
         }
     }
 
-    /** Kuromoji's or Nori's analyzer, for the options that both have (ADR 0023). */
+    /**
+     * Kuromoji's or Nori's analyzer, for the options that they share (ADR 0023): Kuromoji's
+     * completion analyzer has a user dictionary but no stop tags (ADR 0038).
+     */
     enum Language {
         JAPANESE,
-        KOREAN
+        KOREAN,
+        JAPANESE_COMPLETION
     }
 
     Kind kind = Kind.STANDARD;
@@ -109,6 +121,12 @@ public final class AnalyzerSettings {
 
     /** {@code KoreanAnalyzer}'s options; sent only when one is set. */
     KoreanOptions korean = noKorean();
+
+    /** A collation analyzer's collator; sent only when one is set (ADR 0038). */
+    Collation collation = noCollation();
+
+    /** {@code JapaneseCompletionAnalyzer}'s options; sent only when one is set (ADR 0038). */
+    JapaneseCompletionOptions japaneseCompletion = noJapaneseCompletion();
 
     /** The custom chain: by default what the standard analyzer does, the standard tokenizer, then lowercase. */
     List<AnalysisComponent> charFilters = new ArrayList<>();
@@ -136,6 +154,8 @@ public final class AnalyzerSettings {
         copy.stemOverride = stemOverride;
         copy.japanese = japanese;
         copy.korean = korean;
+        copy.collation = collation;
+        copy.japaneseCompletion = japaneseCompletion;
         copy.charFilters = new ArrayList<>(charFilters);
         copy.tokenizer = tokenizer;
         copy.tokenFilters = new ArrayList<>(tokenFilters);
@@ -153,6 +173,15 @@ public final class AnalyzerSettings {
         return new KoreanOptions(Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
     }
 
+    /** The root locale with the collator's defaults, which the backend uses when none is sent. */
+    static Collation noCollation() {
+        return new Collation("", Optional.empty(), Optional.empty());
+    }
+
+    static JapaneseCompletionOptions noJapaneseCompletion() {
+        return new JapaneseCompletionOptions(Optional.empty(), Optional.empty());
+    }
+
     /** The analyzer as a request sends it. */
     public Analyzer analyzer() {
         Optional<StandardAnalyzer> standard = Optional.empty();
@@ -168,10 +197,14 @@ public final class AnalyzerSettings {
                         maxTokenLength,
                         stemOverride,
                         japanese.equals(noJapanese()) ? Optional.empty() : Optional.of(japanese),
-                        korean.equals(noKorean()) ? Optional.empty() : Optional.of(korean)));
+                        korean.equals(noKorean()) ? Optional.empty() : Optional.of(korean),
+                        collation.equals(noCollation()) ? Optional.empty() : Optional.of(collation),
+                        japaneseCompletion.equals(noJapaneseCompletion())
+                                ? Optional.empty()
+                                : Optional.of(japaneseCompletion)));
             case CUSTOM -> custom = Optional.of(chain());
         }
-        return new Analyzer(standard, presetAnalyzer, custom, shingles, limitTokenCount);
+        return new Analyzer(standard, presetAnalyzer, custom, shingles, limitTokenCount, List.of(), List.of());
     }
 
     /** The default analyzer as a request sends it: the standard one, without wrappers. */
@@ -205,28 +238,40 @@ public final class AnalyzerSettings {
     }
 
     Optional<String> userDictionary(Language language) {
-        return language == Language.JAPANESE ? japanese.userDictionary() : korean.userDictionary();
+        return switch (language) {
+            case JAPANESE -> japanese.userDictionary();
+            case KOREAN -> korean.userDictionary();
+            case JAPANESE_COMPLETION -> japaneseCompletion.userDictionary();
+        };
     }
 
     void setUserDictionary(Language language, Optional<String> path) {
-        if (language == Language.JAPANESE) {
-            japanese = new JapaneseOptions(path, japanese.mode(), japanese.stopTags());
-        } else {
-            korean =
-                    new KoreanOptions(path, korean.decompoundMode(), korean.stopTags(), korean.outputUnknownUnigrams());
+        switch (language) {
+            case JAPANESE -> japanese = new JapaneseOptions(path, japanese.mode(), japanese.stopTags());
+            case KOREAN ->
+                korean = new KoreanOptions(
+                        path, korean.decompoundMode(), korean.stopTags(), korean.outputUnknownUnigrams());
+            case JAPANESE_COMPLETION ->
+                japaneseCompletion = new JapaneseCompletionOptions(path, japaneseCompletion.mode());
         }
     }
 
+    /** The stop tags; always empty for the completion analyzer, which has none. */
     Optional<WordSet> stopTags(Language language) {
-        return language == Language.JAPANESE ? japanese.stopTags() : korean.stopTags();
+        return switch (language) {
+            case JAPANESE -> japanese.stopTags();
+            case KOREAN -> korean.stopTags();
+            case JAPANESE_COMPLETION -> Optional.empty();
+        };
     }
 
     void setStopTags(Language language, Optional<WordSet> tags) {
-        if (language == Language.JAPANESE) {
-            japanese = new JapaneseOptions(japanese.userDictionary(), japanese.mode(), tags);
-        } else {
-            korean = new KoreanOptions(
-                    korean.userDictionary(), korean.decompoundMode(), tags, korean.outputUnknownUnigrams());
+        switch (language) {
+            case JAPANESE -> japanese = new JapaneseOptions(japanese.userDictionary(), japanese.mode(), tags);
+            case KOREAN ->
+                korean = new KoreanOptions(
+                        korean.userDictionary(), korean.decompoundMode(), tags, korean.outputUnknownUnigrams());
+            case JAPANESE_COMPLETION -> {}
         }
     }
 
@@ -261,16 +306,29 @@ public final class AnalyzerSettings {
         for (Language language : Language.values()) {
             userDictionary(language)
                     .ifPresent(path -> text.append(" · user dictionary ").append(TextFormat.escapeControl(path)));
-            if (language == Language.JAPANESE) {
-                japanese.mode().ifPresent(mode -> text.append(" · mode ").append(japaneseModeName(mode)));
-            } else {
-                korean.decompoundMode()
-                        .ifPresent(mode -> text.append(" · decompound ").append(decompoundModeName(mode)));
+            switch (language) {
+                case JAPANESE ->
+                    japanese.mode().ifPresent(mode -> text.append(" · mode ").append(japaneseModeName(mode)));
+                case KOREAN ->
+                    korean.decompoundMode()
+                            .ifPresent(mode -> text.append(" · decompound ").append(decompoundModeName(mode)));
+                case JAPANESE_COMPLETION ->
+                    japaneseCompletion
+                            .mode()
+                            .ifPresent(mode -> text.append(" · mode ").append(completionModeName(mode)));
             }
             stopTags(language).ifPresent(tags -> text.append(" · stop tags ").append(wordSetText(tags)));
         }
         korean.outputUnknownUnigrams()
                 .ifPresent(split -> text.append(" · unknown words ").append(unknownWordsText(split)));
+        if (!collation.equals(noCollation())) {
+            text.append(" · ").append(localeText(collation.locale()));
+            collation.strength().ifPresent(strength -> text.append(" · ").append(strengthName(strength)));
+            collation
+                    .decomposition()
+                    .ifPresent(
+                            decomposition -> text.append(" · decomposition ").append(decompositionName(decomposition)));
+        }
         return text.toString();
     }
 
@@ -295,6 +353,8 @@ public final class AnalyzerSettings {
                 && stemOverride.equals(that.stemOverride)
                 && japanese.equals(that.japanese)
                 && korean.equals(that.korean)
+                && collation.equals(that.collation)
+                && japaneseCompletion.equals(that.japaneseCompletion)
                 && chain().equals(that.chain())
                 && shingles.equals(that.shingles)
                 && limitTokenCount.equals(that.limitTokenCount);
@@ -541,6 +601,36 @@ public final class AnalyzerSettings {
             case NONE -> "none";
             case DISCARD -> "discard";
             case MIXED -> "mixed";
+        };
+    }
+
+    static String completionModeName(JapaneseCompletionMode mode) {
+        return switch (mode) {
+            case INDEX -> "index";
+            case QUERY -> "query";
+        };
+    }
+
+    /** The language tag, or {@code root} for the root locale. */
+    static String localeText(String locale) {
+        return locale.isEmpty() ? "root" : TextFormat.escapeControl(locale);
+    }
+
+    static String strengthName(CollationStrength strength) {
+        return switch (strength) {
+            case PRIMARY -> "primary";
+            case SECONDARY -> "secondary";
+            case TERTIARY -> "tertiary";
+            case QUATERNARY -> "quaternary";
+            case IDENTICAL -> "identical";
+        };
+    }
+
+    static String decompositionName(CollationDecomposition decomposition) {
+        return switch (decomposition) {
+            case NO -> "none";
+            case CANONICAL -> "canonical";
+            case FULL -> "full";
         };
     }
 

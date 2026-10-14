@@ -19,7 +19,7 @@ import org.apache.lucene.analysis.Analyzer;
 
 /**
  * {@code analyze}: builds the analyzer and shows what it makes of the text, step by step (ADR
- * 0014). The text is short, so this is no job.
+ * 0014), for a field if one is given (ADR 0039). The text is short, so this is no job.
  */
 public final class AnalyzeHandler implements MethodHandler<AnalyzeParams, AnalyzeResult> {
 
@@ -41,7 +41,8 @@ public final class AnalyzeHandler implements MethodHandler<AnalyzeParams, Analyz
                             + " characters long, not " + length);
         }
         try (Analyzer analyzer = AnalyzerSpecs.build(params.analyzer())) {
-            return toResult(Analyzers.analyze(analyzer, params.text(), AnalyzeResult.MAX_TOKENS));
+            return toResult(
+                    Analyzers.analyze(analyzer, params.field().orElse(""), params.text(), AnalyzeResult.MAX_TOKENS));
         } catch (IOException | IllegalArgumentException | IllegalStateException e) {
             // A component that fails on this text, such as one that breaks the token stream contract.
             throw new RpcException(ErrorCode.INVALID_ANALYZER, "Cannot analyze the text: " + e.getMessage(), e);

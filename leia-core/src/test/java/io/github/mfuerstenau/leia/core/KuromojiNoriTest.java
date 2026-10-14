@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.mfuerstenau.leia.core.AnalysisComponents.AvailableAnalyzer;
 import io.github.mfuerstenau.leia.core.AnalyzerSpec.Japanese;
+import io.github.mfuerstenau.leia.core.AnalyzerSpec.JapaneseCompletion;
+import io.github.mfuerstenau.leia.core.AnalyzerSpec.JapaneseCompletionMode;
 import io.github.mfuerstenau.leia.core.AnalyzerSpec.JapaneseMode;
 import io.github.mfuerstenau.leia.core.AnalyzerSpec.Korean;
 import io.github.mfuerstenau.leia.core.AnalyzerSpec.KoreanDecompoundMode;
@@ -22,7 +24,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * The options of Kuromoji's {@code JapaneseAnalyzer} and Nori's {@code KoreanAnalyzer} (ADR 0023),
+ * The options of Kuromoji's {@code JapaneseAnalyzer} and Nori's {@code KoreanAnalyzer} (ADR 0023)
+ * and of Kuromoji's {@code JapaneseCompletionAnalyzer} (ADR 0038),
  * with the modules loaded as analysis jars, so this runs in the {@code jarsTest} JVM.
  */
 @Tag("jars")
@@ -32,6 +35,7 @@ class KuromojiNoriTest {
 
     private static final String JAPANESE = "org.apache.lucene.analysis.ja.JapaneseAnalyzer";
     private static final String KOREAN = "org.apache.lucene.analysis.ko.KoreanAnalyzer";
+    private static final String JAPANESE_COMPLETION = "org.apache.lucene.analysis.ja.JapaneseCompletionAnalyzer";
 
     @TempDir
     Path tmp;
@@ -57,7 +61,32 @@ class KuromojiNoriTest {
                                 KOREAN,
                                 WordSetSupport.NONE,
                                 WordSetSupport.NONE,
-                                List.of(PresetOption.KOREAN)));
+                                List.of(PresetOption.KOREAN)),
+                        new AvailableAnalyzer(
+                                "JapaneseCompletionAnalyzer",
+                                JAPANESE_COMPLETION,
+                                WordSetSupport.NONE,
+                                WordSetSupport.NONE,
+                                List.of(PresetOption.JAPANESE_COMPLETION)));
+    }
+
+    @Test
+    void japaneseCompletionTakesTheModeAndAUserDictionary() throws Exception {
+        String text = "東京t";
+        // INDEX: each token and its romanization.
+        assertThat(terms(japaneseCompletion(Optional.empty()), text)).containsExactly("東京", "toukyou", "t");
+        assertThat(terms(
+                        japaneseCompletion(Optional.of(
+                                new JapaneseCompletion(Optional.empty(), Optional.of(JapaneseCompletionMode.QUERY)))),
+                        text))
+                .containsExactly("東京t", "toukyout");
+
+        Path dictionary = Files.writeString(tmp.resolve("userdict_ja.txt"), "関西国際空港,関西 国際 空港,カンサイ コクサイ クウコウ,カスタム名詞\n");
+        var withDictionary = new JapaneseCompletion(Optional.of(dictionary), Optional.empty());
+        // The dictionary splits the compound, each part with its readings.
+        assertThat(terms(japaneseCompletion(Optional.of(withDictionary)), "関西国際空港"))
+                .containsExactly("関西", "kansai", "kannsai", "国際", "kokusai", "空港", "kuukou");
+        assertThat(terms(japaneseCompletion(Optional.empty()), "関西国際空港")).doesNotContain("関西");
     }
 
     @Test
@@ -136,6 +165,8 @@ class KuromojiNoriTest {
                 OptionalInt.empty(),
                 Optional.empty(),
                 Optional.of(japaneseOptions(null, null)),
+                Optional.empty(),
+                Optional.empty(),
                 Optional.empty());
         assertThatThrownBy(() -> Analyzers.build(english))
                 .isInstanceOf(InvalidAnalyzerException.class)
@@ -147,10 +178,25 @@ class KuromojiNoriTest {
                 OptionalInt.empty(),
                 Optional.empty(),
                 Optional.empty(),
-                Optional.of(koreanOptions(null, null)));
+                Optional.of(koreanOptions(null, null)),
+                Optional.empty(),
+                Optional.empty());
         assertThatThrownBy(() -> Analyzers.build(japaneseWithKorean))
                 .isInstanceOf(InvalidAnalyzerException.class)
                 .hasMessage("JapaneseAnalyzer takes no Korean options");
+        var japaneseWithCompletion = new AnalyzerSpec.Preset(
+                JAPANESE,
+                Optional.empty(),
+                Optional.empty(),
+                OptionalInt.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(new JapaneseCompletion(Optional.empty(), Optional.empty())));
+        assertThatThrownBy(() -> Analyzers.build(japaneseWithCompletion))
+                .isInstanceOf(InvalidAnalyzerException.class)
+                .hasMessage("JapaneseAnalyzer takes no Japanese completion options");
         assertThatThrownBy(
                         () -> Analyzers.build(new AnalyzerSpec.Preset(KOREAN, Optional.of(words()), Optional.empty())))
                 .isInstanceOf(InvalidAnalyzerException.class)
@@ -165,7 +211,22 @@ class KuromojiNoriTest {
                 OptionalInt.empty(),
                 Optional.empty(),
                 options,
+                Optional.empty(),
+                Optional.empty(),
                 Optional.empty());
+    }
+
+    private static AnalyzerSpec.Preset japaneseCompletion(Optional<JapaneseCompletion> options) {
+        return new AnalyzerSpec.Preset(
+                JAPANESE_COMPLETION,
+                Optional.empty(),
+                Optional.empty(),
+                OptionalInt.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                options);
     }
 
     private static Japanese japaneseOptions(JapaneseMode mode, WordSet stopTags) {
@@ -180,7 +241,9 @@ class KuromojiNoriTest {
                 OptionalInt.empty(),
                 Optional.empty(),
                 Optional.empty(),
-                Optional.of(options));
+                Optional.of(options),
+                Optional.empty(),
+                Optional.empty());
     }
 
     private static Korean koreanOptions(KoreanDecompoundMode mode, WordSet stopTags) {

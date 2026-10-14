@@ -232,7 +232,8 @@ class AppTest {
 
         Optional<Action> analyze = app.handleKey(key('a'));
         assertThat(analyze)
-                .hasValue(new Action.Analyze(new AnalyzeParams(AnalyzerSettings.standardAnalyzer(), "doc-0")));
+                .hasValue(new Action.Analyze(
+                        new AnalyzeParams(AnalyzerSettings.standardAnalyzer(), "doc-0", Optional.empty())));
         // The screen came without its components, which follow the analysis.
         assertThat(app.analyzed("doc-0", new AnalyzeResult(List.of(), List.of())))
                 .hasValue(new Action.LoadAnalysisComponents());
@@ -244,7 +245,8 @@ class AppTest {
         assertThat(app.handleKey(key('v'))).isEmpty();
         assertThat(wide(app)).contains("a analyze");
         assertThat(app.handleKey(key('a')))
-                .hasValue(new Action.Analyze(new AnalyzeParams(AnalyzerSettings.standardAnalyzer(), "doc-0")));
+                .hasValue(new Action.Analyze(
+                        new AnalyzeParams(AnalyzerSettings.standardAnalyzer(), "doc-0", Optional.empty())));
         assertThat(app.handleKey(key('c'))).hasValue(new Action.Close());
         app.closed();
         assertThat(app.hasIndex()).isFalse();

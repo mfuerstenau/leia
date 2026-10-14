@@ -11,7 +11,8 @@ import org.apache.lucene.analysis.Analyzer;
 /**
  * What {@link Analyzers#build} makes an {@link Analyzer} from (ADR 0014): {@code StandardAnalyzer},
  * a preset analyzer by class name (ADR 0015) or a {@code CustomAnalyzer}, each of which can be
- * wrapped in shingles and a token limit (ADR 0023).
+ * wrapped in shingles and a token limit (ADR 0023); then analyzers per field, and stop words per
+ * field around them (ADR 0039).
  */
 public sealed interface AnalyzerSpec {
 
@@ -29,6 +30,10 @@ public sealed interface AnalyzerSpec {
      * @param stemOverride the words whose stem is given; empty for the analyzer's default ones
      * @param japanese the options of Kuromoji's {@code JapaneseAnalyzer}; empty for its defaults
      * @param korean the options of Nori's {@code KoreanAnalyzer}; empty for its defaults
+     * @param collation the collator of a collation analyzer; empty for the root locale and the
+     *     collator's defaults (ADR 0038)
+     * @param japaneseCompletion the options of Kuromoji's {@code JapaneseCompletionAnalyzer}; empty
+     *     for its defaults (ADR 0038)
      */
     record Preset(
             String className,
@@ -37,7 +42,9 @@ public sealed interface AnalyzerSpec {
             OptionalInt maxTokenLength,
             Optional<StemDictionary> stemOverride,
             Optional<Japanese> japanese,
-            Optional<Korean> korean)
+            Optional<Korean> korean,
+            Optional<Collation> collation,
+            Optional<JapaneseCompletion> japaneseCompletion)
             implements AnalyzerSpec {
 
         public Preset {
@@ -48,6 +55,8 @@ public sealed interface AnalyzerSpec {
             Objects.requireNonNull(stemOverride);
             Objects.requireNonNull(japanese);
             Objects.requireNonNull(korean);
+            Objects.requireNonNull(collation);
+            Objects.requireNonNull(japaneseCompletion);
         }
 
         /** The analyzer with these word sets, and no other options. */
@@ -57,6 +66,8 @@ public sealed interface AnalyzerSpec {
                     stopwords,
                     stemExclusion,
                     OptionalInt.empty(),
+                    Optional.empty(),
+                    Optional.empty(),
                     Optional.empty(),
                     Optional.empty(),
                     Optional.empty());
@@ -170,6 +181,61 @@ public sealed interface AnalyzerSpec {
     }
 
     /**
+     * The collator of a collation analyzer (ADR 0038): the JDK's or ICU's, whichever the analyzer
+     * takes; each setting is the collator's default when empty.
+     *
+     * @param locale a BCP 47 language tag; empty for the root locale
+     * @param strength the collator's strength
+     * @param decomposition the collator's decomposition
+     */
+    record Collation(
+            String locale, Optional<CollationStrength> strength, Optional<CollationDecomposition> decomposition) {
+
+        public Collation {
+            Objects.requireNonNull(locale);
+            Objects.requireNonNull(strength);
+            Objects.requireNonNull(decomposition);
+        }
+    }
+
+    /** The strength of a collator; {@code QUATERNARY} is ICU's only. */
+    enum CollationStrength {
+        PRIMARY,
+        SECONDARY,
+        TERTIARY,
+        QUATERNARY,
+        IDENTICAL
+    }
+
+    /** The decomposition of a collator; {@code FULL} is the JDK's only. */
+    enum CollationDecomposition {
+        NO,
+        CANONICAL,
+        FULL
+    }
+
+    /**
+     * The options of Kuromoji's {@code JapaneseCompletionAnalyzer} (ADR 0038); each is the
+     * analyzer's default when empty.
+     *
+     * @param userDictionary a user dictionary file in Kuromoji's CSV format, UTF-8
+     * @param mode the romanization mode
+     */
+    record JapaneseCompletion(Optional<Path> userDictionary, Optional<JapaneseCompletionMode> mode) {
+
+        public JapaneseCompletion {
+            Objects.requireNonNull(userDictionary);
+            Objects.requireNonNull(mode);
+        }
+    }
+
+    /** {@code JapaneseCompletionFilter.Mode}. */
+    enum JapaneseCompletionMode {
+        INDEX,
+        QUERY
+    }
+
+    /**
      * A {@code CustomAnalyzer}: char filters, one tokenizer, then token filters.
      *
      * @param configDir the directory that resource files are read from before the classpath; empty
@@ -200,6 +266,37 @@ public sealed interface AnalyzerSpec {
             Objects.requireNonNull(analyzer);
             Objects.requireNonNull(shingles);
             Objects.requireNonNull(limitTokenCount);
+        }
+    }
+
+    /**
+     * An analyzer per field, as Lucene's {@code PerFieldAnalyzerWrapper} has it (ADR 0039).
+     *
+     * @param defaultAnalyzer the analyzer of every other field
+     * @param fields the fields with an analyzer of their own
+     */
+    record PerField(AnalyzerSpec defaultAnalyzer, Map<String, AnalyzerSpec> fields) implements AnalyzerSpec {
+
+        public PerField {
+            Objects.requireNonNull(defaultAnalyzer);
+            fields = Map.copyOf(fields);
+        }
+    }
+
+    /**
+     * An analyzer whose tokens of some fields lose stop words, as Lucene's {@code
+     * QueryAutoStopWordAnalyzer} removes them (ADR 0039).
+     *
+     * @param analyzer what is wrapped
+     * @param words the stop words of each field, case-sensitive; a field without an entry keeps every
+     *     token
+     */
+    record AutoStopWords(AnalyzerSpec analyzer, Map<String, List<String>> words) implements AnalyzerSpec {
+
+        public AutoStopWords {
+            Objects.requireNonNull(analyzer);
+            words = Map.copyOf(words);
+            words.values().forEach(Objects::requireNonNull);
         }
     }
 

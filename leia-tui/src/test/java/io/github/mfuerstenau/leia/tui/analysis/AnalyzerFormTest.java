@@ -9,8 +9,13 @@ import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
 import io.github.mfuerstenau.leia.protocol.analysis.AvailableAnalyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.AvailableComponent;
+import io.github.mfuerstenau.leia.protocol.analysis.Collation;
+import io.github.mfuerstenau.leia.protocol.analysis.CollationDecomposition;
+import io.github.mfuerstenau.leia.protocol.analysis.CollationStrength;
 import io.github.mfuerstenau.leia.protocol.analysis.CustomAnalyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsResult;
+import io.github.mfuerstenau.leia.protocol.analysis.JapaneseCompletionMode;
+import io.github.mfuerstenau.leia.protocol.analysis.JapaneseCompletionOptions;
 import io.github.mfuerstenau.leia.protocol.analysis.JapaneseMode;
 import io.github.mfuerstenau.leia.protocol.analysis.JapaneseOptions;
 import io.github.mfuerstenau.leia.protocol.analysis.KoreanDecompoundMode;
@@ -64,6 +69,8 @@ class AnalyzerFormTest {
             case "DutchAnalyzer" -> List.of(PresetOption.STEM_OVERRIDE);
             case "JapaneseAnalyzer" -> List.of(PresetOption.JAPANESE);
             case "KoreanAnalyzer" -> List.of(PresetOption.KOREAN);
+            case "CollationKeyAnalyzer" -> List.of(PresetOption.COLLATION);
+            case "JapaneseCompletionAnalyzer" -> List.of(PresetOption.JAPANESE_COMPLETION);
             default -> List.of();
         };
         return new AvailableAnalyzer(name, "org.apache.lucene.analysis.x." + name, stopwords, stemExclusion, options);
@@ -80,7 +87,9 @@ class AnalyzerFormTest {
                         analyzer("WhitespaceAnalyzer", none, none),
                         analyzer("DutchAnalyzer", optional, optional),
                         analyzer("JapaneseAnalyzer", optional, none),
-                        analyzer("KoreanAnalyzer", none, none)),
+                        analyzer("KoreanAnalyzer", none, none),
+                        analyzer("CollationKeyAnalyzer", none, none),
+                        analyzer("JapaneseCompletionAnalyzer", none, none)),
                 available("htmlStrip", "mapping"),
                 available("keyword", "standard", "whitespace"),
                 available("asciiFolding", "lowercase", "stop", "stemmerOverride"));
@@ -272,6 +281,8 @@ class AnalyzerFormTest {
                         OptionalInt.empty(),
                         Optional.empty(),
                         Optional.empty(),
+                        Optional.empty(),
+                        Optional.empty(),
                         Optional.empty()));
         assertThat(settings.analyzer().standard()).isEmpty();
 
@@ -367,6 +378,8 @@ class AnalyzerFormTest {
                         Optional.empty(),
                         Optional.empty(),
                         OptionalInt.empty(),
+                        Optional.empty(),
+                        Optional.empty(),
                         Optional.empty(),
                         Optional.empty(),
                         Optional.empty()));
@@ -606,6 +619,73 @@ class AnalyzerFormTest {
         japanese.preset = AnalyzerSettings.JAPANESE_ANALYZER;
         AnalyzerForm unlisted = new AnalyzerForm(japanese, Optional.empty());
         assertThat(unlisted.rows()).contains(new Row.JapaneseModeRow()).doesNotContain(new Row.DecompoundMode());
+    }
+
+    @Test
+    void editsACollationAndTheCompletionOptions() {
+        AnalyzerForm form = presetNamed("CollationKey");
+        assertThat(form.rows().subList(0, 5))
+                .containsExactly(
+                        new Row.KindRow(),
+                        new Row.Preset(),
+                        new Row.CollationLocale(),
+                        new Row.Strength(),
+                        new Row.Decomposition());
+        assertThat(render(form))
+                .contains("Locale          root")
+                .contains("Strength        default: the collator's own");
+        // Nothing set sends no collation: the root locale.
+        assertThat(applied(form).analyzer().preset().orElseThrow().collation()).isEmpty();
+
+        edit(form, new Row.CollationLocale(), "de-AT");
+        form.select(new Row.Strength());
+        press(form, key(' '));
+        form.select(new Row.Decomposition());
+        press(form, key(KeyCode.LEFT));
+        AnalyzerSettings settings = applied(form);
+        assertThat(settings.text()).isEqualTo("CollationKeyAnalyzer · de-AT · primary · decomposition full");
+        assertThat(settings.analyzer().preset().orElseThrow().collation())
+                .hasValue(new Collation(
+                        "de-AT", Optional.of(CollationStrength.PRIMARY), Optional.of(CollationDecomposition.FULL)));
+        // The strength cycles through every one, then back to the default.
+        form.select(new Row.Strength());
+        for (int i = 0; i < 4; i++) {
+            press(form, key(' '));
+        }
+        assertThat(form.draft().collation.strength()).hasValue(CollationStrength.IDENTICAL);
+        press(form, key(' '));
+        assertThat(form.draft().collation.strength()).isEmpty();
+        form.select(new Row.CollationLocale());
+        press(form, key('d'));
+        assertThat(form.draft().collation.locale()).isEmpty();
+
+        // Another preset drops the collation, and has no collation rows.
+        form = new AnalyzerForm(applied(form), Optional.of(components()));
+        form.select(new Row.Preset());
+        press(form, key(' '));
+        typed(form, "JapaneseCompletion");
+        press(form, key(KeyCode.ENTER));
+        assertThat(form.draft().collation).isEqualTo(AnalyzerSettings.noCollation());
+        assertThat(form.rows())
+                .doesNotContain(new Row.CollationLocale(), new Row.StopTags(Language.JAPANESE))
+                .contains(new Row.UserDictionary(Language.JAPANESE_COMPLETION), new Row.CompletionMode());
+        assertThat(render(form)).contains("Mode            default: index");
+        edit(form, new Row.UserDictionary(Language.JAPANESE_COMPLETION), "/x/userdict.txt");
+        form.select(new Row.CompletionMode());
+        press(form, key(KeyCode.LEFT));
+        settings = applied(form);
+        assertThat(settings.text())
+                .isEqualTo("JapaneseCompletionAnalyzer · user dictionary /x/userdict.txt · mode query");
+        assertThat(settings.analyzer().preset().orElseThrow().japaneseCompletion())
+                .hasValue(new JapaneseCompletionOptions(
+                        Optional.of("/x/userdict.txt"), Optional.of(JapaneseCompletionMode.QUERY)));
+        assertThat(settings.analyzer().preset().orElseThrow().japanese()).isEmpty();
+
+        // Without the list, the class name says which options there are.
+        AnalyzerSettings icu = new AnalyzerSettings();
+        icu.kind = Kind.PRESET;
+        icu.preset = "org.apache.lucene.analysis.icu.ICUCollationKeyAnalyzer";
+        assertThat(new AnalyzerForm(icu, Optional.empty()).rows()).contains(new Row.Strength());
     }
 
     @Test

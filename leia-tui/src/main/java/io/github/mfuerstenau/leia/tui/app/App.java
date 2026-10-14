@@ -17,6 +17,7 @@ import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeResult;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsResult;
+import io.github.mfuerstenau.leia.protocol.analysis.GetAutoStopWordsResult;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
@@ -36,6 +37,7 @@ import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
 import io.github.mfuerstenau.leia.protocol.index.IndexCommitStats;
 import io.github.mfuerstenau.leia.protocol.index.IndexEntry;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
+import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
@@ -287,6 +289,7 @@ public final class App {
         check = new Check(stats.path());
         terms = new Terms(stats.fields());
         documents = newDocuments(stats, opened);
+        analysis.indexChanged(indexedFields(stats), true, false);
         search = newSearch(stats);
         prompt = null;
         forgetExport();
@@ -339,6 +342,7 @@ public final class App {
                 result.skipped().stream().map(SkippedIndex::path).toList());
         commits = new Commits(indexNames(opened));
         check = new Check(result.path());
+        analysis.indexChanged(List.of(), false, false);
         if (screen != Screen.ANALYSIS && screen != Screen.CHECK) {
             screen = Screen.COMMITS;
         }
@@ -372,6 +376,7 @@ public final class App {
             reopened = changed + " of " + indexes.size() + " indexes";
         }
         boolean sameFields = schema(overview.stats().fields()).equals(schema(stats.fields()));
+        analysis.indexChanged(indexedFields(stats), true, true);
         search = search != null ? search.reopened(stats.fields(), stats.maxDoc(), sameFields) : newSearch(stats);
         overview = overview.reopened(stats, topN);
         terms = terms != null ? terms.reopened(stats.fields()) : new Terms(stats.fields());
@@ -448,6 +453,7 @@ public final class App {
 
     /** The backend stopped the jobs of the closed index. */
     public void closed() {
+        analysis.indexChanged(List.of(), false, false);
         opened = null;
         overview = null;
         commits = null;
@@ -484,12 +490,54 @@ public final class App {
         return Optional.empty();
     }
 
+    /**
+     * Turns what the analysis screen needs into an action. The search screen then has the analysis
+     * screen's analysis, which a key may have changed, such as dropping a field's analyzer or the
+     * auto stop words (ADR 0039).
+     */
     private Optional<Action> analysisAction(Optional<Analysis.Request> request) {
-        request.ifPresent(_ -> analysisCalls++);
+        syncAnalyzer();
         return request.map(next -> switch (next) {
-            case Analysis.Request.Components _ -> new Action.LoadAnalysisComponents();
-            case Analysis.Request.Analyze analyze -> new Action.Analyze(analyze.params());
+            case Analysis.Request.Components _ -> {
+                analysisCalls++;
+                yield new Action.LoadAnalysisComponents();
+            }
+            case Analysis.Request.Analyze analyze -> {
+                analysisCalls++;
+                yield new Action.Analyze(analyze.params());
+            }
+            case Analysis.Request.StartAutoStopWords start -> new Action.StartAutoStopWords(start.id(), start.params());
+            case Analysis.Request.CancelAutoStopWords cancel -> new Action.CancelAutoStopWords(cancel.jobId());
         });
+    }
+
+    /** The search screen parses and likes with the analysis screen's analysis. */
+    private void syncAnalyzer() {
+        if (search != null) {
+            search.setAnalyzer(analysis.settings());
+        }
+    }
+
+    /** The job of the search for auto stop words {@code id} has started (ADR 0039). */
+    public Optional<Action> autoStopWordsStarted(long id, long jobId) {
+        return analysisAction(analysis.autoStopWordsStarted(id, jobId));
+    }
+
+    public void autoStopWordsProgress(long id, GetAutoStopWordsResult result) {
+        analysis.autoStopWordsProgress(id, result);
+        syncAnalyzer();
+    }
+
+    public void autoStopWordsFailed(long id, String error) {
+        analysis.autoStopWordsFailed(id, error);
+    }
+
+    /** The indexed fields of {@code stats}, which the analysis screen offers (ADR 0039). */
+    private static List<String> indexedFields(GetIndexStatsResult stats) {
+        return stats.fields().stream()
+                .filter(field -> field.indexOptions() != IndexOptions.NONE)
+                .map(IndexField::name)
+                .toList();
     }
 
     public void componentsLoaded(GetAnalysisComponentsResult components) {
@@ -552,9 +600,6 @@ public final class App {
     public Optional<Action> analyzed(String text, AnalyzeResult result) {
         analysisCalls--;
         analysis.analyzed(text, result);
-        if (search != null) {
-            search.setAnalyzer(analysis.settings());
-        }
         return analysisAction(analysis.initialRequest());
     }
 
@@ -1236,6 +1281,7 @@ public final class App {
         if (check != null) {
             check.job().ifPresent(job -> polls.add(new Poll.Check(job[0], job[1], check.fromLine())));
         }
+        analysis.autoStopWordsJob().ifPresent(job -> polls.add(new Poll.AutoStopWords(job[0], job[1])));
         return polls;
     }
 

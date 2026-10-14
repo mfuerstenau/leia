@@ -23,6 +23,8 @@ import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeParams;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeResult;
 import io.github.mfuerstenau.leia.protocol.analysis.CharFilterStep;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsResult;
+import io.github.mfuerstenau.leia.protocol.analysis.GetAutoStopWordsResult;
+import io.github.mfuerstenau.leia.protocol.analysis.StartAutoStopWordsParams;
 import io.github.mfuerstenau.leia.protocol.analysis.Token;
 import io.github.mfuerstenau.leia.protocol.analysis.TokenAttribute;
 import io.github.mfuerstenau.leia.protocol.analysis.TokenStage;
@@ -43,6 +45,10 @@ import java.util.function.ToIntFunction;
  * each token filter, with every attribute of the selected token. It works without an open index.
  * {@code b} builds the analyzer, which the search screen then parses and likes with. {@code a} on the
  * documents screen brings a stored value here.
+ *
+ * <p>With an index open, {@code f}/{@code F} pick a field of it (ADR 0039): the text is analyzed for
+ * that field, with its own analyzer if it has one, and {@code b} builds that. {@code D} drops it, and
+ * {@code w} finds auto stop words of the index's fields, in a job.
  *
  * <p>Its calls are not jobs, and the backend answers them in order, so the reply to the last
  * analysis asked for comes last and is the one shown.
@@ -65,6 +71,15 @@ public final class Analysis {
 
         /** An analysis, reported back with {@link #analyzed} or {@link #analyzeFailed}. */
         record Analyze(AnalyzeParams params) implements Request {}
+
+        /**
+         * A search for auto stop words, reported back with {@link #autoStopWordsStarted}, then {@link
+         * #autoStopWordsProgress} or {@link #autoStopWordsFailed}, under {@code id}.
+         */
+        record StartAutoStopWords(long id, StartAutoStopWordsParams params) implements Request {}
+
+        /** Stops the job of a search for auto stop words; nothing is reported back. */
+        record CancelAutoStopWords(long jobId) implements Request {}
     }
 
     private enum Focus {
@@ -86,7 +101,22 @@ public final class Analysis {
         record Stage(int index) implements Step {}
     }
 
-    private AnalyzerSettings settings = new AnalyzerSettings();
+    private AnalysisSettings settings = new AnalysisSettings();
+
+    /** The indexed fields of the open index; none without one, or without a reader. */
+    private List<String> fields = List.of();
+
+    /** Whether an index is open with a reader. */
+    private boolean readable;
+
+    /** The field the text is analyzed for; empty for the default analyzer. */
+    private Optional<String> field = Optional.empty();
+
+    /** The auto stop words popup; null while it is closed. */
+    private AutoStopWordsForm stopWordsForm;
+
+    /** The id of the last search for auto stop words. */
+    private long stopWordsId;
 
     /** The components, once fetched; null before. */
     private GetAnalysisComponentsResult components;
@@ -99,8 +129,8 @@ public final class Analysis {
     private boolean editing;
     private AnalyzerForm form;
 
-    /** The analyzer that the form applied, while the backend tries it; null otherwise. */
-    private AnalyzerSettings trying;
+    /** The analysis with the analyzer that the form applied, while the backend tries it; null otherwise. */
+    private AnalysisSettings trying;
 
     /** The last analysis; null before the first one or after it failed. */
     private Shown shown;
@@ -117,14 +147,69 @@ public final class Analysis {
     /** The first line of the details panel that is shown. */
     private int detailsScroll;
 
-    /** The current analyzer. */
-    public AnalyzerSettings settings() {
+    /** The current analysis. */
+    public AnalysisSettings settings() {
         return settings;
     }
 
-    /** Whether the text line or the popup takes the keys, Esc included. */
+    /** Whether the text line or a popup takes the keys, Esc included. */
     public boolean prompting() {
-        return editing || form != null;
+        return editing || form != null || stopWordsForm != null;
+    }
+
+    /**
+     * The open index changed (ADR 0039): its indexed fields, none without one or without a reader.
+     * Another index drops the auto stop words, a reopen keeps them; the backend stopped the job of a
+     * search. A field that is gone is no longer the shown one.
+     */
+    public void indexChanged(List<String> indexedFields, boolean readable, boolean reopen) {
+        this.fields = List.copyOf(indexedFields);
+        this.readable = readable;
+        settings = settings.forIndex(reopen);
+        if (field.isPresent() && !fields.contains(field.get())) {
+            field = Optional.empty();
+        }
+        if (stopWordsForm != null) {
+            stopWordsForm.indexChanged(settings.stopWords());
+        }
+    }
+
+    /** The field the text is analyzed for; empty for the default analyzer. */
+    Optional<String> field() {
+        return field;
+    }
+
+    /** The search for auto stop words that runs, as its id and job; empty if there is none. */
+    public Optional<long[]> autoStopWordsJob() {
+        return stopWordsForm != null && stopWordsForm.jobId().isPresent()
+                ? Optional.of(new long[] {stopWordsId, stopWordsForm.jobId().getAsLong()})
+                : Optional.empty();
+    }
+
+    /** The job of search {@code id} has started; one that is no longer wanted is stopped. */
+    public Optional<Request> autoStopWordsStarted(long id, long jobId) {
+        if (id != stopWordsId || stopWordsForm == null || !stopWordsForm.running()) {
+            return Optional.of(new Request.CancelAutoStopWords(jobId));
+        }
+        stopWordsForm.started(jobId);
+        return Optional.empty();
+    }
+
+    /** How far search {@code id} has got; the words it found become the current ones. */
+    public void autoStopWordsProgress(long id, GetAutoStopWordsResult result) {
+        if (id != stopWordsId || stopWordsForm == null) {
+            return;
+        }
+        stopWordsForm.progress(result);
+        if (result.stopWords().isPresent()) {
+            settings = settings.withStopWords(result.stopWords());
+        }
+    }
+
+    public void autoStopWordsFailed(long id, String error) {
+        if (id == stopWordsId && stopWordsForm != null) {
+            stopWordsForm.failed(error);
+        }
     }
 
     /** The components, the first time the screen is shown. */
@@ -196,9 +281,14 @@ public final class Analysis {
         return analyze(settings);
     }
 
-    /** The analysis of the text line with {@code with}. */
-    private Optional<Request> analyze(AnalyzerSettings with) {
-        return Optional.of(new Request.Analyze(new AnalyzeParams(with.analyzer(), input.text())));
+    /** The analysis of the text line with {@code with}, for the shown field. */
+    private Optional<Request> analyze(AnalysisSettings with) {
+        return Optional.of(new Request.Analyze(new AnalyzeParams(with.analyzer(), input.text(), field)));
+    }
+
+    /** The analysis again, if there is one to redo. */
+    private Optional<Request> again() {
+        return shown != null || error != null ? analyze(settings) : Optional.empty();
     }
 
     /**
@@ -208,6 +298,9 @@ public final class Analysis {
      * the steps, the tokens and the token's details.
      */
     public Optional<Request> handleKey(KeyEvent key) {
+        if (stopWordsForm != null) {
+            return stopWordsKey(key);
+        }
         if (form != null) {
             return switch (form.handleKey(key)) {
                 case Form.Event.None<AnalyzerSettings> _ -> Optional.empty();
@@ -216,8 +309,8 @@ public final class Analysis {
                     yield Optional.empty();
                 }
                 case Form.Event.Apply<AnalyzerSettings> apply -> {
-                    trying = apply.draft();
-                    yield analyze(apply.draft());
+                    trying = settings.withAnalyzer(field, apply.draft());
+                    yield analyze(trying);
                 }
             };
         }
@@ -242,11 +335,27 @@ public final class Analysis {
             return Optional.empty();
         }
         if (key.isChar('b')) {
-            form = new AnalyzerForm(settings, Optional.ofNullable(components));
+            // A field's first analyzer starts from the default one.
+            form = new AnalyzerForm(settings.analyzer(field), Optional.ofNullable(components));
             return Optional.empty();
         }
         if (key.isChar('r')) {
-            return shown != null || error != null ? analyze(settings) : Optional.empty();
+            return again();
+        }
+        if ((key.isChar('f') || key.isChar('F')) && !fields.isEmpty()) {
+            List<Optional<String>> choices = new ArrayList<>();
+            choices.add(Optional.empty());
+            fields.forEach(name -> choices.add(Optional.of(name)));
+            field = AnalyzerSettings.cycled(field, key.isChar('f'), choices);
+            return again();
+        }
+        if (key.isChar('D') && field.isPresent() && settings.hasOwn(field.get())) {
+            settings = settings.withoutAnalyzer(field.get());
+            return again();
+        }
+        if (key.isChar('w')) {
+            stopWordsForm = new AutoStopWordsForm(fields, readable, settings.stopWords());
+            return Optional.empty();
         }
         if (key.code() == KeyCode.TAB) {
             boolean back = key.hasShift();
@@ -278,6 +387,25 @@ public final class Analysis {
             case DETAILS -> scrollDetails(key);
         }
         return Optional.empty();
+    }
+
+    private Optional<Request> stopWordsKey(KeyEvent key) {
+        return switch (stopWordsForm.handleKey(key)) {
+            case AutoStopWordsForm.Event.None _ -> Optional.empty();
+            case AutoStopWordsForm.Event.Close _ -> {
+                stopWordsForm = null;
+                yield again();
+            }
+            case AutoStopWordsForm.Event.Start start -> {
+                stopWordsId++;
+                yield Optional.of(new Request.StartAutoStopWords(stopWordsId, start.params()));
+            }
+            case AutoStopWordsForm.Event.Cancel cancel -> Optional.of(new Request.CancelAutoStopWords(cancel.jobId()));
+            case AutoStopWordsForm.Event.Clear _ -> {
+                settings = settings.withStopWords(Optional.empty());
+                yield Optional.empty();
+            }
+        };
     }
 
     private void scrollDetails(KeyEvent key) {
@@ -341,12 +469,18 @@ public final class Analysis {
 
     /** The keys for the footer. */
     public String keys() {
+        if (stopWordsForm != null) {
+            return stopWordsForm.keys();
+        }
         if (form != null) {
             return form.keys();
         }
-        return editing
-                ? " ⏎ analyze   Esc done   ←→ Ctrl+A/E/U/K/W edit"
-                : "/ text   b analyzer   r again   Tab panel   ↑↓";
+        if (editing) {
+            return " ⏎ analyze   Esc done   ←→ Ctrl+A/E/U/K/W edit";
+        }
+        String fieldKeys = fields.isEmpty() ? "" : "f/F field   ";
+        String drop = field.isPresent() && settings.hasOwn(field.get()) ? "D default   " : "";
+        return "/ text   b analyzer   " + fieldKeys + drop + "w stop words   r again   Tab panel   ↑↓";
     }
 
     public void render(Frame frame, Rect area) {
@@ -398,12 +532,45 @@ public final class Analysis {
         if (form != null) {
             form.render(frame, area);
         }
+        if (stopWordsForm != null) {
+            stopWordsForm.render(frame, area);
+        }
     }
 
-    /** The current analyzer, and why the component names are missing. */
+    /**
+     * The shown field and its analyzer, the other fields' own analyzers and the auto stop words, and
+     * why the component names are missing.
+     */
     private List<Line> analyzerLines() {
         List<Line> lines = new ArrayList<>();
-        lines.add(Line.from(settings.text()));
+        if (field.isEmpty()) {
+            lines.add(Line.from(
+                    Span.raw(settings.analyzer(field).text()),
+                    Span.styled(fields.isEmpty() ? "" : "   for any field · f picks one", Form.dim())));
+        } else {
+            String name = TextFormat.escapeControl(field.get());
+            boolean own = settings.hasOwn(field.get());
+            lines.add(Line.from(
+                    Span.styled(name + ": ", Style.EMPTY.bold()),
+                    Span.raw(settings.analyzer(field).text()),
+                    Span.styled(own ? "   its own · D drops it" : "   the default one", Form.dim())));
+            List<String> words = settings.stopWords(field.get());
+            if (!words.isEmpty()) {
+                lines.add(Line.styled(
+                        AnalysisSettings.count(words.size(), "auto stop word") + " of " + name, Form.dim()));
+            }
+        }
+        long others = settings.fields().keySet().stream()
+                .filter(name -> !field.equals(Optional.of(name)))
+                .count();
+        String stopWords = settings.stopWordsText();
+        if (others > 0 || !stopWords.isEmpty()) {
+            String text = others > 0
+                    ? AnalysisSettings.count((int) others, field.isEmpty() ? "field" : "other field") + " with its own"
+                    : "";
+            text += stopWords.isEmpty() ? "" : (text.isEmpty() ? stopWords.substring(3) : stopWords);
+            lines.add(Line.styled(text, Form.dim()));
+        }
         if (componentsError != null) {
             lines.add(Line.styled("Cannot list the components: " + componentsError, Style.EMPTY.red()));
         }

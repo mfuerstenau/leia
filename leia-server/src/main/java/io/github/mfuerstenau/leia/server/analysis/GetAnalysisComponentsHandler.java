@@ -62,6 +62,8 @@ public final class GetAnalysisComponentsHandler
             case STEM_OVERRIDE -> PresetOption.STEM_OVERRIDE;
             case JAPANESE -> PresetOption.JAPANESE;
             case KOREAN -> PresetOption.KOREAN;
+            case COLLATION -> PresetOption.COLLATION;
+            case JAPANESE_COMPLETION -> PresetOption.JAPANESE_COMPLETION;
         };
     }
 

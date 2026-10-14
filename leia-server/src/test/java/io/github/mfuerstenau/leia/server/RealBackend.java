@@ -58,7 +58,9 @@ final class RealBackend implements AutoCloseable {
             Optional.empty(),
             Optional.empty(),
             Optional.empty(),
-            Optional.empty());
+            Optional.empty(),
+            List.of(),
+            List.of());
     static final Similarity BM25 =
             new Similarity(Optional.of(new Bm25Similarity(1.2f, 0.75f)), Optional.empty(), Optional.empty());
     /** Lucene's defaults, as the search screen starts with them. */
@@ -182,6 +184,17 @@ final class RealBackend implements AutoCloseable {
     /** The classic parser on {@code expression}, with {@code body} as the default field. */
     static SearchQuery classic(String expression) {
         return classic(expression, DEFAULTS);
+    }
+
+    /** The classic parser on {@code expression} with {@code analyzer}, with {@code body} as the default field. */
+    static SearchQuery classic(String expression, Analyzer analyzer) {
+        return new SearchQuery(
+                Optional.of(
+                        new ClassicQuery(expression, "body", QueryOperator.OR, DEFAULTS, 2, false, false, analyzer)),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty());
     }
 
     static SearchQuery classic(String expression, ParserOptions options) {

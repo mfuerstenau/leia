@@ -1,6 +1,7 @@
 package io.github.mfuerstenau.leia.tui.app;
 
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeParams;
+import io.github.mfuerstenau.leia.protocol.analysis.StartAutoStopWordsParams;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.filter.StartFilterParams;
 import io.github.mfuerstenau.leia.protocol.filter.StepFilterParams;
@@ -178,6 +179,15 @@ public sealed interface Action {
 
     /** Analyze a text, and report back with {@link App#analyzed} or {@link App#analyzeFailed}. */
     record Analyze(AnalyzeParams params) implements Action {}
+
+    /**
+     * Start a search for auto stop words, and report back with {@link App#autoStopWordsStarted} or
+     * {@link App#autoStopWordsFailed}, under {@code id} (ADR 0039).
+     */
+    record StartAutoStopWords(long id, StartAutoStopWordsParams params) implements Action {}
+
+    /** Cancel the job of a search for auto stop words; nothing is reported back. */
+    record CancelAutoStopWords(long jobId) implements Action {}
 
     /**
      * Cancel the jobs in {@code cancel}, then start search {@code searchId}, and report back with

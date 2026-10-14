@@ -7,6 +7,15 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
+import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeParams;
+import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.AvailableAnalyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.Collation;
+import io.github.mfuerstenau.leia.protocol.analysis.CollationStrength;
+import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsParams;
+import io.github.mfuerstenau.leia.protocol.analysis.PresetAnalyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.PresetOption;
+import io.github.mfuerstenau.leia.protocol.analysis.WordSetSupport;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
 import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
@@ -17,6 +26,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Tag;
@@ -25,13 +35,15 @@ import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Jars loaded at the start and added while leia runs, through {@link LeiaBackend} (ADR 0016, ADR
- * 0018, ADR 0024). Loading a jar changes Lucene's global lists for the whole JVM, and a loaded jar
+ * 0018, ADR 0024, ADR 0038). Loading a jar changes Lucene's global lists for the whole JVM, and a loaded jar
  * that is gone stops every later load, so this is one flow, in jarsTest's JVM of its own.
  */
 @Tag("jars")
 class JarsBackendTest {
 
     private static final Path ANALYSIS_JARS = testFile("leia.test.analysis.jars");
+
+    private static final String ICU_COLLATION = "org.apache.lucene.analysis.icu.ICUCollationKeyAnalyzer";
 
     @TempDir
     Path tmp;
@@ -73,6 +85,24 @@ class JarsBackendTest {
                         .hasSize(1);
             }
 
+            // ICU's collation analyzer, with ICU's collator and the keywords of the tag (ADR 0038).
+            backend.call(
+                    Methods.ADD_JARS,
+                    new AddJarsParams(List.of(ANALYSIS_JARS.resolve("icu").toString())));
+            assertThat(backend.call(Methods.GET_ANALYSIS_COMPONENTS, new GetAnalysisComponentsParams())
+                            .analyzers())
+                    .contains(new AvailableAnalyzer(
+                            "ICUCollationKeyAnalyzer",
+                            ICU_COLLATION,
+                            WordSetSupport.NONE,
+                            WordSetSupport.NONE,
+                            List.of(PresetOption.COLLATION)));
+            var level1 = icuCollation(new Collation("de-u-ks-level1", Optional.empty(), Optional.empty()));
+            assertThat(bytes(backend, level1, "Äpfel")).isEqualTo(bytes(backend, level1, "apfel"));
+            var quaternary =
+                    icuCollation(new Collation("de", Optional.of(CollationStrength.QUATERNARY), Optional.empty()));
+            assertThat(bytes(backend, quaternary, "Äpfel")).isNotEqualTo(bytes(backend, quaternary, "apfel"));
+
             // Lucene reads the service files of every loaded jar again, so a jar that is gone stops it.
             Files.delete(codecJar);
             RpcException gone = backend.fails(
@@ -82,6 +112,42 @@ class JarsBackendTest {
             assertThat(gone.getMessage())
                     .startsWith("Cannot add the jars: the jar " + codecJar + " was loaded before and is gone");
         }
+    }
+
+    private static Analyzer icuCollation(Collation collation) {
+        return new Analyzer(
+                Optional.empty(),
+                Optional.of(new PresetAnalyzer(
+                        ICU_COLLATION,
+                        Optional.empty(),
+                        Optional.empty(),
+                        OptionalInt.empty(),
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.of(collation),
+                        Optional.empty())),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                List.of(),
+                List.of());
+    }
+
+    /** The collation key bytes of the first token. */
+    private static String bytes(RealBackend backend, Analyzer analyzer, String text) throws Exception {
+        return backend
+                .call(Methods.ANALYZE, new AnalyzeParams(analyzer, text, Optional.empty()))
+                .stages()
+                .getFirst()
+                .tokens()
+                .getFirst()
+                .attributes()
+                .stream()
+                .filter(attribute -> attribute.key().equals("bytes"))
+                .findFirst()
+                .orElseThrow()
+                .value();
     }
 
     /** The phonetic analysis jar without commons-codec, which its factories need. */

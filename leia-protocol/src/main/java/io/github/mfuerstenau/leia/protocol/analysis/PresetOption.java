@@ -9,5 +9,9 @@ public enum PresetOption {
     /** {@code japanese}. */
     JAPANESE,
     /** {@code korean}. */
-    KOREAN
+    KOREAN,
+    /** {@code collation} (ADR 0038). */
+    COLLATION,
+    /** {@code japaneseCompletion} (ADR 0038). */
+    JAPANESE_COMPLETION
 }

@@ -35,4 +35,7 @@ public sealed interface Poll {
 
     /** Report back with {@link App#termsExportProgress} or {@link App#exportFailed}, under {@code exportId}. */
     record ExportTerms(long exportId, long jobId) implements Poll {}
+
+    /** Report back with {@link App#autoStopWordsProgress} or {@link App#autoStopWordsFailed}, under {@code id}. */
+    record AutoStopWords(long id, long jobId) implements Poll {}
 }

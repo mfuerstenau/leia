@@ -565,6 +565,74 @@ public final class ReadOnlyIndex implements OpenedIndex {
         return new FieldTerms(field, scanned, List.of(topTerms));
     }
 
+    /**
+     * The stop words of fields as Lucene's {@code QueryAutoStopWordAnalyzer} finds them (ADR 0039):
+     * every term of a field in more than the threshold's documents, deleted ones included, as
+     * Lucene counts them. A field without postings has none.
+     *
+     * <p>{@code progress} gets the number of terms scanned over all fields every {@value
+     * #PROGRESS_INTERVAL} terms and at the end, as for {@link #fieldTerms}.
+     *
+     * @param fields the indexed fields to scan; empty for every indexed field, as in Lucene
+     * @param maxWords the most words of one field
+     * @throws IllegalArgumentException if a field is missing or not indexed, or the threshold is out
+     *     of range
+     * @throws AutoStopWords.TooManyWordsException if a field has more than {@code maxWords} words
+     * @throws IOException if reading the terms fails
+     */
+    public AutoStopWords autoStopWords(
+            List<String> fields, AutoStopWords.Threshold threshold, int maxWords, ScanProgress progress)
+            throws IOException, AutoStopWords.TooManyWordsException {
+        for (String field : fields) {
+            FieldInfo info = fieldInfos.fieldInfo(field);
+            if (info == null || info.getIndexOptions() == IndexOptions.NONE) {
+                throw new IllegalArgumentException("No indexed field '" + field + "' in the index");
+            }
+        }
+        int maxDocFreq = switch (threshold) {
+            case AutoStopWords.Threshold.MaxDocFreq given -> {
+                if (given.maxDocFreq() < 0) {
+                    throw new IllegalArgumentException("maxDocFreq must not be negative: " + given.maxDocFreq());
+                }
+                yield given.maxDocFreq();
+            }
+            case AutoStopWords.Threshold.MaxPercentDocs percent -> {
+                double fraction = percent.maxPercentDocs();
+                if (!(fraction >= 0 && fraction <= 1)) {
+                    throw new IllegalArgumentException("maxPercentDocs must be from 0 to 1: " + fraction);
+                }
+                yield (int) (reader.numDocs() * fraction);
+            }
+        };
+        List<String> scanned = fields.isEmpty()
+                ? FieldInfos.getIndexedFields(reader).stream().sorted().toList()
+                : fields.stream().distinct().sorted().toList();
+        TreeMap<String, List<String>> words = new TreeMap<>();
+        long terms = 0;
+        for (String field : scanned) {
+            List<String> fieldWords = new ArrayList<>();
+            Terms fieldTerms = MultiTerms.getTerms(reader, field);
+            if (fieldTerms != null) {
+                TermsEnum termsEnum = fieldTerms.iterator();
+                for (BytesRef term = termsEnum.next(); term != null; term = termsEnum.next()) {
+                    terms++;
+                    if (termsEnum.docFreq() > maxDocFreq) {
+                        if (fieldWords.size() == maxWords) {
+                            throw new AutoStopWords.TooManyWordsException(field, maxWords);
+                        }
+                        fieldWords.add(term.utf8ToString());
+                    }
+                    if (terms % PROGRESS_INTERVAL == 0) {
+                        progress.scanned(terms);
+                    }
+                }
+            }
+            words.put(field, fieldWords);
+        }
+        progress.scanned(terms);
+        return new AutoStopWords(maxDocFreq, words);
+    }
+
     /** Whether {@code docId} is a document id of the index, deleted or not: from 0 to maxDoc - 1. */
     public boolean hasDocId(int docId) {
         return docId >= 0 && docId < reader.maxDoc();

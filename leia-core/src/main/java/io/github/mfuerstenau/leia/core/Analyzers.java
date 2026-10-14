@@ -17,7 +17,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 import org.apache.lucene.analysis.Analyzer;
@@ -52,6 +54,9 @@ public final class Analyzers {
             PositionLengthAttribute.class,
             TypeAttribute.class);
 
+    /** The name of the stage of the stop words of a field (ADR 0039). */
+    public static final String AUTO_STOP_WORDS = "AutoStopWords";
+
     private static final Pattern MODULE_ADVICE = Pattern.compile(" \\(if you use Java Module System[^)]*\\)");
 
     private Analyzers() {}
@@ -83,7 +88,30 @@ public final class Analyzers {
             case AnalyzerSpec.Preset preset -> PresetAnalyzers.create(preset);
             case AnalyzerSpec.Custom custom -> custom(custom);
             case AnalyzerSpec.Wrapped wrapped -> wrapped(wrapped);
+            case AnalyzerSpec.PerField perField -> perField(perField);
+            case AnalyzerSpec.AutoStopWords autoStopWords ->
+                new AutoStopWordsAnalyzer(build(autoStopWords.analyzer()), autoStopWords.words());
         };
+    }
+
+    /** The default analyzer and each field's own (ADR 0039); one that fails closes those built before. */
+    private static Analyzer perField(AnalyzerSpec.PerField spec) throws InvalidAnalyzerException {
+        Analyzer defaultAnalyzer = build(spec.defaultAnalyzer());
+        Map<String, Analyzer> fields = new TreeMap<>();
+        try {
+            for (Map.Entry<String, AnalyzerSpec> field : new TreeMap<>(spec.fields()).entrySet()) {
+                try {
+                    fields.put(field.getKey(), build(field.getValue()));
+                } catch (InvalidAnalyzerException e) {
+                    throw new InvalidAnalyzerException("field '" + field.getKey() + "': " + e.getMessage(), e);
+                }
+            }
+        } catch (InvalidAnalyzerException | RuntimeException e) {
+            fields.values().forEach(Analyzer::close);
+            defaultAnalyzer.close();
+            throw e;
+        }
+        return new PerFieldAnalyzer(defaultAnalyzer, fields);
     }
 
     /** The analyzer in Lucene's shingle wrapper, then in its token limit (ADR 0023). */
@@ -141,16 +169,38 @@ public final class Analyzers {
      * @param maxTokens the most tokens a stage has; it stops there and is marked truncated
      */
     public static TextAnalysis analyze(Analyzer analyzer, String text, int maxTokens) throws IOException {
+        return analyze(analyzer, "", text, maxTokens);
+    }
+
+    /**
+     * What {@code analyzer} makes of {@code text} in {@code field}, as {@link #analyze(Analyzer,
+     * String, int)} shows it (ADR 0039). An analyzer per field is shown as the field's analyzer, its
+     * own or the default one. Stop words of the field add a stage, {@value #AUTO_STOP_WORDS}, after
+     * the analyzer's own; a field without words has none.
+     */
+    public static TextAnalysis analyze(Analyzer analyzer, String field, String text, int maxTokens) throws IOException {
+        if (analyzer instanceof AutoStopWordsAnalyzer autoStopWords) {
+            TextAnalysis inner = analyze(autoStopWords.delegate(), field, text, maxTokens);
+            if (autoStopWords.words(field).filter(words -> !words.isEmpty()).isEmpty()) {
+                return inner;
+            }
+            List<TokenStage> stages = new ArrayList<>(inner.stages());
+            stages.add(stage(AUTO_STOP_WORDS, analyzer.tokenStream(field, text), maxTokens));
+            return new TextAnalysis(inner.charFilters(), stages);
+        }
+        if (analyzer instanceof PerFieldAnalyzer perField) {
+            return analyze(perField.analyzer(field), field, text, maxTokens);
+        }
         if (analyzer instanceof WrappedAnalyzer wrapped) {
-            TextAnalysis base = analyze(wrapped.base(), text, maxTokens);
+            TextAnalysis base = analyze(wrapped.base(), field, text, maxTokens);
             List<TokenStage> stages = new ArrayList<>(base.stages());
             for (Analyzer wrapper : wrapped.wrappers()) {
-                stages.add(stage(wrapper.getClass().getSimpleName(), wrapper.tokenStream("", text), maxTokens));
+                stages.add(stage(wrapper.getClass().getSimpleName(), wrapper.tokenStream(field, text), maxTokens));
             }
             return new TextAnalysis(base.charFilters(), stages);
         }
         if (!(analyzer instanceof CustomAnalyzer custom)) {
-            TokenStage stage = stage(analyzer.getClass().getSimpleName(), analyzer.tokenStream("", text), maxTokens);
+            TokenStage stage = stage(analyzer.getClass().getSimpleName(), analyzer.tokenStream(field, text), maxTokens);
             return new TextAnalysis(List.of(), List.of(stage));
         }
         List<CharFilterFactory> charFilters = custom.getCharFilterFactories();

@@ -1,0 +1,334 @@
+package io.github.mfuerstenau.leia.tui.analysis;
+
+import dev.tamboui.layout.Rect;
+import dev.tamboui.style.Style;
+import dev.tamboui.terminal.Frame;
+import dev.tamboui.text.Line;
+import dev.tamboui.tui.event.KeyEvent;
+import io.github.mfuerstenau.leia.protocol.analysis.AutoStopWords;
+import io.github.mfuerstenau.leia.protocol.analysis.GetAutoStopWordsResult;
+import io.github.mfuerstenau.leia.protocol.analysis.StartAutoStopWordsParams;
+import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.widgets.Form;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Optional;
+import java.util.OptionalDouble;
+import java.util.OptionalInt;
+import java.util.OptionalLong;
+
+/**
+ * The popup that finds auto stop words (ADR 0039): the terms of fields in more documents than a
+ * threshold, as Lucene's {@code QueryAutoStopWordAnalyzer} finds them. It picks the threshold, a
+ * percentage of the documents or a document frequency, and the fields, none for every indexed one.
+ * Enter runs the search as a job, Esc stops it; the words it finds become the analysis screen's, and
+ * the popup shows how many each field has.
+ */
+public final class AutoStopWordsForm {
+
+    /** Lucene's default: a term in more than 40 % of the documents. */
+    static final int DEFAULT_PERCENT = 40;
+
+    private static final int WIDTH = 72;
+
+    /** The longest list of words shown for a field. */
+    private static final int SHOWN_WORDS = 200;
+
+    /** What a key did. */
+    public sealed interface Event {
+
+        /** Nothing for the screen to do. */
+        record None() implements Event {}
+
+        /** The popup closes. */
+        record Close() implements Event {}
+
+        /** Start the search with these params. */
+        record Start(StartAutoStopWordsParams params) implements Event {}
+
+        /** Stop the running job. */
+        record Cancel(long jobId) implements Event {}
+
+        /** The words found are dropped. */
+        record Clear() implements Event {}
+    }
+
+    private enum Row {
+        KIND,
+        VALUE
+    }
+
+    private final List<String> fields;
+    private final List<Boolean> chosen;
+    private final boolean readable;
+
+    private boolean percent = true;
+    private int percentValue = DEFAULT_PERCENT;
+    private int docFreqValue = 1;
+
+    /** The row: 0 the kind, 1 the value, then the fields. */
+    private int selected;
+
+    /** Whether a search is asked for or runs, and its job once it started. */
+    private boolean running;
+
+    private OptionalLong jobId = OptionalLong.empty();
+    private long scanned;
+
+    /** The words of the analysis screen, found here or before. */
+    private Optional<AutoStopWords> found;
+
+    /** The field whose words are listed; empty for none. */
+    private Optional<String> listed = Optional.empty();
+
+    private String message;
+
+    /**
+     * @param fields the indexed fields of the open index
+     * @param readable whether an index is open with a reader, which the search needs
+     * @param found the words that the analysis screen has
+     */
+    public AutoStopWordsForm(List<String> fields, boolean readable, Optional<AutoStopWords> found) {
+        this.fields = List.copyOf(fields);
+        this.chosen = new ArrayList<>(Collections.nCopies(fields.size(), false));
+        this.readable = readable;
+        this.found = found;
+        // The fields of the words found before, unless that was every field.
+        found.filter(words -> words.fields().size() < this.fields.size())
+                .ifPresent(words -> words.fields().forEach(field -> {
+                    int index = this.fields.indexOf(field.field());
+                    if (index >= 0) {
+                        chosen.set(index, true);
+                    }
+                }));
+    }
+
+    /** Whether a search is asked for or runs. */
+    public boolean running() {
+        return running;
+    }
+
+    /** The running job; empty before it started. */
+    public OptionalLong jobId() {
+        return jobId;
+    }
+
+    /** The params that Enter starts the search with; empty without a reader. */
+    StartAutoStopWordsParams params() {
+        List<String> names = new ArrayList<>();
+        for (int i = 0; i < fields.size(); i++) {
+            if (chosen.get(i)) {
+                names.add(fields.get(i));
+            }
+        }
+        return percent
+                ? new StartAutoStopWordsParams(names, OptionalInt.empty(), OptionalDouble.of(percentValue / 100.0))
+                : new StartAutoStopWordsParams(names, OptionalInt.of(docFreqValue), OptionalDouble.empty());
+    }
+
+    /** The job of the search has started. */
+    public void started(long jobId) {
+        if (running) {
+            this.jobId = OptionalLong.of(jobId);
+        }
+    }
+
+    /** How far the search has got, and its words once it is done. */
+    public void progress(GetAutoStopWordsResult result) {
+        scanned = result.termsScanned();
+        if (result.stopWords().isPresent()) {
+            running = false;
+            jobId = OptionalLong.empty();
+            found = result.stopWords();
+            message = null;
+        }
+    }
+
+    /** The search failed, or was stopped. */
+    public void failed(String error) {
+        running = false;
+        jobId = OptionalLong.empty();
+        message = error;
+    }
+
+    /** The index changed, and the backend stopped the job; the words are the screen's. */
+    public void indexChanged(Optional<AutoStopWords> words) {
+        if (running) {
+            failed("Stopped: the index changed.");
+        }
+        found = words;
+    }
+
+    /**
+     * Enter starts the search, Esc stops it or closes the popup; ↑↓ select a row, Space or ←→
+     * change it, digits type the value, {@code v} lists a field's words, {@code d} drops the words.
+     */
+    public Event handleKey(KeyEvent key) {
+        int last = 1 + fields.size();
+        switch (key.code()) {
+            case ESCAPE -> {
+                if (running) {
+                    if (jobId.isPresent()) {
+                        long job = jobId.getAsLong();
+                        failed("Stopped.");
+                        return new Event.Cancel(job);
+                    }
+                    return new Event.None();
+                }
+                return new Event.Close();
+            }
+            case ENTER -> {
+                if (running) {
+                    return new Event.None();
+                }
+                if (!readable) {
+                    message = "The search needs an index opened with a reader.";
+                    return new Event.None();
+                }
+                running = true;
+                scanned = 0;
+                message = null;
+                return new Event.Start(params());
+            }
+            case UP -> selected = Math.max(selected - 1, 0);
+            case DOWN -> selected = Math.min(selected + 1, last);
+            case HOME -> selected = 0;
+            case END -> selected = last;
+            case LEFT, RIGHT -> change();
+            case BACKSPACE -> {
+                if (selected == Row.VALUE.ordinal()) {
+                    setValue(value() / 10);
+                }
+            }
+            case CHAR -> {
+                int c = key.codePoint();
+                if (selected == Row.VALUE.ordinal() && c >= '0' && c <= '9') {
+                    setValue(Form.typeDigit(value(), (char) c, percent ? 100 : Integer.MAX_VALUE));
+                    return new Event.None();
+                }
+                switch (c) {
+                    case 'k' -> selected = Math.max(selected - 1, 0);
+                    case 'j' -> selected = Math.min(selected + 1, last);
+                    case ' ' -> change();
+                    case 'a' -> Collections.fill(chosen, true);
+                    case 'n' -> Collections.fill(chosen, false);
+                    case 'v' -> {
+                        Optional<String> field = selectedField();
+                        listed = field.equals(listed) ? Optional.empty() : field;
+                    }
+                    case 'd' -> {
+                        if (!running && found.isPresent()) {
+                            found = Optional.empty();
+                            listed = Optional.empty();
+                            return new Event.Clear();
+                        }
+                    }
+                    default -> {}
+                }
+            }
+            default -> {}
+        }
+        return new Event.None();
+    }
+
+    private Optional<String> selectedField() {
+        int index = selected - 2;
+        return index >= 0 && index < fields.size() ? Optional.of(fields.get(index)) : Optional.empty();
+    }
+
+    private void change() {
+        if (selected == Row.KIND.ordinal()) {
+            percent = !percent;
+        } else if (selected > Row.VALUE.ordinal()) {
+            int index = selected - 2;
+            chosen.set(index, !chosen.get(index));
+        }
+    }
+
+    private int value() {
+        return percent ? percentValue : docFreqValue;
+    }
+
+    private void setValue(int value) {
+        if (percent) {
+            percentValue = value;
+        } else {
+            docFreqValue = value;
+        }
+    }
+
+    /** The keys for the footer while the popup is open. */
+    public String keys() {
+        if (running) {
+            return " Esc stop";
+        }
+        return " ⏎ find   Esc close   ↑↓ select   Space change   0–9 value   a all   n none   v words   d drop";
+    }
+
+    public void render(Frame frame, Rect area) {
+        List<Line> lines = new ArrayList<>();
+        lines.add(Form.row(
+                "Threshold", percent ? "% of the documents" : "document frequency", selected == Row.KIND.ordinal()));
+        lines.add(Form.row(
+                percent ? "More than (%)" : "More than (documents)",
+                Integer.toString(value()),
+                selected == Row.VALUE.ordinal()));
+        lines.add(Line.empty());
+        boolean none = !chosen.contains(true);
+        lines.add(Line.styled(none ? "Fields: none chosen, so every indexed field" : "Fields", Style.EMPTY.bold()));
+        int selectedLine = selected < 2 ? selected : 0;
+        for (int i = 0; i < fields.size(); i++) {
+            String field = fields.get(i);
+            String words = found.isPresent() && hasField(field) ? "   " + count(field) : "";
+            if (selected == i + 2) {
+                selectedLine = lines.size();
+            }
+            lines.add(Form.row(
+                    TextFormat.escapeControl(field), (chosen.get(i) ? "[x]" : "[ ]") + words, selected == i + 2));
+            if (listed.equals(Optional.of(field)) && found.isPresent()) {
+                List<String> fieldWords = words(field);
+                String text = fieldWords.isEmpty()
+                        ? "no words"
+                        : String.join(", ", fieldWords.subList(0, Math.min(fieldWords.size(), SHOWN_WORDS)))
+                                + (fieldWords.size() > SHOWN_WORDS ? ", …" : "");
+                for (String line : TextFormat.wrap(TextFormat.escapeControl(text), WIDTH - 6, Integer.MAX_VALUE)) {
+                    lines.add(Line.styled("    " + line, Form.dim()));
+                }
+            }
+        }
+        if (fields.isEmpty()) {
+            lines.add(Line.styled("  No indexed fields: open an index with a reader.", Form.dim()));
+        }
+        lines.add(Line.empty());
+        if (running) {
+            lines.add(Line.from("Finding the stop words: " + scanned + " terms scanned"));
+        } else if (found.isPresent()) {
+            lines.add(Line.from("Found: more than " + found.get().maxDocFreq() + " documents"));
+        } else {
+            lines.add(Line.styled("A term in more documents than this is a stop word of its field.", Form.dim()));
+        }
+        if (message != null) {
+            for (String line : TextFormat.wrap(message, WIDTH - 2, Integer.MAX_VALUE)) {
+                lines.add(Line.styled(line, Style.EMPTY.red()));
+            }
+        }
+        Form.renderPopup(frame, area, " Auto stop words ", lines, selectedLine, WIDTH);
+    }
+
+    private boolean hasField(String field) {
+        return found.get().fields().stream().anyMatch(words -> words.field().equals(field));
+    }
+
+    private List<String> words(String field) {
+        return found.get().fields().stream()
+                .filter(words -> words.field().equals(field))
+                .findFirst()
+                .map(words -> words.words())
+                .orElse(List.of());
+    }
+
+    private String count(String field) {
+        return AnalysisSettings.count(words(field).size(), "word");
+    }
+}

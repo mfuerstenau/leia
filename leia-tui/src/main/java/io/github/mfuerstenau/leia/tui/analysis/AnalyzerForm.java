@@ -22,7 +22,12 @@ import dev.tamboui.widgets.paragraph.Paragraph;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalysisComponent;
 import io.github.mfuerstenau.leia.protocol.analysis.AvailableAnalyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.AvailableComponent;
+import io.github.mfuerstenau.leia.protocol.analysis.Collation;
+import io.github.mfuerstenau.leia.protocol.analysis.CollationDecomposition;
+import io.github.mfuerstenau.leia.protocol.analysis.CollationStrength;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsResult;
+import io.github.mfuerstenau.leia.protocol.analysis.JapaneseCompletionMode;
+import io.github.mfuerstenau.leia.protocol.analysis.JapaneseCompletionOptions;
 import io.github.mfuerstenau.leia.protocol.analysis.JapaneseMode;
 import io.github.mfuerstenau.leia.protocol.analysis.JapaneseOptions;
 import io.github.mfuerstenau.leia.protocol.analysis.KoreanDecompoundMode;
@@ -138,6 +143,16 @@ public final class AnalyzerForm {
 
         record UnknownWords() implements Row {}
 
+        /** A collation analyzer's collator (ADR 0038). */
+        record CollationLocale() implements Row {}
+
+        record Strength() implements Row {}
+
+        record Decomposition() implements Row {}
+
+        /** {@code JapaneseCompletionAnalyzer}'s mode (ADR 0038). */
+        record CompletionMode() implements Row {}
+
         record ConfigDir() implements Row {}
 
         /** A component: its section and its index there (0 for the tokenizer). */
@@ -195,6 +210,8 @@ public final class AnalyzerForm {
         record UserDictionary(Language language) implements TextTarget {}
 
         record StopTags(Language language) implements TextTarget {}
+
+        record CollationLocale() implements TextTarget {}
 
         record ShingleSize() implements TextTarget {}
 
@@ -298,6 +315,15 @@ public final class AnalyzerForm {
                     rows.add(new Row.StopTags(Language.KOREAN));
                     rows.add(new Row.UnknownWords());
                 }
+                if (takes(PresetOption.COLLATION)) {
+                    rows.add(new Row.CollationLocale());
+                    rows.add(new Row.Strength());
+                    rows.add(new Row.Decomposition());
+                }
+                if (takes(PresetOption.JAPANESE_COMPLETION)) {
+                    rows.add(new Row.UserDictionary(Language.JAPANESE_COMPLETION));
+                    rows.add(new Row.CompletionMode());
+                }
             }
             case CUSTOM -> chainRows(rows);
         }
@@ -347,8 +373,8 @@ public final class AnalyzerForm {
 
     /**
      * Whether the draft's preset takes the option. Without the list, the backend judges: every preset
-     * may take the token length and stem overrides, and Kuromoji's and Nori's analyzers, by class
-     * name, their options.
+     * may take the token length and stem overrides, Kuromoji's and Nori's analyzers, by class name,
+     * their options, and an analyzer with {@code Collation} in its name a collator.
      */
     private boolean takes(PresetOption option) {
         Optional<AvailableAnalyzer> preset = listedPreset();
@@ -358,6 +384,8 @@ public final class AnalyzerForm {
         return switch (option) {
             case JAPANESE -> draft.preset.equals(AnalyzerSettings.JAPANESE_ANALYZER);
             case KOREAN -> draft.preset.equals(AnalyzerSettings.KOREAN_ANALYZER);
+            case JAPANESE_COMPLETION -> draft.preset.equals(AnalyzerSettings.JAPANESE_COMPLETION_ANALYZER);
+            case COLLATION -> simpleName(draft.preset).contains("Collation");
             case MAX_TOKEN_LENGTH, STEM_OVERRIDE -> true;
         };
     }
@@ -523,6 +551,47 @@ public final class AnalyzerForm {
                         Optional.ofNullable(split));
                 error = null;
             }
+            case Row.CollationLocale _ -> editText(new TextTarget.CollationLocale());
+            case Row.Strength _ -> {
+                Collation collation = draft.collation;
+                CollationStrength strength = cycled(
+                        collation.strength().orElse(null),
+                        forward,
+                        Arrays.asList(
+                                null,
+                                CollationStrength.PRIMARY,
+                                CollationStrength.SECONDARY,
+                                CollationStrength.TERTIARY,
+                                CollationStrength.QUATERNARY,
+                                CollationStrength.IDENTICAL));
+                draft.collation =
+                        new Collation(collation.locale(), Optional.ofNullable(strength), collation.decomposition());
+                error = null;
+            }
+            case Row.Decomposition _ -> {
+                Collation collation = draft.collation;
+                CollationDecomposition decomposition = cycled(
+                        collation.decomposition().orElse(null),
+                        forward,
+                        Arrays.asList(
+                                null,
+                                CollationDecomposition.NO,
+                                CollationDecomposition.CANONICAL,
+                                CollationDecomposition.FULL));
+                draft.collation =
+                        new Collation(collation.locale(), collation.strength(), Optional.ofNullable(decomposition));
+                error = null;
+            }
+            case Row.CompletionMode _ -> {
+                JapaneseCompletionOptions completion = draft.japaneseCompletion;
+                JapaneseCompletionMode mode = cycled(
+                        completion.mode().orElse(null),
+                        forward,
+                        Arrays.asList(null, JapaneseCompletionMode.INDEX, JapaneseCompletionMode.QUERY));
+                draft.japaneseCompletion =
+                        new JapaneseCompletionOptions(completion.userDictionary(), Optional.ofNullable(mode));
+                error = null;
+            }
             case Row.ShinglesRow _ -> {
                 draft.shingles = draft.shingles.isPresent() ? Optional.empty() : Optional.of(DEFAULT_SHINGLES);
                 error = null;
@@ -611,6 +680,7 @@ public final class AnalyzerForm {
             case TextTarget.UserDictionary(Language language) ->
                 draft.userDictionary(language).orElse("");
             case TextTarget.StopTags(Language language) -> AnalyzerSettings.wordSetInput(draft.stopTags(language));
+            case TextTarget.CollationLocale _ -> draft.collation.locale();
             case TextTarget.ShingleSize _ ->
                 draft.shingles
                         .map(s -> s.minShingleSize() == s.maxShingleSize()
@@ -676,6 +746,16 @@ public final class AnalyzerForm {
                         draft.korean.decompoundMode(),
                         draft.korean.stopTags(),
                         Optional.empty());
+            case Row.CollationLocale _ ->
+                draft.collation = new Collation("", draft.collation.strength(), draft.collation.decomposition());
+            case Row.Strength _ ->
+                draft.collation =
+                        new Collation(draft.collation.locale(), Optional.empty(), draft.collation.decomposition());
+            case Row.Decomposition _ ->
+                draft.collation = new Collation(draft.collation.locale(), draft.collation.strength(), Optional.empty());
+            case Row.CompletionMode _ ->
+                draft.japaneseCompletion =
+                        new JapaneseCompletionOptions(draft.japaneseCompletion.userDictionary(), Optional.empty());
             case Row.ShinglesRow _ -> {
                 draft.shingles = Optional.empty();
                 clampSelected();
@@ -834,6 +914,12 @@ public final class AnalyzerForm {
                 if (!takes(PresetOption.KOREAN)) {
                     draft.korean = AnalyzerSettings.noKorean();
                 }
+                if (!takes(PresetOption.COLLATION)) {
+                    draft.collation = AnalyzerSettings.noCollation();
+                }
+                if (!takes(PresetOption.JAPANESE_COMPLETION)) {
+                    draft.japaneseCompletion = AnalyzerSettings.noJapaneseCompletion();
+                }
                 error = null;
             }
             default -> {
@@ -901,6 +987,8 @@ public final class AnalyzerForm {
                 draft.setUserDictionary(language, text.isEmpty() ? Optional.empty() : Optional.of(text));
             case TextTarget.StopTags(Language language) ->
                 draft.setStopTags(language, AnalyzerSettings.parseWordSet(text));
+            case TextTarget.CollationLocale _ ->
+                draft.collation = new Collation(text, draft.collation.strength(), draft.collation.decomposition());
             case TextTarget.ShingleSize _ -> {
                 int[] size = AnalyzerSettings.parseShingleSize(text)
                         .orElse(new int[] {DEFAULT_SHINGLES.minShingleSize(), DEFAULT_SHINGLES.maxShingleSize()});
@@ -1025,8 +1113,14 @@ public final class AnalyzerForm {
         if (rows.contains(new Row.StemOverride())) {
             notes.add("Stem overrides: word=stem pairs, - for none, or @ and a file of word<TAB>stem lines.");
         }
+        if (rows.contains(new Row.CollationLocale())) {
+            notes.add("Locale: a BCP 47 language tag; ICU's collators also read its -u- keywords, such as "
+                    + "de-u-co-phonebk. Quaternary strength is ICU's only, full decomposition the JDK's only.");
+        }
         if (rows.stream().anyMatch(row -> row instanceof Row.StopTags)) {
             notes.add("Stop tags like stop words. A user dictionary is a file in Kuromoji's or Nori's own format.");
+        } else if (rows.stream().anyMatch(row -> row instanceof Row.UserDictionary)) {
+            notes.add("A user dictionary is a file in Kuromoji's own format.");
         }
         int width = Math.max(Math.min(area.width(), WIDTH) - 2, 1);
         if (!notes.isEmpty()) {
@@ -1114,6 +1208,28 @@ public final class AnalyzerForm {
                         "Unknown words",
                         draft.korean.outputUnknownUnigrams().map(AnalyzerSettings::unknownWordsText),
                         "default: kept whole");
+            case Row.CollationLocale _ ->
+                valueLine(
+                        "Locale",
+                        draft.collation.locale().isEmpty()
+                                ? Optional.empty()
+                                : Optional.of(TextFormat.escapeControl(draft.collation.locale())),
+                        "root");
+            case Row.Strength _ ->
+                valueLine(
+                        "Strength",
+                        draft.collation.strength().map(AnalyzerSettings::strengthName),
+                        "default: the collator's own");
+            case Row.Decomposition _ ->
+                valueLine(
+                        "Decomposition",
+                        draft.collation.decomposition().map(AnalyzerSettings::decompositionName),
+                        "default: the collator's own");
+            case Row.CompletionMode _ ->
+                valueLine(
+                        "Mode",
+                        draft.japaneseCompletion.mode().map(AnalyzerSettings::completionModeName),
+                        "default: index");
             case Row.ShinglesRow _ -> valueLine("Shingles", draft.shingles.map(_ -> "on"), "off");
             case Row.Shingle(ShingleField field) -> {
                 if (draft.shingles.isEmpty()) {
@@ -1206,6 +1322,7 @@ public final class AnalyzerForm {
                 " Stem overrides: word=stem …, - for none, or @file (blank for the default) ";
             case TextTarget.UserDictionary _ -> " User dictionary file (blank for none) ";
             case TextTarget.StopTags _ -> " Stop tags: tags, - for none, or @file (blank for the default) ";
+            case TextTarget.CollationLocale _ -> " Locale: a language tag, such as de or de-AT (blank for root) ";
             case TextTarget.ShingleSize _ -> " Shingle size: min-max, such as 2-3 (blank for 2) ";
             case TextTarget.ShingleSeparator _ -> " Token separator, as typed ";
             case TextTarget.ShingleFiller _ -> " Filler token, as typed ";

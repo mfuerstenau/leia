@@ -9,6 +9,10 @@ import static org.assertj.core.api.Assertions.tuple;
 
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
+import io.github.mfuerstenau.leia.protocol.analysis.AutoStopWords;
+import io.github.mfuerstenau.leia.protocol.analysis.FieldStopWords;
+import io.github.mfuerstenau.leia.protocol.analysis.GetAutoStopWordsResult;
+import io.github.mfuerstenau.leia.protocol.analysis.StartAutoStopWordsParams;
 import io.github.mfuerstenau.leia.protocol.commits.Commit;
 import io.github.mfuerstenau.leia.protocol.commits.FieldFormats;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitParams;
@@ -70,6 +74,7 @@ import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
 import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalDouble;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import org.junit.jupiter.api.AfterEach;
@@ -184,6 +189,23 @@ class Lucene9BackendTest {
         assertThat(terms.topTerms())
                 .extracting(TopTerm::term, TopTerm::docFreq)
                 .startsWith(tuple("document", 3), tuple("number", 3));
+    }
+
+    @Test
+    void findsAutoStopWords() throws Exception {
+        // 2 live documents: half of them is 1, and the deleted one counts, as in Lucene (ADR 0039).
+        AutoStopWords stopWords = backend.job(
+                Methods.START_AUTO_STOP_WORDS,
+                new StartAutoStopWordsParams(List.of(), OptionalInt.empty(), OptionalDouble.of(0.5)),
+                Methods.GET_AUTO_STOP_WORDS,
+                GetAutoStopWordsResult::stopWords);
+
+        assertThat(stopWords)
+                .isEqualTo(new AutoStopWords(
+                        1,
+                        List.of(
+                                new FieldStopWords("body", List.of("document", "number")),
+                                new FieldStopWords("id", List.of()))));
     }
 
     @Test

@@ -1,6 +1,7 @@
 package io.github.mfuerstenau.leia.core;
 
 import io.github.mfuerstenau.leia.core.AnalysisComponents.AvailableAnalyzer;
+import io.github.mfuerstenau.leia.core.AnalyzerSpec.Collation;
 import io.github.mfuerstenau.leia.core.AnalyzerSpec.Japanese;
 import io.github.mfuerstenau.leia.core.AnalyzerSpec.StemDictionary;
 import io.github.mfuerstenau.leia.core.AnalyzerSpec.WordSet;
@@ -51,7 +52,8 @@ import org.apache.lucene.analysis.WordlistLoader;
  * the extension jars included (ADR 0016). By Lucene's convention, a constructor that takes one
  * {@link CharArraySet} takes the stop words, and one that takes two takes the stop words and the
  * stem exclusions (ADR 0017); one that also takes a {@link CharArrayMap} takes a stem override
- * dictionary, and a public {@code setMaxTokenLength(int)} sets the longest token (ADR 0023).
+ * dictionary, and a public {@code setMaxTokenLength(int)} sets the longest token (ADR 0023). A
+ * class with a public collator constructor is a preset too, which always gets a collator (ADR 0038).
  */
 final class PresetAnalyzers {
 
@@ -72,12 +74,14 @@ final class PresetAnalyzers {
 
     /**
      * A preset's class and its constructors: without arguments, with the stop words, and with the
-     * stop words and the stem exclusions; at least one of the first two is present. Then what sets
-     * its options (ADR 0023).
+     * stop words and the stem exclusions; at least one of the first two or {@code collation} is
+     * present. Then what sets its options (ADR 0023, ADR 0038).
      *
      * @param stemOverride with the stop words, the stem exclusions and a stem override dictionary
      * @param japanese Kuromoji's {@code JapaneseAnalyzer} with its options and the stop words
      * @param korean Nori's {@code KoreanAnalyzer} with its options
+     * @param collation with a JDK or ICU collator
+     * @param japaneseCompletion Kuromoji's {@code JapaneseCompletionAnalyzer} with its options
      * @param maxTokenLength {@code WhitespaceAnalyzer(int)}
      * @param maxTokenLengthSetter the public {@code setMaxTokenLength(int)}
      * @param defaultStopSet the static {@code getDefaultStopSet()}, for an analyzer that is not a
@@ -91,6 +95,8 @@ final class PresetAnalyzers {
             Optional<Constructor<? extends Analyzer>> stemOverride,
             Optional<Constructor<? extends Analyzer>> japanese,
             Optional<Constructor<? extends Analyzer>> korean,
+            Optional<Constructor<? extends Analyzer>> collation,
+            Optional<Constructor<? extends Analyzer>> japaneseCompletion,
             Optional<Constructor<? extends Analyzer>> maxTokenLength,
             Optional<Method> maxTokenLengthSetter,
             Optional<Method> defaultStopSet) {
@@ -120,6 +126,12 @@ final class PresetAnalyzers {
             }
             if (korean.isPresent()) {
                 options.add(PresetOption.KOREAN);
+            }
+            if (collation.isPresent()) {
+                options.add(PresetOption.COLLATION);
+            }
+            if (japaneseCompletion.isPresent()) {
+                options.add(PresetOption.JAPANESE_COMPLETION);
             }
             return options;
         }
@@ -183,7 +195,19 @@ final class PresetAnalyzers {
                 ? Optional.of(read("stem exclusions", spec.stemExclusion().orElseThrow()))
                 : Optional.empty();
         Analyzer analyzer;
-        if (preset.japanese().isPresent()
+        if (preset.collation().isPresent()) {
+            Constructor<? extends Analyzer> constructor = preset.collation().orElseThrow();
+            Collation collation = spec.collation().orElse(new Collation("", Optional.empty(), Optional.empty()));
+            return construct(preset, constructor, Collations.collator(constructor, collation));
+        } else if (spec.japaneseCompletion().isPresent()) {
+            Constructor<? extends Analyzer> constructor =
+                    preset.japaneseCompletion().orElseThrow();
+            analyzer = construct(
+                    preset,
+                    constructor,
+                    KuromojiNori.japaneseCompletionArguments(
+                            constructor, spec.japaneseCompletion().orElseThrow()));
+        } else if (preset.japanese().isPresent()
                 && (stopwords.isPresent() || spec.japanese().isPresent())) {
             Constructor<? extends Analyzer> constructor = preset.japanese().orElseThrow();
             Japanese options =
@@ -249,6 +273,12 @@ final class PresetAnalyzers {
         }
         if (spec.korean().isPresent() && !options.contains(PresetOption.KOREAN)) {
             throw new InvalidAnalyzerException(preset.name() + " takes no Korean options", null);
+        }
+        if (spec.collation().isPresent() && !options.contains(PresetOption.COLLATION)) {
+            throw new InvalidAnalyzerException(preset.name() + " takes no collation", null);
+        }
+        if (spec.japaneseCompletion().isPresent() && !options.contains(PresetOption.JAPANESE_COMPLETION)) {
+            throw new InvalidAnalyzerException(preset.name() + " takes no Japanese completion options", null);
         }
         if (spec.maxTokenLength().isPresent()) {
             int length = spec.maxTokenLength().getAsInt();
@@ -480,7 +510,8 @@ final class PresetAnalyzers {
         Class<? extends Analyzer> analyzer = type.asSubclass(Analyzer.class);
         Optional<Constructor<? extends Analyzer>> noArguments = constructor(analyzer);
         Optional<Constructor<? extends Analyzer>> stopwords = constructor(analyzer, CharArraySet.class);
-        if (noArguments.isEmpty() && stopwords.isEmpty()) {
+        Optional<Constructor<? extends Analyzer>> collation = Collations.constructor(analyzer);
+        if (noArguments.isEmpty() && stopwords.isEmpty() && collation.isEmpty()) {
             return Optional.empty();
         }
         return Optional.of(new Preset(
@@ -491,6 +522,8 @@ final class PresetAnalyzers {
                 constructor(analyzer, CharArraySet.class, CharArraySet.class, CharArrayMap.class),
                 KuromojiNori.japaneseConstructor(analyzer),
                 KuromojiNori.koreanConstructor(analyzer),
+                collation,
+                KuromojiNori.japaneseCompletionConstructor(analyzer),
                 className.equals(WHITESPACE) ? constructor(analyzer, int.class) : Optional.empty(),
                 maxTokenLengthSetter(analyzer),
                 defaultStopSet(analyzer)));
