@@ -33,6 +33,7 @@ import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
 import io.github.mfuerstenau.leia.protocol.search.Explanation;
+import io.github.mfuerstenau.leia.protocol.search.FieldMatches;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
 import io.github.mfuerstenau.leia.protocol.search.GetHighlightResult;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
@@ -61,6 +62,7 @@ import io.github.mfuerstenau.leia.protocol.search.TermQuery;
 import io.github.mfuerstenau.leia.protocol.search.TotalHitsRelation;
 import io.github.mfuerstenau.leia.protocol.search.ValueHighlight;
 import io.github.mfuerstenau.leia.tui.analysis.AnalysisSettings;
+import io.github.mfuerstenau.leia.tui.documents.Documents;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.prompt.LineInput;
 import io.github.mfuerstenau.leia.tui.search.LikeSettings.LikeSource;
@@ -1144,6 +1146,18 @@ public final class Search {
     }
 
     /**
+     * The submitted query and how its hits are highlighted, for the documents screen to mark the
+     * matches in a hit it opens (ADR 0043); absent while highlighting is off, for queries without
+     * terms, and for the regex scan.
+     */
+    public Optional<Documents.MatchQuery> matchesQuery() {
+        if (submitted == null || mode == Mode.REGEX) {
+            return Optional.empty();
+        }
+        return submitted.params.highlight().map(options -> new Documents.MatchQuery(submitted.params.query(), options));
+    }
+
+    /**
      * Finds every match in the value of the selected hit's first passage, to view it with them
      * marked (ADR 0042); nothing for a hit without passages.
      */
@@ -1158,7 +1172,7 @@ public final class Search {
         StartHighlightParams params = new StartHighlightParams(
                 submitted.params.query(),
                 hit.get().docId(),
-                first.field(),
+                Optional.of(first.field()),
                 submitted.params.highlight().get());
         List<Long> cancel = new ArrayList<>();
         highlightJob().ifPresent(job -> cancel.add(job[1]));
@@ -1189,20 +1203,24 @@ public final class Search {
             return Optional.empty();
         }
         Highlighting done = highlighting;
-        List<ValueHighlight> values = result.highlight().get().values();
+        String field = done.params.field().orElseThrow();
+        List<ValueHighlight> values = result.highlight().get().fields().stream()
+                .filter(matches -> matches.field().equals(field))
+                .findFirst()
+                .map(FieldMatches::values)
+                .orElse(List.of());
         Optional<ValueHighlight> value = values.stream()
                 .filter(v -> v.valueIndex() == done.valueIndex)
                 .findFirst()
                 .or(() -> values.stream().findFirst());
         if (value.isEmpty()) {
-            done.error = "No match in " + TextFormat.escapeControl(done.params.field()) + " of document "
-                    + done.params.docId() + ".";
+            done.error = "No match in " + TextFormat.escapeControl(field) + " of document " + done.params.docId() + ".";
             return Optional.empty();
         }
         highlighting = null;
         return Optional.of(new Request.View(
                 done.params.docId(),
-                done.params.field(),
+                field,
                 value.get().valueIndex(),
                 value.get().spans(),
                 value.get().matchCount()));
@@ -2254,8 +2272,10 @@ public final class Search {
                 lines.add(Line.styled("Cannot view the matches: " + highlighting.error, Style.EMPTY.red()));
             } else {
                 lines.add(Line.styled(
-                        "Finding every match in " + TextFormat.escapeControl(highlighting.params.field()) + "["
-                                + highlighting.valueIndex + "]…",
+                        "Finding every match in "
+                                + TextFormat.escapeControl(
+                                        highlighting.params.field().orElseThrow()) + "[" + highlighting.valueIndex
+                                + "]…",
                         Form.dim()));
             }
         } else {
@@ -2269,7 +2289,7 @@ public final class Search {
         return lines;
     }
 
-    static String offsetSourceText(OffsetSource source) {
+    public static String offsetSourceText(OffsetSource source) {
         return switch (source) {
             case POSTINGS -> "the postings";
             case TERM_VECTORS -> "the term vector";

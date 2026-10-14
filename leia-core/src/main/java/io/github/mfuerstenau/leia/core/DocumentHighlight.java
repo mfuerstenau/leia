@@ -3,14 +3,24 @@ package io.github.mfuerstenau.leia.core;
 import java.util.List;
 
 /**
- * The matches of a query in the stored text values of one field of a document (ADR 0042).
+ * The matches of a query in the stored text values of a document (ADR 0042, ADR 0043).
  *
- * @param offsetSource where the offsets of the matches came from
- * @param values the values with at least one match, in order
- * @param truncated whether the values are longer than the highlighter reads, so that later matches
- *     are missing
+ * @param fields per field highlighted, in the order of the document's stored fields: one named
+ *     field, or each field with a text value
  */
-public record DocumentHighlight(OffsetSource offsetSource, List<ValueHighlight> values, boolean truncated) {
+public record DocumentHighlight(List<FieldMatches> fields) {
+
+    /**
+     * The matches in the stored text values of one field.
+     *
+     * @param field the field
+     * @param offsetSource where the offsets of the matches came from
+     * @param values the values with at least one match, in order
+     * @param truncated whether the field's values are longer than the highlighter reads, so that
+     *     later matches are missing
+     */
+    public record FieldMatches(
+            String field, OffsetSource offsetSource, List<ValueHighlight> values, boolean truncated) {}
 
     /**
      * The matches in one value. Positions are UTF-8 byte offsets into the whole value.

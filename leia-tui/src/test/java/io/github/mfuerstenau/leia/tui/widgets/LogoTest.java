@@ -3,6 +3,7 @@ package io.github.mfuerstenau.leia.tui.widgets;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.tamboui.style.Color;
+import dev.tamboui.style.Modifier;
 import dev.tamboui.text.Line;
 import dev.tamboui.text.Span;
 import io.github.mfuerstenau.leia.protocol.version.JavaRuntime;
@@ -51,6 +52,16 @@ class LogoTest {
     void aboutNamesVersionAndBuild() {
         VersionResult version = new VersionResult("leia-server", "1", "abc", "t", new JavaRuntime("25", "v", "/h"));
 
-        assertThat(Logo.aboutLines(version)).extracting(Line::rawContent).containsExactly("leia 1", "build abc", "t");
+        assertThat(Logo.aboutLines(version))
+                .extracting(Line::rawContent)
+                .containsExactly("leia 1", "Lucene Explorer for Index Analysis", "build abc", "t");
+
+        StringBuilder bold = new StringBuilder();
+        for (Span span : Logo.aboutLines(version).get(1).spans()) {
+            if (span.style().addModifiers().contains(Modifier.BOLD)) {
+                bold.append(span.content());
+            }
+        }
+        assertThat(bold).hasToString("LEIA");
     }
 }

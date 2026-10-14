@@ -712,7 +712,7 @@ public final class App {
                 if (documents == null) {
                     yield Optional.<Action>empty();
                 }
-                documents.showSearchHit();
+                documents.showSearchHit(document.docId(), search.matchesQuery());
                 screen = Screen.DOCUMENTS;
                 yield loadDocument(document.docId());
             }
@@ -720,10 +720,12 @@ public final class App {
                 if (documents == null) {
                     yield Optional.<Action>empty();
                 }
-                documents.showSearchHit();
+                documents.showSearchHit(view.docId(), search.matchesQuery());
                 screen = Screen.DOCUMENTS;
-                yield documentsAction(documents.viewMatches(
+                Optional<Action> action = documentsAction(documents.viewMatches(
                         view.docId(), view.field(), view.index(), view.spans(), view.matchCount()));
+                documents.forgetUnsentMatches();
+                yield action;
             }
         });
     }
@@ -805,15 +807,17 @@ public final class App {
 
     /**
      * Fetches a document for the documents screen, which stops rebuilding a field of the shown one,
-     * and finds out whether it matches the filter if that isn't known yet.
+     * finds out whether it matches the filter if that isn't known yet, and finds the matches of the
+     * search hit it is (ADR 0043).
      */
     private Optional<Action> loadDocument(int docId) {
         List<Long> cancel = new ArrayList<>();
         documents.stopRebuild().ifPresent(cancel::add);
+        Optional<Documents.MatchesStart> matches = documents.matchesFor(docId, cancel);
         Optional<Documents.Locate> locate = documents.filterToLocate(docId);
         documents.want(docId);
         documentFetches++;
-        return Optional.of(new Action.LoadDocument(docId, List.copyOf(cancel), locate));
+        return Optional.of(new Action.LoadDocument(docId, List.copyOf(cancel), locate, matches));
     }
 
     /**
@@ -934,6 +938,23 @@ public final class App {
             next = documents.positionsRequest();
         }
         return documentsAction(next.isPresent() ? next : documents.openPendingView());
+    }
+
+    /** The job of document matches {@code matchesId} has started; the job of ones that are gone is cancelled. */
+    public Optional<Action> documentMatchesStarted(long matchesId, long jobId) {
+        return cancelSearchJob(documents == null ? OptionalLong.of(jobId) : documents.matchesStarted(matchesId, jobId));
+    }
+
+    public void documentMatchesProgress(long matchesId, GetHighlightResult result) {
+        if (documents != null) {
+            documents.matchesProgress(matchesId, result);
+        }
+    }
+
+    public void documentMatchesFailed(long matchesId, String error) {
+        if (documents != null) {
+            documents.matchesFailed(matchesId, error);
+        }
     }
 
     public void documentFailed(int docId, String error) {
@@ -1343,6 +1364,7 @@ public final class App {
         }
         if (documents != null) {
             documents.reconstructJob().ifPresent(jobId -> polls.add(new Poll.Reconstruct(jobId)));
+            documents.matchesJob().ifPresent(job -> polls.add(new Poll.DocumentMatches(job[0], job[1])));
             documents
                     .filterJob()
                     .ifPresent(jobId ->

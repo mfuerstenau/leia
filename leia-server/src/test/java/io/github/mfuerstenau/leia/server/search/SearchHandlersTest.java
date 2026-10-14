@@ -28,6 +28,7 @@ import io.github.mfuerstenau.leia.protocol.search.DocValuesRange;
 import io.github.mfuerstenau.leia.protocol.search.DocumentHighlight;
 import io.github.mfuerstenau.leia.protocol.search.Explanation;
 import io.github.mfuerstenau.leia.protocol.search.FieldDateResolution;
+import io.github.mfuerstenau.leia.protocol.search.FieldMatches;
 import io.github.mfuerstenau.leia.protocol.search.FieldSort;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
 import io.github.mfuerstenau.leia.protocol.search.GetHighlightResult;
@@ -198,37 +199,55 @@ class SearchHandlersTest {
     void highlightsEveryMatchOfADocumentsField() throws Exception {
         openIndex();
 
-        DocumentHighlight highlight = highlight(new StartHighlightParams(classic("red"), 2, "body", options(1)));
-
-        assertThat(highlight)
-                .isEqualTo(new DocumentHighlight(
-                        OffsetSource.ANALYSIS, List.of(new ValueHighlight(0, 1, List.of(new MatchSpan(0, 3)))), false));
-        assertThat(highlight(new StartHighlightParams(classic("blue"), 2, "body", options(1)))
+        FieldMatches red = new FieldMatches(
+                "body", OffsetSource.ANALYSIS, List.of(new ValueHighlight(0, 1, List.of(new MatchSpan(0, 3)))), false);
+        assertThat(highlight(new StartHighlightParams(classic("red"), 2, Optional.of("body"), options(1))))
+                .isEqualTo(new DocumentHighlight(List.of(red)));
+        assertThat(highlight(new StartHighlightParams(classic("blue"), 2, Optional.of("body"), options(1)))
+                        .fields()
+                        .getFirst()
                         .values())
                 .isEmpty();
         assertThat(highlight(new StartHighlightParams(
                         knn("vec", OptionalInt.empty(), floats(1, 0), OptionalInt.of(2), false),
                         0,
-                        "body",
+                        Optional.of("body"),
                         options(1))))
-                .isEqualTo(new DocumentHighlight(OffsetSource.NONE, List.of(), false));
+                .isEqualTo(new DocumentHighlight(List.of()));
+    }
+
+    @Test
+    void highlightsEveryStoredFieldWithoutOne() throws Exception {
+        openIndex();
+
+        DocumentHighlight highlight =
+                highlight(new StartHighlightParams(classic("red"), 2, Optional.empty(), options(1)));
+
+        assertThat(highlight.fields()).extracting(FieldMatches::field).containsExactly("id", "body");
+        assertThat(highlight.fields().getFirst().values()).isEmpty();
+        assertThat(highlight.fields().get(1).values())
+                .containsExactly(new ValueHighlight(0, 1, List.of(new MatchSpan(0, 3))));
     }
 
     @Test
     void checksTheHighlightParams() throws Exception {
         assertFails(
-                () -> startHighlight.handle(new StartHighlightParams(classic("red"), 0, "body", options(1))),
+                () -> startHighlight.handle(
+                        new StartHighlightParams(classic("red"), 0, Optional.of("body"), options(1))),
                 ErrorCode.NO_INDEX_OPEN);
         openIndex();
 
         assertFails(
-                () -> startHighlight.handle(new StartHighlightParams(classic("red"), 3, "body", options(1))),
+                () -> startHighlight.handle(
+                        new StartHighlightParams(classic("red"), 3, Optional.of("body"), options(1))),
                 ErrorCode.DOC_NOT_FOUND);
         assertFails(
-                () -> startHighlight.handle(new StartHighlightParams(classic("red"), 0, "nope", options(1))),
+                () -> startHighlight.handle(
+                        new StartHighlightParams(classic("red"), 0, Optional.of("nope"), options(1))),
                 ErrorCode.FIELD_NOT_FOUND);
         assertFails(
-                () -> startHighlight.handle(new StartHighlightParams(classic("body:(red"), 0, "body", options(1))),
+                () -> startHighlight.handle(
+                        new StartHighlightParams(classic("body:(red"), 0, Optional.empty(), options(1))),
                 ErrorCode.INVALID_QUERY);
     }
 

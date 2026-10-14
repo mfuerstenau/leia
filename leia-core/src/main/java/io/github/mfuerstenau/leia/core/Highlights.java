@@ -1,5 +1,6 @@
 package io.github.mfuerstenau.leia.core;
 
+import io.github.mfuerstenau.leia.core.DocumentHighlight.FieldMatches;
 import io.github.mfuerstenau.leia.core.DocumentHighlight.ValueHighlight;
 import io.github.mfuerstenau.leia.core.IndexDocument.StoredValue;
 import io.github.mfuerstenau.leia.core.SearchResults.FieldHighlight;
@@ -33,7 +34,7 @@ import org.apache.lucene.search.uhighlight.WholeBreakIterator;
 
 /**
  * Highlights the matches of a query in stored text with Lucene's {@link UnifiedHighlighter} (ADR
- * 0042): the best passages of the hits of a search, or every match in one field of a document.
+ * 0042): the best passages of the hits of a search, or every match in the fields of a document.
  *
  * <p>The highlighter joins a field's text values with one separator character, and keeps each
  * passage inside one value. A passage's value is found by counting the separators before it, and
@@ -113,51 +114,77 @@ final class Highlights {
     }
 
     /**
-     * Every match in the text values of {@code field} of a document, up to {@code maxSpans} per value.
+     * Every match in the text values of each field of {@code stored} of a document, up to {@code
+     * maxSpans} per value. Fields without a text value are left out.
      *
-     * @param values the document's stored values in {@code field}
+     * @param stored the document's stored values by field, in stored order: the fields to highlight
      */
     static DocumentHighlight document(
             IndexSearcher searcher,
             Query query,
             HighlightSpec spec,
             int docId,
-            String field,
-            List<StoredValue> values,
+            Map<String, List<StoredValue>> stored,
             int maxSpans)
             throws IOException {
-        List<Integer> textIndexes = textIndexes(values);
-        long chars = Math.max(textIndexes.size() - 1, 0);
-        for (int index : textIndexes) {
-            chars += ((StoredValue.Text) values.get(index)).value().length();
+        List<String> fields = new ArrayList<>();
+        List<List<Integer>> textIndexes = new ArrayList<>();
+        stored.forEach((field, values) -> {
+            List<Integer> indexes = textIndexes(values);
+            if (!indexes.isEmpty()) {
+                fields.add(field);
+                textIndexes.add(indexes);
+            }
+        });
+        if (fields.isEmpty()) {
+            return new DocumentHighlight(List.of());
         }
         Highlighter highlighter = new Highlighter(builder(searcher, spec, MAX_DOCUMENT_CHARS, WholeBreakIterator::new));
         // One passage per value: the whole value.
+        int[] maxPassages = textIndexes.stream().mapToInt(List::size).toArray();
         Map<String, Object[]> byField =
-                highlighter.highlight(new String[] {field}, query, new int[] {docId}, Math.max(textIndexes.size(), 1));
-        OffsetSource source = highlighter.source(field);
-        List<ValueHighlight> valueHighlights = new ArrayList<>();
-        if (byField.get(field)[0] instanceof Raw raw) {
-            source = raw.source();
-            for (RawPassage passage : raw.passages()) {
-                Value value = Value.of(raw.content(), passage.start());
-                if (value.ordinal() >= textIndexes.size()) {
-                    continue;
-                }
-                List<int[]> matches = passage.matches(value.start(), value.end());
-                if (matches.isEmpty()) {
-                    continue;
-                }
-                Utf8Offsets offsets = new Utf8Offsets(raw.content().substring(value.start(), value.end()));
-                List<Span> spans = new ArrayList<>(Math.min(matches.size(), maxSpans));
-                for (int[] match : matches.subList(0, Math.min(matches.size(), maxSpans))) {
-                    spans.add(new Span(offsets.at(match[0] - value.start()), offsets.at(match[1] - value.start())));
-                }
-                valueHighlights.add(
-                        new ValueHighlight(textIndexes.get(value.ordinal()), matches.size(), List.copyOf(spans)));
+                highlighter.highlight(fields.toArray(String[]::new), query, new int[] {docId}, maxPassages);
+        List<FieldMatches> matches = new ArrayList<>(fields.size());
+        for (int f = 0; f < fields.size(); f++) {
+            String field = fields.get(f);
+            List<Integer> indexes = textIndexes.get(f);
+            List<StoredValue> values = stored.get(field);
+            long chars = indexes.size() - 1;
+            for (int index : indexes) {
+                chars += ((StoredValue.Text) values.get(index)).value().length();
             }
+            OffsetSource source = highlighter.source(field);
+            List<ValueHighlight> valueHighlights = List.of();
+            if (byField.get(field)[0] instanceof Raw raw) {
+                source = raw.source();
+                valueHighlights = valueHighlights(raw, indexes, maxSpans);
+            }
+            matches.add(new FieldMatches(field, source, valueHighlights, chars > MAX_DOCUMENT_CHARS));
         }
-        return new DocumentHighlight(source, List.copyOf(valueHighlights), chars > MAX_DOCUMENT_CHARS);
+        return new DocumentHighlight(List.copyOf(matches));
+    }
+
+    /** Every match in each value of a field, up to {@code maxSpans} per value, with UTF-8 offsets. */
+    private static List<ValueHighlight> valueHighlights(Raw raw, List<Integer> textIndexes, int maxSpans) {
+        List<ValueHighlight> valueHighlights = new ArrayList<>();
+        for (RawPassage passage : raw.passages()) {
+            Value value = Value.of(raw.content(), passage.start());
+            if (value.ordinal() >= textIndexes.size()) {
+                continue;
+            }
+            List<int[]> matches = passage.matches(value.start(), value.end());
+            if (matches.isEmpty()) {
+                continue;
+            }
+            Utf8Offsets offsets = new Utf8Offsets(raw.content().substring(value.start(), value.end()));
+            List<Span> spans = new ArrayList<>(Math.min(matches.size(), maxSpans));
+            for (int[] match : matches.subList(0, Math.min(matches.size(), maxSpans))) {
+                spans.add(new Span(offsets.at(match[0] - value.start()), offsets.at(match[1] - value.start())));
+            }
+            valueHighlights.add(
+                    new ValueHighlight(textIndexes.get(value.ordinal()), matches.size(), List.copyOf(spans)));
+        }
+        return List.copyOf(valueHighlights);
     }
 
     /** The passages of a field of a hit, cut around their first match, with UTF-8 offsets. */
@@ -337,7 +364,13 @@ final class Highlights {
                 throws IOException {
             int[] max = new int[fields.length];
             Arrays.fill(max, maxPassages);
-            return highlightFieldsAsObjects(fields, query, docIds, max);
+            return highlight(fields, query, docIds, max);
+        }
+
+        /** As {@link #highlight(String[], Query, int[], int)}, with the most passages per field. */
+        Map<String, Object[]> highlight(String[] fields, Query query, int[] docIds, int[] maxPassages)
+                throws IOException {
+            return highlightFieldsAsObjects(fields, query, docIds, maxPassages);
         }
 
         /** Where the offsets of {@code field} come from, as chosen for the last query. */

@@ -42,11 +42,18 @@ import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.points.PointValue;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
+import io.github.mfuerstenau.leia.protocol.search.FieldMatches;
+import io.github.mfuerstenau.leia.protocol.search.GetHighlightResult;
+import io.github.mfuerstenau.leia.protocol.search.HighlightOptions;
 import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
+import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
+import io.github.mfuerstenau.leia.protocol.search.StartHighlightParams;
+import io.github.mfuerstenau.leia.protocol.search.ValueHighlight;
 import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.points.PointFormat;
 import io.github.mfuerstenau.leia.tui.points.PointFormats;
+import io.github.mfuerstenau.leia.tui.search.Search;
 import io.github.mfuerstenau.leia.tui.terms.Terms.TermHit;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
@@ -193,6 +200,44 @@ public final class Documents {
     /** The filter to locate a document in once it is loaded: its serial and the backend's id. */
     public record Locate(long serial, long filterId) {}
 
+    /** A search's query and how it highlights, to mark its matches in a hit opened from it (ADR 0043). */
+    public record MatchQuery(SearchQuery query, HighlightOptions options) {}
+
+    /**
+     * Find the matches {@code matchesId} with a document's load, reported back with {@link
+     * #matchesStarted} or {@link #matchesFailed}; the job with {@link #matchesProgress}.
+     */
+    public record MatchesStart(long matchesId, StartHighlightParams params) {}
+
+    /** The matches of a search in the hit it opened (ADR 0043). */
+    private static final class Matches {
+        final long id;
+        final int docId;
+        final MatchQuery query;
+
+        /** Whether the load of the document asked for them. */
+        boolean sent;
+
+        /** Null until the backend has started the job. */
+        Long jobId;
+
+        /** Per field with a text value, once they are in; null before. */
+        Map<String, FieldMatches> fields;
+
+        /** Why they could not be found; or null. */
+        String error;
+
+        Matches(long id, int docId, MatchQuery query) {
+            this.id = id;
+            this.docId = docId;
+            this.query = query;
+        }
+
+        boolean running() {
+            return sent && fields == null && error == null;
+        }
+    }
+
     /** The term vector of a field of the shown document. */
     private sealed interface TermVector {
         record Loaded(List<TermVectorTerm> terms) implements TermVector {}
@@ -311,6 +356,14 @@ public final class Documents {
     /** The value the viewer opens on once its document is in; or null. */
     private PendingView pendingView;
 
+    /** The matches of the search hit shown, or last shown; or null. */
+    private Matches matches;
+
+    private long nextMatchesId = 1;
+
+    /** The jobs of matches dropped while they ran, to cancel with the next load. */
+    private final List<Long> matchesToCancel = new ArrayList<>();
+
     /** The delimiters the viewer last split values at, for the next viewer. */
     private Viewer.Delimiters delimiters = Viewer.Delimiters.DEFAULT;
 
@@ -406,6 +459,7 @@ public final class Documents {
         this.hit = hit;
         searchHits = false;
         positions = null;
+        dropMatches();
     }
 
     /**
@@ -417,13 +471,111 @@ public final class Documents {
         hit = null;
         searchHits = false;
         positions = null;
+        dropMatches();
     }
 
-    /** Forgets the term hit: the search screen opened the next document, so {@code [}/{@code ]} step through its hits. */
-    public void showSearchHit() {
+    /**
+     * Forgets the term hit: the search screen opened hit {@code docId}, so {@code [}/{@code ]} step
+     * through its hits. With {@code query}, the next load of the document finds the query's matches in
+     * it (ADR 0043), unless they are in already.
+     */
+    public void showSearchHit(int docId, Optional<MatchQuery> query) {
         hit = null;
         searchHits = true;
         positions = null;
+        boolean same = matches != null
+                && matches.docId == docId
+                && query.isPresent()
+                && matches.query.equals(query.get())
+                && matches.error == null;
+        if (!same) {
+            dropMatches();
+            query.ifPresent(q -> matches = new Matches(nextMatchesId++, docId, q));
+        }
+    }
+
+    /** Forgets the matches, and stops their job with the next load if it runs. */
+    private void dropMatches() {
+        if (matches != null && matches.running() && matches.jobId != null) {
+            matchesToCancel.add(matches.jobId);
+        }
+        matches = null;
+    }
+
+    /** Forgets the matches that {@link #showSearchHit} asked for if no load fetched them: the document was shown already. */
+    public void forgetUnsentMatches() {
+        if (matches != null && !matches.sent) {
+            matches = null;
+        }
+    }
+
+    /**
+     * The matches to find with the load of {@code docId}, if {@link #showSearchHit} asked for them;
+     * adds the jobs of dropped matches to {@code cancel}.
+     */
+    public Optional<MatchesStart> matchesFor(int docId, List<Long> cancel) {
+        cancel.addAll(matchesToCancel);
+        matchesToCancel.clear();
+        if (matches == null || matches.sent || matches.docId != docId) {
+            return Optional.empty();
+        }
+        matches.sent = true;
+        return Optional.of(new MatchesStart(
+                matches.id,
+                new StartHighlightParams(matches.query.query(), docId, Optional.empty(), matches.query.options())));
+    }
+
+    private boolean findsMatches(long matchesId) {
+        return matches != null && matches.id == matchesId && matches.running();
+    }
+
+    /** The job of matches {@code matchesId} has started. Returns the job to cancel if they were dropped. */
+    public OptionalLong matchesStarted(long matchesId, long jobId) {
+        if (!findsMatches(matchesId)) {
+            return OptionalLong.of(jobId);
+        }
+        matches.jobId = jobId;
+        return OptionalLong.empty();
+    }
+
+    /** The matches job to poll, while it runs: the matches' id and the job id. */
+    public Optional<long[]> matchesJob() {
+        return matches != null && matches.running() && matches.jobId != null
+                ? Optional.of(new long[] {matches.id, matches.jobId})
+                : Optional.empty();
+    }
+
+    /** Takes the matches {@code matchesId} once they are in. */
+    public void matchesProgress(long matchesId, GetHighlightResult result) {
+        if (!findsMatches(matchesId) || result.highlight().isEmpty()) {
+            return;
+        }
+        Map<String, FieldMatches> fields = new HashMap<>();
+        for (FieldMatches field : result.highlight().get().fields()) {
+            fields.put(field.field(), field);
+        }
+        matches.fields = fields;
+    }
+
+    public void matchesFailed(long matchesId, String error) {
+        if (findsMatches(matchesId)) {
+            matches.error = error;
+        }
+    }
+
+    /** The matches of the shown document, if it is the hit they were found in. */
+    private Optional<Matches> shownMatches() {
+        return matches != null && matches.sent && document != null && shows(matches.docId)
+                ? Optional.of(matches)
+                : Optional.empty();
+    }
+
+    /** The matches in {@code field} of the shown document, if it has any. */
+    private Optional<FieldMatches> matchesIn(String field) {
+        return shownMatches()
+                .filter(shown -> shown.fields != null)
+                .map(shown -> shown.fields.get(field))
+                .filter(found -> !found.values().isEmpty());
     }
 
     /**
@@ -990,7 +1142,16 @@ public final class Documents {
         if (values.isEmpty()) {
             return Optional.empty();
         }
-        viewer = new Viewer(docId, field.get().name(), values, delimiters);
+        Optional<FieldMatches> found = matchesIn(field.get().name());
+        viewer = found.isPresent()
+                ? Viewer.withMatches(
+                        docId,
+                        field.get().name(),
+                        values,
+                        delimiters,
+                        found.get().values().getFirst().valueIndex(),
+                        found.get().values())
+                : new Viewer(docId, field.get().name(), values, delimiters);
         return viewer.fetch().flatMap(Documents::viewerRequest);
     }
 
@@ -1355,9 +1516,11 @@ public final class Documents {
         }
         List<String[]> cells = new ArrayList<>();
         List<Boolean> empty = new ArrayList<>();
+        List<Boolean> matched = new ArrayList<>();
         for (int i : rows) {
             DocumentField field = document.fields().get(i);
             empty.add(isEmpty(field));
+            matched.add(matchesIn(field.name()).isPresent());
             cells.add(new String[] {
                 TextFormat.escapeControl(field.name()),
                 flags(Optional.ofNullable(schema.get(field.name())), field),
@@ -1379,12 +1542,15 @@ public final class Documents {
         List<Row> tableRows = new ArrayList<>();
         for (int i = 0; i < cells.size(); i++) {
             String[] row = cells.get(i);
-            Row tableRow = Row.from(Cell.from(row[0]), Cell.from(row[1]), right(row[2], widths[2]), Cell.from(row[3]));
+            Cell name =
+                    matched.get(i) ? Cell.from(Line.from(Span.styled(row[0], TextFormat.MATCH))) : Cell.from(row[0]);
+            Row tableRow = Row.from(name, Cell.from(row[1]), right(row[2], widths[2]), Cell.from(row[3]));
             tableRows.add(empty.get(i) ? tableRow.style(Style.EMPTY.dim()) : tableRow);
         }
         int shown = rows.size();
         int total = document.fields().size();
-        String count = shown == total ? Integer.toString(total) : shown + " of " + total + ", e shows all";
+        String count =
+                (shown == total ? Integer.toString(total) : shown + " of " + total + ", e shows all") + matchesTitle();
         String title;
         if (seek == null) {
             title = " Fields (" + count + ", / seeks) ";
@@ -1429,6 +1595,8 @@ public final class Documents {
                 Optional.ofNullable(schema.get(field.name())),
                 field,
                 fieldHit,
+                matchesLine(field.name()),
+                matchesIn(field.name()),
                 positions,
                 termVectors.get(field.name()),
                 reconstructions.get(field.name()),
@@ -1447,6 +1615,61 @@ public final class Documents {
                         .block(block)
                         .build(),
                 area);
+    }
+
+    /** What the fields table's title says about the matches of the search hit shown (ADR 0043). */
+    private String matchesTitle() {
+        Optional<Matches> shown = shownMatches();
+        if (shown.isEmpty()) {
+            return "";
+        }
+        if (shown.get().error != null) {
+            return ", cannot find the matches";
+        }
+        if (shown.get().fields == null) {
+            return ", finding matches…";
+        }
+        long fields = shown.get().fields.values().stream()
+                .filter(field -> !field.values().isEmpty())
+                .count();
+        return ", matches in " + fields;
+    }
+
+    /**
+     * The details' line about the matches of the search hit in {@code field}: how many there are,
+     * where their offsets came from, or why they could not be found; empty if the field has none.
+     */
+    private Optional<String> matchesLine(String field) {
+        Optional<Matches> shown = shownMatches();
+        if (shown.isPresent() && shown.get().error != null) {
+            return Optional.of("cannot find them: " + shown.get().error);
+        }
+        return matchesIn(field).map(found -> {
+            int count =
+                    found.values().stream().mapToInt(ValueHighlight::matchCount).sum();
+            return count + " in " + TextFormat.count(found.values().size(), "value") + ", offsets from "
+                    + Search.offsetSourceText(found.offsetSource()) + ", v views them"
+                    + (found.truncated()
+                            ? " (cut at " + TextFormat.size(HighlightOptions.MAX_DOCUMENT_CHARS) + ")"
+                            : "");
+        });
+    }
+
+    /**
+     * Where the matches of stored value {@code index} fall in {@code shown}, the beginning of its
+     * {@code text}: as {@link TextFormat#charRanges}, cut to the characters that {@code shown} has of
+     * {@code text}.
+     */
+    private static List<int[]> valueMarks(String text, String shown, Optional<FieldMatches> matches, int index) {
+        Optional<ValueHighlight> value = matches.flatMap(found -> found.values().stream()
+                .filter(each -> each.valueIndex() == index)
+                .findFirst());
+        if (value.isEmpty()) {
+            return List.of();
+        }
+        // Without the … that firstChars adds.
+        int length = shown.equals(text) ? shown.length() : shown.length() - 1;
+        return TextFormat.charRanges(text.substring(0, length), 0, value.get().spans());
     }
 
     /** Whether the document has nothing that {@code getDocument} reports in the field. It may still have postings there. */
@@ -1475,12 +1698,29 @@ public final class Documents {
             schema.filter(f -> f.pointDimensionCount() > 0).isPresent(),
             field.vector().isPresent()
         };
-        String names = "INPSVDTK";
         StringBuilder flags = new StringBuilder();
         for (int i = 0; i < set.length; i++) {
-            flags.append(set[i] ? names.charAt(i) : '-');
+            flags.append(set[i] ? FLAGS.charAt(i) : '-');
         }
         return flags.toString();
+    }
+
+    /** The letters of {@link #flags}, in order. */
+    private static final String FLAGS = "INPSVDTK";
+
+    /** What each letter of {@link #FLAGS} stands for. */
+    private static final List<String> FLAG_WORDS =
+            List.of("indexed", "norm", "payloads", "stored", "term vector", "doc values", "points", "KNN vector");
+
+    /** The flags that {@link #flags} set, in words: {@code IN-S----} is {@code indexed, norm, stored}. */
+    static String flagWords(String flags) {
+        List<String> words = new ArrayList<>();
+        for (int i = 0; i < flags.length(); i++) {
+            if (flags.charAt(i) == FLAGS.charAt(i)) {
+                words.add(FLAG_WORDS.get(i));
+            }
+        }
+        return words.isEmpty() ? "none" : String.join(", ", words);
     }
 
     /** One line for the value column: the first stored value, or else the doc values, or else the vector. */
@@ -1579,12 +1819,16 @@ public final class Documents {
             Optional<IndexField> schema,
             DocumentField field,
             Optional<TermHit> hit,
+            Optional<String> matchesLine,
+            Optional<FieldMatches> matches,
             Positions positions,
             TermVector termVector,
             Reconstruction reconstruction,
             NumberFormat numbers,
             PointFormats pointFormats) {
         List<Line> lines = new ArrayList<>();
+        String flags = flags(schema, field);
+        lines.add(labelled("Flags", flags + "  " + flagWords(flags)));
         if (schema.isPresent()) {
             IndexField index = schema.get();
             List<String> indexed = new ArrayList<>();
@@ -1624,6 +1868,7 @@ public final class Documents {
         }
         lines.add(labelled(
                 "Norm", field.norm().isPresent() ? normText(field.norm().getAsLong()) : "-"));
+        matchesLine.ifPresent(text -> lines.add(labelled("Matches", text)));
         if (hit.isPresent()) {
             lines.add(Line.empty());
             lines.addAll(hitLines(hit.get(), positions));
@@ -1635,13 +1880,16 @@ public final class Documents {
         } else {
             lines.add(labelled("Stored", TextFormat.count(field.stored().size(), "value")));
             Style dim = Style.EMPTY.dim();
-            for (StoredValue value : field.stored()) {
+            for (int v = 0; v < field.stored().size(); v++) {
+                StoredValue value = field.stored().get(v);
                 // Multi-line text keeps its lines, indented under the first; a long value shows its
                 // beginning, and the viewer the rest.
                 String text = storedText(value);
                 String shown = TextFormat.firstChars(text, DETAIL_VALUE_CHARS);
                 boolean more = !shown.equals(text);
+                List<int[]> marks = valueMarks(text, shown, matches, v);
                 String[] valueLines = shown.split("\n", -1);
+                int lineStart = 0;
                 for (int i = 0; i < valueLines.length; i++) {
                     if (i == DETAIL_VALUE_LINES) {
                         more = true;
@@ -1650,7 +1898,11 @@ public final class Documents {
                     String prefix = i == 0
                             ? String.format(Locale.ROOT, "  %-8s", Viewer.storedType(value.type()))
                             : " ".repeat(10);
-                    lines.add(Line.from(Span.styled(prefix, dim), Span.raw(TextFormat.escapeControl(valueLines[i]))));
+                    List<Span> spans = new ArrayList<>();
+                    spans.add(Span.styled(prefix, dim));
+                    spans.addAll(TextFormat.marked(shown, lineStart, lineStart + valueLines[i].length(), marks));
+                    lines.add(Line.from(spans));
+                    lineStart += valueLines[i].length() + 1;
                 }
                 if (value.fullLength().isPresent()) {
                     lines.add(Line.styled(

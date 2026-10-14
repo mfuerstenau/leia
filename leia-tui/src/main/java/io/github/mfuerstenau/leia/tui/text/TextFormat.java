@@ -2,6 +2,8 @@ package io.github.mfuerstenau.leia.tui.text;
 
 import dev.tamboui.style.Style;
 import dev.tamboui.text.CharWidth;
+import dev.tamboui.text.Span;
+import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -55,6 +57,82 @@ public final class TextFormat {
             return text;
         }
         return text.substring(0, text.offsetByCodePoints(0, max)) + "…";
+    }
+
+    /**
+     * Where matches given as UTF-8 byte offsets fall in {@code text}: each as its start and end in
+     * {@code text}'s characters, in order. A match is cut to the text; one that is empty then, starts
+     * before the one before it ends, or doesn't fall on characters' boundaries is left out.
+     *
+     * @param offset the byte offset of {@code text}'s start in the value the matches are offsets into
+     */
+    public static List<int[]> charRanges(String text, long offset, List<MatchSpan> matches) {
+        // The character position of each byte offset that starts a character, and of the end; -1 inside one.
+        int[] chars = new int[utf8Length(text) + 1];
+        int bytes = 0;
+        for (int i = 0; i < text.length(); ) {
+            int c = text.codePointAt(i);
+            int length = utf8Length(c);
+            chars[bytes] = i;
+            for (int b = 1; b < length; b++) {
+                chars[bytes + b] = -1;
+            }
+            bytes += length;
+            i += Character.charCount(c);
+        }
+        chars[bytes] = text.length();
+        List<int[]> ranges = new ArrayList<>(matches.size());
+        int end = 0;
+        for (MatchSpan match : matches) {
+            int from = Math.clamp(match.start() - offset, 0, bytes);
+            int to = Math.clamp(match.end() - offset, 0, bytes);
+            if (to <= from || chars[from] < end || chars[from] < 0 || chars[to] < 0) {
+                continue;
+            }
+            ranges.add(new int[] {chars[from], chars[to]});
+            end = chars[to];
+        }
+        return ranges;
+    }
+
+    /** How many bytes {@code text} takes in UTF-8. */
+    public static int utf8Length(String text) {
+        int length = 0;
+        for (int i = 0; i < text.length(); ) {
+            int c = text.codePointAt(i);
+            length += utf8Length(c);
+            i += Character.charCount(c);
+        }
+        return length;
+    }
+
+    private static int utf8Length(int codePoint) {
+        return codePoint < 0x80 ? 1 : codePoint < 0x800 ? 2 : codePoint < 0x10000 ? 3 : 4;
+    }
+
+    /**
+     * The characters {@code from} to {@code to} of {@code text} as spans, escaped, with the parts that
+     * {@code ranges} (from {@link #charRanges}) cover highlighted as {@link #MATCH}.
+     */
+    public static List<Span> marked(String text, int from, int to, List<int[]> ranges) {
+        List<Span> spans = new ArrayList<>();
+        int pos = from;
+        for (int[] range : ranges) {
+            int start = Math.max(range[0], pos);
+            int end = Math.min(range[1], to);
+            if (end <= start) {
+                continue;
+            }
+            if (start > pos) {
+                spans.add(Span.raw(escapeControl(text.substring(pos, start))));
+            }
+            spans.add(Span.styled(escapeControl(text.substring(start, end)), MATCH));
+            pos = end;
+        }
+        if (pos < to) {
+            spans.add(Span.raw(escapeControl(text.substring(pos, to))));
+        }
+        return spans;
     }
 
     /** {@code n} and the noun, in the plural unless {@code n} is 1. */

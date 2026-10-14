@@ -5,6 +5,7 @@ import io.github.mfuerstenau.leia.core.HighlightSpec;
 import io.github.mfuerstenau.leia.core.SearchResults.FieldHighlight;
 import io.github.mfuerstenau.leia.core.StoredScan;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
+import io.github.mfuerstenau.leia.protocol.search.FieldMatches;
 import io.github.mfuerstenau.leia.protocol.search.HighlightOptions;
 import io.github.mfuerstenau.leia.protocol.search.HighlightPassage;
 import io.github.mfuerstenau.leia.protocol.search.HitHighlight;
@@ -75,12 +76,18 @@ final class Highlighting {
 
     static io.github.mfuerstenau.leia.protocol.search.DocumentHighlight toHighlight(DocumentHighlight highlight) {
         return new io.github.mfuerstenau.leia.protocol.search.DocumentHighlight(
-                toSource(highlight.offsetSource()),
-                highlight.values().stream()
+                highlight.fields().stream().map(Highlighting::toMatches).toList());
+    }
+
+    private static FieldMatches toMatches(DocumentHighlight.FieldMatches matches) {
+        return new FieldMatches(
+                matches.field(),
+                toSource(matches.offsetSource()),
+                matches.values().stream()
                         .map(value ->
                                 new ValueHighlight(value.valueIndex(), value.matchCount(), toSpans(value.spans())))
                         .toList(),
-                highlight.truncated());
+                matches.truncated());
     }
 
     private static List<MatchSpan> toSpans(List<StoredScan.Span> spans) {

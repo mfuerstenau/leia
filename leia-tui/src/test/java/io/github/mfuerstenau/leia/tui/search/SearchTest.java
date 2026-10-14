@@ -29,6 +29,7 @@ import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesRange;
 import io.github.mfuerstenau.leia.protocol.search.DocumentHighlight;
 import io.github.mfuerstenau.leia.protocol.search.Explanation;
+import io.github.mfuerstenau.leia.protocol.search.FieldMatches;
 import io.github.mfuerstenau.leia.protocol.search.FieldSort;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
 import io.github.mfuerstenau.leia.protocol.search.GetHighlightResult;
@@ -70,6 +71,7 @@ import io.github.mfuerstenau.leia.protocol.search.ValueHighlight;
 import io.github.mfuerstenau.leia.tui.TestScreens;
 import io.github.mfuerstenau.leia.tui.analysis.AnalysisSettings;
 import io.github.mfuerstenau.leia.tui.analysis.AnalyzerSettings;
+import io.github.mfuerstenau.leia.tui.documents.Documents;
 import io.github.mfuerstenau.leia.tui.search.Search.Mode;
 import io.github.mfuerstenau.leia.tui.search.Search.Request;
 import java.util.ArrayList;
@@ -1188,7 +1190,7 @@ class SearchTest {
                 .isEqualTo(new StartHighlightParams(
                         start.params().query(),
                         7,
-                        "title",
+                        Optional.of("title"),
                         start.params().highlight().orElseThrow()));
         assertThat(search.highlightStarted(highlight.highlightId(), 9)).isEmpty();
         assertThat(search.jobs()).containsExactly(9L);
@@ -1199,10 +1201,11 @@ class SearchTest {
         Request.Highlight again = (Request.Highlight) press(search, 'v').orElseThrow();
         assertThat(again.cancel()).containsExactly(9L);
         List<MatchSpan> spans = List.of(new MatchSpan(8, 11), new MatchSpan(30, 33));
-        GetHighlightResult found = new GetHighlightResult(Optional.of(new DocumentHighlight(
+        GetHighlightResult found = new GetHighlightResult(Optional.of(new DocumentHighlight(List.of(new FieldMatches(
+                "title",
                 OffsetSource.POSTINGS,
                 List.of(new ValueHighlight(0, 1, List.of(new MatchSpan(0, 3))), new ValueHighlight(1, 2, spans)),
-                false)));
+                false)))));
         assertThat(search.highlightProgress(highlight.highlightId(), found)).isEmpty();
         assertThat(search.highlightStarted(highlight.highlightId(), 9)).hasValue(9L);
 
@@ -1211,6 +1214,10 @@ class SearchTest {
                 .contains(new Request.View(7, "title", 1, spans, 2));
         assertThat(search.highlightJob()).isEmpty();
         assertThat(search.running()).isFalse();
+        // The documents screen marks the matches of a hit it opens with the same query and options.
+        assertThat(search.matchesQuery())
+                .hasValue(new Documents.MatchQuery(
+                        start.params().query(), start.params().highlight().orElseThrow()));
     }
 
     @Test
@@ -1231,6 +1238,7 @@ class SearchTest {
         assertThat(render(search)).contains("count to 1000 · highlight any field's terms");
         Request.Start off = started(press(search, 'H'));
         assertThat(off.params().highlight()).isEmpty();
+        assertThat(search.matchesQuery()).isEmpty();
         assertThat(render(search)).contains("count to 1000 · no highlights");
         // Back to the query's fields; the searches before never started a job.
         assertSearch(press(search, 'H'), query, 0, Search.SEARCH_PAGE, List.of());

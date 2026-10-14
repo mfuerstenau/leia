@@ -101,9 +101,13 @@ public sealed interface Action {
      * Cancel the jobs in {@code cancel}, fetch this document, and report back with {@link
      * App#documentLoaded} or {@link App#documentFailed}. With {@code locate}, first find out whether
      * it matches that filter, and report back with {@link App#filterStepped} or {@link
-     * App#filterFailed} (ADR 0031).
+     * App#filterFailed} (ADR 0031). With {@code matches}, also start finding the matches of a search
+     * in it, and report back with {@link App#documentMatchesStarted} or {@link
+     * App#documentMatchesFailed} (ADR 0043).
      */
-    record LoadDocument(int docId, List<Long> cancel, Optional<Documents.Locate> locate) implements Action {}
+    record LoadDocument(
+            int docId, List<Long> cancel, Optional<Documents.Locate> locate, Optional<Documents.MatchesStart> matches)
+            implements Action {}
 
     /**
      * Fetch a stored value whole, and report back with {@link App#storedValueLoaded} or {@link

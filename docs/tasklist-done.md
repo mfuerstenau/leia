@@ -284,3 +284,9 @@ Finished items, moved here from `docs/tasklist.md` (the open work queue).
 - [x] Parity check against `docs/demo-index.md` and the real-server tests of `tui/tests/`: their gaps now run through `LeiaBackend` in leia-server (`Lucene9BackendTest`, `JarsBackendTest` in `jarsTest`, `DemoIndexTest` for the document's numbers), and the UI-only bullets were walked in TamboUI in tmux; two wrong sentences of the document fixed (ADR 0034 §10)
 - [x] Removed the old path (ADR 0034 §6): the `tui/` crate, `protocol/fixtures/` and `protocol/error-codes.json` with their tests, the JSON-RPC transport (`RpcServer`, `Dispatcher`, `RequestScanner`, `RequestEnvelope`, `LeiaServer`, `ServerArgs`, `ServerLogging`) and `leia-server.jar`, the envelope and Jackson in `leia-protocol` (`Request`, `Response`, `RpcError`, `JsonRpcVersion`, `ProtocolJson`, `ProtocolAnnotationIntrospector`, the annotations), and the transport-only error codes
 - [x] Updated `AGENTS.md` (architecture, hard rules 2–4, tech stack, commands, CLI contract), `README.md` and `build-dist.sh` (one `leia.jar` plus `leia` and `leia.cmd`, no Rust toolchain)
+
+## UI polish — done
+
+- [x] Show the name "Lucene Explorer for Index Analysis" below the leia line with the version, with the letters of the acronym (L, E, I, A) highlighted
+- [x] Documents screen: a legend for the flags (the details panel's first line spells out the selected field's flags)
+- [x] Matches of the query in a document opened from a search hit: the fields table, the details and the viewer (ADR 0043, deferred by ADR 0042)

@@ -355,6 +355,12 @@ public final class Session {
                         });
             case Action.LoadDocument load -> {
                 cancelJobs(load.cancel(), runner);
+                load.matches()
+                        .ifPresent(matches -> startJob(
+                                backend.call(Methods.START_HIGHLIGHT, matches.params()),
+                                runner,
+                                app -> jobId -> app.documentMatchesStarted(matches.matchesId(), jobId),
+                                app -> message -> app.documentMatchesFailed(matches.matchesId(), message)));
                 backend.call(Methods.GET_DOCUMENT, new GetDocumentParams(load.docId()))
                         .whenComplete((result, error) -> {
                             if (error == null) {
@@ -855,6 +861,25 @@ public final class Session {
                                     String message = describe(rpc);
                                     polled(runner, poll, app -> {
                                         app.highlightFailed(highlighting.highlightId(), message);
+                                        return Optional.empty();
+                                    });
+                                }
+                            });
+                case Poll.DocumentMatches finding ->
+                    backend.call(Methods.GET_HIGHLIGHT, new JobParams(finding.jobId()))
+                            .whenComplete((result, error) -> {
+                                if (error == null) {
+                                    polled(runner, poll, app -> {
+                                        app.documentMatchesProgress(finding.matchesId(), result);
+                                        return Optional.empty();
+                                    });
+                                    return;
+                                }
+                                RpcException rpc = rpcException(error, runner);
+                                if (rpc != null) {
+                                    String message = describe(rpc);
+                                    polled(runner, poll, app -> {
+                                        app.documentMatchesFailed(finding.matchesId(), message);
                                         return Optional.empty();
                                     });
                                 }

@@ -40,7 +40,7 @@ Several questions are new:
      - `snippet` and `spans` are ADR 0027's `Snippet` and `MatchSpan`, in UTF-8 bytes into the whole value. Overlapping matches are merged.
      - A passage longer than 300 characters is cut from 60 characters before its first match. Whitespace at its ends is trimmed.
    - A field is read up to its first 100,000 characters for passages.
-3. **Every match in one value: a job, `startHighlight` / `getHighlight`.**
+3. **Every match in one value: a job, `startHighlight` / `getHighlight`.** *Amended by ADR 0043: `field` is optional, and the outcome has one entry per field.*
    - `startHighlight {query, docId, field, options}` returns `JobStarted`.
    - The outcome is `DocumentHighlight {offsetSource, values, truncated}`, with one `ValueHighlight {valueIndex, matchCount, spans}` per value with a match. It keeps the first 100 spans (`StartStoredScanParams.MAX_SPANS`) and counts the rest.
    - The highlighter reads each value whole, with `WholeBreakIterator`, up to 1 MiB characters of the field. `truncated` says that the field is longer.
@@ -71,7 +71,7 @@ Several questions are new:
 - **The highlighter's HTML with `<b>` tags, parsed in the TUI.** The tags can't be told from the text, and positions would be lost. Rejected.
 - **Whole values on hits instead of passages.** A value can be megabytes long; passages keep a page small. The viewer gets whole values with `startHighlight`.
 - **`FastVectorHighlighter` or the original `Highlighter`.** The first needs term vectors with offsets, and the second re-analyzes always. The unified highlighter picks the cheapest source per field. Rejected.
-- **Highlighting by the documents screen**, marking matches in every value of a document opened from a hit. It needs the query on the documents screen and one more job per document. Left for later; `v` covers one value.
+- **Highlighting by the documents screen**, marking matches in every value of a document opened from a hit. It needs the query on the documents screen and one more job per document. Left for later; `v` covers one value. *Done in ADR 0043.*
 - **Failing on term vectors without offsets.** That is Lucene's behaviour, but such a field would then be impossible to highlight. Rejected for the fallback to analysis.
 
 ## Consequences

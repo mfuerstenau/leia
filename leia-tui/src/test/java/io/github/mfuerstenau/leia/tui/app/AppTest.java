@@ -47,17 +47,22 @@ import io.github.mfuerstenau.leia.protocol.jars.AddJarsResult;
 import io.github.mfuerstenau.leia.protocol.jars.JarComponents;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
+import io.github.mfuerstenau.leia.protocol.search.DocumentHighlight;
+import io.github.mfuerstenau.leia.protocol.search.FieldMatches;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
+import io.github.mfuerstenau.leia.protocol.search.GetHighlightResult;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanResult;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
 import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
+import io.github.mfuerstenau.leia.protocol.search.OffsetSource;
 import io.github.mfuerstenau.leia.protocol.search.SearchResults;
 import io.github.mfuerstenau.leia.protocol.search.Snippet;
 import io.github.mfuerstenau.leia.protocol.search.StoredScanHit;
 import io.github.mfuerstenau.leia.protocol.search.TermQuery;
 import io.github.mfuerstenau.leia.protocol.search.TotalHitsRelation;
+import io.github.mfuerstenau.leia.protocol.search.ValueHighlight;
 import io.github.mfuerstenau.leia.protocol.terms.ExportTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.FieldTerms;
 import io.github.mfuerstenau.leia.protocol.terms.GetExportTermsResult;
@@ -334,14 +339,65 @@ class AppTest {
         App app = searching("q");
         assertThat(app.searchProgress(searchId, page(2, 0))).isEmpty();
 
-        assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(load(2));
+        Action.LoadDocument open = loadWithMatches(app.handleKey(key(KeyCode.ENTER)), 2);
         app.documentLoaded(document(2));
         assertThat(wide(app)).contains("2 Documents", "[ ] hits").doesNotContain("[ ] term docs");
 
-        assertThat(app.handleKey(key(']'))).isEqualTo(load(0));
+        Action.LoadDocument next = loadWithMatches(app.handleKey(key(']')), 0);
         app.documentLoaded(document(0));
         assertThat(app.handleKey(key(']'))).isEmpty();
-        assertThat(app.handleKey(key('['))).isEqualTo(load(2));
+        Action.LoadDocument back = loadWithMatches(app.handleKey(key('[')), 2);
+        assertThat(List.of(open, next, back))
+                .allSatisfy(load -> assertThat(load.cancel()).isEmpty());
+    }
+
+    @Test
+    void aHitOpenedFromASearchMarksItsMatches() {
+        App app = searching("q");
+        app.searchProgress(searchId, page(2, 0));
+
+        Action.LoadDocument open = loadWithMatches(app.handleKey(key(KeyCode.ENTER)), 2);
+        Documents.MatchesStart matches = open.matches().orElseThrow();
+        assertThat(matches.params().field()).isEmpty();
+        app.documentLoaded(document(2));
+        assertThat(app.documentMatchesStarted(matches.matchesId(), 4)).isEmpty();
+        assertThat(app.polls()).contains(new Poll.DocumentMatches(matches.matchesId(), 4));
+        assertThat(wide(app)).contains("Fields (1, finding matches…, / seeks)");
+
+        app.documentMatchesProgress(
+                matches.matchesId(),
+                new GetHighlightResult(Optional.of(new DocumentHighlight(List.of(new FieldMatches(
+                        "id",
+                        OffsetSource.ANALYSIS,
+                        List.of(new ValueHighlight(0, 1, List.of(new MatchSpan(4, 5)))),
+                        false))))));
+        assertThat(app.polls()).doesNotContain(new Poll.DocumentMatches(matches.matchesId(), 4));
+        assertThat(TestScreens.render(app::render, 140, 24))
+                .contains("Fields (1, matches in 1, / seeks)", "Matches     1 in 1 value, offsets from analysis");
+
+        // The next hit's matches still run when → steps on to a document that isn't a hit: they
+        // stay for when it comes back, but a new hit cancels their job.
+        Action.LoadDocument next = loadWithMatches(app.handleKey(key(']')), 0);
+        app.documentLoaded(document(0));
+        assertThat(app.documentMatchesStarted(next.matches().orElseThrow().matchesId(), 5))
+                .isEmpty();
+        assertThat(app.handleKey(key(KeyCode.RIGHT))).isEqualTo(load(1));
+        app.documentLoaded(document(1));
+        assertThat(wide(app)).doesNotContain("matches");
+        assertThat(app.handleKey(key('[')))
+                .hasValueSatisfying(action ->
+                        assertThat(((Action.LoadDocument) action).cancel()).containsExactly(5L));
+    }
+
+    /** A load of {@code docId} that finds the matches of the search in it. */
+    private static Action.LoadDocument loadWithMatches(Optional<Action> action, int docId) {
+        assertThat(action).containsInstanceOf(Action.LoadDocument.class);
+        Action.LoadDocument load = (Action.LoadDocument) action.orElseThrow();
+        assertThat(load.docId()).isEqualTo(docId);
+        assertThat(load.matches())
+                .hasValueSatisfying(
+                        matches -> assertThat(matches.params().docId()).isEqualTo(docId));
+        return load;
     }
 
     @Test
@@ -1174,7 +1230,7 @@ class AppTest {
     }
 
     private static Optional<Action> load(int docId) {
-        return Optional.of(new Action.LoadDocument(docId, List.of(), Optional.empty()));
+        return Optional.of(new Action.LoadDocument(docId, List.of(), Optional.empty(), Optional.empty()));
     }
 
     private static GetIndexStatsResult withDocs(GetIndexStatsResult stats, int maxDoc, IndexField... fields) {
@@ -1345,7 +1401,8 @@ class AppTest {
         assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(load(0));
         assertThat(app.documentLoaded(document(0))).hasValue(new Action.LoadPositions(0, "id", text("1")));
         app.positionsLoaded(0, "id", text("1"), List.of());
-        assertThat(render(app)).contains("id:1  1 of 2", "[ ] term docs", "no positions indexed");
+        assertThat(TestScreens.render(app::render, 100, 22))
+                .contains("id:1  1 of 2", "[ ] term docs", "no positions indexed");
 
         assertThat(app.handleKey(key(']'))).isEqualTo(load(2));
         assertThat(app.handleKey(key(']'))).isEmpty();
@@ -1416,7 +1473,7 @@ class AppTest {
 
         // Another document stops it.
         assertThat(app.handleKey(key(KeyCode.RIGHT)))
-                .hasValue(new Action.LoadDocument(1, List.of(7L), Optional.empty()));
+                .hasValue(new Action.LoadDocument(1, List.of(7L), Optional.empty(), Optional.empty()));
         assertThat(app.polls()).isEmpty();
         app.documentLoaded(document(1));
 
@@ -1510,7 +1567,8 @@ class AppTest {
         app.handleKey(key(KeyCode.ENTER));
         app.handleKey(key(KeyCode.ENTER));
         assertThat(app.handleKey(key(KeyCode.ENTER)))
-                .hasValue(new Action.LoadDocument(0, List.of(), Optional.of(new Documents.Locate(2, 5))));
+                .hasValue(new Action.LoadDocument(
+                        0, List.of(), Optional.of(new Documents.Locate(2, 5)), Optional.empty()));
         StepFilterParams located = new StepFilterParams(5, 0, true);
         app.filterLocated(2, located, Optional.of(new FilterMatch(2, 1)));
         app.documentLoaded(document(0));

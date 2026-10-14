@@ -25,6 +25,12 @@ public sealed interface Poll {
     record Highlight(long highlightId, long jobId) implements Poll {}
 
     /**
+     * Report back with {@link App#documentMatchesProgress} or {@link App#documentMatchesFailed}, under
+     * {@code matchesId} (ADR 0043).
+     */
+    record DocumentMatches(long matchesId, long jobId) implements Poll {}
+
+    /**
      * Ask for the hits from {@code fromHit} on, and report back with {@link App#storedScanProgress} or
      * {@link App#storedScanFailed}, under {@code scanId}.
      */

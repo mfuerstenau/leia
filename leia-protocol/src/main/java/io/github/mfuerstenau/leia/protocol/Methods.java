@@ -272,9 +272,10 @@ public final class Methods {
             new RpcMethod<>("getExplain", JobParams.class, GetExplainResult.class);
 
     /**
-     * Starts a job that finds the matches of a query in every stored value of one field of a document
-     * (ADR 0042), for the viewer to mark them. Fails as {@code startSearch} does, with {@code
-     * DOC_NOT_FOUND} for an id outside 0 to maxDoc - 1, {@code FIELD_NOT_FOUND} for an unknown field,
+     * Starts a job that finds the matches of a query in every stored value of one field of a document,
+     * or of all its stored fields (ADR 0042, ADR 0043), for the viewer and the documents screen to mark
+     * them. Fails as {@code startSearch} does, with {@code DOC_NOT_FOUND} for an id outside 0 to maxDoc
+     * - 1, {@code FIELD_NOT_FOUND} for an unknown named field,
      * or {@code INVALID_ANALYZER} if the highlight analyzer can't be built.
      */
     public static final RpcMethod<StartHighlightParams, JobStarted> START_HIGHLIGHT =

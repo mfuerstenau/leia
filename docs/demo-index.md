@@ -110,6 +110,11 @@ other tests use their own indexes and the Lucene 9 and 8 indexes from `LegacyInd
   `H` set to any field's terms, `title:lamp` also marks `lamp` in `body`, `csv` and
   `unit_separated`, and for doc 132 in `tagged` and `lines` too. `H` again turns it off, and the
   hits show their stored fields.
+- Matches on the documents screen (ADR 0043): `Enter` on doc 223 of `title:lamp AND body:qu*`
+  marks `title` and `body` in the fields table, whose title says `matches in 2`; the details mark
+  `lamp` and the `qu…` words in the stored values, and `v` on `body` opens at `match 1 of …` with
+  `m` `M` stepping. `]` moves to the next hit with its own matches; `←` to a document that is no
+  hit shows none. With `H` off, a hit opens without marks.
 - `/` on a top term of `binary_key` in the overview: a term query for a binary term, shown as hex.
 - `title:(lamp`: a syntax error; `body:*a*`: a leading wildcard, which the classic parser rejects
   until `p` turns leading wildcards on.

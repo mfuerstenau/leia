@@ -97,15 +97,33 @@ public final class Logo {
     }
 
     /**
-     * leia's name and version, then its build: {@code leia 0.1.0}, {@code build 9229a55}, the
-     * commit time. leia and its backend are one build (ADR 0034), so the backend's version is
-     * leia's.
+     * leia's name and version, what the name stands for, then its build: {@code leia 0.1.0},
+     * {@code Lucene Explorer for Index Analysis}, {@code build 9229a55}, the commit time. leia and
+     * its backend are one build (ADR 0034), so the backend's version is leia's.
      */
     public static List<Line> aboutLines(VersionResult version) {
         return List.of(
                 Line.from(Span.styled("leia", Style.EMPTY.bold()), Span.raw(" " + version.version())),
+                acronym(),
                 Line.from("build " + version.commit()),
                 Line.from(version.commitTime()));
+    }
+
+    /** {@code Lucene Explorer for Index Analysis}, with the letters of leia's name bold and the rest dim. */
+    static Line acronym() {
+        List<Span> spans = new ArrayList<>();
+        for (String word : List.of("Lucene", "Explorer", "for", "Index", "Analysis")) {
+            if (!spans.isEmpty()) {
+                spans.add(Span.styled(" ", Style.EMPTY.dim()));
+            }
+            if (word.equals("for")) {
+                spans.add(Span.styled(word, Style.EMPTY.dim()));
+            } else {
+                spans.add(Span.styled(word.substring(0, 1), Style.EMPTY.bold()));
+                spans.add(Span.styled(word.substring(1), Style.EMPTY.dim()));
+            }
+        }
+        return Line.from(spans);
     }
 
     /** Columns that the logo and {@code text} next to it take. */

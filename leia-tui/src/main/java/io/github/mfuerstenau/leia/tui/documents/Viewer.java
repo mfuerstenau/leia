@@ -20,6 +20,7 @@ import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
+import io.github.mfuerstenau.leia.protocol.search.ValueHighlight;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import java.nio.ByteBuffer;
@@ -598,19 +599,40 @@ public final class Viewer {
             int index,
             List<MatchSpan> spans,
             int matchCount) {
+        return withMatches(
+                docId, field, values, delimiters, index, List.of(new ValueHighlight(index, matchCount, spans)));
+    }
+
+    /**
+     * Views {@code values} from the stored value with this index on, as text with the matches of
+     * each value in {@code highlights} highlighted, scrolled to the first of them (ADR 0043). {@link
+     * #fetch} then fetches the value, if it is cut.
+     */
+    public static Viewer withMatches(
+            int docId,
+            String field,
+            List<Value> values,
+            Delimiters delimiters,
+            int index,
+            List<ValueHighlight> highlights) {
         Viewer viewer = new Viewer(docId, field, values, delimiters);
+        for (ValueHighlight highlight : highlights) {
+            for (Value value : values) {
+                if (value.stored == highlight.valueIndex()) {
+                    value.matches = highlight.spans().stream()
+                            .filter(span -> span.start() >= 0 && span.end() >= 0)
+                            .map(span -> new ByteRange(span.start(), span.end()))
+                            .toList();
+                    value.matchCount = Math.max(highlight.matchCount(), 0);
+                }
+            }
+        }
         for (int i = 0; i < values.size(); i++) {
             if (values.get(i).stored == index) {
                 viewer.current = i;
                 break;
             }
         }
-        Value value = values.get(viewer.current);
-        value.matches = spans.stream()
-                .filter(span -> span.start() >= 0 && span.end() >= 0)
-                .map(span -> new ByteRange(span.start(), span.end()))
-                .toList();
-        value.matchCount = Math.max(matchCount, 0);
         viewer.mode = Mode.TEXT;
         viewer.toMatch = true;
         return viewer;
@@ -809,6 +831,9 @@ public final class Viewer {
         current = index;
         scroll = 0;
         wrapped = null;
+        // Each value's matches from its first on.
+        matchIndex = 0;
+        toMatch = !values.get(index).matches.isEmpty();
     }
 
     /**

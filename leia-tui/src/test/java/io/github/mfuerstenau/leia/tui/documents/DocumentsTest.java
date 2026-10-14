@@ -29,14 +29,25 @@ import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
 import io.github.mfuerstenau.leia.protocol.points.PointValue;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
+import io.github.mfuerstenau.leia.protocol.search.DocumentHighlight;
+import io.github.mfuerstenau.leia.protocol.search.FieldMatches;
+import io.github.mfuerstenau.leia.protocol.search.GetHighlightResult;
+import io.github.mfuerstenau.leia.protocol.search.HighlightOptions;
 import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
+import io.github.mfuerstenau.leia.protocol.search.OffsetSource;
+import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
+import io.github.mfuerstenau.leia.protocol.search.StartHighlightParams;
+import io.github.mfuerstenau.leia.protocol.search.TermQuery;
+import io.github.mfuerstenau.leia.protocol.search.ValueHighlight;
 import io.github.mfuerstenau.leia.tui.TestFilters;
 import io.github.mfuerstenau.leia.tui.TestScreens;
+import io.github.mfuerstenau.leia.tui.analysis.AnalysisSettings;
 import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.documents.Documents.Request;
 import io.github.mfuerstenau.leia.tui.points.PointFormat;
 import io.github.mfuerstenau.leia.tui.points.PointFormats;
 import io.github.mfuerstenau.leia.tui.terms.Terms.TermHit;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -161,8 +172,16 @@ class DocumentsTest {
                         "red blue\\nred (+1 more)",
                         "dv: -1, 4612811918334230528",
                         // The details of the first field.
+                        "Flags       I--S----  indexed, stored",
                         "string  doc-0",
                         "Term vector -");
+    }
+
+    @Test
+    void spellsOutTheFlags() {
+        assertThat(Documents.flagWords("IN-SV---")).isEqualTo("indexed, norm, stored, term vector");
+        assertThat(Documents.flagWords("--P--DTK")).isEqualTo("payloads, doc values, points, KNN vector");
+        assertThat(Documents.flagWords("--------")).isEqualTo("none");
     }
 
     @Test
@@ -577,6 +596,66 @@ class DocumentsTest {
         assertThat(documents.viewer().orElseThrow().keys()).contains("m/M");
         // Only once.
         assertThat(documents.openPendingView()).isEmpty();
+    }
+
+    @Test
+    void marksTheMatchesOfASearchHit() {
+        Documents documents = documents();
+        Documents.MatchQuery query = new Documents.MatchQuery(
+                new SearchQuery(
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.of(new TermQuery("body", new BytesValue("red", false))),
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.empty()),
+                new HighlightOptions(3, true, new AnalysisSettings().analyzer()));
+        documents.showSearchHit(0, Optional.of(query));
+        List<Long> cancel = new ArrayList<>();
+        Documents.MatchesStart start = documents.matchesFor(0, cancel).orElseThrow();
+        assertThat(start.params())
+                .isEqualTo(new StartHighlightParams(query.query(), 0, Optional.empty(), query.options()));
+        assertThat(cancel).isEmpty();
+        // Asked for once.
+        assertThat(documents.matchesFor(0, cancel)).isEmpty();
+        documents.loaded(document(0));
+        assertThat(render(documents, 140, 30)).contains("Fields (4, finding matches…, / seeks)");
+
+        assertThat(documents.matchesStarted(start.matchesId(), 7)).isEmpty();
+        assertThat(documents.matchesJob())
+                .hasValueSatisfying(job -> assertThat(job).containsExactly(start.matchesId(), 7));
+        documents.matchesProgress(
+                start.matchesId(),
+                new GetHighlightResult(Optional.of(new DocumentHighlight(List.of(
+                        new FieldMatches("id", OffsetSource.ANALYSIS, List.of(), false),
+                        new FieldMatches(
+                                "body",
+                                OffsetSource.POSTINGS,
+                                List.of(new ValueHighlight(0, 2, List.of(new MatchSpan(0, 3), new MatchSpan(9, 12)))),
+                                true))))));
+        assertThat(documents.matchesJob()).isEmpty();
+        documents.handleKey(key(KeyCode.DOWN));
+        assertThat(render(documents, 140, 30))
+                .contains(
+                        "Fields (4, matches in 1, / seeks)",
+                        "Matches     2 in 1 value, offsets from the postings, v views",
+                        "them (cut at 1.0 MiB)",
+                        "string  red blue",
+                        "          red");
+
+        documents.handleKey(key('v'));
+        assertThat(render(documents, 100, 20)).contains("body · 1 of 2", "match 1 of 2");
+        documents.handleKey(key(KeyCode.ESCAPE));
+
+        // Another document shows none, and they are back with the hit.
+        documents.loaded(document(1));
+        assertThat(render(documents, 140, 30)).doesNotContain("matches");
+        documents.loaded(document(0));
+        assertThat(render(documents, 140, 30)).contains("matches in 1");
+
+        // A term hit forgets them.
+        documents.showHit(new TermHit("id", new BytesValue("doc-0", false), 0, 0, 1, OptionalInt.empty()));
+        assertThat(render(documents, 140, 30)).doesNotContain("matches");
     }
 
     @Test

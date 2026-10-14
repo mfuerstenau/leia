@@ -26,9 +26,7 @@ import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.widgets.Form;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -351,41 +349,16 @@ public final class StoredScan {
      * @param valueLength the value's length in bytes; -1 if unknown, for no {@code …} after it
      */
     static List<Span> snippetSpans(Snippet snippet, List<MatchSpan> matches, long valueLength) {
-        byte[] text = snippet.text().getBytes(StandardCharsets.UTF_8);
+        String text = snippet.text();
         long start = snippet.start();
-        int len = text.length;
         List<Span> spans = new ArrayList<>();
         if (start > 0) {
             spans.add(Span.styled("…", Form.dim()));
         }
-        int pos = 0;
-        for (MatchSpan span : matches) {
-            int from = Math.clamp(span.start() - start, 0, len);
-            int to = Math.clamp(span.end() - start, 0, len);
-            if (to <= from || from < pos || !boundary(text, from) || !boundary(text, to)) {
-                continue;
-            }
-            if (from > pos) {
-                spans.add(Span.raw(TextFormat.escapeControl(utf8(text, pos, from))));
-            }
-            spans.add(Span.styled(TextFormat.escapeControl(utf8(text, from, to)), TextFormat.MATCH));
-            pos = to;
-        }
-        if (pos < len) {
-            spans.add(Span.raw(TextFormat.escapeControl(utf8(text, pos, len))));
-        }
-        if (start + len < valueLength) {
+        spans.addAll(TextFormat.marked(text, 0, text.length(), TextFormat.charRanges(text, start, matches)));
+        if (start + TextFormat.utf8Length(text) < valueLength) {
             spans.add(Span.styled("…", Form.dim()));
         }
         return spans;
-    }
-
-    /** Whether a character starts at byte {@code at}, or the text ends there. */
-    private static boolean boundary(byte[] text, int at) {
-        return at >= text.length || (text[at] & 0xC0) != 0x80;
-    }
-
-    private static String utf8(byte[] text, int from, int to) {
-        return new String(Arrays.copyOfRange(text, from, to), StandardCharsets.UTF_8);
     }
 }

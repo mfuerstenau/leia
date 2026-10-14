@@ -69,6 +69,7 @@ import io.github.mfuerstenau.leia.protocol.search.DocValuesRange;
 import io.github.mfuerstenau.leia.protocol.search.DocumentHighlight;
 import io.github.mfuerstenau.leia.protocol.search.Explanation;
 import io.github.mfuerstenau.leia.protocol.search.FieldDateResolution;
+import io.github.mfuerstenau.leia.protocol.search.FieldMatches;
 import io.github.mfuerstenau.leia.protocol.search.FieldSort;
 import io.github.mfuerstenau.leia.protocol.search.HighlightOptions;
 import io.github.mfuerstenau.leia.protocol.search.HighlightPassage;
@@ -716,8 +717,13 @@ class DemoIndexTest {
                     .findFirst()
                     .orElseThrow()
                     .docId();
-            DocumentHighlight body = backend.highlight(
-                    new StartHighlightParams(classic("lam*"), docId, "body", new HighlightOptions(1, true, STANDARD)));
+            DocumentHighlight document = backend.highlight(new StartHighlightParams(
+                    classic("lam*"), docId, Optional.empty(), new HighlightOptions(1, true, STANDARD)));
+            assertThat(document.fields()).extracting(FieldMatches::field).contains("title", "body");
+            FieldMatches body = document.fields().stream()
+                    .filter(field -> field.field().equals("body"))
+                    .findFirst()
+                    .orElseThrow();
             // A wildcard needs the term vector to find the terms it matches.
             assertThat(body.offsetSource()).isEqualTo(OffsetSource.POSTINGS_WITH_TERM_VECTORS);
             assertThat(body.values())

@@ -3,6 +3,7 @@ package io.github.mfuerstenau.leia.core;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.github.mfuerstenau.leia.core.DocumentHighlight.FieldMatches;
 import io.github.mfuerstenau.leia.core.DocumentHighlight.ValueHighlight;
 import io.github.mfuerstenau.leia.core.Queries.Operator;
 import io.github.mfuerstenau.leia.core.SearchResults.FieldHighlight;
@@ -228,8 +229,8 @@ class HighlightsTest {
     @Test
     void marksEveryMatchInAField() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            DocumentHighlight highlight =
-                    index.highlight(classic("tags:goose"), SPEC, 1, "tags", 100, ScanProgress.NONE);
+            FieldMatches highlight =
+                    only(index.highlight(classic("tags:goose"), SPEC, 1, Optional.of("tags"), 100, ScanProgress.NONE));
 
             // TextField has no offsets in its postings.
             assertThat(highlight.offsetSource()).isEqualTo(OffsetSource.ANALYSIS);
@@ -244,7 +245,8 @@ class HighlightsTest {
     @Test
     void keepsTheFirstSpansAndCountsTheRest() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            DocumentHighlight highlight = index.highlight(classic("post:word"), SPEC, 2, "post", 3, ScanProgress.NONE);
+            FieldMatches highlight =
+                    only(index.highlight(classic("post:word"), SPEC, 2, Optional.of("post"), 3, ScanProgress.NONE));
 
             assertThat(highlight.values()).hasSize(1);
             assertThat(highlight.values().getFirst().matchCount()).isEqualTo(400);
@@ -256,14 +258,59 @@ class HighlightsTest {
     @Test
     void aFieldWithoutMatchesHasNoValues() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
-            DocumentHighlight highlight = index.highlight(classic("post:fox"), SPEC, 1, "tags", 100, ScanProgress.NONE);
+            FieldMatches highlight =
+                    only(index.highlight(classic("post:fox"), SPEC, 1, Optional.of("tags"), 100, ScanProgress.NONE));
 
+            assertThat(highlight.field()).isEqualTo("tags");
             assertThat(highlight.values()).isEmpty();
             assertThat(highlight.offsetSource()).isEqualTo(OffsetSource.NONE);
-            assertThatThrownBy(() -> index.highlight(classic("post:fox"), SPEC, 99, "post", 100, ScanProgress.NONE))
+            assertThatThrownBy(() ->
+                            index.highlight(classic("post:fox"), SPEC, 99, Optional.of("post"), 100, ScanProgress.NONE))
                     .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> index.highlight(classic("post:fox"), SPEC, 0, "nothing", 100, ScanProgress.NONE))
+            assertThatThrownBy(() -> index.highlight(
+                            classic("post:fox"), SPEC, 0, Optional.of("nothing"), 100, ScanProgress.NONE))
                     .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
+    void marksEveryMatchInEachFieldWithText() throws Exception {
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
+            DocumentHighlight highlight = index.highlight(
+                    classic("post:fox OR vectors:cat"), SPEC, 0, Optional.empty(), 100, ScanProgress.NONE);
+
+            // Every stored field with text, in stored order, with matches or not.
+            assertThat(highlight.fields())
+                    .extracting(FieldMatches::field)
+                    .containsExactly("id", "post", "vectors", "bare", "plain");
+            FieldMatches post = highlight.fields().get(1);
+            assertThat(post.offsetSource()).isEqualTo(OffsetSource.POSTINGS);
+            assertThat(post.values())
+                    .containsExactly(new ValueHighlight(0, 2, List.of(new Span(16, 19), new Span(36, 39))));
+            FieldMatches vectors = highlight.fields().get(2);
+            assertThat(vectors.offsetSource()).isEqualTo(OffsetSource.TERM_VECTORS);
+            assertThat(vectors.values()).containsExactly(new ValueHighlight(0, 1, List.of(new Span(2, 5))));
+            // The fox in plain is not marked: the query asks for it in post only.
+            FieldMatches plain = highlight.fields().get(4);
+            assertThat(plain.values()).isEmpty();
+            assertThat(plain.truncated()).isFalse();
+        }
+    }
+
+    @Test
+    void withoutAFieldMatchEachFieldMarksTheQuerysTerms() throws Exception {
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
+            DocumentHighlight highlight = index.highlight(
+                    classic("post:fox"),
+                    new HighlightSpec(3, false, ANALYZER),
+                    0,
+                    Optional.empty(),
+                    100,
+                    ScanProgress.NONE);
+
+            FieldMatches plain = highlight.fields().get(4);
+            assertThat(plain.field()).isEqualTo("plain");
+            assertThat(plain.values()).containsExactly(new ValueHighlight(0, 1, List.of(new Span(13, 16))));
         }
     }
 
@@ -274,7 +321,7 @@ class HighlightsTest {
                 throw new CancellationException("cancelled");
             };
 
-            assertThatThrownBy(() -> index.highlight(classic("post:fox"), SPEC, 0, "post", 100, cancelled))
+            assertThatThrownBy(() -> index.highlight(classic("post:fox"), SPEC, 0, Optional.empty(), 100, cancelled))
                     .isInstanceOf(CancellationException.class);
         }
     }
@@ -287,6 +334,11 @@ class HighlightsTest {
                         Arrays.copyOfRange(text, span.start() - passage.start(), span.end() - passage.start()),
                         StandardCharsets.UTF_8))
                 .toList();
+    }
+
+    private static FieldMatches only(DocumentHighlight highlight) {
+        assertThat(highlight.fields()).hasSize(1);
+        return highlight.fields().getFirst();
     }
 
     private static Hit only(SearchResults results) {

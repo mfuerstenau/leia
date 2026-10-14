@@ -182,8 +182,8 @@ final class Searcher {
     }
 
     /**
-     * Every match of {@code query} in the stored text values of {@code field} of a document (ADR 0042),
-     * up to {@code maxSpans} per value.
+     * Every match of {@code query} in the stored text values of {@code field} of a document, or of
+     * each of its stored fields without one (ADR 0042, ADR 0043), up to {@code maxSpans} per value.
      */
     static DocumentHighlight highlight(
             IndexReader reader,
@@ -191,7 +191,7 @@ final class Searcher {
             Query query,
             HighlightSpec spec,
             int docId,
-            String field,
+            Optional<String> field,
             int maxSpans,
             ScanProgress progress)
             throws IOException, InvalidQueryException {
@@ -199,10 +199,10 @@ final class Searcher {
         IndexSearcher searcher = searcher(directoryReaders, IndexSearcher.getDefaultSimilarity(), cancellation);
         try {
             Query built = built(searcher, query);
-            DocumentReader.StoredValues stored = new DocumentReader.StoredValues(field::equals);
+            DocumentReader.StoredValues stored = new DocumentReader.StoredValues(
+                    name -> field.map(name::equals).orElse(true));
             reader.storedFields().document(docId, stored);
-            DocumentHighlight highlight = Highlights.document(
-                    searcher, built, spec, docId, field, stored.values.getOrDefault(field, List.of()), maxSpans);
+            DocumentHighlight highlight = Highlights.document(searcher, built, spec, docId, stored.values, maxSpans);
             cancellation.check();
             return highlight;
         } catch (ExitableDirectoryReader.ExitingReaderException e) {

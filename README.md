@@ -268,10 +268,20 @@ and so do opening and closing an index. A reopen that finds a new commit builds 
 and then only says where the shown document stands in it. A regex filter reads every stored value
 again, so its title also says how many values took too long and were skipped.
 
+A document opened from a hit of the search screen shows where the query matches it (ADR 0043), with
+the search's highlight setting (`H`): every match in every stored text field is found in the
+background, the fields table's title says `finding matches…` and then `matches in 2`, and the
+names of the fields with a match are marked. The details panel says how many matches the selected
+field has and where their offsets came from, and marks them in the stored values; `v` opens the
+viewer on the first value with a match, and `m` `M` step through the matches of each value. `←`
+`→` to another document show none, and they come back with the hit. A hit opened from the terms
+screen, or with highlighting off, has no matches.
+
 Flags: `I` indexed, `N` has a norm, `P` payloads, `S` stored, `V` term vector, `D` doc values,
 `T` points, `K` KNN vector. `N`, `S`, `V`, `D` and `K` say what this document has; the others
-describe the field. Whether the document has terms or points in a field is not shown: finding out
-means reading the field's terms and points, which `r` does.
+describe the field. The details panel's first line spells out the selected field's flags. Whether
+the document has terms or points in a field is not shown: finding out means reading the field's
+terms and points, which `r` does.
 
 #### Viewer
 
@@ -280,7 +290,7 @@ means reading the field's terms and points, which `r` does.
 | Key | Action |
 |---|---|
 | `←` `→` / `p` `n` | previous or next value |
-| `m` `M` | next or previous match, for a value opened from the regex scan |
+| `m` `M` | next or previous match, for a value opened from the regex scan, a search hit's `v`, or a document opened from a hit |
 | `t` | show the text |
 | `h` | switch between the text and a hex dump |
 | `J` | switch between the text and pretty-printed JSON |
@@ -414,8 +424,9 @@ has offsets; or else analysis of the stored text with the analysis screen's anal
 fuzzy query needs analysis or the term vector even on a field with postings offsets. `H` switches
 to highlighting each field with the terms of every field, which also marks text that is stored but
 not indexed, then off. `v` finds every match in the value of the first passage and opens it in the
-documents screen's viewer, where `m` and `M` step through them. Doc values and KNN queries have no
-terms, so nothing is highlighted.
+documents screen's viewer, where `m` and `M` step through them. `Enter` on a hit, and `[` `]` from
+one to the next, mark the query's matches on the documents screen too (ADR 0043). Doc values and
+KNN queries have no terms, so nothing is highlighted.
 
 The doc values mode searches one field's doc values, which find what has neither terms nor points,
 such as a sort or facet field (ADR 0033). The line holds one value, several values separated by

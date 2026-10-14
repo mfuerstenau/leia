@@ -920,8 +920,8 @@ public final class ReadOnlyIndex implements OpenedIndex {
     }
 
     /**
-     * Finds every match of {@code query} in the stored text values of {@code field} of a document
-     * (ADR 0042), up to {@code maxSpans} per value. {@code progress} can stop it by throwing a {@link
+     * Finds every match of {@code query} in the stored text values of {@code field} of a document, or
+     * of each of its stored fields without one (ADR 0042, ADR 0043), up to {@code maxSpans} per value. {@code progress} can stop it by throwing a {@link
      * CancellationException}, as for {@link #search}.
      *
      * @throws IllegalArgumentException if there is no such document id or field, or {@code maxSpans} is
@@ -930,10 +930,10 @@ public final class ReadOnlyIndex implements OpenedIndex {
      * @throws IOException if reading the index fails
      */
     public DocumentHighlight highlight(
-            Query query, HighlightSpec spec, int docId, String field, int maxSpans, ScanProgress progress)
+            Query query, HighlightSpec spec, int docId, Optional<String> field, int maxSpans, ScanProgress progress)
             throws IOException, InvalidQueryException {
         checkDocId(docId);
-        checkField(field);
+        field.ifPresent(this::checkField);
         if (maxSpans < 0) {
             throw new IllegalArgumentException("maxSpans must not be negative: " + maxSpans);
         }

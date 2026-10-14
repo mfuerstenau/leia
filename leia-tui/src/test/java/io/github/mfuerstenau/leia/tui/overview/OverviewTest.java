@@ -181,8 +181,9 @@ class OverviewTest {
         assertThat(lines.get(9)).startsWith("└");
         // leia's name, version and build next to it.
         assertThat(lines.get(3)).contains("leia 0.1.0");
-        assertThat(lines.get(4)).contains("build 9229a55");
-        assertThat(lines.get(5)).contains("2026-10-09 12:00");
+        assertThat(lines.get(4)).contains("Lucene Explorer for Index Analysis");
+        assertThat(lines.get(5)).contains("build 9229a55");
+        assertThat(lines.get(6)).contains("2026-10-09 12:00");
 
         // Not where the summary wouldn't fit next to it, nor on a short screen.
         assertThat(render(overview, 60, 30)).doesNotContain("▀");

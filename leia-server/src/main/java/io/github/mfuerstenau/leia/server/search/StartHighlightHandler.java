@@ -9,7 +9,6 @@ import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
 import io.github.mfuerstenau.leia.protocol.search.DocumentHighlight;
-import io.github.mfuerstenau.leia.protocol.search.OffsetSource;
 import io.github.mfuerstenau.leia.protocol.search.StartHighlightParams;
 import io.github.mfuerstenau.leia.protocol.search.StartStoredScanParams;
 import io.github.mfuerstenau.leia.server.MethodHandler;
@@ -20,13 +19,14 @@ import io.github.mfuerstenau.leia.server.job.Jobs;
 import jakarta.inject.Inject;
 import java.io.IOException;
 import java.util.List;
+import java.util.Optional;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.search.Query;
 
 /**
  * {@code startHighlight}: checks the params and parses the query at once, then finds the query's
- * matches in one field of a document of the {@link CurrentIndex} in a job ({@link
- * GetHighlightHandler}, ADR 0042).
+ * matches in one field, or all stored fields, of a document of the {@link CurrentIndex} in a job
+ * ({@link GetHighlightHandler}, ADR 0042, ADR 0043).
  */
 public final class StartHighlightHandler implements MethodHandler<StartHighlightParams, JobStarted> {
 
@@ -48,17 +48,18 @@ public final class StartHighlightHandler implements MethodHandler<StartHighlight
     public JobStarted handle(StartHighlightParams params) throws RpcException {
         ReadOnlyIndex index = currentIndex.readable();
         int docId = params.docId();
-        String field = params.field();
+        Optional<String> field = params.field();
         GetDocumentHandler.checkDocId(index, docId);
-        SearchQueries.checkField(index, field);
-        String description = "highlight " + field + " of document " + docId;
+        if (field.isPresent()) {
+            SearchQueries.checkField(index, field.get());
+        }
+        String what = field.orElse("the stored fields") + " of document " + docId;
+        String description = "highlight " + what;
         if (!Highlighting.hasTerms(params.query())) {
             // Checked as a search would be, but there is nothing to mark.
             SearchQueries.query(index, params.query()).close();
-            return new JobStarted(jobs.start(
-                    description,
-                    DocumentHighlight.class,
-                    _ -> new DocumentHighlight(OffsetSource.NONE, List.of(), false)));
+            return new JobStarted(
+                    jobs.start(description, DocumentHighlight.class, _ -> new DocumentHighlight(List.of())));
         }
         // Last: from here on, the job owns the analyzers and closes them.
         SearchQueries.AnalyzedQuery analyzed = SearchQueries.query(index, params.query());
@@ -74,14 +75,20 @@ public final class StartHighlightHandler implements MethodHandler<StartHighlight
         long jobId = jobs.start(description + " for " + query, DocumentHighlight.class, progress -> {
             try (analyzed;
                     analyzer) {
-                return highlight(index, query, spec, docId, field, progress);
+                return highlight(index, query, spec, docId, field, what, progress);
             }
         });
         return new JobStarted(jobId);
     }
 
     private static DocumentHighlight highlight(
-            ReadOnlyIndex index, Query query, HighlightSpec spec, int docId, String field, ScanProgress progress)
+            ReadOnlyIndex index,
+            Query query,
+            HighlightSpec spec,
+            int docId,
+            Optional<String> field,
+            String what,
+            ScanProgress progress)
             throws RpcException {
         try {
             return Highlighting.toHighlight(
@@ -89,10 +96,7 @@ public final class StartHighlightHandler implements MethodHandler<StartHighlight
         } catch (InvalidQueryException e) {
             throw SearchQueries.invalidQuery(e);
         } catch (IOException e) {
-            throw new RpcException(
-                    ErrorCode.INDEX_NOT_READABLE,
-                    "Cannot highlight " + field + " of document " + docId + ": " + e.getMessage(),
-                    e);
+            throw new RpcException(ErrorCode.INDEX_NOT_READABLE, "Cannot highlight " + what + ": " + e.getMessage(), e);
         }
     }
 }

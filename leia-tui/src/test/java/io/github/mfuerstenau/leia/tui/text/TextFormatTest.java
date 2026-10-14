@@ -1,20 +1,58 @@
 package io.github.mfuerstenau.leia.tui.text;
 
 import static io.github.mfuerstenau.leia.tui.text.TextFormat.bytesText;
+import static io.github.mfuerstenau.leia.tui.text.TextFormat.charRanges;
 import static io.github.mfuerstenau.leia.tui.text.TextFormat.count;
 import static io.github.mfuerstenau.leia.tui.text.TextFormat.escapeControl;
 import static io.github.mfuerstenau.leia.tui.text.TextFormat.firstChars;
+import static io.github.mfuerstenau.leia.tui.text.TextFormat.marked;
 import static io.github.mfuerstenau.leia.tui.text.TextFormat.size;
 import static io.github.mfuerstenau.leia.tui.text.TextFormat.utcTime;
+import static io.github.mfuerstenau.leia.tui.text.TextFormat.utf8Length;
 import static io.github.mfuerstenau.leia.tui.text.TextFormat.wrap;
 import static io.github.mfuerstenau.leia.tui.text.TextFormat.wrapHanging;
 import static io.github.mfuerstenau.leia.tui.text.TextFormat.wrapRanges;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.tamboui.text.Span;
+import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class TextFormatTest {
+
+    @Test
+    void marksUtf8SpansInText() {
+        // "ü" takes two bytes, the fox four and two UTF-16 chars.
+        String text = "grüße 🦊 fox";
+        List<int[]> ranges = charRanges(
+                text,
+                0,
+                List.of(new MatchSpan(0, 7), new MatchSpan(3, 5), new MatchSpan(8, 12), new MatchSpan(13, 99)));
+
+        // The overlapping second span is left out, and the last is cut to the text.
+        assertThat(ranges).containsExactly(new int[] {0, 5}, new int[] {6, 8}, new int[] {9, 12});
+        assertThat(marked(text, 0, text.length(), ranges))
+                .containsExactly(
+                        Span.styled("grüße", TextFormat.MATCH),
+                        Span.raw(" "),
+                        Span.styled("🦊", TextFormat.MATCH),
+                        Span.raw(" "),
+                        Span.styled("fox", TextFormat.MATCH));
+        // A part of the text: the spans are cut to it.
+        assertThat(marked(text, 3, 10, ranges))
+                .containsExactly(
+                        Span.styled("ße", TextFormat.MATCH),
+                        Span.raw(" "),
+                        Span.styled("🦊", TextFormat.MATCH),
+                        Span.raw(" "),
+                        Span.styled("f", TextFormat.MATCH));
+        // From a later byte offset on, and a span inside a character.
+        assertThat(charRanges("fox", 10, List.of(new MatchSpan(8, 11), new MatchSpan(12, 13))))
+                .containsExactly(new int[] {0, 1}, new int[] {2, 3});
+        assertThat(charRanges("ü", 0, List.of(new MatchSpan(1, 2)))).isEmpty();
+        assertThat(utf8Length(text)).isEqualTo(16);
+    }
 
     @Test
     void escapesControlCharacters() {
