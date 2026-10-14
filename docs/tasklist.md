@@ -2,6 +2,10 @@
 
 The work queue for leia. Check items off (`[x]`) as they land, and keep it aligned with the "Remaining / next" section of the latest entry in `docs/SESSION-SUMMARIES.md`. Finished items move to `docs/tasklist-done.md`.
 
+## Bugs
+
+- [ ] The key legend in the footer is cut off on a narrow terminal instead of wrapping; it must wrap so that every key stays visible
+
 ## Backlog — future capabilities
 
 From the read-only checklist in `docs/luke-features.md` §7. Ordered roughly by value. Each area will need its own records, handlers and probably an ADR for the cross-cutting parts.
