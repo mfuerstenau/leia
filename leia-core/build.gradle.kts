@@ -11,6 +11,8 @@ dependencies {
     implementation(libs.lucene.queries)
     // CustomAnalyzer and the analysis factories for the analysis screen (ADR 0014).
     implementation(libs.lucene.analysis.common)
+    // UnifiedHighlighter for the passages of hits and the matches in a value (ADR 0042).
+    implementation(libs.lucene.highlighter)
     // Lucene 9 indexes must open with Lucene 10 (AGENTS.md, hard rule 5).
     runtimeOnly(libs.lucene.backward.codecs)
     // Lucene's other codecs and formats, such as SimpleText and the suggesters' Completion

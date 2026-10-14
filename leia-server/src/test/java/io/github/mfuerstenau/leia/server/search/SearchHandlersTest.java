@@ -25,16 +25,23 @@ import io.github.mfuerstenau.leia.protocol.search.DocSort;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesRange;
+import io.github.mfuerstenau.leia.protocol.search.DocumentHighlight;
 import io.github.mfuerstenau.leia.protocol.search.Explanation;
 import io.github.mfuerstenau.leia.protocol.search.FieldDateResolution;
 import io.github.mfuerstenau.leia.protocol.search.FieldSort;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
+import io.github.mfuerstenau.leia.protocol.search.GetHighlightResult;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
+import io.github.mfuerstenau.leia.protocol.search.HighlightOptions;
+import io.github.mfuerstenau.leia.protocol.search.HighlightPassage;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.HitField;
+import io.github.mfuerstenau.leia.protocol.search.HitHighlight;
 import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
 import io.github.mfuerstenau.leia.protocol.search.LikeTerm;
+import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
 import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
+import io.github.mfuerstenau.leia.protocol.search.OffsetSource;
 import io.github.mfuerstenau.leia.protocol.search.ParserOptions;
 import io.github.mfuerstenau.leia.protocol.search.PointField;
 import io.github.mfuerstenau.leia.protocol.search.PointType;
@@ -43,6 +50,7 @@ import io.github.mfuerstenau.leia.protocol.search.ScoreSort;
 import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
 import io.github.mfuerstenau.leia.protocol.search.SearchResults;
 import io.github.mfuerstenau.leia.protocol.search.Similarity;
+import io.github.mfuerstenau.leia.protocol.search.Snippet;
 import io.github.mfuerstenau.leia.protocol.search.SortKey;
 import io.github.mfuerstenau.leia.protocol.search.SortMissing;
 import io.github.mfuerstenau.leia.protocol.search.SortSelector;
@@ -50,9 +58,11 @@ import io.github.mfuerstenau.leia.protocol.search.SortType;
 import io.github.mfuerstenau.leia.protocol.search.SortValue;
 import io.github.mfuerstenau.leia.protocol.search.StandardQuery;
 import io.github.mfuerstenau.leia.protocol.search.StartExplainParams;
+import io.github.mfuerstenau.leia.protocol.search.StartHighlightParams;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.TermQuery;
 import io.github.mfuerstenau.leia.protocol.search.TotalHitsRelation;
+import io.github.mfuerstenau.leia.protocol.search.ValueHighlight;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
@@ -113,6 +123,8 @@ class SearchHandlersTest {
     private final GetSearchHandler getSearch = new GetSearchHandler(jobs);
     private final StartExplainHandler startExplain = new StartExplainHandler(currentIndex, jobs);
     private final GetExplainHandler getExplain = new GetExplainHandler(jobs);
+    private final StartHighlightHandler startHighlight = new StartHighlightHandler(currentIndex, jobs);
+    private final GetHighlightHandler getHighlight = new GetHighlightHandler(jobs);
 
     @Test
     void searchesAndPages() throws Exception {
@@ -131,6 +143,93 @@ class SearchHandlersTest {
 
         SearchResults second = search(params(classic("red"), 1, 1, Optional.of(List.of("id"))));
         assertThat(second.hits()).extracting(Hit::docId).containsExactly(2);
+    }
+
+    @Test
+    void highlightsTheHits() throws Exception {
+        openIndex();
+
+        SearchResults results = search(
+                new StartSearchParams(classic("red"), BM25, List.of(), 0, 10, true, Optional.empty(), highlight(3)));
+
+        assertThat(results.hits()).extracting(Hit::docId).containsExactly(0, 2);
+        HitHighlight red = results.hits().getFirst().highlights().getFirst();
+        assertThat(red.field()).isEqualTo("body");
+        // TextField has no offsets in its postings.
+        assertThat(red.offsetSource()).isEqualTo(OffsetSource.ANALYSIS);
+        assertThat(red.passages()).hasSize(1);
+        HighlightPassage passage = red.passages().getFirst();
+        assertThat(passage.valueIndex()).isZero();
+        assertThat(passage.snippet()).isEqualTo(new Snippet(0, "red"));
+        assertThat(passage.spans()).containsExactly(new MatchSpan(0, 3));
+        // The long value's passage is cut, unlike its stored value.
+        HighlightPassage cut =
+                results.hits().get(1).highlights().getFirst().passages().getFirst();
+        assertThat(cut.snippet().text()).hasSize(HighlightOptions.MAX_PASSAGE_CHARS);
+        assertThat(cut.spans()).containsExactly(new MatchSpan(0, 3));
+    }
+
+    @Test
+    void highlightsNothingForKnnQueriesAndChecksThePassages() throws Exception {
+        openIndex();
+
+        SearchResults results = search(new StartSearchParams(
+                knn("vec", OptionalInt.empty(), floats(1, 0), OptionalInt.of(2), false),
+                BM25,
+                List.of(),
+                0,
+                10,
+                true,
+                Optional.empty(),
+                highlight(3)));
+
+        assertThat(results.hits())
+                .isNotEmpty()
+                .allSatisfy(hit -> assertThat(hit.highlights()).isEmpty());
+        for (int passages : new int[] {0, HighlightOptions.MAX_PASSAGES + 1}) {
+            assertFails(
+                    () -> startSearch.handle(new StartSearchParams(
+                            classic("red"), BM25, List.of(), 0, 10, true, Optional.empty(), highlight(passages))),
+                    ErrorCode.INVALID_PARAMS);
+        }
+    }
+
+    @Test
+    void highlightsEveryMatchOfADocumentsField() throws Exception {
+        openIndex();
+
+        DocumentHighlight highlight = highlight(new StartHighlightParams(classic("red"), 2, "body", options(1)));
+
+        assertThat(highlight)
+                .isEqualTo(new DocumentHighlight(
+                        OffsetSource.ANALYSIS, List.of(new ValueHighlight(0, 1, List.of(new MatchSpan(0, 3)))), false));
+        assertThat(highlight(new StartHighlightParams(classic("blue"), 2, "body", options(1)))
+                        .values())
+                .isEmpty();
+        assertThat(highlight(new StartHighlightParams(
+                        knn("vec", OptionalInt.empty(), floats(1, 0), OptionalInt.of(2), false),
+                        0,
+                        "body",
+                        options(1))))
+                .isEqualTo(new DocumentHighlight(OffsetSource.NONE, List.of(), false));
+    }
+
+    @Test
+    void checksTheHighlightParams() throws Exception {
+        assertFails(
+                () -> startHighlight.handle(new StartHighlightParams(classic("red"), 0, "body", options(1))),
+                ErrorCode.NO_INDEX_OPEN);
+        openIndex();
+
+        assertFails(
+                () -> startHighlight.handle(new StartHighlightParams(classic("red"), 3, "body", options(1))),
+                ErrorCode.DOC_NOT_FOUND);
+        assertFails(
+                () -> startHighlight.handle(new StartHighlightParams(classic("red"), 0, "nope", options(1))),
+                ErrorCode.FIELD_NOT_FOUND);
+        assertFails(
+                () -> startHighlight.handle(new StartHighlightParams(classic("body:(red"), 0, "body", options(1))),
+                ErrorCode.INVALID_QUERY);
     }
 
     @Test
@@ -688,7 +787,8 @@ class SearchHandlersTest {
         openIndex();
         SearchQuery query = term("body", new BytesValue("red", false));
 
-        SearchResults results = search(new StartSearchParams(query, BOOLEAN, List.of(), 0, 10, true, Optional.empty()));
+        SearchResults results = search(
+                new StartSearchParams(query, BOOLEAN, List.of(), 0, 10, true, Optional.empty(), Optional.empty()));
 
         assertThat(results.hits()).extracting(Hit::score).containsExactly(1f, 1f);
         assertThat(explain(new StartExplainParams(query, BOOLEAN, 0)).value()).isEqualTo("1.0");
@@ -858,8 +958,8 @@ class SearchHandlersTest {
 
         for (Similarity similarity : List.of(both, neither, badB)) {
             assertFails(
-                    () -> startSearch.handle(
-                            new StartSearchParams(query, similarity, List.of(), 0, 10, true, Optional.empty())),
+                    () -> startSearch.handle(new StartSearchParams(
+                            query, similarity, List.of(), 0, 10, true, Optional.empty(), Optional.empty())),
                     ErrorCode.INVALID_PARAMS);
             assertFails(
                     () -> startExplain.handle(new StartExplainParams(query, similarity, 0)), ErrorCode.INVALID_PARAMS);
@@ -1158,7 +1258,7 @@ class SearchHandlersTest {
     }
 
     private static StartSearchParams params(SearchQuery query, int offset, int limit, Optional<List<String>> fields) {
-        return new StartSearchParams(query, BM25, List.of(), offset, limit, true, fields);
+        return new StartSearchParams(query, BM25, List.of(), offset, limit, true, fields, Optional.empty());
     }
 
     private static SortKey fieldKey(String field, SortType type, boolean reverse) {
@@ -1169,7 +1269,7 @@ class SearchHandlersTest {
     }
 
     private static StartSearchParams sorted(SearchQuery query, SortKey... sort) {
-        return new StartSearchParams(query, BM25, List.of(sort), 0, 10, true, Optional.of(List.of()));
+        return new StartSearchParams(query, BM25, List.of(sort), 0, 10, true, Optional.of(List.of()), Optional.empty());
     }
 
     private static List<Explanation> flatten(Explanation explanation) {
@@ -1192,6 +1292,27 @@ class SearchHandlersTest {
             Thread.sleep(5);
         }
         throw new AssertionError("job " + jobId + " did not finish");
+    }
+
+    private DocumentHighlight highlight(StartHighlightParams params) throws Exception {
+        long jobId = startHighlight.handle(params).jobId();
+        long deadline = System.nanoTime() + TIMEOUT.toNanos();
+        while (System.nanoTime() < deadline) {
+            GetHighlightResult result = getHighlight.handle(new JobParams(jobId));
+            if (result.highlight().isPresent()) {
+                return result.highlight().get();
+            }
+            Thread.sleep(5);
+        }
+        throw new AssertionError("job " + jobId + " did not finish");
+    }
+
+    private static HighlightOptions options(int maxPassages) {
+        return new HighlightOptions(maxPassages, true, STANDARD);
+    }
+
+    private static Optional<HighlightOptions> highlight(int maxPassages) {
+        return Optional.of(options(maxPassages));
     }
 
     private Explanation explain(StartExplainParams params) throws Exception {

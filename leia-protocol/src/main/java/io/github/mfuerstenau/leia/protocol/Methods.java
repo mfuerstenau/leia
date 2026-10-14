@@ -47,10 +47,12 @@ import io.github.mfuerstenau.leia.protocol.points.GetPointCellResult;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeResult;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
+import io.github.mfuerstenau.leia.protocol.search.GetHighlightResult;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanResult;
 import io.github.mfuerstenau.leia.protocol.search.StartExplainParams;
+import io.github.mfuerstenau.leia.protocol.search.StartHighlightParams;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.StartStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetExportTermsResult;
@@ -270,6 +272,21 @@ public final class Methods {
             new RpcMethod<>("getExplain", JobParams.class, GetExplainResult.class);
 
     /**
+     * Starts a job that finds the matches of a query in every stored value of one field of a document
+     * (ADR 0042), for the viewer to mark them. Fails as {@code startSearch} does, with {@code
+     * DOC_NOT_FOUND} for an id outside 0 to maxDoc - 1, {@code FIELD_NOT_FOUND} for an unknown field,
+     * or {@code INVALID_ANALYZER} if the highlight analyzer can't be built.
+     */
+    public static final RpcMethod<StartHighlightParams, JobStarted> START_HIGHLIGHT =
+            new RpcMethod<>("startHighlight", StartHighlightParams.class, JobStarted.class);
+
+    /**
+     * The outcome of a highlight once it is done, handed out once as for {@code getSearch}.
+     */
+    public static final RpcMethod<JobParams, GetHighlightResult> GET_HIGHLIGHT =
+            new RpcMethod<>("getHighlight", JobParams.class, GetHighlightResult.class);
+
+    /**
      * Starts a job that looks for a regular expression in the stored values of every document of the
      * open index (ADR 0027): text values, and binary values that are UTF-8. Fails with {@code
      * NO_INDEX_OPEN}, {@code NO_READER}, {@code INVALID_QUERY} if the pattern doesn't compile, or
@@ -425,6 +442,8 @@ public final class Methods {
             GET_SEARCH,
             START_EXPLAIN,
             GET_EXPLAIN,
+            START_HIGHLIGHT,
+            GET_HIGHLIGHT,
             START_STORED_SCAN,
             GET_STORED_SCAN,
             START_FILTER,

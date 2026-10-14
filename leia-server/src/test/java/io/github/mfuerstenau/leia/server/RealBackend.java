@@ -18,8 +18,10 @@ import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
 import io.github.mfuerstenau.leia.protocol.search.Bm25Similarity;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
+import io.github.mfuerstenau.leia.protocol.search.DocumentHighlight;
 import io.github.mfuerstenau.leia.protocol.search.Explanation;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
+import io.github.mfuerstenau.leia.protocol.search.GetHighlightResult;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanResult;
@@ -31,6 +33,7 @@ import io.github.mfuerstenau.leia.protocol.search.SearchResults;
 import io.github.mfuerstenau.leia.protocol.search.Similarity;
 import io.github.mfuerstenau.leia.protocol.search.StandardQuery;
 import io.github.mfuerstenau.leia.protocol.search.StartExplainParams;
+import io.github.mfuerstenau.leia.protocol.search.StartHighlightParams;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.StartStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.search.StoredScanHit;
@@ -139,7 +142,8 @@ final class RealBackend implements AutoCloseable {
 
     /** The first {@code limit} hits of {@code query} with BM25, with an exact total and no stored fields. */
     SearchResults search(SearchQuery query, int limit) throws Exception {
-        return search(new StartSearchParams(query, BM25, List.of(), 0, limit, true, Optional.of(List.of())));
+        return search(new StartSearchParams(
+                query, BM25, List.of(), 0, limit, true, Optional.of(List.of()), Optional.empty()));
     }
 
     Explanation explain(SearchQuery query, Similarity similarity, int docId) throws Exception {
@@ -148,6 +152,10 @@ final class RealBackend implements AutoCloseable {
                 new StartExplainParams(query, similarity, docId),
                 Methods.GET_EXPLAIN,
                 GetExplainResult::explanation);
+    }
+
+    DocumentHighlight highlight(StartHighlightParams params) throws Exception {
+        return job(Methods.START_HIGHLIGHT, params, Methods.GET_HIGHLIGHT, GetHighlightResult::highlight);
     }
 
     ReconstructResult reconstruct(int docId, Optional<List<String>> fields) throws Exception {

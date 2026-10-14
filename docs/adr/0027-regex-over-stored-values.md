@@ -1,6 +1,6 @@
 # ADR 0027 — A regular expression over stored values
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by ADR 0042 (the viewer also marks a query's matches, and the snippet code is shared)
 - **Date:** 2026-10-07
 
 ## Context

@@ -281,7 +281,7 @@ class AppTest {
                         docIds.length,
                         TotalHitsRelation.EQUAL_TO,
                         Arrays.stream(docIds)
-                                .mapToObj(docId -> new Hit(docId, 1f, List.of(), List.of()))
+                                .mapToObj(docId -> new Hit(docId, 1f, List.of(), List.of(), List.of()))
                                 .toList(),
                         1,
                         Optional.empty())));

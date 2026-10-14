@@ -19,6 +19,7 @@ lucene-backward-codecs = { module = "org.apache.lucene:lucene-backward-codecs", 
 lucene-queryparser = { module = "org.apache.lucene:lucene-queryparser", version.ref = "lucene" }
 lucene-queries = { module = "org.apache.lucene:lucene-queries", version.ref = "lucene" }
 lucene-analysis-common = { module = "org.apache.lucene:lucene-analysis-common", version.ref = "lucene" }
+lucene-highlighter = { module = "org.apache.lucene:lucene-highlighter", version.ref = "lucene" }
 # Codecs and formats that are bundled, so that indexes using them open (ADR 0018)
 lucene-codecs = { module = "org.apache.lucene:lucene-codecs", version.ref = "lucene" }
 lucene-suggest = { module = "org.apache.lucene:lucene-suggest", version.ref = "lucene" }

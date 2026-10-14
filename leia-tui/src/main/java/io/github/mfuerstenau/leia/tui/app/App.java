@@ -48,6 +48,7 @@ import io.github.mfuerstenau.leia.protocol.jars.AddJarsResult;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellResult;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeResult;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
+import io.github.mfuerstenau.leia.protocol.search.GetHighlightResult;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetExportTermsResult;
@@ -701,6 +702,8 @@ public final class App {
                 Optional.of(new Action.StartSearch(start.searchId(), start.params(), start.cancel()));
             case Search.Request.Explain explain ->
                 Optional.of(new Action.StartExplain(explain.explainId(), explain.params(), explain.cancel()));
+            case Search.Request.Highlight highlight ->
+                Optional.of(new Action.StartHighlight(highlight.highlightId(), highlight.params(), highlight.cancel()));
             case Search.Request.StoredScan scan ->
                 Optional.of(new Action.StartStoredScan(scan.scanId(), scan.params(), scan.cancel()));
             case Search.Request.Cancel cancel -> Optional.of(new Action.CancelSearch(cancel.jobs()));
@@ -764,6 +767,22 @@ public final class App {
     public void explainFailed(long explainId, String error) {
         if (search != null) {
             search.explainFailed(explainId, error);
+        }
+    }
+
+    /** The job of highlight {@code highlightId} has started; the job of one that is gone is cancelled. */
+    public Optional<Action> highlightStarted(long highlightId, long jobId) {
+        return cancelSearchJob(search == null ? OptionalLong.of(jobId) : search.highlightStarted(highlightId, jobId));
+    }
+
+    /** Takes the matches of highlight {@code highlightId}; once they are in, views the value with them. */
+    public Optional<Action> highlightProgress(long highlightId, GetHighlightResult result) {
+        return search == null ? Optional.empty() : searchAction(search.highlightProgress(highlightId, result));
+    }
+
+    public void highlightFailed(long highlightId, String error) {
+        if (search != null) {
+            search.highlightFailed(highlightId, error);
         }
     }
 
@@ -1338,6 +1357,7 @@ public final class App {
         if (search != null) {
             search.searchJob().ifPresent(job -> polls.add(new Poll.Search(job[0], job[1])));
             search.explainJob().ifPresent(job -> polls.add(new Poll.Explain(job[0], job[1])));
+            search.highlightJob().ifPresent(job -> polls.add(new Poll.Highlight(job[0], job[1])));
             search.storedScanJob()
                     .ifPresent(job -> polls.add(new Poll.StoredScan(job[0], job[1], search.storedScanFromHit())));
         }

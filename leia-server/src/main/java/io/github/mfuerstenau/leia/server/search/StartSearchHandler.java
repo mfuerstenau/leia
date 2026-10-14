@@ -1,5 +1,6 @@
 package io.github.mfuerstenau.leia.server.search;
 
+import io.github.mfuerstenau.leia.core.HighlightSpec;
 import io.github.mfuerstenau.leia.core.InvalidQueryException;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.core.ScanProgress;
@@ -7,6 +8,7 @@ import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
+import io.github.mfuerstenau.leia.protocol.search.HighlightOptions;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.HitField;
 import io.github.mfuerstenau.leia.protocol.search.LikeTerm;
@@ -25,6 +27,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.Sort;
 import org.apache.lucene.search.similarities.Similarity;
@@ -74,16 +77,32 @@ public final class StartSearchHandler implements MethodHandler<StartSearchParams
         Similarity similarity = SearchQueries.similarity(params.similarity());
         Optional<Sort> sort = SearchQueries.sort(index, params.sort());
         boolean exact = params.exactTotalHits();
-        // Last: from here on, the job owns the query's analyzer and closes it.
+        // Doc values and KNN queries have no terms to highlight.
+        Optional<HighlightOptions> options = params.highlight().filter(_ -> Highlighting.hasTerms(params.query()));
+        if (options.isPresent()) {
+            Highlighting.checkPassages(options.get());
+        }
+        // Last: from here on, the job owns the analyzers and closes them.
         SearchQueries.AnalyzedQuery analyzed = SearchQueries.query(index, params.query());
+        Optional<Analyzer> analyzer;
+        try {
+            analyzer = options.isPresent() ? Optional.of(Highlighting.analyzer(options.get())) : Optional.empty();
+        } catch (RpcException e) {
+            analyzed.close();
+            throw e;
+        }
+        Optional<HighlightSpec> highlight = options.map(given -> Highlighting.spec(given, analyzer.orElseThrow()));
         Query query = analyzed.query();
         long jobId = jobs.start(
                 "search " + query + sort.map(s -> " sorted by " + s).orElse("") + " with " + similarity + ", hits "
-                        + offset + " to " + (offset + limit),
+                        + offset + " to " + (offset + limit) + (highlight.isPresent() ? ", highlighted" : ""),
                 SearchResults.class,
                 progress -> {
                     try (analyzed) {
-                        return search(index, query, similarity, sort, offset, limit, exact, fields, progress);
+                        return search(
+                                index, query, similarity, sort, offset, limit, exact, fields, highlight, progress);
+                    } finally {
+                        analyzer.ifPresent(Analyzer::close);
                     }
                 });
         return new JobStarted(jobId);
@@ -98,10 +117,11 @@ public final class StartSearchHandler implements MethodHandler<StartSearchParams
             int limit,
             boolean exact,
             Optional<Set<String>> fields,
+            Optional<HighlightSpec> highlight,
             ScanProgress progress)
             throws RpcException {
         try {
-            return toResults(index.search(query, similarity, sort, offset, limit, exact, fields, progress));
+            return toResults(index.search(query, similarity, sort, offset, limit, exact, fields, highlight, progress));
         } catch (InvalidQueryException e) {
             throw SearchQueries.invalidQuery(e);
         } catch (IOException e) {
@@ -139,6 +159,11 @@ public final class StartSearchHandler implements MethodHandler<StartSearchParams
                 .map(value -> new SortValue(
                         value.number().map(Number::toString), value.term().map(ByteStrings::bytesValue)))
                 .toList();
-        return new Hit(hit.docId(), hit.score(), sortValues, fields);
+        return new Hit(
+                hit.docId(),
+                hit.score(),
+                sortValues,
+                fields,
+                hit.highlights().stream().map(Highlighting::toHighlight).toList());
     }
 }

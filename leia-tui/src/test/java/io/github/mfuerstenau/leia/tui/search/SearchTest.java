@@ -27,17 +27,23 @@ import io.github.mfuerstenau.leia.protocol.search.ClassicSimilarity;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesRange;
+import io.github.mfuerstenau.leia.protocol.search.DocumentHighlight;
 import io.github.mfuerstenau.leia.protocol.search.Explanation;
 import io.github.mfuerstenau.leia.protocol.search.FieldSort;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
+import io.github.mfuerstenau.leia.protocol.search.GetHighlightResult;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanResult;
+import io.github.mfuerstenau.leia.protocol.search.HighlightOptions;
+import io.github.mfuerstenau.leia.protocol.search.HighlightPassage;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.HitField;
+import io.github.mfuerstenau.leia.protocol.search.HitHighlight;
 import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
 import io.github.mfuerstenau.leia.protocol.search.LikeTerm;
 import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
 import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
+import io.github.mfuerstenau.leia.protocol.search.OffsetSource;
 import io.github.mfuerstenau.leia.protocol.search.ParserOptions;
 import io.github.mfuerstenau.leia.protocol.search.PointField;
 import io.github.mfuerstenau.leia.protocol.search.PointType;
@@ -53,12 +59,14 @@ import io.github.mfuerstenau.leia.protocol.search.SortType;
 import io.github.mfuerstenau.leia.protocol.search.SortValue;
 import io.github.mfuerstenau.leia.protocol.search.StandardQuery;
 import io.github.mfuerstenau.leia.protocol.search.StartExplainParams;
+import io.github.mfuerstenau.leia.protocol.search.StartHighlightParams;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.StartStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.search.StoredScanHit;
 import io.github.mfuerstenau.leia.protocol.search.StoredScanResult;
 import io.github.mfuerstenau.leia.protocol.search.TermQuery;
 import io.github.mfuerstenau.leia.protocol.search.TotalHitsRelation;
+import io.github.mfuerstenau.leia.protocol.search.ValueHighlight;
 import io.github.mfuerstenau.leia.tui.TestScreens;
 import io.github.mfuerstenau.leia.tui.analysis.AnalysisSettings;
 import io.github.mfuerstenau.leia.tui.analysis.AnalyzerSettings;
@@ -190,7 +198,15 @@ class SearchTest {
     }
 
     private static StartSearchParams params(SearchQuery query, int offset, int limit) {
-        return new StartSearchParams(query, bm25(), List.of(), offset, limit, false, Optional.empty());
+        return new StartSearchParams(
+                query,
+                bm25(),
+                List.of(),
+                offset,
+                limit,
+                false,
+                Optional.empty(),
+                Optional.of(new HighlightOptions(Search.HIGHLIGHT_PASSAGES, true, new AnalysisSettings().analyzer())));
     }
 
     /** The search that {@code request} starts. */
@@ -213,7 +229,8 @@ class SearchTest {
                 docId,
                 1.5f,
                 List.of(),
-                List.of(new HitField("id", List.of(new StoredValue(StoredType.STRING, "doc-" + docId, false)))));
+                List.of(new HitField("id", List.of(new StoredValue(StoredType.STRING, "doc-" + docId, false)))),
+                List.of());
     }
 
     private static GetSearchResult results(int from, int to, long totalHits) {
@@ -1123,6 +1140,103 @@ class SearchTest {
     }
 
     @Test
+    void showsTheHighlightedPassagesAndViewsAValueWithEveryMatch() {
+        Search search = search();
+        press(search, '/');
+        typed(search, "red");
+        Request.Start start = started(press(search, KeyCode.ENTER));
+        assertThat(search.searchStarted(start.searchId(), 1)).isEmpty();
+        Hit hit = new Hit(
+                7,
+                1.5f,
+                List.of(),
+                List.of(new HitField(
+                        "title",
+                        List.of(
+                                new StoredValue(StoredType.STRING, "a cup", false),
+                                new StoredValue(StoredType.STRING, "the big red lamp shines", false)))),
+                List.of(new HitHighlight(
+                        "title",
+                        OffsetSource.POSTINGS,
+                        List.of(new HighlightPassage(
+                                1, new Snippet(4, "big red lamp"), List.of(new MatchSpan(8, 11)), 1f)))));
+        search.searchProgress(
+                start.searchId(),
+                new GetSearchResult(
+                        500,
+                        Optional.of(new SearchResults(
+                                "title:red",
+                                "title:red",
+                                1,
+                                TotalHitsRelation.EQUAL_TO,
+                                List.of(hit),
+                                3,
+                                Optional.empty()))));
+
+        assertThat(render(search))
+                .contains(
+                        "title: …big red lamp…",
+                        "Highlights of doc 7 · terms of the field",
+                        "title · offsets from the postings",
+                        "  [1] …big red lamp…",
+                        "v views title[1] with every match marked.");
+
+        Optional<Request> request = press(search, 'v');
+        assertThat(request).containsInstanceOf(Request.Highlight.class);
+        Request.Highlight highlight = (Request.Highlight) request.orElseThrow();
+        assertThat(highlight.params())
+                .isEqualTo(new StartHighlightParams(
+                        start.params().query(),
+                        7,
+                        "title",
+                        start.params().highlight().orElseThrow()));
+        assertThat(search.highlightStarted(highlight.highlightId(), 9)).isEmpty();
+        assertThat(search.jobs()).containsExactly(9L);
+        assertThat(search.running()).isTrue();
+        assertThat(render(search)).contains("finding the matches…", "Finding every match in title[1]…");
+
+        // Asked for again: the first one's reply is dropped, and its job cancelled.
+        Request.Highlight again = (Request.Highlight) press(search, 'v').orElseThrow();
+        assertThat(again.cancel()).containsExactly(9L);
+        List<MatchSpan> spans = List.of(new MatchSpan(8, 11), new MatchSpan(30, 33));
+        GetHighlightResult found = new GetHighlightResult(Optional.of(new DocumentHighlight(
+                OffsetSource.POSTINGS,
+                List.of(new ValueHighlight(0, 1, List.of(new MatchSpan(0, 3))), new ValueHighlight(1, 2, spans)),
+                false)));
+        assertThat(search.highlightProgress(highlight.highlightId(), found)).isEmpty();
+        assertThat(search.highlightStarted(highlight.highlightId(), 9)).hasValue(9L);
+
+        assertThat(search.highlightStarted(again.highlightId(), 10)).isEmpty();
+        assertThat(search.highlightProgress(again.highlightId(), found))
+                .contains(new Request.View(7, "title", 1, spans, 2));
+        assertThat(search.highlightJob()).isEmpty();
+        assertThat(search.running()).isFalse();
+    }
+
+    @Test
+    void vDoesNothingForAHitWithoutPassages() {
+        Search search = searched(1, 1);
+        // The hits of searched() have no passages, so v has nothing to view.
+        assertThat(press(search, 'v')).isEmpty();
+    }
+
+    @Test
+    void hCyclesTheHighlightingAndSearchesAgain() {
+        Search search = searched(2, 2);
+        SearchQuery query = classic("red", "title", QueryOperator.OR);
+
+        Request.Start any = started(press(search, 'H'));
+        assertThat(any.params().highlight())
+                .hasValue(new HighlightOptions(Search.HIGHLIGHT_PASSAGES, false, new AnalysisSettings().analyzer()));
+        assertThat(render(search)).contains("count to 1000 · highlight any field's terms");
+        Request.Start off = started(press(search, 'H'));
+        assertThat(off.params().highlight()).isEmpty();
+        assertThat(render(search)).contains("count to 1000 · no highlights");
+        // Back to the query's fields; the searches before never started a job.
+        assertSearch(press(search, 'H'), query, 0, Search.SEARCH_PAGE, List.of());
+    }
+
+    @Test
     void theSortPopupSearchesAgainAndTheHitsShowTheirSortValues() {
         Search search = searched(2, 2);
 
@@ -1151,14 +1265,16 @@ class SearchTest {
                         0,
                         1.5f,
                         List.of(new SortValue(Optional.of("4621819117588971520"), Optional.empty())),
-                        hits.get(0).fields()));
+                        hits.get(0).fields(),
+                        List.of()));
         hits.set(
                 1,
                 new Hit(
                         1,
                         1.5f,
                         List.of(new SortValue(Optional.empty(), Optional.empty())),
-                        hits.get(1).fields()));
+                        hits.get(1).fields(),
+                        List.of()));
         search.searchProgress(
                 start.searchId(),
                 new GetSearchResult(
@@ -1300,7 +1416,8 @@ class SearchTest {
                         new HitField("id", List.of(new StoredValue(StoredType.STRING, "doc-0", false))),
                         new HitField(
                                 "key",
-                                List.of(new StoredValue(StoredType.BINARY, "ff00", true, OptionalLong.of(300))))));
+                                List.of(new StoredValue(StoredType.BINARY, "ff00", true, OptionalLong.of(300))))),
+                List.of());
 
         search.searchProgress(
                 id,

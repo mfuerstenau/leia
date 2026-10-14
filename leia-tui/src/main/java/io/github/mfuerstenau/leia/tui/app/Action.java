@@ -9,6 +9,7 @@ import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
 import io.github.mfuerstenau.leia.protocol.search.StartExplainParams;
+import io.github.mfuerstenau.leia.protocol.search.StartHighlightParams;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.StartStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.terms.PostingsFilter;
@@ -212,6 +213,12 @@ public sealed interface Action {
      * with {@link App#explainStarted} or {@link App#explainFailed}.
      */
     record StartExplain(long explainId, StartExplainParams params, List<Long> cancel) implements Action {}
+
+    /**
+     * Cancel the jobs in {@code cancel}, then start highlight {@code highlightId} (ADR 0042), and
+     * report back with {@link App#highlightStarted} or {@link App#highlightFailed}.
+     */
+    record StartHighlight(long highlightId, StartHighlightParams params, List<Long> cancel) implements Action {}
 
     /**
      * Cancel the jobs in {@code cancel}, then start regex scan {@code scanId}, and report back with

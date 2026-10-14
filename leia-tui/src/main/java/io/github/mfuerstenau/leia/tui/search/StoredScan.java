@@ -17,6 +17,7 @@ import dev.tamboui.widgets.table.Table;
 import dev.tamboui.widgets.table.TableState;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanResult;
 import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
+import io.github.mfuerstenau.leia.protocol.search.Snippet;
 import io.github.mfuerstenau.leia.protocol.search.StartStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.search.StoredScanHit;
 import io.github.mfuerstenau.leia.protocol.search.StoredScanResult;
@@ -339,15 +340,26 @@ public final class StoredScan {
      * on. The spans and the snippet's start are UTF-8 byte offsets (ADR 0027).
      */
     static Line snippetLine(StoredScanHit hit) {
-        byte[] text = hit.snippet().text().getBytes(StandardCharsets.UTF_8);
-        long start = hit.snippet().start();
+        return Line.from(snippetSpans(hit.snippet(), hit.spans(), hit.length()));
+    }
+
+    /**
+     * {@code snippet} with the {@code matches} in it highlighted, and {@code …} where the value goes
+     * on: before it unless it starts the value, and after it if it ends before {@code valueLength}.
+     * The matches, the snippet's start and the length are UTF-8 byte offsets (ADR 0027, ADR 0042).
+     *
+     * @param valueLength the value's length in bytes; -1 if unknown, for no {@code …} after it
+     */
+    static List<Span> snippetSpans(Snippet snippet, List<MatchSpan> matches, long valueLength) {
+        byte[] text = snippet.text().getBytes(StandardCharsets.UTF_8);
+        long start = snippet.start();
         int len = text.length;
         List<Span> spans = new ArrayList<>();
         if (start > 0) {
             spans.add(Span.styled("…", Form.dim()));
         }
         int pos = 0;
-        for (MatchSpan span : hit.spans()) {
+        for (MatchSpan span : matches) {
             int from = Math.clamp(span.start() - start, 0, len);
             int to = Math.clamp(span.end() - start, 0, len);
             if (to <= from || from < pos || !boundary(text, from) || !boundary(text, to)) {
@@ -362,10 +374,10 @@ public final class StoredScan {
         if (pos < len) {
             spans.add(Span.raw(TextFormat.escapeControl(utf8(text, pos, len))));
         }
-        if (start + len < hit.length()) {
+        if (start + len < valueLength) {
             spans.add(Span.styled("…", Form.dim()));
         }
-        return Line.from(spans);
+        return spans;
     }
 
     /** Whether a character starts at byte {@code at}, or the text ends there. */

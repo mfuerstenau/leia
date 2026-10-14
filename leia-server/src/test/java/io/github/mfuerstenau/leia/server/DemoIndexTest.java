@@ -66,13 +66,18 @@ import io.github.mfuerstenau.leia.protocol.search.DocSort;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesRange;
+import io.github.mfuerstenau.leia.protocol.search.DocumentHighlight;
 import io.github.mfuerstenau.leia.protocol.search.Explanation;
 import io.github.mfuerstenau.leia.protocol.search.FieldDateResolution;
 import io.github.mfuerstenau.leia.protocol.search.FieldSort;
+import io.github.mfuerstenau.leia.protocol.search.HighlightOptions;
+import io.github.mfuerstenau.leia.protocol.search.HighlightPassage;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
+import io.github.mfuerstenau.leia.protocol.search.HitHighlight;
 import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
 import io.github.mfuerstenau.leia.protocol.search.LikeTerm;
 import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
+import io.github.mfuerstenau.leia.protocol.search.OffsetSource;
 import io.github.mfuerstenau.leia.protocol.search.ParserOptions;
 import io.github.mfuerstenau.leia.protocol.search.PointField;
 import io.github.mfuerstenau.leia.protocol.search.PointType;
@@ -85,6 +90,7 @@ import io.github.mfuerstenau.leia.protocol.search.SortKey;
 import io.github.mfuerstenau.leia.protocol.search.SortMissing;
 import io.github.mfuerstenau.leia.protocol.search.SortSelector;
 import io.github.mfuerstenau.leia.protocol.search.SortType;
+import io.github.mfuerstenau.leia.protocol.search.StartHighlightParams;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.StartStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.search.StoredScanHit;
@@ -92,10 +98,12 @@ import io.github.mfuerstenau.leia.protocol.terms.GetPostingsParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.Posting;
 import io.github.mfuerstenau.leia.protocol.terms.PostingsFilter;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.text.Collator;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
@@ -134,6 +142,16 @@ class DemoIndexTest {
     @AfterAll
     void close() {
         backend.close();
+    }
+
+    /** The text of each span of {@code passage}. */
+    private static List<String> marked(HighlightPassage passage) {
+        byte[] text = passage.snippet().text().getBytes(StandardCharsets.UTF_8);
+        int start = passage.snippet().start();
+        return passage.spans().stream()
+                .map(span -> new String(
+                        Arrays.copyOfRange(text, span.start() - start, span.end() - start), StandardCharsets.UTF_8))
+                .toList();
     }
 
     @Nested
@@ -636,7 +654,7 @@ class DemoIndexTest {
             Similarity classic =
                     new Similarity(Optional.empty(), Optional.of(new ClassicSimilarity()), Optional.empty());
             SearchResults tfIdf = backend.search(new StartSearchParams(
-                    classic("title:lamp"), classic, List.of(), 0, 100, true, Optional.of(List.of())));
+                    classic("title:lamp"), classic, List.of(), 0, 100, true, Optional.of(List.of()), Optional.empty()));
 
             Hit doc51 = tfIdf.hits().stream()
                     .filter(hit -> hit.docId() == 51)
@@ -650,16 +668,69 @@ class DemoIndexTest {
 
             Similarity bool = new Similarity(Optional.empty(), Optional.empty(), Optional.of(new BooleanSimilarity()));
             assertThat(backend.search(new StartSearchParams(
-                                    classic("title:lamp"), bool, List.of(), 0, 100, true, Optional.of(List.of())))
+                                    classic("title:lamp"),
+                                    bool,
+                                    List.of(),
+                                    0,
+                                    100,
+                                    true,
+                                    Optional.of(List.of()),
+                                    Optional.empty()))
                             .hits())
                     .extracting(Hit::score)
                     .containsOnly(1f);
         }
 
         @Test
+        void highlightsLampsWithTheOffsetsEachFieldHas() throws Exception {
+            SearchResults results = backend.search(new StartSearchParams(
+                    classic("lamp title:lamp tagged:lamp"),
+                    BM25,
+                    List.of(),
+                    0,
+                    100,
+                    false,
+                    Optional.of(List.of("title", "body", "tagged")),
+                    Optional.of(new HighlightOptions(3, true, STANDARD))));
+
+            List<HitHighlight> highlights = results.hits().stream()
+                    .flatMap(hit -> hit.highlights().stream())
+                    .toList();
+            // body has offsets in its postings, title none, and tagged term vectors without offsets.
+            assertThat(highlights)
+                    .extracting(HitHighlight::field, HitHighlight::offsetSource)
+                    .contains(
+                            tuple("body", OffsetSource.POSTINGS),
+                            tuple("title", OffsetSource.ANALYSIS),
+                            tuple("tagged", OffsetSource.ANALYSIS))
+                    .doesNotContain(tuple("tagged", OffsetSource.TERM_VECTORS));
+            assertThat(highlights)
+                    .flatExtracting(HitHighlight::passages)
+                    .allSatisfy(passage -> assertThat(marked(passage))
+                            .isNotEmpty()
+                            .allSatisfy(text -> assertThat(text).isEqualToIgnoringCase("lamp")));
+
+            int docId = results.hits().stream()
+                    .filter(hit ->
+                            hit.highlights().stream().anyMatch(h -> h.field().equals("body")))
+                    .findFirst()
+                    .orElseThrow()
+                    .docId();
+            DocumentHighlight body = backend.highlight(
+                    new StartHighlightParams(classic("lam*"), docId, "body", new HighlightOptions(1, true, STANDARD)));
+            // A wildcard needs the term vector to find the terms it matches.
+            assertThat(body.offsetSource()).isEqualTo(OffsetSource.POSTINGS_WITH_TERM_VECTORS);
+            assertThat(body.values())
+                    .isNotEmpty()
+                    .allSatisfy(value -> assertThat(value.matchCount())
+                            .isPositive()
+                            .isEqualTo(value.spans().size()));
+        }
+
+        @Test
         void theSecondPageOfThe() throws Exception {
             SearchResults second = backend.search(new StartSearchParams(
-                    classic("body:the"), BM25, List.of(), 100, 100, true, Optional.of(List.of())));
+                    classic("body:the"), BM25, List.of(), 100, 100, true, Optional.of(List.of()), Optional.empty()));
 
             assertThat(second.totalHits()).isEqualTo(471);
             assertThat(second.hits().getFirst().docId()).isEqualTo(418);
@@ -743,7 +814,7 @@ class DemoIndexTest {
         }
 
         private static StartSearchParams params(SearchQuery query) {
-            return new StartSearchParams(query, BM25, List.of(), 0, 10, false, Optional.empty());
+            return new StartSearchParams(query, BM25, List.of(), 0, 10, false, Optional.empty(), Optional.empty());
         }
 
         private static StartSearchParams sorted(SearchQuery query, SortKey... sort) {
@@ -751,7 +822,8 @@ class DemoIndexTest {
         }
 
         private static StartSearchParams sorted(SearchQuery query, int limit, SortKey... sort) {
-            return new StartSearchParams(query, BM25, List.of(sort), 0, limit, true, Optional.of(List.of()));
+            return new StartSearchParams(
+                    query, BM25, List.of(sort), 0, limit, true, Optional.of(List.of()), Optional.empty());
         }
 
         private static SortKey field(

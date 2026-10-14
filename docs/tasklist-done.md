@@ -256,6 +256,11 @@ Finished items, moved here from `docs/tasklist.md` (the open work queue).
   - a sixth `SearchQuery` alternative `knn {field, docId?, vector?, k?, exact, filter?}`: Lucene's `KnnFloatVectorQuery`/`KnnByteVectorQuery` with a classic pre-filter, or leia's `ExactKnnQuery` (a `FunctionScoreQuery` over `FieldExistsQuery`, scored by `similarityToQueryVector`) that ranks every document with a vector; cancellable in the search job
   - TUI: the overview's Vector column (`8d f32 cos`); on the documents screen the vector in the value column, the details (four to a line, with its length), the viewer and `N` nearest; a KNN mode on the search screen (`f` field, `k`, `e` exact, `w` filter); the export is version 2 with `vector`
   - the Lucene 9 test index has a float vector field, read and searched through the backward codecs
+- [x] Improvements over Luke (§6): highlighting of hits in stored text (ADR 0042, amends ADR 0010 and 0027)
+  - `startSearch` takes `highlight {maxPassages, requireFieldMatch, analyzer}`; each hit gets `highlights`, the best passages per stored text field with UTF-8 match spans and the field's offset source (postings, term vectors, analysis); doc values and KNN queries highlight nothing
+  - `startHighlight`/`getHighlight`: every match in one field of a document, up to 100 spans per value
+  - core `Highlights` subclasses `UnifiedHighlighter`: passages copied instead of formatted, values found by the separators, term vectors without offsets analyzed instead
+  - TUI: the hit list shows each field's first passage, the details all of them with their offset source; `H` cycles the field's terms, any field's terms, off; `v` opens the value in the viewer with every match (`m`/`M`)
 
 ## TamboUI migration — done
 

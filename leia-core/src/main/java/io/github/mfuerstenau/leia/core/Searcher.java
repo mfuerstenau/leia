@@ -1,5 +1,6 @@
 package io.github.mfuerstenau.leia.core;
 
+import io.github.mfuerstenau.leia.core.SearchResults.FieldHighlight;
 import io.github.mfuerstenau.leia.core.SearchResults.Hit;
 import io.github.mfuerstenau.leia.core.SearchResults.HitField;
 import io.github.mfuerstenau.leia.core.SearchResults.LikeTerm;
@@ -10,6 +11,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
@@ -71,6 +73,7 @@ final class Searcher {
             int limit,
             boolean exactTotalHits,
             Optional<Set<String>> fields,
+            Optional<HighlightSpec> highlight,
             ScanProgress progress)
             throws IOException, InvalidQueryException {
         Cancellation cancellation = new Cancellation(progress);
@@ -105,15 +108,13 @@ final class Searcher {
                 TopFieldCollector.populateScores(page, searcher, rewritten);
                 cancellation.check();
             }
-            cancellation.searched(reader.maxDoc());
             Duration took = Duration.ofNanos(System.nanoTime() - start);
-            return new SearchResults(
-                    query.toString(),
-                    rewritten.toString(),
-                    top.totalHits,
-                    hits(reader, page, sort, fields),
-                    took,
-                    likeTerms);
+            // The built query is highlighted: the highlighter handles multi-term queries itself.
+            List<Hit> hits =
+                    hits(reader, page, sort, fields, highlight.map(spec -> new Highlighting(searcher, built, spec)));
+            cancellation.check();
+            cancellation.searched(reader.maxDoc());
+            return new SearchResults(query.toString(), rewritten.toString(), top.totalHits, hits, took, likeTerms);
         } catch (ExitableDirectoryReader.ExitingReaderException e) {
             throw cancellation.stopped(e);
         } catch (IndexSearcher.TooManyClauses e) {
@@ -181,6 +182,40 @@ final class Searcher {
     }
 
     /**
+     * Every match of {@code query} in the stored text values of {@code field} of a document (ADR 0042),
+     * up to {@code maxSpans} per value.
+     */
+    static DocumentHighlight highlight(
+            IndexReader reader,
+            List<DirectoryReader> directoryReaders,
+            Query query,
+            HighlightSpec spec,
+            int docId,
+            String field,
+            int maxSpans,
+            ScanProgress progress)
+            throws IOException, InvalidQueryException {
+        Cancellation cancellation = new Cancellation(progress);
+        IndexSearcher searcher = searcher(directoryReaders, IndexSearcher.getDefaultSimilarity(), cancellation);
+        try {
+            Query built = built(searcher, query);
+            DocumentReader.StoredValues stored = new DocumentReader.StoredValues(field::equals);
+            reader.storedFields().document(docId, stored);
+            DocumentHighlight highlight = Highlights.document(
+                    searcher, built, spec, docId, field, stored.values.getOrDefault(field, List.of()), maxSpans);
+            cancellation.check();
+            return highlight;
+        } catch (ExitableDirectoryReader.ExitingReaderException e) {
+            throw cancellation.stopped(e);
+        } catch (IndexSearcher.TooManyClauses e) {
+            throw new InvalidQueryException(e.getMessage(), e);
+        }
+    }
+
+    /** What highlights the hits of a search: its searcher, its built query and the spec. */
+    private record Highlighting(IndexSearcher searcher, Query query, HighlightSpec spec) {}
+
+    /**
      * A searcher over {@code directoryReaders}, each wrapped in an {@link ExitableDirectoryReader}, and
      * combined in a {@link MultiReader} if there are several (ADR 0021). Its document ids are those of
      * the index's reader, which combines them in the same order.
@@ -209,15 +244,36 @@ final class Searcher {
     }
 
     private static List<Hit> hits(
-            IndexReader reader, ScoreDoc[] page, Optional<Sort> sort, Optional<Set<String>> fields) throws IOException {
+            IndexReader reader,
+            ScoreDoc[] page,
+            Optional<Sort> sort,
+            Optional<Set<String>> fields,
+            Optional<Highlighting> highlighting)
+            throws IOException {
         StoredFields storedFields = reader.storedFields();
         Predicate<String> wanted = fields.isPresent() ? fields.get()::contains : _ -> true;
         SortField[] sortFields = sort.map(Sort::getSort).orElse(new SortField[0]);
-        List<Hit> hits = new ArrayList<>(page.length);
+        List<Map<String, List<IndexDocument.StoredValue>>> stored = new ArrayList<>(page.length);
         for (ScoreDoc scoreDoc : page) {
-            DocumentReader.StoredValues stored = new DocumentReader.StoredValues(wanted);
-            storedFields.document(scoreDoc.doc, stored);
-            List<HitField> hitFields = stored.values.entrySet().stream()
+            DocumentReader.StoredValues values = new DocumentReader.StoredValues(wanted);
+            storedFields.document(scoreDoc.doc, values);
+            stored.add(values.values);
+        }
+        List<List<FieldHighlight>> highlights = List.of();
+        if (highlighting.isPresent()) {
+            int[] docIds =
+                    Arrays.stream(page).mapToInt(scoreDoc -> scoreDoc.doc).toArray();
+            highlights = Highlights.passages(
+                    highlighting.get().searcher(),
+                    highlighting.get().query(),
+                    highlighting.get().spec(),
+                    docIds,
+                    stored);
+        }
+        List<Hit> hits = new ArrayList<>(page.length);
+        for (int h = 0; h < page.length; h++) {
+            ScoreDoc scoreDoc = page[h];
+            List<HitField> hitFields = stored.get(h).entrySet().stream()
                     .map(entry -> new HitField(entry.getKey(), List.copyOf(entry.getValue())))
                     .toList();
             List<SortValue> sortValues = new ArrayList<>(sortFields.length);
@@ -229,7 +285,12 @@ final class Searcher {
                                     : SortValue.of(fieldDoc.fields[i]));
                 }
             }
-            hits.add(new Hit(scoreDoc.doc, scoreDoc.score, List.copyOf(sortValues), hitFields));
+            hits.add(new Hit(
+                    scoreDoc.doc,
+                    scoreDoc.score,
+                    List.copyOf(sortValues),
+                    hitFields,
+                    highlights.isEmpty() ? List.of() : highlights.get(h)));
         }
         return List.copyOf(hits);
     }

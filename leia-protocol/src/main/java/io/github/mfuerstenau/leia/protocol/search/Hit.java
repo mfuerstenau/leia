@@ -10,5 +10,8 @@ import java.util.List;
  * @param sortValues the values the hit was sorted by, one per sort key; empty without a sort
  * @param fields the document's stored values in the fields asked for, in the order of each field's
  *     first value; values longer than {@link SearchResults#MAX_VALUE_LENGTH} bytes are cut
+ * @param highlights the best passages per field with the query's matches, in the order of {@code
+ *     fields}; empty without highlighting, and without a field with a match (ADR 0042)
  */
-public record Hit(int docId, float score, List<SortValue> sortValues, List<HitField> fields) {}
+public record Hit(
+        int docId, float score, List<SortValue> sortValues, List<HitField> fields, List<HitHighlight> highlights) {}

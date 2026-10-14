@@ -21,6 +21,9 @@ public sealed interface Poll {
     /** Report back with {@link App#explainProgress} or {@link App#explainFailed}, under {@code explainId}. */
     record Explain(long explainId, long jobId) implements Poll {}
 
+    /** Report back with {@link App#highlightProgress} or {@link App#highlightFailed}, under {@code highlightId}. */
+    record Highlight(long highlightId, long jobId) implements Poll {}
+
     /**
      * Ask for the hits from {@code fromHit} on, and report back with {@link App#storedScanProgress} or
      * {@link App#storedScanFailed}, under {@code scanId}.

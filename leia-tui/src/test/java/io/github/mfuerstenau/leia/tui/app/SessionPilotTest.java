@@ -659,7 +659,7 @@ class SessionPilotTest {
         openAtStart(writeBodies(tmp.resolve("index"), "red fox", "blue fox", "red lamp"), OpenMode.READER);
 
         search("red");
-        assertThat(screen()).contains("2 hits in", "body=red fox", "Parsed     body:red");
+        assertThat(screen()).contains("2 hits in", "body: red fox", "Parsed     body:red");
 
         pilot.press('x');
         settle();
@@ -671,6 +671,25 @@ class SessionPilotTest {
         pilot.press(']');
         settle();
         assertThat(screen()).contains("#2 of 0–2", "red lamp");
+    }
+
+    @Test
+    void highlightsTheHitsAndViewsAValueWithEveryMatch() throws Exception {
+        openAtStart(writeBodies(tmp.resolve("index"), "red fox and a red hen", "blue fox"), OpenMode.READER);
+
+        search("red");
+        assertThat(screen())
+                .contains("1 hit in", "body: red fox and a red hen", "body · offsets from analysis", "v views body[0]");
+
+        pilot.press('v');
+        settle();
+        assertThat(screen()).contains("2 Documents", "match 1 of 2", "Esc close");
+        pilot.press(KeyCode.ESCAPE);
+        pilot.press('5');
+        pilot.press('H');
+        pilot.press('H');
+        settle();
+        assertThat(screen()).contains("body=red fox and a red hen", "count to 1000 · no highlights");
     }
 
     @Test

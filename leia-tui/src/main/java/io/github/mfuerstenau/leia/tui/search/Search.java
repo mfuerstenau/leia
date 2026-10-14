@@ -34,25 +34,32 @@ import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
 import io.github.mfuerstenau.leia.protocol.search.Explanation;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
+import io.github.mfuerstenau.leia.protocol.search.GetHighlightResult;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanResult;
+import io.github.mfuerstenau.leia.protocol.search.HighlightOptions;
+import io.github.mfuerstenau.leia.protocol.search.HighlightPassage;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.HitField;
+import io.github.mfuerstenau.leia.protocol.search.HitHighlight;
 import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
 import io.github.mfuerstenau.leia.protocol.search.LikeTerm;
 import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
 import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
+import io.github.mfuerstenau.leia.protocol.search.OffsetSource;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
 import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
 import io.github.mfuerstenau.leia.protocol.search.SearchResults;
 import io.github.mfuerstenau.leia.protocol.search.SortValue;
 import io.github.mfuerstenau.leia.protocol.search.StandardQuery;
 import io.github.mfuerstenau.leia.protocol.search.StartExplainParams;
+import io.github.mfuerstenau.leia.protocol.search.StartHighlightParams;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.StartStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.search.StoredScanHit;
 import io.github.mfuerstenau.leia.protocol.search.TermQuery;
 import io.github.mfuerstenau.leia.protocol.search.TotalHitsRelation;
+import io.github.mfuerstenau.leia.protocol.search.ValueHighlight;
 import io.github.mfuerstenau.leia.tui.analysis.AnalysisSettings;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.prompt.LineInput;
@@ -61,6 +68,7 @@ import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.widgets.Form;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -93,6 +101,9 @@ public final class Search {
 
     /** The widest the sort values of a hit get in the hit list. */
     private static final int MAX_SORT_WIDTH = 32;
+
+    /** The most passages per field that a hit shows (ADR 0042). */
+    static final int HIGHLIGHT_PASSAGES = 3;
 
     /** The k of a KNN query until another is typed. */
     static final int DEFAULT_K = 10;
@@ -134,6 +145,13 @@ public final class Search {
         /** Browse the documents screen through the documents that match (ADR 0031), from {@code startDoc} on. */
         record Filter(StartFilterParams params, String label, int startDoc) implements Request {}
 
+        /**
+         * Cancel the jobs in {@code cancel}, then start highlight {@code highlightId} (ADR 0042),
+         * reported back with {@link #highlightStarted} or {@link #highlightFailed}; its job with
+         * {@link #highlightProgress}, which asks to view the value once its matches are in.
+         */
+        record Highlight(long highlightId, StartHighlightParams params, List<Long> cancel) implements Request {}
+
         /** Show this stored value in the viewer of the documents screen, with its matches highlighted. */
         record View(int docId, String field, int index, List<MatchSpan> spans, int matchCount) implements Request {}
     }
@@ -171,6 +189,43 @@ public final class Search {
     private enum Focus {
         HITS,
         DETAILS
+    }
+
+    /** Which fields of the hits the query's matches are highlighted in (ADR 0042). */
+    enum Highlights {
+        /** The stored fields per hit, each with the query's terms in that field. */
+        QUERY_FIELDS("terms of the field"),
+        /** The stored fields per hit, each with the query's terms in any field. */
+        ANY_FIELD("terms of any field"),
+        /** None: the hits show their stored fields. */
+        OFF("off");
+
+        final String text;
+
+        Highlights(String text) {
+            this.text = text;
+        }
+    }
+
+    /** The search for every match in the value that {@code v} views (ADR 0042). */
+    private static final class Highlighting {
+        final long id;
+        final StartHighlightParams params;
+
+        /** The value to view: that of the hit's first passage. */
+        final int valueIndex;
+
+        /** Null until the backend has started the job. */
+        Long jobId;
+
+        /** Why the matches could not be found; null while the job runs. */
+        String error;
+
+        Highlighting(long id, StartHighlightParams params, int valueIndex) {
+            this.id = id;
+            this.params = params;
+            this.valueIndex = valueIndex;
+        }
     }
 
     /** The hits of a query, as far as they are fetched. */
@@ -281,6 +336,11 @@ public final class Search {
     private Object form;
 
     private boolean exact;
+
+    private Highlights highlights = Highlights.QUERY_FIELDS;
+
+    /** The highlight that runs for {@code v}, or the one that failed; null otherwise. */
+    private Highlighting highlighting;
 
     /** Whether the regex scan ignores case. */
     private boolean caseInsensitive;
@@ -417,6 +477,7 @@ public final class Search {
         search.mode = mode;
         search.operator = operator;
         search.exact = exact;
+        search.highlights = highlights;
         search.caseInsensitive = caseInsensitive;
         search.includeDeleted = includeDeleted;
         search.input = new LineInput(input.text());
@@ -475,12 +536,23 @@ public final class Search {
         searchJob().ifPresent(job -> jobs.add(job[1]));
         explainJob().ifPresent(job -> jobs.add(job[1]));
         storedScanJob().ifPresent(job -> jobs.add(job[1]));
+        highlightJob().ifPresent(job -> jobs.add(job[1]));
         return jobs;
     }
 
-    /** Whether a search, explanation or scan runs, started or not: what Esc stops. */
+    /** The highlight job to poll, while one runs: its highlight id and job id. */
+    public Optional<long[]> highlightJob() {
+        return highlighting != null && highlighting.error == null && highlighting.jobId != null
+                ? Optional.of(new long[] {highlighting.id, highlighting.jobId})
+                : Optional.empty();
+    }
+
+    /** Whether a search, explanation, scan or highlight runs, started or not: what Esc stops. */
     public boolean running() {
-        return running != null || (explain != null && explain.running()) || (scan != null && scan.running());
+        return running != null
+                || (explain != null && explain.running())
+                || (scan != null && scan.running())
+                || (highlighting != null && highlighting.error == null);
     }
 
     /**
@@ -497,6 +569,9 @@ public final class Search {
         }
         if (explain != null && explain.running()) {
             explain.error = "Cancelled.";
+        }
+        if (highlighting != null && highlighting.error == null) {
+            highlighting.error = "Cancelled.";
         }
         return jobs;
     }
@@ -813,9 +888,17 @@ public final class Search {
             return Optional.empty();
         }
         StartSearchParams params = new StartSearchParams(
-                query.get(), scoring.similarity(), scoring.sortKeys(), 0, SEARCH_PAGE, exact, hitFields.param());
+                query.get(),
+                scoring.similarity(),
+                scoring.sortKeys(),
+                0,
+                SEARCH_PAGE,
+                exact,
+                hitFields.param(),
+                highlightOptions());
         List<Long> cancel = jobs();
         explain = null;
+        highlighting = null;
         stepPending = false;
         submitted = new Submitted(params);
         long id = nextId++;
@@ -883,6 +966,7 @@ public final class Search {
         submitted = null;
         running = null;
         explain = null;
+        highlighting = null;
         stepPending = false;
         selected = -1;
         detailsScroll = 0;
@@ -914,7 +998,14 @@ public final class Search {
         }
         StartSearchParams first = submitted.params;
         StartSearchParams params = new StartSearchParams(
-                first.query(), first.similarity(), first.sort(), offset, limit, first.exactTotalHits(), first.fields());
+                first.query(),
+                first.similarity(),
+                first.sort(),
+                offset,
+                limit,
+                first.exactTotalHits(),
+                first.fields(),
+                first.highlight());
         long id = nextId++;
         running = new Running(id, null, true, limit, 0);
         return Optional.of(new Request.Start(id, params, List.of()));
@@ -1040,6 +1131,86 @@ public final class Search {
     public void explainFailed(long explainId, String error) {
         if (explains(explainId)) {
             explain.error = error;
+        }
+    }
+
+    /** How the hits are highlighted: absent while highlighting is off, and for queries without terms. */
+    private Optional<HighlightOptions> highlightOptions() {
+        if (highlights == Highlights.OFF || mode == Mode.DOC_VALUES || mode == Mode.KNN) {
+            return Optional.empty();
+        }
+        return Optional.of(
+                new HighlightOptions(HIGHLIGHT_PASSAGES, highlights == Highlights.QUERY_FIELDS, analyzer.analyzer()));
+    }
+
+    /**
+     * Finds every match in the value of the selected hit's first passage, to view it with them
+     * marked (ADR 0042); nothing for a hit without passages.
+     */
+    private Optional<Request> viewSelected() {
+        Optional<Hit> hit = selectedHit();
+        if (hit.isEmpty()
+                || hit.get().highlights().isEmpty()
+                || submitted.params.highlight().isEmpty()) {
+            return Optional.empty();
+        }
+        HitHighlight first = hit.get().highlights().getFirst();
+        StartHighlightParams params = new StartHighlightParams(
+                submitted.params.query(),
+                hit.get().docId(),
+                first.field(),
+                submitted.params.highlight().get());
+        List<Long> cancel = new ArrayList<>();
+        highlightJob().ifPresent(job -> cancel.add(job[1]));
+        highlighting =
+                new Highlighting(nextId++, params, first.passages().getFirst().valueIndex());
+        return Optional.of(new Request.Highlight(highlighting.id, params, cancel));
+    }
+
+    private boolean highlights(long highlightId) {
+        return highlighting != null && highlighting.id == highlightId && highlighting.error == null;
+    }
+
+    /** The job of highlight {@code highlightId} has started. Returns the job to cancel if it was replaced or stopped. */
+    public OptionalLong highlightStarted(long highlightId, long jobId) {
+        if (!highlights(highlightId)) {
+            return OptionalLong.of(jobId);
+        }
+        highlighting.jobId = jobId;
+        return OptionalLong.empty();
+    }
+
+    /**
+     * Takes the matches of highlight {@code highlightId} once they are in, and asks to view the value
+     * with them marked: the value of the hit's first passage, or else the first with a match.
+     */
+    public Optional<Request> highlightProgress(long highlightId, GetHighlightResult result) {
+        if (!highlights(highlightId) || result.highlight().isEmpty()) {
+            return Optional.empty();
+        }
+        Highlighting done = highlighting;
+        List<ValueHighlight> values = result.highlight().get().values();
+        Optional<ValueHighlight> value = values.stream()
+                .filter(v -> v.valueIndex() == done.valueIndex)
+                .findFirst()
+                .or(() -> values.stream().findFirst());
+        if (value.isEmpty()) {
+            done.error = "No match in " + TextFormat.escapeControl(done.params.field()) + " of document "
+                    + done.params.docId() + ".";
+            return Optional.empty();
+        }
+        highlighting = null;
+        return Optional.of(new Request.View(
+                done.params.docId(),
+                done.params.field(),
+                value.get().valueIndex(),
+                value.get().spans(),
+                value.get().matchCount()));
+    }
+
+    public void highlightFailed(long highlightId, String error) {
+        if (highlights(highlightId)) {
+            highlighting.error = error;
         }
     }
 
@@ -1326,6 +1497,20 @@ public final class Search {
             case 'x' -> {
                 return Optional.of(explainSelected());
             }
+            case 'H' -> {
+                if (mode == Mode.DOC_VALUES || knn) {
+                    return Optional.empty();
+                }
+                highlights = switch (highlights) {
+                    case QUERY_FIELDS -> Highlights.ANY_FIELD;
+                    case ANY_FIELD -> Highlights.OFF;
+                    case OFF -> Highlights.QUERY_FIELDS;
+                };
+                return Optional.of(resubmit());
+            }
+            case 'v' -> {
+                return Optional.of(viewSelected());
+            }
             case 'b', 'B' -> {
                 return Optional.of(filter(c == 'B'));
             }
@@ -1478,9 +1663,11 @@ public final class Search {
             case REGEX ->
                 "/ pattern   m mode   l fields   i case   d deleted   ⏎ open doc   v view value   Tab panel   ↑↓";
             case LIKE ->
-                "/ doc id   m mode   p/s/l settings   t count   x explain   ⏎ open doc   b/B browse   Tab panel   ↑↓";
+                "/ doc id   m mode   p/s/l settings   t count   x explain   H highlight   v view   ⏎ open doc   b/B browse   "
+                        + "Tab panel   ↑↓";
             case LIKE_TEXT ->
-                "/ text   m mode   p/s/l settings   t count   x explain   ⏎ open doc   b/B browse   Tab panel   ↑↓";
+                "/ text   m mode   p/s/l settings   t count   x explain   H highlight   v view   ⏎ open doc   b/B browse   "
+                        + "Tab panel   ↑↓";
             case DOC_VALUES ->
                 "/ values   m mode   s/l settings   f/F field   n number   h hex   t count   x explain   ⏎ open doc   "
                         + "b/B browse   Tab panel   ↑↓";
@@ -1488,11 +1675,11 @@ public final class Search {
                 "/ target   w filter   m mode   p/s/l settings   f/F field   k k   e exact   a AND/OR   t count   "
                         + "x explain   ⏎ open doc   b/B browse   Tab panel   ↑↓";
             case TERM ->
-                "/ term   m mode   s/l settings   f/F field   t count   x explain   ⏎ open doc   b/B browse   Tab panel   "
-                        + "↑↓";
-            default ->
-                "/ query   m mode   p/s/l settings   f/F field   a AND/OR   t count   x explain   ⏎ open doc   "
+                "/ term   m mode   s/l settings   f/F field   t count   x explain   H highlight   v view   ⏎ open doc   "
                         + "b/B browse   Tab panel   ↑↓";
+            default ->
+                "/ query   m mode   p/s/l settings   f/F field   a AND/OR   t count   x explain   H highlight   v view   "
+                        + "⏎ open doc   b/B browse   Tab panel   ↑↓";
         };
     }
 
@@ -1526,11 +1713,16 @@ public final class Search {
         String fieldName = field < fields.size() ? TextFormat.escapeControl(fields.get(field)) : "";
         String count = exact ? "exact count" : "count to 1000";
         String title = switch (mode) {
-            case CLASSIC -> " Classic query · default field " + fieldName + " · " + operator + " · " + count + " ";
-            case STANDARD -> " Standard query · default field " + fieldName + " · " + operator + " · " + count + " ";
-            case TERM -> " Term · field " + fieldName + (binary ? " · hex" : "") + " · " + count + " ";
-            case LIKE -> " More like this document · " + like.fieldsText() + " · " + count + " ";
-            case LIKE_TEXT -> " More like this text · " + like.fieldsText() + " · " + count + " ";
+            case CLASSIC ->
+                " Classic query · default field " + fieldName + " · " + operator + " · " + count + highlightsTitle()
+                        + " ";
+            case STANDARD ->
+                " Standard query · default field " + fieldName + " · " + operator + " · " + count + highlightsTitle()
+                        + " ";
+            case TERM ->
+                " Term · field " + fieldName + (binary ? " · hex" : "") + " · " + count + highlightsTitle() + " ";
+            case LIKE -> " More like this document · " + like.fieldsText() + " · " + count + highlightsTitle() + " ";
+            case LIKE_TEXT -> " More like this text · " + like.fieldsText() + " · " + count + highlightsTitle() + " ";
             case REGEX ->
                 " Regex over stored values · fields " + hitFields.text().orElse("all") + " · "
                         + (caseInsensitive ? "ignore case" : "match case")
@@ -1649,6 +1841,8 @@ public final class Search {
         }
         if (searching != null) {
             title += "· " + searching + " ";
+        } else if (highlighting != null && highlighting.error == null) {
+            title += "· finding the matches… ";
         } else if (list.error != null) {
             title += "· cannot read more ";
         } else if (!list.more && list.hits.size() >= StartSearchParams.MAX_WINDOW) {
@@ -1685,7 +1879,24 @@ public final class Search {
                 cells.add(Cell.from(sortTexts.get(i)));
             }
             boolean isSource = source.isPresent() && source.getAsInt() == hit.docId();
-            cells.add(Cell.from(isSource ? SOURCE_MARK + " " + fieldsText(hit) : fieldsText(hit)));
+            List<Span> fieldSpans = new ArrayList<>();
+            if (isSource) {
+                fieldSpans.add(Span.raw(SOURCE_MARK + " "));
+            }
+            if (hit.highlights().isEmpty()) {
+                fieldSpans.add(Span.raw(fieldsText(hit)));
+            } else {
+                // The first passage of each field, as the stored fields would be.
+                for (HitHighlight highlight : hit.highlights()) {
+                    if (highlight != hit.highlights().getFirst()) {
+                        fieldSpans.add(Span.raw("  "));
+                    }
+                    fieldSpans.add(Span.styled(TextFormat.escapeControl(highlight.field()) + ": ", Form.dim()));
+                    fieldSpans.addAll(
+                            passageSpans(hit, highlight, highlight.passages().getFirst()));
+                }
+            }
+            cells.add(Cell.from(Line.from(fieldSpans)));
             rows.add(Row.from(cells.toArray(Cell[]::new)));
         }
         tailRow(list.more, Optional.ofNullable(list.error)).ifPresent(rows::add);
@@ -1825,7 +2036,7 @@ public final class Search {
             return lines;
         }
         HitList list = found.get();
-        List<Line> lines = new ArrayList<>();
+        List<Line> lines = highlightLines();
         lines.add(Line.from("Parsed     " + TextFormat.escapeControl(list.query)));
         lines.add(Line.from("Rewritten  " + TextFormat.escapeControl(list.rewrittenQuery)));
         lines.addAll(parserLines());
@@ -1855,6 +2066,15 @@ public final class Search {
         }
         lines.add(settingsLine());
         return lines;
+    }
+
+    /** How the hits are highlighted (ADR 0042), for the query line's title: nothing for the default. */
+    private String highlightsTitle() {
+        return switch (highlights) {
+            case QUERY_FIELDS -> "";
+            case ANY_FIELD -> " · highlight any field's terms";
+            case OFF -> " · no highlights";
+        };
     }
 
     /** What the settings popups set, for the footer's {@code p/s/l settings}. */
@@ -1978,6 +2198,85 @@ public final class Search {
                                 .map(term -> TextFormat.bytesText(term.value(), term.binary()))
                                 .orElse("–")))
                 .collect(Collectors.joining(" · "));
+    }
+
+    /**
+     * A passage of a hit, with its matches marked, and {@code …} where its value goes on (ADR 0042).
+     */
+    static List<Span> passageSpans(Hit hit, HitHighlight highlight, HighlightPassage passage) {
+        return StoredScan.snippetSpans(
+                passage.snippet(), passage.spans(), valueLength(hit, highlight.field(), passage.valueIndex()));
+    }
+
+    /**
+     * The length in bytes of a stored text value of a hit, from its cut text or its full length; -1
+     * if the hit doesn't have it.
+     */
+    private static long valueLength(Hit hit, String field, int index) {
+        for (HitField hitField : hit.fields()) {
+            if (hitField.name().equals(field) && index < hitField.values().size()) {
+                StoredValue value = hitField.values().get(index);
+                if (value.fullLength().isPresent()) {
+                    return value.fullLength().getAsLong();
+                }
+                return value.binary() ? -1 : value.value().getBytes(StandardCharsets.UTF_8).length;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * The passages of the selected hit, per field with the source of its offsets (ADR 0042), and how
+     * the search for every match of {@code v} goes.
+     */
+    private List<Line> highlightLines() {
+        List<Line> lines = new ArrayList<>();
+        Optional<Hit> hit = selectedHit();
+        if (hit.isEmpty() || hit.get().highlights().isEmpty()) {
+            return lines;
+        }
+        lines.add(Line.from(
+                Span.styled("Highlights of doc " + hit.get().docId(), Style.EMPTY.bold()),
+                Span.styled(" · " + highlights.text, Form.dim())));
+        for (HitHighlight highlight : hit.get().highlights()) {
+            lines.add(Line.from(
+                    Span.styled(TextFormat.escapeControl(highlight.field()), Style.EMPTY.cyan()),
+                    Span.styled(" · offsets from " + offsetSourceText(highlight.offsetSource()), Form.dim())));
+            for (HighlightPassage passage : highlight.passages()) {
+                List<Span> spans = new ArrayList<>();
+                spans.add(Span.styled("  [" + passage.valueIndex() + "] ", Form.dim()));
+                spans.addAll(passageSpans(hit.get(), highlight, passage));
+                lines.add(Line.from(spans));
+            }
+        }
+        if (highlighting != null && highlighting.params.docId() == hit.get().docId()) {
+            if (highlighting.error != null) {
+                lines.add(Line.styled("Cannot view the matches: " + highlighting.error, Style.EMPTY.red()));
+            } else {
+                lines.add(Line.styled(
+                        "Finding every match in " + TextFormat.escapeControl(highlighting.params.field()) + "["
+                                + highlighting.valueIndex + "]…",
+                        Form.dim()));
+            }
+        } else {
+            HitHighlight first = hit.get().highlights().getFirst();
+            lines.add(Line.styled(
+                    "v views " + TextFormat.escapeControl(first.field()) + "["
+                            + first.passages().getFirst().valueIndex() + "] with every match marked.",
+                    Form.dim()));
+        }
+        lines.add(Line.empty());
+        return lines;
+    }
+
+    static String offsetSourceText(OffsetSource source) {
+        return switch (source) {
+            case POSTINGS -> "the postings";
+            case TERM_VECTORS -> "the term vector";
+            case POSTINGS_WITH_TERM_VECTORS -> "the postings and the term vector";
+            case ANALYSIS -> "analysis";
+            case NONE -> "nowhere: no terms";
+        };
     }
 
     /**

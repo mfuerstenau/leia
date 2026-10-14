@@ -31,7 +31,8 @@ because Lucene 10 can't read them.
   a given one or like a text (More-Like-This, with the terms it chose), with the parsers' options and ranges on point fields, scored with BM25, classic TF-IDF or boolean similarity and
   sorted by score, document id or up to two doc values fields (with the value of a multi-valued
   field and the place of missing values); the hits with their scores, sort values and
-  chosen stored fields, exact or approximate hit counts, and an explanation of how a hit scores.
+  chosen stored fields, or their best passages with the query's matches highlighted, exact or
+  approximate hit counts, and an explanation of how a hit scores.
   A regular expression over the stored values finds what was never indexed or was analyzed
   away, with the matches highlighted. A query can also narrow the documents screen to the
   documents it matches, to browse them in document id order.
@@ -379,11 +380,12 @@ shows as missing. The documents and terms screens always show the opened commit.
 | `w` | KNN: edit the filter, in classic syntax |
 | `t` | count every hit, or stop counting after 1000 |
 | `x` | explain how the selected hit scores |
+| `H` | highlight the matches with the terms of each field, with the terms of any field, or not at all |
 | `i` | regex: ignore case, or match it |
 | `d` | regex: scan deleted documents too, or not |
 | `Enter` | show the selected hit's document on the documents screen |
 | `b` `B` | browse the documents that match the query, or have a value the regex finds, on the documents screen, without or with the deleted ones |
-| `v` | regex: view the selected value with its matches highlighted |
+| `v` | view the value of the selected hit's first passage, or in regex mode the selected value, with its matches highlighted |
 | `Tab` | switch between the hits and the details |
 | `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the hits, or scroll the details |
 
@@ -402,6 +404,18 @@ a resolution, the bounds stay text. Without a time zone, they are read in the JV
 as Lucene does (ADR 0026). A term query searches the field for
 the line exactly as typed, `:` and spaces included, without analysis. A changed setting searches
 again.
+
+The hits show where the query matches (ADR 0042): Lucene's `UnifiedHighlighter` picks the best
+passages, usually sentences, of each stored text field per hit (`l`), and the hit list shows each
+field's first one with the matches marked, `body: …the quick fox jumps…`. The details panel lists up to
+three passages per field of the selected hit, with the value they are in, and where the offsets of
+the matches came from: the postings, if the field was indexed with offsets; the term vector, if it
+has offsets; or else analysis of the stored text with the analysis screen's analyzer. A wildcard or
+fuzzy query needs analysis or the term vector even on a field with postings offsets. `H` switches
+to highlighting each field with the terms of every field, which also marks text that is stored but
+not indexed, then off. `v` finds every match in the value of the first passage and opens it in the
+documents screen's viewer, where `m` and `M` step through them. Doc values and KNN queries have no
+terms, so nothing is highlighted.
 
 The doc values mode searches one field's doc values, which find what has neither terms nor points,
 such as a sort or facet field (ADR 0033). The line holds one value, several values separated by

@@ -30,9 +30,11 @@ import io.github.mfuerstenau.leia.server.job.CancelJobHandler;
 import io.github.mfuerstenau.leia.server.points.GetPointCellHandler;
 import io.github.mfuerstenau.leia.server.points.GetPointTreeHandler;
 import io.github.mfuerstenau.leia.server.search.GetExplainHandler;
+import io.github.mfuerstenau.leia.server.search.GetHighlightHandler;
 import io.github.mfuerstenau.leia.server.search.GetSearchHandler;
 import io.github.mfuerstenau.leia.server.search.GetStoredScanHandler;
 import io.github.mfuerstenau.leia.server.search.StartExplainHandler;
+import io.github.mfuerstenau.leia.server.search.StartHighlightHandler;
 import io.github.mfuerstenau.leia.server.search.StartSearchHandler;
 import io.github.mfuerstenau.leia.server.search.StartStoredScanHandler;
 import io.github.mfuerstenau.leia.server.terms.GetExportTermsHandler;
@@ -143,6 +145,14 @@ interface HandlerModule {
     @Binds
     @IntoSet
     MethodHandler<?, ?> getExplain(GetExplainHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> startHighlight(StartHighlightHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> getHighlight(GetHighlightHandler handler);
 
     @Binds
     @IntoSet

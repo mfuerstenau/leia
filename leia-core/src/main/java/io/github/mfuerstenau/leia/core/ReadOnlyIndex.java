@@ -876,13 +876,68 @@ public final class ReadOnlyIndex implements OpenedIndex {
             Optional<Set<String>> fields,
             ScanProgress progress)
             throws IOException, InvalidQueryException {
+        return search(query, similarity, sort, offset, limit, exactTotalHits, fields, Optional.empty(), progress);
+    }
+
+    /**
+     * Runs {@code query} as {@link #search(Query, Similarity, Optional, int, int, boolean, Optional,
+     * ScanProgress)} does, and highlights the query's matches in each hit's stored text values in
+     * {@code fields} with {@code highlight} (ADR 0042): the best passages per field.
+     *
+     * @throws IllegalArgumentException if {@code offset} is negative, {@code limit} is below 1, or their sum
+     *     overflows
+     * @throws InvalidQueryException if the rewritten query has too many clauses
+     * @throws IOException if reading the index fails
+     */
+    public SearchResults search(
+            Query query,
+            Similarity similarity,
+            Optional<Sort> sort,
+            int offset,
+            int limit,
+            boolean exactTotalHits,
+            Optional<Set<String>> fields,
+            Optional<HighlightSpec> highlight,
+            ScanProgress progress)
+            throws IOException, InvalidQueryException {
         checkLimit(limit);
         if (offset < 0 || offset > Integer.MAX_VALUE - limit) {
             throw new IllegalArgumentException(
                     "offset must be from 0 to " + (Integer.MAX_VALUE - limit) + ": " + offset);
         }
         return Searcher.search(
-                reader, directoryReaders(), query, similarity, sort, offset, limit, exactTotalHits, fields, progress);
+                reader,
+                directoryReaders(),
+                query,
+                similarity,
+                sort,
+                offset,
+                limit,
+                exactTotalHits,
+                fields,
+                highlight,
+                progress);
+    }
+
+    /**
+     * Finds every match of {@code query} in the stored text values of {@code field} of a document
+     * (ADR 0042), up to {@code maxSpans} per value. {@code progress} can stop it by throwing a {@link
+     * CancellationException}, as for {@link #search}.
+     *
+     * @throws IllegalArgumentException if there is no such document id or field, or {@code maxSpans} is
+     *     negative
+     * @throws InvalidQueryException if the rewritten query has too many clauses
+     * @throws IOException if reading the index fails
+     */
+    public DocumentHighlight highlight(
+            Query query, HighlightSpec spec, int docId, String field, int maxSpans, ScanProgress progress)
+            throws IOException, InvalidQueryException {
+        checkDocId(docId);
+        checkField(field);
+        if (maxSpans < 0) {
+            throw new IllegalArgumentException("maxSpans must not be negative: " + maxSpans);
+        }
+        return Searcher.highlight(reader, directoryReaders(), query, spec, docId, field, maxSpans, progress);
     }
 
     /**

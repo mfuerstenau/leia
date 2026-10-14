@@ -101,6 +101,15 @@ other tests use their own indexes and the Lucene 9 and 8 indexes from `LegacyInd
 - `title:lamp AND body:qu*`: 10 hits; `x` on doc 223 shows a BM25 explanation with a prefix
   clause.
 - `*:*` with `t` (exact count): 487 hits, the live documents, fetched 100 at a time as you scroll.
+- Highlighting (ADR 0042): `title:lamp AND body:qu*` shows doc 223 first as `title: Red lamp`, with
+  `lamp` marked. The details panel says that `title` has its offsets from analysis (it has none in
+  the index), and `body` from the postings and the term vector, which the prefix query needs.
+  `body:"quick fox"` marks the phrase as one match, with offsets from the postings, and `body:quik~`
+  marks the `quick`s. `tagged:lamp` is highlighted by analysis, since its term vectors have no
+  offsets; `v` on its first hit, doc 195, opens the value in the viewer at `match 1 of 2`. With
+  `H` set to any field's terms, `title:lamp` also marks `lamp` in `body`, `csv` and
+  `unit_separated`, and for doc 132 in `tagged` and `lines` too. `H` again turns it off, and the
+  hits show their stored fields.
 - `/` on a top term of `binary_key` in the overview: a term query for a binary term, shown as hex.
 - `title:(lamp`: a syntax error; `body:*a*`: a leading wildcard, which the classic parser rejects
   until `p` turns leading wildcards on.

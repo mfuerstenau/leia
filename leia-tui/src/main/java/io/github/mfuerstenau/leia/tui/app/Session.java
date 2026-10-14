@@ -451,6 +451,14 @@ public final class Session {
                         app -> jobId -> app.explainStarted(start.explainId(), jobId),
                         app -> message -> app.explainFailed(start.explainId(), message));
             }
+            case Action.StartHighlight start -> {
+                cancelJobs(start.cancel(), runner);
+                startJob(
+                        backend.call(Methods.START_HIGHLIGHT, start.params()),
+                        runner,
+                        app -> jobId -> app.highlightStarted(start.highlightId(), jobId),
+                        app -> message -> app.highlightFailed(start.highlightId(), message));
+            }
             case Action.StartStoredScan start -> {
                 cancelJobs(start.cancel(), runner);
                 startJob(
@@ -828,6 +836,25 @@ public final class Session {
                                     String message = describe(rpc);
                                     polled(runner, poll, app -> {
                                         app.explainFailed(explaining.explainId(), message);
+                                        return Optional.empty();
+                                    });
+                                }
+                            });
+                case Poll.Highlight highlighting ->
+                    backend.call(Methods.GET_HIGHLIGHT, new JobParams(highlighting.jobId()))
+                            .whenComplete((result, error) -> {
+                                if (error == null) {
+                                    polled(
+                                            runner,
+                                            poll,
+                                            app -> app.highlightProgress(highlighting.highlightId(), result));
+                                    return;
+                                }
+                                RpcException rpc = rpcException(error, runner);
+                                if (rpc != null) {
+                                    String message = describe(rpc);
+                                    polled(runner, poll, app -> {
+                                        app.highlightFailed(highlighting.highlightId(), message);
                                         return Optional.empty();
                                     });
                                 }

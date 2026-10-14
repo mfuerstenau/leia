@@ -332,8 +332,8 @@ class Lucene9BackendTest {
         SearchQuery query = classic("number AND (1 OR 2 OR 3)");
         Similarity tfIdf = new Similarity(Optional.empty(), Optional.of(new ClassicSimilarity()), Optional.empty());
 
-        SearchResults results =
-                backend.search(new StartSearchParams(query, tfIdf, List.of(), 0, 10, true, Optional.of(List.of("id"))));
+        SearchResults results = backend.search(new StartSearchParams(
+                query, tfIdf, List.of(), 0, 10, true, Optional.of(List.of("id")), Optional.empty()));
 
         assertThat(results.query()).isEqualTo("+body:number +(body:1 body:2 body:3)");
         assertThat(results.totalHits()).isEqualTo(2);
@@ -375,7 +375,14 @@ class Lucene9BackendTest {
         assertThat(backend.fails(
                                 Methods.START_SEARCH,
                                 new StartSearchParams(
-                                        classic("number"), BM25, List.of(byId), 0, 10, false, Optional.empty()),
+                                        classic("number"),
+                                        BM25,
+                                        List.of(byId),
+                                        0,
+                                        10,
+                                        false,
+                                        Optional.empty(),
+                                        Optional.empty()),
                                 ErrorCode.INVALID_PARAMS)
                         .getMessage())
                 .contains("no doc values");
@@ -390,6 +397,7 @@ class Lucene9BackendTest {
                 0,
                 10,
                 true,
+                Optional.empty(),
                 Optional.empty()));
 
         assertThat(sorted.hits()).extracting(Hit::docId).containsExactly(2, 0);
@@ -448,7 +456,7 @@ class Lucene9BackendTest {
     }
 
     private static StartSearchParams params(SearchQuery query) {
-        return new StartSearchParams(query, BM25, List.of(), 0, 10, false, Optional.empty());
+        return new StartSearchParams(query, BM25, List.of(), 0, 10, false, Optional.empty(), Optional.empty());
     }
 
     private static BytesValue text(String value) {
