@@ -11,6 +11,8 @@ import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Color;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
+import dev.tamboui.text.Line;
+import dev.tamboui.text.Span;
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.widgets.table.Cell;
@@ -20,11 +22,16 @@ import dev.tamboui.widgets.table.TableState;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
+import io.github.mfuerstenau.leia.protocol.points.GetPointCellResult;
+import io.github.mfuerstenau.leia.protocol.points.GetPointTreeResult;
+import io.github.mfuerstenau.leia.protocol.points.LeafPoint;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.Posting;
 import io.github.mfuerstenau.leia.protocol.terms.PostingsFilter;
 import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
+import io.github.mfuerstenau.leia.tui.points.PointFormat;
+import io.github.mfuerstenau.leia.tui.points.PointFormats;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
@@ -41,7 +48,9 @@ import java.util.Set;
  * the selected term, side by side (ADR 0007). Terms and postings come in pages, and the next page is
  * fetched once the selection reaches the last row. Enter on a posting shows its document on the
  * documents screen. With a filter on the documents screen, the postings in it are marked, or {@code
- * b} shows only those (ADR 0032).
+ * b} shows only those (ADR 0032). A field with points has a row of its own, which shows its BKD
+ * tree instead: a row per segment and, below an expanded one, its cells, fetched a level at a time,
+ * with the points of a leaf on the right (ADR 0041).
  *
  * <p>The Rust TUI got each reply before the next key; here a reply can come after the user moved
  * on. So a fetch that is under way is not asked for again, and a reply that no longer fits what the
@@ -89,7 +98,28 @@ public final class Terms {
 
         /** Ask where to export the terms of this field to (ADR 0022). */
         record Export(String field) implements Request {}
+
+        /**
+         * The BKD tree of a point field, reported back with {@link #pointTreeLoaded} or {@link
+         * #pointTreeFailed}; {@code serial} tells the replies of one call from another's.
+         */
+        record LoadPointTree(String field, long serial) implements Request {}
+
+        /**
+         * A cell of the BKD tree {@code serial} of a point field, reported back with {@link
+         * #pointCellLoaded} or {@link #pointCellFailed}.
+         */
+        record LoadPointCell(String field, long serial, int segment, List<Integer> path) implements Request {}
+
+        /** Show this document, which has a point of {@code field}, on the documents screen. */
+        record PointDocument(String field, int docId) implements Request {}
     }
+
+    /**
+     * A row of the fields column: a field with postings, or with {@code points} the same or another
+     * field's BKD tree.
+     */
+    private record FieldRow(IndexField field, boolean points) {}
 
     /**
      * A document that contains a term: a posting, as the documents screen shows it.
@@ -193,8 +223,11 @@ public final class Terms {
         }
     }
 
-    /** The fields with postings, in field number order. */
-    private final List<IndexField> fields;
+    /**
+     * The fields with postings, and those with points, in field number order; a field with both has
+     * a row for each, its postings first.
+     */
+    private final List<FieldRow> fields;
 
     private int fieldRow;
     private final TableState fieldTable = new TableState();
@@ -222,10 +255,38 @@ public final class Terms {
     /** The fetches that are under way. */
     private final Set<Request> pending = new HashSet<>();
 
+    /** The tree of the selected point field; null before it is in, or for a field with postings. */
+    private PointTree pointTree;
+
+    /** The tree asked for last; a reply for another is dropped. Null before. */
+    private Request.LoadPointTree wantedTree;
+
+    /** The serial of the next tree asked for. */
+    private long nextTreeSerial = 1;
+
+    /** The format each point field is shown in, shared with the documents screen. */
+    private PointFormats pointFormats = new PointFormats();
+
+    /** What a key that doesn't work on the shown field said; until the next key. */
+    private String note;
+
     public Terms(List<IndexField> fields) {
-        this.fields = fields.stream()
-                .filter(field -> field.indexOptions() != IndexOptions.NONE)
-                .toList();
+        List<FieldRow> rows = new ArrayList<>();
+        for (IndexField field : fields) {
+            if (field.indexOptions() != IndexOptions.NONE) {
+                rows.add(new FieldRow(field, false));
+            }
+            if (field.pointDimensionCount() > 0) {
+                rows.add(new FieldRow(field, true));
+            }
+        }
+        this.fields = List.copyOf(rows);
+    }
+
+    /** Shows points in {@code formats}, which the documents screen shares. */
+    public Terms withPointFormats(PointFormats formats) {
+        this.pointFormats = formats;
+        return this;
     }
 
     /**
@@ -234,9 +295,10 @@ public final class Terms {
      */
     public Terms reopened(List<IndexField> fields) {
         Terms reopened = new Terms(fields);
-        selectedField().ifPresent(field -> {
+        selectedRow().ifPresent(row -> {
             for (int i = 0; i < reopened.fields.size(); i++) {
-                if (reopened.fields.get(i).name().equals(field.name())) {
+                FieldRow other = reopened.fields.get(i);
+                if (other.field().name().equals(row.field().name()) && other.points() == row.points()) {
                     reopened.fieldRow = i;
                     break;
                 }
@@ -244,6 +306,9 @@ public final class Terms {
         });
         reopened.focus = focus;
         reopened.onlyFiltered = onlyFiltered;
+        reopened.pointFormats = pointFormats;
+        // The segments' positions change with a reopen: the tree is fetched again, collapsed.
+        reopened.nextTreeSerial = nextTreeSerial;
         return reopened;
     }
 
@@ -287,8 +352,18 @@ public final class Terms {
         return !pending.isEmpty();
     }
 
-    private Optional<IndexField> selectedField() {
+    private Optional<FieldRow> selectedRow() {
         return fieldRow < fields.size() ? Optional.of(fields.get(fieldRow)) : Optional.empty();
+    }
+
+    /** The selected field, if its postings are shown. */
+    private Optional<IndexField> selectedField() {
+        return selectedRow().filter(row -> !row.points()).map(FieldRow::field);
+    }
+
+    /** The selected field, if its BKD tree is shown. */
+    private Optional<IndexField> selectedPointField() {
+        return selectedRow().filter(FieldRow::points).map(FieldRow::field);
     }
 
     /** {@code request}, unless it is under way already. */
@@ -303,6 +378,18 @@ public final class Terms {
      * itself.
      */
     private Optional<Request> nextRequest() {
+        Optional<IndexField> pointField = selectedPointField();
+        if (pointField.isPresent()) {
+            String field = pointField.get().name();
+            if (pointTree != null && pointTree.field.equals(field)) {
+                return Optional.empty();
+            }
+            pointTree = null;
+            if (wantedTree == null || !wantedTree.field().equals(field)) {
+                wantedTree = new Request.LoadPointTree(field, nextTreeSerial++);
+            }
+            return send(wantedTree);
+        }
         Optional<IndexField> selected = selectedField();
         if (selected.isEmpty()) {
             return Optional.empty();
@@ -455,6 +542,89 @@ public final class Terms {
         }
     }
 
+    /** Shows the BKD tree of a point field, if it is still the one wanted. */
+    public Optional<Request> pointTreeLoaded(Request.LoadPointTree request, GetPointTreeResult result) {
+        pending.remove(request);
+        if (wantedTree(request)) {
+            pointTree = new PointTree(request.serial(), request.field(), result);
+        }
+        return Optional.empty();
+    }
+
+    /** Shows why the BKD tree of a point field could not be fetched, if it is still the one wanted. */
+    public void pointTreeFailed(Request.LoadPointTree request, String error) {
+        pending.remove(request);
+        if (wantedTree(request)) {
+            pointTree = new PointTree(request.serial(), request.field(), error);
+        }
+    }
+
+    private boolean wantedTree(Request.LoadPointTree request) {
+        return request.equals(wantedTree)
+                && selectedPointField()
+                        .map(IndexField::name)
+                        .filter(request.field()::equals)
+                        .isPresent();
+    }
+
+    /**
+     * Shows the children of a cell, or the points of a leaf, if its tree is still shown. A leaf that
+     * is selected shows its points, and the focus moves to them.
+     */
+    public void pointCellLoaded(Request.LoadPointCell request, GetPointCellResult result) {
+        pending.remove(request);
+        cellOf(request).ifPresent(node -> {
+            node.loaded(result);
+            if (node.points != null
+                    && pointTree.selectedNode().filter(node::equals).isPresent()) {
+                pointTree.showLeaf(node);
+                focus = Column.POSTINGS;
+            }
+        });
+    }
+
+    /** Shows why a cell could not be fetched, if its tree is still shown. */
+    public void pointCellFailed(Request.LoadPointCell request, String error) {
+        pending.remove(request);
+        cellOf(request).ifPresent(node -> {
+            node.loading = false;
+            node.error = Optional.of(error);
+        });
+    }
+
+    private Optional<PointTree.Node> cellOf(Request.LoadPointCell request) {
+        if (pointTree == null || pointTree.serial != request.serial()) {
+            return Optional.empty();
+        }
+        return pointTree.find(request.segment(), request.path());
+    }
+
+    /**
+     * Enter on a cell: expands or collapses it, or shows the points of a leaf; fetches what that
+     * needs first.
+     */
+    private Optional<Request> openCell() {
+        Optional<PointTree.Node> selected = pointTree.selectedNode();
+        if (selected.isEmpty()) {
+            return Optional.empty();
+        }
+        PointTree.Node node = selected.get();
+        if (node.points != null) {
+            pointTree.showLeaf(node);
+            focus = Column.POSTINGS;
+            return Optional.empty();
+        }
+        if (node.children != null) {
+            node.expanded = !node.expanded;
+            return Optional.empty();
+        }
+        if (node.loading) {
+            return Optional.empty();
+        }
+        node.loading = true;
+        return send(new Request.LoadPointCell(pointTree.field, pointTree.serial, node.segment, node.path));
+    }
+
     /**
      * Moves to the previous ({@code forward} false) or next posting of the selected term, and shows
      * its document; fetches the next page first if the next posting is not in yet.
@@ -486,7 +656,7 @@ public final class Terms {
     public Optional<Request> browse(String field, BytesValue term) {
         int row = -1;
         for (int i = 0; i < fields.size(); i++) {
-            if (fields.get(i).name().equals(field)) {
+            if (!fields.get(i).points() && fields.get(i).field().name().equals(field)) {
                 row = i;
                 break;
             }
@@ -510,11 +680,35 @@ public final class Terms {
      * Moves the selection in the focused column, switches columns with ←/→ and Tab, seeks with
      * {@code /}, with Enter goes one column to the right or shows the selected posting's document,
      * with {@code e} exports the selected field's terms, and with {@code b} switches between all
-     * postings and those in the filter, if there is one.
+     * postings and those in the filter, if there is one. On a point field's tree, Enter expands or
+     * collapses a cell, or shows a leaf's points, and on a point shows its document; {@code t}
+     * cycles the format the points are shown in.
      */
     public Optional<Request> handleKey(KeyEvent key) {
         if (seek != null) {
             return seekKey(key);
+        }
+        note = null;
+        Optional<IndexField> pointField = selectedPointField();
+        if (pointField.isPresent()) {
+            if (key.isChar('t')) {
+                pointFormats.cycle(pointField.get());
+                return Optional.empty();
+            }
+            if (key.isChar('/') || key.isChar('e')) {
+                note = (key.isChar('/') ? "/ seeks" : "e exports") + " terms only";
+                return Optional.empty();
+            }
+            if (key.code() == KeyCode.ENTER && pointTree != null) {
+                if (focus == Column.TERMS) {
+                    return openCell();
+                }
+                if (focus == Column.POSTINGS) {
+                    return pointTree
+                            .selectedPoint()
+                            .map(point -> new Request.PointDocument(pointTree.field, point.docId()));
+                }
+            }
         }
         if (key.isChar('e')) {
             return selectedField().map(field -> new Request.Export(field.name()));
@@ -589,6 +783,13 @@ public final class Terms {
                 fieldRow = row.getAsInt();
             }
             case TERMS -> {
+                if (selectedPointField().isPresent()) {
+                    if (pointTree != null) {
+                        Selection.moved(pointTree.selected, pointTree.visible().size(), key)
+                                .ifPresent(row -> pointTree.selected = row);
+                    }
+                    return Optional.empty();
+                }
                 if (terms == null) {
                     return Optional.empty();
                 }
@@ -599,6 +800,13 @@ public final class Terms {
                 terms.selected = row.getAsInt();
             }
             case POSTINGS -> {
+                if (selectedPointField().isPresent()) {
+                    if (pointTree != null && pointTree.leaf != null) {
+                        Selection.moved(pointTree.pointSelected, pointTree.leaf.points.size(), key)
+                                .ifPresent(row -> pointTree.pointSelected = row);
+                    }
+                    return Optional.empty();
+                }
                 if (postings == null) {
                     return Optional.empty();
                 }
@@ -614,11 +822,12 @@ public final class Terms {
 
     public void render(Frame frame, Rect area) {
         if (fields.isEmpty()) {
-            message(frame, area, " Fields ", true, "No field has postings.");
+            message(frame, area, " Fields ", true, "No field has postings or points.");
             return;
         }
         int nameWidth = fields.stream()
-                .mapToInt(field -> field.name().codePointCount(0, field.name().length()))
+                .map(Terms::fieldLabel)
+                .mapToInt(label -> label.codePointCount(0, label.length()))
                 .max()
                 .orElse(0);
         List<Rect> columns = Layout.horizontal()
@@ -628,14 +837,35 @@ public final class Terms {
                         Constraint.length(POSTINGS_WIDTH))
                 .split(area);
         renderFields(frame, columns.get(0));
+        if (selectedPointField().isPresent()) {
+            renderPointTree(frame, columns.get(1));
+            renderLeaf(frame, columns.get(2));
+            return;
+        }
         renderTerms(frame, columns.get(1));
         renderPostings(frame, columns.get(2));
+    }
+
+    /** A field's name, and for its points row their dimensions and bytes, such as {@code pt 1×8}. */
+    private static String fieldLabel(FieldRow row) {
+        String name = TextFormat.escapeControl(row.field().name());
+        return row.points()
+                ? name + " pt " + row.field().pointDimensionCount() + "×"
+                        + row.field().pointNumBytes()
+                : name;
     }
 
     private void renderFields(Frame frame, Rect area) {
         boolean focused = focus == Column.FIELDS;
         List<Row> rows = fields.stream()
-                .map(field -> Row.from(Cell.from(TextFormat.escapeControl(field.name()))))
+                .map(row -> {
+                    if (!row.points()) {
+                        return Row.from(Cell.from(fieldLabel(row)));
+                    }
+                    String name = TextFormat.escapeControl(row.field().name());
+                    return Row.from(Cell.from(Line.from(
+                            Span.raw(name), Span.styled(fieldLabel(row).substring(name.length()), Style.EMPTY.dim()))));
+                })
                 .toList();
         fieldTable.select(fieldRow);
         Table table = table(rows, focused)
@@ -748,6 +978,95 @@ public final class Terms {
                 .block(panel(title, focused))
                 .build();
         frame.renderStatefulWidget(table, area, postings.table);
+    }
+
+    private void renderPointTree(Frame frame, Rect area) {
+        boolean focused = focus == Column.TERMS;
+        IndexField field = selectedPointField().orElseThrow();
+        String name = TextFormat.firstChars(TextFormat.escapeControl(field.name()), 30);
+        if (pointTree == null) {
+            frame.renderWidget(panel(" " + name + " ", focused), area);
+            return;
+        }
+        PointFormat format = pointFormats.of(field);
+        if (pointTree.tree == null) {
+            message(frame, area, " " + name + " ", focused, "Cannot read the points: " + pointTree.error.orElse(""));
+            return;
+        }
+        GetPointTreeResult tree = pointTree.tree;
+        // A note goes first, where a narrow title doesn't cut it.
+        String title = " " + name + (note != null ? " · " + note : "") + " · "
+                + TextFormat.count(tree.segments().size(), "segment") + " · " + TextFormat.count(tree.size(), "point")
+                + " in " + TextFormat.count(tree.docCount(), "doc") + " · as " + format.label() + " ";
+        if (pointTree.segments.isEmpty()) {
+            message(frame, area, title, focused, "The field has no points.");
+            return;
+        }
+        List<PointTree.Node> visible = pointTree.visible();
+        pointTree.selected = Math.min(pointTree.selected, visible.size() - 1);
+        List<Row> rows = new ArrayList<>();
+        Style dim = Style.EMPTY.dim();
+        for (PointTree.Node node : visible) {
+            String marker;
+            if (node.leaf.orElse(false)) {
+                marker = "•";
+            } else if (node.expanded) {
+                marker = "▾";
+            } else {
+                marker = "▸";
+            }
+            List<Span> spans = new ArrayList<>();
+            spans.add(Span.raw("  ".repeat(node.depth()) + marker + " "));
+            if (node.name.isPresent() || node.depth() == 0) {
+                spans.add(Span.styled(node.name.orElse("#" + node.segment) + "  ", Style.EMPTY.bold()));
+            }
+            spans.add(Span.raw(node.size + " pts  "));
+            spans.add(Span.styled(format.format(node.min) + " … " + format.format(node.max), dim));
+            if (node.loading) {
+                spans.add(Span.styled("  …", dim));
+            }
+            node.error.ifPresent(error -> spans.add(Span.styled("  cannot read it: " + error, Style.EMPTY.red())));
+            rows.add(Row.from(Cell.from(Line.from(spans))));
+        }
+        pointTree.table.select(pointTree.selected);
+        Table table = table(rows, focused)
+                .widths(Constraint.fill())
+                .block(panel(title, focused))
+                .build();
+        frame.renderStatefulWidget(table, area, pointTree.table);
+    }
+
+    private void renderLeaf(Frame frame, Rect area) {
+        boolean focused = focus == Column.POSTINGS;
+        if (pointTree == null || pointTree.leaf == null) {
+            message(frame, area, " Points ", focused, "⏎ on a leaf (•) shows its points.");
+            return;
+        }
+        PointTree.Node leaf = pointTree.leaf;
+        PointFormat format = pointFormats.of(selectedPointField().orElseThrow());
+        String title = leaf.pointsCut
+                ? " Points (" + leaf.points.size() + " of " + leaf.size + ") "
+                : " Points (" + leaf.points.size() + ") ";
+        int docWidth = Selection.numberWidth(leaf.points.stream().mapToLong(LeafPoint::docId));
+        Row header = Row.from(right("Doc", docWidth), Cell.from("Value")).style(Style.EMPTY.bold());
+        List<Row> rows = new ArrayList<>();
+        for (LeafPoint point : leaf.points) {
+            Row row =
+                    Row.from(right(Integer.toString(point.docId()), docWidth), Cell.from(format.format(point.value())));
+            rows.add(point.deleted() ? row.style(Style.EMPTY.red()) : row);
+        }
+        pointTree.pointTable.select(pointTree.pointSelected);
+        Table table = table(rows, focused)
+                .widths(Constraint.length(docWidth), Constraint.fill())
+                .header(header)
+                .block(panel(title, focused))
+                .build();
+        frame.renderStatefulWidget(table, area, pointTree.pointTable);
+    }
+
+    /** Whether the selected field's BKD tree is shown rather than its terms. */
+    public boolean showsPoints() {
+        return selectedPointField().isPresent();
     }
 
     /** A table of {@code rows}, with the selected row highlighted as in the other screens. */

@@ -22,6 +22,12 @@ import org.apache.lucene.analysis.miscellaneous.PerFieldAnalyzerWrapper;
 import org.apache.lucene.analysis.standard.StandardTokenizer;
 import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 import org.apache.lucene.analysis.tokenattributes.PayloadAttribute;
+import org.apache.lucene.codecs.Codec;
+import org.apache.lucene.codecs.FilterCodec;
+import org.apache.lucene.codecs.PointsFormat;
+import org.apache.lucene.codecs.PointsReader;
+import org.apache.lucene.codecs.PointsWriter;
+import org.apache.lucene.codecs.lucene90.Lucene90PointsWriter;
 import org.apache.lucene.collation.CollationKeyAnalyzer;
 import org.apache.lucene.document.BinaryDocValuesField;
 import org.apache.lucene.document.DateTools;
@@ -50,12 +56,15 @@ import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.NoDeletionPolicy;
 import org.apache.lucene.index.NoMergePolicy;
+import org.apache.lucene.index.SegmentReadState;
+import org.apache.lucene.index.SegmentWriteState;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.NumericUtils;
+import org.apache.lucene.util.bkd.BKDWriter;
 
 /**
  * Writes a demo index for trying leia by hand (build tooling, not part of leia).
@@ -66,6 +75,10 @@ import org.apache.lucene.util.NumericUtils;
  * sparse and empty fields. 500 documents in 3 segments, some deleted, with commit user data, and
  * all 4 commits kept. The content is random but the same on every run. See {@code
  * docs/demo-index.md} for what is where.
+ *
+ * <p>The points are written with leaves of {@value #POINTS_PER_LEAF} points instead of Lucene's 512,
+ * so that a segment's 200 points make a tree of several levels to browse (ADR 0041). The files are
+ * those of the default codec, which reads them as any other.
  */
 public final class DemoIndexWriter {
 
@@ -78,6 +91,8 @@ public final class DemoIndexWriter {
     private static final int HUGE_DOC = 42;
     /** A document with unusual text: control characters, emoji, wide characters. */
     private static final int ODD_TEXT_DOC = 7;
+    /** The most points in a leaf of a BKD tree. */
+    private static final int POINTS_PER_LEAF = 16;
     /** The only document with the field {@code deleted_only}; it is deleted. */
     private static final int DELETED_ONLY_DOC = 74;
 
@@ -204,6 +219,7 @@ public final class DemoIndexWriter {
                 IndexWriter writer = new IndexWriter(
                         directory,
                         new IndexWriterConfig(analyzer())
+                                .setCodec(smallPointLeaves())
                                 // No merges: keep the segments and the deleted documents.
                                 .setMergePolicy(NoMergePolicy.INSTANCE)
                                 // Keep every commit, for the commits screen.
@@ -237,6 +253,31 @@ public final class DemoIndexWriter {
         Collator german = Collator.getInstance(Locale.GERMAN);
         german.setStrength(Collator.PRIMARY);
         return new PerFieldAnalyzerWrapper(new DemoAnalyzer(), Map.of("title_key", new CollationKeyAnalyzer(german)));
+    }
+
+    /**
+     * The default codec, under its own name, but writing BKD trees with leaves of {@value
+     * #POINTS_PER_LEAF} points. The leaf size is in the files, so the default codec reads them.
+     */
+    private static Codec smallPointLeaves() {
+        Codec codec = Codec.getDefault();
+        PointsFormat points = codec.pointsFormat();
+        return new FilterCodec(codec.getName(), codec) {
+            @Override
+            public PointsFormat pointsFormat() {
+                return new PointsFormat() {
+                    @Override
+                    public PointsWriter fieldsWriter(SegmentWriteState state) throws IOException {
+                        return new Lucene90PointsWriter(state, POINTS_PER_LEAF, BKDWriter.DEFAULT_MAX_MB_SORT_IN_HEAP);
+                    }
+
+                    @Override
+                    public PointsReader fieldsReader(SegmentReadState state) throws IOException {
+                        return points.fieldsReader(state);
+                    }
+                };
+            }
+        };
     }
 
     /** Document 0: only an id, so nearly every field is empty. */

@@ -46,6 +46,11 @@ import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
+import io.github.mfuerstenau.leia.protocol.points.GetPointCellParams;
+import io.github.mfuerstenau.leia.protocol.points.GetPointCellResult;
+import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
+import io.github.mfuerstenau.leia.protocol.points.GetPointTreeResult;
+import io.github.mfuerstenau.leia.protocol.points.LeafPoint;
 import io.github.mfuerstenau.leia.protocol.points.PointValue;
 import io.github.mfuerstenau.leia.protocol.search.ClassicSimilarity;
 import io.github.mfuerstenau.leia.protocol.search.DocSort;
@@ -417,6 +422,19 @@ class Lucene9BackendTest {
                 Methods.START_RECONSTRUCT,
                 new StartReconstructParams(0, Optional.of(List.of("nope"))),
                 ErrorCode.FIELD_NOT_FOUND);
+    }
+
+    @Test
+    void readsThePointTree() throws Exception {
+        GetPointTreeResult tree = backend.call(Methods.GET_POINT_TREE, new GetPointTreeParams("number"));
+
+        assertThat(tree.size()).isEqualTo(3);
+        assertThat(tree.min()).contains(new PointValue(List.of("8000000a")));
+        assertThat(tree.max()).contains(new PointValue(List.of("8000001e")));
+        GetPointCellResult root = backend.call(Methods.GET_POINT_CELL, new GetPointCellParams("number", 0, List.of()));
+        assertThat(root.points())
+                .extracting(LeafPoint::docId, LeafPoint::deleted)
+                .containsExactly(tuple(0, false), tuple(1, true), tuple(2, false));
     }
 
     @Test

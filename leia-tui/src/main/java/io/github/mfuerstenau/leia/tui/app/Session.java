@@ -31,6 +31,8 @@ import io.github.mfuerstenau.leia.protocol.index.ReopenIndexParams;
 import io.github.mfuerstenau.leia.protocol.jars.GetJarsParams;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
+import io.github.mfuerstenau.leia.protocol.points.GetPointCellParams;
+import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetPositionsParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsParams;
@@ -323,6 +325,32 @@ public final class Session {
                                     app.postingsFailed(load, message);
                                     return Optional.empty();
                                 });
+                            }
+                        });
+            case Action.LoadPointTree load ->
+                backend.call(Methods.GET_POINT_TREE, new GetPointTreeParams(load.field()))
+                        .whenComplete((result, error) -> {
+                            if (error == null) {
+                                reply(runner, app -> app.pointTreeLoaded(load, result));
+                                return;
+                            }
+                            RpcException rpc = rpcException(error, runner);
+                            if (rpc != null) {
+                                String message = describe(rpc);
+                                reply(runner, app -> app.pointTreeFailed(load, message));
+                            }
+                        });
+            case Action.LoadPointCell load ->
+                backend.call(Methods.GET_POINT_CELL, new GetPointCellParams(load.field(), load.segment(), load.path()))
+                        .whenComplete((result, error) -> {
+                            if (error == null) {
+                                reply(runner, app -> app.pointCellLoaded(load, result));
+                                return;
+                            }
+                            RpcException rpc = rpcException(error, runner);
+                            if (rpc != null) {
+                                String message = describe(rpc);
+                                reply(runner, app -> app.pointCellFailed(load, message));
                             }
                         });
             case Action.LoadDocument load -> {

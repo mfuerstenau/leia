@@ -45,6 +45,8 @@ import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsResult;
+import io.github.mfuerstenau.leia.protocol.points.GetPointCellResult;
+import io.github.mfuerstenau.leia.protocol.points.GetPointTreeResult;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanResult;
@@ -292,7 +294,7 @@ public final class App {
         commits = new Commits(indexNames(opened));
         check = new Check(stats.path());
         pointFormats = new PointFormats();
-        terms = new Terms(stats.fields());
+        terms = new Terms(stats.fields()).withPointFormats(pointFormats);
         documents = newDocuments(stats, opened);
         analysis.indexChanged(indexedFields(stats), true, false);
         search = newSearch(stats);
@@ -386,7 +388,9 @@ public final class App {
         analysis.indexChanged(indexedFields(stats), true, true);
         search = search != null ? search.reopened(stats.fields(), stats.maxDoc(), sameFields) : newSearch(stats);
         overview = overview.reopened(stats, topN);
-        terms = terms != null ? terms.reopened(stats.fields()) : new Terms(stats.fields());
+        terms = terms != null
+                ? terms.reopened(stats.fields())
+                : new Terms(stats.fields()).withPointFormats(pointFormats);
         forgetScans();
         opened = new Opened(
                 opened.path(),
@@ -664,6 +668,17 @@ public final class App {
                 documents.showHit(document.hit());
                 screen = Screen.DOCUMENTS;
                 yield loadDocument(document.hit().docId());
+            }
+            case Terms.Request.LoadPointTree load -> Optional.of(new Action.LoadPointTree(load.field(), load.serial()));
+            case Terms.Request.LoadPointCell load ->
+                Optional.of(new Action.LoadPointCell(load.field(), load.serial(), load.segment(), load.path()));
+            case Terms.Request.PointDocument document -> {
+                if (documents == null) {
+                    yield Optional.<Action>empty();
+                }
+                documents.showPoint(document.field());
+                screen = Screen.DOCUMENTS;
+                yield loadDocument(document.docId());
             }
             case Terms.Request.Export asked -> {
                 if (export != null) {
@@ -1238,6 +1253,40 @@ public final class App {
         return terms == null ? Optional.empty() : termsAction(terms.postingsLoaded(request(load), result));
     }
 
+    /** Shows the BKD tree of a point field. */
+    public Optional<Action> pointTreeLoaded(Action.LoadPointTree load, GetPointTreeResult result) {
+        if (terms != null) {
+            terms.pointTreeLoaded(new Terms.Request.LoadPointTree(load.field(), load.serial()), result);
+        }
+        return Optional.empty();
+    }
+
+    public Optional<Action> pointTreeFailed(Action.LoadPointTree load, String error) {
+        if (terms != null) {
+            terms.pointTreeFailed(new Terms.Request.LoadPointTree(load.field(), load.serial()), error);
+        }
+        return Optional.empty();
+    }
+
+    /** Shows a cell of a BKD tree. */
+    public Optional<Action> pointCellLoaded(Action.LoadPointCell load, GetPointCellResult result) {
+        if (terms != null) {
+            terms.pointCellLoaded(request(load), result);
+        }
+        return Optional.empty();
+    }
+
+    public Optional<Action> pointCellFailed(Action.LoadPointCell load, String error) {
+        if (terms != null) {
+            terms.pointCellFailed(request(load), error);
+        }
+        return Optional.empty();
+    }
+
+    private static Terms.Request.LoadPointCell request(Action.LoadPointCell load) {
+        return new Terms.Request.LoadPointCell(load.field(), load.serial(), load.segment(), load.path());
+    }
+
     public void postingsFailed(Action.LoadPostings load, String error) {
         if (terms != null) {
             terms.postingsFailed(request(load), error);
@@ -1700,6 +1749,10 @@ public final class App {
             terms.render(frame, body);
             if (terms.prompting()) {
                 return " type to seek   ⏎/Esc done";
+            }
+            if (terms.showsPoints()) {
+                return " " + cancel + "q quit   o open   c close   1-7 screen   ⏎ expand / points / open doc   "
+                        + "t format   ←/→ column   ↑↓";
             }
             String filter = !terms.filtered() ? "" : terms.onlyFiltered() ? "b all postings   " : "b filter only   ";
             return " " + cancel + "q quit   o open   c close   1-7 screen   / seek   ⏎ open doc   " + filter

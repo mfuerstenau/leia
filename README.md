@@ -22,7 +22,8 @@ because Lucene 10 can't read them.
   with (rebuilt from the postings and the points), and a viewer for whole values as text, hex, pretty-printed
   JSON or delimited data.
 - **Terms:** the terms of a field with their frequencies, and the documents that contain a term,
-  with the positions, offsets and payloads of each occurrence.
+  with the positions, offsets and payloads of each occurrence; a point field's BKD tree per segment,
+  its cells with their ranges, and the points of a leaf.
 - **Commits:** every commit in the index directory with its segments, and for each segment its
   documents, deletions, versions, codec and codec formats, diagnostics, attributes and files with
   their sizes.
@@ -310,6 +311,7 @@ takes about 1 MiB.
 | `Enter` | go to the next column; on a posting, show its document on the documents screen |
 | `e` | export the selected field's terms to a file |
 | `b` | with a filter on the documents screen, show only the postings in it, or all of them again |
+| `t` | on a point field, show its values as int, long, float, double, lat/lon, address or hex, as fit their size; the documents screen shows them the same way |
 | `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the focused column |
 
 The terms screen lists the fields that have postings, the terms of the selected field in term
@@ -320,6 +322,15 @@ to see the terms before the first one shown, seek again. Like the statistics, th
 include deleted documents, and the postings mark them `deleted`. With a filter on the documents
 screen (ADR 0032), the postings of the documents in it are marked `•` and the others are dimmed,
 or with `b` only those in it are listed; the title says which.
+
+A field with points has a row of its own, marked with its dimensions and bytes (`price pt 1×8`);
+a field with postings and points has two. Its row shows the field's BKD tree (ADR 0041) instead
+of terms: the title says how many segments, points and documents it has, and a row per segment its
+points and their range. `Enter` expands a segment or a cell into its children, fetched a level at a
+time, and collapses it again; on a leaf (`•`), it lists the leaf's points with their documents on
+the right, deleted ones in red, and `Enter` on a point shows its document. `/` and `e` work on terms
+only. Points are shown as `t` chooses, a guess from their size at first (see Documents). A reopen
+that finds a new commit fetches the tree again, collapsed.
 
 A document opened from a posting shows the term in the header, and the details panel of the
 term's field shows where the term occurs: its positions, offsets and payloads, as far as they

@@ -749,6 +749,41 @@ public final class ReadOnlyIndex implements OpenedIndex {
     }
 
     /**
+     * A point field's BKD tree (ADR 0041): its size and range over the index, and the root cell of
+     * each segment with points in it.
+     *
+     * @throws IllegalArgumentException if there is no such field, or it has no points
+     * @throws IOException if reading the points fails
+     */
+    public Points.Tree pointTree(String field) throws IOException {
+        return Points.tree(reader, pointField(field));
+    }
+
+    /**
+     * A cell of a point field's BKD tree in one segment (ADR 0041), with its children, or, for a
+     * leaf, its points.
+     *
+     * @param segment the segment's position among the reader's leaves, as {@link Points.Segment}
+     *     gives it
+     * @param path the child positions from the segment's root cell; empty for the root
+     * @throws IllegalArgumentException if there is no such field, it has no points, there is no such
+     *     segment or it has no points in the field, or there is no cell at {@code path}
+     * @throws IOException if reading the points fails
+     */
+    public Points.CellContents pointCell(String field, int segment, List<Integer> path) throws IOException {
+        return Points.cell(reader, pointField(field).getName(), segment, path);
+    }
+
+    private FieldInfo pointField(String field) {
+        checkField(field);
+        FieldInfo info = fieldInfos.fieldInfo(field);
+        if (info.getPointDimensionCount() == 0) {
+            throw new IllegalArgumentException("Field " + field + " has no points");
+        }
+        return info;
+    }
+
+    /**
      * A page of a field's terms in term order, from {@code from} on, or from the first term. A field
      * without postings has no terms.
      *

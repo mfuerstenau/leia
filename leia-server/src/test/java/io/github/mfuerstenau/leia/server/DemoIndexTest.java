@@ -52,6 +52,12 @@ import io.github.mfuerstenau.leia.protocol.index.ReopenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
+import io.github.mfuerstenau.leia.protocol.points.GetPointCellParams;
+import io.github.mfuerstenau.leia.protocol.points.GetPointCellResult;
+import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
+import io.github.mfuerstenau.leia.protocol.points.GetPointTreeResult;
+import io.github.mfuerstenau.leia.protocol.points.PointCell;
+import io.github.mfuerstenau.leia.protocol.points.PointSegment;
 import io.github.mfuerstenau.leia.protocol.points.PointValue;
 import io.github.mfuerstenau.leia.protocol.search.BooleanSimilarity;
 import io.github.mfuerstenau.leia.protocol.search.ClassicSimilarity;
@@ -819,6 +825,43 @@ class DemoIndexTest {
             List<Explanation> all = new ArrayList<>(List.of(explanation));
             explanation.details().forEach(detail -> all.addAll(flatten(detail)));
             return all;
+        }
+    }
+
+    @Nested
+    @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+    class Points {
+
+        @Test
+        void priceHasATreeOfSeveralLevelsInEachSegment() throws Exception {
+            GetPointTreeResult tree = backend.call(Methods.GET_POINT_TREE, new GetPointTreeParams("price"));
+
+            // Document 0 has no price; deleted documents keep their points.
+            assertThat(tree.size()).isEqualTo(499);
+            assertThat(List.of(tree.dimensions(), tree.indexDimensions(), tree.bytesPerDimension()))
+                    .containsExactly(1, 1, 8);
+            assertThat(tree.segments())
+                    .extracting(PointSegment::segment, PointSegment::name, PointSegment::size)
+                    .containsExactly(
+                            tuple(0, Optional.of("_0"), 199L),
+                            tuple(1, Optional.of("_1"), 200L),
+                            tuple(2, Optional.of("_2"), 100L));
+
+            GetPointCellResult root =
+                    backend.call(Methods.GET_POINT_CELL, new GetPointCellParams("price", 0, List.of()));
+            assertThat(root.cell().leaf()).isFalse();
+            assertThat(root.children().stream().mapToLong(PointCell::size).sum())
+                    .isEqualTo(199);
+
+            // Leaves of at most 16 points (the demo writer's), down the first children.
+            List<Integer> path = new ArrayList<>();
+            GetPointCellResult cell = root;
+            while (!cell.cell().leaf()) {
+                path.add(0);
+                cell = backend.call(Methods.GET_POINT_CELL, new GetPointCellParams("price", 0, path));
+            }
+            assertThat(path.size()).isGreaterThan(2);
+            assertThat(cell.points()).hasSizeBetween(1, 16);
         }
     }
 

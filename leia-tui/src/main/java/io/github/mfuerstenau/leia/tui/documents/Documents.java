@@ -408,6 +408,17 @@ public final class Documents {
         positions = null;
     }
 
+    /**
+     * Forgets the term hit: the terms screen opened a document with a point of {@code field} (ADR
+     * 0041), which is selected once the document is in.
+     */
+    public void showPoint(String field) {
+        selectField = field;
+        hit = null;
+        searchHits = false;
+        positions = null;
+    }
+
     /** Forgets the term hit: the search screen opened the next document, so {@code [}/{@code ]} step through its hits. */
     public void showSearchHit() {
         hit = null;

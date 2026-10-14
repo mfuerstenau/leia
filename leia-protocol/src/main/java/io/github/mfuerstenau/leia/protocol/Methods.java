@@ -42,6 +42,10 @@ import io.github.mfuerstenau.leia.protocol.jars.GetJarsResult;
 import io.github.mfuerstenau.leia.protocol.job.CancelJobResult;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
+import io.github.mfuerstenau.leia.protocol.points.GetPointCellParams;
+import io.github.mfuerstenau.leia.protocol.points.GetPointCellResult;
+import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
+import io.github.mfuerstenau.leia.protocol.points.GetPointTreeResult;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanParams;
@@ -166,6 +170,24 @@ public final class Methods {
      */
     public static final RpcMethod<JobParams, GetReconstructResult> GET_RECONSTRUCT =
             new RpcMethod<>("getReconstruct", JobParams.class, GetReconstructResult.class);
+
+    /**
+     * The BKD tree of a point field (ADR 0041): its size and range over the index, and the root cell
+     * of each segment that has points in it. Fails with {@code NO_INDEX_OPEN}, {@code NO_READER},
+     * {@code FIELD_NOT_FOUND}, or {@code INVALID_PARAMS} for a field without points.
+     */
+    public static final RpcMethod<GetPointTreeParams, GetPointTreeResult> GET_POINT_TREE =
+            new RpcMethod<>("getPointTree", GetPointTreeParams.class, GetPointTreeResult.class);
+
+    /**
+     * A cell of a point field's BKD tree in one segment (ADR 0041): its children, or, for a leaf, its
+     * points. It walks the tree's index from the root to the cell and reads at most one leaf, so it is
+     * no job. Fails with {@code NO_INDEX_OPEN}, {@code NO_READER}, {@code FIELD_NOT_FOUND}, or {@code
+     * INVALID_PARAMS} for a field without points, a segment out of range or without points in the
+     * field, or a path to no cell.
+     */
+    public static final RpcMethod<GetPointCellParams, GetPointCellResult> GET_POINT_CELL =
+            new RpcMethod<>("getPointCell", GetPointCellParams.class, GetPointCellResult.class);
 
     /**
      * A page of the terms of a field, in term order, from a given term on (ADR 0007). A field without
@@ -395,6 +417,8 @@ public final class Methods {
             GET_TERMS,
             GET_POSTINGS,
             GET_POSITIONS,
+            GET_POINT_TREE,
+            GET_POINT_CELL,
             GET_COMMITS,
             GET_COMMIT,
             START_SEARCH,

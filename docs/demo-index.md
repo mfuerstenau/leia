@@ -82,6 +82,12 @@ other tests use their own indexes and the Lucene 9 and 8 indexes from `LegacyInd
   `302`, its stored value; `price` shows a long until `t` makes it a double, `313.97`; `location`
   shows `52.52, 13.405` as lat/lon (`t` cycles to int, float and hex). The deleted document 74 has
   its points too: `quantity` 697.
+- **A BKD tree (terms screen, ADR 0041):** the demo writer keeps BKD leaves at 16 points, so
+  `price pt 1×8` has 3 segments of 199, 200 and 100 points (document 0 has no price), each a tree of
+  several levels. `t` shows them as doubles: `_0` covers `1.07 … 499.23`; `Enter` down the first
+  cells reaches a leaf of 16 points whose documents include 3, 29 and the deleted 37 (in red);
+  `Enter` on one opens it on the documents screen with `price` selected. `location pt 2×4` shows
+  lat/lon ranges.
 - **Seeking a field (`/`):** `ts` selects `tsv`, `sep` selects `unit_separated` (it contains
   `sep`), and `bl` selects `blob` on document 42; on document 0 with `e`, `bl` finds no match.
 - **Exporting a document (`E`):** 42 gives a file of about 1.7 MB (format version 3): `blob` and

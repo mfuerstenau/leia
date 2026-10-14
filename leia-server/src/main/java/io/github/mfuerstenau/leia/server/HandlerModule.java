@@ -27,6 +27,8 @@ import io.github.mfuerstenau.leia.server.index.ReopenIndexHandler;
 import io.github.mfuerstenau.leia.server.jars.AddJarsHandler;
 import io.github.mfuerstenau.leia.server.jars.GetJarsHandler;
 import io.github.mfuerstenau.leia.server.job.CancelJobHandler;
+import io.github.mfuerstenau.leia.server.points.GetPointCellHandler;
+import io.github.mfuerstenau.leia.server.points.GetPointTreeHandler;
 import io.github.mfuerstenau.leia.server.search.GetExplainHandler;
 import io.github.mfuerstenau.leia.server.search.GetSearchHandler;
 import io.github.mfuerstenau.leia.server.search.GetStoredScanHandler;
@@ -105,6 +107,14 @@ interface HandlerModule {
     @Binds
     @IntoSet
     MethodHandler<?, ?> getPostings(GetPostingsHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> getPointTree(GetPointTreeHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> getPointCell(GetPointCellHandler handler);
 
     @Binds
     @IntoSet

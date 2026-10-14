@@ -9,12 +9,20 @@ import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
+import io.github.mfuerstenau.leia.protocol.points.GetPointCellResult;
+import io.github.mfuerstenau.leia.protocol.points.GetPointTreeResult;
+import io.github.mfuerstenau.leia.protocol.points.LeafPoint;
+import io.github.mfuerstenau.leia.protocol.points.PointCell;
+import io.github.mfuerstenau.leia.protocol.points.PointSegment;
+import io.github.mfuerstenau.leia.protocol.points.PointValue;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.Posting;
 import io.github.mfuerstenau.leia.protocol.terms.PostingsFilter;
 import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
 import io.github.mfuerstenau.leia.tui.TestScreens;
+import io.github.mfuerstenau.leia.tui.points.PointFormat;
+import io.github.mfuerstenau.leia.tui.points.PointFormats;
 import io.github.mfuerstenau.leia.tui.terms.Terms.Request;
 import io.github.mfuerstenau.leia.tui.terms.Terms.TermHit;
 import java.util.ArrayList;
@@ -225,7 +233,7 @@ class TermsTest {
         assertThat(terms.initialRequest()).isEmpty();
         assertThat(terms.handleKey(key('/'))).isEmpty();
         assertThat(terms.prompting()).isFalse();
-        assertThat(render(terms)).contains("No field has postings.");
+        assertThat(render(terms)).contains("No field has postings or points.");
     }
 
     @Test
@@ -357,5 +365,150 @@ class TermsTest {
         assertThat(terms.handleKey(key(KeyCode.DOWN))).isEmpty();
         assertThat(terms.termsLoaded(termsRequest("body", "quick", false), page(List.of("quick"), null)))
                 .hasValue(new Request.LoadPostings("body", text("quick"), 0, false, Optional.empty()));
+    }
+
+    private static IndexField pointField(String name, int number, IndexOptions indexOptions, int bytes) {
+        return new IndexField(
+                name,
+                number,
+                indexOptions,
+                false,
+                false,
+                false,
+                DocValuesType.NONE,
+                1,
+                bytes,
+                0,
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty());
+    }
+
+    private static PointValue intPoint(int value) {
+        return new PointValue(List.of(String.format("%08x", value ^ Integer.MIN_VALUE)));
+    }
+
+    private static PointCell cell(int min, int max, long size, boolean leaf) {
+        return new PointCell(intPoint(min), intPoint(max), size, leaf);
+    }
+
+    /** {@code id} has postings; {@code code} postings and int points; {@code price} only double points. */
+    private static Terms pointTerms() {
+        return new Terms(List.of(
+                field("id", 0, IndexOptions.DOCS),
+                pointField("code", 1, IndexOptions.DOCS, 4),
+                pointField("price", 2, IndexOptions.NONE, 8)));
+    }
+
+    /** {@code code}'s points row, with its tree in: one segment of 3 points, a root with two leaves. */
+    private static Terms codeTree() {
+        Terms terms = pointTerms();
+        terms.initialRequest();
+        terms.handleKey(key(KeyCode.DOWN));
+        assertThat(terms.handleKey(key(KeyCode.DOWN))).hasValue(new Request.LoadPointTree("code", 1));
+        terms.pointTreeLoaded(
+                new Request.LoadPointTree("code", 1),
+                new GetPointTreeResult(
+                        "code",
+                        1,
+                        1,
+                        4,
+                        3,
+                        3,
+                        Optional.of(intPoint(-5)),
+                        Optional.of(intPoint(40)),
+                        List.of(new PointSegment(0, 0, Optional.of("_0"), 0, 3, 3, 3, intPoint(-5), intPoint(40)))));
+        return terms;
+    }
+
+    @Test
+    void listsPointFieldsOnARowOfTheirOwn() {
+        Terms terms = pointTerms();
+
+        String screen = render(terms);
+        assertThat(screen).contains("id", "code", "code pt 1×4", "price pt 1×8");
+        assertThat(screen.indexOf("code pt 1×4")).isGreaterThan(screen.indexOf("code "));
+    }
+
+    @Test
+    void expandsASegmentDownToALeafAndShowsItsPoints() {
+        Terms terms = codeTree();
+        assertThat(render(terms)).contains("code · 1 segment · 3 points in 3 docs · as int", "▸ _0  3 pts  -5 … 40");
+
+        terms.handleKey(key(KeyCode.RIGHT));
+        Request.LoadPointCell root = new Request.LoadPointCell("code", 1, 0, List.of());
+        assertThat(terms.handleKey(key(KeyCode.ENTER))).hasValue(root);
+        // Asked for already.
+        assertThat(terms.handleKey(key(KeyCode.ENTER))).isEmpty();
+        terms.pointCellLoaded(
+                root,
+                new GetPointCellResult(
+                        cell(-5, 40, 3, false),
+                        List.of(cell(-5, 7, 2, true), cell(40, 40, 1, true)),
+                        List.of(),
+                        false));
+        assertThat(render(terms)).contains("▾ _0  3 pts", "  • 2 pts  -5 … 7", "  • 1 pts  40 … 40");
+
+        terms.handleKey(key(KeyCode.DOWN));
+        Request.LoadPointCell leaf = new Request.LoadPointCell("code", 1, 0, List.of(0));
+        assertThat(terms.handleKey(key(KeyCode.ENTER))).hasValue(leaf);
+        terms.pointCellLoaded(
+                leaf,
+                new GetPointCellResult(
+                        cell(-5, 7, 2, true),
+                        List.of(),
+                        List.of(new LeafPoint(3, false, intPoint(7)), new LeafPoint(8, true, intPoint(-5))),
+                        false));
+        String screen = render(terms);
+        assertThat(screen).contains("Points (2)", "3  7", "8  -5");
+
+        // The focus is on the points now: Enter opens the selected one's document.
+        terms.handleKey(key(KeyCode.DOWN));
+        assertThat(terms.handleKey(key(KeyCode.ENTER))).hasValue(new Request.PointDocument("code", 8));
+
+        // Collapsing the segment hides its cells.
+        terms.handleKey(key(KeyCode.LEFT));
+        terms.handleKey(key(KeyCode.UP));
+        assertThat(terms.handleKey(key(KeyCode.ENTER))).isEmpty();
+        assertThat(render(terms)).contains("▸ _0").doesNotContain("• 2 pts");
+    }
+
+    @Test
+    void tCyclesThePointFormatSharedWithTheDocumentsScreen() {
+        PointFormats formats = new PointFormats();
+        Terms terms = codeTree().withPointFormats(formats);
+
+        terms.handleKey(key('t'));
+
+        assertThat(render(terms)).contains("as float");
+        assertThat(formats.of(pointField("code", 1, IndexOptions.DOCS, 4))).isEqualTo(PointFormat.FLOAT);
+    }
+
+    @Test
+    void seekAndExportSayTheyWorkOnTermsOnly() {
+        Terms terms = codeTree();
+
+        assertThat(terms.handleKey(key('/'))).isEmpty();
+        assertThat(terms.prompting()).isFalse();
+        assertThat(render(terms)).contains("/ seeks terms only");
+        assertThat(terms.handleKey(key('e'))).isEmpty();
+    }
+
+    @Test
+    void repliesOfAnotherTreeAreDropped() {
+        Terms terms = codeTree();
+        terms.handleKey(key(KeyCode.RIGHT));
+        terms.handleKey(key(KeyCode.ENTER));
+
+        // The tree of the reopened index is serial 2: a reply for serial 1 doesn't fit it.
+        Terms reopened = terms.reopened(List.of(
+                field("id", 0, IndexOptions.DOCS),
+                pointField("code", 1, IndexOptions.DOCS, 4),
+                pointField("price", 2, IndexOptions.NONE, 8)));
+        assertThat(reopened.initialRequest()).hasValue(new Request.LoadPointTree("code", 2));
+        reopened.pointCellLoaded(
+                new Request.LoadPointCell("code", 1, 0, List.of()),
+                new GetPointCellResult(cell(-5, 40, 3, true), List.of(), List.of(), false));
+        assertThat(render(reopened)).doesNotContain("Points (");
     }
 }

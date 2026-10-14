@@ -85,6 +85,18 @@ public sealed interface Action {
             implements Action {}
 
     /**
+     * Fetch the BKD tree of a point field, and report back with {@link App#pointTreeLoaded} or
+     * {@link App#pointTreeFailed} (ADR 0041).
+     */
+    record LoadPointTree(String field, long serial) implements Action {}
+
+    /**
+     * Fetch a cell of the BKD tree {@code serial} of a point field, and report back with {@link
+     * App#pointCellLoaded} or {@link App#pointCellFailed} (ADR 0041).
+     */
+    record LoadPointCell(String field, long serial, int segment, List<Integer> path) implements Action {}
+
+    /**
      * Cancel the jobs in {@code cancel}, fetch this document, and report back with {@link
      * App#documentLoaded} or {@link App#documentFailed}. With {@code locate}, first find out whether
      * it matches that filter, and report back with {@link App#filterStepped} or {@link

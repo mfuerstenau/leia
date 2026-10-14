@@ -51,14 +51,40 @@ The index doesn't record what a point encodes. A 4-byte point is an `IntPoint` o
 
 7. **The export (ADR 0030) gains `points` per field and becomes version 3.** It holds the `PointValue`s, raw hex as the doc values hold raw `long`s, and is there when the points were rebuilt and the field has points. `indexed` is now there only for a field with postings, so a field with only points has `points` and no `indexed`. The tab line says `Exporting doc N: scanned/total terms and points`, and the prompt's `Tab` toggle `terms and points`. Versions 1 and 2 still read, without points.
 
+### A field's BKD tree
+
+8. **Two synchronous methods, in the new package `protocol.points`:**
+   - `getPointTree {field}` → `{field, dimensions, indexDimensions, bytesPerDimension, size, docCount, min?, max?, segments}`. `size` and `docCount` are summed over the segments; `min` and `max` cover the index dimensions over the index, absent without points.
+   - Each `PointSegment` is `{segment, index, name?, docBase, maxDoc, size, docCount, min, max}`, only for segments with points in the field. `segment` is the leaf's position in the open reader, the handle for the next method; `index` the position of its index directory (ADR 0021), found from the directories' `docBase`; `name` the segment's name when the leaf is a `SegmentReader`.
+   - `getPointCell {field, segment, path}` → `{cell, children, points, pointsCut}`. `path` lists child positions from the segment's root: `[]` is the root, `[0, 1]` its first child's second child. A `PointCell` is `{min, max, size, leaf}`. `points` are `LeafPoint {docId, deleted, value}`, only for a leaf, by global document id, then value. At most `PointCell.MAX_POINTS` (10,000) come back, with `pointsCut`; Lucene's leaves hold 512 at most by default.
+   - Errors: `NO_INDEX_OPEN`, `NO_READER`, `FIELD_NOT_FOUND`, and `INVALID_PARAMS` for a field without points, a segment out of range or without points in the field, or a path to no cell. No new error codes.
+
+9. **They are no jobs.** Core walks `PointValues.getPointTree()` with `moveToChild` and `moveToSibling` along the path, then lists the children the same way; `size()` of a BKD node is arithmetic. That reads the tree's index only, O(depth). A leaf's points are one block, read with `visitDocValues`, and marked deleted from the leaf's live docs. So rule 7 holds without the job plumbing.
+
+10. **The terms screen shows the tree.**
+    - **Fields column:** a field with points has a row of its own, after its postings row if it has postings, marked dim `pt 1×8` (dimensions × bytes).
+    - **Middle column:** a row per segment, `▸ _0  199 pts  1.07 … 499.23`, and below an expanded one its cells, indented two columns per level: `▸` collapsed, `▾` expanded, `•` a leaf. `Enter` fetches a cell's children through `getPointCell` the first time, then expands or collapses it; on a leaf, it fetches the leaf's points and moves the focus to them.
+    - **Right column:** the leaf's points, `Doc  Value`, deleted ones in red; `Enter` shows the document on the documents screen, with the field selected.
+    - **Title:** `price · 3 segments · 499 points in 499 docs · as double`. `/` and `e` say they work on terms only.
+    - **`t`** cycles the field's format, shared with the documents screen (decision 5).
+    - **Replies:** each `getPointTree` call has a serial, and a cell's reply names it, so a reply for a tree no longer shown is dropped. A reopen that finds a new commit changes the segments' positions; the tree is fetched again, collapsed.
+
+11. **The demo index writes leaves of 16 points.** Its segments have at most 200 points per field, below Lucene's 512, so each tree would be one leaf. `DemoIndexWriter` wraps the default codec under its own name, with a points format whose writer is `Lucene90PointsWriter` with 16 points per leaf. The leaf size is in the files, so the default codec reads them, and nothing else of the index changes.
+
 ## Alternatives considered
 
 - **A separate points job**, `startDocPoints`. It would duplicate the job plumbing, the progress and the cancel paths of the rebuild for one more kind of indexed data, and the export would need two jobs. Rejected.
 - **Decoding on the server**, with a type per field in the params. The server would decode by a guess it can't check, and every change of format would be a call. The TUI has the bytes and decodes them at once. Rejected.
 - **A synchronous field of `getDocument`.** Finding a document's points reads every leaf of the field's tree in its segment, which can take long on a large segment (rule 7). Rejected.
+- **A dedicated points screen.** The terms screen already has a field column and a middle and right column that page through what a field holds; a point field's tree fits the same shape, and an eighth screen would take a number key. Rejected.
+- **The whole tree in one call.** A segment of millions of points has thousands of cells. Fetching a level at a time keeps every call small. Rejected.
+- **Cells by an id of their own,** such as Lucene's node id. `PointTree` doesn't expose it; a path of child positions works on any `PointTree`. Rejected.
 - **The search screen's point types** (`ParserSettings`) as the format. Those map a field to a parser's `PointsConfig`, only for one-dimensional 4- and 8-byte fields, and only in standard mode. A format of its own covers lat/lon, addresses and several dimensions. The two guesses are made independently. Rejected.
 
 ## Consequences
+
+- New methods `getPointTree` and `getPointCell`, with handlers in `server.points`, and records `GetPointTreeParams`, `GetPointTreeResult`, `PointSegment`, `GetPointCellParams`, `GetPointCellResult`, `PointCell`, `LeafPoint`.
+- Core has `Points`, which reads the tree through `PointValues.PointTree`. A Lucene upgrade that changes how that interface moves needs a look at it.
 
 - `ReconstructedField` gains `points`; `GetReconstructResult`'s fields are renamed. New record: `PointValue` in the new package `protocol.points`.
 - Core's `Reconstruct.Field` gains the packed points; `ReadOnlyIndex.reconstructTermCount` is now `reconstructCount`.
