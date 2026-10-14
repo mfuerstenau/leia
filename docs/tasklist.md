@@ -14,6 +14,11 @@ From the read-only checklist in `docs/luke-features.md` §7. Ordered roughly by 
   - [ ] Per-segment document view: a document's segment and local id, stepping within one segment, and a jump from a segment on the commits screen to its documents
   - [ ] KNN: HNSW graph inspection (a node's levels and neighbours through `HnswGraphProvider`), and a recall check of approximate against exact (left out of ADR 0040)
 
+## UI polish
+
+- [ ] Show the name "Lucene Explorer for Index Analysis" below the leia line with the version, with the letters of the acronym (L, E, I, A) highlighted
+- [ ] Documents screen: a legend for the flags
+
 ## Open questions
 
 None right now. Settled: release platforms and distribution (ADR 0004).
