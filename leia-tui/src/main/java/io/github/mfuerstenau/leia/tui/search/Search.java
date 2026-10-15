@@ -26,6 +26,7 @@ import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.filter.FilterPattern;
 import io.github.mfuerstenau.leia.protocol.filter.StartFilterParams;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
+import io.github.mfuerstenau.leia.protocol.index.Feature;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
@@ -77,6 +78,7 @@ import java.util.Locale;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -156,6 +158,9 @@ public final class Search {
 
         /** Show this stored value in the viewer of the documents screen, with its matches highlighted. */
         record View(int docId, String field, int index, List<MatchSpan> spans, int matchCount) implements Request {}
+
+        /** A key that the index lacks a feature for (ADR 0044); {@code what} names it. Nothing changed. */
+        record Unsupported(String what) implements Request {}
     }
 
     /** How the query line is read. */
@@ -417,6 +422,12 @@ public final class Search {
     /** The id of the next search, explanation or scan. */
     private long nextId = 1;
 
+    /**
+     * What the index can do (ADR 0044): the modes and keys it lacks a feature for are refused and
+     * left out of the legend.
+     */
+    private Set<Feature> features = Feature.all();
+
     /** The default field is the first one with positions, which is most likely text. */
     public Search(List<IndexField> indexFields, int maxDoc) {
         List<IndexField> searchable = indexFields.stream()
@@ -486,6 +497,7 @@ public final class Search {
         search.binary = binary;
         search.analyzer = analyzer;
         search.nextId = nextId;
+        search.features = features;
         if (sameFields) {
             search.parser = parser;
             search.like = like;
@@ -493,6 +505,73 @@ public final class Search {
             search.hitFields = hitFields;
         }
         return search;
+    }
+
+    /**
+     * Offers only the modes and keys that {@code features} allow (ADR 0044): without {@link
+     * Feature#HIGHLIGHT}, the hits aren't highlighted, and the mode is the first one left if its own
+     * is gone.
+     */
+    public Search withFeatures(Set<Feature> features) {
+        this.features = Set.copyOf(features);
+        if (!features.contains(Feature.HIGHLIGHT)) {
+            highlights = Highlights.OFF;
+        }
+        List<Mode> modes = modes();
+        if (!modes.isEmpty() && !modes.contains(mode)) {
+            mode = modes.getFirst();
+        }
+        return this;
+    }
+
+    private boolean supports(Feature... needed) {
+        return features.containsAll(List.of(needed));
+    }
+
+    /** The modes the index has the features for, in the order {@code m} cycles through them. */
+    private List<Mode> modes() {
+        List<Mode> modes = new ArrayList<>();
+        for (Mode each : MODE_CYCLE) {
+            boolean available = switch (each) {
+                case CLASSIC -> supports(Feature.SEARCH) || supports(Feature.CLASSIC_SEARCH);
+                case STANDARD, TERM, LIKE, LIKE_TEXT -> supports(Feature.SEARCH);
+                case DOC_VALUES -> supports(Feature.SEARCH, Feature.DOC_VALUES);
+                case KNN -> supports(Feature.SEARCH, Feature.KNN_VECTORS);
+                case REGEX -> supports(Feature.STORED_SCAN);
+            };
+            if (available) {
+                modes.add(each);
+            }
+        }
+        return modes;
+    }
+
+    /** The order in which {@code m} cycles through the modes. */
+    private static final List<Mode> MODE_CYCLE = List.of(
+            Mode.CLASSIC, Mode.STANDARD, Mode.TERM, Mode.DOC_VALUES, Mode.KNN, Mode.LIKE, Mode.LIKE_TEXT, Mode.REGEX);
+
+    /** What {@code key} is called if the index lacks a feature it needs (ADR 0044); empty otherwise. */
+    private Optional<String> unsupported(KeyEvent key) {
+        boolean regex = mode == Mode.REGEX;
+        if (key.code() == KeyCode.ENTER) {
+            return need("Open doc", Feature.DOCUMENTS);
+        }
+        if (key.code() != KeyCode.CHAR) {
+            return Optional.empty();
+        }
+        return switch (key.codePoint()) {
+            case 'm' -> modes().size() > 1 ? Optional.empty() : Optional.of("Other modes");
+            case 'b', 'B' -> need("Browse", Feature.FILTER);
+            case 's' -> regex ? Optional.empty() : need("Similarity and sort", Feature.SEARCH);
+            case 'x' -> regex ? Optional.empty() : need("Explain", Feature.EXPLAIN);
+            case 'H' -> regex ? Optional.empty() : need("Highlight", Feature.HIGHLIGHT);
+            case 'v' -> regex ? Optional.empty() : need("View", Feature.HIGHLIGHT);
+            default -> Optional.empty();
+        };
+    }
+
+    private Optional<String> need(String what, Feature feature) {
+        return supports(feature) ? Optional.empty() : Optional.of(what);
     }
 
     /** From now on, queries are analyzed with {@code settings}; the shown hits stay as they are. */
@@ -1350,6 +1429,10 @@ public final class Search {
             }
             return Optional.empty();
         }
+        Optional<String> unsupported = unsupported(key);
+        if (unsupported.isPresent()) {
+            return unsupported.map(Request.Unsupported::new);
+        }
         if (mode == Mode.REGEX) {
             Optional<Optional<Request>> handled = regexKey(key);
             if (handled.isPresent()) {
@@ -1441,17 +1524,8 @@ public final class Search {
                 return Optional.empty();
             }
             case 'm' -> {
-                return Optional.of(switchMode(
-                        switch (mode) {
-                            case CLASSIC -> Mode.STANDARD;
-                            case STANDARD -> Mode.TERM;
-                            case TERM -> Mode.DOC_VALUES;
-                            case DOC_VALUES -> Mode.KNN;
-                            case KNN -> Mode.LIKE;
-                            case LIKE -> Mode.LIKE_TEXT;
-                            case LIKE_TEXT -> Mode.REGEX;
-                            case REGEX -> Mode.CLASSIC;
-                        }));
+                List<Mode> modes = modes();
+                return Optional.of(switchMode(modes.get((modes.indexOf(mode) + 1) % modes.size())));
             }
             case 'p' -> {
                 if (likes) {
@@ -1677,28 +1751,50 @@ public final class Search {
         if (editing) {
             return " ⏎ search   Esc done   ←→ Ctrl+A/E/U/K/W edit";
         }
-        return switch (mode) {
-            case REGEX ->
-                "/ pattern   m mode   l fields   i case   d deleted   ⏎ open doc   v view value   Tab panel   ↑↓";
-            case LIKE ->
-                "/ doc id   m mode   p/s/l settings   t count   x explain   H highlight   v view   ⏎ open doc   b/B browse   "
-                        + "Tab panel   ↑↓";
-            case LIKE_TEXT ->
-                "/ text   m mode   p/s/l settings   t count   x explain   H highlight   v view   ⏎ open doc   b/B browse   "
-                        + "Tab panel   ↑↓";
-            case DOC_VALUES ->
-                "/ values   m mode   s/l settings   f/F field   n number   h hex   t count   x explain   ⏎ open doc   "
-                        + "b/B browse   Tab panel   ↑↓";
-            case KNN ->
-                "/ target   w filter   m mode   p/s/l settings   f/F field   k k   e exact   a AND/OR   t count   "
-                        + "x explain   ⏎ open doc   b/B browse   Tab panel   ↑↓";
-            case TERM ->
-                "/ term   m mode   s/l settings   f/F field   t count   x explain   H highlight   v view   ⏎ open doc   "
-                        + "b/B browse   Tab panel   ↑↓";
-            default ->
-                "/ query   m mode   p/s/l settings   f/F field   a AND/OR   t count   x explain   H highlight   v view   "
-                        + "⏎ open doc   b/B browse   Tab panel   ↑↓";
-        };
+        return available(
+                switch (mode) {
+                    case REGEX ->
+                        "/ pattern   m mode   l fields   i case   d deleted   ⏎ open doc   v view value   Tab panel   ↑↓";
+                    case LIKE ->
+                        "/ doc id   m mode   p/s/l settings   t count   x explain   H highlight   v view   ⏎ open doc   b/B browse   "
+                                + "Tab panel   ↑↓";
+                    case LIKE_TEXT ->
+                        "/ text   m mode   p/s/l settings   t count   x explain   H highlight   v view   ⏎ open doc   b/B browse   "
+                                + "Tab panel   ↑↓";
+                    case DOC_VALUES ->
+                        "/ values   m mode   s/l settings   f/F field   n number   h hex   t count   x explain   ⏎ open doc   "
+                                + "b/B browse   Tab panel   ↑↓";
+                    case KNN ->
+                        "/ target   w filter   m mode   p/s/l settings   f/F field   k k   e exact   a AND/OR   t count   "
+                                + "x explain   ⏎ open doc   b/B browse   Tab panel   ↑↓";
+                    case TERM ->
+                        "/ term   m mode   s/l settings   f/F field   t count   x explain   H highlight   v view   ⏎ open doc   "
+                                + "b/B browse   Tab panel   ↑↓";
+                    default ->
+                        "/ query   m mode   p/s/l settings   f/F field   a AND/OR   t count   x explain   H highlight   v view   "
+                                + "⏎ open doc   b/B browse   Tab panel   ↑↓";
+                });
+    }
+
+    /** The entries of {@code keys} that the index has the features for (ADR 0044). */
+    private String available(String keys) {
+        List<String> shown = new ArrayList<>();
+        for (String entry : keys.split("   ")) {
+            String kept = switch (entry) {
+                case "m mode" -> modes().size() > 1 ? entry : "";
+                case "p/s/l settings" -> supports(Feature.SEARCH) ? entry : "p/l settings";
+                case "s/l settings" -> supports(Feature.SEARCH) ? entry : "l settings";
+                case "x explain" -> supports(Feature.EXPLAIN) ? entry : "";
+                case "H highlight", "v view" -> supports(Feature.HIGHLIGHT) ? entry : "";
+                case "⏎ open doc" -> supports(Feature.DOCUMENTS) ? entry : "";
+                case "b/B browse" -> supports(Feature.FILTER) ? entry : "";
+                default -> entry;
+            };
+            if (!kept.isEmpty()) {
+                shown.add(kept);
+            }
+        }
+        return String.join("   ", shown);
     }
 
     public void render(Frame frame, Rect area) {

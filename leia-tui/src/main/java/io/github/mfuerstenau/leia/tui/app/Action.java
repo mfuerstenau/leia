@@ -161,10 +161,11 @@ public sealed interface Action {
     record ClearFilter(OptionalLong cancel, OptionalLong release) implements Action {}
 
     /**
-     * Fetch document {@code docId} whole for export {@code exportId} (ADR 0030), and report back with
-     * {@link App#documentExportLoaded} or {@link App#exportFailed}.
+     * Fetch document {@code docId} whole for export {@code exportId} (ADR 0030), with its term vectors
+     * if the index reads {@code termVectors}, and report back with {@link App#documentExportLoaded} or
+     * {@link App#exportFailed}.
      */
-    record LoadDocumentExport(long exportId, int docId) implements Action {}
+    record LoadDocumentExport(long exportId, int docId, boolean termVectors) implements Action {}
 
     /**
      * Start rebuilding the indexed terms of the document of export {@code exportId}, and report back

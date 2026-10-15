@@ -155,10 +155,11 @@ public final class DocumentExport {
 
     /**
      * Document {@code docId}, with every stored value that {@code getDocument} cuts fetched whole,
-     * and the term vector of every field that has one. The calls are made one after the other, and
-     * the first that fails fails the load.
+     * and, {@code withTermVectors}, the term vector of every field that has one; an index that an old
+     * Lucene reads may lack them (ADR 0044). The calls are made one after the other, and the first
+     * that fails fails the load.
      */
-    public static CompletionStage<DocumentData> load(Fetch fetch, int docId) {
+    public static CompletionStage<DocumentData> load(Fetch fetch, int docId, boolean withTermVectors) {
         return fetch.document(docId).thenCompose(document -> {
             List<DocumentField> fields = new ArrayList<>(document.fields());
             Map<String, List<TermVectorTerm>> termVectors = new HashMap<>();
@@ -183,7 +184,7 @@ public final class DocumentExport {
                                 field.docValues(),
                                 field.hasTermVector(),
                                 field.vector())));
-                if (field.hasTermVector()) {
+                if (withTermVectors && field.hasTermVector()) {
                     chain = chain.thenCompose(_ -> fetch.termVector(docId, field.name()))
                             .thenAccept(terms -> termVectors.put(field.name(), terms));
                 }

@@ -16,6 +16,7 @@ import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.filter.FilterPattern;
 import io.github.mfuerstenau.leia.protocol.filter.StartFilterParams;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
+import io.github.mfuerstenau.leia.protocol.index.Feature;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
@@ -79,6 +80,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
+import java.util.Set;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
@@ -254,6 +256,34 @@ class SearchTest {
 
     private static String render(Search search, int width, int height) {
         return TestScreens.render(frame -> search.render(frame, frame.area()), width, height);
+    }
+
+    @Test
+    void aClassicOnlyIndexSearchesWithoutHighlightsOrOtherModes() {
+        Search search = search().withFeatures(Set.of(Feature.CLASSIC_SEARCH, Feature.DOCUMENTS));
+        assertThat(search.keys())
+                .contains("/ query", "p/l settings", "⏎ open doc")
+                .doesNotContain("m mode", "x explain", "H highlight", "v view", "b/B browse");
+        assertThat(press(search, 'm')).hasValue(new Request.Unsupported("Other modes"));
+        assertThat(press(search, 's')).hasValue(new Request.Unsupported("Similarity and sort"));
+
+        press(search, '/');
+        typed(search, "red");
+        Request.Start start = started(press(search, KeyCode.ENTER));
+        assertThat(start.params().query().classic()).isPresent();
+        assertThat(start.params().highlight()).isEmpty();
+        assertThat(press(search, 'x')).hasValue(new Request.Unsupported("Explain"));
+        assertThat(press(search, 'H')).hasValue(new Request.Unsupported("Highlight"));
+    }
+
+    @Test
+    void cyclesOnlyThroughTheModesTheIndexHas() {
+        Search search = search().withFeatures(Set.of(Feature.CLASSIC_SEARCH, Feature.STORED_SCAN));
+        assertThat(search.keys()).startsWith("/ query").contains("m mode");
+        assertThat(press(search, 'm')).isEmpty();
+        assertThat(search.keys()).startsWith("/ pattern");
+        assertThat(press(search, 'm')).isEmpty();
+        assertThat(search.keys()).startsWith("/ query");
     }
 
     /** A search for {@code red} whose first page is in: hits 0 to {@code count - 1} of {@code totalHits}. */

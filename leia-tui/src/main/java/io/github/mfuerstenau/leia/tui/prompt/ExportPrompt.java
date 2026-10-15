@@ -86,8 +86,10 @@ public final class ExportPrompt {
      * A document.
      *
      * @param indexDirs the index directories of the open path, opened or skipped, which it never writes to
+     * @param rebuilds whether the index can rebuild the indexed terms, so that Tab switches them
      */
-    private record DocumentKind(int docId, boolean indexedTerms, List<String> indexDirs) implements Kind {}
+    private record DocumentKind(int docId, boolean indexedTerms, List<String> indexDirs, boolean rebuilds)
+            implements Kind {}
 
     private Kind kind;
     private final LineInput input;
@@ -122,11 +124,16 @@ public final class ExportPrompt {
 
     /**
      * The prompt for document {@code docId}, prefilled with {@code doc-<id>.json}, with its indexed
-     * terms rebuilt. It never writes into {@code indexDirs}.
+     * terms rebuilt if the index {@code rebuilds} them; otherwise they stay off (ADR 0044). It never
+     * writes into {@code indexDirs}.
      */
-    public static ExportPrompt document(int docId, List<String> indexDirs, Optional<Path> home, Optional<Path> cwd) {
+    public static ExportPrompt document(
+            int docId, List<String> indexDirs, boolean rebuilds, Optional<Path> home, Optional<Path> cwd) {
         return new ExportPrompt(
-                new DocumentKind(docId, true, List.copyOf(indexDirs)), DocumentExport.defaultFile(docId), home, cwd);
+                new DocumentKind(docId, rebuilds, List.copyOf(indexDirs), rebuilds),
+                DocumentExport.defaultFile(docId),
+                home,
+                cwd);
     }
 
     public String input() {
@@ -176,7 +183,11 @@ public final class ExportPrompt {
                                     case SPACE -> TermDelimiter.TAB;
                                 });
                     case DocumentKind document ->
-                        new DocumentKind(document.docId(), !document.indexedTerms(), document.indexDirs());
+                        new DocumentKind(
+                                document.docId(),
+                                document.rebuilds() && !document.indexedTerms(),
+                                document.indexDirs(),
+                                document.rebuilds());
                 };
                 return new Nothing();
             }
@@ -262,8 +273,12 @@ public final class ExportPrompt {
             }
             case DocumentKind document -> {
                 title = " Export document " + document.docId() + " as JSON ";
-                choice = " Tab terms and points: " + (document.indexedTerms() ? "on" : "off") + " ";
-                keys = "Enter export   Ctrl+Y copy   Tab terms and points   Esc cancel";
+                choice = document.rebuilds()
+                        ? " Tab terms and points: " + (document.indexedTerms() ? "on" : "off") + " "
+                        : " Terms and points: off ";
+                keys = document.rebuilds()
+                        ? "Enter export   Ctrl+Y copy   Tab terms and points   Esc cancel"
+                        : "Enter export   Ctrl+Y copy   Esc cancel";
             }
         }
         Block block = Block.builder()

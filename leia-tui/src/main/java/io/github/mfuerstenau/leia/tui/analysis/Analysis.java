@@ -106,8 +106,8 @@ public final class Analysis {
     /** The indexed fields of the open index; none without one, or without a reader. */
     private List<String> fields = List.of();
 
-    /** Whether an index is open with a reader. */
-    private boolean readable;
+    /** Why the open index can't find auto stop words; empty if it can. */
+    private Optional<String> unsupported = Optional.of(AutoStopWordsForm.NO_INDEX);
 
     /** The field the text is analyzed for; empty for the default analyzer. */
     private Optional<String> field = Optional.empty();
@@ -158,13 +158,13 @@ public final class Analysis {
     }
 
     /**
-     * The open index changed (ADR 0039): its indexed fields, none without one or without a reader.
-     * Another index drops the auto stop words, a reopen keeps them; the backend stopped the job of a
+     * The open index changed (ADR 0039): its indexed fields, none without one or without a reader,
+     * and why it can't find auto stop words, empty if it can (ADR 0044). Another index drops the auto stop words, a reopen keeps them; the backend stopped the job of a
      * search. A field that is gone is no longer the shown one.
      */
-    public void indexChanged(List<String> indexedFields, boolean readable, boolean reopen) {
+    public void indexChanged(List<String> indexedFields, Optional<String> unsupported, boolean reopen) {
         this.fields = List.copyOf(indexedFields);
-        this.readable = readable;
+        this.unsupported = unsupported;
         settings = settings.forIndex(reopen);
         if (field.isPresent() && !fields.contains(field.get())) {
             field = Optional.empty();
@@ -354,7 +354,7 @@ public final class Analysis {
             return again();
         }
         if (key.isChar('w')) {
-            stopWordsForm = new AutoStopWordsForm(fields, readable, settings.stopWords());
+            stopWordsForm = new AutoStopWordsForm(fields, unsupported, settings.stopWords());
             return Optional.empty();
         }
         if (key.code() == KeyCode.TAB) {

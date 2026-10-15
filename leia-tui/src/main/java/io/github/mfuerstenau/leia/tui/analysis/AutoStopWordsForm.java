@@ -27,6 +27,9 @@ import java.util.OptionalLong;
  */
 public final class AutoStopWordsForm {
 
+    /** Why the search can't run without an index, or with one opened without a reader. */
+    public static final String NO_INDEX = "needs an index opened with a reader";
+
     /** Lucene's default: a term in more than 40 % of the documents. */
     static final int DEFAULT_PERCENT = 40;
 
@@ -61,7 +64,7 @@ public final class AutoStopWordsForm {
 
     private final List<String> fields;
     private final List<Boolean> chosen;
-    private final boolean readable;
+    private final Optional<String> unsupported;
 
     private boolean percent = true;
     private int percentValue = DEFAULT_PERCENT;
@@ -86,13 +89,14 @@ public final class AutoStopWordsForm {
 
     /**
      * @param fields the indexed fields of the open index
-     * @param readable whether an index is open with a reader, which the search needs
+     * @param unsupported why the open index can't run the search, such as {@link #NO_INDEX}; empty if
+     *     it can
      * @param found the words that the analysis screen has
      */
-    public AutoStopWordsForm(List<String> fields, boolean readable, Optional<AutoStopWords> found) {
+    public AutoStopWordsForm(List<String> fields, Optional<String> unsupported, Optional<AutoStopWords> found) {
         this.fields = List.copyOf(fields);
         this.chosen = new ArrayList<>(Collections.nCopies(fields.size(), false));
-        this.readable = readable;
+        this.unsupported = unsupported;
         this.found = found;
         // The fields of the words found before, unless that was every field.
         found.filter(words -> words.fields().size() < this.fields.size())
@@ -182,8 +186,8 @@ public final class AutoStopWordsForm {
                 if (running) {
                     return new Event.None();
                 }
-                if (!readable) {
-                    message = "The search needs an index opened with a reader.";
+                if (unsupported.isPresent()) {
+                    message = "Auto stop words: " + unsupported.get();
                     return new Event.None();
                 }
                 running = true;

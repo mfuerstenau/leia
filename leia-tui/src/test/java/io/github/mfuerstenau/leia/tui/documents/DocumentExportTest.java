@@ -228,7 +228,9 @@ class DocumentExportTest {
     }
 
     private static DocumentData loaded() {
-        return DocumentExport.load(new Fake(false), 3).toCompletableFuture().join();
+        return DocumentExport.load(new Fake(false), 3, true)
+                .toCompletableFuture()
+                .join();
     }
 
     private static String golden() throws IOException {
@@ -240,7 +242,8 @@ class DocumentExportTest {
     @Test
     void loadsCutValuesWholeAndTheTermVectors() {
         Fake fake = new Fake(false);
-        DocumentData data = DocumentExport.load(fake, 3).toCompletableFuture().join();
+        DocumentData data =
+                DocumentExport.load(fake, 3, true).toCompletableFuture().join();
 
         assertThat(fake.calls).containsExactly("document 3", "stored 3 body 0", "term vector 3 body");
         assertThat(data.document().fields().get(1).stored()).containsExactly(string("red blue."));
@@ -249,11 +252,21 @@ class DocumentExportTest {
     }
 
     @Test
+    void anIndexWithoutTermVectorsLoadsNone() {
+        Fake fake = new Fake(false);
+        DocumentData data =
+                DocumentExport.load(fake, 3, false).toCompletableFuture().join();
+
+        assertThat(fake.calls).containsExactly("document 3", "stored 3 body 0");
+        assertThat(data.termVectors()).isEmpty();
+    }
+
+    @Test
     void loadingStopsAtTheFirstError() {
         Fake fake = new Fake(true);
 
-        assertThatThrownBy(
-                        () -> DocumentExport.load(fake, 3).toCompletableFuture().join())
+        assertThatThrownBy(() ->
+                        DocumentExport.load(fake, 3, true).toCompletableFuture().join())
                 .isInstanceOf(CompletionException.class)
                 .hasRootCauseMessage("gone");
         assertThat(fake.calls).containsExactly("document 3", "stored 3 body 0");

@@ -900,6 +900,66 @@ class AppTest {
         assertThat(render(app)).doesNotContain("r read again");
     }
 
+    private static String legend(App app) {
+        return TestScreens.render(app::render, 240, 30);
+    }
+
+    @Test
+    void anOldLuceneIndexLeavesOutTheDocumentKeysItLacks() {
+        App app = oldLuceneApp();
+        assertThat(app.handleKey(key('2'))).isEqualTo(load(0));
+        assertThat(app.documentLoaded(document(0))).isEmpty();
+        assertThat(legend(app))
+                .contains("⏎ term vector", "v view", "E export")
+                .doesNotContain("r rebuild", "N nearest", "m similar", "t points", "s search value");
+
+        assertThat(app.handleKey(key('r'))).isEmpty();
+        assertThat(render(app)).contains("Rebuild: not for Lucene 2.x");
+        assertThat(app.handleKey(key('m'))).isEmpty();
+        assertThat(render(app)).contains("Similar: not for Lucene 2.x");
+    }
+
+    @Test
+    void anOldLuceneIndexFetchesNoPositionsForAPosting() {
+        App app = oldLuceneApp();
+        app.handleKey(key('3'));
+        app.termsLoaded(loadTerms("id", null), termPage("1", "2"));
+        app.postingsLoaded(loadPostings("id", "1"), postingsOf());
+        assertThat(legend(app)).contains("/ seek", "⏎ open doc").doesNotContain("e export");
+        assertThat(app.handleKey(key('e'))).isEmpty();
+        assertThat(render(app)).contains("Export: not for Lucene 2.x");
+
+        app.handleKey(key(KeyCode.ENTER));
+        app.handleKey(key(KeyCode.ENTER));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(load(0));
+        assertThat(app.documentLoaded(document(0))).isEmpty();
+    }
+
+    @Test
+    void anOldLuceneIndexSearchesWithAClassicQueryOnly() {
+        App app = oldLuceneApp();
+        assertThat(app.handleKey(key('5'))).isEmpty();
+        assertThat(legend(app))
+                .contains("/ query", "p/l settings", "⏎ open doc")
+                .doesNotContain("m mode", "p/s/l settings", "H highlight", "x explain", "b/B browse");
+        assertThat(app.handleKey(key('m'))).isEmpty();
+        assertThat(render(app)).contains("Other modes: not for Lucene 2.x");
+
+        app.handleKey(key('/'));
+        typed(app, "q");
+        Action.StartSearch start =
+                (Action.StartSearch) app.handleKey(key(KeyCode.ENTER)).orElseThrow();
+        assertThat(start.params().query().classic()).isPresent();
+        assertThat(start.params().highlight()).isEmpty();
+        app.searchStarted(start.searchId(), 1);
+        app.searchProgress(start.searchId(), page(0, 1));
+
+        assertThat(app.handleKey(key('x'))).isEmpty();
+        assertThat(render(app)).contains("Explain: not for Lucene 2.x");
+        assertThat(app.handleKey(key('s'))).isEmpty();
+        assertThat(legend(app)).contains("Similarity and sort: not for Lucene 2.x");
+    }
+
     @Test
     void withoutAReaderOnlyTheCommitsScreenWorks() {
         App app = appWithFields();
@@ -911,12 +971,14 @@ class AppTest {
                 .contains("no reader", "4 Commits", "Reading the commits…", "r read again")
                 .doesNotContain("R reopen");
 
-        app.handleKey(key('2'));
-        assertThat(render(app)).contains("This screen needs a reader");
+        assertThat(app.handleKey(key('2'))).isEmpty();
+        assertThat(render(app)).contains("Documents: needs a reader", "r read again");
+        assertThat(app.handleKey(key('5'))).isEmpty();
+        assertThat(render(app)).contains("Search: needs a reader");
         assertThat(app.handleKey(key('R'))).isEmpty();
-        assertThat(render(app)).contains("No reader to reopen");
+        assertThat(render(app)).contains("Reopen: needs a reader");
         app.handleKey(key('1'));
-        assertThat(render(app)).contains("Reader     none");
+        assertThat(render(app)).contains("Reader     none").doesNotContain("needs a reader");
 
         assertThat(app.handleKey(key('c'))).hasValue(new Action.Close());
         app.closed();
@@ -1292,7 +1354,7 @@ class AppTest {
         openedWithoutReader(app);
 
         assertThat(app.handleKey(key('3'))).isEmpty();
-        assertThat(render(app)).contains("This screen needs a reader");
+        assertThat(render(app)).contains("Terms: needs a reader", "r read again");
     }
 
     @Test
@@ -1466,7 +1528,7 @@ class AppTest {
         openedWithoutReader(app);
 
         assertThat(app.handleKey(key('2'))).isEmpty();
-        assertThat(render(app)).contains("This screen needs a reader");
+        assertThat(render(app)).contains("Documents: needs a reader", "r read again");
     }
 
     /** On the terms screen of an index of three documents, with the postings 0 and 2 of the term "1". */
@@ -1744,7 +1806,7 @@ class AppTest {
         assertThat(app.handleKey(key('E'))).isEmpty();
         assertThat(render(app)).contains("Export document 0 as JSON", "Tab terms and points: on");
 
-        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.LoadDocumentExport(1, 0));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.LoadDocumentExport(1, 0, true));
         assertThat(render(app)).contains("Exporting…");
         assertThat(app.documentExportLoaded(1, data(0))).hasValue(new Action.StartDocumentExport(1, 0));
         assertThat(app.exportStarted(1, 7)).isEmpty();
@@ -1781,7 +1843,7 @@ class AppTest {
         app.handleKey(key(KeyCode.TAB));
         assertThat(render(app)).contains("Tab terms and points: off");
 
-        assertThat(app.handleKey(ctrl('y'))).hasValue(new Action.LoadDocumentExport(1, 0));
+        assertThat(app.handleKey(ctrl('y'))).hasValue(new Action.LoadDocumentExport(1, 0, true));
         Optional<Action> copy = app.documentExportLoaded(1, data(0));
         assertThat(copy).containsInstanceOf(Action.Copy.class);
         assertThat(((Action.Copy) copy.get()).text()).contains("\"indexedTerms\": false", "\"value\": \"doc-0\"");
@@ -1795,7 +1857,7 @@ class AppTest {
         // Without indexed terms, the prompt stays open until the file is written.
         app.handleKey(key('E'));
         app.handleKey(key(KeyCode.TAB));
-        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.LoadDocumentExport(1, 0));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.LoadDocumentExport(1, 0, true));
         assertThat(app.documentExportLoaded(1, data(0))).containsInstanceOf(Action.WriteExport.class);
         app.exportFailed(1, "Cannot write doc-0.json: disk full");
         assertThat(render(app)).contains("Cannot write doc-0.json: disk full");
@@ -1804,7 +1866,7 @@ class AppTest {
 
         // With them, Esc stops the rebuild.
         app.handleKey(key('E'));
-        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.LoadDocumentExport(2, 0));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.LoadDocumentExport(2, 0, true));
         app.documentExportLoaded(2, data(0));
         app.exportStarted(2, 4);
         assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.CancelExport(4));
@@ -1838,7 +1900,7 @@ class AppTest {
         assertThat(app.polls()).isEmpty();
         // The next export is a new one.
         app.handleKey(key('E'));
-        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.LoadDocumentExport(2, 0));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.LoadDocumentExport(2, 0, true));
         app.exportFailed(1, "too late");
         assertThat(render(app)).doesNotContain("too late").contains("Exporting…");
     }

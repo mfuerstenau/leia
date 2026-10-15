@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import dev.tamboui.tui.event.KeyCode;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
+import io.github.mfuerstenau.leia.protocol.index.Feature;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
@@ -31,6 +32,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /** The tests of {@code terms.rs}, ported, and what the asynchronous calls add. */
@@ -109,6 +111,21 @@ class TermsTest {
                 .isEmpty();
         assertThat(terms.loading()).isFalse();
         return terms;
+    }
+
+    @Test
+    void refusesAndLeavesOutTheKeysTheIndexLacks() {
+        Terms terms = terms().withFeatures(Set.of(Feature.TERMS, Feature.POSTINGS));
+        terms.initialRequest();
+        terms.termsLoaded(termsRequest("id", null, false), page(List.of("a", "b", "c"), "d"));
+        terms.postingsLoaded(postingsRequest("id", "a", 0, false), postings(List.of(1, 4), 7));
+
+        assertThat(terms.keys()).contains("/ seek").doesNotContain("e export", "⏎ open doc");
+        assertThat(terms.handleKey(key('e'))).hasValue(new Request.Unsupported("Export"));
+        terms.handleKey(key(KeyCode.ENTER));
+        terms.handleKey(key(KeyCode.ENTER));
+        assertThat(terms.handleKey(key(KeyCode.ENTER))).hasValue(new Request.Unsupported("Open doc"));
+        assertThat(loaded().keys()).contains("e export", "⏎ open doc");
     }
 
     private static String render(Terms terms) {

@@ -553,20 +553,21 @@ public final class Session {
             case Action.ClearFilter clear -> clearFilter(clear.cancel(), clear.release(), runner);
             case Action.CancelScan cancel -> cancelJobs(List.of(cancel.jobId()), runner);
             case Action.LoadDocumentExport load ->
-                DocumentExport.load(exportFetch(), load.docId()).whenComplete((data, error) -> {
-                    if (error == null) {
-                        reply(runner, app -> app.documentExportLoaded(load.exportId(), data));
-                        return;
-                    }
-                    RpcException rpc = rpcException(error, runner);
-                    if (rpc != null) {
-                        String message = describe(rpc);
-                        reply(runner, app -> {
-                            app.exportFailed(load.exportId(), message);
-                            return Optional.empty();
+                DocumentExport.load(exportFetch(), load.docId(), load.termVectors())
+                        .whenComplete((data, error) -> {
+                            if (error == null) {
+                                reply(runner, app -> app.documentExportLoaded(load.exportId(), data));
+                                return;
+                            }
+                            RpcException rpc = rpcException(error, runner);
+                            if (rpc != null) {
+                                String message = describe(rpc);
+                                reply(runner, app -> {
+                                    app.exportFailed(load.exportId(), message);
+                                    return Optional.empty();
+                                });
+                            }
                         });
-                    }
-                });
             case Action.StartDocumentExport start ->
                 backend.call(Methods.START_RECONSTRUCT, new StartReconstructParams(start.docId(), Optional.empty()))
                         .whenComplete((job, error) -> {

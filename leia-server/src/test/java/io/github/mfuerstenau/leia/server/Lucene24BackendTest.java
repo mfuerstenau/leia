@@ -84,7 +84,8 @@ class Lucene24BackendTest {
         assertThat(opened.luceneRuntime()).startsWith("3.6");
         assertThat(opened.features())
                 .contains(Feature.DOCUMENTS, Feature.TERMS, Feature.CLASSIC_SEARCH)
-                .doesNotContain(Feature.SEARCH, Feature.COMMITS, Feature.CHECK_INDEX, Feature.POINTS);
+                .doesNotContain(
+                        Feature.SEARCH, Feature.COMMITS, Feature.CHECK_INDEX, Feature.POINTS, Feature.AUTO_STOP_WORDS);
         ReaderInfo reader = opened.indexes().getFirst().reader().orElseThrow();
         assertThat(reader.createdVersionMajor()).isEqualTo(2);
         assertThat(reader.minSegmentLuceneVersion()).contains("2.x");

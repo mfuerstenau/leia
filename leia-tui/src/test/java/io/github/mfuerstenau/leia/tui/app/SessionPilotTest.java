@@ -211,10 +211,10 @@ class SessionPilotTest {
         pilot.press(KeyCode.ENTER);
         settle();
         assertThat(screen()).contains("2 hits", "body=document number 3 of the old index");
-        // A feature the screen has, but Lucene 3 doesn't: the backend says so.
+        // A key that Lucene 3 lacks is refused before it reaches the backend.
         pilot.press('x');
         settle();
-        assertThat(screen()).contains("Not supported for an index written by Lucene 2.x or 3.x");
+        assertThat(screen()).contains("Explain: not for Lucene 2.x");
     }
 
     @Test

@@ -52,7 +52,9 @@ public enum Feature {
     /** {@code startExportTerms}. */
     EXPORT_TERMS,
     /** {@code reopenIndex}. */
-    REOPEN;
+    REOPEN,
+    /** {@code startAutoStopWords}. */
+    AUTO_STOP_WORDS;
 
     /** Every feature: an index that Lucene 10 opens with a reader. */
     public static Set<Feature> all() {

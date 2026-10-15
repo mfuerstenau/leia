@@ -14,11 +14,11 @@ sealed interface Notice {
 
     record Failed(String error) implements Notice {}
 
-    /** {@code R} without a reader. */
-    record NoReader() implements Notice {}
-
-    /** A screen or key that the open index's Lucene lacks (ADR 0044). */
-    record NotSupported(String what, String why) implements Notice {}
+    /**
+     * A screen or key that the open index lacks (ADR 0044): what it is, and why, such as {@code
+     * needs a reader}.
+     */
+    record NotSupported(String what, String reason) implements Notice {}
 
     /** The document was written or copied: what, and where. */
     record Exported(String text) implements Notice {}
@@ -34,9 +34,8 @@ sealed interface Notice {
             case Unchanged unchanged -> Line.from("Unchanged: " + unchanged.segmentsFile());
             case Reopened reopened -> Line.from("Reopened: " + reopened.text());
             case Failed failed -> Line.styled("Reopen failed: " + failed.error(), Style.EMPTY.red());
-            case NoReader _ -> Line.from("No reader to reopen");
             case NotSupported notSupported ->
-                Line.styled(notSupported.what() + ": not for " + notSupported.why(), Style.EMPTY.yellow());
+                Line.styled(notSupported.what() + ": " + notSupported.reason(), Style.EMPTY.yellow());
             case Exported exported -> Line.styled(exported.text(), Style.EMPTY.green());
             case ExportFailed failed -> Line.styled("Export failed: " + failed.error(), Style.EMPTY.red());
             case ExportRunning _ -> Line.from("An export runs; Esc cancels it");

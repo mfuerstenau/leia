@@ -22,6 +22,7 @@ import io.github.mfuerstenau.leia.protocol.filter.FilterMatch;
 import io.github.mfuerstenau.leia.protocol.filter.GetFilterResult;
 import io.github.mfuerstenau.leia.protocol.filter.StepFilterParams;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
+import io.github.mfuerstenau.leia.protocol.index.Feature;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
@@ -53,6 +54,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -750,6 +752,28 @@ class DocumentsTest {
 
         documents.handleKey(key(KeyCode.HOME));
         assertThat(render(documents, 140, 12)).contains("Indexed");
+    }
+
+    @Test
+    void refusesAndLeavesOutTheKeysTheIndexLacks() {
+        Documents documents =
+                documents().withFeatures(Set.of(Feature.DOCUMENTS, Feature.STORED_VALUES, Feature.TERM_VECTORS));
+        documents.loaded(document(0));
+
+        assertThat(documents.keys())
+                .contains("⏎ term vector", "v view", "E export")
+                .doesNotContain("r rebuild", "m similar", "N nearest", "s search value", "t points");
+        assertThat(documents.handleKey(key('r'))).hasValue(new Request.Unsupported("Rebuild"));
+        assertThat(documents.handleKey(key('m'))).hasValue(new Request.Unsupported("Similar"));
+        assertThat(documents.handleKey(key('s'))).hasValue(new Request.Unsupported("Search value"));
+        assertThat(render(documents, 140, 30)).doesNotContain("r rebuilds");
+
+        // Without positions, a hit's are not fetched.
+        documents.showHit(hit("body", 2, 1));
+        documents.loaded(document(2));
+        assertThat(documents.positionsRequest()).isEmpty();
+
+        assertThat(documents.reopened(List.of(schema("id", 0)), 5).keys()).doesNotContain("r rebuild");
     }
 
     private static TermHit hit(String field, int docId, int index) {

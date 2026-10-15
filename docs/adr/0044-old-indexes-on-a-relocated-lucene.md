@@ -40,7 +40,7 @@ Every Lucene version uses the package `org.apache.lucene`, so two of them can't 
    - Only a single index directory with a reader is routed. `DIRECTORY_ONLY` mode on such an index gives `UNSUPPORTED_INDEX_FORMAT`.
 4. **`openIndex` reports the features of the opened index.**
    - `OpenIndexResult` gains `features: Set<Feature>` and `luceneRuntime`.
-   - `Feature` lists the screens and methods: `INDEX_STATS`, `TOP_TERMS`, `DOCUMENTS`, `STORED_VALUES`, `TERM_VECTORS`, `POSITIONS`, `RECONSTRUCT`, `FILTER`, `TERMS`, `POSTINGS`, `POINTS`, `DOC_VALUES`, `KNN_VECTORS`, `COMMITS`, `SEARCH`, `CLASSIC_SEARCH`, `EXPLAIN`, `HIGHLIGHT`, `STORED_SCAN`, `CHECK_INDEX`, `EXPORT_TERMS` and `REOPEN`.
+   - `Feature` lists the screens and methods: `INDEX_STATS`, `TOP_TERMS`, `DOCUMENTS`, `STORED_VALUES`, `TERM_VECTORS`, `POSITIONS`, `RECONSTRUCT`, `FILTER`, `TERMS`, `POSTINGS`, `POINTS`, `DOC_VALUES`, `KNN_VECTORS`, `COMMITS`, `SEARCH`, `CLASSIC_SEARCH`, `EXPLAIN`, `HIGHLIGHT`, `STORED_SCAN`, `CHECK_INDEX`, `EXPORT_TERMS`, `REOPEN` and `AUTO_STOP_WORDS`.
    - Lucene 10 with a reader has them all, and without one only `COMMITS` and `CHECK_INDEX`.
    - Lucene 3.6 has `INDEX_STATS`, `DOCUMENTS`, `STORED_VALUES`, `TERM_VECTORS`, `TERMS`, `POSTINGS` and `CLASSIC_SEARCH`.
 5. **The backend refuses what an index can't do with `NOT_SUPPORTED` (-32019).**
@@ -52,7 +52,8 @@ Every Lucene version uses the package `org.apache.lucene`, so two of them can't 
    - A screen the index lacks gets a dimmed tab, and its key gives a notice: "Commits: not for Lucene 2.x".
    - `R` and the overview's top-terms keys go the same way.
    - The tab line says "Lucene 2.x, read with 3.6.2".
-   - Keys inside a screen that the index lacks, such as `x` explain, still reach the backend, and the screen shows its `NOT_SUPPORTED` message.
+   - Keys inside a screen that the index lacks, such as `x` explain or `r` rebuild, are left out of the legend. Pressed anyway, they give the same notice ("Explain: not for Lucene 2.x"), and nothing goes to the backend. The search screen's `m` cycles only through the modes the index has.
+   - Without a reader, the features alone decide too (amending ADR 0021 §16): tabs 2, 3 and 5 are dimmed, and their keys say "Documents: needs a reader".
 7. **Where the runtimes come from.**
    - The release folder has a `runtimes/` folder beside `leia.jar`, with one jar per runtime. `leiaFolder` builds the same for a development build.
    - leia finds that folder from the location of its own jar and loads it at startup, before the jars of `--jar` and the default folder. `--no-default-jars` doesn't affect it.
@@ -67,6 +68,8 @@ The runtime seam (decision 1) has landed:
 - `leia-lucene3` implements it as `Lucene3Runtime` and takes `leia-runtime` compileOnly, so the interface isn't in its jar.
 - leia-server depends on `leia-lucene3` at runtime only, and finds the runtime with `ServiceLoader` (`Runtimes`). The Lucene 10 handlers are unchanged; each handler that a runtime can serve has one `currentIndex.runtime()` branch into `RuntimeResults`.
 - A runtime built for another `API_VERSION` is refused with `INVALID_JAR`: at the start, nothing starts; on `addJars`, the jar stays loaded and its runtime is never used.
+
+The TUI's gates (decision 6) have landed: `Opened.features` decides every screen, key and legend entry, the no-reader mode included. `Documents`, `Terms` and `Search` take the features (`withFeatures`), answer a key they lack with a `Request.Unsupported`, and build their own legends (`keys()`). Without `POSITIONS` no positions are fetched for a posting, without `HIGHLIGHT` the hits aren't highlighted, and without `RECONSTRUCT` the document export leaves the indexed terms off. `AUTO_STOP_WORDS` has no runtime branch, so an old index lacks it.
 
 The routing (decision 3) has landed:
 - One detector in leia-server, `SegmentsHeader.read`, reads the newest `segments_N` without Lucene and gives the index's major and the Lucene version for messages:
@@ -104,6 +107,4 @@ The routing (decision 3) has landed:
   - commits and `CheckIndex` on 3.6;
   - several old index directories under one path;
   - a 3.x test index;
-  - the term-statistics scan (`TOP_TERMS`);
-  - hiding the keys of the features a screen lacks;
-  - folding the no-reader checks into `features`.
+  - the term-statistics scan (`TOP_TERMS`).

@@ -39,7 +39,7 @@ class ExportPromptTest {
 
     @Test
     void exportsADocumentToAFileOrTheClipboard() {
-        ExportPrompt prompt = ExportPrompt.document(7, List.of(), Optional.empty(), Optional.of(dir));
+        ExportPrompt prompt = ExportPrompt.document(7, List.of(), true, Optional.empty(), Optional.of(dir));
         assertThat(prompt.input()).isEqualTo("doc-7.json");
         String screen = render(prompt);
         assertThat(screen).contains("Export document 7 as JSON").contains("Tab terms and points: on");
@@ -55,9 +55,19 @@ class ExportPromptTest {
     }
 
     @Test
+    void anIndexThatCantRebuildExportsWithoutTermsAndPoints() {
+        ExportPrompt prompt = ExportPrompt.document(7, List.of(), false, Optional.empty(), Optional.of(dir));
+        assertThat(render(prompt)).contains("Terms and points: off").doesNotContain("Tab terms");
+
+        prompt.handleKey(key(KeyCode.TAB));
+        assertThat(prompt.handleKey(ctrl('y')))
+                .isEqualTo(new ExportPrompt.Submit(new ExportRequest.Document(7, false, new ExportTarget.Clipboard())));
+    }
+
+    @Test
     void resolvesTheHomeDirectoryAndRelativePaths() throws IOException {
         Path home = Files.createDirectories(dir.resolve("home"));
-        ExportPrompt prompt = ExportPrompt.document(1, List.of(), Optional.of(home), Optional.of(dir));
+        ExportPrompt prompt = ExportPrompt.document(1, List.of(), true, Optional.of(home), Optional.of(dir));
         clear(prompt);
         typed(prompt, "~/d.json");
 
@@ -73,7 +83,7 @@ class ExportPromptTest {
     @Test
     void asksBeforeOverwritingAFile() throws IOException {
         Files.writeString(dir.resolve("d.json"), "old");
-        ExportPrompt prompt = ExportPrompt.document(1, List.of(), Optional.empty(), Optional.of(dir));
+        ExportPrompt prompt = ExportPrompt.document(1, List.of(), true, Optional.empty(), Optional.of(dir));
         clear(prompt);
         typed(prompt, "d.json");
 
@@ -93,7 +103,8 @@ class ExportPromptTest {
 
     @Test
     void doesNotWriteADocumentIntoAnIndexDirectory() {
-        ExportPrompt prompt = ExportPrompt.document(1, List.of(dir.toString()), Optional.empty(), Optional.of(dir));
+        ExportPrompt prompt =
+                ExportPrompt.document(1, List.of(dir.toString()), true, Optional.empty(), Optional.of(dir));
 
         assertThat(prompt.handleKey(key(KeyCode.ENTER))).isEqualTo(new ExportPrompt.Nothing());
         assertThat(prompt.error())
@@ -103,7 +114,7 @@ class ExportPromptTest {
 
     @Test
     void ignoresKeysWhileBusyAndShowsErrors() {
-        ExportPrompt prompt = ExportPrompt.document(1, List.of(), Optional.empty(), Optional.of(dir));
+        ExportPrompt prompt = ExportPrompt.document(1, List.of(), true, Optional.empty(), Optional.of(dir));
         prompt.setBusy();
         assertThat(prompt.handleKey(key(KeyCode.ESCAPE))).isEqualTo(new ExportPrompt.Nothing());
         assertThat(render(prompt)).contains("Exporting…");

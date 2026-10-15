@@ -10,12 +10,13 @@ import java.util.Set;
  * What was opened (ADR 0021).
  *
  * @param path the absolute path that was opened
- * @param noReader whether it was opened without a reader: only the commits and check screens work
+ * @param noReader whether it was opened without a reader, as the tab line and the overview say; what
+ *     works then is in {@code features}
  * @param directory the {@code Directory} it was opened through
  * @param indexes the index directories, in order; at least one
  * @param skipped the index directories that were found but left out
- * @param features what works on the index (ADR 0044); without a reader, the screens check {@code
- *     noReader} instead
+ * @param features what works on the index (ADR 0044), which decides every screen and key; without a
+ *     reader, {@link Feature#withoutReader()}
  * @param oldLucene for an index that an old Lucene reads (ADR 0044), what the tab line says about
  *     it, such as {@code Lucene 2.x, read with 3.6.2}; empty for one that Lucene 10 reads
  */

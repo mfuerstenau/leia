@@ -24,7 +24,7 @@ class AutoStopWordsFormTest {
 
     @Test
     void picksTheThresholdAndTheFields() {
-        var form = new AutoStopWordsForm(List.of("body", "title"), true, Optional.empty());
+        var form = new AutoStopWordsForm(List.of("body", "title"), Optional.empty(), Optional.empty());
         assertThat(render(form)).contains("% of the documents", "More than (%)", "40", "every indexed field");
 
         // The value: digits replace it once it would go over 100.
@@ -56,7 +56,7 @@ class AutoStopWordsFormTest {
 
     @Test
     void showsAndListsTheWordsFoundAndDropsThem() {
-        var form = new AutoStopWordsForm(List.of("body", "title"), true, Optional.empty());
+        var form = new AutoStopWordsForm(List.of("body", "title"), Optional.empty(), Optional.empty());
         assertThat(form.handleKey(key(KeyCode.ENTER))).isInstanceOf(AutoStopWordsForm.Event.Start.class);
         assertThat(form.running()).isTrue();
         // Enter does nothing more while it runs, and Esc waits for the job.
@@ -81,7 +81,7 @@ class AutoStopWordsFormTest {
     @Test
     void choosesTheFieldsOfTheWordsFoundBefore() {
         var found = new AutoStopWords(2, List.of(new FieldStopWords("title", List.of())));
-        var form = new AutoStopWordsForm(List.of("body", "title"), true, Optional.of(found));
+        var form = new AutoStopWordsForm(List.of("body", "title"), Optional.empty(), Optional.of(found));
 
         assertThat(form.params().fields()).containsExactly("title");
     }

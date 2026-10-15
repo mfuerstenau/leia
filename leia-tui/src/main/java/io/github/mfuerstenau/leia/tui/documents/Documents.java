@@ -38,6 +38,7 @@ import io.github.mfuerstenau.leia.protocol.filter.GetFilterResult;
 import io.github.mfuerstenau.leia.protocol.filter.StartFilterParams;
 import io.github.mfuerstenau.leia.protocol.filter.StepFilterParams;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
+import io.github.mfuerstenau.leia.protocol.index.Feature;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.points.PointValue;
@@ -68,6 +69,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -195,6 +197,9 @@ public final class Documents {
 
         /** Ask where to export this document to as JSON (ADR 0030). */
         record Export(int docId) implements Request {}
+
+        /** A key that the index lacks a feature for (ADR 0044); {@code what} names it. Nothing changed. */
+        record Unsupported(String what) implements Request {}
     }
 
     /** The filter to locate a document in once it is loaded: its serial and the backend's id. */
@@ -373,6 +378,9 @@ public final class Documents {
      */
     private List<IndexStart> indexes = List.of();
 
+    /** What the index can do (ADR 0044): the keys it lacks a feature for are refused and left out of the legend. */
+    private Set<Feature> features = Feature.all();
+
     public Documents(List<IndexField> fields, int maxDoc) {
         this.schema = fields.stream()
                 .collect(Collectors.toMap(IndexField::name, Function.identity(), (a, b) -> a, HashMap::new));
@@ -392,6 +400,16 @@ public final class Documents {
     public Documents withPointFormats(PointFormats formats) {
         this.pointFormats = formats;
         return this;
+    }
+
+    /** Offers only the keys that {@code features} allow (ADR 0044). */
+    public Documents withFeatures(Set<Feature> features) {
+        this.features = Set.copyOf(features);
+        return this;
+    }
+
+    private boolean supports(Feature... needed) {
+        return features.containsAll(List.of(needed));
     }
 
     /** What the index says about the field {@code name}; empty if it doesn't know it. */
@@ -420,6 +438,7 @@ public final class Documents {
     public Documents reopened(List<IndexField> fields, int maxDoc) {
         Documents documents = new Documents(fields, maxDoc);
         documents.indexes = indexes;
+        documents.features = features;
         documents.docId = Math.max(Math.min(docId, maxDoc - 1), 0);
         documents.selectField = selectedField().map(DocumentField::name).orElse(null);
         documents.hideEmpty = hideEmpty;
@@ -820,7 +839,7 @@ public final class Documents {
 
     /** The positions to fetch, if the shown document is the hit's and they are not in yet. */
     public Optional<Request> positionsRequest() {
-        if (hit == null || !shows(hit.docId()) || positions != null) {
+        if (hit == null || !shows(hit.docId()) || positions != null || !supports(Feature.POSITIONS)) {
             return Optional.empty();
         }
         return Optional.of(new Request.Positions(hit.docId(), hit.field(), hit.term()));
@@ -1279,6 +1298,10 @@ public final class Documents {
             }
             return from < maxDoc - 1 ? Optional.of(new Request.Document(from + 1)) : Optional.empty();
         }
+        Optional<String> unsupported = unsupported(key);
+        if (unsupported.isPresent()) {
+            return unsupported.map(Request.Unsupported::new);
+        }
         if (code == KeyCode.ENTER) {
             Optional<DocumentField> field = selectedField();
             if (field.isEmpty()
@@ -1366,6 +1389,56 @@ public final class Documents {
             }
         }
         return Optional.empty();
+    }
+
+    /** What {@code key} is called if the index lacks a feature it needs (ADR 0044); empty otherwise. */
+    private Optional<String> unsupported(KeyEvent key) {
+        if (key.code() == KeyCode.ENTER) {
+            return supports(Feature.TERM_VECTORS) ? Optional.empty() : Optional.of("Term vector");
+        }
+        if (key.code() != KeyCode.CHAR) {
+            return Optional.empty();
+        }
+        return switch (key.codePoint()) {
+            case 'v' -> supports(Feature.STORED_VALUES) ? Optional.empty() : Optional.of("View");
+            case 'E' -> supports(Feature.STORED_VALUES) ? Optional.empty() : Optional.of("Export");
+            case 'r' -> supports(Feature.RECONSTRUCT) ? Optional.empty() : Optional.of("Rebuild");
+            case 't' -> supports(Feature.POINTS) ? Optional.empty() : Optional.of("Points");
+            case 's' -> supports(Feature.SEARCH, Feature.DOC_VALUES) ? Optional.empty() : Optional.of("Search value");
+            case 'N' -> supports(Feature.SEARCH, Feature.KNN_VECTORS) ? Optional.empty() : Optional.of("Nearest");
+            case 'm' -> supports(Feature.SEARCH) ? Optional.empty() : Optional.of("Similar");
+            case 'b' -> supports(Feature.FILTER) ? Optional.empty() : Optional.of("Filter");
+            default -> Optional.empty();
+        };
+    }
+
+    /**
+     * The screen's keys for the footer, after the app's: those the index has the features for (ADR
+     * 0044).
+     */
+    public String keys() {
+        String steps = walk().map(walk -> walk == Walk.TERM_DOCS ? "[ ] term docs   " : "[ ] hits   ")
+                .orElse("");
+        String step = filtered() ? "←→ match   b unfilter   " : "←→ doc   ";
+        StringBuilder keys = new StringBuilder(step).append(steps).append("i go to   ");
+        keyIf(keys, supports(Feature.TERM_VECTORS), "⏎ term vector");
+        keyIf(keys, supports(Feature.STORED_VALUES), "v view");
+        keys.append("a analyze   ");
+        keyIf(keys, supports(Feature.SEARCH, Feature.DOC_VALUES), "s search value");
+        keyIf(keys, supports(Feature.SEARCH, Feature.KNN_VECTORS), "N nearest");
+        keys.append("x numbers   ");
+        keyIf(keys, supports(Feature.POINTS), "t points");
+        keys.append("e empty   ");
+        keyIf(keys, supports(Feature.SEARCH), "m similar");
+        keyIf(keys, supports(Feature.RECONSTRUCT), "r rebuild");
+        keyIf(keys, supports(Feature.STORED_VALUES), "E export");
+        return keys.append("Tab panel   ↑↓").toString();
+    }
+
+    private static void keyIf(StringBuilder keys, boolean shown, String key) {
+        if (shown) {
+            keys.append(key).append("   ");
+        }
     }
 
     private void scrollDetails(KeyEvent key) {
@@ -1601,7 +1674,8 @@ public final class Documents {
                 termVectors.get(field.name()),
                 reconstructions.get(field.name()),
                 numbers,
-                pointFormats);
+                pointFormats,
+                features);
         // TamboUI scrolls no further than to show the last line at the bottom, so the scroll stops
         // there too: the next key after End moves.
         Block block = panel(title, focused);
@@ -1814,7 +1888,10 @@ public final class Documents {
         return Line.from(label(label), Span.raw(text));
     }
 
-    /** Everything about the selected field: how it is indexed, then what the document has in it. */
+    /**
+     * Everything about the selected field: how it is indexed, then what the document has in it, as
+     * far as the index has the {@code features} to read it (ADR 0044).
+     */
     private static List<Line> detailLines(
             Optional<IndexField> schema,
             DocumentField field,
@@ -1825,7 +1902,8 @@ public final class Documents {
             TermVector termVector,
             Reconstruction reconstruction,
             NumberFormat numbers,
-            PointFormats pointFormats) {
+            PointFormats pointFormats,
+            Set<Feature> features) {
         List<Line> lines = new ArrayList<>();
         String flags = flags(schema, field);
         lines.add(labelled("Flags", flags + "  " + flagWords(flags)));
@@ -1950,7 +2028,9 @@ public final class Documents {
             lines.add(labelled("Term vector", "-"));
         } else {
             switch (termVector) {
-                case null -> lines.add(labelled("Term vector", "⏎ loads it"));
+                case null ->
+                    lines.add(labelled(
+                            "Term vector", features.contains(Feature.TERM_VECTORS) ? "⏎ loads it" : "not read"));
                 case TermVector.Failed failed ->
                     lines.add(labelled("Term vector", "cannot read it: " + failed.error()));
                 case TermVector.Loaded loaded -> {
@@ -1961,7 +2041,8 @@ public final class Documents {
             }
         }
 
-        if (schema.filter(Documents::rebuildable).isPresent()) {
+        if (features.contains(Feature.RECONSTRUCT)
+                && schema.filter(Documents::rebuildable).isPresent()) {
             lines.add(Line.empty());
             lines.addAll(reconstructionLines(reconstruction, schema.get(), pointFormats));
         }

@@ -58,6 +58,7 @@ import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import io.github.mfuerstenau.leia.tui.analysis.Analysis;
+import io.github.mfuerstenau.leia.tui.analysis.AutoStopWordsForm;
 import io.github.mfuerstenau.leia.tui.check.Check;
 import io.github.mfuerstenau.leia.tui.commits.Commits;
 import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
@@ -316,9 +317,9 @@ public final class App {
         commits = new Commits(indexNames(opened));
         check = new Check(stats.path());
         pointFormats = new PointFormats();
-        terms = new Terms(stats.fields()).withPointFormats(pointFormats);
+        terms = new Terms(stats.fields()).withPointFormats(pointFormats).withFeatures(opened.features());
         documents = newDocuments(stats, opened);
-        analysis.indexChanged(indexedFields(stats), true, false);
+        analysis.indexChanged(indexedFields(stats), autoStopWordsReason(), false);
         search = newSearch(stats);
         prompt = null;
         forgetExport();
@@ -328,7 +329,7 @@ public final class App {
 
     /** The search screen of {@code stats}, which parses with the analysis screen's analyzer. */
     private Search newSearch(GetIndexStatsResult stats) {
-        Search fresh = new Search(stats.fields(), stats.maxDoc());
+        Search fresh = new Search(stats.fields(), stats.maxDoc()).withFeatures(opened.features());
         fresh.setAnalyzer(analysis.settings());
         return fresh;
     }
@@ -375,7 +376,7 @@ public final class App {
                 Optional.empty());
         commits = new Commits(indexNames(opened));
         check = new Check(result.path());
-        analysis.indexChanged(List.of(), false, false);
+        analysis.indexChanged(List.of(), autoStopWordsReason(), false);
         if (screen != Screen.ANALYSIS && screen != Screen.CHECK) {
             screen = Screen.COMMITS;
         }
@@ -409,12 +410,12 @@ public final class App {
             reopened = changed + " of " + indexes.size() + " indexes";
         }
         boolean sameFields = schema(overview.stats().fields()).equals(schema(stats.fields()));
-        analysis.indexChanged(indexedFields(stats), true, true);
+        analysis.indexChanged(indexedFields(stats), autoStopWordsReason(), true);
         search = search != null ? search.reopened(stats.fields(), stats.maxDoc(), sameFields) : newSearch(stats);
         overview = overview.reopened(stats, topN);
         terms = terms != null
                 ? terms.reopened(stats.fields())
-                : new Terms(stats.fields()).withPointFormats(pointFormats);
+                : new Terms(stats.fields()).withPointFormats(pointFormats).withFeatures(opened.features());
         forgetScans();
         opened = new Opened(
                 opened.path(),
@@ -450,7 +451,10 @@ public final class App {
         for (int i = 0; i < Math.min(names.size(), stats.indexes().size()); i++) {
             starts.add(new Documents.IndexStart(stats.indexes().get(i).docBase(), names.get(i)));
         }
-        return new Documents(stats.fields(), stats.maxDoc()).withIndexes(starts).withPointFormats(pointFormats);
+        return new Documents(stats.fields(), stats.maxDoc())
+                .withIndexes(starts)
+                .withPointFormats(pointFormats)
+                .withFeatures(opened.features());
     }
 
     /** The index has no newer commit; everything stays as it is. */
@@ -490,7 +494,7 @@ public final class App {
 
     /** The backend stopped the jobs of the closed index. */
     public void closed() {
-        analysis.indexChanged(List.of(), false, false);
+        analysis.indexChanged(List.of(), Optional.of(AutoStopWordsForm.NO_INDEX), false);
         opened = null;
         overview = null;
         commits = null;
@@ -714,6 +718,7 @@ public final class App {
                 }
                 yield Optional.<Action>empty();
             }
+            case Terms.Request.Unsupported unsupported -> notSupported(unsupported.what());
         });
     }
 
@@ -752,6 +757,7 @@ public final class App {
                 documents.forgetUnsentMatches();
                 yield action;
             }
+            case Search.Request.Unsupported unsupported -> notSupported(unsupported.what());
         });
     }
 
@@ -908,11 +914,13 @@ public final class App {
             }
             case Documents.Request.ClearFilter clear ->
                 Optional.of(new Action.ClearFilter(clear.cancel(), clear.release()));
+            case Documents.Request.Unsupported unsupported -> notSupported(unsupported.what());
             case Documents.Request.Export asked -> {
                 if (export != null) {
                     notice = new Notice.ExportRunning();
                 } else {
-                    exportPrompt = ExportPrompt.document(asked.docId(), indexDirs(), home, cwd);
+                    exportPrompt = ExportPrompt.document(
+                            asked.docId(), indexDirs(), opened.supports(Feature.RECONSTRUCT), home, cwd);
                 }
                 yield Optional.empty();
             }
@@ -1144,7 +1152,8 @@ public final class App {
                 exportPrompt.setBusy();
                 long id = nextExportId++;
                 export = new Loading(id, document.docId(), document.indexedTerms(), document.target());
-                yield Optional.of(new Action.LoadDocumentExport(id, document.docId()));
+                yield Optional.of(
+                        new Action.LoadDocumentExport(id, document.docId(), opened.supports(Feature.TERM_VECTORS)));
             }
         };
     }
@@ -1503,7 +1512,7 @@ public final class App {
     /** Queues the scans of {@code fields}, and returns the scan to start if none runs. */
     private Optional<Action> requestScans(List<String> fields) {
         if (!opened.supports(Feature.TOP_TERMS)) {
-            notice = new Notice.NotSupported("Top terms", whyNot());
+            notice = new Notice.NotSupported("Top terms", reason());
             return Optional.empty();
         }
         for (String field : fields) {
@@ -1530,6 +1539,10 @@ public final class App {
         if (key.code() == KeyCode.ENTER) {
             Optional<Overview.FieldTerm> top = overview.selectedTopTerm();
             if (top.isPresent()) {
+                if (!opened.supports(Feature.TERMS)) {
+                    notice = new Notice.NotSupported("Term's docs", reason());
+                    return Optional.empty();
+                }
                 screen = Screen.TERMS;
                 return termsAction(terms.browse(top.get().field(), top.get().term()));
             }
@@ -1539,6 +1552,10 @@ public final class App {
         }
         if (key.isChar('/')) {
             Optional<Overview.FieldTerm> top = overview.selectedTopTerm();
+            if (top.isPresent() && !opened.supports(Feature.SEARCH)) {
+                notice = new Notice.NotSupported("Search term", reason());
+                return Optional.empty();
+            }
             if (top.isPresent() && search != null) {
                 screen = Screen.SEARCH;
                 return searchAction(
@@ -1703,17 +1720,12 @@ public final class App {
                 }
             }
             case 'R' -> {
-                if (overview != null && !opened.supports(Feature.REOPEN)) {
-                    notice = new Notice.NotSupported("Reopen", whyNot());
-                    return Optional.empty();
-                }
-                if (overview != null) {
+                if (hasIndex() && !opened.supports(Feature.REOPEN)) {
+                    notice = new Notice.NotSupported("Reopen", reason());
+                } else if (overview != null) {
                     notice = new Notice.Reopening();
                     busy = true;
                     return Optional.of(new Action.Reopen());
-                }
-                if (hasIndex()) {
-                    notice = new Notice.NoReader();
                 }
             }
             default -> {
@@ -1752,15 +1764,16 @@ public final class App {
     }
 
     /**
-     * Whether the open index can show {@code screen}; without a reader, the screens say so themselves
-     * (ADR 0021). An index that an old Lucene reads lacks some (ADR 0044).
+     * Whether the open index can show {@code screen}, by its features (ADR 0044): an index opened
+     * without a reader, or one that an old Lucene reads, lacks some. The overview is always there;
+     * without a reader, it shows how the index was opened.
      */
     private boolean supports(Screen screen) {
-        if (opened == null || opened.noReader()) {
+        if (opened == null) {
             return true;
         }
         return switch (screen) {
-            case OVERVIEW -> opened.supports(Feature.INDEX_STATS);
+            case OVERVIEW -> true;
             case DOCUMENTS -> opened.supports(Feature.DOCUMENTS);
             case TERMS -> opened.supports(Feature.TERMS);
             case COMMITS -> opened.supports(Feature.COMMITS);
@@ -1770,9 +1783,29 @@ public final class App {
         };
     }
 
-    /** Why the open index lacks a feature, for {@link Notice.NotSupported}: who wrote it, such as {@code Lucene 2.x}. */
-    private String whyNot() {
-        return opened.oldLucene().map(old -> old.substring(0, old.indexOf(','))).orElse("this index");
+    /**
+     * Why the open index lacks a feature, for {@link Notice.NotSupported}: {@code needs a reader}, or
+     * who wrote it, such as {@code not for Lucene 2.x}.
+     */
+    private String reason() {
+        if (opened.noReader()) {
+            return "needs a reader";
+        }
+        return "not for "
+                + opened.oldLucene()
+                        .map(old -> old.substring(0, old.indexOf(',')))
+                        .orElse("this index");
+    }
+
+    /** Why the open index can't find auto stop words; empty if it can (ADR 0039). */
+    private Optional<String> autoStopWordsReason() {
+        return opened.supports(Feature.AUTO_STOP_WORDS) ? Optional.empty() : Optional.of(reason());
+    }
+
+    /** The tab line says that the index lacks {@code what} until the next key; nothing goes to the backend. */
+    private Optional<Action> notSupported(String what) {
+        notice = new Notice.NotSupported(what, reason());
+        return Optional.empty();
     }
 
     /** As {@link #supports(Screen)}; if not, the tab line says why until the next key. */
@@ -1780,7 +1813,7 @@ public final class App {
         if (supports(screen)) {
             return true;
         }
-        notice = new Notice.NotSupported(screen.name, whyNot());
+        notice = new Notice.NotSupported(screen.name, reason());
         return false;
     }
 
@@ -1878,13 +1911,7 @@ public final class App {
             if (terms.prompting()) {
                 return " type to seek   ⏎/Esc done";
             }
-            if (terms.showsPoints()) {
-                return " " + cancel + "q quit   o open   c close   1-7 screen   ⏎ expand / points / open doc   "
-                        + "t format   ←/→ column   ↑↓";
-            }
-            String filter = !terms.filtered() ? "" : terms.onlyFiltered() ? "b all postings   " : "b filter only   ";
-            return " " + cancel + "q quit   o open   c close   1-7 screen   / seek   ⏎ open doc   " + filter
-                    + "e export   ←/→ column   ↑↓";
+            return " " + cancel + "q quit   o open   c close   1-7 screen   " + terms.keys();
         }
         if (screen == Screen.DOCUMENTS) {
             if (documents.viewer().isPresent()) {
@@ -1893,29 +1920,23 @@ public final class App {
             if (documents.seeking()) {
                 return " type to seek a field   ⏎/Esc done";
             }
-            String steps = documents
-                    .walk()
-                    .map(walk -> walk == Documents.Walk.TERM_DOCS ? "[ ] term docs   " : "[ ] hits   ")
-                    .orElse("");
             // Esc stops the scan first.
             if (cancel.isEmpty() && documents.rebuilding()) {
                 cancel = "Esc stop rebuild   ";
             } else if (cancel.isEmpty() && documents.filterBuilding()) {
                 cancel = "Esc stop filter   ";
             }
-            String step = documents.filtered() ? "←→ match   b unfilter   " : "←→ doc   ";
-            return " " + cancel + "q quit   o open   c close   1-7 screen   " + step + steps
-                    + "i go to   ⏎ term vector   v view   a analyze   s search value   N nearest   x numbers   t points   e empty   "
-                    + "m similar   "
-                    + "r rebuild   E export   Tab panel   ↑↓";
+            return " " + cancel + "q quit   o open   c close   1-7 screen   " + documents.keys();
         }
         if (scan != null) {
             return " Esc cancel scan   q quit   o open   c close   " + reopen
                     + "1-7 screen   s/S sort   Tab panel   ↑↓";
         }
         if (overview.selectedTopTerm().isPresent()) {
-            return " q quit   o open   c close   " + reopen
-                    + "1-7 screen   ⏎ term's docs   / search term   +/- top N   " + "s/S sort   Tab panel   ↑↓";
+            String docs = opened.supports(Feature.TERMS) ? "⏎ term's docs   " : "";
+            String searchTerm = opened.supports(Feature.SEARCH) ? "/ search term   " : "";
+            return " q quit   o open   c close   " + reopen + "1-7 screen   " + docs + searchTerm + "+/- top N   "
+                    + "s/S sort   Tab panel   ↑↓";
         }
         String topTerms = opened.supports(Feature.TOP_TERMS) ? "⏎ terms   a all terms   +/- top N   " : "";
         return " q quit   o open   c close   " + reopen + "1-7 screen   " + topTerms + "s/S sort   Tab panel   ↑↓";
@@ -1940,29 +1961,21 @@ public final class App {
     }
 
     /**
-     * A screen of an index opened without a reader: the overview says how it was opened, and the
-     * screens that need a reader say so.
+     * The overview of an index opened without a reader: how it was opened. The screens that need a
+     * reader can't be shown (ADR 0044).
      */
     private void renderWithoutReader(Frame frame, Rect body) {
         List<Line> lines = new ArrayList<>();
-        String title;
-        if (screen == Screen.OVERVIEW) {
-            lines.add(labelLine("Path", opened.path()));
-            lines.add(labelLine("Directory", directoryName(opened.directory())));
-            lines.add(labelLine("Reader", "none: opened without a reader, so only the commits (4) and check (7) work"));
-            if (opened.indexes().size() > 1) {
-                lines.add(labelLine("Indexes", Integer.toString(opened.indexes().size())));
-                for (String index : opened.indexes()) {
-                    lines.add(Line.from("  " + Overview.relative(opened.path(), index)));
-                }
+        lines.add(labelLine("Path", opened.path()));
+        lines.add(labelLine("Directory", directoryName(opened.directory())));
+        lines.add(labelLine("Reader", "none: opened without a reader, so only the commits (4) and check (7) work"));
+        if (opened.indexes().size() > 1) {
+            lines.add(labelLine("Indexes", Integer.toString(opened.indexes().size())));
+            for (String index : opened.indexes()) {
+                lines.add(Line.from("  " + Overview.relative(opened.path(), index)));
             }
-            title = " Index ";
-        } else {
-            lines.add(Line.from("This screen needs a reader, and the index was opened without one. The commits (4) "
-                    + "and check (7) screens work; o opens the index again, Ctrl+N switches the reader on."));
-            title = " No reader ";
         }
-        frame.renderWidget(wrapped(lines, title, body), body);
+        frame.renderWidget(wrapped(lines, " Index ", body), body);
     }
 
     /** What the tab line says about the running export, once its prompt is closed. */

@@ -20,6 +20,7 @@ import dev.tamboui.widgets.table.Row;
 import dev.tamboui.widgets.table.Table;
 import dev.tamboui.widgets.table.TableState;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
+import io.github.mfuerstenau.leia.protocol.index.Feature;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellResult;
@@ -113,6 +114,9 @@ public final class Terms {
 
         /** Show this document, which has a point of {@code field}, on the documents screen. */
         record PointDocument(String field, int docId) implements Request {}
+
+        /** A key that the index lacks a feature for (ADR 0044); {@code what} names it. Nothing changed. */
+        record Unsupported(String what) implements Request {}
     }
 
     /**
@@ -270,6 +274,9 @@ public final class Terms {
     /** What a key that doesn't work on the shown field said; until the next key. */
     private String note;
 
+    /** What the index can do (ADR 0044): the keys it lacks a feature for are refused and left out of the legend. */
+    private Set<Feature> features = Feature.all();
+
     public Terms(List<IndexField> fields) {
         List<FieldRow> rows = new ArrayList<>();
         for (IndexField field : fields) {
@@ -286,6 +293,12 @@ public final class Terms {
     /** Shows points in {@code formats}, which the documents screen shares. */
     public Terms withPointFormats(PointFormats formats) {
         this.pointFormats = formats;
+        return this;
+    }
+
+    /** Offers only the keys that {@code features} allow (ADR 0044). */
+    public Terms withFeatures(Set<Feature> features) {
+        this.features = Set.copyOf(features);
         return this;
     }
 
@@ -307,6 +320,7 @@ public final class Terms {
         reopened.focus = focus;
         reopened.onlyFiltered = onlyFiltered;
         reopened.pointFormats = pointFormats;
+        reopened.features = features;
         // The segments' positions change with a reopen: the tree is fetched again, collapsed.
         reopened.nextTreeSerial = nextTreeSerial;
         return reopened;
@@ -689,6 +703,10 @@ public final class Terms {
             return seekKey(key);
         }
         note = null;
+        Optional<String> unsupported = unsupported(key);
+        if (unsupported.isPresent()) {
+            return unsupported.map(Request.Unsupported::new);
+        }
         Optional<IndexField> pointField = selectedPointField();
         if (pointField.isPresent()) {
             if (key.isChar('t')) {
@@ -745,6 +763,44 @@ public final class Terms {
             return Optional.empty();
         }
         return moveSelection(key);
+    }
+
+    /** What {@code key} is called if the index lacks a feature it needs (ADR 0044); empty otherwise. */
+    private Optional<String> unsupported(KeyEvent key) {
+        boolean points = showsPoints();
+        Feature needed;
+        String what;
+        if (key.code() == KeyCode.ENTER && focus == Column.POSTINGS) {
+            needed = Feature.DOCUMENTS;
+            what = "Open doc";
+        } else if (key.isChar('t') && points) {
+            needed = Feature.POINTS;
+            what = "Points";
+        } else if (key.isChar('e') && !points) {
+            needed = Feature.EXPORT_TERMS;
+            what = "Export";
+        } else if (key.isChar('b') && filter.isPresent()) {
+            needed = Feature.FILTER;
+            what = "Filter";
+        } else {
+            return Optional.empty();
+        }
+        return features.contains(needed) ? Optional.empty() : Optional.of(what);
+    }
+
+    /**
+     * The screen's keys for the footer, after the app's, while the seek prompt is closed: those the
+     * index has the features for (ADR 0044).
+     */
+    public String keys() {
+        if (showsPoints()) {
+            return "⏎ expand / points / open doc   " + (features.contains(Feature.POINTS) ? "t format   " : "")
+                    + "←/→ column   ↑↓";
+        }
+        String open = features.contains(Feature.DOCUMENTS) ? "⏎ open doc   " : "";
+        String only = !filtered() ? "" : onlyFiltered ? "b all postings   " : "b filter only   ";
+        String export = features.contains(Feature.EXPORT_TERMS) ? "e export   " : "";
+        return "/ seek   " + open + only + export + "←/→ column   ↑↓";
     }
 
     private Optional<Request> seekKey(KeyEvent key) {

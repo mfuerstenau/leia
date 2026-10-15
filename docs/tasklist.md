@@ -7,8 +7,6 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 Goal: every index from Lucene 2.1 to 10 opens in one leia, each read by a relocated Lucene that can read it, with the features of that Lucene and the rest switched off. The spike did Lucene 2.x and 3.x on Lucene 3.6.2 (`leia-lucene3`). Each Lucene major reads its own indexes and those of the major before it, so four runtimes besides Lucene 10 are needed.
 
 ### Foundation
-- [ ] Fold the no-reader checks of the TUI into `features` (ADR 0021 mode becomes one more feature set)
-- [ ] TUI: hide the keys of the features an index lacks, per screen (`x` explain, `r` rebuild, `E` export, `t` points, `N` nearest, `m` similar, `b` filter, the query modes other than classic, …), instead of letting the backend refuse them
 - [ ] A shared Gradle convention for a runtime module (`leia.lucene-runtime-conventions` in build-logic): the Lucene dependency, the relocation, the `shadowRuntimeElements` wiring, `-Xlint:-deprecation`, the test-index source set and its consumable configuration
 
 ### Runtimes

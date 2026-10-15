@@ -51,6 +51,7 @@ These change the results of `openIndex`, `reopenIndex` and `getIndexStats` for o
 14. **Documents:** with several indexes, the document's index is shown with its id.
 15. **Commits:** with several indexes, an `Indexes` panel comes first. The commits below are those of the selected index, and Tab goes through indexes, commits, segments and details. The commits that can't be read follow the others, marked `✗`, with the reason.
 16. **Without a reader:** the overview has only the index panel, which says that the index was opened without a reader. Documents, terms and search say that they need a reader. Opening switches to the commits screen unless the analysis screen is shown. `R` says that there is no reader to reopen. The tab line shows "no reader", or with several indexes how many there are.
+    - *Amended by ADR 0044 §6:* the features of `openIndex` decide instead. The tabs of documents, terms and search are dimmed, and their keys and `R` give a notice on the tab line: "Documents: needs a reader", "Reopen: needs a reader".
 17. **Reopen notice:** with several indexes, "Reopened: 2 of 3 indexes" and "Unchanged: 3 indexes".
 
 ## Alternatives considered
