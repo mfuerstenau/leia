@@ -2,6 +2,29 @@
 
 The work queue for leia. Check items off (`[x]`) as they land, and keep it aligned with the "Remaining / next" section of the latest entry in `docs/SESSION-SUMMARIES.md`. Finished items move to `docs/tasklist-done.md`.
 
+## Lucene 2 to 10 (ADR 0044)
+
+Goal: every index from Lucene 2.1 to 10 opens in one leia, each read by a relocated Lucene that can read it, with the features of that Lucene and the rest switched off. The spike (branch `lucene-2.4-spike`) did Lucene 2.x and 3.x on Lucene 3.6.2 (`leia-lucene3`). Each Lucene major reads its own indexes and those of the major before it, so four runtimes besides Lucene 10 are needed.
+
+### Foundation
+- [ ] Accept ADR 0044 (now Proposed) and merge the spike
+- [ ] A runtime seam in leia-server instead of the `legacy()` branches: an interface per method group that `CurrentIndex` hands out (Lucene 10, Lucene 3, …), so a new runtime doesn't add a branch to every handler
+- [ ] Routing by version: read the `segments_N` header once (format number before 4.0; from 4.0 the `CodecUtil` header and, from 5.3/6.0, the created and segment versions) and pick the runtime; one detector, with tests per version
+- [ ] Fold the no-reader checks of the TUI into `features` (ADR 0021 mode becomes one more feature set)
+- [ ] TUI: hide the keys of the features an index lacks, per screen (`x` explain, `r` rebuild, `E` export, `t` points, `N` nearest, `m` similar, `b` filter, the query modes other than classic, …), instead of letting the backend refuse them
+- [ ] A shared Gradle convention for a runtime module (`leia.lucene-runtime-conventions` in build-logic): the Lucene dependency, the relocation, the `shadowRuntimeElements` wiring, `-Xlint:-deprecation`, the test-index source set and its consumable configuration
+
+### Runtimes
+- [ ] Lucene 3.6.2 (2.1 – 3.6), the spike's module, to finish: `getCommits`/`getCommit`, `CheckIndex` (read-only, no fix) as a job, top terms as a job, a 3.x test index (written with 3.6.2) besides the 2.4 one, several old indexes under one path, analyzers other than `StandardAnalyzer` for search
+- [ ] Lucene 5.5.5 for 4.x and 5.x (`leia-lucene5`): codecs through SPI, so relocate and merge `META-INF/services`; doc values (from 4.0); test indexes written with 4.10.4 and 5.5.5
+- [ ] Lucene 7.7.3 for 6.x and 7.x (`leia-lucene7`): points (6.0), index sort (6.2), soft deletes (7.4); test indexes written with 6.6.6 and 7.7.3
+- [ ] Lucene 9.12.3 for 8.x (`leia-lucene9`), with its backward-codecs; a Lucene 8.11.4 test index exists already (`leia-core`'s `lucene8`, now expected to be refused)
+- [ ] Check whether the facades of 5, 7 and 9 can share sources (their APIs are close), e.g. one source set compiled against each version with small per-version adapters
+- [ ] A feature matrix per runtime in ADR 0044 or a doc page, kept in sync with each module's feature set
+
+### Packaging
+- [ ] The old runtimes are optional: `leia.jar` reads Lucene 9 and 10 only, and each runtime module is a jar of its own that `--jar` or the default jars folder (ADR 0024) loads, so the default download stays small. `openIndex` says which runtime an old index needs when it isn't loaded; the release folders ship the runtime jars beside `leia.jar`
+
 ## Bugs
 
 None right now.
@@ -11,7 +34,6 @@ None right now.
 From the read-only checklist in `docs/luke-features.md` §7. Ordered roughly by value. Each area will need its own records, handlers and probably an ADR for the cross-cutting parts.
 
 - [ ] Open options: Elasticsearch/OpenSearch indexes (left out of ADR 0018): their codecs need the server's `lib/`, which has its own `lucene-*.jar` of another version; skipping those jars, or saying which ones clash, untested without an installation
-- [ ] Old indexes (ADR 0044, spike on `lucene-2.4-spike`): decide on the spike; then, for Lucene 3.6, commits and `CheckIndex`, a 3.x test index, several old indexes under one path, top terms, and hiding the keys of features an index lacks; fold the no-reader checks into `features`; further runtimes 5.5.5 (4.x, 5.x), 7.7.3 (6.x, 7.x) and 9.12.3 (8.x)
 - [ ] Tools: check only the selected index or segments, and the thread count (left out of ADR 0022)
 - [ ] Tools: export terms with `totalTermFreq` and a marker for binary terms (left out of ADR 0022, which keeps Luke's format)
 - [ ] Misc: log view with level filter, cross-screen navigation (`docs/luke-features.md` §5), themes, about
