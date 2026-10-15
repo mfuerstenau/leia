@@ -60,7 +60,14 @@ Every Lucene version uses the package `org.apache.lucene`, so two of them can't 
 
 ### Until the Packaging task
 
-The spike's code bundles 3.6 as before: leia-server takes `leia-lucene3`'s shadow jar (`shadowRuntimeElements`), so 3.6 is in `leia.jar`, and `openIndex` routes with `Lucene3Index.handles`. Decisions 1, 3 and 7 land with the runtime seam, routing and packaging tasks of `docs/tasklist.md`.
+leia-server still takes `leia-lucene3`'s shadow jar (`shadowRuntimeElements`), so 3.6 is in `leia.jar`. Decisions 3 and 7 land with the routing and packaging tasks of `docs/tasklist.md`.
+
+The runtime seam (decision 1) has landed:
+- The interface is the module `leia-runtime`, part of `leia.jar`: the service `LuceneRuntime`, with `API_VERSION` 1, opens a `RuntimeIndex`, which hands out the groups `Documents`, `Terms` and `Search`. A runtime that lacks a group returns it empty, and `openIndex` leaves its features out.
+- `leia-lucene3` implements it as `Lucene3Runtime` and takes `leia-runtime` compileOnly, so the interface isn't in its jar.
+- leia-server depends on `leia-lucene3` at runtime only, and finds the runtime with `ServiceLoader` (`Runtimes`). The Lucene 10 handlers are unchanged; each handler that a runtime can serve has one `currentIndex.runtime()` branch into `RuntimeResults`.
+- A runtime built for another `API_VERSION` is refused with `INVALID_JAR`: at the start, nothing starts; on `addJars`, the jar stays loaded and its runtime is never used.
+- The detector is still interim: `SegmentsHeader.isPreCodec` tells an index before 4.0, which counts as major 3. Without a runtime for it, `openIndex` fails with `UNSUPPORTED_INDEX_FORMAT` until the routing task brings `MISSING_RUNTIME`.
 
 ## What the spike showed
 

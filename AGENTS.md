@@ -21,13 +21,14 @@ leia / leia.cmd  ──finds the JVM, runs──▶  <java> -jar leia.jar
 | Path | Role |
 |---|---|
 | `leia-core/` | Java library with the Lucene functionality. No UI or protocol code. |
-| `leia-lucene3/` | Lucene 3.6.2, relocated into `…lucene3.shaded`, for indexes written by Lucene 2.x and 3.x (ADR 0044). `Lucene3Index` has no Lucene types in its API. To become a jar of its own in `runtimes/` (ADR 0044); until then leia-server takes the shadow jar. Also writes the Lucene 2.4 test index. |
+| `leia-runtime/` | The runtime interface (ADR 0044): `LuceneRuntime` (with `API_VERSION`), `RuntimeIndex` and the groups `Documents`, `Terms` and `Search`, with records of its own. JDK types only; part of `leia.jar`. |
+| `leia-lucene3/` | Lucene 3.6.2, relocated into `…lucene3.shaded`, for indexes written by Lucene 2.x and 3.x (ADR 0044). `Lucene3Runtime` implements `LuceneRuntime` and is found through `ServiceLoader`. To become a jar of its own in `runtimes/` (ADR 0044); until then leia-server takes the shadow jar at runtime. Also writes the Lucene 2.4 test index. |
 | `leia-protocol/` | Records for every method's params and result, `Methods` (the registry), `RpcMethod` and `ErrorCode`: the API between the UI and the backend. |
 | `leia-server/` | Library: a handler per method, with Dagger wiring, mapping core results to the records. `LeiaBackend` runs the calls in order on one thread; `RpcException` carries an expected failure's `ErrorCode`. |
 | `leia-tui/` | The application: the CLI (`Cli`, `Main`), the version-check entry class `Launcher` (compiled for Java 8), the log, and a package per screen (`…tui.overview`, `…tui.documents`, …). Builds the **fat jar** `leia.jar`; the scripts `leia` and `leia.cmd` are in `leia-tui/src/scripts/`. |
 | `docs/` | `adr/`, `tasklist.md`, `SESSION-SUMMARIES.md`, `demo-index.md` (the manual-testing index), `luke-features.md` (the Luke analysis). |
 
-Dependency direction: `leia-server → leia-protocol` (api), `leia-server → leia-core`, `leia-server → leia-lucene3` (shadow jar), `leia-tui → leia-server`, `leia-tui → leia-protocol` (`leia-tui` can't compile against core or Lucene). `leia-core` and `leia-protocol` do not depend on each other.
+Dependency direction: `leia-server → leia-protocol` (api), `leia-server → leia-core`, `leia-server → leia-runtime`, `leia-server → leia-lucene3` (shadow jar, runtime only), `leia-lucene3 → leia-runtime` (compileOnly), `leia-tui → leia-server`, `leia-tui → leia-protocol` (`leia-tui` can't compile against core or Lucene). `leia-core` and `leia-protocol` do not depend on each other.
 
 ## Hard rules
 
@@ -35,7 +36,7 @@ Dependency direction: `leia-server → leia-protocol` (api), `leia-server → le
 2. **The UI reaches an index only through `LeiaBackend.call` and the protocol records** (ADR 0034 §6). The build keeps core and Lucene off `leia-tui`'s compile classpath.
 3. **Every method has explicit records.** A method is a params and a result record in `leia-protocol`, an entry in `Methods`, and a handler in `leia-server` bound in `HandlerModule` (`Handlers` fails if one is missing). A field is optional exactly when it is `Optional*`; every other field is required. No `Map<String, Object>` or other untyped params or results.
 4. **The terminal belongs to the UI.** Logs go to `leia.log` (ADR 0034 §7). While the UI runs, `System.out` and `System.err` go into the log too, so nothing may rely on printing to them.
-5. **Lucene 9 and 10 indexes must open.** Keep `lucene-backward-codecs` on the runtime classpath and keep a test that opens a Lucene 9 index. Lucene 2.x and 3.x indexes open with the relocated Lucene 3.6 of `leia-lucene3` (ADR 0044), with the features `openIndex` reports; an unrelocated second Lucene must never reach the classpath.
+5. **Lucene 9 and 10 indexes must open.** Keep `lucene-backward-codecs` on the runtime classpath and keep a test that opens a Lucene 9 index. Lucene 2.x and 3.x indexes open with the relocated Lucene 3.6 of `leia-lucene3`, through the runtime interface of `leia-runtime` (ADR 0044), with the features `openIndex` reports; an unrelocated second Lucene must never reach the classpath.
 6. **Keep core Lucene-only.** UI concepts belong in the TUI, and API concepts belong in protocol/server.
 7. **Long-running work is a job** (ADR 0005). Anything that can take long (a term scan, check index, …) runs as a backend job behind `start<Op>` / `get<Op>`, with `cancelJob` to stop it, and never blocks the backend thread. Cancellation is cooperative through `ScanProgress`: never call `Thread.interrupt` on a thread that reads an index (it breaks `NIOFSDirectory`).
 

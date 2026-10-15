@@ -17,4 +17,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "leia"
 
-include("leia-core", "leia-lucene3", "leia-protocol", "leia-server", "leia-tui")
+include("leia-core", "leia-lucene3", "leia-protocol", "leia-runtime", "leia-server", "leia-tui")

@@ -3,6 +3,12 @@ package io.github.mfuerstenau.leia.lucene3;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import io.github.mfuerstenau.leia.runtime.DirectoryKind;
+import io.github.mfuerstenau.leia.runtime.Documents;
+import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
+import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
+import io.github.mfuerstenau.leia.runtime.Search;
+import io.github.mfuerstenau.leia.runtime.Terms;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -13,13 +19,14 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.ServiceLoader;
 import java.util.TreeMap;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.EnumSource;
 
-/** Reads the Lucene 2.4 index that the build writes (build.gradle.kts) with plain Lucene 3.6. */
+/** Reads the Lucene 2.4 index that the build writes (build.gradle.kts) with plain Lucene 3.6, through the runtime interface. */
 class Lucene3IndexTest {
 
     private static Path lucene24() {
@@ -30,102 +37,115 @@ class Lucene3IndexTest {
         return Path.of(dir).toAbsolutePath();
     }
 
+    private static RuntimeIndex open(DirectoryKind kind) throws IOException {
+        return new Lucene3Runtime().open(lucene24(), kind);
+    }
+
     @Test
-    void handlesOnlyIndexesBeforeCodecs(@org.junit.jupiter.api.io.TempDir Path tmp) throws IOException {
-        assertThat(Lucene3Index.handles(lucene24())).isTrue();
-        assertThat(Lucene3Index.handles(tmp)).isFalse();
-        // The header of every segments_N since Lucene 4.0: CodecUtil's magic.
-        Files.write(tmp.resolve("segments_1"), new byte[] {0x3f, (byte) 0xd7, 0x6c, 0x17});
-        assertThat(Lucene3Index.handles(tmp)).isFalse();
+    void isFoundAsARuntime() {
+        assertThat(ServiceLoader.load(LuceneRuntime.class))
+                .singleElement()
+                .isInstanceOfSatisfying(Lucene3Runtime.class, runtime -> {
+                    assertThat(runtime.apiVersion()).isEqualTo(LuceneRuntime.API_VERSION);
+                    assertThat(runtime.indexMajors()).containsExactlyInAnyOrder(2, 3);
+                    assertThat(runtime.luceneVersion()).startsWith("3.6");
+                });
     }
 
     @Test
     void readsTheStats() throws IOException {
-        try (Lucene3Index index = Lucene3Index.open(lucene24(), "NIO")) {
-            Lucene3Index.Stats stats = index.stats();
+        try (RuntimeIndex index = open(DirectoryKind.NIO)) {
+            RuntimeIndex.Stats stats = index.stats();
             assertThat(stats.numDocs()).isEqualTo(2);
             assertThat(stats.maxDoc()).isEqualTo(3);
             assertThat(stats.segmentVersions()).containsExactly("2.x");
             assertThat(stats.oldestMajor()).isEqualTo(2);
             assertThat(stats.segmentsFile()).startsWith("segments_");
-            assertThat(stats.fields()).extracting(Lucene3Index.Field::name).containsExactly("id", "body", "raw");
+            assertThat(stats.fields()).extracting(RuntimeIndex.Field::name).containsExactly("id", "body", "raw");
             assertThat(stats.fields().get(1))
-                    .isEqualTo(new Lucene3Index.Field(
-                            "body", 1, Lucene3Index.IndexOptions.DOCS_AND_FREQS_AND_POSITIONS, true, false, true));
-            assertThat(stats.fields().get(2).indexOptions()).isEqualTo(Lucene3Index.IndexOptions.NONE);
+                    .isEqualTo(new RuntimeIndex.Field(
+                            "body", 1, RuntimeIndex.IndexOptions.DOCS_AND_FREQS_AND_POSITIONS, true, false, true));
+            assertThat(stats.fields().get(2).indexOptions()).isEqualTo(RuntimeIndex.IndexOptions.NONE);
         }
-        assertThat(Lucene3Index.luceneVersion()).startsWith("3.6");
     }
 
     @Test
     void readsDocumentsAndTermVectors() throws IOException {
-        try (Lucene3Index index = Lucene3Index.open(lucene24(), "FS")) {
-            Lucene3Index.IndexDocument doc = index.document(0);
+        try (RuntimeIndex index = open(DirectoryKind.FS)) {
+            Documents.IndexDocument doc = index.documents().orElseThrow().document(0);
             assertThat(doc.deleted()).isFalse();
-            assertThat(doc.fields().get(0).stored()).containsExactly(new Lucene3Index.StoredValue.Text("1"));
+            assertThat(doc.fields().get(0).stored()).containsExactly(new RuntimeIndex.StoredValue.Text("1"));
             assertThat(doc.fields().get(1).hasTermVector()).isTrue();
             assertThat(doc.fields().get(1).norm()).isPresent();
-            Lucene3Index.StoredValue raw = doc.fields().get(2).stored().getFirst();
-            assertThat(((Lucene3Index.StoredValue.Binary) raw).bytes())
+            RuntimeIndex.StoredValue raw = doc.fields().get(2).stored().getFirst();
+            assertThat(((RuntimeIndex.StoredValue.Binary) raw).bytes())
                     .asString()
                     .isEqualTo("bytes1");
-            assertThat(index.document(1).deleted()).isTrue();
+            assertThat(index.documents().orElseThrow().document(1).deleted()).isTrue();
 
-            List<Lucene3Index.VectorTerm> vector = index.termVector(0, "body");
-            assertThat(vector).extracting(Lucene3Index.VectorTerm::term).contains("document", "number", "old");
-            Lucene3Index.VectorTerm document = vector.stream()
+            List<Documents.VectorTerm> vector = index.documents().orElseThrow().termVector(0, "body");
+            assertThat(vector).extracting(Documents.VectorTerm::term).contains("document", "number", "old");
+            Documents.VectorTerm document = vector.stream()
                     .filter(term -> term.term().equals("document"))
                     .findFirst()
                     .orElseThrow();
             assertThat(document.positions().getFirst().position()).hasValue(0);
             assertThat(document.positions().getFirst().startOffset()).hasValue(0);
             assertThat(document.positions().getFirst().endOffset()).hasValue(8);
-            assertThatThrownBy(() -> index.document(3)).isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> index.documents().orElseThrow().document(3))
+                    .isInstanceOf(IllegalArgumentException.class);
         }
     }
 
     @Test
     void readsTermsAndPostings() throws IOException {
-        try (Lucene3Index index = Lucene3Index.open(lucene24(), "NIO")) {
-            Lucene3Index.TermsPage page = index.terms("id", Optional.empty(), 2);
-            assertThat(page.terms()).extracting(Lucene3Index.TermEntry::term).containsExactly("1", "2");
+        try (RuntimeIndex index = open(DirectoryKind.NIO)) {
+            Terms.TermsPage page = index.terms().orElseThrow().terms("id", Optional.empty(), 2);
+            assertThat(page.terms()).extracting(Terms.TermEntry::term).containsExactly("1", "2");
             assertThat(page.next()).contains("3");
-            assertThat(index.terms("id", page.next(), 2).terms())
-                    .containsExactly(new Lucene3Index.TermEntry("3", 1, 1));
-            assertThat(index.terms("nothing", Optional.empty(), 10).terms()).isEmpty();
+            assertThat(index.terms().orElseThrow().terms("id", page.next(), 2).terms())
+                    .containsExactly(new Terms.TermEntry("3", 1, 1));
+            assertThat(index.terms()
+                            .orElseThrow()
+                            .terms("nothing", Optional.empty(), 10)
+                            .terms())
+                    .isEmpty();
 
-            Lucene3Index.PostingsPage postings = index.postings("body", "document", 0, 1);
+            Terms.PostingsPage postings = index.terms().orElseThrow().postings("body", "document", 0, 1);
             // docFreq counts the deleted document, the postings skip it.
             assertThat(postings.docFreq()).isEqualTo(3);
-            assertThat(postings.postings()).containsExactly(new Lucene3Index.Posting(0, 1));
+            assertThat(postings.postings()).containsExactly(new Terms.Posting(0, 1));
             assertThat(postings.nextDoc()).hasValue(2);
         }
     }
 
     @Test
     void searches() throws Exception {
-        try (Lucene3Index index = Lucene3Index.open(lucene24(), "NIO")) {
-            Lucene3Index.ParsedQuery query = index.parse(
-                    "number AND (1 OR 3)", new Lucene3Index.ParserOptions("body", false, false, 0, 0, true, false));
-            Lucene3Index.SearchResults results = index.search(query, 0, 10, Optional.of(List.of("id")), _ -> {});
+        try (RuntimeIndex index = open(DirectoryKind.NIO)) {
+            Search.ParsedQuery query = index.search()
+                    .orElseThrow()
+                    .parse("number AND (1 OR 3)", new Search.ParserOptions("body", false, false, 0, 0, true, false));
+            Search.SearchResults results =
+                    index.search().orElseThrow().search(query, 0, 10, Optional.of(List.of("id")), _ -> {});
             assertThat(results.totalHits()).isEqualTo(2);
-            assertThat(results.hits()).extracting(Lucene3Index.Hit::docId).containsExactlyInAnyOrder(0, 2);
+            assertThat(results.hits()).extracting(Search.Hit::docId).containsExactlyInAnyOrder(0, 2);
             assertThat(results.hits().getFirst().fields()).containsOnlyKeys("id");
-            assertThatThrownBy(() -> index.parse(
-                            "body:(", new Lucene3Index.ParserOptions("body", false, false, 0, 0, true, false)))
-                    .isInstanceOf(Lucene3Index.InvalidQueryException.class);
+            assertThatThrownBy(() -> index.search()
+                            .orElseThrow()
+                            .parse("body:(", new Search.ParserOptions("body", false, false, 0, 0, true, false)))
+                    .isInstanceOf(Search.InvalidQueryException.class);
         }
     }
 
     /** Hard rule 1: reading changes nothing in the index directory, and leaves no lock. */
     @ParameterizedTest
-    @ValueSource(strings = {"FS", "MMAP", "NIO"})
-    void changesNothing(String directoryImpl) throws Exception {
+    @EnumSource(DirectoryKind.class)
+    void changesNothing(DirectoryKind directoryKind) throws Exception {
         Map<String, String> before = hashes(lucene24());
-        try (Lucene3Index index = Lucene3Index.open(lucene24(), directoryImpl)) {
+        try (RuntimeIndex index = open(directoryKind)) {
             index.stats();
-            index.document(2);
-            index.terms("body", Optional.empty(), 100);
+            index.documents().orElseThrow().document(2);
+            index.terms().orElseThrow().terms("body", Optional.empty(), 100);
         }
         assertThat(hashes(lucene24())).isEqualTo(before);
         assertThat(lucene24().resolve("write.lock")).doesNotExist();

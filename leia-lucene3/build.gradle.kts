@@ -1,8 +1,8 @@
 // Lucene 3.6.2, relocated, for indexes that Lucene 10 can't read: those written by Lucene 2.x and
 // 3.x (ADR 0044). Every Lucene class is renamed to io.github.mfuerstenau.leia.lucene3.shaded.lucene,
-// so it lives next to Lucene 10 on one classpath. The API (Lucene3Index) has no Lucene types:
-// consumers take the shadow jar (shadowRuntimeElements), which the module's own code is relocated in
-// too.
+// so it lives next to Lucene 10 on one classpath. leia finds it through ServiceLoader as a
+// LuceneRuntime of leia-runtime, which leia.jar brings: consumers take the shadow jar
+// (shadowRuntimeElements) at runtime, which the module's own code is relocated in too.
 plugins {
     id("leia.java-library-conventions")
     alias(libs.plugins.shadow)
@@ -10,6 +10,9 @@ plugins {
 
 dependencies {
     implementation(libs.lucene3.core)
+    // compileOnly: the interface is leia's, so it stays out of the shadow jar.
+    compileOnly(project(":leia-runtime"))
+    testImplementation(project(":leia-runtime"))
 }
 
 tasks.withType<JavaCompile>().configureEach {

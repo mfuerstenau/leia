@@ -20,6 +20,7 @@ import io.github.mfuerstenau.leia.protocol.index.ReopenIndexParams;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.job.Jobs;
+import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -46,7 +47,7 @@ class OpenIndexHandlerTest {
     Path tmp;
 
     private final CurrentIndex currentIndex = new CurrentIndex(new Jobs(), new Filters());
-    private final OpenIndexHandler handler = new OpenIndexHandler(currentIndex);
+    private final OpenIndexHandler handler = new OpenIndexHandler(currentIndex, new Runtimes());
 
     @Test
     void opensIndexAndMakesItCurrent() throws Exception {

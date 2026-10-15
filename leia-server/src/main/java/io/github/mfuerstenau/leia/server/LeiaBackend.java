@@ -4,6 +4,7 @@ import io.github.mfuerstenau.leia.core.ExtensionJarException;
 import io.github.mfuerstenau.leia.core.ExtensionJars;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
+import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -53,7 +54,8 @@ public final class LeiaBackend implements AutoCloseable {
      * and starts the backend thread.
      *
      * @param jars jars, or directories of jars
-     * @throws RpcException {@code INVALID_JAR} if the jars can't be loaded; nothing is started then
+     * @throws RpcException {@code INVALID_JAR} if the jars can't be loaded, or bring a runtime that
+     *     leia refuses (ADR 0044); nothing is started then
      */
     public static LeiaBackend start(List<Path> jars) throws RpcException {
         try {
@@ -63,6 +65,10 @@ public final class LeiaBackend implements AutoCloseable {
             }
         } catch (ExtensionJarException e) {
             throw new RpcException(ErrorCode.INVALID_JAR, "Cannot load the jars: " + e.getMessage(), e);
+        }
+        List<String> refused = Runtimes.load(ExtensionJars.classLoader()).refused();
+        if (!refused.isEmpty()) {
+            throw new RpcException(ErrorCode.INVALID_JAR, "Cannot load the jars: " + String.join("; ", refused));
         }
         ExecutorService executor = newExecutor();
         ServerComponent component = await(CompletableFuture.supplyAsync(

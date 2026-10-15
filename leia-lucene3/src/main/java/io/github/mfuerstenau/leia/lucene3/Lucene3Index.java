@@ -1,11 +1,12 @@
 package io.github.mfuerstenau.leia.lucene3;
 
-import java.io.Closeable;
-import java.io.DataInputStream;
+import io.github.mfuerstenau.leia.runtime.DirectoryKind;
+import io.github.mfuerstenau.leia.runtime.Documents;
+import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
+import io.github.mfuerstenau.leia.runtime.Search;
+import io.github.mfuerstenau.leia.runtime.Terms;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -18,7 +19,6 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.function.LongConsumer;
-import java.util.stream.Stream;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Fieldable;
@@ -48,7 +48,6 @@ import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.store.MMapDirectory;
 import org.apache.lucene.store.NIOFSDirectory;
 import org.apache.lucene.store.NoLockFactory;
-import org.apache.lucene.util.Constants;
 import org.apache.lucene.util.ReaderUtil;
 import org.apache.lucene.util.Version;
 
@@ -56,160 +55,75 @@ import org.apache.lucene.util.Version;
  * An index written by Lucene 2.x or 3.x, read with Lucene 3.6 (ADR 0044). Lucene 10 can't read such
  * an index: there were no codecs before 4.0.
  *
- * <p>Lucene is relocated in this module's jar, so its API takes and returns no Lucene types, only
- * the records below. It is read-only like the rest of leia: it opens a reader, never an {@code
+ * <p>Lucene is relocated in this module's jar, and leia reaches it only through {@link
+ * Lucene3Runtime} and the interfaces of {@code leia-runtime}. It is read-only like the rest of leia: it opens a reader, never an {@code
  * IndexWriter}, through a {@code Directory} without locks. A reader of Lucene 3 can be used from
  * several threads, so jobs can read it.
  */
-public final class Lucene3Index implements Closeable {
-
-    /** The oldest {@code segments_N} format that Lucene 3.6 reads: 2.1, the first with {@code segments_N}. */
-    private static final int FORMAT_LOCKLESS = -2;
-    /** The newest {@code segments_N} format before codecs: 3.1 to 3.6. */
-    private static final int FORMAT_3_1 = -11;
+final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
 
     private final Path path;
-    private final String directoryImpl;
+    private final DirectoryKind directoryKind;
     private final Directory directory;
     private final IndexReader reader;
     private final FieldInfos fieldInfos;
 
-    private Lucene3Index(Path path, String directoryImpl, Directory directory, IndexReader reader) {
+    private Lucene3Index(Path path, DirectoryKind directoryKind, Directory directory, IndexReader reader) {
         this.path = path;
-        this.directoryImpl = directoryImpl;
+        this.directoryKind = directoryKind;
         this.directory = directory;
         this.reader = reader;
         this.fieldInfos = ReaderUtil.getMergedFieldInfos(reader);
     }
 
-    /** The version of the Lucene that reads these indexes, such as {@code 3.6.2}. */
-    public static String luceneVersion() {
-        return Constants.LUCENE_MAIN_VERSION;
-    }
-
-    /**
-     * Whether {@code dir} holds an index that Lucene 10 can't read and Lucene 3.6 can: one whose
-     * newest {@code segments_N} file starts with a format of Lucene 2.1 to 3.6, not with the header
-     * that every Lucene since 4.0 writes. Reads only that first int, without Lucene.
-     */
-    public static boolean handles(Path dir) {
-        Optional<Path> segments = newestSegmentsFile(dir);
-        if (segments.isEmpty()) {
-            return false;
-        }
-        try (InputStream in = Files.newInputStream(segments.get());
-                DataInputStream data = new DataInputStream(in)) {
-            int format = data.readInt();
-            return format <= FORMAT_LOCKLESS && format >= FORMAT_3_1;
-        } catch (IOException e) {
-            return false;
-        }
-    }
-
-    private static Optional<Path> newestSegmentsFile(Path dir) {
-        if (!Files.isDirectory(dir)) {
-            return Optional.empty();
-        }
-        try (Stream<Path> files = Files.list(dir)) {
-            return files.filter(file -> generation(file).isPresent())
-                    .max(Comparator.comparingLong(file -> generation(file).orElseThrow()));
-        } catch (IOException e) {
-            return Optional.empty();
-        }
-    }
-
-    private static OptionalLong generation(Path file) {
-        String name = file.getFileName().toString();
-        if (!name.startsWith("segments_")) {
-            return OptionalLong.empty();
-        }
-        try {
-            return OptionalLong.of(Long.parseLong(name.substring("segments_".length()), Character.MAX_RADIX));
-        } catch (NumberFormatException e) {
-            return OptionalLong.empty();
-        }
-    }
-
     /**
      * Opens the latest commit of {@code dir} with a reader.
      *
-     * @param directoryImpl {@code FS}, {@code MMAP} or {@code NIO}, as leia's {@code --directory}
      * @throws IOException if the index can't be read
      */
-    public static Lucene3Index open(Path dir, String directoryImpl) throws IOException {
+    static Lucene3Index open(Path dir, DirectoryKind kind) throws IOException {
         File file = dir.toFile();
         NoLockFactory noLocks = NoLockFactory.getNoLockFactory();
-        Directory directory = switch (directoryImpl) {
-            case "FS" -> FSDirectory.open(file, noLocks);
-            case "MMAP" -> new MMapDirectory(file, noLocks);
-            case "NIO" -> new NIOFSDirectory(file, noLocks);
-            default -> throw new IllegalArgumentException("Unknown directory: " + directoryImpl);
+        Directory directory = switch (kind) {
+            case FS -> FSDirectory.open(file, noLocks);
+            case MMAP -> new MMapDirectory(file, noLocks);
+            case NIO -> new NIOFSDirectory(file, noLocks);
         };
         try {
             // Read-only: no write lock, no changes to the index.
-            return new Lucene3Index(dir, directoryImpl, directory, IndexReader.open(directory, true));
+            return new Lucene3Index(dir, kind, directory, IndexReader.open(directory, true));
         } catch (IOException | RuntimeException e) {
             directory.close();
             throw e;
         }
     }
 
+    @Override
     public Path path() {
         return path;
     }
 
-    /** The {@code directoryImpl} it was opened with. */
-    public String directoryImpl() {
-        return directoryImpl;
+    @Override
+    public DirectoryKind directory() {
+        return directoryKind;
     }
 
-    /** How a field is indexed, as far as Lucene 3 records it. */
-    public enum IndexOptions {
-        NONE,
-        DOCS,
-        DOCS_AND_FREQS,
-        DOCS_AND_FREQS_AND_POSITIONS
+    @Override
+    public Optional<Documents> documents() {
+        return Optional.of(this);
     }
 
-    /** A field of the index. */
-    public record Field(
-            String name,
-            int number,
-            IndexOptions indexOptions,
-            boolean hasNorms,
-            boolean hasPayloads,
-            boolean hasTermVectors) {}
-
-    /**
-     * The opened commit and the fields.
-     *
-     * @param segmentVersions the Lucene version that wrote each segment; {@code 2.x} for a segment
-     *     written before 3.0, which didn't record it
-     */
-    public record Stats(
-            String segmentsFile,
-            long generation,
-            long version,
-            int numDocs,
-            int maxDoc,
-            List<String> segmentVersions,
-            Map<String, String> userData,
-            List<Field> fields) {
-
-        /** The major version of the oldest segment, which stands in for the version that created the index. */
-        public int oldestMajor() {
-            return segmentVersions.stream()
-                    .mapToInt(version -> Integer.parseInt(version.substring(0, version.indexOf('.'))))
-                    .min()
-                    .orElse(3);
-        }
-
-        /** The oldest segment version, such as {@code 2.x}; empty without segments. */
-        public Optional<String> oldestSegmentVersion() {
-            return segmentVersions.stream().min(Comparator.naturalOrder());
-        }
+    @Override
+    public Optional<Terms> terms() {
+        return Optional.of(this);
     }
 
+    @Override
+    public Optional<Search> search() {
+        return Optional.of(this);
+    }
+
+    @Override
     public Stats stats() throws IOException {
         SegmentInfos infos = new SegmentInfos();
         infos.read(directory);
@@ -228,7 +142,7 @@ public final class Lucene3Index implements Closeable {
                 fields());
     }
 
-    /** The fields, by field number. */
+    @Override
     public List<Field> fields() {
         List<Field> fields = new ArrayList<>();
         for (int i = 0; i < fieldInfos.size(); i++) {
@@ -252,30 +166,12 @@ public final class Lucene3Index implements Closeable {
         return List.copyOf(fields);
     }
 
+    @Override
     public int maxDoc() {
         return reader.maxDoc();
     }
 
-    /** A stored value: text, bytes or, from a {@code NumericField}, a number. */
-    public sealed interface StoredValue {
-        record Text(String text) implements StoredValue {}
-
-        record Binary(byte[] bytes) implements StoredValue {}
-
-        record Numeric(Number number) implements StoredValue {}
-    }
-
-    /** What a document has in one field of the index. */
-    public record DocumentField(String name, OptionalLong norm, List<StoredValue> stored, boolean hasTermVector) {}
-
-    /** A document, with every field of the index in field-number order. */
-    public record IndexDocument(int docId, boolean deleted, List<DocumentField> fields) {}
-
-    /**
-     * Reads document {@code docId}, a deleted one too.
-     *
-     * @throws IllegalArgumentException if there is no such document
-     */
+    @Override
     public IndexDocument document(int docId) throws IOException {
         checkDoc(docId);
         Document document = reader.document(docId);
@@ -311,13 +207,7 @@ public final class Lucene3Index implements Closeable {
         return new StoredValue.Text(field.stringValue());
     }
 
-    /** One occurrence of a term in a term vector. */
-    public record Position(OptionalInt position, OptionalInt startOffset, OptionalInt endOffset) {}
-
-    /** A term of a term vector. */
-    public record VectorTerm(String term, int freq, List<Position> positions) {}
-
-    /** The term vector of a document in {@code field}, in term order; empty if it has none. */
+    @Override
     public List<VectorTerm> termVector(int docId, String field) throws IOException {
         checkDoc(docId);
         TermFreqVector vector = reader.getTermFreqVector(docId, field);
@@ -349,17 +239,8 @@ public final class Lucene3Index implements Closeable {
         return List.copyOf(result);
     }
 
-    /**
-     * A term of a field.
-     *
-     * @param totalTermFreq counted from the postings of live documents: Lucene 3 doesn't record it
-     */
-    public record TermEntry(String term, int docFreq, long totalTermFreq) {}
-
-    /** A page of terms, and the term after it. */
-    public record TermsPage(List<TermEntry> terms, Optional<String> next) {}
-
-    /** Up to {@code limit} terms of {@code field}, from {@code from} on (or from its first term). */
+    /** {@inheritDoc} Lucene 3 doesn't record {@code totalTermFreq}, so it is counted from the postings. */
+    @Override
     public TermsPage terms(String field, Optional<String> from, int limit) throws IOException {
         List<TermEntry> terms = new ArrayList<>();
         // interned field names are compared with ==, so take Term's own.
@@ -386,17 +267,8 @@ public final class Lucene3Index implements Closeable {
         return total;
     }
 
-    /** A document that contains a term, and how often. */
-    public record Posting(int docId, int freq) {}
-
-    /**
-     * A page of postings.
-     *
-     * @param postings live documents only: Lucene 3 skips deleted ones
-     */
-    public record PostingsPage(int docFreq, long totalTermFreq, List<Posting> postings, OptionalInt nextDoc) {}
-
-    /** Up to {@code limit} postings of {@code term} in {@code field}, from document {@code fromDoc} on. */
+    /** {@inheritDoc} Lucene 3 skips deleted documents in the postings, though {@code docFreq} counts them. */
+    @Override
     public PostingsPage postings(String field, String text, int fromDoc, int limit) throws IOException {
         Term term = new Term(field, text);
         List<Posting> postings = new ArrayList<>();
@@ -415,35 +287,11 @@ public final class Lucene3Index implements Closeable {
         return new PostingsPage(reader.docFreq(term), totalTermFreq(term), List.copyOf(postings), next);
     }
 
-    /** The classic query parser's options that Lucene 3.6 has. */
-    public record ParserOptions(
-            String defaultField,
-            boolean defaultAnd,
-            boolean allowLeadingWildcard,
-            int phraseSlop,
-            int fuzzyPrefixLength,
-            boolean enablePositionIncrements,
-            boolean autoGeneratePhraseQueries) {}
-
-    /** A query that the classic query parser of Lucene 3.6 can't parse. */
-    public static final class InvalidQueryException extends Exception {
-        private static final long serialVersionUID = 1L;
-
-        InvalidQueryException(String message, Throwable cause) {
-            super(message, cause);
-        }
-    }
-
-    /** A hit, with the stored values of the fields asked for. */
-    public record Hit(int docId, float score, Map<String, List<StoredValue>> fields) {}
-
-    public record SearchResults(String query, String rewrittenQuery, long totalHits, List<Hit> hits, long tookMillis) {}
-
-    /** A query from {@link #parse}, for {@link #search}. */
-    public static final class ParsedQuery {
+    /** A query of Lucene 3.6. */
+    private static final class Lucene3Query implements ParsedQuery {
         private final Query query;
 
-        private ParsedQuery(Query query) {
+        private Lucene3Query(Query query) {
             this.query = query;
         }
 
@@ -453,7 +301,8 @@ public final class Lucene3Index implements Closeable {
         }
     }
 
-    /** Parses {@code expression} with the classic query parser and Lucene 3.6's {@code StandardAnalyzer}. */
+    /** {@inheritDoc} The analyzer is Lucene 3.6's {@code StandardAnalyzer}. */
+    @Override
     public ParsedQuery parse(String expression, ParserOptions options) throws InvalidQueryException {
         QueryParser parser =
                 new QueryParser(Version.LUCENE_36, options.defaultField(), new StandardAnalyzer(Version.LUCENE_36));
@@ -464,23 +313,21 @@ public final class Lucene3Index implements Closeable {
         parser.setEnablePositionIncrements(options.enablePositionIncrements());
         parser.setAutoGeneratePhraseQueries(options.autoGeneratePhraseQueries());
         try {
-            return new ParsedQuery(parser.parse(expression));
+            return new Lucene3Query(parser.parse(expression));
         } catch (ParseException | RuntimeException e) {
             throw new InvalidQueryException(e.getMessage(), e);
         }
     }
 
-    /**
-     * Searches with a query from {@link #parse}, best score first.
-     *
-     * @param fields the stored fields to return per hit; empty for all of them
-     * @param progress receives the documents searched so far, once per segment; it may throw to stop
-     *     the search
-     */
+    /** {@inheritDoc} The progress is reported once per segment. */
+    @Override
     public SearchResults search(
             ParsedQuery parsed, int offset, int limit, Optional<List<String>> fields, LongConsumer progress)
             throws IOException {
-        Query query = parsed.query;
+        if (!(parsed instanceof Lucene3Query lucene3)) {
+            throw new IllegalArgumentException("Not a query of this index: " + parsed);
+        }
+        Query query = lucene3.query;
         long start = System.nanoTime();
         IndexSearcher searcher = new IndexSearcher(reader);
         try {

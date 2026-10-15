@@ -11,6 +11,7 @@ import io.github.mfuerstenau.leia.protocol.jars.AddJarsResult;
 import io.github.mfuerstenau.leia.protocol.jars.JarComponents;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import jakarta.inject.Inject;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -26,8 +27,12 @@ public final class AddJarsHandler implements MethodHandler<AddJarsParams, AddJar
 
     private static final Logger LOG = Logger.getLogger(AddJarsHandler.class.getName());
 
+    private final Runtimes runtimes;
+
     @Inject
-    AddJarsHandler() {}
+    AddJarsHandler(Runtimes runtimes) {
+        this.runtimes = runtimes;
+    }
 
     @Override
     public RpcMethod<AddJarsParams, AddJarsResult> method() {
@@ -57,6 +62,14 @@ public final class AddJarsHandler implements MethodHandler<AddJarsParams, AddJar
             LOG.info(() -> "Added the jars " + added.jars());
             // Job threads are started from this thread, and inherit its loader (as in LeiaBackend.start).
             Thread.currentThread().setContextClassLoader(ExtensionJars.classLoader());
+            // A loader can't be unloaded, so the jar stays, but its runtime is never used (ADR 0044).
+            List<String> refused = runtimes.newlyRefused();
+            if (!refused.isEmpty()) {
+                throw new RpcException(
+                        ErrorCode.INVALID_JAR,
+                        "Cannot add the jars: " + String.join("; ", refused)
+                                + "; the jars stay loaded, but leia doesn't use the runtime");
+            }
         }
         io.github.mfuerstenau.leia.core.JarComponents components = added.added();
         return new AddJarsResult(

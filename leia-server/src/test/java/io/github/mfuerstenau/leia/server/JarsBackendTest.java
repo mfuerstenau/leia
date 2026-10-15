@@ -22,12 +22,17 @@ import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
 import io.github.mfuerstenau.leia.protocol.jars.GetJarsParams;
+import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
+import io.github.mfuerstenau.leia.server.runtime.FutureRuntime;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.jar.JarEntry;
+import java.util.jar.JarOutputStream;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -35,7 +40,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Jars loaded at the start and added while leia runs, through {@link LeiaBackend} (ADR 0016, ADR
- * 0018, ADR 0024, ADR 0038). Loading a jar changes Lucene's global lists for the whole JVM, and a loaded jar
+ * 0018, ADR 0024, ADR 0038, ADR 0044). Loading a jar changes Lucene's global lists for the whole JVM, and a loaded jar
  * that is gone stops every later load, so this is one flow, in jarsTest's JVM of its own.
  */
 @Tag("jars")
@@ -103,6 +108,19 @@ class JarsBackendTest {
                     icuCollation(new Collation("de", Optional.of(CollationStrength.QUATERNARY), Optional.empty()));
             assertThat(bytes(backend, quaternary, "Äpfel")).isNotEqualTo(bytes(backend, quaternary, "apfel"));
 
+            // A runtime built for another runtime interface is refused, and never used (ADR 0044).
+            Path futureRuntime = futureRuntimeJar();
+            RpcException refused = backend.fails(
+                    Methods.ADD_JARS, new AddJarsParams(List.of(futureRuntime.toString())), ErrorCode.INVALID_JAR);
+            assertThat(refused.getMessage())
+                    .startsWith("Cannot add the jars: the runtime " + FutureRuntime.class.getName() + " in ")
+                    .contains("is built for runtime interface 99, leia has " + LuceneRuntime.API_VERSION);
+            assertThat(backend.call(
+                                    Methods.OPEN_INDEX,
+                                    new OpenIndexParams(testIndex("lucene24").toString()))
+                            .luceneRuntime())
+                    .startsWith("3.6");
+
             // Lucene reads the service files of every loaded jar again, so a jar that is gone stops it.
             Files.delete(codecJar);
             RpcException gone = backend.fails(
@@ -148,6 +166,17 @@ class JarsBackendTest {
                 .findFirst()
                 .orElseThrow()
                 .value();
+    }
+
+    /** A jar with only a services file, which names {@link FutureRuntime} of the test classpath. */
+    private Path futureRuntimeJar() throws IOException {
+        Path jar = tmp.resolve("future-runtime.jar");
+        try (JarOutputStream out = new JarOutputStream(Files.newOutputStream(jar))) {
+            out.putNextEntry(new JarEntry("META-INF/services/" + LuceneRuntime.class.getName()));
+            out.write((FutureRuntime.class.getName() + "\n").getBytes(StandardCharsets.UTF_8));
+            out.closeEntry();
+        }
+        return jar;
     }
 
     /** The phonetic analysis jar without commons-codec, which its factories need. */

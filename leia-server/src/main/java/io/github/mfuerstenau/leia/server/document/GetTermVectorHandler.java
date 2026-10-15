@@ -12,7 +12,7 @@ import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
-import io.github.mfuerstenau.leia.server.legacy.Lucene3Results;
+import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
 import jakarta.inject.Inject;
 import java.io.IOException;
 
@@ -33,8 +33,8 @@ public final class GetTermVectorHandler implements MethodHandler<GetTermVectorPa
 
     @Override
     public GetTermVectorResult handle(GetTermVectorParams params) throws RpcException {
-        if (currentIndex.legacy().isPresent()) {
-            return Lucene3Results.termVector(currentIndex.legacy().get(), params);
+        if (currentIndex.runtime().isPresent()) {
+            return RuntimeResults.termVector(currentIndex.runtime().get(), params);
         }
         ReadOnlyIndex index = currentIndex.readable();
         int docId = params.docId();

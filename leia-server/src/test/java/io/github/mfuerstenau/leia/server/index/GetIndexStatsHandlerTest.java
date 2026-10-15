@@ -15,6 +15,7 @@ import io.github.mfuerstenau.leia.protocol.index.TermStats;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.job.Jobs;
+import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
@@ -46,7 +47,7 @@ class GetIndexStatsHandlerTest {
     @Test
     void reportsTheOpenIndex() throws Exception {
         Path dir = writeIndex(tmp.resolve("index"));
-        new OpenIndexHandler(currentIndex).handle(new OpenIndexParams(dir.toString()));
+        new OpenIndexHandler(currentIndex, new Runtimes()).handle(new OpenIndexParams(dir.toString()));
 
         GetIndexStatsResult result = handler.handle(new GetIndexStatsParams());
 

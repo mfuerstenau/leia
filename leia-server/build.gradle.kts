@@ -8,9 +8,12 @@ dependencies {
     // the UI's compile classpath (AGENTS.md, hard rule 6).
     api(project(":leia-protocol"))
     implementation(project(":leia-core"))
-    // Lucene 3.6, relocated, for indexes written by Lucene 2.x and 3.x (ADR 0044): the shadow jar
-    // only, so the unrelocated Lucene 3 never meets Lucene 10 on the classpath.
-    implementation(project(mapOf("path" to ":leia-lucene3", "configuration" to "shadowRuntimeElements")))
+    // The interface to the runtimes for indexes that Lucene 10 can't read (ADR 0044).
+    implementation(project(":leia-runtime"))
+    // Lucene 3.6, relocated, for indexes written by Lucene 2.x and 3.x: found through ServiceLoader,
+    // so runtime only, and the shadow jar only, so the unrelocated Lucene 3 never meets Lucene 10 on
+    // the classpath. Bundled until it becomes a jar of runtimes/ (ADR 0044, the Packaging task).
+    runtimeOnly(project(mapOf("path" to ":leia-lucene3", "configuration" to "shadowRuntimeElements")))
     implementation(libs.dagger)
     annotationProcessor(libs.dagger.compiler)
 }
@@ -41,6 +44,7 @@ val testIndexFiles = mapOf(
 val jarsTestIndexFiles = mapOf(
     "custom-codec" to coreTestFiles("testCodecIndex", "testCodecIndexElements"),
     "custom-formats" to coreTestFiles("customFormatsIndex", "customFormatsIndexElements"),
+    "lucene24" to testIndexFiles.getValue("lucene24"),
 )
 val testCodecJar = coreTestFiles("testCodecJar", "testCodecJarElements")
 val testAnalysisJars = coreTestFiles("testAnalysisJars", "testAnalysisJarsElements")

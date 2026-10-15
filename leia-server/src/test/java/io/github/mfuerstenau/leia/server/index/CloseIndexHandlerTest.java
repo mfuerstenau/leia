@@ -8,6 +8,7 @@ import io.github.mfuerstenau.leia.protocol.index.CloseIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.job.Jobs;
+import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Optional;
@@ -28,7 +29,7 @@ class CloseIndexHandlerTest {
     @Test
     void closesTheOpenIndex() throws Exception {
         Path dir = writeEmptyIndex(tmp.resolve("index"));
-        new OpenIndexHandler(currentIndex).handle(new OpenIndexParams(dir.toString()));
+        new OpenIndexHandler(currentIndex, new Runtimes()).handle(new OpenIndexParams(dir.toString()));
         ReadOnlyIndex open = currentIndex.readable();
 
         CloseIndexResult result = handler.handle(new CloseIndexParams());
@@ -47,7 +48,7 @@ class CloseIndexHandlerTest {
     @Test
     void closingTwiceReportsTheIndexOnce() throws Exception {
         Path dir = writeEmptyIndex(tmp.resolve("index"));
-        new OpenIndexHandler(currentIndex).handle(new OpenIndexParams(dir.toString()));
+        new OpenIndexHandler(currentIndex, new Runtimes()).handle(new OpenIndexParams(dir.toString()));
 
         handler.handle(new CloseIndexParams());
 

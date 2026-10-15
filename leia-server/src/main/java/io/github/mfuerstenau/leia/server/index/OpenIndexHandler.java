@@ -6,7 +6,6 @@ import io.github.mfuerstenau.leia.core.IndexOpenException;
 import io.github.mfuerstenau.leia.core.IndexSummary;
 import io.github.mfuerstenau.leia.core.OpenedIndex;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
-import io.github.mfuerstenau.leia.lucene3.Lucene3Index;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
@@ -17,9 +16,15 @@ import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
+import io.github.mfuerstenau.leia.runtime.DirectoryKind;
+import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
+import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
-import io.github.mfuerstenau.leia.server.legacy.Lucene3Results;
+import io.github.mfuerstenau.leia.server.runtime.OpenRuntime;
+import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
+import io.github.mfuerstenau.leia.server.runtime.Runtimes;
+import io.github.mfuerstenau.leia.server.runtime.SegmentsHeader;
 import jakarta.inject.Inject;
 import java.io.IOException;
 import java.nio.file.InvalidPathException;
@@ -39,10 +44,12 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
     private static final Logger LOG = Logger.getLogger(OpenIndexHandler.class.getName());
 
     private final CurrentIndex currentIndex;
+    private final Runtimes runtimes;
 
     @Inject
-    OpenIndexHandler(CurrentIndex currentIndex) {
+    OpenIndexHandler(CurrentIndex currentIndex, Runtimes runtimes) {
         this.currentIndex = currentIndex;
+        this.runtimes = runtimes;
     }
 
     @Override
@@ -64,8 +71,8 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
                 .map(DirectoryImpl::valueOf)
                 .orElse(DirectoryImpl.FS);
         OpenMode mode = params.mode().orElse(OpenMode.READER);
-        if (Lucene3Index.handles(path)) {
-            return openLegacy(path.toAbsolutePath().normalize(), directoryImpl, mode);
+        if (SegmentsHeader.isPreCodec(path)) {
+            return openWithRuntime(path.toAbsolutePath().normalize(), directoryImpl, mode);
         }
         OpenedIndex index;
         try {
@@ -105,28 +112,34 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
     }
 
     /**
-     * Opens an index written by Lucene 2.x or 3.x with Lucene 3.6 (ADR 0044). Only with a reader: the
+     * Opens an index written by Lucene 2.x or 3.x through a runtime (ADR 0044). Only with a reader: the
      * commits screen and the check need Lucene 10.
      */
-    private OpenIndexResult openLegacy(Path path, DirectoryImpl directoryImpl, OpenMode mode) throws RpcException {
+    private OpenIndexResult openWithRuntime(Path path, DirectoryImpl directoryImpl, OpenMode mode) throws RpcException {
         if (mode == OpenMode.DIRECTORY_ONLY) {
             throw new RpcException(
                     ErrorCode.UNSUPPORTED_INDEX_FORMAT,
                     "An index written by Lucene 2.x or 3.x opens only with a reader: " + path);
         }
-        Lucene3Index index;
+        // The interim detector tells only an index before 4.0, which counts as major 3.
+        LuceneRuntime runtime = runtimes.forMajor(3)
+                .orElseThrow(() -> new RpcException(
+                        ErrorCode.UNSUPPORTED_INDEX_FORMAT,
+                        "No runtime reads the index written by Lucene 2.x or 3.x: " + path));
+        RuntimeIndex index;
         try {
-            index = Lucene3Index.open(path, directoryImpl.name());
+            index = runtime.open(path, DirectoryKind.valueOf(directoryImpl.name()));
         } catch (IOException | RuntimeException e) {
             throw new RpcException(
                     ErrorCode.INDEX_NOT_READABLE,
-                    "Cannot read the index written by Lucene 2.x or 3.x with Lucene " + Lucene3Index.luceneVersion()
-                            + ": " + e,
+                    "Cannot read the index written by Lucene 2.x or 3.x with Lucene " + runtime.luceneVersion() + ": "
+                            + e,
                     e);
         }
-        currentIndex.replace(index);
-        LOG.info(() -> "Opened " + path + " (" + Lucene3Results.describe(index) + ", " + directoryImpl + ")");
-        return Lucene3Results.opened(index);
+        OpenRuntime open = new OpenRuntime(runtime, index);
+        currentIndex.replace(open);
+        LOG.info(() -> "Opened " + path + " (" + RuntimeResults.describe(open) + ", " + directoryImpl + ")");
+        return RuntimeResults.opened(open);
     }
 
     /** What the log says about an opened index. */
