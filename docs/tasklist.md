@@ -4,12 +4,11 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 
 ## Lucene 2 to 10 (ADR 0044)
 
-Goal: every index from Lucene 2.1 to 10 opens in one leia, each read by a relocated Lucene that can read it, with the features of that Lucene and the rest switched off. The spike (branch `lucene-2.4-spike`) did Lucene 2.x and 3.x on Lucene 3.6.2 (`leia-lucene3`). Each Lucene major reads its own indexes and those of the major before it, so four runtimes besides Lucene 10 are needed.
+Goal: every index from Lucene 2.1 to 10 opens in one leia, each read by a relocated Lucene that can read it, with the features of that Lucene and the rest switched off. The spike did Lucene 2.x and 3.x on Lucene 3.6.2 (`leia-lucene3`). Each Lucene major reads its own indexes and those of the major before it, so four runtimes besides Lucene 10 are needed.
 
 ### Foundation
-- [ ] Accept ADR 0044 (now Proposed) and merge the spike
-- [ ] A runtime seam in leia-server instead of the `legacy()` branches: an interface per method group that `CurrentIndex` hands out (Lucene 10, Lucene 3, …), so a new runtime doesn't add a branch to every handler
-- [ ] Routing by version: read the `segments_N` header once (format number before 4.0; from 4.0 the `CodecUtil` header and, from 5.3/6.0, the created and segment versions) and pick the runtime; one detector, with tests per version
+- [ ] A runtime seam in leia-server instead of the `legacy()` branches: an interface per method group that `CurrentIndex` hands out (Lucene 10, Lucene 3, …), so a new runtime doesn't add a branch to every handler. The interface lives in `leia.jar`, has JDK types and records only and a version of its own; runtimes are found with `ServiceLoader` over `ExtensionJars.classLoader()`, and one built for another version is refused as `INVALID_JAR` (ADR 0044 §1)
+- [ ] Routing by version: read the `segments_N` header once (format number before 4.0; from 4.0 the `CodecUtil` header and, from 5.3/6.0, the created and segment versions) and pick the runtime; one detector, in `leia.jar` rather than a runtime, with tests per version; `MISSING_RUNTIME` when no loaded runtime reads the version (ADR 0044 §3)
 - [ ] Fold the no-reader checks of the TUI into `features` (ADR 0021 mode becomes one more feature set)
 - [ ] TUI: hide the keys of the features an index lacks, per screen (`x` explain, `r` rebuild, `E` export, `t` points, `N` nearest, `m` similar, `b` filter, the query modes other than classic, …), instead of letting the backend refuse them
 - [ ] A shared Gradle convention for a runtime module (`leia.lucene-runtime-conventions` in build-logic): the Lucene dependency, the relocation, the `shadowRuntimeElements` wiring, `-Xlint:-deprecation`, the test-index source set and its consumable configuration
@@ -23,7 +22,12 @@ Goal: every index from Lucene 2.1 to 10 opens in one leia, each read by a reloca
 - [ ] A feature matrix per runtime in ADR 0044 or a doc page, kept in sync with each module's feature set
 
 ### Packaging
-- [ ] The old runtimes are optional: `leia.jar` reads Lucene 9 and 10 only, and each runtime module is a jar of its own that `--jar` or the default jars folder (ADR 0024) loads, so the default download stays small. `openIndex` says which runtime an old index needs when it isn't loaded; the release folders ship the runtime jars beside `leia.jar`
+- [ ] The old runtimes are optional jars (ADR 0044 §1, §7): `leia.jar` reads Lucene 9 and 10 only, and each runtime module is a jar of its own
+  - a `runtimes/` folder beside `leia.jar`, found from the jar's location and loaded at startup, before `--jar` and the default folder, whatever `--no-default-jars` says; `--jar`, the default folder and `X` load runtimes too
+  - `MISSING_RUNTIME` (-32020) in `ErrorCode`, naming the runtime jar and the index's Lucene version; a TUI notice that points at `X`, like `MISSING_CODEC`'s
+  - leia-server's dependency on `leia-lucene3`'s shadow jar becomes test-only
+  - `leiaFolder` and `build-dist.sh` copy `runtimes/`
+  - AGENTS.md's CLI contract and module table updated once it is built
 
 ## Bugs
 

@@ -1,8 +1,8 @@
 # ADR 0044 — Old indexes on a relocated Lucene, and features per index
 
-- **Status:** Proposed (spike, branch `lucene-2.4-spike`)
+- **Status:** Accepted on 2026-10-12, after the spike ("What the spike showed"); decisions 1, 3 and 5 changed and 7 added: the old runtimes are optional jars, not part of `leia.jar`
 - **Date:** 2026-10-12
-- **Amends:** ADR 0021 (`openIndex` reports the features of the opened index), AGENTS.md hard rule 5 (a second Lucene on the classpath)
+- **Amends:** ADR 0021 (`openIndex` reports the features of the opened index), ADR 0024 (a `runtimes/` folder beside `leia.jar` is loaded too), ADR 0034 §9 (the release folder gets `runtimes/`), AGENTS.md hard rule 5 (a second Lucene on the classpath)
 
 ## Context
 
@@ -24,16 +24,19 @@ Every Lucene version uses the package `org.apache.lucene`, so two of them can't 
 
 ## Decision
 
-1. **A second Lucene is relocated, not loaded in a classloader of its own.**
-   - The module `leia-lucene3` depends on lucene-core 3.6.2. Its Shadow jar renames `org.apache.lucene` to `io.github.mfuerstenau.leia.lucene3.shaded.lucene`, its own classes included.
-   - leia-server takes the shadow jar (`shadowRuntimeElements`), so the unrelocated Lucene 3 never reaches the classpath. leia.jar grows by 1.6 MB.
+1. **A second Lucene is relocated, and is a jar of its own.**
+   - The module `leia-lucene3` depends on lucene-core 3.6.2. Its Shadow jar renames `org.apache.lucene` to `io.github.mfuerstenau.leia.lucene3.shaded.lucene`, its own classes included. That jar is the runtime, `leia-lucene3.jar`, and it is never part of `leia.jar`. `leia.jar` reads Lucene 9 and 10 only, and doesn't grow: the 1.6 MB of 3.6 are in the runtime jar.
+   - A runtime loads like any other jar, through the `ExtensionJars` chain of ADR 0016 and 0024. That chain is parent-first, so the runtime sees leia's own classes, and relocation keeps its Lucene apart from Lucene 10.
+   - leia finds a runtime with `ServiceLoader` over `ExtensionJars.classLoader()`, through a runtime interface that `leia.jar` defines, of JDK types and records only. The interface has a version; a runtime built for another version is refused as `INVALID_JAR`.
    - 3.x has no `META-INF/services`, so renaming the classes is all there is to it. The Lucenes from 4 on use SPI for codecs; their services files would be relocated with them (Shadow's `mergeServiceFiles`). A codec jar from `--jar` (ADR 0018) only ever extends Lucene 10.
-   - A child-first classloader with nested jars would allow plug-in runtimes, but it needs jar extraction and an API of JDK types only, which relocation needs too. Relocation keeps one jar and one classloader.
+   - A child-first classloader with nested jars was rejected. It needs jar extraction and an API of JDK types only; relocation needs the API too, and with it a runtime shares the loader chain that already exists, so child-first gains nothing.
 2. **The module's API has no Lucene types.**
+   - Its facade implements the runtime interface of decision 1.
    - The module's code is compiled against the unrelocated names, so a Lucene type in its API wouldn't match at runtime. `Lucene3Index` returns records of its own (`Stats`, `IndexDocument`, `TermsPage`, `PostingsPage`, `SearchResults`, …).
    - It is read-only like leia-core: `IndexReader.open(dir, readOnly=true)` through a `Directory` with `NoLockFactory`, never an `IndexWriter`. `--directory` maps to `FSDirectory.open`, `MMapDirectory` and `NIOFSDirectory` of 3.6.
 3. **Routing by the `segments_N` header.**
-   - Before Lucene 10 is tried, `Lucene3Index.handles(path)` reads the first int of the newest `segments_N`, without any Lucene. A value from -2 to -11 is a format from before 4.0. Every Lucene from 4.0 on writes `CodecUtil`'s magic there.
+   - Before Lucene 10 is tried, a detector in `leia.jar` reads the first int of the newest `segments_N`, without any Lucene. A value from -2 to -11 is a format from before 4.0. Every Lucene from 4.0 on writes `CodecUtil`'s magic there. The detector is in `leia.jar`, not in a runtime (the spike's `Lucene3Index.handles`), so leia can tell an old index even when its runtime isn't loaded.
+   - An old index that no loaded runtime reads gives `MISSING_RUNTIME` (-32020), next after `NOT_SUPPORTED` in `ErrorCode`. Its message names the runtime jar and the index's Lucene version, so the TUI can point at `X`, as with `MISSING_CODEC` (ADR 0018).
    - Only a single index directory with a reader is routed. `DIRECTORY_ONLY` mode on such an index gives `UNSUPPORTED_INDEX_FORMAT`.
 4. **`openIndex` reports the features of the opened index.**
    - `OpenIndexResult` gains `features: Set<Feature>` and `luceneRuntime`.
@@ -42,7 +45,7 @@ Every Lucene version uses the package `org.apache.lucene`, so two of them can't 
    - Lucene 3.6 has `INDEX_STATS`, `DOCUMENTS`, `STORED_VALUES`, `TERM_VECTORS`, `TERMS`, `POSTINGS` and `CLASSIC_SEARCH`.
 5. **The backend refuses what an index can't do with `NOT_SUPPORTED` (-32019).**
    - `CurrentIndex` holds either a Lucene 10 index or a `Lucene3Index`. With the latter, `opened()` and `readable()` throw `NOT_SUPPORTED`, so every handler without a branch of its own refuses.
-   - The handlers of the supported methods ask `legacy()` first, and `Lucene3Results` maps the records.
+   - Handlers reach a runtime through the runtime interface of decision 1. The spike's `legacy()` branches in the handlers and its `Lucene3Results` are interim, until that interface exists.
    - Search is a job as always (hard rule 7). It takes a classic query only, best score first.
 6. **The TUI switches off what the index lacks.**
    - `Opened` carries the features.
@@ -50,6 +53,14 @@ Every Lucene version uses the package `org.apache.lucene`, so two of them can't 
    - `R` and the overview's top-terms keys go the same way.
    - The tab line says "Lucene 2.x, read with 3.6.2".
    - Keys inside a screen that the index lacks, such as `x` explain, still reach the backend, and the screen shows its `NOT_SUPPORTED` message.
+7. **Where the runtimes come from.**
+   - The release folder has a `runtimes/` folder beside `leia.jar`, with one jar per runtime. `leiaFolder` builds the same for a development build.
+   - leia finds that folder from the location of its own jar and loads it at startup, before the jars of `--jar` and the default folder. `--no-default-jars` doesn't affect it.
+   - `--jar`, the default folder and `X` can load a runtime too.
+
+### Until the Packaging task
+
+The spike's code bundles 3.6 as before: leia-server takes `leia-lucene3`'s shadow jar (`shadowRuntimeElements`), so 3.6 is in `leia.jar`, and `openIndex` routes with `Lucene3Index.handles`. Decisions 1, 3 and 7 land with the runtime seam, routing and packaging tasks of `docs/tasklist.md`.
 
 ## What the spike showed
 
@@ -66,7 +77,11 @@ Every Lucene version uses the package `org.apache.lucene`, so two of them can't 
 
 ## Consequences
 
-- Each further runtime is a module like `leia-lucene3`: a relocated Lucene, a facade with its own records, and a `Results` class in the server. Each needs a routing rule (the `segments_N` header names the version from 4.0 on) and a feature set. The APIs of 5, 7 and 9 differ less from each other than from 3, so their facades may share sources.
+- Each further runtime is a module like `leia-lucene3`: a relocated Lucene and a facade that implements the runtime interface. Each needs a routing rule (the `segments_N` header names the version from 4.0 on) and a feature set. The APIs of 5, 7 and 9 differ less from each other than from 3, so their facades may share sources.
+- Packaging:
+  - the release folder grows with each runtime; `leia.jar` doesn't, and someone who only reads Lucene 9 and 10 can leave `runtimes/` out;
+  - every runtime module is built against the runtime interface's version, and a change to the interface means building them all again;
+  - `build-dist.sh` and `leiaFolder` copy `runtimes/`.
 - The protocol's records stay those of Lucene 10. An old runtime fills what it lacks with neutral values: no doc values, no points, no vectors.
 - Left for later:
   - commits and `CheckIndex` on 3.6;

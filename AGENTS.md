@@ -21,7 +21,7 @@ leia / leia.cmd  ──finds the JVM, runs──▶  <java> -jar leia.jar
 | Path | Role |
 |---|---|
 | `leia-core/` | Java library with the Lucene functionality. No UI or protocol code. |
-| `leia-lucene3/` | Lucene 3.6.2, relocated into `…lucene3.shaded`, for indexes written by Lucene 2.x and 3.x (ADR 0044). `Lucene3Index` has no Lucene types in its API; leia-server takes the shadow jar. Also writes the Lucene 2.4 test index. |
+| `leia-lucene3/` | Lucene 3.6.2, relocated into `…lucene3.shaded`, for indexes written by Lucene 2.x and 3.x (ADR 0044). `Lucene3Index` has no Lucene types in its API. To become a jar of its own in `runtimes/` (ADR 0044); until then leia-server takes the shadow jar. Also writes the Lucene 2.4 test index. |
 | `leia-protocol/` | Records for every method's params and result, `Methods` (the registry), `RpcMethod` and `ErrorCode`: the API between the UI and the backend. |
 | `leia-server/` | Library: a handler per method, with Dagger wiring, mapping core results to the records. `LeiaBackend` runs the calls in order on one thread; `RpcException` carries an expected failure's `ErrorCode`. |
 | `leia-tui/` | The application: the CLI (`Cli`, `Main`), the version-check entry class `Launcher` (compiled for Java 8), the log, and a package per screen (`…tui.overview`, `…tui.documents`, …). Builds the **fat jar** `leia.jar`; the scripts `leia` and `leia.cmd` are in `leia-tui/src/scripts/`. |

@@ -291,3 +291,7 @@ Finished items, moved here from `docs/tasklist.md` (the open work queue).
 - [x] Documents screen: a legend for the flags (the details panel's first line spells out the selected field's flags)
 - [x] Matches of the query in a document opened from a search hit: the fields table, the details and the viewer (ADR 0043, deferred by ADR 0042)
 - [x] Bug: the key legend in the footer was cut off on a narrow terminal; it wraps between its entries now (`KeyLegend`), taking up to a third of the screen
+
+## Lucene 2 to 10 — done
+
+- [x] ADR 0044 accepted after the spike (Lucene 2.x and 3.x on a relocated Lucene 3.6.2 in `leia-lucene3`, features per index in `openIndex`, `NOT_SUPPORTED`, dimmed screens in the TUI), amended so the old runtimes are optional jars in a `runtimes/` folder beside `leia.jar`, found through `ServiceLoader` and a runtime interface, with `MISSING_RUNTIME` (-32020) for an old index whose runtime isn't loaded; the spike merged
