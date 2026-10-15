@@ -60,14 +60,24 @@ Every Lucene version uses the package `org.apache.lucene`, so two of them can't 
 
 ### Until the Packaging task
 
-leia-server still takes `leia-lucene3`'s shadow jar (`shadowRuntimeElements`), so 3.6 is in `leia.jar`. Decisions 3 and 7 land with the routing and packaging tasks of `docs/tasklist.md`.
+leia-server still takes `leia-lucene3`'s shadow jar (`shadowRuntimeElements`), so 3.6 is in `leia.jar`. Decision 7 lands with the packaging task of `docs/tasklist.md`.
 
 The runtime seam (decision 1) has landed:
 - The interface is the module `leia-runtime`, part of `leia.jar`: the service `LuceneRuntime`, with `API_VERSION` 1, opens a `RuntimeIndex`, which hands out the groups `Documents`, `Terms` and `Search`. A runtime that lacks a group returns it empty, and `openIndex` leaves its features out.
 - `leia-lucene3` implements it as `Lucene3Runtime` and takes `leia-runtime` compileOnly, so the interface isn't in its jar.
 - leia-server depends on `leia-lucene3` at runtime only, and finds the runtime with `ServiceLoader` (`Runtimes`). The Lucene 10 handlers are unchanged; each handler that a runtime can serve has one `currentIndex.runtime()` branch into `RuntimeResults`.
 - A runtime built for another `API_VERSION` is refused with `INVALID_JAR`: at the start, nothing starts; on `addJars`, the jar stays loaded and its runtime is never used.
-- The detector is still interim: `SegmentsHeader.isPreCodec` tells an index before 4.0, which counts as major 3. Without a runtime for it, `openIndex` fails with `UNSUPPORTED_INDEX_FORMAT` until the routing task brings `MISSING_RUNTIME`.
+
+The routing (decision 3) has landed:
+- One detector in leia-server, `SegmentsHeader.read`, reads the newest `segments_N` without Lucene and gives the index's major and the Lucene version for messages:
+  - before 4.0, the first int: −2 to −9 are major 2 (−9 is "2.9 or 3.0"), −10 and −11 are major 3;
+  - from 4.0, `CodecUtil`'s header with the codec `segments`: formats 0–3 are 4.x, 4–5 are 5.0 to 5.2;
+  - format 6 (5.3 to 6.x): the oldest segment's major, or the writer's when there are no segments;
+  - formats 7–10 (7.0 to 10.x): the created major.
+  - Anything else gives no version, and Lucene 10 reports its own error.
+- `openIndex` sends a major below 9 to the runtime that reads it. If none is loaded, it fails with `MISSING_RUNTIME` (-32020), naming the jar (`Runtimes.jarFor`: `leia-lucene3.jar`, `leia-lucene5.jar`, `leia-lucene7.jar` or `leia-lucene9.jar`) and the version, such as "8.11.4". The TUI adds a hint at `X` and `--jar`, and offers to open without a reader.
+- Without a reader, an index of 2.x or 3.x is refused with `UNSUPPORTED_INDEX_FORMAT`; one of 4.x to 8.x still goes to Lucene 10, which lists the commits of a Lucene 8 index (as unreadable) and checks it (ADR 0022).
+- A path with several indexes below it isn't routed: it has no `segments_N` at the top.
 
 ## What the spike showed
 

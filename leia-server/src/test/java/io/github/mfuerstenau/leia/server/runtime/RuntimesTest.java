@@ -28,6 +28,20 @@ class RuntimesTest {
     }
 
     @Test
+    void namesTheJarForEachMajor() {
+        assertThat(Runtimes.jarFor(2)).contains("leia-lucene3.jar");
+        assertThat(Runtimes.jarFor(3)).contains("leia-lucene3.jar");
+        assertThat(Runtimes.jarFor(4)).contains("leia-lucene5.jar");
+        assertThat(Runtimes.jarFor(5)).contains("leia-lucene5.jar");
+        assertThat(Runtimes.jarFor(6)).contains("leia-lucene7.jar");
+        assertThat(Runtimes.jarFor(7)).contains("leia-lucene7.jar");
+        assertThat(Runtimes.jarFor(8)).contains("leia-lucene9.jar");
+        assertThat(Runtimes.jarFor(1)).isEmpty();
+        assertThat(Runtimes.jarFor(9)).isEmpty();
+        assertThat(Runtimes.jarFor(10)).isEmpty();
+    }
+
+    @Test
     void namesTheMajorsInNotSupported() {
         assertThat(new OpenRuntime(runtime(Set.of(3, 2)), null).notSupported().getMessage())
                 .isEqualTo("Not supported for an index written by Lucene 2.x or 3.x (read with Lucene 1.2.3)");

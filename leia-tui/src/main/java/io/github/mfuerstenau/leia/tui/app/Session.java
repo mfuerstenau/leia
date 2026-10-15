@@ -985,9 +985,11 @@ public final class Session {
             if (error != null) {
                 RpcException rpc = rpcException(error, runner);
                 if (rpc != null) {
-                    // A reader can't open a corrupt index, but its commits may still be readable.
-                    boolean noReaderHelps =
-                            rpc.code() == ErrorCode.CORRUPT_INDEX || rpc.code() == ErrorCode.MISSING_CODEC;
+                    // A reader can't open a corrupt index, but its commits may still be readable; and Lucene 10
+                    // checks a Lucene 8 index without its runtime (ADR 0044).
+                    boolean noReaderHelps = rpc.code() == ErrorCode.CORRUPT_INDEX
+                            || rpc.code() == ErrorCode.MISSING_CODEC
+                            || rpc.code() == ErrorCode.MISSING_RUNTIME;
                     String message = describe(withJarHint(rpc));
                     reply(runner, app -> {
                         app.openFailed(message, noReaderHelps);
@@ -1106,13 +1108,17 @@ public final class Session {
 
     /**
      * A codec or format that isn't loaded can come from a jar that X adds or leia is started with
-     * (ADR 0018, ADR 0024).
+     * (ADR 0018, ADR 0024), and so can a runtime for an old index, which the message names (ADR 0044).
      */
     static RpcException withJarHint(RpcException error) {
-        if (error.code() != ErrorCode.MISSING_CODEC) {
+        String hint = switch (error.code()) {
+            case MISSING_CODEC -> "; add a jar that has it with X, or start leia with --jar";
+            case MISSING_RUNTIME -> "; add it with X, or start leia with --jar";
+            default -> null;
+        };
+        if (hint == null) {
             return error;
         }
-        return new RpcException(
-                error.code(), error.getMessage() + "; add a jar that has it with X, or start leia with --jar", error);
+        return new RpcException(error.code(), error.getMessage() + hint, error);
     }
 }

@@ -79,7 +79,8 @@ public final class Methods {
     /**
      * Opens the latest commit of an index, read-only, and makes it the open index. An index that was
      * open before is closed, and its jobs stopped, once the new one has opened; if opening fails, it
-     * stays open.
+     * stays open. An index written by a Lucene before 9 opens through a runtime jar (ADR 0044); with no
+     * such jar loaded, it fails with {@code MISSING_RUNTIME}.
      */
     public static final RpcMethod<OpenIndexParams, OpenIndexResult> OPEN_INDEX =
             new RpcMethod<>("openIndex", OpenIndexParams.class, OpenIndexResult.class);

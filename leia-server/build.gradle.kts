@@ -37,6 +37,8 @@ fun coreTestFiles(name: String, configuration: String) =
 
 val testIndexFiles = mapOf(
     "lucene9" to coreTestFiles("lucene9TestIndex", "lucene9TestIndexElements"),
+    // Routed by its version: Lucene 10 doesn't read it, and leia-lucene9.jar isn't there (ADR 0044).
+    "lucene8" to coreTestFiles("lucene8TestIndex", "lucene8TestIndexElements"),
     "demo" to coreTestFiles("demoIndex", "demoIndexElements"),
     // Written by leia-lucene3's build, read with the relocated Lucene 3.6 (ADR 0044).
     "lucene24" to lucene3TestFiles("lucene24TestIndex", "lucene24TestIndexElements"),

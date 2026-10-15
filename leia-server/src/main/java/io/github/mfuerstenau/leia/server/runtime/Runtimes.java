@@ -116,6 +116,20 @@ public final class Runtimes {
                 .findFirst();
     }
 
+    /**
+     * The runtime jar that reads indexes of {@code major} (ADR 0044), such as {@code leia-lucene3.jar}
+     * for 2 and 3, or empty for a major that Lucene 10 reads itself or none reads.
+     */
+    public static Optional<String> jarFor(int major) {
+        return switch (major) {
+            case 2, 3 -> Optional.of("leia-lucene3.jar");
+            case 4, 5 -> Optional.of("leia-lucene5.jar");
+            case 6, 7 -> Optional.of("leia-lucene7.jar");
+            case 8 -> Optional.of("leia-lucene9.jar");
+            default -> Optional.empty();
+        };
+    }
+
     /** The refusals not reported before, for {@code addJars}. */
     public List<String> newlyRefused() {
         List<String> fresh = current().refused().stream()

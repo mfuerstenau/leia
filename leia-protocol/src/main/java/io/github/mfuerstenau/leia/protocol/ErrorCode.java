@@ -62,7 +62,12 @@ public enum ErrorCode {
      * The open index can't do that: it was written by a Lucene version whose runtime in leia lacks the
      * feature (ADR 0044). {@code openIndex} lists the features that work.
      */
-    NOT_SUPPORTED(-32019);
+    NOT_SUPPORTED(-32019),
+    /**
+     * The index was written by a Lucene version that only a runtime jar reads, and none that reads it
+     * is loaded (ADR 0044).
+     */
+    MISSING_RUNTIME(-32020);
 
     private final int code;
 

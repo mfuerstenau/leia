@@ -116,11 +116,15 @@ artifacts {
     }
 }
 
-// The Lucene 9 index, for leia-server's tests through LeiaBackend.
+// The Lucene 9 and 8 indexes, for leia-server's tests through LeiaBackend.
 val lucene9TestIndexElements = configurations.consumable("lucene9TestIndexElements")
+val lucene8TestIndexElements = configurations.consumable("lucene8TestIndexElements")
 artifacts {
     add(lucene9TestIndexElements.name, testIndexesDir.map { it.dir("lucene9") }) {
         builtBy(legacyIndexTasks.toMap().getValue("lucene9"))
+    }
+    add(lucene8TestIndexElements.name, testIndexesDir.map { it.dir("lucene8") }) {
+        builtBy(legacyIndexTasks.toMap().getValue("lucene8"))
     }
 }
 

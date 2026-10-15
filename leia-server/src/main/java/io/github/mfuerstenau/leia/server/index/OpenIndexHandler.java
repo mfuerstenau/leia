@@ -21,6 +21,7 @@ import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.runtime.IndexVersion;
 import io.github.mfuerstenau.leia.server.runtime.OpenRuntime;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
@@ -71,8 +72,20 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
                 .map(DirectoryImpl::valueOf)
                 .orElse(DirectoryImpl.FS);
         OpenMode mode = params.mode().orElse(OpenMode.READER);
-        if (SegmentsHeader.isPreCodec(path)) {
-            return openWithRuntime(path.toAbsolutePath().normalize(), directoryImpl, mode);
+        // Routed by the version of the index (ADR 0044 §3); a path with indexes below it has none.
+        Optional<IndexVersion> version = SegmentsHeader.read(path);
+        if (version.isPresent() && version.get().major() < Version.MIN_SUPPORTED_MAJOR) {
+            Path normalized = path.toAbsolutePath().normalize();
+            if (mode == OpenMode.READER) {
+                return openWithRuntime(normalized, version.get(), directoryImpl);
+            }
+            if (version.get().major() < 4) {
+                throw new RpcException(
+                        ErrorCode.UNSUPPORTED_INDEX_FORMAT,
+                        "An index written by Lucene " + version.get().writtenBy() + " opens only with a reader: "
+                                + normalized);
+            }
+            // Without a reader, Lucene 10 lists their commits and checks some, such as a Lucene 8 index (ADR 0022).
         }
         OpenedIndex index;
         try {
@@ -112,28 +125,25 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
     }
 
     /**
-     * Opens an index written by Lucene 2.x or 3.x through a runtime (ADR 0044). Only with a reader: the
+     * Opens an index that Lucene 10 can't read through a runtime (ADR 0044). Only with a reader: the
      * commits screen and the check need Lucene 10.
      */
-    private OpenIndexResult openWithRuntime(Path path, DirectoryImpl directoryImpl, OpenMode mode) throws RpcException {
-        if (mode == OpenMode.DIRECTORY_ONLY) {
-            throw new RpcException(
-                    ErrorCode.UNSUPPORTED_INDEX_FORMAT,
-                    "An index written by Lucene 2.x or 3.x opens only with a reader: " + path);
-        }
-        // The interim detector tells only an index before 4.0, which counts as major 3.
-        LuceneRuntime runtime = runtimes.forMajor(3)
+    private OpenIndexResult openWithRuntime(Path path, IndexVersion version, DirectoryImpl directoryImpl)
+            throws RpcException {
+        LuceneRuntime runtime = runtimes.forMajor(version.major())
                 .orElseThrow(() -> new RpcException(
-                        ErrorCode.UNSUPPORTED_INDEX_FORMAT,
-                        "No runtime reads the index written by Lucene 2.x or 3.x: " + path));
+                        ErrorCode.MISSING_RUNTIME,
+                        "The index was written by Lucene " + version.writtenBy() + "; reading it needs the runtime "
+                                + Runtimes.jarFor(version.major()).orElse("for Lucene " + version.major())
+                                + ", which isn't loaded: " + path));
         RuntimeIndex index;
         try {
             index = runtime.open(path, DirectoryKind.valueOf(directoryImpl.name()));
         } catch (IOException | RuntimeException e) {
             throw new RpcException(
                     ErrorCode.INDEX_NOT_READABLE,
-                    "Cannot read the index written by Lucene 2.x or 3.x with Lucene " + runtime.luceneVersion() + ": "
-                            + e,
+                    "Cannot read the index written by Lucene " + version.writtenBy() + " with Lucene "
+                            + runtime.luceneVersion() + ": " + e,
                     e);
         }
         OpenRuntime open = new OpenRuntime(runtime, index);
