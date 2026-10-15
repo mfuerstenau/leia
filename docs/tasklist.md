@@ -4,7 +4,7 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 
 ## Bugs
 
-- [ ] The key legend in the footer is cut off on a narrow terminal instead of wrapping; it must wrap so that every key stays visible
+None right now.
 
 ## Backlog — future capabilities
 

@@ -627,6 +627,34 @@ class AppTest {
     }
 
     @Test
+    void theKeyLegendWrapsOnANarrowTerminal() {
+        App app = app();
+        List<String> rows = TestScreens.render(app::render, 30, 20).lines().toList();
+        assertThat(rows.subList(18, 20))
+                .containsExactly(" q quit   o open   6 analysis ", " X jars                       ");
+        // The screen ends above the footer.
+        assertThat(rows.get(17)).startsWith("└").endsWith("┘");
+
+        app = appWithDocuments();
+        app.handleKey(key('2'));
+        app.documentLoaded(document(0));
+        String screen = TestScreens.render(app::render, 60, 30);
+        assertThat(screen).contains(" q quit   o open   c close   1-7 screen   ←→ doc   i go to");
+        assertThat(screen.lines().toList().getLast())
+                .isEqualTo(" r rebuild   E export   Tab panel   ↑↓" + " ".repeat(22));
+    }
+
+    @Test
+    void aLegendThatWrapsTakesAThirdOfTheScreenAtMost() {
+        App app = appWithDocuments();
+        app.handleKey(key('2'));
+        app.documentLoaded(document(0));
+        List<String> rows = TestScreens.render(app::render, 30, 12).lines().toList();
+        assertThat(rows.get(7)).startsWith("└").endsWith("┘");
+        assertThat(rows.get(8)).isEqualTo(" q quit   o open   c close    ");
+    }
+
+    @Test
     void aFailedOpenKeepsThePromptAndThePreviousIndex() {
         App app = app();
         app.opened(stats("/data/first"), List.of());
@@ -939,7 +967,7 @@ class AppTest {
         app.scanStarted(2, 2);
         assertThat(app.scanFailed(2, "Cannot read")).isEmpty();
         assertThat(app.polls()).isEmpty();
-        assertThat(render(app)).contains("failed");
+        assertThat(wide(app)).contains("failed");
 
         // A failed field is scanned again; the others are done or have no postings.
         assertThat(app.handleKey(key('a'))).isEqualTo(start(3, "body"));
@@ -1401,7 +1429,7 @@ class AppTest {
         assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(load(0));
         assertThat(app.documentLoaded(document(0))).hasValue(new Action.LoadPositions(0, "id", text("1")));
         app.positionsLoaded(0, "id", text("1"), List.of());
-        assertThat(TestScreens.render(app::render, 100, 22))
+        assertThat(TestScreens.render(app::render, 100, 24))
                 .contains("id:1  1 of 2", "[ ] term docs", "no positions indexed");
 
         assertThat(app.handleKey(key(']'))).isEqualTo(load(2));

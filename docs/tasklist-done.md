@@ -290,3 +290,4 @@ Finished items, moved here from `docs/tasklist.md` (the open work queue).
 - [x] Show the name "Lucene Explorer for Index Analysis" below the leia line with the version, with the letters of the acronym (L, E, I, A) highlighted
 - [x] Documents screen: a legend for the flags (the details panel's first line spells out the selected field's flags)
 - [x] Matches of the query in a document opened from a search hit: the fields table, the details and the viewer (ADR 0043, deferred by ADR 0042)
+- [x] Bug: the key legend in the footer was cut off on a narrow terminal; it wraps between its entries now (`KeyLegend`), taking up to a third of the screen

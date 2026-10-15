@@ -75,6 +75,7 @@ import io.github.mfuerstenau.leia.tui.prompt.PathPrompt;
 import io.github.mfuerstenau.leia.tui.search.Search;
 import io.github.mfuerstenau.leia.tui.terms.Terms;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.widgets.KeyLegend;
 import io.github.mfuerstenau.leia.tui.widgets.Logo;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.nio.charset.StandardCharsets;
@@ -1725,19 +1726,23 @@ public final class App {
     }
 
     public void render(Frame frame) {
+        Rect area = frame.area();
         // The analysis screen needs no index, so its tab shows without one.
         boolean tabsShown = hasIndex() || screen == Screen.ANALYSIS;
+        List<Line> footer = notice != null && notice.inFooter()
+                ? List.of(Line.from(Span.raw(" ")).append(notice.line()))
+                : KeyLegend.lines(footerKeys(), area.width());
+        // A legend that wraps takes a third of the screen at most, so the screen keeps the rest.
+        int footerHeight = Math.min(footer.size(), Math.max(area.height() / 3, 1));
         List<Rect> rows = Layout.vertical()
-                .constraints(Constraint.length(tabsShown ? 1 : 0), Constraint.fill(), Constraint.length(1))
-                .split(frame.area());
+                .constraints(Constraint.length(tabsShown ? 1 : 0), Constraint.fill(), Constraint.length(footerHeight))
+                .split(area);
         Rect body = rows.get(1);
-        String keys = renderBody(frame, body);
+        renderScreen(frame, body);
         if (tabsShown) {
             renderTabs(frame, rows.get(0));
         }
-        Line footer =
-                notice != null && notice.inFooter() ? Line.from(Span.raw(" ")).append(notice.line()) : Line.from(keys);
-        frame.renderWidget(Paragraph.from(footer), rows.get(2));
+        frame.renderWidget(Paragraph.from(Text.from(footer)), rows.get(2));
         if (exportPrompt != null) {
             exportPrompt.render(frame, body);
         }
@@ -1749,12 +1754,34 @@ public final class App {
         }
     }
 
-    /** Draws the shown screen into {@code body}, and returns the footer's keys for it. */
-    private String renderBody(Frame frame, Rect body) {
+    /** Draws the shown screen into {@code body}. */
+    private void renderScreen(Frame frame, Rect body) {
+        if (screen == Screen.ANALYSIS) {
+            analysis.render(frame, body);
+        } else if (opened == null) {
+            renderAbout(frame, body);
+        } else if (screen == Screen.COMMITS) {
+            commits.render(frame, body);
+        } else if (screen == Screen.CHECK && check != null) {
+            check.render(frame, body);
+        } else if (overview == null) {
+            renderWithoutReader(frame, body);
+        } else if (screen == Screen.SEARCH) {
+            search.render(frame, body);
+        } else if (screen == Screen.TERMS) {
+            terms.render(frame, body);
+        } else if (screen == Screen.DOCUMENTS) {
+            documents.render(frame, body);
+        } else {
+            overview.render(frame, body);
+        }
+    }
+
+    /** The footer's keys for the shown screen; they follow the branches of {@link #renderScreen}. */
+    private String footerKeys() {
         String reopen = overview != null ? "R reopen   " : "";
         String cancel = scan != null ? "Esc cancel scan   " : export != null ? "Esc cancel export   " : "";
         if (screen == Screen.ANALYSIS) {
-            analysis.render(frame, body);
             if (analysis.prompting()) {
                 return analysis.keys();
             }
@@ -1763,24 +1790,19 @@ public final class App {
                     : " q quit   o open   " + analysis.keys();
         }
         if (opened == null) {
-            renderAbout(frame, body);
             return " q quit   o open   6 analysis   X jars";
         }
         if (screen == Screen.COMMITS) {
-            commits.render(frame, body);
             return " " + cancel + "q quit   o open   c close   " + reopen
                     + "1-7 screen   r read again   ⏎ segments   Tab panel   ↑↓";
         }
         if (screen == Screen.CHECK && check != null) {
-            check.render(frame, body);
             return " " + cancel + "q quit   o open   c close   " + reopen + "1-7 screen   " + check.keys();
         }
         if (overview == null) {
-            renderWithoutReader(frame, body);
             return " q quit   o open   c close   1-7 screen";
         }
         if (screen == Screen.SEARCH) {
-            search.render(frame, body);
             if (search.prompting()) {
                 return search.keys();
             }
@@ -1788,7 +1810,6 @@ public final class App {
             return " " + stop + "q quit   o open   c close   1-7 screen   " + search.keys();
         }
         if (screen == Screen.TERMS) {
-            terms.render(frame, body);
             if (terms.prompting()) {
                 return " type to seek   ⏎/Esc done";
             }
@@ -1801,7 +1822,6 @@ public final class App {
                     + "e export   ←/→ column   ↑↓";
         }
         if (screen == Screen.DOCUMENTS) {
-            documents.render(frame, body);
             if (documents.viewer().isPresent()) {
                 return documents.viewer().get().keys();
             }
@@ -1824,7 +1844,6 @@ public final class App {
                     + "m similar   "
                     + "r rebuild   E export   Tab panel   ↑↓";
         }
-        overview.render(frame, body);
         if (scan != null) {
             return " Esc cancel scan   q quit   o open   c close   R reopen   1-7 screen   s/S sort   Tab panel   ↑↓";
         }
