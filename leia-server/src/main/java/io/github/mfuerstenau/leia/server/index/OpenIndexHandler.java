@@ -6,9 +6,11 @@ import io.github.mfuerstenau.leia.core.IndexOpenException;
 import io.github.mfuerstenau.leia.core.IndexSummary;
 import io.github.mfuerstenau.leia.core.OpenedIndex;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
+import io.github.mfuerstenau.leia.lucene3.Lucene3Index;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
+import io.github.mfuerstenau.leia.protocol.index.Feature;
 import io.github.mfuerstenau.leia.protocol.index.IndexEntry;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
@@ -17,7 +19,9 @@ import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.legacy.Lucene3Results;
 import jakarta.inject.Inject;
+import java.io.IOException;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.List;
@@ -60,6 +64,9 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
                 .map(DirectoryImpl::valueOf)
                 .orElse(DirectoryImpl.FS);
         OpenMode mode = params.mode().orElse(OpenMode.READER);
+        if (Lucene3Index.handles(path)) {
+            return openLegacy(path.toAbsolutePath().normalize(), directoryImpl, mode);
+        }
         OpenedIndex index;
         try {
             index = switch (mode) {
@@ -79,7 +86,9 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
                         OptionalInt.of(readOnly.numDocs()),
                         OptionalInt.of(readOnly.maxDoc()),
                         entries(readOnly),
-                        skipped(readOnly));
+                        skipped(readOnly),
+                        Feature.all(),
+                        Version.LATEST.toString());
             case DirectoryOnlyIndex directoryOnly ->
                 new OpenIndexResult(
                         directoryOnly.path().toString(),
@@ -89,8 +98,35 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
                         directoryOnly.directories().stream()
                                 .map(dir -> new IndexEntry(dir.toString(), Optional.empty()))
                                 .toList(),
-                        List.of());
+                        List.of(),
+                        Feature.withoutReader(),
+                        Version.LATEST.toString());
         };
+    }
+
+    /**
+     * Opens an index written by Lucene 2.x or 3.x with Lucene 3.6 (ADR 0044). Only with a reader: the
+     * commits screen and the check need Lucene 10.
+     */
+    private OpenIndexResult openLegacy(Path path, DirectoryImpl directoryImpl, OpenMode mode) throws RpcException {
+        if (mode == OpenMode.DIRECTORY_ONLY) {
+            throw new RpcException(
+                    ErrorCode.UNSUPPORTED_INDEX_FORMAT,
+                    "An index written by Lucene 2.x or 3.x opens only with a reader: " + path);
+        }
+        Lucene3Index index;
+        try {
+            index = Lucene3Index.open(path, directoryImpl.name());
+        } catch (IOException | RuntimeException e) {
+            throw new RpcException(
+                    ErrorCode.INDEX_NOT_READABLE,
+                    "Cannot read the index written by Lucene 2.x or 3.x with Lucene " + Lucene3Index.luceneVersion()
+                            + ": " + e,
+                    e);
+        }
+        currentIndex.replace(index);
+        LOG.info(() -> "Opened " + path + " (" + Lucene3Results.describe(index) + ", " + directoryImpl + ")");
+        return Lucene3Results.opened(index);
     }
 
     /** What the log says about an opened index. */

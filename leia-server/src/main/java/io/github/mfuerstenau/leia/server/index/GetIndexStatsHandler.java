@@ -18,6 +18,7 @@ import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.legacy.Lucene3Results;
 import jakarta.inject.Inject;
 import java.io.IOException;
 import java.util.Optional;
@@ -41,6 +42,9 @@ public final class GetIndexStatsHandler implements MethodHandler<GetIndexStatsPa
 
     @Override
     public GetIndexStatsResult handle(GetIndexStatsParams params) throws RpcException {
+        if (currentIndex.legacy().isPresent()) {
+            return Lucene3Results.indexStats(currentIndex.legacy().get());
+        }
         ReadOnlyIndex index = currentIndex.readable();
         try {
             return toResult(index.stats());

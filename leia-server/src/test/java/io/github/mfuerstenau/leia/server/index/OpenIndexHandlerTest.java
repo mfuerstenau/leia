@@ -9,6 +9,7 @@ import io.github.mfuerstenau.leia.core.IndexOpenException;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
+import io.github.mfuerstenau.leia.protocol.index.Feature;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
 import io.github.mfuerstenau.leia.protocol.index.IndexEntry;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
@@ -68,7 +69,9 @@ class OpenIndexHandlerTest {
                                         2,
                                         Version.LATEST.major,
                                         Optional.of(Version.LATEST.toString()))))),
-                        List.of()));
+                        List.of(),
+                        Feature.all(),
+                        Version.LATEST.toString()));
         assertThat(currentIndex.get())
                 .hasValueSatisfying(index -> assertThat(index.path()).isEqualTo(dir));
     }
@@ -160,7 +163,9 @@ class OpenIndexHandlerTest {
                         OptionalInt.empty(),
                         OptionalInt.empty(),
                         List.of(new IndexEntry(dir.toString(), Optional.empty())),
-                        List.of()));
+                        List.of(),
+                        Feature.withoutReader(),
+                        Version.LATEST.toString()));
         assertThat(currentIndex.opened()).isInstanceOf(DirectoryOnlyIndex.class);
         for (ThrowingCallable call : List.<ThrowingCallable>of(
                 () -> new GetIndexStatsHandler(currentIndex).handle(new GetIndexStatsParams()),

@@ -31,6 +31,7 @@ import io.github.mfuerstenau.leia.protocol.filter.FilterMatch;
 import io.github.mfuerstenau.leia.protocol.filter.StepFilterParams;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
+import io.github.mfuerstenau.leia.protocol.index.Feature;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
 import io.github.mfuerstenau.leia.protocol.index.IndexCommitStats;
 import io.github.mfuerstenau.leia.protocol.index.IndexEntry;
@@ -91,6 +92,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -838,7 +840,64 @@ class AppTest {
                 OptionalInt.empty(),
                 OptionalInt.empty(),
                 List.of(new IndexEntry("/data/broken", Optional.empty())),
-                List.of()));
+                List.of(),
+                Feature.withoutReader(),
+                "10.5.2"));
+    }
+
+    /** An index written by Lucene 2.4, which Lucene 3.6 reads with fewer features (ADR 0044). */
+    private static App oldLuceneApp() {
+        App app = app();
+        IndexCommitStats index = new IndexCommitStats(
+                "/data/old", 0, "segments_2", 2, 1, 1, 3, 3, 2, "2.x", Optional.of("2.x"), Map.of());
+        GetIndexStatsResult stats = new GetIndexStatsResult(
+                "/data/old", "FS", 1, 3, 3, List.of(index), List.of(field("id", 0), field("body", 1)));
+        app.opened(
+                stats,
+                List.of(),
+                Set.of(
+                        Feature.INDEX_STATS,
+                        Feature.DOCUMENTS,
+                        Feature.STORED_VALUES,
+                        Feature.TERM_VECTORS,
+                        Feature.TERMS,
+                        Feature.POSTINGS,
+                        Feature.CLASSIC_SEARCH),
+                "3.6.2");
+        return app;
+    }
+
+    @Test
+    void anOldLuceneIndexRefusesTheScreensItLacks() {
+        App app = oldLuceneApp();
+        String overview = render(app);
+        assertThat(overview).contains("Lucene 2.x, read with 3.6.2").doesNotContain("R reopen", "a all terms");
+
+        assertThat(app.handleKey(key('4'))).isEmpty();
+        assertThat(render(app)).contains("Commits: not for Lucene 2.x");
+        app.handleKey(key('7'));
+        assertThat(render(app)).contains("Check: not for Lucene 2.x");
+        app.handleKey(key('R'));
+        assertThat(render(app)).contains("Reopen: not for Lucene 2.x");
+        app.handleKey(key('a'));
+        assertThat(render(app)).contains("Top terms: not for Lucene 2.x");
+
+        // The screens it has still switch.
+        app.handleKey(key('3'));
+        assertThat(render(app)).doesNotContain("not for");
+        app.handleKey(key('5'));
+        assertThat(render(app)).doesNotContain("not for");
+    }
+
+    @Test
+    void anOldLuceneIndexOpensOnTheOverviewFromAScreenItLacks() {
+        App app = appWithFields();
+        app.handleKey(key('4'));
+        App old = oldLuceneApp();
+        assertThat(render(old)).contains("Lucene 2.x");
+        // The commits screen was shown: the overview is shown instead.
+        app.opened(stats("/data/old"), List.of(), Set.of(Feature.INDEX_STATS), "3.6.2");
+        assertThat(render(app)).doesNotContain("r read again");
     }
 
     @Test

@@ -12,6 +12,7 @@ import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
+import io.github.mfuerstenau.leia.server.legacy.Lucene3Results;
 import jakarta.inject.Inject;
 import java.io.IOException;
 import java.util.Optional;
@@ -39,6 +40,9 @@ public final class GetPostingsHandler implements MethodHandler<GetPostingsParams
 
     @Override
     public GetPostingsResult handle(GetPostingsParams params) throws RpcException {
+        if (currentIndex.legacy().isPresent()) {
+            return Lucene3Results.postings(currentIndex.legacy().get(), params);
+        }
         TermParams.checkLimit(params.limit(), GetPostingsParams.MAX_LIMIT);
         if (params.fromDoc() < 0) {
             throw new RpcException(

@@ -185,6 +185,38 @@ class SessionPilotTest {
         assertThat(Files.readAllLines(historyFile)).containsExactly(index.toString());
     }
 
+    /** An index written by Lucene 2.4, which the relocated Lucene 3.6 reads (ADR 0044). */
+    @Test
+    void opensALucene24IndexWithTheScreensItHas() throws Exception {
+        Path index = Path.of(System.getProperty("leia.test.index.lucene24")).toAbsolutePath();
+
+        openAtStart(index, OpenMode.READER);
+        assertThat(screen()).contains("Lucene 2.x, read with 3.6", "Documents  2 live, 1 deleted, 3 max");
+
+        pilot.press('2');
+        settle();
+        assertThat(screen()).contains("document number 1 of the old index");
+        pilot.press('3');
+        settle();
+        assertThat(screen()).contains("Terms").doesNotContain("not for");
+        pilot.press('4');
+        settle();
+        assertThat(screen()).contains("Commits: not for Lucene 2.x");
+
+        pilot.press('5');
+        pilot.press('/');
+        for (char c : "body:number".toCharArray()) {
+            pilot.press(c);
+        }
+        pilot.press(KeyCode.ENTER);
+        settle();
+        assertThat(screen()).contains("2 hits", "body=document number 3 of the old index");
+        // A feature the screen has, but Lucene 3 doesn't: the backend says so.
+        pilot.press('x');
+        settle();
+        assertThat(screen()).contains("Not supported for an index written by Lucene 2.x or 3.x");
+    }
+
     @Test
     void reopensAfterACommitAndOpensFromThePrompt() throws Exception {
         Path index = writeIndex(tmp.resolve("index"), 2);

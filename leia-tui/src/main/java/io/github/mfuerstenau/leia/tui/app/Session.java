@@ -1002,7 +1002,9 @@ public final class Session {
             }
             backend.call(Methods.GET_INDEX_STATS, new GetIndexStatsParams()).whenComplete((stats, statsError) -> {
                 if (statsError == null) {
-                    reply(runner, app -> app.opened(stats, result.skipped()));
+                    reply(
+                            runner,
+                            app -> app.opened(stats, result.skipped(), result.features(), result.luceneRuntime()));
                 } else {
                     closeUnseen(statsError, runner);
                 }

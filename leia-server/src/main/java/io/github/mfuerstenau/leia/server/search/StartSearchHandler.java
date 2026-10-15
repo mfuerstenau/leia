@@ -22,6 +22,7 @@ import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
+import io.github.mfuerstenau.leia.server.legacy.Lucene3Results;
 import jakarta.inject.Inject;
 import java.io.IOException;
 import java.util.List;
@@ -54,6 +55,9 @@ public final class StartSearchHandler implements MethodHandler<StartSearchParams
 
     @Override
     public JobStarted handle(StartSearchParams params) throws RpcException {
+        if (currentIndex.legacy().isPresent()) {
+            return Lucene3Results.startSearch(currentIndex.legacy().get(), params, jobs);
+        }
         int offset = params.offset();
         int limit = params.limit();
         if (limit < 1 || limit > StartSearchParams.MAX_LIMIT) {

@@ -8,6 +8,9 @@ dependencies {
     // the UI's compile classpath (AGENTS.md, hard rule 6).
     api(project(":leia-protocol"))
     implementation(project(":leia-core"))
+    // Lucene 3.6, relocated, for indexes written by Lucene 2.x and 3.x (ADR 0044): the shadow jar
+    // only, so the unrelocated Lucene 3 never meets Lucene 10 on the classpath.
+    implementation(project(mapOf("path" to ":leia-lucene3", "configuration" to "shadowRuntimeElements")))
     implementation(libs.dagger)
     annotationProcessor(libs.dagger.compiler)
 }
@@ -15,6 +18,11 @@ dependencies {
 tasks.test {
     useJUnitPlatform { excludeTags("jars") }
 }
+
+fun lucene3TestFiles(name: String, configuration: String) =
+    configurations.create(name) { isCanBeConsumed = false }.also {
+        dependencies.add(it.name, dependencies.project(mapOf("path" to ":leia-lucene3", "configuration" to configuration)))
+    }
 
 // The indexes and jars that leia-core's build writes, for the tests that go through LeiaBackend as
 // the UI does: the Lucene 9 index (AGENTS.md, hard rule 5) and the demo index (docs/demo-index.md)
@@ -27,6 +35,8 @@ fun coreTestFiles(name: String, configuration: String) =
 val testIndexFiles = mapOf(
     "lucene9" to coreTestFiles("lucene9TestIndex", "lucene9TestIndexElements"),
     "demo" to coreTestFiles("demoIndex", "demoIndexElements"),
+    // Written by leia-lucene3's build, read with the relocated Lucene 3.6 (ADR 0044).
+    "lucene24" to lucene3TestFiles("lucene24TestIndex", "lucene24TestIndexElements"),
 )
 val jarsTestIndexFiles = mapOf(
     "custom-codec" to coreTestFiles("testCodecIndex", "testCodecIndexElements"),

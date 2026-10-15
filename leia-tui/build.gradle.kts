@@ -41,11 +41,24 @@ application {
     mainClass = "io.github.mfuerstenau.leia.tui.Launcher"
 }
 
+// The Lucene 2.4 index that leia-lucene3's build writes, which a Pilot test opens (ADR 0044).
+val lucene24TestIndex = configurations.create("lucene24TestIndex") { isCanBeConsumed = false }
+
+dependencies {
+    lucene24TestIndex(project(path = ":leia-lucene3", configuration = "lucene24TestIndexElements"))
+}
+
 tasks.test {
     // LaunchScriptTest runs the leia script from here.
     inputs.dir("src/scripts")
     systemProperty("leia.scripts", file("src/scripts").absolutePath)
     useJUnitPlatform { excludeTags("jars") }
+    val lucene24Index: FileCollection = lucene24TestIndex
+    inputs.files(lucene24Index).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("lucene24Index")
+    val projectPath = projectDir.toPath()
+    jvmArgumentProviders.add(CommandLineArgumentProvider {
+        listOf("-Dleia.test.index.lucene24=" + projectPath.relativize(lucene24Index.singleFile.toPath()))
+    })
 }
 
 // The Pilot tests that add a jar (ADR 0024). Loading one changes Lucene's global lists of codecs

@@ -33,6 +33,7 @@ import io.github.mfuerstenau.leia.protocol.filter.GetFilterResult;
 import io.github.mfuerstenau.leia.protocol.filter.StartFilterParams;
 import io.github.mfuerstenau.leia.protocol.filter.StepFilterParams;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
+import io.github.mfuerstenau.leia.protocol.index.Feature;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
 import io.github.mfuerstenau.leia.protocol.index.IndexCommitStats;
 import io.github.mfuerstenau.leia.protocol.index.IndexEntry;
@@ -85,6 +86,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.Set;
 
 /**
  * The application state: what is on screen and what a key does. It makes no calls itself: {@link
@@ -284,6 +286,16 @@ public final class App {
      * backend stopped the jobs of the previous one. Returns what the shown screen has to fetch first.
      */
     public Optional<Action> opened(GetIndexStatsResult stats, List<SkippedIndex> skipped) {
+        return opened(stats, skipped, Feature.all(), "");
+    }
+
+    /**
+     * As {@link #opened(GetIndexStatsResult, List)}, for an index that can do only {@code features}:
+     * one that an old Lucene reads, whose version is {@code luceneRuntime} (ADR 0044). The screens it
+     * can't show are refused, and the overview is shown if the shown screen is one of them.
+     */
+    public Optional<Action> opened(
+            GetIndexStatsResult stats, List<SkippedIndex> skipped, Set<Feature> features, String luceneRuntime) {
         history.add(stats.path());
         overview = new Overview(stats, Logo.aboutLines(version), topN).withSkipped(skipped);
         forgetScans();
@@ -292,7 +304,15 @@ public final class App {
                 false,
                 directory,
                 stats.indexes().stream().map(IndexCommitStats::path).toList(),
-                skipped.stream().map(SkippedIndex::path).toList());
+                skipped.stream().map(SkippedIndex::path).toList(),
+                features,
+                features.containsAll(Feature.all())
+                        ? Optional.empty()
+                        : Optional.of("Lucene " + stats.indexes().getFirst().createdVersionMajor() + ".x, read with "
+                                + luceneRuntime));
+        if (!supports(screen)) {
+            screen = Screen.OVERVIEW;
+        }
         commits = new Commits(indexNames(opened));
         check = new Check(stats.path());
         pointFormats = new PointFormats();
@@ -350,7 +370,9 @@ public final class App {
                 true,
                 directory,
                 result.indexes().stream().map(IndexEntry::path).toList(),
-                result.skipped().stream().map(SkippedIndex::path).toList());
+                result.skipped().stream().map(SkippedIndex::path).toList(),
+                result.features(),
+                Optional.empty());
         commits = new Commits(indexNames(opened));
         check = new Check(result.path());
         analysis.indexChanged(List.of(), false, false);
@@ -399,7 +421,9 @@ public final class App {
                 false,
                 opened.directory(),
                 indexes.stream().map(IndexCommitStats::path).toList(),
-                opened.skipped());
+                opened.skipped(),
+                opened.features(),
+                opened.oldLucene());
         commits = new Commits(indexNames(opened));
         documents =
                 documents != null ? documents.reopened(stats.fields(), stats.maxDoc()) : newDocuments(stats, opened);
@@ -1478,6 +1502,10 @@ public final class App {
 
     /** Queues the scans of {@code fields}, and returns the scan to start if none runs. */
     private Optional<Action> requestScans(List<String> fields) {
+        if (!opened.supports(Feature.TOP_TERMS)) {
+            notice = new Notice.NotSupported("Top terms", whyNot());
+            return Optional.empty();
+        }
         for (String field : fields) {
             overview.setScan(field, Optional.of(new FieldScan.Queued()));
             queue.addLast(field);
@@ -1632,31 +1660,31 @@ public final class App {
             case 'q' -> {
                 return Optional.of(new Action.Quit());
             }
-            case '1' -> showIf(hasIndex(), Screen.OVERVIEW);
+            case '1' -> showIf(hasIndex() && supported(Screen.OVERVIEW), Screen.OVERVIEW);
             case '2' -> {
-                if (hasIndex()) {
+                if (hasIndex() && supported(Screen.DOCUMENTS)) {
                     screen = Screen.DOCUMENTS;
                     return initialRequest();
                 }
             }
             case '3' -> {
-                if (hasIndex()) {
+                if (hasIndex() && supported(Screen.TERMS)) {
                     screen = Screen.TERMS;
                     return initialRequest();
                 }
             }
             case '4' -> {
-                if (hasIndex()) {
+                if (hasIndex() && supported(Screen.COMMITS)) {
                     screen = Screen.COMMITS;
                     return initialRequest();
                 }
             }
-            case '5' -> showIf(hasIndex(), Screen.SEARCH);
+            case '5' -> showIf(hasIndex() && supported(Screen.SEARCH), Screen.SEARCH);
             case '6' -> {
                 screen = Screen.ANALYSIS;
                 return initialRequest();
             }
-            case '7' -> showIf(check != null, Screen.CHECK);
+            case '7' -> showIf(check != null && supported(Screen.CHECK), Screen.CHECK);
             case 'o' -> {
                 // Starts from the path that failed to open, then from the open index, so a sibling
                 // is a Ctrl+W away.
@@ -1675,6 +1703,10 @@ public final class App {
                 }
             }
             case 'R' -> {
+                if (overview != null && !opened.supports(Feature.REOPEN)) {
+                    notice = new Notice.NotSupported("Reopen", whyNot());
+                    return Optional.empty();
+                }
                 if (overview != null) {
                     notice = new Notice.Reopening();
                     busy = true;
@@ -1717,6 +1749,39 @@ public final class App {
             });
         }
         return Optional.empty();
+    }
+
+    /**
+     * Whether the open index can show {@code screen}; without a reader, the screens say so themselves
+     * (ADR 0021). An index that an old Lucene reads lacks some (ADR 0044).
+     */
+    private boolean supports(Screen screen) {
+        if (opened == null || opened.noReader()) {
+            return true;
+        }
+        return switch (screen) {
+            case OVERVIEW -> opened.supports(Feature.INDEX_STATS);
+            case DOCUMENTS -> opened.supports(Feature.DOCUMENTS);
+            case TERMS -> opened.supports(Feature.TERMS);
+            case COMMITS -> opened.supports(Feature.COMMITS);
+            case SEARCH -> opened.supports(Feature.SEARCH) || opened.supports(Feature.CLASSIC_SEARCH);
+            case ANALYSIS -> true;
+            case CHECK -> opened.supports(Feature.CHECK_INDEX);
+        };
+    }
+
+    /** Why the open index lacks a feature, for {@link Notice.NotSupported}: who wrote it, such as {@code Lucene 2.x}. */
+    private String whyNot() {
+        return opened.oldLucene().map(old -> old.substring(0, old.indexOf(','))).orElse("this index");
+    }
+
+    /** As {@link #supports(Screen)}; if not, the tab line says why until the next key. */
+    private boolean supported(Screen screen) {
+        if (supports(screen)) {
+            return true;
+        }
+        notice = new Notice.NotSupported(screen.name, whyNot());
+        return false;
     }
 
     private void showIf(boolean available, Screen screen) {
@@ -1779,7 +1844,7 @@ public final class App {
 
     /** The footer's keys for the shown screen; they follow the branches of {@link #renderScreen}. */
     private String footerKeys() {
-        String reopen = overview != null ? "R reopen   " : "";
+        String reopen = overview != null && opened.supports(Feature.REOPEN) ? "R reopen   " : "";
         String cancel = scan != null ? "Esc cancel scan   " : export != null ? "Esc cancel export   " : "";
         if (screen == Screen.ANALYSIS) {
             if (analysis.prompting()) {
@@ -1845,14 +1910,15 @@ public final class App {
                     + "r rebuild   E export   Tab panel   ↑↓";
         }
         if (scan != null) {
-            return " Esc cancel scan   q quit   o open   c close   R reopen   1-7 screen   s/S sort   Tab panel   ↑↓";
+            return " Esc cancel scan   q quit   o open   c close   " + reopen
+                    + "1-7 screen   s/S sort   Tab panel   ↑↓";
         }
         if (overview.selectedTopTerm().isPresent()) {
-            return " q quit   o open   c close   R reopen   1-7 screen   ⏎ term's docs   / search term   +/- top N   "
-                    + "s/S sort   Tab panel   ↑↓";
+            return " q quit   o open   c close   " + reopen
+                    + "1-7 screen   ⏎ term's docs   / search term   +/- top N   " + "s/S sort   Tab panel   ↑↓";
         }
-        return " q quit   o open   c close   R reopen   1-7 screen   ⏎ terms   a all terms   +/- top N   s/S sort   "
-                + "Tab panel   ↑↓";
+        String topTerms = opened.supports(Feature.TOP_TERMS) ? "⏎ terms   a all terms   +/- top N   " : "";
+        return " q quit   o open   c close   " + reopen + "1-7 screen   " + topTerms + "s/S sort   Tab panel   ↑↓";
     }
 
     private void renderAbout(Frame frame, Rect body) {
@@ -1943,7 +2009,10 @@ public final class App {
                 spans.add(Span.raw("│"));
             }
             spans.add(Span.raw(padding));
-            spans.add(tab == screen ? Span.styled(tab.title(), Style.EMPTY.reversed()) : Span.raw(tab.title()));
+            spans.add(
+                    tab == screen
+                            ? Span.styled(tab.title(), Style.EMPTY.reversed())
+                            : supports(tab) ? Span.raw(tab.title()) : Span.styled(tab.title(), Style.EMPTY.dim()));
             spans.add(Span.raw(padding));
         }
         frame.renderWidget(Paragraph.from(Line.from(spans)), tabs);
@@ -1972,6 +2041,8 @@ public final class App {
         String text;
         if (opened.noReader()) {
             text = count == 1 ? "no reader" : "no reader, " + count + " indexes";
+        } else if (opened.oldLucene().isPresent()) {
+            text = opened.oldLucene().get();
         } else if (count > 1) {
             text = count + " indexes";
         } else {

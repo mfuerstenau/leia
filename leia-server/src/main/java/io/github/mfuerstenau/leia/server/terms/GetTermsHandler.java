@@ -12,6 +12,7 @@ import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
+import io.github.mfuerstenau.leia.server.legacy.Lucene3Results;
 import jakarta.inject.Inject;
 import java.io.IOException;
 import java.util.Optional;
@@ -34,6 +35,9 @@ public final class GetTermsHandler implements MethodHandler<GetTermsParams, GetT
 
     @Override
     public GetTermsResult handle(GetTermsParams params) throws RpcException {
+        if (currentIndex.legacy().isPresent()) {
+            return Lucene3Results.terms(currentIndex.legacy().get(), params);
+        }
         TermParams.checkLimit(params.limit(), GetTermsParams.MAX_LIMIT);
         Optional<BytesRef> from = params.from().isPresent()
                 ? Optional.of(TermParams.term(params.from().get()))

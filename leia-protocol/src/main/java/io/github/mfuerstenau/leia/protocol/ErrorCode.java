@@ -57,7 +57,12 @@ public enum ErrorCode {
      * The server doesn't keep that filter (ADR 0031): it is unknown, was released or replaced, or its
      * index was closed or reopened.
      */
-    FILTER_NOT_FOUND(-32018);
+    FILTER_NOT_FOUND(-32018),
+    /**
+     * The open index can't do that: it was written by a Lucene version whose runtime in leia lacks the
+     * feature (ADR 0044). {@code openIndex} lists the features that work.
+     */
+    NOT_SUPPORTED(-32019);
 
     private final int code;
 

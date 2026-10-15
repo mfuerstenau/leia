@@ -6,6 +6,7 @@ import io.github.mfuerstenau.leia.protocol.index.CloseIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.CloseIndexResult;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import jakarta.inject.Inject;
+import java.nio.file.Path;
 
 /** {@code closeIndex}: closes the {@link CurrentIndex}, if one is open. */
 public final class CloseIndexHandler implements MethodHandler<CloseIndexParams, CloseIndexResult> {
@@ -24,7 +25,6 @@ public final class CloseIndexHandler implements MethodHandler<CloseIndexParams, 
 
     @Override
     public CloseIndexResult handle(CloseIndexParams params) {
-        return new CloseIndexResult(
-                currentIndex.close().map(index -> index.path().toString()));
+        return new CloseIndexResult(currentIndex.close().map(Path::toString));
     }
 }
