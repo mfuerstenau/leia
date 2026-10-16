@@ -55,6 +55,4 @@ tamboui-jline3-backend = { module = "dev.tamboui:tamboui-jline3-backend" }
 tamboui-panama-backend = { module = "dev.tamboui:tamboui-panama-backend" }
 # Gradle plugins used as libraries by build-logic
 spotless-gradle-plugin = { module = "com.diffplug.spotless:spotless-plugin-gradle", version.ref = "spotless" }
-
-[plugins]
-shadow = { id = "com.gradleup.shadow", version.ref = "shadow" }
+shadow-gradle-plugin = { module = "com.gradleup.shadow:shadow-gradle-plugin", version.ref = "shadow" }

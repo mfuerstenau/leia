@@ -1,7 +1,7 @@
 plugins {
     id("leia.java-conventions")
     application
-    alias(libs.plugins.shadow)
+    id("com.gradleup.shadow")
 }
 
 // The entry class that checks the Java version before anything else loads (ADR 0034 §8). It is
