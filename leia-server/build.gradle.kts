@@ -10,12 +10,13 @@ dependencies {
     implementation(project(":leia-core"))
     // The interface to the runtimes for indexes that Lucene 10 can't read (ADR 0044).
     implementation(project(":leia-runtime"))
-    // Lucene 3.6 and 5.5, relocated, for indexes written by Lucene 2.x to 5.x: found through
+    // Lucene 3.6, 5.5 and 7.7, relocated, for indexes written by Lucene 2.x to 7.x: found through
     // ServiceLoader, and the shadow jars only, so an unrelocated old Lucene never meets Lucene 10 on
     // the classpath. For the tests only: test reaches them through the classpath, jarsTest as loaded
     // jars, and leia through runtimes/ beside leia.jar, where leia-tui puts them (ADR 0044).
     testRuntimeOnly(project(mapOf("path" to ":leia-lucene3", "configuration" to "shadowRuntimeElements")))
     testRuntimeOnly(project(mapOf("path" to ":leia-lucene5", "configuration" to "shadowRuntimeElements")))
+    testRuntimeOnly(project(mapOf("path" to ":leia-lucene7", "configuration" to "shadowRuntimeElements")))
     implementation(libs.dagger)
     annotationProcessor(libs.dagger.compiler)
 }
@@ -32,6 +33,8 @@ fun runtimeTestFiles(runtime: String, name: String, configuration: String) =
 fun lucene3TestFiles(name: String, configuration: String) = runtimeTestFiles("leia-lucene3", name, configuration)
 
 fun lucene5TestFiles(name: String, configuration: String) = runtimeTestFiles("leia-lucene5", name, configuration)
+
+fun lucene7TestFiles(name: String, configuration: String) = runtimeTestFiles("leia-lucene7", name, configuration)
 
 // The indexes and jars that leia-core's build writes, for the tests that go through LeiaBackend as
 // the UI does: the Lucene 9 index (AGENTS.md, hard rule 5) and the demo index (docs/demo-index.md)
@@ -52,6 +55,9 @@ val testIndexFiles = mapOf(
     // Written by leia-lucene5's build, read with the relocated Lucene 5.5 (ADR 0046).
     "lucene4" to lucene5TestFiles("lucene4TestIndex", "lucene4TestIndexElements"),
     "lucene5" to lucene5TestFiles("lucene5TestIndex", "lucene5TestIndexElements"),
+    // Written by leia-lucene7's build, read with the relocated Lucene 7.7 (ADR 0048).
+    "lucene6" to lucene7TestFiles("lucene6TestIndex", "lucene6TestIndexElements"),
+    "lucene7" to lucene7TestFiles("lucene7TestIndex", "lucene7TestIndexElements"),
 )
 val jarsTestIndexFiles = mapOf(
     "custom-codec" to coreTestFiles("testCodecIndex", "testCodecIndexElements"),
@@ -60,12 +66,15 @@ val jarsTestIndexFiles = mapOf(
     "lucene3" to testIndexFiles.getValue("lucene3"),
     "lucene4" to testIndexFiles.getValue("lucene4"),
     "lucene5" to testIndexFiles.getValue("lucene5"),
+    "lucene6" to testIndexFiles.getValue("lucene6"),
+    "lucene7" to testIndexFiles.getValue("lucene7"),
 )
 val testCodecJar = coreTestFiles("testCodecJar", "testCodecJarElements")
 val testAnalysisJars = coreTestFiles("testAnalysisJars", "testAnalysisJarsElements")
 // The runtime jars, which jarsTest loads as leia loads runtimes/, instead of from the classpath.
 val lucene3RuntimeJar = lucene3TestFiles("lucene3RuntimeJar", "shadowRuntimeElements").apply { isTransitive = false }
 val lucene5RuntimeJar = lucene5TestFiles("lucene5RuntimeJar", "shadowRuntimeElements").apply { isTransitive = false }
+val lucene7RuntimeJar = lucene7TestFiles("lucene7RuntimeJar", "shadowRuntimeElements").apply { isTransitive = false }
 
 /** Passes each file as a system property, relative to the test's working directory (this project). */
 fun Test.testFiles(properties: Map<String, FileCollection>) {
@@ -86,7 +95,7 @@ val jarsTest = tasks.register<Test>("jarsTest") {
     description = "Runs the tests that load jars, in a JVM of their own."
     group = "verification"
     testClassesDirs = sourceSets.test.get().output.classesDirs
-    classpath = sourceSets.test.get().runtimeClasspath - lucene3RuntimeJar - lucene5RuntimeJar
+    classpath = sourceSets.test.get().runtimeClasspath - lucene3RuntimeJar - lucene5RuntimeJar - lucene7RuntimeJar
     useJUnitPlatform { includeTags("jars") }
     testFiles(
         jarsTestIndexFiles.mapKeys { "leia.test.index.${it.key}" } +
@@ -95,6 +104,7 @@ val jarsTest = tasks.register<Test>("jarsTest") {
                 "leia.test.analysis.jars" to testAnalysisJars,
                 "leia.test.runtime.lucene3" to lucene3RuntimeJar,
                 "leia.test.runtime.lucene5" to lucene5RuntimeJar,
+                "leia.test.runtime.lucene7" to lucene7RuntimeJar,
             ),
     )
 }

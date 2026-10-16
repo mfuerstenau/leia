@@ -38,6 +38,13 @@ import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
+import io.github.mfuerstenau.leia.protocol.points.GetPointCellParams;
+import io.github.mfuerstenau.leia.protocol.points.GetPointCellResult;
+import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
+import io.github.mfuerstenau.leia.protocol.points.GetPointTreeResult;
+import io.github.mfuerstenau.leia.protocol.points.LeafPoint;
+import io.github.mfuerstenau.leia.protocol.points.PointCell;
+import io.github.mfuerstenau.leia.protocol.points.PointSegment;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.HitField;
@@ -61,6 +68,7 @@ import io.github.mfuerstenau.leia.runtime.Commits;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.Documents;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
+import io.github.mfuerstenau.leia.runtime.Points;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.Terms;
@@ -70,6 +78,7 @@ import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.index.IndexDirectories;
 import io.github.mfuerstenau.leia.server.job.Jobs;
+import io.github.mfuerstenau.leia.server.points.PointMapper;
 import io.github.mfuerstenau.leia.server.terms.TermParams;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -98,8 +107,9 @@ public final class RuntimeResults {
 
     /**
      * What works on {@code open}: the statistics, the features of the groups its index has, and the
-     * commits and the check if its runtime has them (ADR 0045, ADR 0046): doc values with the
-     * documents if a field has them, and the check's levels if the runtime's check takes them.
+     * commits and the check if its runtime has them (ADR 0045, ADR 0046, ADR 0048): doc values with
+     * the documents and points if a field has them, and the check's levels if the runtime's check
+     * takes them.
      */
     public static Set<Feature> features(OpenRuntime open) {
         RuntimeIndex index = open.index();
@@ -115,6 +125,9 @@ public final class RuntimeResults {
         }
         if (index.search().isPresent()) {
             features.add(Feature.CLASSIC_SEARCH);
+        }
+        if (index.points().isPresent() && index.fields().stream().anyMatch(field -> field.pointDimensionCount() > 0)) {
+            features.add(Feature.POINTS);
         }
         if (open.runtime().commits().isPresent()) {
             features.add(Feature.COMMITS);
@@ -144,7 +157,7 @@ public final class RuntimeResults {
                                         index.segmentsFile(),
                                         index.numDocs(),
                                         index.maxDoc(),
-                                        index.oldestMajor(),
+                                        index.createdMajor(),
                                         index.oldestSegmentVersion()))))
                         .toList(),
                 open.skipped().stream()
@@ -194,7 +207,8 @@ public final class RuntimeResults {
                         commit.segmentVersions().size(),
                         commit.numDocs(),
                         commit.maxDoc(),
-                        commit.oldestMajor(),
+                        // How the norms are encoded (ADR 0048).
+                        commit.createdMajor(),
                         // Before 5.3, the newest segment stands in for the version that wrote the commit.
                         commit.commitVersion(open.runtime().luceneVersion()),
                         commit.oldestSegmentVersion(),
@@ -270,8 +284,9 @@ public final class RuntimeResults {
     }
 
     /**
-     * A segment of a runtime: before Lucene 4 without id, codec or formats (ADR 0045), and never with
-     * soft deletes, document blocks or an index sort, which came later (ADR 0046).
+     * A segment of a runtime: before Lucene 4 without id, codec or formats (ADR 0045), before 6.2
+     * without an index sort, before 7.0 without a minimum version, before 7.4 without soft deletes
+     * (ADR 0048), and never with document blocks, which came with 9.9.
      */
     private static Segment segment(Commits.Segment segment) {
         return new Segment(
@@ -280,12 +295,12 @@ public final class RuntimeResults {
                 segment.maxDoc(),
                 segment.docBase(),
                 segment.delCount(),
-                0,
+                segment.softDelCount(),
                 segment.delGen(),
                 segment.fieldInfosGen(),
                 segment.docValuesGen(),
                 segment.luceneVersion(),
-                Optional.empty(),
+                segment.minLuceneVersion(),
                 segment.codec(),
                 segment.formats()
                         .map(formats -> new CodecFormats(
@@ -307,7 +322,7 @@ public final class RuntimeResults {
                 segment.fieldInfosError(),
                 segment.compound(),
                 false,
-                Optional.empty(),
+                segment.indexSort(),
                 segment.sizeInBytes(),
                 Map.copyOf(segment.diagnostics()),
                 Map.copyOf(segment.attributes()));
@@ -329,8 +344,8 @@ public final class RuntimeResults {
                 field.hasPayloads(),
                 field.hasTermVectors(),
                 docValuesType(field.docValuesType()),
-                0,
-                0,
+                field.pointDimensionCount(),
+                field.pointNumBytes(),
                 0,
                 Optional.empty(),
                 Optional.empty(),
@@ -534,6 +549,91 @@ public final class RuntimeResults {
                 position.startOffset(),
                 position.endOffset(),
                 position.payload().map(payload -> ByteStrings.hex(new BytesRef(payload))));
+    }
+
+    /** {@code getPointTree}: a point field's BKD tree, segment by segment (ADR 0041, ADR 0048). */
+    public static GetPointTreeResult pointTree(OpenRuntime open, GetPointTreeParams params) throws RpcException {
+        Points points = open.index().points().orElseThrow(open::notSupported);
+        String field = params.field();
+        int bytes = checkPointField(open.index(), field);
+        Points.Tree tree;
+        List<Integer> docBases;
+        try {
+            tree = points.tree(field);
+            docBases = stats(open.index()).indexes().stream()
+                    .map(RuntimeIndex.IndexStats::docBase)
+                    .toList();
+        } catch (IOException e) {
+            throw PointMapper.notReadable(field, e);
+        }
+        return new GetPointTreeResult(
+                tree.field(),
+                tree.dimensions(),
+                tree.indexDimensions(),
+                tree.bytesPerDimension(),
+                tree.size(),
+                tree.docCount(),
+                tree.min().map(min -> PointMapper.pointValue(min, bytes)),
+                tree.max().map(max -> PointMapper.pointValue(max, bytes)),
+                tree.segments().stream()
+                        .map(segment -> new PointSegment(
+                                segment.segment(),
+                                PointMapper.indexOf(docBases, segment.docBase()),
+                                segment.name(),
+                                segment.docBase(),
+                                segment.maxDoc(),
+                                segment.size(),
+                                segment.docCount(),
+                                PointMapper.pointValue(segment.min(), bytes),
+                                PointMapper.pointValue(segment.max(), bytes)))
+                        .toList());
+    }
+
+    /** {@code getPointCell}: a cell of a point field's BKD tree in one segment (ADR 0041, ADR 0048). */
+    public static GetPointCellResult pointCell(OpenRuntime open, GetPointCellParams params) throws RpcException {
+        Points points = open.index().points().orElseThrow(open::notSupported);
+        String field = params.field();
+        int bytes = checkPointField(open.index(), field);
+        Points.CellContents contents;
+        try {
+            contents = points.cell(field, params.segment(), List.copyOf(params.path()));
+        } catch (IllegalArgumentException e) {
+            throw new RpcException(ErrorCode.INVALID_PARAMS, "Invalid params: " + e.getMessage(), e);
+        } catch (IOException e) {
+            throw PointMapper.notReadable(field, e);
+        }
+        return new GetPointCellResult(
+                pointCell(contents.cell(), bytes),
+                contents.children().stream().map(cell -> pointCell(cell, bytes)).toList(),
+                contents.points().stream()
+                        .map(point -> new LeafPoint(
+                                point.docId(), point.deleted(), PointMapper.pointValue(point.value(), bytes)))
+                        .toList(),
+                contents.pointsCut());
+    }
+
+    private static PointCell pointCell(Points.Cell cell, int bytes) {
+        return new PointCell(
+                PointMapper.pointValue(cell.min(), bytes),
+                PointMapper.pointValue(cell.max(), bytes),
+                cell.size(),
+                cell.leaf());
+    }
+
+    /**
+     * Checks that {@code field} is a field with points, as {@code PointMapper.checkPointField} does.
+     * Returns the bytes of each of its dimensions.
+     */
+    private static int checkPointField(RuntimeIndex index, String field) throws RpcException {
+        RuntimeIndex.Field info = index.fields().stream()
+                .filter(f -> f.name().equals(field))
+                .findFirst()
+                .orElseThrow(
+                        () -> new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + field + "' in the index"));
+        if (info.pointDimensionCount() == 0) {
+            throw new RpcException(ErrorCode.INVALID_PARAMS, "Invalid params: the field '" + field + "' has no points");
+        }
+        return info.pointNumBytes();
     }
 
     /**

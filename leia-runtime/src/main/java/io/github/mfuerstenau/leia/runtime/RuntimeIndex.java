@@ -7,6 +7,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
 
 /**
  * An index opened by a {@link LuceneRuntime}. What it can read beyond the statistics is in groups: a
@@ -40,6 +41,9 @@ public interface RuntimeIndex extends Closeable {
     /** The classic query parser and search. */
     Optional<Search> search();
 
+    /** The BKD trees of point fields (ADR 0048). */
+    Optional<Points> points();
+
     /** How a field is indexed. */
     enum IndexOptions {
         NONE,
@@ -62,6 +66,8 @@ public interface RuntimeIndex extends Closeable {
     /**
      * A field of the index.
      *
+     * @param pointDimensionCount dimensions of its points; 0 without points, as before Lucene 6
+     * @param pointNumBytes bytes of each dimension of its points; 0 without points
      * @param terms its postings statistics; empty if no segment has postings for it, or the runtime's
      *     Lucene doesn't record them
      */
@@ -73,6 +79,8 @@ public interface RuntimeIndex extends Closeable {
             boolean hasPayloads,
             boolean hasTermVectors,
             DocValuesType docValuesType,
+            int pointDimensionCount,
+            int pointNumBytes,
             Optional<TermStats> terms) {}
 
     /**
@@ -99,6 +107,8 @@ public interface RuntimeIndex extends Closeable {
      *     2.x} for a segment written before 3.0, which didn't record it
      * @param luceneVersion the Lucene version that wrote the commit; empty if it isn't recorded, as
      *     before 5.3
+     * @param createdVersionMajor the major version of the Lucene that created the index; empty if it
+     *     isn't recorded, as before 7.0 (though 7.x reports 6 for a commit of 6.x)
      */
     record IndexStats(
             Path path,
@@ -110,7 +120,17 @@ public interface RuntimeIndex extends Closeable {
             int maxDoc,
             List<String> segmentVersions,
             Optional<String> luceneVersion,
+            OptionalInt createdVersionMajor,
             Map<String, String> userData) {
+
+        /**
+         * The major version of the Lucene that created the index, or else of its oldest segment. It
+         * says how the norms are encoded: a segment that a newer Lucene rewrote keeps them as the
+         * index's creator wrote them.
+         */
+        public int createdMajor() {
+            return createdVersionMajor.orElseGet(this::oldestMajor);
+        }
 
         /** The major version of the oldest segment, which stands in for the version that created the index. */
         public int oldestMajor() {

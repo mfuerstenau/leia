@@ -33,6 +33,7 @@ dependencies {
     // The old indexes of the Pilot tests need the runtimes, which leia.jar leaves to runtimes/.
     testRuntimeOnly(project(path = ":leia-lucene3", configuration = "shadowRuntimeElements"))
     testRuntimeOnly(project(path = ":leia-lucene5", configuration = "shadowRuntimeElements"))
+    testRuntimeOnly(project(path = ":leia-lucene7", configuration = "shadowRuntimeElements"))
     // The Pilot tests write the indexes they open, as leia-server's tests do.
     testImplementation(libs.lucene.core)
     testImplementation(platform(libs.tamboui.bom))
@@ -45,12 +46,14 @@ application {
 }
 
 // The old indexes that the runtimes' builds write, which Pilot tests open (ADR 0044): Lucene 2.4 and
-// 3.x from leia-lucene3, 4.x and 5.x from leia-lucene5.
+// 3.x from leia-lucene3, 4.x and 5.x from leia-lucene5, 6.x and 7.x from leia-lucene7.
 val oldTestIndexes = mapOf(
     "lucene24" to "leia-lucene3",
     "lucene3" to "leia-lucene3",
     "lucene4" to "leia-lucene5",
     "lucene5" to "leia-lucene5",
+    "lucene6" to "leia-lucene7",
+    "lucene7" to "leia-lucene7",
 ).mapValues { (name, runtime) ->
     configurations.create("${name}TestIndex") { isCanBeConsumed = false }.also {
         dependencies.add(it.name, dependencies.project(mapOf("path" to ":$runtime", "configuration" to "${name}TestIndexElements")))
@@ -146,6 +149,7 @@ val runtimeJars = configurations.create("runtimeJars") {
 dependencies {
     runtimeJars(project(path = ":leia-lucene3", configuration = "shadowRuntimeElements"))
     runtimeJars(project(path = ":leia-lucene5", configuration = "shadowRuntimeElements"))
+    runtimeJars(project(path = ":leia-lucene7", configuration = "shadowRuntimeElements"))
 }
 
 // The folder leia runs from: leia.jar, the scripts that start it (ADR 0034 §8) and runtimes/.

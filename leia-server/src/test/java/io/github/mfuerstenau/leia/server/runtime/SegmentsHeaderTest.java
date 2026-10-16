@@ -42,6 +42,8 @@ class SegmentsHeaderTest {
     @Test
     void readsRealIndexes() throws IOException {
         assertThat(SegmentsHeader.read(testIndex("lucene24"))).contains(new IndexVersion(2, "2.x"));
+        assertThat(SegmentsHeader.read(testIndex("lucene6"))).contains(new IndexVersion(6, "6.6.6"));
+        assertThat(SegmentsHeader.read(testIndex("lucene7"))).contains(new IndexVersion(7, "7.7.3"));
         assertThat(SegmentsHeader.read(testIndex("lucene8"))).contains(new IndexVersion(8, "8.11.4"));
         assertThat(SegmentsHeader.read(testIndex("lucene9"))).hasValueSatisfying(version -> {
             assertThat(version.major()).isEqualTo(9);

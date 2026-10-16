@@ -112,6 +112,8 @@ class Lucene3IndexTest {
                             false,
                             true,
                             RuntimeIndex.DocValuesType.NONE,
+                            0,
+                            0,
                             Optional.empty()));
             assertThat(stats.fields().get(2).indexOptions()).isEqualTo(RuntimeIndex.IndexOptions.NONE);
         }

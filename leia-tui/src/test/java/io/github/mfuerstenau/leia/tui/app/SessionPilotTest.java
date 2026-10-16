@@ -253,6 +253,37 @@ class SessionPilotTest {
         assertThat(screen()).contains("OK: no problems found in 1 index");
     }
 
+    /** An index written by Lucene 7.7, which the relocated Lucene 7.7 reads with its points (ADR 0048). */
+    @Test
+    void opensALucene7IndexAndWalksItsPointTree() throws Exception {
+        Path index = Path.of(System.getProperty("leia.test.index.lucene7")).toAbsolutePath();
+
+        openAtStart(index, OpenMode.READER);
+        assertThat(screen()).contains("Documents  7 live, 1 deleted, 8 max");
+
+        // id, body, tag, then the point fields.
+        pilot.press('3');
+        settle();
+        for (int i = 0; i < 3; i++) {
+            pilot.press(KeyCode.DOWN);
+            settle();
+        }
+        assertThat(screen()).contains("pt · 2 segments · 120 points in 8 docs", "▸ _0  60 pts  100 … 414");
+        // Into the tree: _0, then its left cell, then that cell's first leaf.
+        pilot.press(KeyCode.RIGHT);
+        pilot.press(KeyCode.ENTER);
+        settle();
+        assertThat(screen()).contains("▾ _0  60 pts", "▸ 32 pts  100 … 302", "▸ 28 pts  302 … 414");
+        pilot.press(KeyCode.DOWN);
+        pilot.press(KeyCode.ENTER);
+        settle();
+        assertThat(screen()).contains("• 16 pts  100 … 201");
+        pilot.press(KeyCode.DOWN);
+        pilot.press(KeyCode.ENTER);
+        settle();
+        assertThat(screen()).contains("Points (16)");
+    }
+
     @Test
     void reopensAfterACommitAndOpensFromThePrompt() throws Exception {
         Path index = writeIndex(tmp.resolve("index"), 2);

@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.lucene5;
 
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.Documents;
+import io.github.mfuerstenau.leia.runtime.Points;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.Terms;
@@ -173,6 +174,12 @@ final class Lucene5Index implements RuntimeIndex, Documents, Terms, Search {
         return Optional.of(this);
     }
 
+    /** {@inheritDoc} Points came with Lucene 6. */
+    @Override
+    public Optional<Points> points() {
+        return Optional.empty();
+    }
+
     @Override
     public Stats stats() throws IOException {
         List<IndexStats> indexes = new ArrayList<>();
@@ -195,6 +202,8 @@ final class Lucene5Index implements RuntimeIndex, Documents, Terms, Search {
                     List.copyOf(versions),
                     // Recorded since 5.3.
                     Optional.ofNullable(infos.getCommitLuceneVersion()).map(Object::toString),
+                    // Recorded since 7.0.
+                    OptionalInt.empty(),
                     Map.copyOf(commit.getUserData())));
             docBase += part.reader().maxDoc();
         }
@@ -224,6 +233,8 @@ final class Lucene5Index implements RuntimeIndex, Documents, Terms, Search {
                     info.hasPayloads(),
                     info.hasVectors(),
                     docValuesType(info.getDocValuesType()),
+                    0,
+                    0,
                     termStats(info.name)));
         }
         result.sort(Comparator.comparingInt(Field::number));

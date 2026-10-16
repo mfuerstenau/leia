@@ -75,6 +75,11 @@ public interface Commits {
      * @param fieldInfosError why its field infos can't be read; empty if they can
      * @param fieldInfosGen the generation of its field infos update; empty without one
      * @param docValuesGen the generation of its doc values updates; empty without one
+     * @param softDelCount its soft-deleted documents, 0 before Lucene 7.4
+     * @param minLuceneVersion the oldest Lucene version that wrote a part of it; empty before 7.0, or
+     *     if it isn't known
+     * @param indexSort how its documents are sorted, as Lucene's {@code Sort} describes it; empty if
+     *     they aren't, as always before Lucene 6.2
      */
     record Segment(
             String name,
@@ -93,7 +98,52 @@ public interface Commits {
             List<FieldFormats> fieldFormats,
             Optional<String> fieldInfosError,
             OptionalLong fieldInfosGen,
-            OptionalLong docValuesGen) {
+            OptionalLong docValuesGen,
+            int softDelCount,
+            Optional<String> minLuceneVersion,
+            Optional<String> indexSort) {
+
+        /** A segment of Lucene 4.x or 5.x: no soft deletes, no minimum version, no index sort. */
+        public Segment(
+                String name,
+                int maxDoc,
+                int docBase,
+                int delCount,
+                OptionalLong delGen,
+                String luceneVersion,
+                boolean compound,
+                OptionalLong sizeInBytes,
+                Map<String, String> diagnostics,
+                Map<String, String> attributes,
+                Optional<String> id,
+                Optional<String> codec,
+                Optional<Formats> formats,
+                List<FieldFormats> fieldFormats,
+                Optional<String> fieldInfosError,
+                OptionalLong fieldInfosGen,
+                OptionalLong docValuesGen) {
+            this(
+                    name,
+                    maxDoc,
+                    docBase,
+                    delCount,
+                    delGen,
+                    luceneVersion,
+                    compound,
+                    sizeInBytes,
+                    diagnostics,
+                    attributes,
+                    id,
+                    codec,
+                    formats,
+                    fieldFormats,
+                    fieldInfosError,
+                    fieldInfosGen,
+                    docValuesGen,
+                    0,
+                    Optional.empty(),
+                    Optional.empty());
+        }
 
         /** A segment before codecs, as Lucene 2.x and 3.x write it. */
         public Segment(

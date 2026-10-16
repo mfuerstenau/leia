@@ -125,6 +125,8 @@ class Lucene5IndexTest {
                             true,
                             true,
                             RuntimeIndex.DocValuesType.NONE,
+                            0,
+                            0,
                             // alpha, document and 1 to 7 in each document, beta in 4, gamma twice in 1.
                             Optional.of(new RuntimeIndex.TermStats(7, 26, 27))));
             RuntimeIndex.Field tag = stats.fields().get(2);

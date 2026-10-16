@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.lucene3;
 
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.Documents;
+import io.github.mfuerstenau.leia.runtime.Points;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.Terms;
@@ -158,6 +159,12 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
         return Optional.of(this);
     }
 
+    /** {@inheritDoc} Points came with Lucene 6. */
+    @Override
+    public Optional<Points> points() {
+        return Optional.empty();
+    }
+
     @Override
     public Stats stats() throws IOException {
         List<IndexStats> indexes = new ArrayList<>();
@@ -179,8 +186,9 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
                     part.reader().numDocs(),
                     part.reader().maxDoc(),
                     List.copyOf(versions),
-                    // 3.6 doesn't record which version wrote a commit.
+                    // 3.6 records neither which version wrote a commit nor which created the index.
                     Optional.empty(),
+                    OptionalInt.empty(),
                     Map.copyOf(commit.getUserData())));
             docBase += part.reader().maxDoc();
         }
@@ -208,6 +216,8 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
                     info.storePayloads,
                     info.storeTermVector,
                     DocValuesType.NONE,
+                    0,
+                    0,
                     Optional.empty()));
         }
         fields.sort(Comparator.comparingInt(Field::number));

@@ -26,6 +26,7 @@ import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
 import io.github.mfuerstenau.leia.protocol.jars.GetJarsParams;
+import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.server.runtime.FutureRuntime;
 import java.io.IOException;
@@ -72,9 +73,11 @@ class JarsBackendTest {
         // Not on jarsTest's classpath: loaded as leia loads runtimes/ (ADR 0044).
         Path lucene3Jar = testFile("leia.test.runtime.lucene3");
         Path lucene5Jar = testFile("leia.test.runtime.lucene5");
-        try (RealBackend backend = RealBackend.start(List.of(codecJar, lucene3Jar, lucene5Jar))) {
+        Path lucene7Jar = testFile("leia.test.runtime.lucene7");
+        try (RealBackend backend = RealBackend.start(List.of(codecJar, lucene3Jar, lucene5Jar, lucene7Jar))) {
             assertThat(backend.call(Methods.GET_JARS, new GetJarsParams()).jars())
-                    .containsExactly(codecJar.toString(), lucene3Jar.toString(), lucene5Jar.toString());
+                    .containsExactly(
+                            codecJar.toString(), lucene3Jar.toString(), lucene5Jar.toString(), lucene7Jar.toString());
 
             // The codec, and Lucene's codec with the jar's postings, doc values and KNN vectors formats.
             for (String name : List.of("custom-codec", "custom-formats")) {
@@ -164,6 +167,25 @@ class JarsBackendTest {
                                 .segments())
                         .as(name)
                         .allSatisfy(segment -> assertThat(segment.codec()).isPresent());
+            }
+
+            // Lucene 7.7 likewise, with the codecs of 6.x in backward-codecs and the points (ADR 0048).
+            for (String name : List.of("lucene6", "lucene7")) {
+                assertThat(backend.call(
+                                        Methods.OPEN_INDEX,
+                                        new OpenIndexParams(testIndex(name).toString()))
+                                .luceneRuntime())
+                        .isEqualTo("7.7.3");
+                assertThat(backend.call(Methods.GET_DOCUMENT, new GetDocumentParams(0))
+                                .fields())
+                        .as(name)
+                        .filteredOn(field -> field.name().equals("dv_set"))
+                        .singleElement()
+                        .satisfies(dvSet -> assertThat(dvSet.docValues()).isPresent());
+                assertThat(backend.call(Methods.GET_POINT_TREE, new GetPointTreeParams("pt"))
+                                .segments())
+                        .as(name)
+                        .hasSize(2);
             }
 
             // Lucene reads the service files of every loaded jar again, so a jar that is gone stops it.

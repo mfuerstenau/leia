@@ -30,6 +30,22 @@ public final class PointMapper {
         return new PointValue(List.copyOf(dimensions));
     }
 
+    /** As {@link #pointValue(BytesRef, int)}, for a packed point of a runtime (ADR 0048). */
+    public static PointValue pointValue(byte[] packed, int bytesPerDimension) {
+        return pointValue(new BytesRef(packed), bytesPerDimension);
+    }
+
+    /** The index directory that a document id is in: the last one starting at or before it. */
+    public static int indexOf(List<Integer> docBases, int docId) {
+        int found = 0;
+        for (int i = 0; i < docBases.size(); i++) {
+            if (docBases.get(i) <= docId) {
+                found = i;
+            }
+        }
+        return found;
+    }
+
     /**
      * Checks that {@code field} is a field with points. Returns the bytes of each of its dimensions.
      *
@@ -46,7 +62,7 @@ public final class PointMapper {
         return info.getPointNumBytes();
     }
 
-    static RpcException notReadable(String field, IOException e) {
+    public static RpcException notReadable(String field, IOException e) {
         return new RpcException(
                 ErrorCode.INDEX_NOT_READABLE, "Cannot read the points of field '" + field + "': " + e.getMessage(), e);
     }

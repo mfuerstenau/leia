@@ -12,6 +12,7 @@ import io.github.mfuerstenau.leia.protocol.points.PointCell;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
+import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
 import jakarta.inject.Inject;
 import java.io.IOException;
 import java.util.List;
@@ -36,6 +37,9 @@ public final class GetPointCellHandler implements MethodHandler<GetPointCellPara
 
     @Override
     public GetPointCellResult handle(GetPointCellParams params) throws RpcException {
+        if (currentIndex.runtime().isPresent()) {
+            return RuntimeResults.pointCell(currentIndex.runtime().get(), params);
+        }
         ReadOnlyIndex index = currentIndex.readable();
         String field = params.field();
         int bytes = PointMapper.checkPointField(index, field);
