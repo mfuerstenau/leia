@@ -109,6 +109,7 @@ The routing (decision 3) has landed:
 ## Consequences
 
 - Each further runtime is a module like `leia-lucene3`: a relocated Lucene and a facade that implements the runtime interface. Each needs a routing rule (the `segments_N` header names the version from 4.0 on) and a feature set. The APIs of 5, 7 and 9 differ less from each other than from 3, so their facades may share sources.
+  - *Amended by ADR 0050:* their facades stay copies, since the APIs differ in nearly every method; the Lucene-free helpers they repeat are shared in `leia-runtime`'s `support` package.
 - Packaging:
   - the release folder grows with each runtime; `leia.jar` doesn't, and someone who only reads Lucene 9 and 10 can leave `runtimes/` out;
   - every runtime module is built against the runtime interface's version, and a change to the interface means building them all again;

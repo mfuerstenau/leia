@@ -3,6 +3,7 @@ package io.github.mfuerstenau.leia.lucene7;
 import io.github.mfuerstenau.leia.runtime.Commits;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
+import io.github.mfuerstenau.leia.runtime.support.Failures;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -58,7 +59,7 @@ final class Lucene7Commits implements Commits {
                 try {
                     commits.add(commit(SegmentInfos.readCommit(directory, name)));
                 } catch (IOException | RuntimeException e) {
-                    unreadable.add(new Unreadable(name, Directories.message(e)));
+                    unreadable.add(new Unreadable(name, Failures.message(e)));
                 }
             }
             return new CommitList(List.copyOf(commits), List.copyOf(unreadable));
@@ -141,7 +142,7 @@ final class Lucene7Commits implements Commits {
         try {
             fieldFormats = fieldFormats(directory, segment);
         } catch (IOException | RuntimeException e) {
-            fieldInfosError = Optional.of(Directories.message(e));
+            fieldInfosError = Optional.of(Failures.message(e));
         }
         OptionalLong size;
         try {

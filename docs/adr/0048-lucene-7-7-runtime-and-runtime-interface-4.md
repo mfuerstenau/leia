@@ -21,6 +21,7 @@ The created major matters beyond the overview. Since the fixes after the manual 
 ## Decision
 
 1. **A runtime `leia-lucene7`** with lucene-core, backward-codecs (the codecs of 6.x), queryparser and analyzers-common 7.7.3, relocated and built by `leia.lucene-runtime-conventions` as `leia-lucene5` is (ADR 0046 §1–2). `indexMajors()` is `{6, 7}`. It is `runtimes/leia-lucene7.jar` beside `leia.jar`. It starts as a copy of `leia-lucene5`, adapted to 7.7; sharing sources between the runtimes for 5, 7 and 9 stays a task once 9 exists.
+   - *Amended by ADR 0050:* the facades stay copies; the Lucene-free helpers are shared in `leia-runtime`'s `support` package.
 2. **Runtime interface 4.** `LuceneRuntime.API_VERSION` is 4.
    - `RuntimeIndex.Field` gains `pointDimensionCount` and `pointNumBytes`, 0 without points.
    - `IndexStats` gains `OptionalInt createdVersionMajor`, empty before 7.0 (7.7 reports 6 for a commit of 6.x), and `createdMajor()`, which falls back to `oldestMajor()`.

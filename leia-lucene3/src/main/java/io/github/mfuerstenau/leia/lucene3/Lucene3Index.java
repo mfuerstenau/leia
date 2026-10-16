@@ -7,6 +7,7 @@ import io.github.mfuerstenau.leia.runtime.Points;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.Terms;
+import io.github.mfuerstenau.leia.runtime.support.IndexParts;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -94,29 +95,8 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
      * @throws IOException if none of them can be read
      */
     static Lucene3Index open(List<Path> dirs, DirectoryKind kind) throws IOException {
-        if (dirs.isEmpty()) {
-            throw new IllegalArgumentException("No directory to open");
-        }
-        List<Part> parts = new ArrayList<>();
-        List<Skipped> skipped = new ArrayList<>();
-        IOException firstFailure = null;
-        for (Path dir : dirs) {
-            try {
-                parts.add(openPart(dir, kind));
-            } catch (IOException | RuntimeException e) {
-                if (dirs.size() == 1) {
-                    throw e;
-                }
-                skipped.add(new Skipped(dir, Directories.message(e)));
-                if (firstFailure == null) {
-                    firstFailure = new IOException(dir + ": " + Directories.message(e), e);
-                }
-            }
-        }
-        if (parts.isEmpty()) {
-            throw firstFailure;
-        }
-        return new Lucene3Index(kind, parts, skipped);
+        IndexParts.Opened<Part> opened = IndexParts.open(dirs, dir -> openPart(dir, kind));
+        return new Lucene3Index(kind, opened.parts(), opened.skipped());
     }
 
     private static Part openPart(Path dir, DirectoryKind kind) throws IOException {

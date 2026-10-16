@@ -35,9 +35,4 @@ final class Directories {
     static boolean unmap(String access) {
         return "allow".equals(access) && MMapDirectory.UNMAP_SUPPORTED;
     }
-
-    /** The message of {@code e}, or its class if it has none. */
-    static String message(Throwable e) {
-        return e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-    }
 }

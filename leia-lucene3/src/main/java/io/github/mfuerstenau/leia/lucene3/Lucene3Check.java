@@ -2,9 +2,10 @@ package io.github.mfuerstenau.leia.lucene3;
 
 import io.github.mfuerstenau.leia.runtime.Check;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
-import java.io.ByteArrayOutputStream;
+import io.github.mfuerstenau.leia.runtime.support.Cancellation;
+import io.github.mfuerstenau.leia.runtime.support.CheckReport;
+import io.github.mfuerstenau.leia.runtime.support.Failures;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -33,9 +34,6 @@ import org.apache.lucene.store.NoLockFactory;
  */
 final class Lucene3Check implements Check {
 
-    /** How many causes {@link #describe} names at most. */
-    private static final int MAX_CAUSES = 8;
-
     /** {@inheritDoc} 3.6 checks at one level. */
     @Override
     public boolean hasLevels() {
@@ -46,7 +44,7 @@ final class Lucene3Check implements Check {
     public CheckResult check(
             Path dir, DirectoryKind kind, OptionalInt level, Consumer<String> line, LongConsumer progress) {
         Cancellation cancellation = new Cancellation(progress);
-        Report report = new Report(line, cancellation);
+        CheckReport report = new CheckReport(line, cancellation);
         CheckIndex.Status status;
         try (Directory directory = new ReadOnlyDirectory(Directories.open(dir, kind), cancellation);
                 PrintStream infoStream = new PrintStream(report, true, StandardCharsets.UTF_8)) {
@@ -59,7 +57,7 @@ final class Lucene3Check implements Check {
             // A check that was cancelled may fail in any way; it is still cancelled.
             cancellation.rethrow();
             report.end();
-            return CheckResult.failed(describe(e));
+            return CheckResult.failed(Failures.describe(e));
         }
         cancellation.rethrow();
         return result(status);
@@ -109,111 +107,11 @@ final class Lucene3Check implements Check {
         }
         for (Throwable error : errors) {
             if (error != null) {
-                return Optional.of(describe(error));
+                return Optional.of(Failures.describe(error));
             }
         }
         // 3.6 reports why on the output only.
         return segment.openReaderPassed ? Optional.empty() : Optional.of("open reader failed");
-    }
-
-    /** The message of {@code t}, followed by those of its causes. */
-    private static String describe(Throwable t) {
-        StringBuilder text = new StringBuilder(Directories.message(t));
-        int depth = 0;
-        for (Throwable cause = t.getCause(); cause != null && depth < MAX_CAUSES; cause = cause.getCause(), depth++) {
-            text.append("; caused by ")
-                    .append(cause.getClass().getSimpleName())
-                    .append(": ")
-                    .append(Directories.message(cause));
-        }
-        return text.toString();
-    }
-
-    /** Asks {@code progress} whether to go on, and remembers the first time it said no. */
-    private static final class Cancellation {
-        private final LongConsumer progress;
-        private volatile RuntimeException stopped;
-        private long lines;
-
-        Cancellation(LongConsumer progress) {
-            this.progress = progress;
-        }
-
-        synchronized void line() {
-            lines++;
-            check();
-        }
-
-        synchronized void check() {
-            if (stopped != null) {
-                throw stopped;
-            }
-            try {
-                progress.accept(lines);
-            } catch (RuntimeException e) {
-                stopped = e;
-                throw e;
-            }
-        }
-
-        void rethrow() {
-            if (stopped != null) {
-                throw stopped;
-            }
-        }
-    }
-
-    /** Splits what {@code CheckIndex} prints into lines and passes them on. */
-    private static final class Report extends OutputStream {
-        private final Consumer<String> output;
-        private final Cancellation cancellation;
-        private final ByteArrayOutputStream line = new ByteArrayOutputStream();
-
-        Report(Consumer<String> output, Cancellation cancellation) {
-            this.output = output;
-            this.cancellation = cancellation;
-        }
-
-        @Override
-        public synchronized void write(int b) {
-            if (b == '\n') {
-                emit();
-            } else {
-                line.write(b);
-            }
-        }
-
-        @Override
-        public synchronized void write(byte[] b, int off, int len) {
-            int start = off;
-            for (int i = off; i < off + len; i++) {
-                if (b[i] == '\n') {
-                    line.write(b, start, i - start);
-                    emit();
-                    start = i + 1;
-                }
-            }
-            line.write(b, start, off + len - start);
-        }
-
-        /** Passes on what is left of the last line, if anything. */
-        synchronized void end() {
-            if (line.size() > 0) {
-                String text = text();
-                output.accept(text);
-            }
-        }
-
-        private void emit() {
-            output.accept(text());
-            cancellation.line();
-        }
-
-        private String text() {
-            String text = line.toString(StandardCharsets.UTF_8);
-            line.reset();
-            return text.endsWith("\r") ? text.substring(0, text.length() - 1) : text;
-        }
     }
 
     /** A directory that only reads, without locks, and whose inputs ask whether to go on. */

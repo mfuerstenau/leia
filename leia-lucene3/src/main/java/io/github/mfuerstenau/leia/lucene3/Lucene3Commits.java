@@ -3,6 +3,7 @@ package io.github.mfuerstenau.leia.lucene3;
 import io.github.mfuerstenau.leia.runtime.Commits;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
+import io.github.mfuerstenau.leia.runtime.support.Failures;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -42,7 +43,7 @@ final class Lucene3Commits implements Commits {
                 try {
                     commits.add(commit(read(directory, name)));
                 } catch (IOException | RuntimeException e) {
-                    unreadable.add(new Unreadable(name, Directories.message(e)));
+                    unreadable.add(new Unreadable(name, Failures.message(e)));
                 }
             }
             return new CommitList(List.copyOf(commits), List.copyOf(unreadable));

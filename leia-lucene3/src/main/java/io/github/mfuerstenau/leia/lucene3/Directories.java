@@ -22,9 +22,4 @@ final class Directories {
             case NIO -> new NIOFSDirectory(dir.toFile(), noLocks);
         };
     }
-
-    /** The message of {@code e}, or its class if it has none. */
-    static String message(Throwable e) {
-        return e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-    }
 }
