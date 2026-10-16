@@ -59,9 +59,14 @@ Every Lucene version uses the package `org.apache.lucene`, so two of them can't 
    - leia finds that folder from the location of its own jar and loads it at startup, before the jars of `--jar` and the default folder. `--no-default-jars` doesn't affect it.
    - `--jar`, the default folder and `X` can load a runtime too.
 
-### Until the Packaging task
+### Implementation
 
-leia-server still takes `leia-lucene3`'s shadow jar (`shadowRuntimeElements`), so 3.6 is in `leia.jar`. Decision 7 lands with the packaging task of `docs/tasklist.md`.
+The packaging (decision 7) has landed:
+- leia-server takes `leia-lucene3`'s shadow jar (`shadowRuntimeElements`) for its tests only, so `leia.jar` holds Lucene 10 alone. Its `test` reaches the runtime through the classpath; its `jarsTest` takes the jar off the classpath and loads it as leia loads `runtimes/`, so that the Lucene 2.4 index there opens through `ExtensionJars`.
+- `leia-tui`'s configuration `runtimeJars` (not transitive, one line per runtime) holds the runtime jars; `leiaFolder` puts them into `runtimes/`, and `build-dist.sh` copies the folder whole.
+- `Platform.leiaJar` is the jar that `Main` was loaded from, empty when it runs from classes (under Gradle, in tests); `runtimes/` is beside it. `RuntimeJars` says whether the folder has jars.
+- The load order at startup: `runtimes/`, then the jars of `--jar`, then the default folder. Parent-first loading lets the earlier jars win a clash. If the jars can't be loaded, the error names `runtimes/` when it was loaded. `--version` loads no jars.
+- The jars popup (`X`) shows the folder under the default folder and marks its jars "runtimes".
 
 The runtime seam (decision 1) has landed:
 - The interface is the module `leia-runtime`, part of `leia.jar`: the service `LuceneRuntime`, with `API_VERSION` 1, opens a `RuntimeIndex`, which hands out the groups `Documents`, `Terms` and `Search`. A runtime that lacks a group returns it empty, and `openIndex` leaves its features out.

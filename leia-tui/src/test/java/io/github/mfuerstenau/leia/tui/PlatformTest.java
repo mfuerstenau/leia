@@ -50,7 +50,10 @@ class PlatformTest {
     void usesAppDataOnWindows() {
         // A path that is absolute on the platform the test runs on stands for a folder below C:\Users.
         Platform platform = new Platform(
-                Map.of("LOCALAPPDATA", "/local", "APPDATA", "/roaming", "XDG_STATE_HOME", "/state")::get, HOME, true);
+                Map.of("LOCALAPPDATA", "/local", "APPDATA", "/roaming", "XDG_STATE_HOME", "/state")::get,
+                HOME,
+                true,
+                Optional.empty());
 
         assertThat(platform.logFile()).hasValue(Path.of("/local/leia/leia.log"));
         assertThat(platform.historyFile()).hasValue(Path.of("/local/leia/history"));
@@ -59,13 +62,33 @@ class PlatformTest {
 
     @Test
     void ignoresTheHomeDirectoryOnWindows() {
-        Platform platform = new Platform(Map.<String, String>of()::get, HOME, true);
+        Platform platform = new Platform(Map.<String, String>of()::get, HOME, true, Optional.empty());
 
         assertThat(platform.logFile()).isEmpty();
         assertThat(platform.defaultJarsDir()).isEmpty();
     }
 
+    @Test
+    void findsTheRuntimesBesideLeiaJar() {
+        Platform platform =
+                new Platform(Map.<String, String>of()::get, HOME, false, Optional.of(Path.of("/opt/leia/leia.jar")));
+
+        assertThat(platform.runtimesDir()).hasValue(Path.of("/opt/leia/runtimes"));
+        assertThat(linux(Map.of(), HOME).runtimesDir()).isEmpty();
+    }
+
+    @Test
+    void findsTheJarOfAClassOnlyIfItIsInOne() {
+        // The test's own classes are in a directory, JUnit's in a jar.
+        assertThat(Platform.jarOf(PlatformTest.class)).isEmpty();
+        assertThat(Platform.jarOf(Test.class))
+                .hasValueSatisfying(
+                        jar -> assertThat(jar.getFileName().toString()).endsWith(".jar"));
+        // From the boot class path, without a code source.
+        assertThat(Platform.jarOf(String.class)).isEmpty();
+    }
+
     private static Platform linux(Map<String, String> env, Optional<Path> home) {
-        return new Platform(env::get, home, false);
+        return new Platform(env::get, home, false, Optional.empty());
     }
 }

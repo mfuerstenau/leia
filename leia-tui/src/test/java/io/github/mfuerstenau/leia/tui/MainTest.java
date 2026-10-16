@@ -38,7 +38,8 @@ class MainTest {
         platform = new Platform(
                 Map.of("XDG_STATE_HOME", tmp.resolve("state").toString(), "XDG_CONFIG_HOME", configDir.toString())::get,
                 Optional.empty(),
-                false);
+                false,
+                Optional.empty());
     }
 
     @AfterEach
@@ -97,15 +98,23 @@ class MainTest {
     @Test
     void namesTheDefaultFolderIfItsJarsCantBeLoaded() throws Exception {
         Path jarsDir = Files.createDirectories(configDir.resolve("leia/jars"));
-        // Names a factory that isn't in it.
-        try (ZipOutputStream jar = new ZipOutputStream(Files.newOutputStream(jarsDir.resolve("broken.jar")))) {
-            jar.putNextEntry(new ZipEntry("META-INF/services/org.apache.lucene.analysis.TokenizerFactory"));
-            jar.write("com.example.MissingTokenizerFactory\n".getBytes(StandardCharsets.UTF_8));
-        }
+        brokenJar(jarsDir.resolve("broken.jar"));
 
         assertThat(run()).isEqualTo(1);
 
         assertThat(err()).contains("leia: Cannot load the jars: ", jarsDir.toString(), "--no-default-jars");
+    }
+
+    @Test
+    void namesTheRuntimesFolderIfItsJarsCantBeLoaded() throws Exception {
+        Path runtimesDir = Files.createDirectories(tmp.resolve("leia/runtimes"));
+        brokenJar(runtimesDir.resolve("leia-broken.jar"));
+        platform = new Platform(
+                platform.env(), platform.home(), platform.windows(), Optional.of(tmp.resolve("leia/leia.jar")));
+
+        assertThat(run()).isEqualTo(1);
+
+        assertThat(err()).contains("leia: Cannot load the jars: ", "The runtimes of " + runtimesDir);
     }
 
     private int run(String... args) throws Exception {
@@ -114,6 +123,14 @@ class MainTest {
                 new PrintStream(out, true, StandardCharsets.UTF_8),
                 new PrintStream(err, true, StandardCharsets.UTF_8),
                 platform);
+    }
+
+    /** A jar that names a factory that isn't in it. */
+    private static void brokenJar(Path path) throws Exception {
+        try (ZipOutputStream jar = new ZipOutputStream(Files.newOutputStream(path))) {
+            jar.putNextEntry(new ZipEntry("META-INF/services/org.apache.lucene.analysis.TokenizerFactory"));
+            jar.write("com.example.MissingTokenizerFactory\n".getBytes(StandardCharsets.UTF_8));
+        }
     }
 
     private String out() {

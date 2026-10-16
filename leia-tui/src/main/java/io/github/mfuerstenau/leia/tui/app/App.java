@@ -67,6 +67,7 @@ import io.github.mfuerstenau.leia.tui.documents.DocumentExport.DocumentData;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
 import io.github.mfuerstenau.leia.tui.jars.DefaultJars;
 import io.github.mfuerstenau.leia.tui.jars.JarsPopup;
+import io.github.mfuerstenau.leia.tui.jars.RuntimeJars;
 import io.github.mfuerstenau.leia.tui.overview.FieldScan;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.points.PointFormats;
@@ -188,6 +189,8 @@ public final class App {
     /** The default folder of jars, and whether its jars were loaded (ADR 0024). */
     private DefaultJars defaultJars = DefaultJars.none();
 
+    private RuntimeJars runtimeJars = RuntimeJars.none();
+
     /** The jars popup, while it is open; or null. */
     private JarsPopup jars;
 
@@ -251,6 +254,12 @@ public final class App {
     /** The jars popup shows the default folder, and marks the jars that came from it. */
     public App withDefaultJars(DefaultJars defaultJars) {
         this.defaultJars = defaultJars;
+        return this;
+    }
+
+    /** The jars popup shows the folder of runtimes (ADR 0044), and marks the jars that came from it. */
+    public App withRuntimeJars(RuntimeJars runtimeJars) {
+        this.runtimeJars = runtimeJars;
         return this;
     }
 
@@ -1710,7 +1719,7 @@ public final class App {
                 prompt = pathPrompt(path);
             }
             case 'X' -> {
-                jars = new JarsPopup(defaultJars, home);
+                jars = new JarsPopup(defaultJars, runtimeJars, home);
                 return Optional.of(new Action.LoadJars());
             }
             case 'c' -> {

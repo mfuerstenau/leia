@@ -65,9 +65,11 @@ class JarsBackendTest {
                 });
 
         Path codecJar = Files.copy(testFile("leia.test.codec.jar"), tmp.resolve("leia-test-codec.jar"));
-        try (RealBackend backend = RealBackend.start(List.of(codecJar))) {
+        // Not on jarsTest's classpath: loaded as leia loads runtimes/ (ADR 0044).
+        Path lucene3Jar = testFile("leia.test.runtime.lucene3");
+        try (RealBackend backend = RealBackend.start(List.of(codecJar, lucene3Jar))) {
             assertThat(backend.call(Methods.GET_JARS, new GetJarsParams()).jars())
-                    .containsExactly(codecJar.toString());
+                    .containsExactly(codecJar.toString(), lucene3Jar.toString());
 
             // The codec, and Lucene's codec with the jar's postings, doc values and KNN vectors formats.
             for (String name : List.of("custom-codec", "custom-formats")) {
@@ -108,7 +110,8 @@ class JarsBackendTest {
                     icuCollation(new Collation("de", Optional.of(CollationStrength.QUATERNARY), Optional.empty()));
             assertThat(bytes(backend, quaternary, "Äpfel")).isNotEqualTo(bytes(backend, quaternary, "apfel"));
 
-            // A runtime built for another runtime interface is refused, and never used (ADR 0044).
+            // A runtime built for another runtime interface is refused, and never used; the loaded
+            // one reads the Lucene 2.4 index (ADR 0044).
             Path futureRuntime = futureRuntimeJar();
             RpcException refused = backend.fails(
                     Methods.ADD_JARS, new AddJarsParams(List.of(futureRuntime.toString())), ErrorCode.INVALID_JAR);

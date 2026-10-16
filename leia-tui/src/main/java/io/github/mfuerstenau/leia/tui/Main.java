@@ -14,6 +14,7 @@ import io.github.mfuerstenau.leia.tui.app.App;
 import io.github.mfuerstenau.leia.tui.app.History;
 import io.github.mfuerstenau.leia.tui.app.Session;
 import io.github.mfuerstenau.leia.tui.jars.DefaultJars;
+import io.github.mfuerstenau.leia.tui.jars.RuntimeJars;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -81,9 +82,13 @@ public final class Main {
                 return 1;
             }
         }
-        // The default folder's jars come after those of --jar, which win a clash of names (ADR 0024).
+        // The runtimes beside leia.jar come first (ADR 0044); the default folder's jars come after
+        // those of --jar, which win a clash of names (ADR 0024).
+        RuntimeJars runtimeJars = RuntimeJars.find(platform.runtimesDir());
         DefaultJars defaultJars = DefaultJars.find(platform.defaultJarsDir(), cli.noDefaultJars());
-        List<Path> jars = new ArrayList<>(cli.jars());
+        List<Path> jars = new ArrayList<>();
+        runtimeJars.loadedDir().ifPresent(jars::add);
+        jars.addAll(cli.jars());
         defaultJars.loadedDir().ifPresent(jars::add);
 
         try (PrintStream log = LeiaLog.toFile(platform.logFile())) {
@@ -94,6 +99,9 @@ public final class Main {
             } catch (RpcException e) {
                 LOG.log(Level.SEVERE, "Cannot start", e);
                 err.println("leia: " + e.getMessage());
+                runtimeJars
+                        .loadedDir()
+                        .ifPresent(dir -> err.println("The runtimes of " + dir + " beside leia.jar are loaded too."));
                 defaultJars
                         .loadedDir()
                         .ifPresent(dir -> err.println("The jars of the default folder " + dir
@@ -101,7 +109,7 @@ public final class Main {
                 return 1;
             }
             try (backend) {
-                return runTui(cli, platform, defaultJars, backend, log, out, err, started);
+                return runTui(cli, platform, runtimeJars, defaultJars, backend, log, out, err, started);
             }
         }
     }
@@ -135,6 +143,7 @@ public final class Main {
     private static int runTui(
             Cli cli,
             Platform platform,
+            RuntimeJars runtimeJars,
             DefaultJars defaultJars,
             LeiaBackend backend,
             PrintStream log,
@@ -148,7 +157,8 @@ public final class Main {
         History history = platform.historyFile().map(History::load).orElseGet(History::inMemory);
         App app = new App(version, platform.home(), history, cli.directory())
                 .withCwd(Path.of("").toAbsolutePath())
-                .withDefaultJars(defaultJars);
+                .withDefaultJars(defaultJars)
+                .withRuntimeJars(runtimeJars);
         Session session = new Session(app, backend);
         OpenMode mode = cli.noReader() ? OpenMode.DIRECTORY_ONLY : OpenMode.READER;
         // The first frame shows the path being opened.

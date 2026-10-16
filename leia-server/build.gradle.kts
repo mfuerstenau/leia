@@ -11,9 +11,10 @@ dependencies {
     // The interface to the runtimes for indexes that Lucene 10 can't read (ADR 0044).
     implementation(project(":leia-runtime"))
     // Lucene 3.6, relocated, for indexes written by Lucene 2.x and 3.x: found through ServiceLoader,
-    // so runtime only, and the shadow jar only, so the unrelocated Lucene 3 never meets Lucene 10 on
-    // the classpath. Bundled until it becomes a jar of runtimes/ (ADR 0044, the Packaging task).
-    runtimeOnly(project(mapOf("path" to ":leia-lucene3", "configuration" to "shadowRuntimeElements")))
+    // and the shadow jar only, so the unrelocated Lucene 3 never meets Lucene 10 on the classpath.
+    // For the tests only: test reaches it through the classpath, jarsTest as a loaded jar, and leia
+    // through runtimes/ beside leia.jar, where leia-tui puts it (ADR 0044).
+    testRuntimeOnly(project(mapOf("path" to ":leia-lucene3", "configuration" to "shadowRuntimeElements")))
     implementation(libs.dagger)
     annotationProcessor(libs.dagger.compiler)
 }
@@ -50,6 +51,8 @@ val jarsTestIndexFiles = mapOf(
 )
 val testCodecJar = coreTestFiles("testCodecJar", "testCodecJarElements")
 val testAnalysisJars = coreTestFiles("testAnalysisJars", "testAnalysisJarsElements")
+// The runtime jar, which jarsTest loads as leia loads runtimes/, instead of from the classpath.
+val lucene3RuntimeJar = lucene3TestFiles("lucene3RuntimeJar", "shadowRuntimeElements").apply { isTransitive = false }
 
 /** Passes each file as a system property, relative to the test's working directory (this project). */
 fun Test.testFiles(properties: Map<String, FileCollection>) {
@@ -70,11 +73,15 @@ val jarsTest = tasks.register<Test>("jarsTest") {
     description = "Runs the tests that load jars, in a JVM of their own."
     group = "verification"
     testClassesDirs = sourceSets.test.get().output.classesDirs
-    classpath = sourceSets.test.get().runtimeClasspath
+    classpath = sourceSets.test.get().runtimeClasspath - lucene3RuntimeJar
     useJUnitPlatform { includeTags("jars") }
     testFiles(
         jarsTestIndexFiles.mapKeys { "leia.test.index.${it.key}" } +
-            mapOf("leia.test.codec.jar" to testCodecJar, "leia.test.analysis.jars" to testAnalysisJars),
+            mapOf(
+                "leia.test.codec.jar" to testCodecJar,
+                "leia.test.analysis.jars" to testAnalysisJars,
+                "leia.test.runtime.lucene3" to lucene3RuntimeJar,
+            ),
     )
 }
 

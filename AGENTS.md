@@ -22,13 +22,13 @@ leia / leia.cmd  ──finds the JVM, runs──▶  <java> -jar leia.jar
 |---|---|
 | `leia-core/` | Java library with the Lucene functionality. No UI or protocol code. |
 | `leia-runtime/` | The runtime interface (ADR 0044): `LuceneRuntime` (with `API_VERSION`), `RuntimeIndex` and the groups `Documents`, `Terms` and `Search`, with records of its own. JDK types only; part of `leia.jar`. |
-| `leia-lucene3/` | Lucene 3.6.2, relocated into `…lucene3.shaded`, for indexes written by Lucene 2.x and 3.x (ADR 0044). `Lucene3Runtime` implements `LuceneRuntime` and is found through `ServiceLoader`. To become a jar of its own in `runtimes/` (ADR 0044); until then leia-server takes the shadow jar at runtime. Also writes the Lucene 2.4 test index. |
+| `leia-lucene3/` | Lucene 3.6.2, relocated into `…lucene3.shaded`, for indexes written by Lucene 2.x and 3.x (ADR 0044). `Lucene3Runtime` implements `LuceneRuntime` and is found through `ServiceLoader`. Its shadow jar is `runtimes/leia-lucene3.jar` beside `leia.jar`, not part of it (ADR 0044). Also writes the Lucene 2.4 test index. |
 | `leia-protocol/` | Records for every method's params and result, `Methods` (the registry), `RpcMethod` and `ErrorCode`: the API between the UI and the backend. |
 | `leia-server/` | Library: a handler per method, with Dagger wiring, mapping core results to the records. `LeiaBackend` runs the calls in order on one thread; `RpcException` carries an expected failure's `ErrorCode`. |
 | `leia-tui/` | The application: the CLI (`Cli`, `Main`), the version-check entry class `Launcher` (compiled for Java 8), the log, and a package per screen (`…tui.overview`, `…tui.documents`, …). Builds the **fat jar** `leia.jar`; the scripts `leia` and `leia.cmd` are in `leia-tui/src/scripts/`. |
 | `docs/` | `adr/`, `tasklist.md`, `SESSION-SUMMARIES.md`, `demo-index.md` (the manual-testing index), `luke-features.md` (the Luke analysis). |
 
-Dependency direction: `leia-server → leia-protocol` (api), `leia-server → leia-core`, `leia-server → leia-runtime`, `leia-server → leia-lucene3` (shadow jar, runtime only), `leia-lucene3 → leia-runtime` (compileOnly), `leia-tui → leia-server`, `leia-tui → leia-protocol` (`leia-tui` can't compile against core or Lucene). `leia-core` and `leia-protocol` do not depend on each other.
+Dependency direction: `leia-server → leia-protocol` (api), `leia-server → leia-core`, `leia-server → leia-runtime`, `leia-server → leia-lucene3` (shadow jar, tests only), `leia-lucene3 → leia-runtime` (compileOnly), `leia-tui → leia-server`, `leia-tui → leia-protocol` (`leia-tui` can't compile against core or Lucene), and `leia-tui` puts `leia-lucene3`'s shadow jar into `runtimes/`. `leia-core` and `leia-protocol` do not depend on each other.
 
 ## Hard rules
 
@@ -54,10 +54,10 @@ Keep these in sync with the build:
 ./gradlew build              # compile, test (also each module's jarsTest), spotlessCheck
 ./gradlew spotlessApply      # format Java
 ./gradlew :leia-tui:shadowJar      # fat jar → leia-tui/build/libs/leia.jar
-./gradlew :leia-tui:leiaFolder     # leia.jar with the leia and leia.cmd scripts → leia-tui/build/leia/
+./gradlew :leia-tui:leiaFolder     # leia.jar, the leia and leia.cmd scripts and runtimes/ → leia-tui/build/leia/
 ./gradlew :leia-core:demoIndex     # demo index for manual testing → leia-core/build/test-indexes/demo (docs/demo-index.md)
 ./gradlew :leia-server:analysisModules   # Lucene's unbundled analysis modules → leia-server/build/analysis-modules/<module>/ (ADR 0016)
-./build-dist.sh              # leia.jar, leia and leia.cmd → dist/leia-<version>-{linux,windows}-x86_64/
+./build-dist.sh              # leia.jar, leia, leia.cmd and runtimes/ → dist/leia-<version>-{linux,windows}-x86_64/
 
 leia-tui/build/leia/leia <index>   # run a development build (needs a Java 25 JAVA_HOME or --java)
 ```
@@ -73,6 +73,7 @@ To see every call and its result, start leia with `LEIA_OPTS=-Dleia.log.level=FI
 - The scripts run the `leia.jar` in their own folder (`leia` resolves symlinks, `leia.cmd` doesn't). `LEIA_OPTS` holds options for the JVM, split at spaces and put before `-jar`. A wrong command line exits with 2; a JVM or `leia.jar` the script can't find exits with 1; otherwise the script passes on Java's exit status (ADR 0034 §8).
 - `leia.jar` checks for Java 25 first, through `Launcher`, and says what is needed.
 - `--jar <PATH>` (repeatable): a jar with analysis components, codecs or formats of its own, or a directory of such jars. leia checks that the path exists and loads it at startup (ADR 0016, ADR 0018). `--version` doesn't load them.
+- `runtimes/` beside `leia.jar` holds a jar for each old Lucene runtime (`leia-lucene3.jar`). leia finds it from its own jar's location and loads it at startup, before the jars of `--jar` and the default folder, whatever `--no-default-jars` says (ADR 0044). Without it, Lucene 9 and 10 indexes still open.
 - `--no-default-jars`: don't load the jars of the default folder, `$XDG_CONFIG_HOME/leia/jars` (`~/.config/leia/jars`) or `%APPDATA%\leia\jars` on Windows. Without it, the folder is loaded after the jars of `--jar`, if it has a jar in it (ADR 0024). `X` adds more jars at runtime through `addJars`.
 - `--directory <fs|mmap|nio>`: the Lucene `Directory` to open indexes through (ADR 0020). Default: `fs`, which is Lucene's `FSDirectory.open`. The open prompt can change it with Ctrl+D.
 - `--no-reader`: open `INDEX_PATH` without a reader, so that only its commits can be read and its indexes checked (ADR 0021, ADR 0022). The open prompt does the same with Ctrl+N.

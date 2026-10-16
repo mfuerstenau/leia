@@ -30,6 +30,8 @@ dependencies {
     runtimeOnly(libs.tamboui.panama.backend)
 
     testImplementation(launcher.output)
+    // The Lucene 2.4 index of a Pilot test needs the runtime, which leia.jar leaves to runtimes/.
+    testRuntimeOnly(project(path = ":leia-lucene3", configuration = "shadowRuntimeElements"))
     // The Pilot tests write the indexes they open, as leia-server's tests do.
     testImplementation(libs.lucene.core)
     testImplementation(platform(libs.tamboui.bom))
@@ -125,9 +127,21 @@ tasks.shadowJar {
     }
 }
 
-// The folder leia runs from: leia.jar and the scripts that start it (ADR 0034 §8).
+// The runtimes for indexes that Lucene 10 can't read, each a jar of its own in runtimes/ beside
+// leia.jar, which leia loads at startup (ADR 0044). A new runtime is one more line here.
+val runtimeJars = configurations.create("runtimeJars") {
+    isCanBeConsumed = false
+    isTransitive = false
+}
+
+dependencies {
+    runtimeJars(project(path = ":leia-lucene3", configuration = "shadowRuntimeElements"))
+}
+
+// The folder leia runs from: leia.jar, the scripts that start it (ADR 0034 §8) and runtimes/.
 val leiaFolder by tasks.registering(Sync::class) {
     from(tasks.shadowJar)
+    from(runtimeJars) { into("runtimes") }
     from("src/scripts") {
         filesMatching("leia") { permissions { unix("rwxr-xr-x") } }
     }

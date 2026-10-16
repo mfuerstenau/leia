@@ -28,8 +28,8 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * The jars popup (ADR 0024): lists the loaded jars and the default folder, and adds more jars
- * while leia runs. The backend loads them; the popup only asks for a path.
+ * The jars popup (ADR 0024): lists the loaded jars, the default folder and the folder of runtimes
+ * (ADR 0044), and adds more jars while leia runs. The backend loads them; the popup only asks for a path.
  */
 public final class JarsPopup {
 
@@ -52,6 +52,7 @@ public final class JarsPopup {
     public record Close() implements Event {}
 
     private final DefaultJars defaultJars;
+    private final RuntimeJars runtimeJars;
 
     /** The directory that {@code ~} stands for. */
     private final Optional<Path> home;
@@ -85,8 +86,9 @@ public final class JarsPopup {
     /** How many jars the list showed when it was last drawn. */
     private int page = 1;
 
-    public JarsPopup(DefaultJars defaultJars, Optional<Path> home) {
+    public JarsPopup(DefaultJars defaultJars, RuntimeJars runtimeJars, Optional<Path> home) {
         this.defaultJars = defaultJars;
+        this.runtimeJars = runtimeJars;
         this.home = home;
     }
 
@@ -196,8 +198,9 @@ public final class JarsPopup {
         int candidateLines = candidates.isEmpty() ? 0 : 1;
         Line header = header();
         List<Line> jarLines = jarLines();
-        // Default folder, header, input, candidates, outcome, hint, and the top and bottom border.
-        int fixed = 1 + 1 + 1 + candidateLines + outcome.size() + 1 + 2;
+        // Default folder, runtimes, header, input, candidates, outcome, hint, and the top and bottom
+        // border.
+        int fixed = 1 + 1 + 1 + 1 + candidateLines + outcome.size() + 1 + 2;
         int height = Math.min(fixed + jarLines.size(), area.height());
         int listHeight = Math.clamp(height - fixed, 0, jarLines.size());
         Rect popup = Panels.centered(area, width, height);
@@ -210,6 +213,7 @@ public final class JarsPopup {
                 .constraints(
                         Constraint.length(1),
                         Constraint.length(1),
+                        Constraint.length(1),
                         Constraint.length(listHeight),
                         Constraint.length(1),
                         Constraint.length(candidateLines),
@@ -217,14 +221,15 @@ public final class JarsPopup {
                         Constraint.length(1))
                 .split(inner);
         frame.renderWidget(Paragraph.from(defaultLine()), parts.get(0));
-        frame.renderWidget(Paragraph.from(header), parts.get(1));
+        frame.renderWidget(Paragraph.from(runtimesLine()), parts.get(1));
+        frame.renderWidget(Paragraph.from(header), parts.get(2));
         page = Math.max(listHeight, 1);
         maxScroll = Math.max(jarLines.size() - listHeight, 0);
         scroll = shownScroll();
         List<Line> shown = jarLines.subList(scroll, scroll + listHeight);
-        frame.renderWidget(Paragraph.builder().text(Text.from(shown)).build(), parts.get(2));
+        frame.renderWidget(Paragraph.builder().text(Text.from(shown)).build(), parts.get(3));
 
-        Rect inputRow = parts.get(3);
+        Rect inputRow = parts.get(4);
         int label = Math.min(INPUT_LABEL.length(), inputRow.width());
         Rect inputArea = new Rect(inputRow.x() + label, inputRow.y(), inputRow.width() - label, 1);
         frame.renderWidget(Paragraph.from(Line.from(INPUT_LABEL)), inputRow);
@@ -234,9 +239,9 @@ public final class JarsPopup {
             frame.setCursorPosition(inputArea.x() + visible.cursorColumn(), inputArea.y());
         }
         frame.renderWidget(
-                Paragraph.from(Line.from(Span.raw(String.join("  ", candidates)).dim())), parts.get(4));
+                Paragraph.from(Line.from(Span.raw(String.join("  ", candidates)).dim())), parts.get(5));
         if (!outcome.isEmpty()) {
-            frame.renderWidget(Paragraph.from(Text.from(outcome)), parts.get(5));
+            frame.renderWidget(Paragraph.from(Text.from(outcome)), parts.get(6));
         }
         String hint;
         if (busy) {
@@ -246,7 +251,7 @@ public final class JarsPopup {
         } else {
             hint = "Enter add   Tab complete   Esc close";
         }
-        frame.renderWidget(Paragraph.from(Line.from(Span.raw(hint).dim())), parts.get(6));
+        frame.renderWidget(Paragraph.from(Line.from(Span.raw(hint).dim())), parts.get(7));
     }
 
     private Line defaultLine() {
@@ -263,6 +268,19 @@ public final class JarsPopup {
         return Line.from(
                 Span.raw("Default folder: "),
                 Span.raw(shorten(defaultJars.dir().get())),
+                Span.raw(note).dim());
+    }
+
+    private Line runtimesLine() {
+        if (runtimeJars.dir().isEmpty()) {
+            return Line.from(
+                    Span.raw("Runtimes: "),
+                    Span.raw("none (not run from leia.jar)").dim());
+        }
+        String note = runtimeJars.state() == RuntimeJars.State.LOADED ? "" : "  (no jars in it)";
+        return Line.from(
+                Span.raw("Runtimes: "),
+                Span.raw(shorten(runtimeJars.dir().get())),
                 Span.raw(note).dim());
     }
 
@@ -286,6 +304,7 @@ public final class JarsPopup {
             return List.of();
         }
         Optional<Path> defaultDir = defaultJars.loadedDir();
+        Optional<Path> runtimesDir = runtimeJars.loadedDir();
         List<Line> lines = new ArrayList<>();
         for (String jar : jars) {
             String name = jar;
@@ -297,9 +316,13 @@ public final class JarsPopup {
                 }
                 Path parent = path.getParent();
                 if (parent != null) {
-                    place = defaultDir.isPresent() && defaultDir.get().equals(parent)
-                            ? "default folder"
-                            : shorten(parent);
+                    if (defaultDir.isPresent() && defaultDir.get().equals(parent)) {
+                        place = "default folder";
+                    } else if (runtimesDir.isPresent() && runtimesDir.get().equals(parent)) {
+                        place = "runtimes";
+                    } else {
+                        place = shorten(parent);
+                    }
                 }
             } catch (InvalidPathException e) {
                 // Shown as it came.

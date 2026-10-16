@@ -14,13 +14,6 @@ Goal: every index from Lucene 2.1 to 10 opens in one leia, each read by a reloca
 - [ ] Check whether the facades of 5, 7 and 9 can share sources (their APIs are close), e.g. one source set compiled against each version with small per-version adapters
 - [ ] A feature matrix per runtime in ADR 0044 or a doc page, kept in sync with each module's feature set
 
-### Packaging
-- [ ] The old runtimes are optional jars (ADR 0044 §1, §7): `leia.jar` reads Lucene 9 and 10 only, and each runtime module is a jar of its own
-  - a `runtimes/` folder beside `leia.jar`, found from the jar's location and loaded at startup, before `--jar` and the default folder, whatever `--no-default-jars` says; `--jar`, the default folder and `X` load runtimes too
-  - leia-server's dependency on `leia-lucene3`'s shadow jar becomes test-only
-  - `leiaFolder` and `build-dist.sh` copy `runtimes/`
-  - AGENTS.md's CLI contract and module table updated once it is built
-
 ## Bugs
 
 None right now.

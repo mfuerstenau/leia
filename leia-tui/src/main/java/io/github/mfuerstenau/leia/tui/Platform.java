@@ -1,26 +1,58 @@
 package io.github.mfuerstenau.leia.tui;
 
+import io.github.mfuerstenau.leia.tui.jars.DefaultJars;
+import java.net.URISyntaxException;
+import java.net.URL;
+import java.nio.file.FileSystemNotFoundException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.CodeSource;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.function.Function;
 
 /**
  * Where leia keeps its files on this platform: the state folder, with the log (ADR 0034 §7) and the
- * history (ADR 0020), and the default folder of jars (ADR 0024).
+ * history (ADR 0020), the default folder of jars (ADR 0024), and the folder of runtimes beside
+ * {@code leia.jar} (ADR 0044).
  *
  * @param env the environment variables
  * @param home the user's home directory, if known
  * @param windows whether this is Windows
+ * @param leiaJar the jar that leia runs from; empty if it runs from classes, as under Gradle
  */
-record Platform(Function<String, String> env, Optional<Path> home, boolean windows) {
+record Platform(Function<String, String> env, Optional<Path> home, boolean windows, Optional<Path> leiaJar) {
 
     static Platform current() {
         String home = System.getProperty("user.home", "");
         return new Platform(
                 System::getenv,
                 home.isEmpty() ? Optional.empty() : Optional.of(Path.of(home)),
-                System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("windows"));
+                System.getProperty("os.name", "").toLowerCase(Locale.ROOT).startsWith("windows"),
+                jarOf(Main.class));
+    }
+
+    /** The jar that {@code type} was loaded from, if it was loaded from a jar. */
+    static Optional<Path> jarOf(Class<?> type) {
+        CodeSource source = type.getProtectionDomain().getCodeSource();
+        URL location = source == null ? null : source.getLocation();
+        if (location == null) {
+            return Optional.empty();
+        }
+        try {
+            Path path = Path.of(location.toURI());
+            return Files.isRegularFile(path)
+                            && DefaultJars.isJarName(path.getFileName().toString())
+                    ? Optional.of(path)
+                    : Optional.empty();
+        } catch (URISyntaxException | IllegalArgumentException | FileSystemNotFoundException e) {
+            return Optional.empty();
+        }
+    }
+
+    /** The runtimes for indexes that Lucene 10 can't read, {@code runtimes} beside {@code leia.jar}. */
+    Optional<Path> runtimesDir() {
+        return leiaJar.map(jar -> jar.resolveSibling("runtimes"));
     }
 
     /**

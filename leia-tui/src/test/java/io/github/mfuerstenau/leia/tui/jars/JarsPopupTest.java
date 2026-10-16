@@ -34,7 +34,7 @@ class JarsPopupTest {
     }
 
     private static JarsPopup popup() {
-        return new JarsPopup(DefaultJars.none(), Optional.empty());
+        return new JarsPopup(DefaultJars.none(), RuntimeJars.none(), Optional.empty());
     }
 
     private static AddJarsResult result(List<String> jars, List<String> alreadyLoaded) {
@@ -42,14 +42,19 @@ class JarsPopupTest {
     }
 
     @Test
-    void listsTheJarsAndMarksTheDefaultFolder() {
+    void listsTheJarsAndMarksTheDefaultFolderAndTheRuntimes() {
         Path home = Path.of("/home/me");
         Path dir = home.resolve(".config/leia/jars");
-        JarsPopup popup = new JarsPopup(new DefaultJars(Optional.of(dir), DefaultJars.State.LOADED), Optional.of(home));
+        Path runtimes = Path.of("/opt/leia/runtimes");
+        JarsPopup popup = new JarsPopup(
+                new DefaultJars(Optional.of(dir), DefaultJars.State.LOADED),
+                new RuntimeJars(Optional.of(runtimes), RuntimeJars.State.LOADED),
+                Optional.of(home));
         assertThat(render(popup, 100, 20)).contains("Listing the jars…");
         assertThat(popup.waiting()).isTrue();
 
         popup.jarsLoaded(List.of(
+                runtimes.resolve("leia-lucene3.jar").toString(),
                 "/opt/modules/kuromoji/lucene-analysis-kuromoji-10.5.2.jar",
                 dir.resolve("mine.jar").toString()));
 
@@ -58,24 +63,31 @@ class JarsPopupTest {
         assertThat(screen)
                 .contains("Default folder: ~" + File.separator + ".config" + File.separator + "leia" + File.separator
                         + "jars ")
-                .contains("Loaded: 2 jars")
+                .contains("Runtimes: " + runtimes + " ")
+                .contains("Loaded: 3 jars")
+                .contains("leia-lucene3.jar  runtimes")
                 .contains("lucene-analysis-kuromoji-10.5.2.jar  " + Path.of("/opt/modules/kuromoji"))
                 .contains("mine.jar  default folder")
                 .contains("Enter add   Tab complete   Esc close");
     }
 
     @Test
-    void saysWhyTheDefaultFolderWasNotLoaded() {
+    void saysWhyTheDefaultFolderAndTheRuntimesWereNotLoaded() {
         JarsPopup popup = new JarsPopup(
-                new DefaultJars(Optional.of(Path.of("/cfg/leia/jars")), DefaultJars.State.SKIPPED), Optional.empty());
+                new DefaultJars(Optional.of(Path.of("/cfg/leia/jars")), DefaultJars.State.SKIPPED),
+                new RuntimeJars(Optional.of(Path.of("/opt/leia/runtimes")), RuntimeJars.State.NO_JARS),
+                Optional.empty());
         popup.jarsLoaded(List.of());
 
         String screen = render(popup, 100, 12);
 
         assertThat(screen)
                 .contains(Path.of("/cfg/leia/jars") + "  (left out: --no-default-jars)")
+                .contains(Path.of("/opt/leia/runtimes") + "  (no jars in it)")
                 .contains("No jars loaded");
-        assertThat(render(popup(), 100, 12)).contains("Default folder: none (no home directory)");
+        assertThat(render(popup(), 100, 12))
+                .contains("Default folder: none (no home directory)")
+                .contains("Runtimes: none (not run from leia.jar)");
     }
 
     @Test
