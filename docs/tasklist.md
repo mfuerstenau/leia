@@ -14,7 +14,15 @@ Goal: every index from Lucene 2.1 to 10 opens in one leia, each read by a reloca
 
 ## Bugs
 
-None right now.
+Found by the manual run on `lucene4`/`lucene5` (2026-10-12):
+
+- [ ] A JVM warning breaks the screen (hard rule 4): on opening a 4.x/5.x index, the relocated 5.5 `MMapDirectory` unmaps through `sun.misc.Unsafe::invokeCleaner`, and Java 25 prints "WARNING: A terminally deprecated method in sun.misc.Unsafe has been called …" to `VM.initialErr()`, the JVM's own stderr, which `System.setErr` doesn't redirect. It is not in `leia.log`; the TUI keeps stale cells until a redraw. Options: `setUseUnmap(false)` in `leia-lucene5` (and later `leia-lucene7`), `--sun-misc-unsafe-memory-access=allow` in the scripts (but Java < 23 rejects it before `Launcher` can say what is needed), or redirecting fd 2 natively while the UI runs
+- [ ] Norms of indexes before Lucene 7 are decoded as lengths with `SmallFloat.byte4ToInt` (`Documents.normLength`): 4.x/5.x `body` shows `118 → length 14360–15383`. Before 7, the default and BM25 similarities stored `floatToByte315(1/√length)` (118 = 0.375, length 6–7); 2.x/3.x likely the same. The TUI needs the index's version (or the server decodes)
+- [ ] An anonymous format class shows its relocated full name: 4.10's norms format is `io.github.mfuerstenau.leia.lucene5.shaded.lucene.codecs.lucene410.Lucene410Codec$3` (`Lucene5Commits.formatName`, same fallback in `leia-core`'s `CommitReader`); use the superclass's simple name (`Lucene49NormsFormat`)
+- [ ] Small: the Search screen's Query panel still says "x explains the selected hit" and "s similarity and sort" when the features lack them (both are refused with "not for Lucene 5.x")
+- [ ] Small: the segment details show "0 soft-deleted", "blocks no" and "no index sort" for versions without soft deletes (7.4), index sorting (6.2) or blocks
+- [ ] Small: without a reader, a commit's details say "Not the opened commit: its documents are not shown on the other screens", though no commit is opened
+- [ ] Small: the level 1 check of a 4.x index ends with Lucene's "Run checkindex without -fast for full verification"; in leia that is level 2 or 3
 
 ## Backlog — future capabilities
 
