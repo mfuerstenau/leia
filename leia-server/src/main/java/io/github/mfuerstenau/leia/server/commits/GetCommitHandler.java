@@ -125,8 +125,9 @@ public final class GetCommitHandler implements MethodHandler<GetCommitParams, Ge
                         formats.storedFields(),
                         formats.termVectors(),
                         formats.norms(),
-                        formats.points(),
-                        formats.knnVectors(),
+                        // Lucene 10 always has them.
+                        Optional.of(formats.points()),
+                        Optional.of(formats.knnVectors()),
                         formats.fieldInfos(),
                         formats.segmentInfo(),
                         formats.liveDocs(),

@@ -17,7 +17,7 @@ import java.util.Set;
 public interface LuceneRuntime {
 
     /** The version of this interface. It changes with every change that breaks a runtime built before. */
-    int API_VERSION = 2;
+    int API_VERSION = 3;
 
     /**
      * The version of this interface the runtime was built against: {@code return API_VERSION;}, which
@@ -25,10 +25,10 @@ public interface LuceneRuntime {
      */
     int apiVersion();
 
-    /** The version of its Lucene, such as {@code 3.6.2}. */
+    /** The version of its Lucene, such as {@code 5.5.5}. */
     String luceneVersion();
 
-    /** The major versions of the indexes it reads, such as {@code {2, 3}}. */
+    /** The major versions of the indexes it reads, such as {@code {4, 5}}. */
     Set<Integer> indexMajors();
 
     /**

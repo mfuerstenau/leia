@@ -791,8 +791,9 @@ public final class Commits {
         formatPairs.put("stored fields", formats.storedFields());
         formatPairs.put("term vectors", formats.termVectors());
         formatPairs.put("norms", formats.norms());
-        formatPairs.put("points", formats.points());
-        formatPairs.put("KNN vectors", formats.knnVectors());
+        // Absent before the Lucene that brought them (ADR 0046).
+        formatPairs.put("points", formats.points().orElse("–"));
+        formatPairs.put("KNN vectors", formats.knnVectors().orElse("–"));
         formatPairs.put("field infos", formats.fieldInfos());
         formatPairs.put("segment info", formats.segmentInfo());
         formatPairs.put("live docs", formats.liveDocs());

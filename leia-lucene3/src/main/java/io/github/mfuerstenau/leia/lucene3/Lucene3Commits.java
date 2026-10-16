@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.lucene3;
 
 import io.github.mfuerstenau.leia.runtime.Commits;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
+import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -101,7 +102,7 @@ final class Lucene3Commits implements Commits {
         String newest = "2.x";
         for (SegmentInfo info : infos) {
             String version = version(info);
-            if (version.compareTo(newest) > 0) {
+            if (RuntimeIndex.VERSION_ORDER.compare(version, newest) > 0) {
                 newest = version;
             }
         }

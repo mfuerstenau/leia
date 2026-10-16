@@ -19,6 +19,7 @@ import io.github.mfuerstenau.leia.protocol.analysis.WordSetSupport;
 import io.github.mfuerstenau.leia.protocol.check.CheckIndexResult;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexParams;
 import io.github.mfuerstenau.leia.protocol.check.StartCheckIndexParams;
+import io.github.mfuerstenau.leia.protocol.commits.GetCommitParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
 import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
@@ -70,9 +71,10 @@ class JarsBackendTest {
         Path codecJar = Files.copy(testFile("leia.test.codec.jar"), tmp.resolve("leia-test-codec.jar"));
         // Not on jarsTest's classpath: loaded as leia loads runtimes/ (ADR 0044).
         Path lucene3Jar = testFile("leia.test.runtime.lucene3");
-        try (RealBackend backend = RealBackend.start(List.of(codecJar, lucene3Jar))) {
+        Path lucene5Jar = testFile("leia.test.runtime.lucene5");
+        try (RealBackend backend = RealBackend.start(List.of(codecJar, lucene3Jar, lucene5Jar))) {
             assertThat(backend.call(Methods.GET_JARS, new GetJarsParams()).jars())
-                    .containsExactly(codecJar.toString(), lucene3Jar.toString());
+                    .containsExactly(codecJar.toString(), lucene3Jar.toString(), lucene5Jar.toString());
 
             // The codec, and Lucene's codec with the jar's postings, doc values and KNN vectors formats.
             for (String name : List.of("custom-codec", "custom-formats")) {
@@ -143,6 +145,26 @@ class JarsBackendTest {
                     .hasValueSatisfying(result -> assertThat(result.indexes())
                             .singleElement()
                             .satisfies(index -> assertThat(index.clean()).isTrue()));
+
+            // Lucene 5.5 finds its relocated codecs in its own jar, those of 4.x in backward-codecs
+            // (ADR 0046).
+            for (String name : List.of("lucene4", "lucene5")) {
+                assertThat(backend.call(
+                                        Methods.OPEN_INDEX,
+                                        new OpenIndexParams(testIndex(name).toString()))
+                                .luceneRuntime())
+                        .isEqualTo("5.5.5");
+                assertThat(backend.call(Methods.GET_DOCUMENT, new GetDocumentParams(0))
+                                .fields())
+                        .as(name)
+                        .filteredOn(field -> field.name().equals("dv_set"))
+                        .singleElement()
+                        .satisfies(dvSet -> assertThat(dvSet.docValues()).isPresent());
+                assertThat(backend.call(Methods.GET_COMMIT, new GetCommitParams(2, OptionalInt.empty()))
+                                .segments())
+                        .as(name)
+                        .allSatisfy(segment -> assertThat(segment.codec()).isPresent());
+            }
 
             // Lucene reads the service files of every loaded jar again, so a jar that is gone stops it.
             Files.delete(codecJar);

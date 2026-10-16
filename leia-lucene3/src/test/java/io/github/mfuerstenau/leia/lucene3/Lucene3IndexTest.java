@@ -14,6 +14,7 @@ import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.Terms;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
@@ -97,7 +98,14 @@ class Lucene3IndexTest {
             assertThat(stats.fields()).extracting(RuntimeIndex.Field::name).containsExactly("id", "body", "raw");
             assertThat(stats.fields().get(1))
                     .isEqualTo(new RuntimeIndex.Field(
-                            "body", 1, RuntimeIndex.IndexOptions.DOCS_AND_FREQS_AND_POSITIONS, true, false, true));
+                            "body",
+                            1,
+                            RuntimeIndex.IndexOptions.DOCS_AND_FREQS_AND_POSITIONS,
+                            true,
+                            false,
+                            true,
+                            RuntimeIndex.DocValuesType.NONE,
+                            Optional.empty()));
             assertThat(stats.fields().get(2).indexOptions()).isEqualTo(RuntimeIndex.IndexOptions.NONE);
         }
     }
@@ -117,14 +125,15 @@ class Lucene3IndexTest {
             assertThat(index.documents().orElseThrow().document(1).deleted()).isTrue();
 
             List<Documents.VectorTerm> vector = index.documents().orElseThrow().termVector(0, "body");
-            assertThat(vector).extracting(Documents.VectorTerm::term).contains("document", "number", "old");
+            assertThat(vector).extracting(term -> text(term.term())).contains("document", "number", "old");
             Documents.VectorTerm document = vector.stream()
-                    .filter(term -> term.term().equals("document"))
+                    .filter(term -> text(term.term()).equals("document"))
                     .findFirst()
                     .orElseThrow();
             assertThat(document.positions().getFirst().position()).hasValue(0);
             assertThat(document.positions().getFirst().startOffset()).hasValue(0);
             assertThat(document.positions().getFirst().endOffset()).hasValue(8);
+            assertThat(document.positions().getFirst().payload()).isEmpty();
             assertThatThrownBy(() -> index.documents().orElseThrow().document(3))
                     .isInstanceOf(IllegalArgumentException.class);
         }
@@ -134,22 +143,50 @@ class Lucene3IndexTest {
     void readsTermsAndPostings() throws IOException {
         try (RuntimeIndex index = open(DirectoryKind.NIO)) {
             Terms.TermsPage page = index.terms().orElseThrow().terms("id", Optional.empty(), 2);
-            assertThat(page.terms()).extracting(Terms.TermEntry::term).containsExactly("1", "2");
-            assertThat(page.next()).contains("3");
+            assertThat(page.terms()).extracting(term -> text(term.term())).containsExactly("1", "2");
+            assertThat(page.next().map(Lucene3IndexTest::text)).contains("3");
             assertThat(index.terms().orElseThrow().terms("id", page.next(), 2).terms())
-                    .containsExactly(new Terms.TermEntry("3", 1, 1));
+                    .extracting(term -> text(term.term()), Terms.TermEntry::docFreq, Terms.TermEntry::totalTermFreq)
+                    .containsExactly(tuple("3", 1, 1L));
             assertThat(index.terms()
                             .orElseThrow()
                             .terms("nothing", Optional.empty(), 10)
                             .terms())
                     .isEmpty();
 
-            Terms.PostingsPage postings = index.terms().orElseThrow().postings("body", "document", 0, 1);
+            Terms.PostingsPage postings = index.terms().orElseThrow().postings("body", utf8("document"), 0, 1);
             // docFreq counts the deleted document, the postings skip it.
             assertThat(postings.docFreq()).isEqualTo(3);
-            assertThat(postings.postings()).containsExactly(new Terms.Posting(0, 1));
+            assertThat(postings.postings()).containsExactly(new Terms.Posting(0, 1, false));
             assertThat(postings.nextDoc()).hasValue(2);
         }
+    }
+
+    @Test
+    void readsPositionsWithoutOffsets() throws IOException {
+        try (RuntimeIndex index = open3()) {
+            Terms terms = index.terms().orElseThrow();
+            assertThat(terms.positions(0, "body", utf8("alpha")))
+                    .hasValueSatisfying(positions -> assertThat(positions)
+                            .singleElement()
+                            .isEqualTo(new Documents.Position(
+                                    OptionalInt.of(0), OptionalInt.empty(), OptionalInt.empty(), Optional.empty())));
+            assertThat(terms.positions(1, "body", utf8("gamma"))).isEmpty();
+            // 3.6 skips the deleted document.
+            assertThat(terms.positions(1, "body", utf8("alpha"))).isEmpty();
+            // Docs only: the document contains it, without positions.
+            assertThat(terms.positions(0, "tag", utf8("odd"))).hasValue(List.of());
+            assertThatThrownBy(() -> terms.positions(99, "body", utf8("alpha")))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    private static byte[] utf8(String text) {
+        return text.getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static String text(byte[] bytes) {
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 
     @Test
@@ -222,7 +259,7 @@ class Lucene3IndexTest {
                             .orElseThrow()
                             .terms("id", Optional.empty(), 20)
                             .terms())
-                    .extracting(Terms.TermEntry::term)
+                    .extracting(term -> text(term.term()))
                     .containsExactly("1", "2", "3", "4", "5", "6", "7");
         }
     }
@@ -299,7 +336,7 @@ class Lucene3IndexTest {
         Check.CheckResult result = new Lucene3Runtime()
                 .check()
                 .orElseThrow()
-                .check(testIndex(name), DirectoryKind.FS, lines::add, _ -> {});
+                .check(testIndex(name), DirectoryKind.FS, OptionalInt.empty(), lines::add, _ -> {});
         assertThat(result.error()).isEmpty();
         assertThat(result.clean()).isTrue();
         assertThat(result.badSegments()).isZero();
@@ -323,8 +360,10 @@ class Lucene3IndexTest {
         Files.write(frq, garbage);
         Map<String, String> before = hashes(dir);
 
-        Check.CheckResult result =
-                new Lucene3Runtime().check().orElseThrow().check(dir, DirectoryKind.NIO, _ -> {}, _ -> {});
+        Check.CheckResult result = new Lucene3Runtime()
+                .check()
+                .orElseThrow()
+                .check(dir, DirectoryKind.NIO, OptionalInt.empty(), _ -> {}, _ -> {});
         assertThat(result.clean()).isFalse();
         assertThat(result.badSegments()).isEqualTo(1);
         assertThat(result.lostDocs()).isEqualTo(3);
@@ -341,7 +380,7 @@ class Lucene3IndexTest {
         assertThatThrownBy(() -> new Lucene3Runtime()
                         .check()
                         .orElseThrow()
-                        .check(lucene3(), DirectoryKind.FS, _ -> {}, _ -> {
+                        .check(lucene3(), DirectoryKind.FS, OptionalInt.empty(), _ -> {}, _ -> {
                             if (calls.incrementAndGet() > 3) {
                                 throw stop;
                             }
@@ -359,10 +398,8 @@ class Lucene3IndexTest {
             assertThat(progress).last().isEqualTo(11L);
             // docFreq counts the deleted document, totalTermFreq the live ones.
             assertThat(terms.topTerms())
-                    .containsExactly(
-                            new Terms.TermEntry("alpha", 7, 6),
-                            new Terms.TermEntry("document", 7, 6),
-                            new Terms.TermEntry("beta", 4, 4));
+                    .extracting(term -> text(term.term()), Terms.TermEntry::docFreq, Terms.TermEntry::totalTermFreq)
+                    .containsExactly(tuple("alpha", 7, 6L), tuple("document", 7, 6L), tuple("beta", 4, 4L));
             assertThat(index.terms().orElseThrow().topTerms("tag", 0, _ -> {}))
                     .isEqualTo(new Terms.FieldTerms(2, List.of()));
         }
@@ -418,7 +455,7 @@ class Lucene3IndexTest {
             }
             runtime.commits().orElseThrow().commits(dir, directoryKind);
             runtime.commits().orElseThrow().commit(dir, directoryKind, 1);
-            runtime.check().orElseThrow().check(dir, directoryKind, _ -> {}, _ -> {});
+            runtime.check().orElseThrow().check(dir, directoryKind, OptionalInt.empty(), _ -> {}, _ -> {});
             assertThat(hashes(dir)).isEqualTo(before);
             assertThat(dir.resolve("write.lock")).doesNotExist();
         }

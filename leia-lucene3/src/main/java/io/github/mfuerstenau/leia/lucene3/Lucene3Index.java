@@ -6,6 +6,7 @@ import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.Terms;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -36,6 +37,7 @@ import org.apache.lucene.index.TermDocs;
 import org.apache.lucene.index.TermEnum;
 import org.apache.lucene.index.TermFreqVector;
 import org.apache.lucene.index.TermPositionVector;
+import org.apache.lucene.index.TermPositions;
 import org.apache.lucene.index.TermVectorOffsetInfo;
 import org.apache.lucene.queryParser.ParseException;
 import org.apache.lucene.queryParser.QueryParser;
@@ -177,12 +179,15 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
                     part.reader().numDocs(),
                     part.reader().maxDoc(),
                     List.copyOf(versions),
+                    // 3.6 doesn't record which version wrote a commit.
+                    Optional.empty(),
                     Map.copyOf(commit.getUserData())));
             docBase += part.reader().maxDoc();
         }
         return new Stats(reader.numDocs(), reader.maxDoc(), List.copyOf(indexes), fields());
     }
 
+    /** {@inheritDoc} Lucene 3 has no doc values, and records no term statistics per field. */
     @Override
     public List<Field> fields() {
         List<Field> fields = new ArrayList<>();
@@ -201,7 +206,9 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
                     options,
                     info.isIndexed && !info.omitNorms,
                     info.storePayloads,
-                    info.storeTermVector));
+                    info.storeTermVector,
+                    DocValuesType.NONE,
+                    Optional.empty()));
         }
         fields.sort(Comparator.comparingInt(Field::number));
         return List.copyOf(fields);
@@ -231,7 +238,11 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
             }
             boolean hasTermVector = field.hasTermVectors() && reader.getTermFreqVector(docId, field.name()) != null;
             fields.add(new DocumentField(
-                    field.name(), norm, List.copyOf(stored.getOrDefault(field.name(), List.of())), hasTermVector));
+                    field.name(),
+                    norm,
+                    List.copyOf(stored.getOrDefault(field.name(), List.of())),
+                    Optional.empty(),
+                    hasTermVector));
         }
         return new IndexDocument(docId, reader.isDeleted(docId), List.copyOf(fields));
     }
@@ -272,26 +283,31 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
                                     : OptionalInt.empty(),
                             offsets != null && j < offsets.length
                                     ? OptionalInt.of(offsets[j].getEndOffset())
-                                    : OptionalInt.empty()));
+                                    : OptionalInt.empty(),
+                            Optional.empty()));
                 }
             }
-            result.add(new VectorTerm(terms[i], freqs[i], List.copyOf(positions)));
+            result.add(new VectorTerm(utf8(terms[i]), freqs[i], List.copyOf(positions)));
         }
         return List.copyOf(result);
     }
 
-    /** {@inheritDoc} Lucene 3 doesn't record {@code totalTermFreq}, so it is counted from the postings. */
+    /**
+     * {@inheritDoc} Terms of Lucene 3 are text, so {@code from} is read as UTF-8; Lucene 3 doesn't
+     * record {@code totalTermFreq}, so it is counted from the postings.
+     */
     @Override
-    public TermsPage terms(String field, Optional<String> from, int limit) throws IOException {
+    public TermsPage terms(String field, Optional<byte[]> from, int limit) throws IOException {
         List<TermEntry> terms = new ArrayList<>();
         // interned field names are compared with ==, so take Term's own.
-        try (TermEnum termEnum = reader.terms(new Term(field, from.orElse("")))) {
+        try (TermEnum termEnum =
+                reader.terms(new Term(field, from.map(Lucene3Index::text).orElse("")))) {
             Term term = termEnum.term();
             while (term != null && term.field().equals(field)) {
                 if (terms.size() == limit) {
-                    return new TermsPage(List.copyOf(terms), Optional.of(term.text()));
+                    return new TermsPage(List.copyOf(terms), Optional.of(utf8(term.text())));
                 }
-                terms.add(new TermEntry(term.text(), termEnum.docFreq(), totalTermFreq(term)));
+                terms.add(new TermEntry(utf8(term.text()), termEnum.docFreq(), totalTermFreq(term)));
                 term = termEnum.next() ? termEnum.term() : null;
             }
         }
@@ -342,7 +358,7 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
         sorted.sort(Comparator.comparingInt(TopTerm::docFreq).reversed().thenComparing(TopTerm::text));
         List<TermEntry> terms = new ArrayList<>();
         for (TopTerm term : sorted) {
-            terms.add(new TermEntry(term.text(), term.docFreq(), totalTermFreq(new Term(field, term.text()))));
+            terms.add(new TermEntry(utf8(term.text()), term.docFreq(), totalTermFreq(new Term(field, term.text()))));
         }
         return new FieldTerms(scanned, List.copyOf(terms));
     }
@@ -351,8 +367,8 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
 
     /** {@inheritDoc} Lucene 3 skips deleted documents in the postings, though {@code docFreq} counts them. */
     @Override
-    public PostingsPage postings(String field, String text, int fromDoc, int limit) throws IOException {
-        Term term = new Term(field, text);
+    public PostingsPage postings(String field, byte[] text, int fromDoc, int limit) throws IOException {
+        Term term = new Term(field, text(text));
         List<Posting> postings = new ArrayList<>();
         OptionalInt next = OptionalInt.empty();
         try (TermDocs docs = reader.termDocs(term)) {
@@ -362,11 +378,52 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
                     next = OptionalInt.of(docs.doc());
                     break;
                 }
-                postings.add(new Posting(docs.doc(), docs.freq()));
+                postings.add(new Posting(docs.doc(), docs.freq(), false));
                 more = docs.next();
             }
         }
         return new PostingsPage(reader.docFreq(term), totalTermFreq(term), List.copyOf(postings), next);
+    }
+
+    /**
+     * {@inheritDoc} Lucene 3 has positions and payloads in the postings, but no offsets; it skips
+     * deleted documents, which so contain no term.
+     */
+    @Override
+    public Optional<List<Position>> positions(int docId, String field, byte[] text) throws IOException {
+        checkDoc(docId);
+        Term term = new Term(field, text(text));
+        try (TermPositions positions = reader.termPositions(term)) {
+            if (!positions.skipTo(docId) || positions.doc() != docId) {
+                return Optional.empty();
+            }
+            FieldInfo info = fieldInfos.fieldInfo(field);
+            if (info == null
+                    || !info.isIndexed
+                    || info.indexOptions != FieldInfo.IndexOptions.DOCS_AND_FREQS_AND_POSITIONS) {
+                return Optional.of(List.of());
+            }
+            List<Position> result = new ArrayList<>();
+            for (int i = 0; i < positions.freq(); i++) {
+                int position = positions.nextPosition();
+                Optional<byte[]> payload = Optional.empty();
+                if (positions.isPayloadAvailable()) {
+                    payload = Optional.of(positions.getPayload(new byte[positions.getPayloadLength()], 0));
+                }
+                result.add(new Position(OptionalInt.of(position), OptionalInt.empty(), OptionalInt.empty(), payload));
+            }
+            return Optional.of(List.copyOf(result));
+        }
+    }
+
+    /** A term of Lucene 3 as bytes. */
+    private static byte[] utf8(String text) {
+        return text.getBytes(StandardCharsets.UTF_8);
+    }
+
+    /** Bytes as a term of Lucene 3, which are text. */
+    private static String text(byte[] bytes) {
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 
     /** A query of Lucene 3.6. */

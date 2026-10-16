@@ -30,8 +30,15 @@ tasks.shadowJar {
     archiveClassifier = ""
     archiveFileName = "${project.name}.jar"
     relocate("org.apache.lucene", "$runtimePackage.shaded.lucene")
-    // Lucene 4 and later find their codecs and formats through META-INF/services.
+    // The Snowball stemmers of analyzers-common, which Lucene 10's analysis-common has too.
+    relocate("org.tartarus", "$runtimePackage.shaded.tartarus")
+    // Lucene 4 and later find their codecs and formats through META-INF/services. Shadow drops a
+    // path it has seen before the merge sees it, unless duplicates are included: lucene-core's codecs
+    // would be lost behind backward-codecs'.
     mergeServiceFiles()
+    filesMatching("META-INF/services/**") {
+        duplicatesStrategy = DuplicatesStrategy.INCLUDE
+    }
     // Lucene 9 is a JPMS module; the relocated classes are not.
     exclude("module-info.class", "META-INF/versions/*/module-info.class")
 }

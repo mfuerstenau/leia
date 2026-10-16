@@ -5,13 +5,16 @@ import io.github.mfuerstenau.leia.core.ScanProgress;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.check.IndexCheck;
 import io.github.mfuerstenau.leia.protocol.check.SegmentCheck;
+import io.github.mfuerstenau.leia.protocol.commits.CodecFormats;
 import io.github.mfuerstenau.leia.protocol.commits.Commit;
 import io.github.mfuerstenau.leia.protocol.commits.CommitFile;
+import io.github.mfuerstenau.leia.protocol.commits.FieldFormats;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.commits.Segment;
 import io.github.mfuerstenau.leia.protocol.commits.UnreadableCommit;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
+import io.github.mfuerstenau.leia.protocol.document.DocValues;
 import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
@@ -33,6 +36,7 @@ import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
+import io.github.mfuerstenau.leia.protocol.index.TermStats;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
@@ -43,6 +47,8 @@ import io.github.mfuerstenau.leia.protocol.search.SortKey;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.TotalHitsRelation;
 import io.github.mfuerstenau.leia.protocol.terms.FieldTerms;
+import io.github.mfuerstenau.leia.protocol.terms.GetPositionsParams;
+import io.github.mfuerstenau.leia.protocol.terms.GetPositionsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsParams;
@@ -58,6 +64,7 @@ import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.Terms;
+import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
@@ -65,14 +72,13 @@ import io.github.mfuerstenau.leia.server.index.IndexDirectories;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import io.github.mfuerstenau.leia.server.terms.TermParams;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
-import java.util.OptionalLong;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.logging.Logger;
@@ -92,16 +98,20 @@ public final class RuntimeResults {
 
     /**
      * What works on {@code open}: the statistics, the features of the groups its index has, and the
-     * commits and the check if its runtime has them (ADR 0045). The check has no levels.
+     * commits and the check if its runtime has them (ADR 0045, ADR 0046): doc values with the
+     * documents if a field has them, and the check's levels if the runtime's check takes them.
      */
     public static Set<Feature> features(OpenRuntime open) {
         RuntimeIndex index = open.index();
         Set<Feature> features = EnumSet.of(Feature.INDEX_STATS);
         if (index.documents().isPresent()) {
             features.addAll(List.of(Feature.DOCUMENTS, Feature.STORED_VALUES, Feature.TERM_VECTORS));
+            if (index.fields().stream().anyMatch(field -> field.docValuesType() != RuntimeIndex.DocValuesType.NONE)) {
+                features.add(Feature.DOC_VALUES);
+            }
         }
         if (index.terms().isPresent()) {
-            features.addAll(List.of(Feature.TERMS, Feature.POSTINGS, Feature.TOP_TERMS));
+            features.addAll(List.of(Feature.TERMS, Feature.POSTINGS, Feature.TOP_TERMS, Feature.POSITIONS));
         }
         if (index.search().isPresent()) {
             features.add(Feature.CLASSIC_SEARCH);
@@ -111,6 +121,9 @@ public final class RuntimeResults {
         }
         if (open.runtime().check().isPresent()) {
             features.add(Feature.CHECK_INDEX);
+            if (open.runtime().check().get().hasLevels()) {
+                features.add(Feature.CHECK_LEVELS);
+            }
         }
         return features;
     }
@@ -167,7 +180,7 @@ public final class RuntimeResults {
         }
     }
 
-    /** {@code getIndexStats}. The runtimes give no term statistics per field, so they are absent. */
+    /** {@code getIndexStats}. A runtime that records no term statistics per field leaves them absent. */
     public static GetIndexStatsResult indexStats(OpenRuntime open) throws RpcException {
         RuntimeIndex index = open.index();
         RuntimeIndex.Stats stats = stats(index);
@@ -182,8 +195,8 @@ public final class RuntimeResults {
                         commit.numDocs(),
                         commit.maxDoc(),
                         commit.oldestMajor(),
-                        // Lucene 3 doesn't record which version wrote the commit; the newest segment did.
-                        commit.segmentVersions().stream().max(String::compareTo).orElse("3.x"),
+                        // Before 5.3, the newest segment stands in for the version that wrote the commit.
+                        commit.commitVersion(open.runtime().luceneVersion()),
                         commit.oldestSegmentVersion(),
                         Map.copyOf(commit.userData())))
                 .toList();
@@ -256,24 +269,42 @@ public final class RuntimeResults {
                 Map.copyOf(commit.userData()));
     }
 
-    /** A segment before codecs: no id, codec, formats, soft deletes or updates (ADR 0045). */
+    /**
+     * A segment of a runtime: before Lucene 4 without id, codec or formats (ADR 0045), and never with
+     * soft deletes, document blocks or an index sort, which came later (ADR 0046).
+     */
     private static Segment segment(Commits.Segment segment) {
         return new Segment(
                 segment.name(),
-                Optional.empty(),
+                segment.id(),
                 segment.maxDoc(),
                 segment.docBase(),
                 segment.delCount(),
                 0,
                 segment.delGen(),
-                OptionalLong.empty(),
-                OptionalLong.empty(),
+                segment.fieldInfosGen(),
+                segment.docValuesGen(),
                 segment.luceneVersion(),
                 Optional.empty(),
-                Optional.empty(),
-                Optional.empty(),
-                List.of(),
-                Optional.empty(),
+                segment.codec(),
+                segment.formats()
+                        .map(formats -> new CodecFormats(
+                                formats.postings(),
+                                formats.docValues(),
+                                formats.storedFields(),
+                                formats.termVectors(),
+                                formats.norms(),
+                                formats.points(),
+                                formats.knnVectors(),
+                                formats.fieldInfos(),
+                                formats.segmentInfo(),
+                                formats.liveDocs(),
+                                formats.compound())),
+                segment.fieldFormats().stream()
+                        .map(field -> new FieldFormats(
+                                field.field(), field.postings(), field.docValues(), field.knnVectors()))
+                        .toList(),
+                segment.fieldInfosError(),
                 segment.compound(),
                 false,
                 Optional.empty(),
@@ -291,17 +322,31 @@ public final class RuntimeResults {
                     case DOCS -> IndexOptions.DOCS;
                     case DOCS_AND_FREQS -> IndexOptions.DOCS_AND_FREQS;
                     case DOCS_AND_FREQS_AND_POSITIONS -> IndexOptions.DOCS_AND_FREQS_AND_POSITIONS;
+                    case DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS ->
+                        IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS;
                 },
                 field.hasNorms(),
                 field.hasPayloads(),
                 field.hasTermVectors(),
-                DocValuesType.NONE,
+                docValuesType(field.docValuesType()),
                 0,
                 0,
                 0,
                 Optional.empty(),
                 Optional.empty(),
-                Optional.empty());
+                field.terms()
+                        .map(terms -> new TermStats(terms.docCount(), terms.sumDocFreq(), terms.sumTotalTermFreq())));
+    }
+
+    private static DocValuesType docValuesType(RuntimeIndex.DocValuesType type) {
+        return switch (type) {
+            case NONE -> DocValuesType.NONE;
+            case NUMERIC -> DocValuesType.NUMERIC;
+            case BINARY -> DocValuesType.BINARY;
+            case SORTED -> DocValuesType.SORTED;
+            case SORTED_NUMERIC -> DocValuesType.SORTED_NUMERIC;
+            case SORTED_SET -> DocValuesType.SORTED_SET;
+        };
     }
 
     /** {@code getDocument}. */
@@ -326,7 +371,13 @@ public final class RuntimeResults {
                                 field.stored().stream()
                                         .map(value -> storedValue(value, GetDocumentResult.MAX_VALUE_LENGTH))
                                         .toList(),
-                                Optional.empty(),
+                                field.docValues()
+                                        .map(values -> new DocValues(
+                                                docValuesType(values.type()),
+                                                values.numbers(),
+                                                values.values().stream()
+                                                        .map(RuntimeResults::bytesValue)
+                                                        .toList())),
                                 field.hasTermVector(),
                                 Optional.empty()))
                         .toList());
@@ -366,37 +417,40 @@ public final class RuntimeResults {
         checkField(open.index(), params.field());
         try {
             return new GetTermVectorResult(documents.termVector(params.docId(), params.field()).stream()
-                    .map(term -> new TermVectorTerm(
-                            term.term(),
-                            false,
-                            term.freq(),
-                            term.positions().stream()
-                                    .map(position -> new TermPosition(
-                                            position.position(),
-                                            position.startOffset(),
-                                            position.endOffset(),
-                                            Optional.empty()))
-                                    .toList()))
+                    .map(term -> {
+                        ByteStrings.Encoded encoded = ByteStrings.encode(new BytesRef(term.term()));
+                        return new TermVectorTerm(
+                                encoded.value(),
+                                encoded.binary(),
+                                term.freq(),
+                                term.positions().stream()
+                                        .map(RuntimeResults::position)
+                                        .toList());
+                    })
                     .toList());
         } catch (IOException e) {
             throw new RpcException(ErrorCode.INDEX_NOT_READABLE, "Cannot read the term vector: " + e.getMessage(), e);
         }
     }
 
-    /** {@code getTerms}. Terms of the runtimes are text, so they are never binary. */
+    /** {@code getTerms}. Terms are text if they are UTF-8, as Lucene 10's are (ADR 0006). */
     public static GetTermsResult terms(OpenRuntime open, GetTermsParams params) throws RpcException {
         Terms terms = open.index().terms().orElseThrow(open::notSupported);
         TermParams.checkLimit(params.limit(), GetTermsParams.MAX_LIMIT);
-        Optional<String> from =
-                params.from().isPresent() ? Optional.of(text(params.from().get())) : Optional.empty();
+        Optional<byte[]> from =
+                params.from().isPresent() ? Optional.of(bytes(params.from().get())) : Optional.empty();
         checkField(open.index(), params.field());
         try {
             Terms.TermsPage page = terms.terms(params.field(), from, params.limit());
             return new GetTermsResult(
                     page.terms().stream()
-                            .map(term -> new TermEntry(term.term(), false, term.docFreq(), term.totalTermFreq()))
+                            .map(term -> {
+                                ByteStrings.Encoded encoded = ByteStrings.encode(new BytesRef(term.term()));
+                                return new TermEntry(
+                                        encoded.value(), encoded.binary(), term.docFreq(), term.totalTermFreq());
+                            })
                             .toList(),
-                    page.next().map(next -> new BytesValue(next, false)));
+                    page.next().map(RuntimeResults::bytesValue));
         } catch (IOException e) {
             throw new RpcException(
                     ErrorCode.INDEX_NOT_READABLE,
@@ -406,8 +460,8 @@ public final class RuntimeResults {
     }
 
     /**
-     * {@code getPostings}. The runtimes give live documents only, so none is marked deleted, though
-     * {@code docFreq} may count them; a filter isn't supported.
+     * {@code getPostings}. A runtime marks deleted documents if its Lucene reads their postings, and
+     * otherwise gives live documents only, though {@code docFreq} counts them; a filter isn't supported.
      */
     public static GetPostingsResult postings(OpenRuntime open, GetPostingsParams params) throws RpcException {
         Terms terms = open.index().terms().orElseThrow(open::notSupported);
@@ -420,20 +474,23 @@ public final class RuntimeResults {
             throw open.notSupported();
         }
         checkField(open.index(), params.field());
-        String term = text(params.term());
+        String term = TermParams.text(params.term());
         try {
-            Terms.PostingsPage page = terms.postings(params.field(), term, params.fromDoc(), params.limit());
+            Terms.PostingsPage page =
+                    terms.postings(params.field(), bytes(params.term()), params.fromDoc(), params.limit());
             if (page.docFreq() == 0) {
                 throw new RpcException(
-                        ErrorCode.TERM_NOT_FOUND,
-                        "No term '" + TermParams.text(params.term()) + "' in field '" + params.field() + "'");
+                        ErrorCode.TERM_NOT_FOUND, "No term '" + term + "' in field '" + params.field() + "'");
             }
             return new GetPostingsResult(
                     page.docFreq(),
                     page.totalTermFreq(),
                     page.postings().stream()
                             .map(posting -> new Posting(
-                                    posting.docId(), false, OptionalInt.of(posting.freq()), Optional.empty()))
+                                    posting.docId(),
+                                    posting.deleted(),
+                                    OptionalInt.of(posting.freq()),
+                                    Optional.empty()))
                             .toList(),
                     page.nextDoc());
         } catch (IOException e) {
@@ -442,6 +499,41 @@ public final class RuntimeResults {
                     "Cannot read the postings of '" + term + "' in field '" + params.field() + "': " + e.getMessage(),
                     e);
         }
+    }
+
+    /** {@code getPositions}. */
+    public static GetPositionsResult positions(OpenRuntime open, GetPositionsParams params) throws RpcException {
+        Terms terms = open.index().terms().orElseThrow(open::notSupported);
+        byte[] term = bytes(params.term());
+        int docId = params.docId();
+        String field = params.field();
+        checkDocId(open.index(), docId);
+        checkField(open.index(), field);
+        String termText = TermParams.text(params.term());
+        try {
+            return new GetPositionsResult(terms
+                    .positions(docId, field, term)
+                    .orElseThrow(() -> new RpcException(
+                            ErrorCode.TERM_NOT_FOUND,
+                            "Document " + docId + " does not contain '" + termText + "' in field '" + field + "'"))
+                    .stream()
+                    .map(RuntimeResults::position)
+                    .toList());
+        } catch (IOException e) {
+            throw new RpcException(
+                    ErrorCode.INDEX_NOT_READABLE,
+                    "Cannot read the positions of '" + termText + "' in document " + docId + ", field '" + field + "': "
+                            + e.getMessage(),
+                    e);
+        }
+    }
+
+    private static TermPosition position(Documents.Position position) {
+        return new TermPosition(
+                position.position(),
+                position.startOffset(),
+                position.endOffset(),
+                position.payload().map(payload -> ByteStrings.hex(new BytesRef(payload))));
     }
 
     /**
@@ -513,7 +605,7 @@ public final class RuntimeResults {
 
     /**
      * {@code startFieldTermScan}: the terms of a field counted and its top terms found in a job, as
-     * {@code getFieldTermScan} reads it. Terms of the runtimes are text, so none is binary.
+     * {@code getFieldTermScan} reads it.
      */
     public static JobStarted startFieldTermScan(OpenRuntime open, String field, int topN, Jobs jobs)
             throws RpcException {
@@ -530,8 +622,14 @@ public final class RuntimeResults {
                                 field,
                                 scanned.uniqueTerms(),
                                 scanned.topTerms().stream()
-                                        .map(term ->
-                                                new TopTerm(term.term(), false, term.docFreq(), term.totalTermFreq()))
+                                        .map(term -> {
+                                            ByteStrings.Encoded encoded = ByteStrings.encode(new BytesRef(term.term()));
+                                            return new TopTerm(
+                                                    encoded.value(),
+                                                    encoded.binary(),
+                                                    term.docFreq(),
+                                                    term.totalTermFreq());
+                                        })
                                         .toList());
                     } catch (IOException e) {
                         throw new RpcException(
@@ -544,13 +642,15 @@ public final class RuntimeResults {
     }
 
     /**
-     * Checks {@code dir} with {@code runtime}'s {@code CheckIndex} (ADR 0045): one level, read-only.
-     * The report goes to {@code line}; {@code progress} stops the check by throwing.
+     * Checks {@code dir} with {@code runtime}'s {@code CheckIndex}, read-only, at {@code level} if it
+     * takes levels, otherwise at its one level (ADR 0045, ADR 0046). The report goes to {@code line};
+     * {@code progress} stops the check by throwing.
      */
     public static IndexCheck check(
             LuceneRuntime runtime,
             Path dir,
             DirectoryKind kind,
+            int level,
             boolean skipped,
             Consumer<String> line,
             ScanProgress progress) {
@@ -558,7 +658,7 @@ public final class RuntimeResults {
         if (check.isEmpty()) {
             return failedCheck(dir, skipped, "Lucene " + runtime.luceneVersion() + " can't check an index here");
         }
-        Check.CheckResult result = check.get().check(dir, kind, line, progress::scanned);
+        Check.CheckResult result = check.get().check(dir, kind, OptionalInt.of(level), line, progress::scanned);
         return new IndexCheck(
                 dir.toString(),
                 skipped,
@@ -575,7 +675,7 @@ public final class RuntimeResults {
                         .map(segment -> new SegmentCheck(
                                 segment.name(),
                                 segment.maxDoc(),
-                                Optional.empty(),
+                                segment.codec(),
                                 segment.compound(),
                                 segment.files(),
                                 segment.sizeBytes(),
@@ -651,10 +751,14 @@ public final class RuntimeResults {
         return GetDocumentHandler.storedValue(core, maxLength);
     }
 
-    /** A term of the params as text: the runtimes' terms are strings. */
-    private static String text(BytesValue term) throws RpcException {
+    /** A term of the params as the runtimes take it. */
+    private static byte[] bytes(BytesValue term) throws RpcException {
         BytesRef bytes = TermParams.term(term);
-        return new String(bytes.bytes, bytes.offset, bytes.length, StandardCharsets.UTF_8);
+        return Arrays.copyOfRange(bytes.bytes, bytes.offset, bytes.offset + bytes.length);
+    }
+
+    private static BytesValue bytesValue(byte[] bytes) {
+        return ByteStrings.bytesValue(new BytesRef(bytes));
     }
 
     private static void checkDocId(RuntimeIndex index, int docId) throws RpcException {

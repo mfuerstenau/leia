@@ -17,17 +17,23 @@ import org.junit.jupiter.api.Test;
 class RuntimesTest {
 
     @Test
-    void findsTheLucene3Runtime() {
+    void findsTheLucene3AndLucene5Runtimes() {
         Runtimes.Loaded loaded = Runtimes.load(RuntimesTest.class.getClassLoader());
         assertThat(loaded.refused()).isEmpty();
         assertThat(loaded.runtimes())
-                .singleElement()
-                .satisfies(runtime -> assertThat(runtime.luceneVersion()).startsWith("3.6"));
+                .extracting(LuceneRuntime::luceneVersion)
+                .containsExactlyInAnyOrder("3.6.2", "5.5.5");
 
         Runtimes runtimes = new Runtimes();
-        assertThat(runtimes.forMajor(2)).isPresent();
+        assertThat(runtimes.forMajor(2))
+                .hasValueSatisfying(
+                        runtime -> assertThat(runtime.luceneVersion()).isEqualTo("3.6.2"));
         assertThat(runtimes.forMajor(3)).isPresent();
-        assertThat(runtimes.forMajor(4)).isEmpty();
+        assertThat(runtimes.forMajor(4))
+                .hasValueSatisfying(
+                        runtime -> assertThat(runtime.luceneVersion()).isEqualTo("5.5.5"));
+        assertThat(runtimes.forMajor(5)).isPresent();
+        assertThat(runtimes.forMajor(6)).isEmpty();
         assertThat(runtimes.newlyRefused()).isEmpty();
     }
 

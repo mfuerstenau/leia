@@ -10,6 +10,7 @@ import io.github.mfuerstenau.leia.protocol.check.CheckIndexResult;
 import io.github.mfuerstenau.leia.protocol.check.SegmentCheck;
 import io.github.mfuerstenau.leia.protocol.check.StartCheckIndexParams;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
+import io.github.mfuerstenau.leia.runtime.Check;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
@@ -70,8 +71,8 @@ public final class StartCheckIndexHandler implements MethodHandler<StartCheckInd
     }
 
     /**
-     * Checks each of {@code targets} with the Lucene that reads it (ADR 0045): Lucene 10 at {@code
-     * level}, a runtime at its one level.
+     * Checks each of {@code targets} with the Lucene that reads it (ADR 0045): Lucene 10 and a runtime
+     * with levels at {@code level}, a runtime without at its one level (ADR 0046).
      */
     private static CheckIndexResult check(
             List<IndexDirectories.IndexDirectory> targets, int level, CheckLog log, ScanProgress progress) {
@@ -95,9 +96,12 @@ public final class StartCheckIndexHandler implements MethodHandler<StartCheckInd
                                             progress),
                                     target.skipped());
                         case IndexDirectories.Route.Runtime(LuceneRuntime runtime) -> {
-                            log.add("Checking with Lucene " + runtime.luceneVersion() + ", which has no levels");
+                            boolean levels =
+                                    runtime.check().map(Check::hasLevels).orElse(false);
+                            log.add("Checking with Lucene " + runtime.luceneVersion()
+                                    + (levels ? "" : ", which has no levels"));
                             yield RuntimeResults.check(
-                                    runtime, target.path(), target.kind(), target.skipped(), log::add, progress);
+                                    runtime, target.path(), target.kind(), level, target.skipped(), log::add, progress);
                         }
                         case IndexDirectories.Route.Missing missing -> {
                             String message = missing.message(target.path());

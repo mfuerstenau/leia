@@ -45,17 +45,42 @@ public interface RuntimeIndex extends Closeable {
         NONE,
         DOCS,
         DOCS_AND_FREQS,
-        DOCS_AND_FREQS_AND_POSITIONS
+        DOCS_AND_FREQS_AND_POSITIONS,
+        DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS
     }
 
-    /** A field of the index. */
+    /** The doc values of a field, as Lucene's {@code DocValuesType}. */
+    enum DocValuesType {
+        NONE,
+        NUMERIC,
+        BINARY,
+        SORTED,
+        SORTED_NUMERIC,
+        SORTED_SET
+    }
+
+    /**
+     * A field of the index.
+     *
+     * @param terms its postings statistics; empty if no segment has postings for it, or the runtime's
+     *     Lucene doesn't record them
+     */
     record Field(
             String name,
             int number,
             IndexOptions indexOptions,
             boolean hasNorms,
             boolean hasPayloads,
-            boolean hasTermVectors) {}
+            boolean hasTermVectors,
+            DocValuesType docValuesType,
+            Optional<TermStats> terms) {}
+
+    /**
+     * The postings statistics of a field, summed over all segments, deleted documents included.
+     *
+     * @param sumTotalTermFreq equal to {@code sumDocFreq} if frequencies are not indexed
+     */
+    record TermStats(int docCount, long sumDocFreq, long sumTotalTermFreq) {}
 
     /**
      * The opened commits and the fields.
@@ -72,6 +97,8 @@ public interface RuntimeIndex extends Closeable {
      * @param docBase the document id of its first document in the opened index
      * @param segmentVersions the Lucene version that wrote each segment, such as {@code 3.6.2}; {@code
      *     2.x} for a segment written before 3.0, which didn't record it
+     * @param luceneVersion the Lucene version that wrote the commit; empty if it isn't recorded, as
+     *     before 5.3
      */
     record IndexStats(
             Path path,
@@ -82,6 +109,7 @@ public interface RuntimeIndex extends Closeable {
             int numDocs,
             int maxDoc,
             List<String> segmentVersions,
+            Optional<String> luceneVersion,
             Map<String, String> userData) {
 
         /** The major version of the oldest segment, which stands in for the version that created the index. */
@@ -94,7 +122,38 @@ public interface RuntimeIndex extends Closeable {
 
         /** The oldest segment version, such as {@code 2.x}; empty without segments. */
         public Optional<String> oldestSegmentVersion() {
-            return segmentVersions.stream().min(Comparator.naturalOrder());
+            return segmentVersions.stream().min(VERSION_ORDER);
+        }
+
+        /** The version that wrote the commit, or else its newest segment; {@code fallback} without segments. */
+        public String commitVersion(String fallback) {
+            return luceneVersion
+                    .or(() -> segmentVersions.stream().max(VERSION_ORDER))
+                    .orElse(fallback);
+        }
+    }
+
+    /**
+     * Orders Lucene versions such as {@code 2.x}, {@code 4.9.0} and {@code 4.10.4} by their numbers, a
+     * part that is not a number (such as {@code x}) before every number.
+     */
+    Comparator<String> VERSION_ORDER = (a, b) -> {
+        String[] left = a.split("\\.");
+        String[] right = b.split("\\.");
+        for (int i = 0; i < Math.min(left.length, right.length); i++) {
+            int order = Long.compare(versionPart(left[i]), versionPart(right[i]));
+            if (order != 0) {
+                return order;
+            }
+        }
+        return Integer.compare(left.length, right.length);
+    };
+
+    private static long versionPart(String part) {
+        try {
+            return Long.parseLong(part);
+        } catch (NumberFormatException e) {
+            return -1;
         }
     }
 

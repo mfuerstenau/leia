@@ -12,6 +12,7 @@ import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
 import io.github.mfuerstenau.leia.server.document.GetTermVectorHandler;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
+import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
 import jakarta.inject.Inject;
 import java.io.IOException;
 import java.util.List;
@@ -34,6 +35,9 @@ public final class GetPositionsHandler implements MethodHandler<GetPositionsPara
 
     @Override
     public GetPositionsResult handle(GetPositionsParams params) throws RpcException {
+        if (currentIndex.runtime().isPresent()) {
+            return RuntimeResults.positions(currentIndex.runtime().get(), params);
+        }
         BytesRef term = TermParams.term(params.term());
         ReadOnlyIndex index = currentIndex.readable();
         int docId = params.docId();

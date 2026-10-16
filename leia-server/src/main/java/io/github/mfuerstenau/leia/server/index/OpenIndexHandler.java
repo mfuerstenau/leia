@@ -17,6 +17,7 @@ import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
+import io.github.mfuerstenau.leia.runtime.Check;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
@@ -91,12 +92,16 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
         if (old && mode == OpenMode.READER) {
             return openWithRuntime(root, dirs, version.get(), directoryImpl);
         }
-        // Without a reader, the commits and the check of each index go to the Lucene that reads it;
-        // Lucene 10 reads those of 4.x to 8.x itself (ADR 0022), the runtime those before.
-        boolean runtimeChecks = old && version.get().major() < 4;
-        if (runtimeChecks && runtimes.forMajor(version.get().major()).isEmpty()) {
+        // Without a reader, the commits and the check of each index go to the Lucene that reads it:
+        // the runtime for its version if one is loaded, otherwise Lucene 10, which lists the commits
+        // of 4.x to 8.x as unreadable (ADR 0022). Before 4.0 the runtime is needed.
+        Optional<LuceneRuntime> runtime = old ? runtimes.forMajor(version.get().major()) : Optional.empty();
+        if (old && version.get().major() < 4 && runtime.isEmpty()) {
             throw missingRuntime(version.get(), dirs.getFirst());
         }
+        // The levels follow the first index, as the features do (ADR 0046).
+        boolean checkLevels =
+                runtime.isEmpty() || runtime.get().check().map(Check::hasLevels).orElse(false);
         OpenedIndex index;
         try {
             index = switch (mode) {
@@ -129,7 +134,7 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
                                 .map(dir -> new IndexEntry(dir.toString(), Optional.empty()))
                                 .toList(),
                         List.of(),
-                        runtimeChecks ? withoutLevels(Feature.withoutReader()) : Feature.withoutReader(),
+                        checkLevels ? Feature.withoutReader() : withoutLevels(Feature.withoutReader()),
                         Version.LATEST.toString());
         };
     }

@@ -45,6 +45,7 @@ Every Lucene version uses the package `org.apache.lucene`, so two of them can't 
    - Lucene 10 with a reader has them all, and without one only `COMMITS` and `CHECK_INDEX`.
    - Lucene 3.6 has `INDEX_STATS`, `DOCUMENTS`, `STORED_VALUES`, `TERM_VECTORS`, `TERMS`, `POSTINGS` and `CLASSIC_SEARCH`.
    - *Amended by ADR 0045 §6:* 3.6 has `TOP_TERMS`, `COMMITS` and `CHECK_INDEX` too, and the new `CHECK_LEVELS` is Lucene 10's alone.
+   - *Amended by ADR 0046 §6:* the features follow the runtime: `POSITIONS` with its terms, `DOC_VALUES` with its documents if a field has doc values, `CHECK_LEVELS` if its check has levels, as 5.5's has.
 5. **The backend refuses what an index can't do with `NOT_SUPPORTED` (-32019).**
    - `CurrentIndex` holds either a Lucene 10 index or a `Lucene3Index`. With the latter, `opened()` and `readable()` throw `NOT_SUPPORTED`, so every handler without a branch of its own refuses.
    - Handlers reach a runtime through the runtime interface of decision 1. The spike's `legacy()` branches in the handlers and its `Lucene3Results` are interim, until that interface exists.

@@ -229,6 +229,30 @@ class SessionPilotTest {
         assertThat(screen()).contains("Explain: not for Lucene 2.x");
     }
 
+    /** An index written by Lucene 5.5, which the relocated Lucene 5.5 reads (ADR 0046). */
+    @Test
+    void opensALucene5IndexWithDocValuesAndCheckLevels() throws Exception {
+        Path index = Path.of(System.getProperty("leia.test.index.lucene5")).toAbsolutePath();
+
+        openAtStart(index, OpenMode.READER);
+        assertThat(screen()).contains("Documents  6 live, 1 deleted, 7 max");
+
+        pilot.press('2');
+        settle();
+        assertThat(screen()).contains("Lucene 5.x, read with 5.5.5", "dv_num", "dv: 1", "dv: b1");
+
+        // Lucene 5.5 checks at the levels, so l is there.
+        pilot.press('7');
+        settle();
+        assertThat(screen()).contains("l level");
+        pilot.press('l');
+        settle();
+        assertThat(screen()).doesNotContain("not for");
+        pilot.press(KeyCode.ENTER);
+        settle();
+        assertThat(screen()).contains("OK: no problems found in 1 index");
+    }
+
     @Test
     void reopensAfterACommitAndOpensFromThePrompt() throws Exception {
         Path index = writeIndex(tmp.resolve("index"), 2);

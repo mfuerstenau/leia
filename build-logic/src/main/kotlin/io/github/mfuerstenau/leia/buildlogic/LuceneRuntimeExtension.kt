@@ -20,7 +20,7 @@ import org.gradle.process.CommandLineArgumentProvider
 abstract class LuceneRuntimeExtension(private val project: Project) {
 
     /**
-     * Registers the test index [name], written by [mainClass] on [lucene] into
+     * Registers the test index [name], written by [mainClass] on the Lucene jars [lucene] into
      * `build/test-indexes/<name>`: the source set `<name>Index`, the task `<name>TestIndex`, the
      * system property `leia.test.index.<name>` for the module's tests, and the consumable
      * `<name>TestIndexElements` for leia-server's and leia-tui's tests.
@@ -30,12 +30,14 @@ abstract class LuceneRuntimeExtension(private val project: Project) {
      */
     fun testIndex(
         name: String,
-        lucene: Provider<MinimalExternalModuleDependency>,
         mainClass: String,
+        vararg lucene: Provider<MinimalExternalModuleDependency>,
     ): NamedDomainObjectProvider<SourceSet> {
         val sourceSets = project.extensions.getByType(SourceSetContainer::class.java)
         val sourceSet = sourceSets.register("${name}Index")
-        project.dependencies.addProvider(sourceSet.get().implementationConfigurationName, lucene)
+        for (dependency in lucene) {
+            project.dependencies.addProvider(sourceSet.get().implementationConfigurationName, dependency)
+        }
 
         val indexDir = project.layout.buildDirectory.dir("test-indexes/$name")
         val writer = project.tasks.register("${name}TestIndex", JavaExec::class.java) {

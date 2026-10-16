@@ -28,9 +28,11 @@ import io.github.mfuerstenau.leia.protocol.commits.GetCommitParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
 import io.github.mfuerstenau.leia.protocol.commits.Segment;
+import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
 import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
+import io.github.mfuerstenau.leia.protocol.document.TermPosition;
 import io.github.mfuerstenau.leia.protocol.index.Feature;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
 import io.github.mfuerstenau.leia.protocol.index.IndexCommitStats;
@@ -44,6 +46,7 @@ import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.terms.FieldTerms;
 import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
+import io.github.mfuerstenau.leia.protocol.terms.GetPositionsParams;
 import io.github.mfuerstenau.leia.protocol.terms.StartFieldTermScanParams;
 import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
 import java.io.IOException;
@@ -104,6 +107,7 @@ class Lucene3BackendTest {
                         Feature.TERM_VECTORS,
                         Feature.TERMS,
                         Feature.POSTINGS,
+                        Feature.POSITIONS,
                         Feature.TOP_TERMS,
                         Feature.CLASSIC_SEARCH,
                         Feature.COMMITS,
@@ -181,6 +185,26 @@ class Lucene3BackendTest {
                 .jobId();
         backend.call(Methods.CANCEL_JOB, new JobParams(jobId));
         backend.fails(Methods.GET_CHECK_INDEX, new GetCheckIndexParams(jobId, 0), ErrorCode.JOB_NOT_FOUND);
+    }
+
+    @Test
+    void readsPositionsWithoutOffsets() throws Exception {
+        open(Path.of(PATH));
+        assertThat(backend.call(
+                                Methods.GET_POSITIONS,
+                                new GetPositionsParams(0, "body", new BytesValue("gamma", false)))
+                        .positions())
+                .containsExactly(new TermPosition(
+                        OptionalInt.of(4), OptionalInt.empty(), OptionalInt.empty(), Optional.empty()));
+        // 3.6 skips deleted documents.
+        backend.fails(
+                Methods.GET_POSITIONS,
+                new GetPositionsParams(1, "body", new BytesValue("alpha", false)),
+                ErrorCode.TERM_NOT_FOUND);
+        backend.fails(
+                Methods.GET_POSITIONS,
+                new GetPositionsParams(0, "body", new BytesValue("zz", true)),
+                ErrorCode.INVALID_PARAMS);
     }
 
     @Test

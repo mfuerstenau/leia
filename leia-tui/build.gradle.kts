@@ -30,8 +30,9 @@ dependencies {
     runtimeOnly(libs.tamboui.panama.backend)
 
     testImplementation(launcher.output)
-    // The Lucene 2.4 index of a Pilot test needs the runtime, which leia.jar leaves to runtimes/.
+    // The old indexes of the Pilot tests need the runtimes, which leia.jar leaves to runtimes/.
     testRuntimeOnly(project(path = ":leia-lucene3", configuration = "shadowRuntimeElements"))
+    testRuntimeOnly(project(path = ":leia-lucene5", configuration = "shadowRuntimeElements"))
     // The Pilot tests write the indexes they open, as leia-server's tests do.
     testImplementation(libs.lucene.core)
     testImplementation(platform(libs.tamboui.bom))
@@ -43,10 +44,16 @@ application {
     mainClass = "io.github.mfuerstenau.leia.tui.Launcher"
 }
 
-// The Lucene 2.4 and 3.x indexes that leia-lucene3's build writes, which Pilot tests open (ADR 0044).
-val oldTestIndexes = listOf("lucene24", "lucene3").associateWith { name ->
+// The old indexes that the runtimes' builds write, which Pilot tests open (ADR 0044): Lucene 2.4 and
+// 3.x from leia-lucene3, 4.x and 5.x from leia-lucene5.
+val oldTestIndexes = mapOf(
+    "lucene24" to "leia-lucene3",
+    "lucene3" to "leia-lucene3",
+    "lucene4" to "leia-lucene5",
+    "lucene5" to "leia-lucene5",
+).mapValues { (name, runtime) ->
     configurations.create("${name}TestIndex") { isCanBeConsumed = false }.also {
-        dependencies.add(it.name, dependencies.project(mapOf("path" to ":leia-lucene3", "configuration" to "${name}TestIndexElements")))
+        dependencies.add(it.name, dependencies.project(mapOf("path" to ":$runtime", "configuration" to "${name}TestIndexElements")))
     }
 }
 
@@ -138,6 +145,7 @@ val runtimeJars = configurations.create("runtimeJars") {
 
 dependencies {
     runtimeJars(project(path = ":leia-lucene3", configuration = "shadowRuntimeElements"))
+    runtimeJars(project(path = ":leia-lucene5", configuration = "shadowRuntimeElements"))
 }
 
 // The folder leia runs from: leia.jar, the scripts that start it (ADR 0034 §8) and runtimes/.

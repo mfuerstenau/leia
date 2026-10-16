@@ -13,6 +13,7 @@ The 3.6 runtime is the template for those of 5, 7 and 9, so the shape of the run
 ## Decision
 
 1. **Runtime interface version 2.** `LuceneRuntime.API_VERSION` is 2, bumped once for all of this, since `open` and `Search.parse` change shape. JDK types and records only, as before.
+   - *Amended by ADR 0046 §3:* interface 3 has terms as bytes, deleted postings, positions, doc values, field statistics, codecs and the check's levels.
    - `RuntimeIndex open(List<Path> dirs, DirectoryKind)` opens each directory and combines those that open as one index. A directory that fails is skipped and listed in `RuntimeIndex.skipped()` (`Skipped(path, message)`); if none opens, the first error is thrown, naming its directory.
    - `RuntimeIndex.stats()` gives `Stats(numDocs, maxDoc, indexes, fields)`, with `IndexStats(path, docBase, segmentsFile, generation, version, numDocs, maxDoc, segmentVersions, userData)` per directory, read from the opened commit.
    - `Optional<Commits> commits()` and `Optional<Check> check()` on `LuceneRuntime`, not on the index. Both are path-based, need no reader, and keep no state, so they serve an open with a reader, one without, and a directory that was skipped.
@@ -35,6 +36,7 @@ The 3.6 runtime is the template for those of 5, 7 and 9, so the shape of the run
    - `getCommits`/`getCommit` on `Missing` fail with `MISSING_RUNTIME`.
    - `startCheckIndex` checks the opened directories, then the skipped ones (ADR 0022), each with the Lucene that reads it, in one job and one log. A Lucene 10 open with old indexes skipped below it checks those with 3.6, and the other way round. A runtime ignores the level and says so on the output ("Checking with Lucene 3.6.2, which has no levels"); `Missing` is a per-index `error` naming the jar.
 6. **Features** (amends ADR 0044 §4, ADR 0022).
+   - *Amended by ADR 0046 §6:* `CHECK_LEVELS` comes with a runtime whose check has levels, and 3.6 has `POSITIONS`.
    - A new feature, `CHECK_LEVELS`: the check's `level`. Lucene 10 has it, so `Feature.all()` and `Feature.withoutReader()` include it; an open without a reader whose first index is below 4 leaves it out, and so does every runtime.
    - 3.6 with a reader has `INDEX_STATS`, `DOCUMENTS`, `STORED_VALUES`, `TERM_VECTORS`, `TERMS`, `POSTINGS`, `TOP_TERMS`, `CLASSIC_SEARCH`, `COMMITS` and `CHECK_INDEX`. `TOP_TERMS` comes with the `Terms` group, `COMMITS` and `CHECK_INDEX` with the runtime's `commits()` and `check()`.
 7. **The protocol.** `commits.Segment`'s `id`, `codec` and `formats` are `Optional`: 3.x has no segment id and no codec. Lucene 10 always fills them.

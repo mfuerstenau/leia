@@ -7,6 +7,10 @@ lucene8 = "8.11.4"
 lucene3 = "3.6.2"
 # Only for writing the Lucene 2.4 test index (leia-lucene3/build.gradle.kts)
 lucene24 = "2.4.1"
+# Reads Lucene 4.x and 5.x indexes, relocated in leia-lucene5 (ADR 0046)
+lucene5 = "5.5.5"
+# Only for writing the Lucene 4.x test index (leia-lucene5/build.gradle.kts)
+lucene4 = "4.10.4"
 dagger = "2.60.1"
 jackson = "3.2.3"
 junit = "6.1.3"
@@ -39,6 +43,12 @@ lucene9-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene
 lucene8-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene8" }
 lucene3-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene3" }
 lucene24-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene24" }
+lucene5-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene5" }
+lucene5-backward-codecs = { module = "org.apache.lucene:lucene-backward-codecs", version.ref = "lucene5" }
+lucene5-queryparser = { module = "org.apache.lucene:lucene-queryparser", version.ref = "lucene5" }
+lucene5-analyzers-common = { module = "org.apache.lucene:lucene-analyzers-common", version.ref = "lucene5" }
+lucene4-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene4" }
+lucene4-analyzers-common = { module = "org.apache.lucene:lucene-analyzers-common", version.ref = "lucene4" }
 dagger = { module = "com.google.dagger:dagger", version.ref = "dagger" }
 dagger-compiler = { module = "com.google.dagger:dagger-compiler", version.ref = "dagger" }
 jackson-bom = { module = "tools.jackson:jackson-bom", version.ref = "jackson" }

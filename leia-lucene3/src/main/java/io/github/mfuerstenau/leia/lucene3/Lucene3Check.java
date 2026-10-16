@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.function.Consumer;
 import java.util.function.LongConsumer;
 import org.apache.lucene.index.CheckIndex;
@@ -35,8 +36,15 @@ final class Lucene3Check implements Check {
     /** How many causes {@link #describe} names at most. */
     private static final int MAX_CAUSES = 8;
 
+    /** {@inheritDoc} 3.6 checks at one level. */
     @Override
-    public CheckResult check(Path dir, DirectoryKind kind, Consumer<String> line, LongConsumer progress) {
+    public boolean hasLevels() {
+        return false;
+    }
+
+    @Override
+    public CheckResult check(
+            Path dir, DirectoryKind kind, OptionalInt level, Consumer<String> line, LongConsumer progress) {
         Cancellation cancellation = new Cancellation(progress);
         Report report = new Report(line, cancellation);
         CheckIndex.Status status;
@@ -63,6 +71,7 @@ final class Lucene3Check implements Check {
             segments.add(new SegmentCheck(
                     segment.name,
                     segment.docCount,
+                    Optional.empty(),
                     segment.compound,
                     segment.numFiles,
                     Math.round(segment.sizeMB * 1024 * 1024),

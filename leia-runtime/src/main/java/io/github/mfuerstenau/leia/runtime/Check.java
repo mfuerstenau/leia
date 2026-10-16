@@ -3,6 +3,7 @@ package io.github.mfuerstenau.leia.runtime;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.function.Consumer;
 import java.util.function.LongConsumer;
 
@@ -13,14 +14,22 @@ import java.util.function.LongConsumer;
 public interface Check {
 
     /**
+     * Whether the check takes leia's levels (ADR 0022): 1 checks the checksums only, 2 is Lucene's
+     * default check, 3 adds the slow checks such as term vectors against the postings (ADR 0046).
+     */
+    boolean hasLevels();
+
+    /**
      * Checks the latest commit of {@code dir}. The report goes to {@code line}, line by line.
      *
+     * @param level the level from 1 to 3, if {@link #hasLevels()}; empty for the default, and ignored
+     *     without levels
      * @param progress receives the lines written so far, after each line and while the check reads;
      *     it may throw to stop the check, which then throws what it threw
      * @return the outcome; one with an {@link CheckResult#error()} if {@code dir} can't be checked
      *     at all
      */
-    CheckResult check(Path dir, DirectoryKind kind, Consumer<String> line, LongConsumer progress);
+    CheckResult check(Path dir, DirectoryKind kind, OptionalInt level, Consumer<String> line, LongConsumer progress);
 
     /**
      * The outcome of checking one directory.
@@ -55,6 +64,7 @@ public interface Check {
     /**
      * The outcome of checking one segment.
      *
+     * @param codec its codec; empty before codecs, as before Lucene 4
      * @param files the files it consists of
      * @param sizeBytes the size of those files
      * @param error the test it failed and why, with the causes; empty if it passed
@@ -62,6 +72,7 @@ public interface Check {
     record SegmentCheck(
             String name,
             int maxDoc,
+            Optional<String> codec,
             boolean compound,
             int files,
             long sizeBytes,

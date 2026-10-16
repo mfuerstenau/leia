@@ -88,7 +88,10 @@ public final class Check {
     /** The opened path, which the index directories are shown relative to. */
     private final String path;
 
-    /** Whether the check has levels: Lucene 10 has them, Lucene 3.6 doesn't (ADR 0045). */
+    /**
+     * Whether the check has levels, as the feature {@code CHECK_LEVELS} says: Lucene 10 and 5.5 have
+     * them, Lucene 3.6 doesn't (ADR 0045, ADR 0046).
+     */
     private final boolean levels;
 
     /** The level the next check runs at. */

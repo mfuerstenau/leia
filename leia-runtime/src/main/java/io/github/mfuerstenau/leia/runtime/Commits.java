@@ -65,7 +65,16 @@ public interface Commits {
      * @param luceneVersion the Lucene version that wrote it, such as {@code 3.6.2}; {@code 2.x} before 3.0
      * @param sizeInBytes the size of its files; empty if one of them can't be stat'ed
      * @param diagnostics how it came to be: source, Lucene version, OS, Java, ...
-     * @param attributes what else its {@code segments_N} entry says, such as the doc store
+     * @param attributes the codec's attributes; before codecs, what else its {@code segments_N} entry
+     *     says, such as the doc store
+     * @param id its unique id in hex; empty before Lucene 5
+     * @param codec its codec, such as {@code Lucene54}; empty before Lucene 4
+     * @param formats the formats of its codec; empty without a codec
+     * @param fieldFormats the formats of each field, by field name; empty if its field infos can't be
+     *     read, or before codecs
+     * @param fieldInfosError why its field infos can't be read; empty if they can
+     * @param fieldInfosGen the generation of its field infos update; empty without one
+     * @param docValuesGen the generation of its doc values updates; empty without one
      */
     record Segment(
             String name,
@@ -77,7 +86,77 @@ public interface Commits {
             boolean compound,
             OptionalLong sizeInBytes,
             Map<String, String> diagnostics,
-            Map<String, String> attributes) {}
+            Map<String, String> attributes,
+            Optional<String> id,
+            Optional<String> codec,
+            Optional<Formats> formats,
+            List<FieldFormats> fieldFormats,
+            Optional<String> fieldInfosError,
+            OptionalLong fieldInfosGen,
+            OptionalLong docValuesGen) {
+
+        /** A segment before codecs, as Lucene 2.x and 3.x write it. */
+        public Segment(
+                String name,
+                int maxDoc,
+                int docBase,
+                int delCount,
+                OptionalLong delGen,
+                String luceneVersion,
+                boolean compound,
+                OptionalLong sizeInBytes,
+                Map<String, String> diagnostics,
+                Map<String, String> attributes) {
+            this(
+                    name,
+                    maxDoc,
+                    docBase,
+                    delCount,
+                    delGen,
+                    luceneVersion,
+                    compound,
+                    sizeInBytes,
+                    diagnostics,
+                    attributes,
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    List.of(),
+                    Optional.empty(),
+                    OptionalLong.empty(),
+                    OptionalLong.empty());
+        }
+    }
+
+    /**
+     * The formats of a segment's codec: the name of a named format (postings, doc values), otherwise
+     * the simple class name.
+     *
+     * @param points empty before Lucene 6
+     * @param knnVectors empty before Lucene 9
+     */
+    record Formats(
+            String postings,
+            String docValues,
+            String storedFields,
+            String termVectors,
+            String norms,
+            Optional<String> points,
+            Optional<String> knnVectors,
+            String fieldInfos,
+            String segmentInfo,
+            String liveDocs,
+            String compound) {}
+
+    /**
+     * The formats of a field in a segment, as its field infos name them.
+     *
+     * @param postings empty if the field isn't indexed
+     * @param docValues empty if the field has no doc values
+     * @param knnVectors empty if the field has no KNN vectors
+     */
+    record FieldFormats(
+            String field, Optional<String> postings, Optional<String> docValues, Optional<String> knnVectors) {}
 
     /**
      * A file of a commit.
