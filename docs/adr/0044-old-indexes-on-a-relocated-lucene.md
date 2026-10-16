@@ -38,15 +38,18 @@ Every Lucene version uses the package `org.apache.lucene`, so two of them can't 
    - Before Lucene 10 is tried, a detector in `leia.jar` reads the first int of the newest `segments_N`, without any Lucene. A value from -2 to -11 is a format from before 4.0. Every Lucene from 4.0 on writes `CodecUtil`'s magic there. The detector is in `leia.jar`, not in a runtime (the spike's `Lucene3Index.handles`), so leia can tell an old index even when its runtime isn't loaded.
    - An old index that no loaded runtime reads gives `MISSING_RUNTIME` (-32020), next after `NOT_SUPPORTED` in `ErrorCode`. Its message names the runtime jar and the index's Lucene version, so the TUI can point at `X`, as with `MISSING_CODEC` (ADR 0018).
    - Only a single index directory with a reader is routed. `DIRECTORY_ONLY` mode on such an index gives `UNSUPPORTED_INDEX_FORMAT`.
+   - *Amended by ADR 0045 §3, §4:* the first index of a walk decides, and the indexes its Lucene can't read are skipped; `DIRECTORY_ONLY` opens an old index, whose commits and check go to its runtime.
 4. **`openIndex` reports the features of the opened index.**
    - `OpenIndexResult` gains `features: Set<Feature>` and `luceneRuntime`.
    - `Feature` lists the screens and methods: `INDEX_STATS`, `TOP_TERMS`, `DOCUMENTS`, `STORED_VALUES`, `TERM_VECTORS`, `POSITIONS`, `RECONSTRUCT`, `FILTER`, `TERMS`, `POSTINGS`, `POINTS`, `DOC_VALUES`, `KNN_VECTORS`, `COMMITS`, `SEARCH`, `CLASSIC_SEARCH`, `EXPLAIN`, `HIGHLIGHT`, `STORED_SCAN`, `CHECK_INDEX`, `EXPORT_TERMS`, `REOPEN` and `AUTO_STOP_WORDS`.
    - Lucene 10 with a reader has them all, and without one only `COMMITS` and `CHECK_INDEX`.
    - Lucene 3.6 has `INDEX_STATS`, `DOCUMENTS`, `STORED_VALUES`, `TERM_VECTORS`, `TERMS`, `POSTINGS` and `CLASSIC_SEARCH`.
+   - *Amended by ADR 0045 §6:* 3.6 has `TOP_TERMS`, `COMMITS` and `CHECK_INDEX` too, and the new `CHECK_LEVELS` is Lucene 10's alone.
 5. **The backend refuses what an index can't do with `NOT_SUPPORTED` (-32019).**
    - `CurrentIndex` holds either a Lucene 10 index or a `Lucene3Index`. With the latter, `opened()` and `readable()` throw `NOT_SUPPORTED`, so every handler without a branch of its own refuses.
    - Handlers reach a runtime through the runtime interface of decision 1. The spike's `legacy()` branches in the handlers and its `Lucene3Results` are interim, until that interface exists.
    - Search is a job as always (hard rule 7). It takes a classic query only, best score first.
+   - *Amended by ADR 0045 §8:* with the analyzers of the runtime's Lucene; one it lacks gives `NOT_SUPPORTED`.
 6. **The TUI switches off what the index lacks.**
    - `Opened` carries the features.
    - A screen the index lacks gets a dimmed tab, and its key gives a notice: "Commits: not for Lucene 2.x".
@@ -108,8 +111,9 @@ The routing (decision 3) has landed:
   - every runtime module is built against the runtime interface's version, and a change to the interface means building them all again;
   - `build-dist.sh` and `leiaFolder` copy `runtimes/`.
 - The protocol's records stay those of Lucene 10. An old runtime fills what it lacks with neutral values: no doc values, no points, no vectors.
-- Left for later:
+- Left for later, and done in ADR 0045 (runtime interface 2):
   - commits and `CheckIndex` on 3.6;
   - several old index directories under one path;
   - a 3.x test index;
-  - the term-statistics scan (`TOP_TERMS`).
+  - the term-statistics scan (`TOP_TERMS`);
+  - analyzers other than 3.6's `StandardAnalyzer` for search.

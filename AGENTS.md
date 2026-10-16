@@ -21,8 +21,8 @@ leia / leia.cmd  ──finds the JVM, runs──▶  <java> -jar leia.jar
 | Path | Role |
 |---|---|
 | `leia-core/` | Java library with the Lucene functionality. No UI or protocol code. |
-| `leia-runtime/` | The runtime interface (ADR 0044): `LuceneRuntime` (with `API_VERSION`), `RuntimeIndex` and the groups `Documents`, `Terms` and `Search`, with records of its own. JDK types only; part of `leia.jar`. |
-| `leia-lucene3/` | Lucene 3.6.2, relocated into `…lucene3.shaded`, for indexes written by Lucene 2.x and 3.x (ADR 0044). `Lucene3Runtime` implements `LuceneRuntime` and is found through `ServiceLoader`. Its shadow jar is `runtimes/leia-lucene3.jar` beside `leia.jar`, not part of it (ADR 0044). Also writes the Lucene 2.4 test index. |
+| `leia-runtime/` | The runtime interface (ADR 0044, ADR 0045): `LuceneRuntime` (with `API_VERSION`), its path-based `Commits` and `Check`, and `RuntimeIndex` with the groups `Documents`, `Terms` and `Search`, with records of its own. JDK types only; part of `leia.jar`. |
+| `leia-lucene3/` | Lucene 3.6.2, relocated into `…lucene3.shaded`, for indexes written by Lucene 2.x and 3.x (ADR 0044). `Lucene3Runtime` implements `LuceneRuntime` and is found through `ServiceLoader`. Its shadow jar is `runtimes/leia-lucene3.jar` beside `leia.jar`, not part of it (ADR 0044). Also writes the Lucene 2.4 and 3.x test indexes. |
 | `leia-protocol/` | Records for every method's params and result, `Methods` (the registry), `RpcMethod` and `ErrorCode`: the API between the UI and the backend. |
 | `leia-server/` | Library: a handler per method, with Dagger wiring, mapping core results to the records. `LeiaBackend` runs the calls in order on one thread; `RpcException` carries an expected failure's `ErrorCode`. |
 | `leia-tui/` | The application: the CLI (`Cli`, `Main`), the version-check entry class `Launcher` (compiled for Java 8), the log, and a package per screen (`…tui.overview`, `…tui.documents`, …). Builds the **fat jar** `leia.jar`; the scripts `leia` and `leia.cmd` are in `leia-tui/src/scripts/`. |

@@ -43,11 +43,11 @@ application {
     mainClass = "io.github.mfuerstenau.leia.tui.Launcher"
 }
 
-// The Lucene 2.4 index that leia-lucene3's build writes, which a Pilot test opens (ADR 0044).
-val lucene24TestIndex = configurations.create("lucene24TestIndex") { isCanBeConsumed = false }
-
-dependencies {
-    lucene24TestIndex(project(path = ":leia-lucene3", configuration = "lucene24TestIndexElements"))
+// The Lucene 2.4 and 3.x indexes that leia-lucene3's build writes, which Pilot tests open (ADR 0044).
+val oldTestIndexes = listOf("lucene24", "lucene3").associateWith { name ->
+    configurations.create("${name}TestIndex") { isCanBeConsumed = false }.also {
+        dependencies.add(it.name, dependencies.project(mapOf("path" to ":leia-lucene3", "configuration" to "${name}TestIndexElements")))
+    }
 }
 
 tasks.test {
@@ -55,11 +55,13 @@ tasks.test {
     inputs.dir("src/scripts")
     systemProperty("leia.scripts", file("src/scripts").absolutePath)
     useJUnitPlatform { excludeTags("jars") }
-    val lucene24Index: FileCollection = lucene24TestIndex
-    inputs.files(lucene24Index).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("lucene24Index")
+    val indexes: Map<String, FileCollection> = oldTestIndexes
+    for ((name, index) in indexes) {
+        inputs.files(index).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("${name}Index")
+    }
     val projectPath = projectDir.toPath()
     jvmArgumentProviders.add(CommandLineArgumentProvider {
-        listOf("-Dleia.test.index.lucene24=" + projectPath.relativize(lucene24Index.singleFile.toPath()))
+        indexes.map { (name, index) -> "-Dleia.test.index.$name=" + projectPath.relativize(index.singleFile.toPath()) }
     })
 }
 

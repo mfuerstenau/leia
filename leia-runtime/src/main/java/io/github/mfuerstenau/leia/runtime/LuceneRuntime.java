@@ -2,6 +2,8 @@ package io.github.mfuerstenau.leia.runtime;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -15,7 +17,7 @@ import java.util.Set;
 public interface LuceneRuntime {
 
     /** The version of this interface. It changes with every change that breaks a runtime built before. */
-    int API_VERSION = 1;
+    int API_VERSION = 2;
 
     /**
      * The version of this interface the runtime was built against: {@code return API_VERSION;}, which
@@ -30,10 +32,19 @@ public interface LuceneRuntime {
     Set<Integer> indexMajors();
 
     /**
-     * Opens the latest commit of {@code dir} read-only, with a reader, through a directory without
-     * locks.
+     * Opens the latest commit of each directory of {@code dirs} read-only, with a reader, through a
+     * directory without locks, and combines them as one index, in the order given (ADR 0045). A
+     * directory that fails to open is skipped and listed in {@link RuntimeIndex#skipped()}.
      *
-     * @throws IOException if the index can't be read
+     * @param dirs the index directories, at least one
+     * @throws IOException if none of them can be read: the error of the first, naming its directory
+     *     if there are several
      */
-    RuntimeIndex open(Path dir, DirectoryKind kind) throws IOException;
+    RuntimeIndex open(List<Path> dirs, DirectoryKind kind) throws IOException;
+
+    /** The commits of an index directory, read without a reader; empty if the runtime can't read them. */
+    Optional<Commits> commits();
+
+    /** Lucene's {@code CheckIndex}, read-only, without a reader; empty if the runtime has none. */
+    Optional<Check> check();
 }

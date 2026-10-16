@@ -5,7 +5,6 @@ import io.github.mfuerstenau.leia.runtime.Documents;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.Terms;
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -18,14 +17,18 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
+import java.util.PriorityQueue;
+import java.util.Set;
 import java.util.function.LongConsumer;
-import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Fieldable;
 import org.apache.lucene.document.NumericField;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FieldInfos;
+import org.apache.lucene.index.IndexCommit;
 import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.MultiReader;
 import org.apache.lucene.index.SegmentInfo;
 import org.apache.lucene.index.SegmentInfos;
 import org.apache.lucene.index.Term;
@@ -44,10 +47,6 @@ import org.apache.lucene.search.Scorer;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.TopScoreDocCollector;
 import org.apache.lucene.store.Directory;
-import org.apache.lucene.store.FSDirectory;
-import org.apache.lucene.store.MMapDirectory;
-import org.apache.lucene.store.NIOFSDirectory;
-import org.apache.lucene.store.NoLockFactory;
 import org.apache.lucene.util.ReaderUtil;
 import org.apache.lucene.util.Version;
 
@@ -56,42 +55,71 @@ import org.apache.lucene.util.Version;
  * an index: there were no codecs before 4.0.
  *
  * <p>Lucene is relocated in this module's jar, and leia reaches it only through {@link
- * Lucene3Runtime} and the interfaces of {@code leia-runtime}. It is read-only like the rest of leia: it opens a reader, never an {@code
- * IndexWriter}, through a {@code Directory} without locks. A reader of Lucene 3 can be used from
- * several threads, so jobs can read it.
+ * Lucene3Runtime} and the interfaces of {@code leia-runtime}. It is read-only like the rest of leia: it
+ * opens readers, never an {@code IndexWriter}, through directories without locks. Several directories
+ * open as one, in a {@link MultiReader} (ADR 0045). A reader of Lucene 3 can be used from several
+ * threads, so jobs can read it.
  */
 final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
 
-    private final Path path;
+    /** How many terms {@link #topTerms} scans between two reports of its progress. */
+    static final int PROGRESS_INTERVAL = 1024;
+
+    /** A directory that opened, and its reader. */
+    private record Part(Path dir, Directory directory, IndexReader reader) {}
+
     private final DirectoryKind directoryKind;
-    private final Directory directory;
+    private final List<Part> parts;
+    private final List<Skipped> skipped;
     private final IndexReader reader;
     private final FieldInfos fieldInfos;
 
-    private Lucene3Index(Path path, DirectoryKind directoryKind, Directory directory, IndexReader reader) {
-        this.path = path;
+    private Lucene3Index(DirectoryKind directoryKind, List<Part> parts, List<Skipped> skipped) {
         this.directoryKind = directoryKind;
-        this.directory = directory;
-        this.reader = reader;
+        this.parts = List.copyOf(parts);
+        this.skipped = List.copyOf(skipped);
+        this.reader = parts.size() == 1
+                ? parts.getFirst().reader()
+                : new MultiReader(parts.stream().map(Part::reader).toArray(IndexReader[]::new), true);
         this.fieldInfos = ReaderUtil.getMergedFieldInfos(reader);
     }
 
     /**
-     * Opens the latest commit of {@code dir} with a reader.
+     * Opens the latest commit of each of {@code dirs} with a reader, and combines those that open.
      *
-     * @throws IOException if the index can't be read
+     * @throws IOException if none of them can be read
      */
-    static Lucene3Index open(Path dir, DirectoryKind kind) throws IOException {
-        File file = dir.toFile();
-        NoLockFactory noLocks = NoLockFactory.getNoLockFactory();
-        Directory directory = switch (kind) {
-            case FS -> FSDirectory.open(file, noLocks);
-            case MMAP -> new MMapDirectory(file, noLocks);
-            case NIO -> new NIOFSDirectory(file, noLocks);
-        };
+    static Lucene3Index open(List<Path> dirs, DirectoryKind kind) throws IOException {
+        if (dirs.isEmpty()) {
+            throw new IllegalArgumentException("No directory to open");
+        }
+        List<Part> parts = new ArrayList<>();
+        List<Skipped> skipped = new ArrayList<>();
+        IOException firstFailure = null;
+        for (Path dir : dirs) {
+            try {
+                parts.add(openPart(dir, kind));
+            } catch (IOException | RuntimeException e) {
+                if (dirs.size() == 1) {
+                    throw e;
+                }
+                skipped.add(new Skipped(dir, Directories.message(e)));
+                if (firstFailure == null) {
+                    firstFailure = new IOException(dir + ": " + Directories.message(e), e);
+                }
+            }
+        }
+        if (parts.isEmpty()) {
+            throw firstFailure;
+        }
+        return new Lucene3Index(kind, parts, skipped);
+    }
+
+    private static Part openPart(Path dir, DirectoryKind kind) throws IOException {
+        Directory directory = Directories.open(dir, kind);
         try {
             // Read-only: no write lock, no changes to the index.
-            return new Lucene3Index(dir, kind, directory, IndexReader.open(directory, true));
+            return new Part(dir, directory, IndexReader.open(directory, true));
         } catch (IOException | RuntimeException e) {
             directory.close();
             throw e;
@@ -99,8 +127,13 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
     }
 
     @Override
-    public Path path() {
-        return path;
+    public List<Path> directories() {
+        return parts.stream().map(Part::dir).toList();
+    }
+
+    @Override
+    public List<Skipped> skipped() {
+        return skipped;
     }
 
     @Override
@@ -125,21 +158,29 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
 
     @Override
     public Stats stats() throws IOException {
-        SegmentInfos infos = new SegmentInfos();
-        infos.read(directory);
-        List<String> versions = new ArrayList<>();
-        for (SegmentInfo info : infos) {
-            versions.add(info.getVersion() == null ? "2.x" : info.getVersion());
+        List<IndexStats> indexes = new ArrayList<>();
+        int docBase = 0;
+        for (Part part : parts) {
+            IndexCommit commit = part.reader().getIndexCommit();
+            SegmentInfos infos = new SegmentInfos();
+            infos.read(part.directory(), commit.getSegmentsFileName());
+            List<String> versions = new ArrayList<>();
+            for (SegmentInfo info : infos) {
+                versions.add(Lucene3Commits.version(info));
+            }
+            indexes.add(new IndexStats(
+                    part.dir(),
+                    docBase,
+                    commit.getSegmentsFileName(),
+                    commit.getGeneration(),
+                    commit.getVersion(),
+                    part.reader().numDocs(),
+                    part.reader().maxDoc(),
+                    List.copyOf(versions),
+                    Map.copyOf(commit.getUserData())));
+            docBase += part.reader().maxDoc();
         }
-        return new Stats(
-                infos.getSegmentsFileName(),
-                infos.getGeneration(),
-                infos.getVersion(),
-                reader.numDocs(),
-                reader.maxDoc(),
-                versions,
-                new HashMap<>(infos.getUserData()),
-                fields());
+        return new Stats(reader.numDocs(), reader.maxDoc(), List.copyOf(indexes), fields());
     }
 
     @Override
@@ -267,6 +308,47 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
         return total;
     }
 
+    /**
+     * {@inheritDoc} One pass over the terms keeps the top ones by {@code docFreq}, as leia-core's
+     * scan does; {@code totalTermFreq}, which Lucene 3 doesn't record, is then counted from the
+     * postings of the top terms only.
+     */
+    @Override
+    public FieldTerms topTerms(String field, int topN, LongConsumer progress) throws IOException {
+        // The weakest first: the lowest docFreq, and of equal ones the later term.
+        PriorityQueue<TopTerm> top = new PriorityQueue<>(
+                Comparator.comparingInt(TopTerm::docFreq).thenComparing(TopTerm::text, Comparator.reverseOrder()));
+        long scanned = 0;
+        try (TermEnum termEnum = reader.terms(new Term(field, ""))) {
+            for (Term term = termEnum.term();
+                    term != null && term.field().equals(field);
+                    term = termEnum.next() ? termEnum.term() : null) {
+                scanned++;
+                int docFreq = termEnum.docFreq();
+                // Terms come in order, so a tie with the weakest top term loses: the earlier term stays.
+                if (topN > 0 && (top.size() < topN || docFreq > top.peek().docFreq())) {
+                    top.add(new TopTerm(term.text(), docFreq));
+                    if (top.size() > topN) {
+                        top.poll();
+                    }
+                }
+                if (scanned % PROGRESS_INTERVAL == 0) {
+                    progress.accept(scanned);
+                }
+            }
+        }
+        progress.accept(scanned);
+        List<TopTerm> sorted = new ArrayList<>(top);
+        sorted.sort(Comparator.comparingInt(TopTerm::docFreq).reversed().thenComparing(TopTerm::text));
+        List<TermEntry> terms = new ArrayList<>();
+        for (TopTerm term : sorted) {
+            terms.add(new TermEntry(term.text(), term.docFreq(), totalTermFreq(new Term(field, term.text()))));
+        }
+        return new FieldTerms(scanned, List.copyOf(terms));
+    }
+
+    private record TopTerm(String text, int docFreq) {}
+
     /** {@inheritDoc} Lucene 3 skips deleted documents in the postings, though {@code docFreq} counts them. */
     @Override
     public PostingsPage postings(String field, String text, int fromDoc, int limit) throws IOException {
@@ -301,21 +383,28 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
         }
     }
 
-    /** {@inheritDoc} The analyzer is Lucene 3.6's {@code StandardAnalyzer}. */
     @Override
-    public ParsedQuery parse(String expression, ParserOptions options) throws InvalidQueryException {
-        QueryParser parser =
-                new QueryParser(Version.LUCENE_36, options.defaultField(), new StandardAnalyzer(Version.LUCENE_36));
-        parser.setDefaultOperator(options.defaultAnd() ? QueryParser.AND_OPERATOR : QueryParser.OR_OPERATOR);
-        parser.setAllowLeadingWildcard(options.allowLeadingWildcard());
-        parser.setPhraseSlop(options.phraseSlop());
-        parser.setFuzzyPrefixLength(options.fuzzyPrefixLength());
-        parser.setEnablePositionIncrements(options.enablePositionIncrements());
-        parser.setAutoGeneratePhraseQueries(options.autoGeneratePhraseQueries());
+    public Set<String> analyzers() {
+        return Lucene3Analyzers.NAMES;
+    }
+
+    @Override
+    public ParsedQuery parse(String expression, ParserOptions options, AnalyzerSpec spec)
+            throws InvalidQueryException, UnsupportedAnalyzerException {
+        Analyzer analyzer = Lucene3Analyzers.analyzer(spec);
         try {
+            QueryParser parser = new QueryParser(Version.LUCENE_36, options.defaultField(), analyzer);
+            parser.setDefaultOperator(options.defaultAnd() ? QueryParser.AND_OPERATOR : QueryParser.OR_OPERATOR);
+            parser.setAllowLeadingWildcard(options.allowLeadingWildcard());
+            parser.setPhraseSlop(options.phraseSlop());
+            parser.setFuzzyPrefixLength(options.fuzzyPrefixLength());
+            parser.setEnablePositionIncrements(options.enablePositionIncrements());
+            parser.setAutoGeneratePhraseQueries(options.autoGeneratePhraseQueries());
             return new Lucene3Query(parser.parse(expression));
         } catch (ParseException | RuntimeException e) {
             throw new InvalidQueryException(e.getMessage(), e);
+        } finally {
+            analyzer.close();
         }
     }
 
@@ -396,12 +485,27 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
         }
     }
 
+    /** Closes the reader, which closes those of the parts, then the directories. */
     @Override
     public void close() throws IOException {
         try {
             reader.close();
         } finally {
-            directory.close();
+            IOException failure = null;
+            for (Part part : parts) {
+                try {
+                    part.directory().close();
+                } catch (IOException e) {
+                    if (failure == null) {
+                        failure = e;
+                    } else {
+                        failure.addSuppressed(e);
+                    }
+                }
+            }
+            if (failure != null) {
+                throw failure;
+            }
         }
     }
 }

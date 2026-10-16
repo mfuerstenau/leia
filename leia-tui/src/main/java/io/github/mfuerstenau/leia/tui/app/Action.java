@@ -18,6 +18,7 @@ import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.OptionalLong;
 
 /**
@@ -235,10 +236,11 @@ public sealed interface Action {
     record CancelSearch(List<Long> jobs) implements Action {}
 
     /**
-     * Start check {@code checkId} of the open path at this level, and report back with {@link
+     * Start check {@code checkId} of the open path at this level, absent for a Lucene without levels
+     * (ADR 0045), and report back with {@link
      * App#checkStarted} or {@link App#checkFailed} (ADR 0022).
      */
-    record StartCheck(long checkId, int level) implements Action {}
+    record StartCheck(long checkId, OptionalInt level) implements Action {}
 
     /** Cancel this check job. The app has stopped the check already, so nothing is reported back. */
     record CancelCheck(long jobId) implements Action {}

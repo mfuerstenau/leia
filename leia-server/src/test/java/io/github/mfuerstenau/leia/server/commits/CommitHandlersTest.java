@@ -19,7 +19,9 @@ import io.github.mfuerstenau.leia.protocol.commits.Segment;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
+import io.github.mfuerstenau.leia.server.index.IndexDirectories;
 import io.github.mfuerstenau.leia.server.job.Jobs;
+import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
@@ -47,8 +49,9 @@ class CommitHandlersTest {
     Path tmp;
 
     private final CurrentIndex currentIndex = new CurrentIndex(new Jobs(), new Filters());
-    private final GetCommitsHandler getCommits = new GetCommitsHandler(currentIndex);
-    private final GetCommitHandler getCommit = new GetCommitHandler(currentIndex);
+    private final IndexDirectories directories = new IndexDirectories(currentIndex, new Runtimes());
+    private final GetCommitsHandler getCommits = new GetCommitsHandler(currentIndex, directories);
+    private final GetCommitHandler getCommit = new GetCommitHandler(currentIndex, directories);
 
     @Test
     void listsTheCommitsNewestFirst() throws Exception {
@@ -73,7 +76,7 @@ class CommitHandlersTest {
         assertThat(first.delCount()).isEqualTo(1);
         assertThat(first.delGen()).hasValue(1);
         assertThat(first.luceneVersion()).isEqualTo(Version.LATEST.toString());
-        assertThat(first.formats().postings()).isEqualTo("PerField40");
+        assertThat(first.formats().orElseThrow().postings()).isEqualTo("PerField40");
         assertThat(first.diagnostics()).containsEntry("source", "flush");
         assertThat(first.fieldFormats())
                 .containsExactly(new FieldFormats("id", Optional.of("Lucene104"), Optional.empty(), Optional.empty()));

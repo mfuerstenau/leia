@@ -285,9 +285,8 @@ public final class Overview {
 
     /** The number of terms of all fields, once every field with postings has been scanned. */
     private OptionalLong totalTerms() {
-        List<IndexField> indexed = stats.fields().stream()
-                .filter(field -> field.terms().isPresent())
-                .toList();
+        List<IndexField> indexed =
+                stats.fields().stream().filter(Overview::hasPostings).toList();
         if (indexed.isEmpty()) {
             return OptionalLong.empty();
         }
@@ -381,7 +380,7 @@ public final class Overview {
      * fewer than the top N terms.
      */
     public boolean needsScan(IndexField field) {
-        if (field.terms().isEmpty()) {
+        if (!hasPostings(field)) {
             return false;
         }
         return switch (scans.get(field.name())) {
@@ -390,6 +389,14 @@ public final class Overview {
             case FieldScan.Done done -> !FieldScan.hasTopTerms(done.terms(), done.topN(), topN);
             case FieldScan.Queued _, FieldScan.Running _ -> false;
         };
+    }
+
+    /**
+     * Whether {@code field} has postings: its statistics say so, or, for an index written by Lucene
+     * 3.x or before, which has none, its index options (ADR 0045).
+     */
+    static boolean hasPostings(IndexField field) {
+        return field.terms().isPresent() || field.indexOptions() != IndexOptions.NONE;
     }
 
     /** The fields that {@linkplain #needsScan need a scan}, in field order. */
@@ -567,7 +574,7 @@ public final class Overview {
             return;
         }
         String name = field.get().name();
-        boolean hasPostings = field.get().terms().isPresent();
+        boolean hasPostings = hasPostings(field.get());
         String title = " Terms: " + name + " ";
         List<Line> message;
         switch (scans.get(name)) {
@@ -791,7 +798,7 @@ public final class Overview {
                 stats.map(s -> Long.toString(s.sumTotalTermFreq())).orElse("-");
         String terms;
         String share;
-        if (stats.isEmpty()) {
+        if (!hasPostings(field)) {
             terms = "-";
             share = "-";
         } else {

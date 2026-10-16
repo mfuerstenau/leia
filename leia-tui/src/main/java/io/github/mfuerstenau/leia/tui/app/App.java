@@ -324,7 +324,7 @@ public final class App {
             screen = Screen.OVERVIEW;
         }
         commits = new Commits(indexNames(opened));
-        check = new Check(stats.path());
+        check = new Check(stats.path(), opened.supports(Feature.CHECK_LEVELS));
         pointFormats = new PointFormats();
         terms = new Terms(stats.fields()).withPointFormats(pointFormats).withFeatures(opened.features());
         documents = newDocuments(stats, opened);
@@ -384,7 +384,7 @@ public final class App {
                 result.features(),
                 Optional.empty());
         commits = new Commits(indexNames(opened));
-        check = new Check(result.path());
+        check = new Check(result.path(), opened.supports(Feature.CHECK_LEVELS));
         analysis.indexChanged(List.of(), autoStopWordsReason(), false);
         if (screen != Screen.ANALYSIS && screen != Screen.CHECK) {
             screen = Screen.COMMITS;
@@ -1765,8 +1765,13 @@ public final class App {
             return searchAction(search.handleKey(key));
         }
         if (screen == Screen.CHECK && check != null) {
-            return check.handleKey(key).map(start -> switch (start) {
-                case Check.Request.Start request -> new Action.StartCheck(request.checkId(), request.level());
+            return check.handleKey(key).flatMap(request -> switch (request) {
+                case Check.Request.Start start -> Optional.of(new Action.StartCheck(start.checkId(), start.level()));
+                case Check.Request.Unsupported unsupported -> {
+                    // Not reason(): an index without a reader may lack levels too.
+                    notice = new Notice.NotSupported(unsupported.what(), "not for " + oldLucene());
+                    yield Optional.empty();
+                }
             });
         }
         return Optional.empty();
@@ -1800,10 +1805,12 @@ public final class App {
         if (opened.noReader()) {
             return "needs a reader";
         }
-        return "not for "
-                + opened.oldLucene()
-                        .map(old -> old.substring(0, old.indexOf(',')))
-                        .orElse("this index");
+        return "not for " + oldLucene();
+    }
+
+    /** The old Lucene of the open index, such as {@code Lucene 2.x}, or {@code this index}. */
+    private String oldLucene() {
+        return opened.oldLucene().map(old -> old.substring(0, old.indexOf(','))).orElse("this index");
     }
 
     /** Why the open index can't find auto stop words; empty if it can (ADR 0039). */

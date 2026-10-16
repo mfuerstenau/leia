@@ -14,6 +14,7 @@ import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
+import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
 import jakarta.inject.Inject;
 import java.io.IOException;
 
@@ -46,8 +47,11 @@ public final class StartFieldTermScanHandler implements MethodHandler<StartField
                     "Invalid params: topN must be between 0 and " + StartFieldTermScanParams.MAX_TOP_N + ", not "
                             + topN);
         }
-        ReadOnlyIndex index = currentIndex.readable();
         String field = params.field();
+        if (currentIndex.runtime().isPresent()) {
+            return RuntimeResults.startFieldTermScan(currentIndex.runtime().get(), field, topN, jobs);
+        }
+        ReadOnlyIndex index = currentIndex.readable();
         if (!index.hasField(field)) {
             throw new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + field + "' in the index");
         }

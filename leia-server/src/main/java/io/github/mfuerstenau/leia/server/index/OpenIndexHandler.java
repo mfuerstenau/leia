@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.server.index;
 
 import io.github.mfuerstenau.leia.core.DirectoryImpl;
 import io.github.mfuerstenau.leia.core.DirectoryOnlyIndex;
+import io.github.mfuerstenau.leia.core.IndexFinder;
 import io.github.mfuerstenau.leia.core.IndexOpenException;
 import io.github.mfuerstenau.leia.core.IndexSummary;
 import io.github.mfuerstenau.leia.core.OpenedIndex;
@@ -30,9 +31,13 @@ import jakarta.inject.Inject;
 import java.io.IOException;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.Set;
 import java.util.logging.Logger;
 import org.apache.lucene.util.Version;
 
@@ -72,20 +77,25 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
                 .map(DirectoryImpl::valueOf)
                 .orElse(DirectoryImpl.FS);
         OpenMode mode = params.mode().orElse(OpenMode.READER);
-        // Routed by the version of the index (ADR 0044 §3); a path with indexes below it has none.
-        Optional<IndexVersion> version = SegmentsHeader.read(path);
-        if (version.isPresent() && version.get().major() < Version.MIN_SUPPORTED_MAJOR) {
-            Path normalized = path.toAbsolutePath().normalize();
-            if (mode == OpenMode.READER) {
-                return openWithRuntime(normalized, version.get(), directoryImpl);
-            }
-            if (version.get().major() < 4) {
-                throw new RpcException(
-                        ErrorCode.UNSUPPORTED_INDEX_FORMAT,
-                        "An index written by Lucene " + version.get().writtenBy() + " opens only with a reader: "
-                                + normalized);
-            }
-            // Without a reader, Lucene 10 lists their commits and checks some, such as a Lucene 8 index (ADR 0022).
+        Path root;
+        List<Path> dirs;
+        try {
+            root = IndexFinder.root(path);
+            dirs = IndexFinder.find(root);
+        } catch (IndexOpenException e) {
+            throw new RpcException(errorCode(e.reason()), e.getMessage(), e);
+        }
+        // Routed by the version of the first index found, which decides for all (ADR 0044 §3, ADR 0045).
+        Optional<IndexVersion> version = SegmentsHeader.read(dirs.getFirst());
+        boolean old = version.isPresent() && version.get().major() < Version.MIN_SUPPORTED_MAJOR;
+        if (old && mode == OpenMode.READER) {
+            return openWithRuntime(root, dirs, version.get(), directoryImpl);
+        }
+        // Without a reader, the commits and the check of each index go to the Lucene that reads it;
+        // Lucene 10 reads those of 4.x to 8.x itself (ADR 0022), the runtime those before.
+        boolean runtimeChecks = old && version.get().major() < 4;
+        if (runtimeChecks && runtimes.forMajor(version.get().major()).isEmpty()) {
+            throw missingRuntime(version.get(), dirs.getFirst());
         }
         OpenedIndex index;
         try {
@@ -119,26 +129,45 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
                                 .map(dir -> new IndexEntry(dir.toString(), Optional.empty()))
                                 .toList(),
                         List.of(),
-                        Feature.withoutReader(),
+                        runtimeChecks ? withoutLevels(Feature.withoutReader()) : Feature.withoutReader(),
                         Version.LATEST.toString());
         };
     }
 
+    private static Set<Feature> withoutLevels(Set<Feature> features) {
+        Set<Feature> without = EnumSet.copyOf(features);
+        without.remove(Feature.CHECK_LEVELS);
+        return without;
+    }
+
+    private static RpcException missingRuntime(IndexVersion version, Path dir) {
+        return new IndexDirectories.Route.Missing(version).error(dir);
+    }
+
     /**
-     * Opens an index that Lucene 10 can't read through a runtime (ADR 0044). Only with a reader: the
-     * commits screen and the check need Lucene 10.
+     * Opens the indexes of a path whose first index Lucene 10 can't read through the runtime for it
+     * (ADR 0044, ADR 0045): those it reads, as one; the others are skipped.
      */
-    private OpenIndexResult openWithRuntime(Path path, IndexVersion version, DirectoryImpl directoryImpl)
-            throws RpcException {
-        LuceneRuntime runtime = runtimes.forMajor(version.major())
-                .orElseThrow(() -> new RpcException(
-                        ErrorCode.MISSING_RUNTIME,
-                        "The index was written by Lucene " + version.writtenBy() + "; reading it needs the runtime "
-                                + Runtimes.jarFor(version.major()).orElse("for Lucene " + version.major())
-                                + ", which isn't loaded: " + path));
+    private OpenIndexResult openWithRuntime(
+            Path root, List<Path> dirs, IndexVersion version, DirectoryImpl directoryImpl) throws RpcException {
+        LuceneRuntime runtime =
+                runtimes.forMajor(version.major()).orElseThrow(() -> missingRuntime(version, dirs.getFirst()));
+        List<Path> readable = new ArrayList<>();
+        List<RuntimeIndex.Skipped> skipped = new ArrayList<>();
+        for (Path dir : dirs) {
+            Optional<IndexVersion> dirVersion = SegmentsHeader.read(dir);
+            // One without a version the runtime tries, and skips if it fails.
+            if (dirVersion.isEmpty()
+                    || runtime.indexMajors().contains(dirVersion.get().major())) {
+                readable.add(dir);
+            } else {
+                skipped.add(new RuntimeIndex.Skipped(
+                        dir, "Written by Lucene " + dirVersion.get().writtenBy() + "; open it on its own"));
+            }
+        }
         RuntimeIndex index;
         try {
-            index = runtime.open(path, DirectoryKind.valueOf(directoryImpl.name()));
+            index = runtime.open(readable, DirectoryKind.valueOf(directoryImpl.name()));
         } catch (IOException | RuntimeException e) {
             throw new RpcException(
                     ErrorCode.INDEX_NOT_READABLE,
@@ -146,9 +175,12 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
                             + runtime.luceneVersion() + ": " + e,
                     e);
         }
-        OpenRuntime open = new OpenRuntime(runtime, index);
+        skipped.addAll(index.skipped());
+        skipped.sort(Comparator.comparingInt(skippedIndex -> dirs.indexOf(skippedIndex.path())));
+        skipped.forEach(dir -> LOG.info(() -> "Skipped " + dir.path() + ": " + dir.message()));
+        OpenRuntime open = new OpenRuntime(root, runtime, index, skipped);
         currentIndex.replace(open);
-        LOG.info(() -> "Opened " + path + " (" + RuntimeResults.describe(open) + ", " + directoryImpl + ")");
+        LOG.info(() -> "Opened " + root + " (" + RuntimeResults.describe(open) + ", " + directoryImpl + ")");
         return RuntimeResults.opened(open);
     }
 

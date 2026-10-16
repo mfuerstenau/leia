@@ -69,6 +69,9 @@ public final class Commits {
 
     private static final int COLUMN_SPACING = 2;
 
+    /** What a segment written before Lucene 4 or 5 shows for its codec or id (ADR 0045). */
+    private static final String NONE = "–";
+
     /** Keys in the details are padded to the longest one, up to this width. */
     private static final int KEY_WIDTH = 28;
 
@@ -581,7 +584,7 @@ public final class Commits {
             7,
             textWidth(segments, segment -> sizeOr(segment.sizeInBytes(), "?"), 4),
             textWidth(segments, Segment::luceneVersion, 6),
-            textWidth(segments, Segment::codec, 5),
+            textWidth(segments, segment -> segment.codec().orElse(NONE), 5),
             3
         };
         // The columns on the right are also in the details, so they go first when the table is too wide.
@@ -602,7 +605,7 @@ public final class Commits {
                             Integer.toString(segment.delCount()),
                             sizeOr(segment.sizeInBytes(), "?"),
                             segment.luceneVersion(),
-                            segment.codec(),
+                            segment.codec().orElse(NONE),
                             segment.compound() ? "yes" : "no"
                         },
                         widths,
@@ -759,18 +762,29 @@ public final class Commits {
         List<Line> lines = new ArrayList<>();
         lines.add(Line.from(
                 docs + " · " + segment.delCount() + " deleted · " + segment.softDelCount() + " soft-deleted"));
-        lines.add(Line.from("Lucene " + segment.luceneVersion() + minVersion + " · codec " + segment.codec()));
+        lines.add(Line.from("Lucene " + segment.luceneVersion() + minVersion + " · codec "
+                + segment.codec().orElse(NONE)));
         lines.add(Line.from("Compound file " + (segment.compound() ? "yes" : "no") + " · blocks "
                 + (segment.hasBlocks() ? "yes" : "no") + " · size " + sizeOr(segment.sizeInBytes(), "unknown")));
         lines.add(Line.from("Sorted by " + segment.indexSort().orElse("document id (no index sort)")));
         lines.add(Line.from("Generations: deletes " + generation(segment.delGen()) + " · field infos "
                 + generation(segment.fieldInfosGen()) + " · doc values " + generation(segment.docValuesGen())));
-        lines.add(Line.from("Id " + segment.id()));
+        lines.add(Line.from("Id " + segment.id().orElse(NONE)));
         Map<String, String> diagnostics = new TreeMap<>();
         segment.diagnostics().forEach((key, value) -> diagnostics.put(key, diagnostic(key, value)));
         section(lines, "Diagnostics", diagnostics);
         section(lines, "Attributes", new TreeMap<>(segment.attributes()));
-        CodecFormats formats = segment.formats();
+        // An index before Lucene 4 has no codec, and its segments' doc store is in the attributes (ADR 0045).
+        segment.formats().ifPresent(formats -> formatSection(lines, formats));
+        fieldFormatSection(lines, segment, width);
+        List<CommitFile> files = details.files().stream()
+                .filter(file -> file.segment().filter(segment.name()::equals).isPresent())
+                .toList();
+        fileSection(lines, files, false);
+        return lines;
+    }
+
+    private static void formatSection(List<Line> lines, CodecFormats formats) {
         Map<String, String> formatPairs = new LinkedHashMap<>();
         formatPairs.put("postings", formats.postings());
         formatPairs.put("doc values", formats.docValues());
@@ -784,12 +798,6 @@ public final class Commits {
         formatPairs.put("live docs", formats.liveDocs());
         formatPairs.put("compound", formats.compound());
         section(lines, "Codec formats", formatPairs);
-        fieldFormatSection(lines, segment, width);
-        List<CommitFile> files = details.files().stream()
-                .filter(file -> file.segment().filter(segment.name()::equals).isPresent())
-                .toList();
-        fileSection(lines, files, false);
-        return lines;
     }
 
     private static String generation(OptionalLong generation) {

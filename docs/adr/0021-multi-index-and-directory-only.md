@@ -30,6 +30,7 @@ Directory choice and recent paths (ADR 0020) and reopen (ADR 0019) are settled. 
 ### Opening without a reader
 
 6. **`openIndex` takes an optional `mode`:** `READER` (absent) or `DIRECTORY_ONLY`. `DIRECTORY_ONLY` finds the indexes the same way, but opens only a `Directory` for each, which reads no index file, so it fails only if no index is found. Only the commits can be read: `getCommits` and `getCommit`. Every method that needs a reader fails with a new error, **`NO_READER` (-32015)**: `getIndexStats`, the document, term and search methods, and `reopenIndex`, since the commits are read fresh on every call anyway. The commit list marks no commit as current, as none is opened.
+    - *Amended by ADR 0045 §4, §5:* an index of Lucene 2.x or 3.x opens without a reader too; its commits are read by its runtime, and the open fails with `MISSING_RUNTIME` if none is loaded.
 7. **The TUI enters it in two ways.** Ctrl+N in the open prompt switches "without a reader" on or off for that open; it is shown in the prompt's bottom border with the directory, and is off again in the next prompt. `--no-reader` opens the index of the command line that way. When an open fails with `CORRUPT_INDEX` or `MISSING_CODEC`, the prompt's error says that Ctrl+N and Enter open it without a reader.
 
 ### On the wire

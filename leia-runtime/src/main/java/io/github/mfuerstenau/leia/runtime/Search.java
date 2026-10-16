@@ -4,13 +4,23 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.Set;
 import java.util.function.LongConsumer;
 
 /** The classic query parser and search of a {@link RuntimeIndex}. */
 public interface Search {
 
-    /** Parses {@code expression} with the classic query parser and the runtime's standard analyzer. */
-    ParsedQuery parse(String expression, ParserOptions options) throws InvalidQueryException;
+    /** The simple class names of the analyzers that {@link AnalyzerSpec.Named} can name. */
+    Set<String> analyzers();
+
+    /**
+     * Parses {@code expression} with the classic query parser and {@code analyzer}.
+     *
+     * @throws UnsupportedAnalyzerException if the runtime can't build {@code analyzer}
+     */
+    ParsedQuery parse(String expression, ParserOptions options, AnalyzerSpec analyzer)
+            throws InvalidQueryException, UnsupportedAnalyzerException;
 
     /**
      * Searches with a query from {@link #parse}, best score first.
@@ -34,6 +44,35 @@ public interface Search {
             int fuzzyPrefixLength,
             boolean enablePositionIncrements,
             boolean autoGeneratePhraseQueries) {}
+
+    /** An analyzer of the runtime's Lucene (ADR 0045). */
+    sealed interface AnalyzerSpec {
+
+        /**
+         * An analyzer of {@link #analyzers()} by its simple class name, such as {@code
+         * StandardAnalyzer}.
+         *
+         * @param stopwords its stop words; empty for its default ones
+         * @param maxTokenLength its longest token; empty for its default
+         */
+        record Named(String name, Optional<List<String>> stopwords, OptionalInt maxTokenLength)
+                implements AnalyzerSpec {}
+
+        /** {@code fallback}, and for each field of {@code fields} its own analyzer. */
+        record PerField(AnalyzerSpec fallback, Map<String, AnalyzerSpec> fields) implements AnalyzerSpec {}
+
+        /** At most {@code maxTokenCount} tokens of {@code analyzer}. */
+        record LimitTokenCount(AnalyzerSpec analyzer, int maxTokenCount) implements AnalyzerSpec {}
+    }
+
+    /** An analyzer the runtime can't build; the message says what it has. */
+    final class UnsupportedAnalyzerException extends Exception {
+        private static final long serialVersionUID = 1L;
+
+        public UnsupportedAnalyzerException(String message) {
+            super(message);
+        }
+    }
 
     /** A query that the classic query parser can't parse. */
     final class InvalidQueryException extends Exception {

@@ -10,25 +10,32 @@ import io.github.mfuerstenau.leia.protocol.commits.Commit;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.commits.UnreadableCommit;
+import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
+import io.github.mfuerstenau.leia.server.index.IndexDirectories;
+import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
 import jakarta.inject.Inject;
 import java.io.IOException;
-import java.util.OptionalInt;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-/** {@code getCommits}: the commits of the {@link CurrentIndex}'s directory (ADR 0009). */
+/**
+ * {@code getCommits}: the commits of an index directory of the {@link CurrentIndex} (ADR 0009), read
+ * by the Lucene that reads the directory (ADR 0045).
+ */
 public final class GetCommitsHandler implements MethodHandler<GetCommitsParams, GetCommitsResult> {
 
     private static final Logger LOG = Logger.getLogger(GetCommitsHandler.class.getName());
 
     private final CurrentIndex currentIndex;
+    private final IndexDirectories directories;
 
     @Inject
-    GetCommitsHandler(CurrentIndex currentIndex) {
+    GetCommitsHandler(CurrentIndex currentIndex, IndexDirectories directories) {
         this.currentIndex = currentIndex;
+        this.directories = directories;
     }
 
     @Override
@@ -38,8 +45,16 @@ public final class GetCommitsHandler implements MethodHandler<GetCommitsParams, 
 
     @Override
     public GetCommitsResult handle(GetCommitsParams params) throws RpcException {
+        IndexDirectories.IndexDirectory dir = directories.opened(params.index());
+        switch (dir.route()) {
+            case IndexDirectories.Route.Runtime(LuceneRuntime runtime) -> {
+                return RuntimeResults.commits(runtime, dir);
+            }
+            case IndexDirectories.Route.Missing missing -> throw missing.error(dir.path());
+            case IndexDirectories.Route.Core() -> {}
+        }
         OpenedIndex opened = currentIndex.opened();
-        int index = directory(opened, params.index());
+        int index = dir.position().orElseThrow();
         CommitList list;
         try {
             list = opened.commits(index);
@@ -58,22 +73,6 @@ public final class GetCommitsHandler implements MethodHandler<GetCommitsParams, 
                 list.unreadable().stream()
                         .map(unreadable -> new UnreadableCommit(unreadable.segmentsFile(), unreadable.message()))
                         .toList());
-    }
-
-    /**
-     * The index directory of the open path that {@code index} names, 0 if absent (ADR 0021).
-     *
-     * @throws RpcException {@code INVALID_PARAMS} if the open path has no such index directory
-     */
-    static int directory(OpenedIndex opened, OptionalInt index) throws RpcException {
-        int position = index.orElse(0);
-        if (!opened.hasDirectory(position)) {
-            throw new RpcException(
-                    ErrorCode.INVALID_PARAMS,
-                    "Invalid params: no index " + position + "; there are "
-                            + opened.directories().size());
-        }
-        return position;
     }
 
     static Commit commit(CommitInfo commit) {

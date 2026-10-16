@@ -199,7 +199,8 @@ class Lucene9BackendTest {
         assertThat(details.segments().stream().mapToInt(Segment::delCount).sum())
                 .isEqualTo(1);
         assertThat(details.segments())
-                .allSatisfy(segment -> assertThat(segment.codec()).startsWith("Lucene9"));
+                .allSatisfy(segment -> assertThat(segment.codec())
+                        .hasValueSatisfying(codec -> assertThat(codec).startsWith("Lucene9")));
         // Read through the backward codecs (hard rule 5).
         assertThat(details.segments())
                 .allSatisfy(segment -> assertThat(segment.fieldFormats())

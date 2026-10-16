@@ -1,10 +1,14 @@
 package io.github.mfuerstenau.leia.lucene3;
 
+import io.github.mfuerstenau.leia.runtime.Check;
+import io.github.mfuerstenau.leia.runtime.Commits;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import org.apache.lucene.util.Constants;
 
@@ -27,7 +31,17 @@ public final class Lucene3Runtime implements LuceneRuntime {
     }
 
     @Override
-    public RuntimeIndex open(Path dir, DirectoryKind kind) throws IOException {
-        return Lucene3Index.open(dir, kind);
+    public RuntimeIndex open(List<Path> dirs, DirectoryKind kind) throws IOException {
+        return Lucene3Index.open(dirs, kind);
+    }
+
+    @Override
+    public Optional<Commits> commits() {
+        return Optional.of(new Lucene3Commits());
+    }
+
+    @Override
+    public Optional<Check> check() {
+        return Optional.of(new Lucene3Check());
     }
 }

@@ -3,7 +3,6 @@ package io.github.mfuerstenau.leia.server.index;
 import io.github.mfuerstenau.leia.core.OpenedIndex;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
-import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.job.Jobs;
@@ -104,7 +103,7 @@ public final class CurrentIndex {
 
     /** Forgets the open index of either kind, and returns it. */
     private Optional<Closeable> take() {
-        Optional<Closeable> previous = index.<Closeable>map(opened -> opened).or(() -> runtime.map(OpenRuntime::index));
+        Optional<Closeable> previous = index.<Closeable>map(opened -> opened).or(() -> runtime.map(open -> open));
         index = Optional.empty();
         runtime = Optional.empty();
         return previous;
@@ -113,7 +112,7 @@ public final class CurrentIndex {
     private static Path path(Closeable closeable) {
         return switch (closeable) {
             case OpenedIndex opened -> opened.path();
-            case RuntimeIndex old -> old.path();
+            case OpenRuntime open -> open.path();
             default -> throw new IllegalStateException("Not an index: " + closeable);
         };
     }

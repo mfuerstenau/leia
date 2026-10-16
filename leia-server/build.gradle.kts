@@ -43,11 +43,13 @@ val testIndexFiles = mapOf(
     "demo" to coreTestFiles("demoIndex", "demoIndexElements"),
     // Written by leia-lucene3's build, read with the relocated Lucene 3.6 (ADR 0044).
     "lucene24" to lucene3TestFiles("lucene24TestIndex", "lucene24TestIndexElements"),
+    "lucene3" to lucene3TestFiles("lucene3TestIndex", "lucene3TestIndexElements"),
 )
 val jarsTestIndexFiles = mapOf(
     "custom-codec" to coreTestFiles("testCodecIndex", "testCodecIndexElements"),
     "custom-formats" to coreTestFiles("customFormatsIndex", "customFormatsIndexElements"),
     "lucene24" to testIndexFiles.getValue("lucene24"),
+    "lucene3" to testIndexFiles.getValue("lucene3"),
 )
 val testCodecJar = coreTestFiles("testCodecJar", "testCodecJarElements")
 val testAnalysisJars = coreTestFiles("testAnalysisJars", "testAnalysisJarsElements")

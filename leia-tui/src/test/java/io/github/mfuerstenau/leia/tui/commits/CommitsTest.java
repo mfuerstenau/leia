@@ -74,7 +74,7 @@ class CommitsTest {
             Optional<String> fieldInfosError) {
         return new Segment(
                 name,
-                "ab52725f4ed21286179cc2af33ded2b1",
+                Optional.of("ab52725f4ed21286179cc2af33ded2b1"),
                 maxDoc,
                 docBase,
                 3,
@@ -84,8 +84,8 @@ class CommitsTest {
                 OptionalLong.empty(),
                 "10.5.2",
                 Optional.of("10.5.2"),
-                "Lucene104",
-                new CodecFormats(
+                Optional.of("Lucene104"),
+                Optional.of(new CodecFormats(
                         "PerField40",
                         "PerFieldDV40",
                         "Lucene90StoredFieldsFormat",
@@ -96,7 +96,7 @@ class CommitsTest {
                         "Lucene94FieldInfosFormat",
                         "Lucene99SegmentInfoFormat",
                         "Lucene90LiveDocsFormat",
-                        "Lucene90CompoundFormat"),
+                        "Lucene90CompoundFormat")),
                 fieldFormats,
                 fieldInfosError,
                 name.equals("_0"),

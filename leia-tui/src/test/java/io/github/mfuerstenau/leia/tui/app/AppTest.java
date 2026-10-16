@@ -1913,7 +1913,7 @@ class AppTest {
         assertThat(screen).contains("Lucene's CheckIndex", "⏎ check   l level: 1 checksums");
 
         app.handleKey(key('l'));
-        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.StartCheck(1, 2));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.StartCheck(1, OptionalInt.of(2)));
         assertThat(app.checking()).isTrue();
         assertThat(app.polls()).isEmpty();
         assertThat(app.checkStarted(1, 5)).isEmpty();
@@ -1934,7 +1934,7 @@ class AppTest {
     void escBeforeTheCheckStartsStopsItAndItsJobIsCancelledOnceItStarts() {
         App app = appWithFields();
         app.handleKey(key('7'));
-        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.StartCheck(1, 1));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.StartCheck(1, OptionalInt.of(1)));
         assertThat(app.handleKey(key(KeyCode.ESCAPE))).isEmpty();
         assertThat(app.checking()).isFalse();
         assertThat(app.checkStarted(1, 8)).hasValue(new Action.CancelCheck(8));
@@ -1951,7 +1951,7 @@ class AppTest {
         app.handleKey(key('1'));
         assertThat(render(app)).contains("only the commits (4) and check (7) work");
         app.handleKey(key('7'));
-        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.StartCheck(1, 1));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.StartCheck(1, OptionalInt.of(1)));
         app.checkStarted(1, 1);
 
         // Opening the path again keeps the screen, with a new check.

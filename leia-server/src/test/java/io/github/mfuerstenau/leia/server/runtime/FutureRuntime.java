@@ -1,9 +1,13 @@
 package io.github.mfuerstenau.leia.server.runtime;
 
+import io.github.mfuerstenau.leia.runtime.Check;
+import io.github.mfuerstenau.leia.runtime.Commits;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -28,7 +32,17 @@ public final class FutureRuntime implements LuceneRuntime {
     }
 
     @Override
-    public RuntimeIndex open(Path dir, DirectoryKind kind) {
+    public RuntimeIndex open(List<Path> dirs, DirectoryKind kind) {
+        throw new AssertionError("A refused runtime is never used");
+    }
+
+    @Override
+    public Optional<Commits> commits() {
+        throw new AssertionError("A refused runtime is never used");
+    }
+
+    @Override
+    public Optional<Check> check() {
         throw new AssertionError("A refused runtime is never used");
     }
 }

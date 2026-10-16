@@ -15,9 +15,10 @@ import org.apache.lucene.index.IndexFileNames;
 
 /**
  * Finds the index directories of a path (ADR 0021): the path itself if it holds an index, or else
- * every directory below it that does. It only lists directories; it reads no index file.
+ * every directory below it that does. It only lists directories; it reads no index file. Public for
+ * the server, which routes each directory found to the Lucene that reads it (ADR 0045).
  */
-final class IndexFinder {
+public final class IndexFinder {
 
     private static final Logger LOG = Logger.getLogger(IndexFinder.class.getName());
 
@@ -40,7 +41,7 @@ final class IndexFinder {
      *
      * @throws IndexOpenException if it doesn't exist or isn't a directory
      */
-    static Path root(Path path) throws IndexOpenException {
+    public static Path root(Path path) throws IndexOpenException {
         Path dir = path.toAbsolutePath().normalize();
         if (!Files.exists(dir)) {
             throw new IndexOpenException(Reason.NOT_FOUND, "No such file or directory: " + dir);
@@ -60,7 +61,7 @@ final class IndexFinder {
      * @throws IndexOpenException if {@code dir} can't be listed, no index is found, or the walk lists
      *     more than {@value #MAX_DIRECTORIES} directories
      */
-    static List<Path> find(Path dir) throws IndexOpenException {
+    public static List<Path> find(Path dir) throws IndexOpenException {
         return find(dir, MAX_DIRECTORIES);
     }
 

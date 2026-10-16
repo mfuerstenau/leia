@@ -476,8 +476,7 @@ public final class Session {
             case Action.CancelSearch cancel -> cancelJobs(cancel.jobs(), runner);
             case Action.StartCheck start ->
                 startJob(
-                        backend.call(
-                                Methods.START_CHECK_INDEX, new StartCheckIndexParams(OptionalInt.of(start.level()))),
+                        backend.call(Methods.START_CHECK_INDEX, new StartCheckIndexParams(start.level())),
                         runner,
                         app -> jobId -> app.checkStarted(start.checkId(), jobId),
                         app -> message -> app.checkFailed(start.checkId(), message));

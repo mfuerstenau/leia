@@ -7,8 +7,7 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 Goal: every index from Lucene 2.1 to 10 opens in one leia, each read by a relocated Lucene that can read it, with the features of that Lucene and the rest switched off. The spike did Lucene 2.x and 3.x on Lucene 3.6.2 (`leia-lucene3`). Each Lucene major reads its own indexes and those of the major before it, so four runtimes besides Lucene 10 are needed.
 
 ### Runtimes
-- [ ] Lucene 3.6.2 (2.1 – 3.6), the spike's module, to finish: `getCommits`/`getCommit`, `CheckIndex` (read-only, no fix) as a job, top terms as a job, a 3.x test index (written with 3.6.2) besides the 2.4 one, several old indexes under one path, analyzers other than `StandardAnalyzer` for search
-- [ ] Lucene 5.5.5 for 4.x and 5.x (`leia-lucene5`): codecs through SPI, so relocate and merge `META-INF/services`; doc values (from 4.0); test indexes written with 4.10.4 and 5.5.5
+- [ ] Lucene 5.5.5 for 4.x and 5.x (`leia-lucene5`), on runtime interface 2 with `leia-lucene3` as the template (ADR 0045): codecs through SPI, so relocate and merge `META-INF/services`; doc values (from 4.0); test indexes written with 4.10.4 and 5.5.5
 - [ ] Lucene 7.7.3 for 6.x and 7.x (`leia-lucene7`): points (6.0), index sort (6.2), soft deletes (7.4); test indexes written with 6.6.6 and 7.7.3
 - [ ] Lucene 9.12.3 for 8.x (`leia-lucene9`), with its backward-codecs; a Lucene 8.11.4 test index exists already (`leia-core`'s `lucene8`, now expected to give `MISSING_RUNTIME`)
 - [ ] Check whether the facades of 5, 7 and 9 can share sources (their APIs are close), e.g. one source set compiled against each version with small per-version adapters

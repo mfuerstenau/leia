@@ -12,6 +12,7 @@ import io.github.mfuerstenau.leia.protocol.check.SegmentCheck;
 import io.github.mfuerstenau.leia.tui.TestScreens;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
@@ -93,11 +94,20 @@ class CheckTest {
         return ((Check.Request.Start) check.handleKey(key(KeyCode.ENTER)).orElseThrow()).checkId();
     }
 
+    /** Lucene 3.6 has no levels (ADR 0045): no l, and the check starts without one. */
+    @Test
+    void aCheckWithoutLevelsHasNoL() {
+        Check check = new Check("/data", false);
+        assertThat(check.keys()).isEqualTo("⏎ check   Tab panel   ↑↓←→");
+        assertThat(check.handleKey(key('l'))).contains(new Check.Request.Unsupported("Check level"));
+        assertThat(check.handleKey(key(KeyCode.ENTER))).contains(new Check.Request.Start(1, OptionalInt.empty()));
+    }
+
     @Test
     void enterStartsACheckAtTheChosenLevel() {
-        Check check = new Check("/data");
+        Check check = new Check("/data", true);
         assertThat(check.handleKey(key('l'))).isEmpty();
-        assertThat(check.handleKey(key(KeyCode.ENTER))).contains(new Check.Request.Start(1, 2));
+        assertThat(check.handleKey(key(KeyCode.ENTER))).contains(new Check.Request.Start(1, OptionalInt.of(2)));
         assertThat(check.running()).isTrue();
         assertThat(check.job()).isEmpty();
         // No second check while one runs, and the level stays.
@@ -112,7 +122,7 @@ class CheckTest {
 
     @Test
     void theLevelCycles() {
-        Check check = new Check("/data");
+        Check check = new Check("/data", true);
         for (int level : new int[] {2, 3, 1}) {
             check.handleKey(key('l'));
             assertThat(check.keys()).contains("l level: " + level + " " + Check.levelName(level));
@@ -121,7 +131,7 @@ class CheckTest {
 
     @Test
     void collectsTheLinesUntilTheOutcome() {
-        Check check = new Check("/data");
+        Check check = new Check("/data", true);
         long id = start(check);
         check.started(id, 1);
         check.progress(id, progress(lines(0, 3), null));
@@ -137,7 +147,7 @@ class CheckTest {
 
     @Test
     void showsWhatIsBrokenPerIndex() {
-        Check check = new Check("/data");
+        Check check = new Check("/data", true);
         long id = start(check);
         check.started(id, 1);
         check.progress(
@@ -159,7 +169,7 @@ class CheckTest {
 
     @Test
     void theOutputFollowsItsEndUntilScrolledUp() {
-        Check check = new Check("/data");
+        Check check = new Check("/data", true);
         long id = start(check);
         check.started(id, 1);
         check.progress(id, progress(lines(0, 50), null));
@@ -178,7 +188,7 @@ class CheckTest {
 
     @Test
     void leftAndRightScrollWideOutput() {
-        Check check = new Check("/data");
+        Check check = new Check("/data", true);
         long id = start(check);
         check.progress(id, progress(List.of("x".repeat(60) + "END"), null));
         assertThat(render(check, 40, 12)).doesNotContain("END");
@@ -194,7 +204,7 @@ class CheckTest {
 
     @Test
     void tabMovesTheScrollingToTheSummary() {
-        Check check = new Check("/data");
+        Check check = new Check("/data", true);
         long id = start(check);
         check.progress(id, progress(lines(0, 50), null));
         render(check, 60, 20);
@@ -206,7 +216,7 @@ class CheckTest {
 
     @Test
     void cancellingOrReopeningStopsARunningCheck() {
-        Check check = new Check("/data");
+        Check check = new Check("/data", true);
         long id = start(check);
         check.started(id, 3);
         assertThat(check.cancel()).hasValue(3);
@@ -224,7 +234,7 @@ class CheckTest {
 
     @Test
     void escBeforeTheJobStartsStopsTheCheckAndCancelsTheJobWhenItComes() {
-        Check check = new Check("/data");
+        Check check = new Check("/data", true);
         long id = start(check);
         assertThat(check.cancel()).isEmpty();
         assertThat(check.running()).isFalse();
@@ -236,7 +246,7 @@ class CheckTest {
 
     @Test
     void dropsTheRepliesOfAnEarlierCheck() {
-        Check check = new Check("/data");
+        Check check = new Check("/data", true);
         long first = start(check);
         check.cancel();
         long second = start(check);
@@ -252,7 +262,7 @@ class CheckTest {
 
     @Test
     void showsWhyTheCheckFailed() {
-        Check check = new Check("/data");
+        Check check = new Check("/data", true);
         long id = start(check);
         check.failed(id, "No index is open (NO_INDEX_OPEN -32004)");
 

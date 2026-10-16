@@ -16,6 +16,9 @@ import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsParams;
 import io.github.mfuerstenau.leia.protocol.analysis.PresetAnalyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.PresetOption;
 import io.github.mfuerstenau.leia.protocol.analysis.WordSetSupport;
+import io.github.mfuerstenau.leia.protocol.check.CheckIndexResult;
+import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexParams;
+import io.github.mfuerstenau.leia.protocol.check.StartCheckIndexParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
 import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
@@ -123,6 +126,23 @@ class JarsBackendTest {
                                     new OpenIndexParams(testIndex("lucene24").toString()))
                             .luceneRuntime())
                     .startsWith("3.6");
+            // Its commits and its check too, read anew by the runtime (ADR 0045).
+            backend.call(
+                    Methods.OPEN_INDEX, new OpenIndexParams(testIndex("lucene3").toString()));
+            assertThat(backend.call(Methods.GET_COMMITS, new GetCommitsParams()).commits())
+                    .hasSize(2);
+            long check = backend.call(Methods.START_CHECK_INDEX, new StartCheckIndexParams())
+                    .jobId();
+            Optional<CheckIndexResult> checked = Optional.empty();
+            for (int poll = 0; poll < 3000 && checked.isEmpty(); poll++) {
+                Thread.sleep(10);
+                checked = backend.call(Methods.GET_CHECK_INDEX, new GetCheckIndexParams(check, 0))
+                        .result();
+            }
+            assertThat(checked)
+                    .hasValueSatisfying(result -> assertThat(result.indexes())
+                            .singleElement()
+                            .satisfies(index -> assertThat(index.clean()).isTrue()));
 
             // Lucene reads the service files of every loaded jar again, so a jar that is gone stops it.
             Files.delete(codecJar);

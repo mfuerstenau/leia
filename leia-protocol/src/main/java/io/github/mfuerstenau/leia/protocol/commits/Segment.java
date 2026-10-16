@@ -9,7 +9,7 @@ import java.util.OptionalLong;
  * A segment of a commit.
  *
  * @param name the segment name, such as {@code _0}
- * @param id the segment's unique id in hex, as Lucene prints it
+ * @param id the segment's unique id in hex, as Lucene prints it; absent before Lucene 5 (ADR 0045)
  * @param maxDoc documents in the segment, deleted ones included
  * @param docBase the document id of the segment's first document in this commit
  * @param delCount deleted documents
@@ -19,8 +19,8 @@ import java.util.OptionalLong;
  * @param docValuesGen the generation of the doc values updates; absent if there are none
  * @param luceneVersion the Lucene version that wrote the segment
  * @param minLuceneVersion the oldest Lucene version that wrote a part of it; absent if unknown
- * @param codec the codec name, such as {@code Lucene103}
- * @param formats the formats of the codec
+ * @param codec the codec name, such as {@code Lucene103}; absent before Lucene 4, which had no codecs
+ * @param formats the formats of the codec; absent without a codec
  * @param fieldFormats the postings, doc values and KNN vectors format of each field, sorted by
  *     field name (ADR 0037); empty if the field infos can't be read
  * @param fieldInfosError why the segment's field infos can't be read; absent if they can
@@ -29,11 +29,12 @@ import java.util.OptionalLong;
  * @param indexSort the sort of the segment's documents; absent if it is not sorted
  * @param sizeInBytes the size of the segment's files; absent if one of them can't be stat'ed
  * @param diagnostics how the segment came to be: source, Lucene version, OS, Java, ...
- * @param attributes the codec's attributes
+ * @param attributes the codec's attributes; before Lucene 4, what the segment's entry in {@code
+ *     segments_N} says besides, such as its doc store
  */
 public record Segment(
         String name,
-        String id,
+        Optional<String> id,
         int maxDoc,
         int docBase,
         int delCount,
@@ -43,8 +44,8 @@ public record Segment(
         OptionalLong docValuesGen,
         String luceneVersion,
         Optional<String> minLuceneVersion,
-        String codec,
-        CodecFormats formats,
+        Optional<String> codec,
+        Optional<CodecFormats> formats,
         List<FieldFormats> fieldFormats,
         Optional<String> fieldInfosError,
         boolean compound,

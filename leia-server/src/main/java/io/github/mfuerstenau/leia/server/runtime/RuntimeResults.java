@@ -1,7 +1,16 @@
 package io.github.mfuerstenau.leia.server.runtime;
 
 import io.github.mfuerstenau.leia.core.IndexDocument;
+import io.github.mfuerstenau.leia.core.ScanProgress;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
+import io.github.mfuerstenau.leia.protocol.check.IndexCheck;
+import io.github.mfuerstenau.leia.protocol.check.SegmentCheck;
+import io.github.mfuerstenau.leia.protocol.commits.Commit;
+import io.github.mfuerstenau.leia.protocol.commits.CommitFile;
+import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
+import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
+import io.github.mfuerstenau.leia.protocol.commits.Segment;
+import io.github.mfuerstenau.leia.protocol.commits.UnreadableCommit;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
@@ -23,6 +32,7 @@ import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
+import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
@@ -32,29 +42,40 @@ import io.github.mfuerstenau.leia.protocol.search.SearchResults;
 import io.github.mfuerstenau.leia.protocol.search.SortKey;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.TotalHitsRelation;
+import io.github.mfuerstenau.leia.protocol.terms.FieldTerms;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.Posting;
 import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
+import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
+import io.github.mfuerstenau.leia.runtime.Check;
+import io.github.mfuerstenau.leia.runtime.Commits;
+import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.Documents;
+import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.Terms;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
+import io.github.mfuerstenau.leia.server.index.IndexDirectories;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import io.github.mfuerstenau.leia.server.terms.TermParams;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.OptionalLong;
 import java.util.Set;
+import java.util.function.Consumer;
+import java.util.logging.Logger;
 import org.apache.lucene.util.BytesRef;
 
 /**
@@ -65,42 +86,58 @@ import org.apache.lucene.util.BytesRef;
  */
 public final class RuntimeResults {
 
+    private static final Logger LOG = Logger.getLogger(RuntimeResults.class.getName());
+
     private RuntimeResults() {}
 
-    /** What works on {@code index}: the statistics, and the features of the groups it has. */
-    public static Set<Feature> features(RuntimeIndex index) {
+    /**
+     * What works on {@code open}: the statistics, the features of the groups its index has, and the
+     * commits and the check if its runtime has them (ADR 0045). The check has no levels.
+     */
+    public static Set<Feature> features(OpenRuntime open) {
+        RuntimeIndex index = open.index();
         Set<Feature> features = EnumSet.of(Feature.INDEX_STATS);
         if (index.documents().isPresent()) {
             features.addAll(List.of(Feature.DOCUMENTS, Feature.STORED_VALUES, Feature.TERM_VECTORS));
         }
         if (index.terms().isPresent()) {
-            features.addAll(List.of(Feature.TERMS, Feature.POSTINGS));
+            features.addAll(List.of(Feature.TERMS, Feature.POSTINGS, Feature.TOP_TERMS));
         }
         if (index.search().isPresent()) {
             features.add(Feature.CLASSIC_SEARCH);
+        }
+        if (open.runtime().commits().isPresent()) {
+            features.add(Feature.COMMITS);
+        }
+        if (open.runtime().check().isPresent()) {
+            features.add(Feature.CHECK_INDEX);
         }
         return features;
     }
 
     /** {@code openIndex}: the result for {@code open}, just opened. */
     public static OpenIndexResult opened(OpenRuntime open) throws RpcException {
-        RuntimeIndex index = open.index();
-        RuntimeIndex.Stats stats = stats(index);
-        ReaderInfo reader = new ReaderInfo(
-                0,
-                stats.segmentsFile(),
-                stats.numDocs(),
-                stats.maxDoc(),
-                stats.oldestMajor(),
-                stats.oldestSegmentVersion());
+        RuntimeIndex.Stats stats = stats(open.index());
         return new OpenIndexResult(
-                index.path().toString(),
+                open.path().toString(),
                 OpenMode.READER,
                 OptionalInt.of(stats.numDocs()),
                 OptionalInt.of(stats.maxDoc()),
-                List.of(new IndexEntry(index.path().toString(), Optional.of(reader))),
-                List.of(),
-                features(index),
+                stats.indexes().stream()
+                        .map(index -> new IndexEntry(
+                                index.path().toString(),
+                                Optional.of(new ReaderInfo(
+                                        index.docBase(),
+                                        index.segmentsFile(),
+                                        index.numDocs(),
+                                        index.maxDoc(),
+                                        index.oldestMajor(),
+                                        index.oldestSegmentVersion()))))
+                        .toList(),
+                open.skipped().stream()
+                        .map(skipped -> new SkippedIndex(skipped.path().toString(), skipped.message()))
+                        .toList(),
+                features(open),
                 open.runtime().luceneVersion());
     }
 
@@ -109,8 +146,13 @@ public final class RuntimeResults {
         String version = open.runtime().luceneVersion();
         try {
             RuntimeIndex.Stats stats = open.index().stats();
-            return stats.segmentsFile() + ", " + stats.maxDoc() + " docs, segments by Lucene "
-                    + String.join(", ", stats.segmentVersions()) + ", read with Lucene " + version;
+            if (stats.indexes().size() == 1 && open.skipped().isEmpty()) {
+                RuntimeIndex.IndexStats only = stats.indexes().getFirst();
+                return only.segmentsFile() + ", " + only.maxDoc() + " docs, segments by Lucene "
+                        + String.join(", ", only.segmentVersions()) + ", read with Lucene " + version;
+            }
+            return stats.indexes().size() + " indexes, " + stats.maxDoc() + " docs, "
+                    + open.skipped().size() + " skipped, read with Lucene " + version;
         } catch (IOException e) {
             return "read with Lucene " + version;
         }
@@ -129,28 +171,115 @@ public final class RuntimeResults {
     public static GetIndexStatsResult indexStats(OpenRuntime open) throws RpcException {
         RuntimeIndex index = open.index();
         RuntimeIndex.Stats stats = stats(index);
-        IndexCommitStats commit = new IndexCommitStats(
-                index.path().toString(),
-                0,
-                stats.segmentsFile(),
-                stats.generation(),
-                stats.version(),
-                stats.segmentVersions().size(),
-                stats.numDocs(),
-                stats.maxDoc(),
-                stats.oldestMajor(),
-                // Lucene 3 doesn't record which version wrote the commit; the newest segment did.
-                stats.segmentVersions().stream().max(String::compareTo).orElse("3.x"),
-                stats.oldestSegmentVersion(),
-                Map.copyOf(stats.userData()));
+        List<IndexCommitStats> commits = stats.indexes().stream()
+                .map(commit -> new IndexCommitStats(
+                        commit.path().toString(),
+                        commit.docBase(),
+                        commit.segmentsFile(),
+                        commit.generation(),
+                        commit.version(),
+                        commit.segmentVersions().size(),
+                        commit.numDocs(),
+                        commit.maxDoc(),
+                        commit.oldestMajor(),
+                        // Lucene 3 doesn't record which version wrote the commit; the newest segment did.
+                        commit.segmentVersions().stream().max(String::compareTo).orElse("3.x"),
+                        commit.oldestSegmentVersion(),
+                        Map.copyOf(commit.userData())))
+                .toList();
         return new GetIndexStatsResult(
-                index.path().toString(),
+                open.path().toString(),
                 index.directory().name(),
-                stats.segmentVersions().size(),
+                commits.stream().mapToInt(IndexCommitStats::segmentCount).sum(),
                 stats.numDocs(),
                 stats.maxDoc(),
-                List.of(commit),
+                commits,
                 stats.fields().stream().map(RuntimeResults::field).toList());
+    }
+
+    /**
+     * {@code getCommits} of a directory that {@code runtime} reads, read anew (ADR 0045). The commit
+     * opened in {@code dir}, if any, is the current one.
+     */
+    public static GetCommitsResult commits(LuceneRuntime runtime, IndexDirectories.IndexDirectory dir)
+            throws RpcException {
+        Commits commits = runtime.commits().orElseThrow(() -> OpenRuntime.notSupported(runtime));
+        Commits.CommitList list;
+        try {
+            list = commits.commits(dir.path(), dir.kind());
+        } catch (IOException e) {
+            throw new RpcException(ErrorCode.INDEX_NOT_READABLE, "Cannot list the commits: " + e.getMessage(), e);
+        }
+        list.unreadable()
+                .forEach(unreadable -> LOG.warning(() ->
+                        "Skipped the unreadable commit " + unreadable.segmentsFile() + ": " + unreadable.message()));
+        return new GetCommitsResult(
+                list.commits().stream().map(commit -> commit(commit, dir)).toList(),
+                list.unreadable().stream()
+                        .map(unreadable -> new UnreadableCommit(unreadable.segmentsFile(), unreadable.message()))
+                        .toList());
+    }
+
+    /** {@code getCommit} of a directory that {@code runtime} reads, read anew (ADR 0045). */
+    public static GetCommitResult commit(LuceneRuntime runtime, IndexDirectories.IndexDirectory dir, long generation)
+            throws RpcException {
+        Commits commits = runtime.commits().orElseThrow(() -> OpenRuntime.notSupported(runtime));
+        Commits.CommitDetails details;
+        try {
+            details = commits.commit(dir.path(), dir.kind(), generation)
+                    .orElseThrow(() -> new RpcException(
+                            ErrorCode.COMMIT_NOT_FOUND, "No commit of generation " + generation + " in the index"));
+        } catch (IOException | RuntimeException e) {
+            throw new RpcException(
+                    ErrorCode.INDEX_NOT_READABLE,
+                    "Cannot read the commit of generation " + generation + ": " + e.getMessage(),
+                    e);
+        }
+        return new GetCommitResult(
+                commit(details.commit(), dir),
+                details.segments().stream().map(RuntimeResults::segment).toList(),
+                details.files().stream()
+                        .map(file -> new CommitFile(file.name(), file.segment(), file.size()))
+                        .toList());
+    }
+
+    private static Commit commit(Commits.Commit commit, IndexDirectories.IndexDirectory dir) {
+        return new Commit(
+                commit.generation(),
+                commit.segmentsFile(),
+                dir.generation().isPresent() && dir.generation().getAsLong() == commit.generation(),
+                commit.version(),
+                commit.segmentCount(),
+                commit.maxDoc(),
+                commit.delCount(),
+                commit.luceneVersion(),
+                Map.copyOf(commit.userData()));
+    }
+
+    /** A segment before codecs: no id, codec, formats, soft deletes or updates (ADR 0045). */
+    private static Segment segment(Commits.Segment segment) {
+        return new Segment(
+                segment.name(),
+                Optional.empty(),
+                segment.maxDoc(),
+                segment.docBase(),
+                segment.delCount(),
+                0,
+                segment.delGen(),
+                OptionalLong.empty(),
+                OptionalLong.empty(),
+                segment.luceneVersion(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                List.of(),
+                Optional.empty(),
+                segment.compound(),
+                false,
+                Optional.empty(),
+                segment.sizeInBytes(),
+                Map.copyOf(segment.diagnostics()),
+                Map.copyOf(segment.attributes()));
     }
 
     private static IndexField field(RuntimeIndex.Field field) {
@@ -316,9 +445,9 @@ public final class RuntimeResults {
     }
 
     /**
-     * {@code startSearch}: a classic query, parsed with the runtime's standard analyzer whatever
-     * analyzer the params name, scored by its default similarity, best score first. Highlighting is
-     * left out; another query or sort is not supported.
+     * {@code startSearch}: a classic query, parsed with the analyzer of the params as the runtime has
+     * it ({@link RuntimeAnalyzers}), scored by its default similarity, best score first. Highlighting
+     * is left out; another query, sort or analyzer is not supported.
      */
     public static JobStarted startSearch(OpenRuntime open, StartSearchParams params, Jobs jobs) throws RpcException {
         Search search = open.index().search().orElseThrow(open::notSupported);
@@ -344,6 +473,7 @@ public final class RuntimeResults {
                 checkField(open.index(), field);
             }
         }
+        Search.AnalyzerSpec analyzer = RuntimeAnalyzers.spec(classic.analyzer(), open.runtime(), search);
         Search.ParsedQuery query;
         try {
             query = search.parse(
@@ -355,9 +485,15 @@ public final class RuntimeResults {
                             classic.options().phraseSlop(),
                             classic.options().fuzzyPrefixLength(),
                             classic.options().enablePositionIncrements(),
-                            classic.autoGeneratePhraseQueries()));
+                            classic.autoGeneratePhraseQueries()),
+                    analyzer);
         } catch (Search.InvalidQueryException e) {
             throw new RpcException(ErrorCode.INVALID_QUERY, "Invalid query: " + e.getMessage(), e);
+        } catch (Search.UnsupportedAnalyzerException e) {
+            throw new RpcException(
+                    ErrorCode.NOT_SUPPORTED,
+                    "Not supported with Lucene " + open.runtime().luceneVersion() + ": " + e.getMessage(),
+                    e);
         }
         Optional<List<String>> fields = params.fields().map(List::copyOf);
         long jobId = jobs.start(
@@ -373,6 +509,97 @@ public final class RuntimeResults {
                     }
                 });
         return new JobStarted(jobId);
+    }
+
+    /**
+     * {@code startFieldTermScan}: the terms of a field counted and its top terms found in a job, as
+     * {@code getFieldTermScan} reads it. Terms of the runtimes are text, so none is binary.
+     */
+    public static JobStarted startFieldTermScan(OpenRuntime open, String field, int topN, Jobs jobs)
+            throws RpcException {
+        Terms terms = open.index().terms().orElseThrow(open::notSupported);
+        checkField(open.index(), field);
+        long jobId = jobs.start(
+                "term scan of field " + field + ", top " + topN + " with Lucene "
+                        + open.runtime().luceneVersion(),
+                FieldTerms.class,
+                progress -> {
+                    try {
+                        Terms.FieldTerms scanned = terms.topTerms(field, topN, progress::scanned);
+                        return new FieldTerms(
+                                field,
+                                scanned.uniqueTerms(),
+                                scanned.topTerms().stream()
+                                        .map(term ->
+                                                new TopTerm(term.term(), false, term.docFreq(), term.totalTermFreq()))
+                                        .toList());
+                    } catch (IOException e) {
+                        throw new RpcException(
+                                ErrorCode.INDEX_NOT_READABLE,
+                                "Cannot read the terms of field '" + field + "': " + e.getMessage(),
+                                e);
+                    }
+                });
+        return new JobStarted(jobId);
+    }
+
+    /**
+     * Checks {@code dir} with {@code runtime}'s {@code CheckIndex} (ADR 0045): one level, read-only.
+     * The report goes to {@code line}; {@code progress} stops the check by throwing.
+     */
+    public static IndexCheck check(
+            LuceneRuntime runtime,
+            Path dir,
+            DirectoryKind kind,
+            boolean skipped,
+            Consumer<String> line,
+            ScanProgress progress) {
+        Optional<Check> check = runtime.check();
+        if (check.isEmpty()) {
+            return failedCheck(dir, skipped, "Lucene " + runtime.luceneVersion() + " can't check an index here");
+        }
+        Check.CheckResult result = check.get().check(dir, kind, line, progress::scanned);
+        return new IndexCheck(
+                dir.toString(),
+                skipped,
+                result.clean(),
+                result.error(),
+                result.segmentsFile(),
+                result.missingSegments(),
+                result.toolOutOfDate(),
+                result.segmentCount(),
+                result.badSegments(),
+                result.lostDocs(),
+                result.validCounter(),
+                result.segments().stream()
+                        .map(segment -> new SegmentCheck(
+                                segment.name(),
+                                segment.maxDoc(),
+                                Optional.empty(),
+                                segment.compound(),
+                                segment.files(),
+                                segment.sizeBytes(),
+                                segment.hasDeletions(),
+                                segment.openReaderPassed(),
+                                segment.error()))
+                        .toList());
+    }
+
+    /** The outcome for a directory that could not be checked at all. */
+    public static IndexCheck failedCheck(Path dir, boolean skipped, String error) {
+        return new IndexCheck(
+                dir.toString(),
+                skipped,
+                false,
+                Optional.of(error),
+                Optional.empty(),
+                false,
+                false,
+                0,
+                0,
+                0,
+                false,
+                List.of());
     }
 
     /** Whether {@code sort} is the best score first: no key, or the score not reversed alone. */

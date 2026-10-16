@@ -8,7 +8,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
-import io.github.mfuerstenau.leia.protocol.check.StartCheckIndexParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
@@ -42,7 +41,6 @@ import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.Posting;
-import io.github.mfuerstenau.leia.protocol.terms.StartFieldTermScanParams;
 import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
 import java.util.List;
 import java.util.Optional;
@@ -83,9 +81,14 @@ class Lucene24BackendTest {
         assertThat(opened.maxDoc()).hasValue(3);
         assertThat(opened.luceneRuntime()).startsWith("3.6");
         assertThat(opened.features())
-                .contains(Feature.DOCUMENTS, Feature.TERMS, Feature.CLASSIC_SEARCH)
-                .doesNotContain(
-                        Feature.SEARCH, Feature.COMMITS, Feature.CHECK_INDEX, Feature.POINTS, Feature.AUTO_STOP_WORDS);
+                .contains(
+                        Feature.DOCUMENTS,
+                        Feature.TERMS,
+                        Feature.TOP_TERMS,
+                        Feature.CLASSIC_SEARCH,
+                        Feature.COMMITS,
+                        Feature.CHECK_INDEX)
+                .doesNotContain(Feature.SEARCH, Feature.POINTS, Feature.AUTO_STOP_WORDS, Feature.CHECK_LEVELS);
         ReaderInfo reader = opened.indexes().getFirst().reader().orElseThrow();
         assertThat(reader.createdVersionMajor()).isEqualTo(2);
         assertThat(reader.minSegmentLuceneVersion()).contains("2.x");
@@ -178,21 +181,35 @@ class Lucene24BackendTest {
 
     @Test
     void refusesWhatLucene3Lacks() throws Exception {
-        backend.fails(Methods.GET_COMMITS, new GetCommitsParams(), ErrorCode.NOT_SUPPORTED);
-        backend.fails(Methods.START_CHECK_INDEX, new StartCheckIndexParams(), ErrorCode.NOT_SUPPORTED);
         backend.fails(Methods.GET_POINT_TREE, new GetPointTreeParams("id"), ErrorCode.NOT_SUPPORTED);
         backend.fails(
                 Methods.START_RECONSTRUCT, new StartReconstructParams(0, Optional.empty()), ErrorCode.NOT_SUPPORTED);
-        backend.fails(Methods.START_FIELD_TERM_SCAN, new StartFieldTermScanParams("body", 10), ErrorCode.NOT_SUPPORTED);
         backend.fails(Methods.REOPEN_INDEX, new ReopenIndexParams(), ErrorCode.NOT_SUPPORTED);
     }
 
     @Test
-    void opensOnlyWithAReader() throws Exception {
-        backend.fails(
+    void readsItsCommits() throws Exception {
+        assertThat(backend.call(Methods.GET_COMMITS, new GetCommitsParams()).commits())
+                .singleElement()
+                .satisfies(commit -> {
+                    assertThat(commit.current()).isTrue();
+                    assertThat(commit.luceneVersion()).isEqualTo("2.x");
+                    assertThat(commit.delCount()).isEqualTo(1);
+                });
+    }
+
+    @Test
+    void opensWithoutAReader() throws Exception {
+        OpenIndexResult withoutReader = backend.call(
                 Methods.OPEN_INDEX,
-                new OpenIndexParams(PATH, Optional.of(DirectoryImpl.NIO), Optional.of(OpenMode.DIRECTORY_ONLY)),
-                ErrorCode.UNSUPPORTED_INDEX_FORMAT);
+                new OpenIndexParams(PATH, Optional.of(DirectoryImpl.NIO), Optional.of(OpenMode.DIRECTORY_ONLY)));
+        assertThat(withoutReader.mode()).isEqualTo(OpenMode.DIRECTORY_ONLY);
+        // Lucene 3.6 checks it, at its one level (ADR 0045).
+        assertThat(withoutReader.features()).containsExactlyInAnyOrder(Feature.COMMITS, Feature.CHECK_INDEX);
+        assertThat(backend.call(Methods.GET_COMMITS, new GetCommitsParams()).commits())
+                .singleElement()
+                .satisfies(commit -> assertThat(commit.current()).isFalse());
+        backend.fails(Methods.GET_DOCUMENT, new GetDocumentParams(0), ErrorCode.NO_READER);
     }
 
     @Test

@@ -5,8 +5,9 @@ import java.util.Set;
 
 /**
  * What can be done with an opened index (ADR 0044). An index opened with Lucene 10 has every feature,
- * one opened without a reader only {@link #COMMITS} and {@link #CHECK_INDEX}, and one written by an
- * old Lucene what the Lucene that reads it supports.
+ * one opened without a reader only {@link #COMMITS}, {@link #CHECK_INDEX} and, if Lucene 10 checks its
+ * first index, {@link #CHECK_LEVELS}, and one written by an old Lucene what the Lucene that reads it
+ * supports (ADR 0045).
  */
 public enum Feature {
     /** {@code getIndexStats}. */
@@ -49,6 +50,8 @@ public enum Feature {
     STORED_SCAN,
     /** {@code startCheckIndex}. */
     CHECK_INDEX,
+    /** The {@code level} of {@code startCheckIndex}; a Lucene without it checks at its one level (ADR 0045). */
+    CHECK_LEVELS,
     /** {@code startExportTerms}. */
     EXPORT_TERMS,
     /** {@code reopenIndex}. */
@@ -61,8 +64,8 @@ public enum Feature {
         return EnumSet.allOf(Feature.class);
     }
 
-    /** An index opened without a reader (ADR 0021). */
+    /** An index opened without a reader (ADR 0021) whose first index Lucene 10 checks. */
     public static Set<Feature> withoutReader() {
-        return EnumSet.of(COMMITS, CHECK_INDEX);
+        return EnumSet.of(COMMITS, CHECK_INDEX, CHECK_LEVELS);
     }
 }

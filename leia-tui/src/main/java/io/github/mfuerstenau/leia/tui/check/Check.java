@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.OptionalLong;
 
 /**
@@ -51,10 +52,13 @@ public final class Check {
     public sealed interface Request {
 
         /**
-         * Start check {@code checkId} at this level, and report back with {@link #started} or {@link
-         * #failed}.
+         * Start check {@code checkId} at this level, or at the only one of a Lucene without levels,
+         * and report back with {@link #started} or {@link #failed}.
          */
-        record Start(long checkId, int level) implements Request {}
+        record Start(long checkId, OptionalInt level) implements Request {}
+
+        /** A key the index doesn't support, such as {@code l} for a Lucene without levels (ADR 0045). */
+        record Unsupported(String what) implements Request {}
     }
 
     private enum Focus {
@@ -84,6 +88,9 @@ public final class Check {
     /** The opened path, which the index directories are shown relative to. */
     private final String path;
 
+    /** Whether the check has levels: Lucene 10 has them, Lucene 3.6 doesn't (ADR 0045). */
+    private final boolean levels;
+
     /** The level the next check runs at. */
     private int level = StartCheckIndexParams.DEFAULT_LEVEL;
 
@@ -110,9 +117,10 @@ public final class Check {
     /** The id of the next check. */
     private long nextId = 1;
 
-    /** The check screen of the path opened as {@code path}. */
-    public Check(String path) {
+    /** The check screen of the path opened as {@code path}, with {@code l} and levels if {@code levels}. */
+    public Check(String path, boolean levels) {
         this.path = path;
+        this.levels = levels;
     }
 
     public boolean running() {
@@ -192,7 +200,10 @@ public final class Check {
             outputScroll = 0;
             outputColumn = 0;
             follow = true;
-            return Optional.of(new Request.Start(id, level));
+            return Optional.of(new Request.Start(id, levels ? OptionalInt.of(level) : OptionalInt.empty()));
+        }
+        if (key.isChar('l') && !levels) {
+            return Optional.of(new Request.Unsupported("Check level"));
         }
         if (key.isChar('l') && !running()) {
             level = level >= StartCheckIndexParams.MAX_LEVEL ? StartCheckIndexParams.MIN_LEVEL : level + 1;
@@ -278,7 +289,9 @@ public final class Check {
     public String keys() {
         return running()
                 ? "Esc cancel check   Tab panel   ↑↓←→"
-                : "⏎ check   l level: " + level + " " + levelName(level) + "   Tab panel   ↑↓←→";
+                : levels
+                        ? "⏎ check   l level: " + level + " " + levelName(level) + "   Tab panel   ↑↓←→"
+                        : "⏎ check   Tab panel   ↑↓←→";
     }
 
     public void render(Frame frame, Rect area) {
@@ -302,7 +315,7 @@ public final class Check {
                 Paragraph.builder()
                         .text(Text.from(wrapped))
                         .scroll(summaryScroll)
-                        .block(panel(" Check (" + titleLevel() + ") ", focus == Focus.SUMMARY))
+                        .block(panel(levels ? " Check (" + titleLevel() + ") " : " Check ", focus == Focus.SUMMARY))
                         .build(),
                 summaryArea);
 
@@ -338,6 +351,13 @@ public final class Check {
 
     private List<Line> summaryLines() {
         return switch (state) {
+            case Idle _
+            when !levels ->
+                List.of(
+                        Line.from("Lucene's CheckIndex reads every index of the path and reports what is broken. "
+                                + "It writes nothing, and works without a reader too."),
+                        Line.from(""),
+                        Line.from("⏎ checks every segment; this Lucene has no levels."));
             case Idle _ ->
                 List.of(
                         Line.from("Lucene's CheckIndex reads every index of the path and reports what is broken. "
