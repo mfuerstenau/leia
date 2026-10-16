@@ -72,6 +72,17 @@ class CommitsTest {
             long size,
             List<FieldFormats> fieldFormats,
             Optional<String> fieldInfosError) {
+        return segment(name, docBase, maxDoc, size, fieldFormats, fieldInfosError, "10.5.2");
+    }
+
+    private static Segment segment(
+            String name,
+            int docBase,
+            int maxDoc,
+            long size,
+            List<FieldFormats> fieldFormats,
+            Optional<String> fieldInfosError,
+            String luceneVersion) {
         return new Segment(
                 name,
                 Optional.of("ab52725f4ed21286179cc2af33ded2b1"),
@@ -82,8 +93,8 @@ class CommitsTest {
                 OptionalLong.of(1),
                 OptionalLong.empty(),
                 OptionalLong.empty(),
-                "10.5.2",
-                Optional.of("10.5.2"),
+                luceneVersion,
+                Optional.of(luceneVersion),
                 Optional.of("Lucene104"),
                 Optional.of(new CodecFormats(
                         "PerField40",
@@ -138,7 +149,7 @@ class CommitsTest {
 
     /** The commits 4 (opened) and 3, as the server lists them. */
     private static Commits loaded() {
-        Commits commits = new Commits(List.of("index"));
+        Commits commits = new Commits(List.of("index"), true);
         assertThat(commits.initialRequest()).isEqualTo(loadList(0));
         assertThat(commits.commitsLoaded(0, list(commit(4, true), commit(3, false))))
                 .isEqualTo(loadCommit(0, 4));
@@ -152,7 +163,7 @@ class CommitsTest {
 
     @Test
     void fetchesTheCommitsThenTheSelectedOne() {
-        Commits commits = new Commits(List.of("index"));
+        Commits commits = new Commits(List.of("index"), true);
         assertThat(commits.initialRequest()).isEqualTo(loadList(0));
         assertThat(commits.commitsLoaded(0, list(commit(4, true), commit(3, false))))
                 .isEqualTo(loadCommit(0, 4));
@@ -181,7 +192,7 @@ class CommitsTest {
 
     @Test
     void selectsTheOpenedCommitFirst() {
-        Commits commits = new Commits(List.of("index"));
+        Commits commits = new Commits(List.of("index"), true);
         commits.initialRequest();
         assertThat(commits.commitsLoaded(0, list(commit(5, false), commit(4, true))))
                 .isEqualTo(loadCommit(0, 4));
@@ -237,6 +248,70 @@ class CommitsTest {
         // Tab to the details keeps the segment.
         commits.handleKey(key(KeyCode.TAB));
         assertThat(render(commits, 140, 40)).contains("Segment _1");
+    }
+
+    /** The first lines of the details of a segment that Lucene {@code version} wrote. */
+    private static List<String> segmentHead(String version) {
+        Segment segment = segment("_0", 0, 400, 2048, List.of(), Optional.empty(), version);
+        GetCommitResult details = new GetCommitResult(commit(4, true), List.of(segment), List.of());
+        return Commits.segmentLines(segment, details, 80).stream()
+                .map(Line::rawContent)
+                .limit(5)
+                .toList();
+    }
+
+    @Test
+    void theSegmentDetailsLeaveOutWhatItsLuceneDidNotHave() {
+        // Soft deletes came with 7.4, index sorting with 6.2, and blocks with 9.10.
+        assertThat(segmentHead("4.10.4"))
+                .containsExactly(
+                        "Documents 0–399 · 3 deleted",
+                        "Lucene 4.10.4 · codec Lucene104",
+                        "Compound file yes · size 2.0 KiB",
+                        "Generations: deletes 1 · field infos – · doc values –",
+                        "Id ab52725f4ed21286179cc2af33ded2b1");
+        assertThat(segmentHead("6.6.6"))
+                .contains("Documents 0–399 · 3 deleted", "Sorted by document id (no index sort)")
+                .doesNotContain("Compound file yes · blocks no · size 2.0 KiB");
+        assertThat(segmentHead("7.7.3"))
+                .contains("Documents 0–399 · 3 deleted · 0 soft-deleted", "Compound file yes · size 2.0 KiB");
+        assertThat(segmentHead("9.9.2")).contains("Compound file yes · size 2.0 KiB");
+        assertThat(segmentHead("10.5.2"))
+                .contains(
+                        "Documents 0–399 · 3 deleted · 0 soft-deleted",
+                        "Compound file yes · blocks no · size 2.0 KiB",
+                        "Sorted by document id (no index sort)");
+    }
+
+    @Test
+    void comparesLuceneVersions() {
+        assertThat(Commits.atLeast("9.10.0", 9, 10)).isTrue();
+        assertThat(Commits.atLeast("9.9.2", 9, 10)).isFalse();
+        assertThat(Commits.atLeast("10.0.0", 9, 10)).isTrue();
+        assertThat(Commits.atLeast("2.x", 6, 2)).isFalse();
+        assertThat(Commits.atLeast("unknown", 6, 2)).isTrue();
+    }
+
+    @Test
+    void withoutAReaderNoCommitIsMarkedOpened() {
+        Commits commits = new Commits(List.of("index"), false);
+        commits.commitsLoaded(0, list(commit(4, false), commit(3, false)));
+        assertThat(render(commits, 120, 24))
+                .contains("Commits (2; r reads again)")
+                .doesNotContain("● opened");
+    }
+
+    @Test
+    void withoutAReaderACommitIsNotSaidToBeOpenedOrNot() {
+        assertThat(Commits.commitLines(details(4, true), false))
+                .extracting(Line::rawContent)
+                .noneMatch(line -> line.contains("opened commit"));
+        assertThat(Commits.commitLines(details(3, false), false))
+                .extracting(Line::rawContent)
+                .noneMatch(line -> line.contains("opened commit"));
+        assertThat(Commits.commitLines(details(3, false), true))
+                .extracting(Line::rawContent)
+                .contains("Not the opened commit: its documents are not shown on the other screens.");
     }
 
     @Test
@@ -325,7 +400,7 @@ class CommitsTest {
 
     @Test
     void showsTheCommitsThatCouldNotBeRead() {
-        Commits commits = new Commits(List.of("index"));
+        Commits commits = new Commits(List.of("index"), true);
         commits.initialRequest();
         GetCommitsResult result = new GetCommitsResult(
                 List.of(), List.of(new UnreadableCommit("segments_2", "Corrupt index, missing file: _0.si")));
@@ -373,7 +448,7 @@ class CommitsTest {
 
     @Test
     void showsTheCommitsOfTheSelectedIndex() {
-        Commits commits = new Commits(List.of("a", "b"));
+        Commits commits = new Commits(List.of("a", "b"), true);
         assertThat(commits.initialRequest()).isEqualTo(loadList(0));
         commits.commitsLoaded(0, list(commit(4, true)));
         commits.handleKey(BACK_TAB);
@@ -420,7 +495,7 @@ class CommitsTest {
 
     /** The commit 4 with one segment of {@code size} bytes, read. */
     private static Commits withSegmentOfSize(long size) {
-        Commits commits = new Commits(List.of("index"));
+        Commits commits = new Commits(List.of("index"), true);
         commits.commitsLoaded(0, list(commit(4, true)));
         commits.commitLoaded(
                 0, 4, new GetCommitResult(commit(4, true), List.of(segment("_0", 0, 400, size)), List.of()));
@@ -452,7 +527,7 @@ class CommitsTest {
 
     @Test
     void showsAGenerationOfFourDigitsWhole() {
-        Commits commits = new Commits(List.of("index"));
+        Commits commits = new Commits(List.of("index"), true);
         commits.commitsLoaded(0, list(commit(1234, true)));
 
         assertThat(render(commits, 120, 24)).contains("●  1234  segments_1234");

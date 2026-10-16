@@ -272,6 +272,11 @@ class SearchTest {
         Request.Start start = started(press(search, KeyCode.ENTER));
         assertThat(start.params().query().classic()).isPresent();
         assertThat(start.params().highlight()).isEmpty();
+        assertThat(search.searchStarted(start.searchId(), 1)).isEmpty();
+        search.searchProgress(start.searchId(), results(0, 2, 2));
+        assertThat(render(search))
+                .contains("p parser options · l stored fields per hit")
+                .doesNotContain("x explains", "s similarity");
         assertThat(press(search, 'x')).hasValue(new Request.Unsupported("Explain"));
         assertThat(press(search, 'H')).hasValue(new Request.Unsupported("Highlight"));
     }

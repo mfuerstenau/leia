@@ -2175,7 +2175,7 @@ public final class Search {
                         Line.styled(SOURCE_MARK + " marks document " + docId.getAsInt() + ", the source.", Form.dim()));
             }
         }
-        if (!list.hits.isEmpty()) {
+        if (!list.hits.isEmpty() && supports(Feature.EXPLAIN)) {
             lines.add(Line.styled("x explains the selected hit.", Form.dim()));
         }
         lines.add(settingsLine());
@@ -2191,7 +2191,10 @@ public final class Search {
         };
     }
 
-    /** What the settings popups set, for the footer's {@code p/s/l settings}. */
+    /**
+     * What the settings popups set, for the footer's {@code p/s/l settings}; {@code s} only if the
+     * index has the features for it (ADR 0044).
+     */
     private Line settingsLine() {
         String popups = switch (mode) {
             case TERM, DOC_VALUES -> "s similarity and sort · l stored fields per hit";
@@ -2200,6 +2203,9 @@ public final class Search {
             case CLASSIC, STANDARD -> "p parser options · s similarity and sort · l stored fields per hit";
             case KNN -> "p filter's parser options · s similarity and sort · l stored fields per hit";
         };
+        if (!supports(Feature.SEARCH)) {
+            popups = popups.replace("s similarity and sort · ", "");
+        }
         return Line.styled(popups, Form.dim());
     }
 

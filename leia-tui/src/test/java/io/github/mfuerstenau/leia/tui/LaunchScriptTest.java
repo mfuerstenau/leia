@@ -28,6 +28,9 @@ import org.junit.jupiter.params.provider.MethodSource;
 @DisabledOnOs(OS.WINDOWS)
 class LaunchScriptTest {
 
+    /** Silences Java 25's Unsafe warning, which bypasses the stderr redirect (ADR 0047). */
+    private static final String UNSAFE = "-Dsun.misc.unsafe.memory.access=allow";
+
     private static final Path SCRIPT = Path.of(System.getProperty("leia.scripts"), "leia");
 
     /** The fake java: its path on the first line, then one line per argument. */
@@ -82,7 +85,7 @@ class LaunchScriptTest {
         Run run = run(shell, "-j", jdk.toString(), "--version");
 
         assertThat(run.status()).isZero();
-        assertThat(run.out()).containsExactly(java(jdk), "-jar", jar.toString(), "--version");
+        assertThat(run.out()).containsExactly(java(jdk), UNSAFE, "-jar", jar.toString(), "--version");
     }
 
     @ParameterizedTest
@@ -183,7 +186,8 @@ class LaunchScriptTest {
         Run run = run(shell, "--jar", "a b.jar", "-j", jdk.toString(), "--no-reader", "my index");
 
         assertThat(run.out())
-                .containsExactly(java(jdk), "-jar", jar.toString(), "--jar", "a b.jar", "--no-reader", "my index");
+                .containsExactly(
+                        java(jdk), UNSAFE, "-jar", jar.toString(), "--jar", "a b.jar", "--no-reader", "my index");
     }
 
     @ParameterizedTest
@@ -197,6 +201,7 @@ class LaunchScriptTest {
         assertThat(run.out())
                 .containsExactly(
                         java(jdk),
+                        UNSAFE,
                         "-jar",
                         jar.toString(),
                         "--jar",
@@ -220,7 +225,8 @@ class LaunchScriptTest {
         Run run = runIn(home, shell, "x");
 
         assertThat(run.out())
-                .containsExactly(java(jdk), "-Dleia.log.level=FINE", "-Xmx1g", "*", "-jar", jar.toString(), "x");
+                .containsExactly(
+                        java(jdk), UNSAFE, "-Dleia.log.level=FINE", "-Xmx1g", "*", "-jar", jar.toString(), "x");
     }
 
     @ParameterizedTest

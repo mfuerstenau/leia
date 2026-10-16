@@ -435,6 +435,8 @@ class Lucene5IndexTest {
             assertThat(formats.points()).isEmpty();
             assertThat(formats.knnVectors()).isEmpty();
             assertThat(formats.storedFields()).isNotBlank();
+            // 4.10's norms format is an anonymous subclass: shown by the class it extends.
+            assertThat(formats.norms()).isEqualTo(five ? "Lucene53NormsFormat" : "Lucene49NormsFormat");
         });
         assertThat(plain.fieldInfosError()).isEmpty();
         assertThat(plain.fieldFormats())
@@ -482,6 +484,11 @@ class Lucene5IndexTest {
             // Level 1 checks the checksums only.
             if (level == 1) {
                 assertThat(lines).noneMatch(line -> line.contains("test: terms"));
+                // Lucene's hint names its -fast; leia's has levels. The 4.10 segments have no ids.
+                assertThat(lines).noneMatch(line -> line.contains("-fast"));
+                if (name.equals("lucene4")) {
+                    assertThat(lines).anyMatch(line -> line.endsWith("Check at level 2 or 3 for full verification."));
+                }
             } else {
                 assertThat(lines).anyMatch(line -> line.contains("test: terms"));
             }

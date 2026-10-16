@@ -240,16 +240,19 @@ final class Lucene5Commits implements Commits {
     }
 
     /**
-     * The SPI name of a named format; otherwise the simple class name, or the full one for an
-     * anonymous class.
+     * The SPI name of a named format; otherwise the simple class name, or for an anonymous class
+     * that of the class it extends, such as {@code Lucene49NormsFormat} for 4.10's norms.
      */
     private static String formatName(Object format) {
         return switch (format) {
             case PostingsFormat named -> named.getName();
             case DocValuesFormat named -> named.getName();
             default -> {
-                String simpleName = format.getClass().getSimpleName();
-                yield simpleName.isEmpty() ? format.getClass().getName() : simpleName;
+                Class<?> type = format.getClass();
+                while (type.getSimpleName().isEmpty() && type.getSuperclass() != null) {
+                    type = type.getSuperclass();
+                }
+                yield type.getSimpleName();
             }
         };
     }

@@ -323,7 +323,7 @@ public final class App {
         if (!supports(screen)) {
             screen = Screen.OVERVIEW;
         }
-        commits = new Commits(indexNames(opened));
+        commits = new Commits(indexNames(opened), true);
         check = new Check(stats.path(), opened.supports(Feature.CHECK_LEVELS));
         pointFormats = new PointFormats();
         terms = new Terms(stats.fields()).withPointFormats(pointFormats).withFeatures(opened.features());
@@ -383,7 +383,7 @@ public final class App {
                 result.skipped().stream().map(SkippedIndex::path).toList(),
                 result.features(),
                 Optional.empty());
-        commits = new Commits(indexNames(opened));
+        commits = new Commits(indexNames(opened), false);
         check = new Check(result.path(), opened.supports(Feature.CHECK_LEVELS));
         analysis.indexChanged(List.of(), autoStopWordsReason(), false);
         if (screen != Screen.ANALYSIS && screen != Screen.CHECK) {
@@ -434,7 +434,7 @@ public final class App {
                 opened.skipped(),
                 opened.features(),
                 opened.oldLucene());
-        commits = new Commits(indexNames(opened));
+        commits = new Commits(indexNames(opened), true);
         documents =
                 documents != null ? documents.reopened(stats.fields(), stats.maxDoc()) : newDocuments(stats, opened);
         syncTermsFilter();
@@ -458,7 +458,8 @@ public final class App {
         List<String> names = indexNames(opened);
         List<Documents.IndexStart> starts = new ArrayList<>();
         for (int i = 0; i < Math.min(names.size(), stats.indexes().size()); i++) {
-            starts.add(new Documents.IndexStart(stats.indexes().get(i).docBase(), names.get(i)));
+            IndexCommitStats index = stats.indexes().get(i);
+            starts.add(new Documents.IndexStart(index.docBase(), names.get(i), index.createdVersionMajor()));
         }
         return new Documents(stats.fields(), stats.maxDoc())
                 .withIndexes(starts)

@@ -5,6 +5,10 @@ rem The JVM is -j/--java <PATH> (a java.exe or a JDK/JRE directory), then %JAVA_
 rem then java.exe on PATH. LEIA_OPTS holds options for the JVM, such as -Dleia.log.level=FINE.
 rem leia.jar checks the Java version and parses the other arguments.
 rem
+rem -Dsun.misc.unsafe.memory.access=allow comes first: it silences the warning Java 25 prints to the
+rem JVM's own stderr when the old runtimes unmap, and lets them unmap (ADR 0047). LEIA_OPTS can
+rem override it.
+rem
 rem Unlike the sh script, this one doesn't resolve symlinks. Limits of cmd: an argument with & ^ or %
 rem needs quotes, and so does one with = , or ; which cmd splits at (--java=X arrives as --java X).
 rem An empty argument ("") ends the arguments. If the JVM ends from Ctrl+C before the TUI has the
@@ -91,5 +95,5 @@ if exist "%jar%" goto launch
 exit /b 1
 
 :launch
-"%exe%" %LEIA_OPTS% -jar "%jar%" %args%
+"%exe%" -Dsun.misc.unsafe.memory.access=allow %LEIA_OPTS% -jar "%jar%" %args%
 exit /b %ERRORLEVEL%

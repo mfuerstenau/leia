@@ -260,8 +260,11 @@ public final class Documents {
     /** A stored value to view with its matches once its document is in (ADR 0027). */
     private record PendingView(int docId, String field, int index, List<MatchSpan> spans, int matchCount) {}
 
-    /** An index directory: the document id it starts at, and its name as shown. */
-    public record IndexStart(int docBase, String name) {}
+    /**
+     * An index directory: the document id it starts at, its name as shown, and the major Lucene
+     * version that created it, which says how its norms are encoded.
+     */
+    public record IndexStart(int docBase, String name, int createdVersionMajor) {}
 
     /** What the navigation keys move. */
     private enum Focus {
@@ -373,8 +376,8 @@ public final class Documents {
     private Viewer.Delimiters delimiters = Viewer.Delimiters.DEFAULT;
 
     /**
-     * With several index directories, where each starts and its name as shown, in order (ADR 0021);
-     * empty with one.
+     * The index directories, where each starts, its name as shown and its version, in order (ADR
+     * 0021).
      */
     private List<IndexStart> indexes = List.of();
 
@@ -388,11 +391,11 @@ public final class Documents {
     }
 
     /**
-     * Shows which index directory a document is in: each with the document id it starts at and its
-     * name, in order. With one, nothing is shown.
+     * Shows which index directory a document is in: each with the document id it starts at, its
+     * name and its version, in order. With one, no name is shown.
      */
     public Documents withIndexes(List<IndexStart> indexes) {
-        this.indexes = indexes.size() > 1 ? List.copyOf(indexes) : List.of();
+        this.indexes = List.copyOf(indexes);
         return this;
     }
 
@@ -419,6 +422,18 @@ public final class Documents {
 
     /** The name of the index directory that {@code docId} is in, with several of them. */
     public Optional<String> indexOf(int docId) {
+        return indexes.size() > 1 ? indexStart(docId).map(IndexStart::name) : Optional.empty();
+    }
+
+    /**
+     * The major Lucene version that created the index {@code docId} is in; with no indexes listed,
+     * one with today's norms.
+     */
+    int createdVersionMajorOf(int docId) {
+        return indexStart(docId).map(IndexStart::createdVersionMajor).orElse(LENGTH_NORMS_SINCE);
+    }
+
+    private Optional<IndexStart> indexStart(int docId) {
         IndexStart in = null;
         for (IndexStart index : indexes) {
             if (index.docBase() > docId) {
@@ -426,7 +441,7 @@ public final class Documents {
             }
             in = index;
         }
-        return Optional.ofNullable(in).map(IndexStart::name);
+        return Optional.ofNullable(in);
     }
 
     /**
@@ -1675,7 +1690,8 @@ public final class Documents {
                 reconstructions.get(field.name()),
                 numbers,
                 pointFormats,
-                features);
+                features,
+                createdVersionMajorOf(docId));
         // TamboUI scrolls no further than to show the last line at the bottom, so the scroll stops
         // there too: the next key after End moves.
         Block block = panel(title, focused);
@@ -1903,7 +1919,8 @@ public final class Documents {
             Reconstruction reconstruction,
             NumberFormat numbers,
             PointFormats pointFormats,
-            Set<Feature> features) {
+            Set<Feature> features,
+            int createdVersionMajor) {
         List<Line> lines = new ArrayList<>();
         String flags = flags(schema, field);
         lines.add(labelled("Flags", flags + "  " + flagWords(flags)));
@@ -1945,7 +1962,7 @@ public final class Documents {
             }
         }
         lines.add(labelled(
-                "Norm", field.norm().isPresent() ? normText(field.norm().getAsLong()) : "-"));
+                "Norm", field.norm().isPresent() ? normText(field.norm().getAsLong(), createdVersionMajor) : "-"));
         matchesLine.ifPresent(text -> lines.add(labelled("Matches", text)));
         if (hit.isPresent()) {
             lines.add(Line.empty());
@@ -2147,12 +2164,19 @@ public final class Documents {
         return String.join(" ", parts);
     }
 
-    /** The norm, and the field length it stands for if Lucene's similarities wrote it. */
-    static String normText(long norm) {
-        return normLength(norm)
+    /** The first major Lucene version whose similarities encode the field length itself. */
+    static final int LENGTH_NORMS_SINCE = 7;
+
+    /**
+     * The norm, and the field length it stands for if Lucene's similarities wrote it in an index
+     * that Lucene {@code createdVersionMajor} created. Before 7, norms include the index-time boost.
+     */
+    static String normText(long norm, int createdVersionMajor) {
+        String boost = createdVersionMajor < LENGTH_NORMS_SINCE ? " at boost 1" : "";
+        return normLength(norm, createdVersionMajor)
                 .map(length -> length.low() == length.high()
-                        ? norm + " → length " + length.low()
-                        : norm + " → length " + length.low() + "–" + length.high())
+                        ? norm + " → length " + length.low() + boost
+                        : norm + " → length " + length.low() + "–" + length.high() + boost)
                 .orElse(Long.toString(norm));
     }
 
@@ -2160,18 +2184,76 @@ public final class Documents {
     record NormLength(long low, long high) {}
 
     /**
-     * The field lengths a norm stands for if Lucene's similarities wrote it: they all encode the
-     * number of terms with {@code SmallFloat.intToByte4}, which is exact below 40 and a range above.
-     * Empty for a norm that is not a byte, which some other similarity wrote.
+     * The field lengths a norm stands for if Lucene's similarities wrote it. From Lucene 7 they all
+     * encode the number of terms with {@code SmallFloat.intToByte4}, which is exact below 40 and a
+     * range above. Before 7, the default and BM25 similarities stored {@code
+     * floatToByte315(boost / √length)}; the lengths are those at boost 1. Empty for a norm that is not
+     * a byte, which some other similarity wrote, and before 7 for one that no length gives at boost 1.
      */
-    static Optional<NormLength> normLength(long norm) {
+    static Optional<NormLength> normLength(long norm, int createdVersionMajor) {
         if (norm < Byte.MIN_VALUE || norm > Byte.MAX_VALUE) {
             return Optional.empty();
         }
         int b = (int) norm & 0xff;
+        if (createdVersionMajor < LENGTH_NORMS_SINCE) {
+            return byte315Length(b);
+        }
         long low = byte4ToInt(b);
         long high = b < 0xff ? byte4ToInt(b + 1) - 1 : low;
         return Optional.of(new NormLength(low, high));
+    }
+
+    /**
+     * The lengths L with {@code floatToByte315(1 / √L) == b}: those with {@code byte315ToFloat(b) ≤ 1 /
+     * √L < byte315ToFloat(b + 1)}, adjusted at the edges by encoding them. Byte 255 is length 0, whose
+     * norm is infinite.
+     */
+    private static Optional<NormLength> byte315Length(int b) {
+        if (b == 0xff) {
+            return Optional.of(new NormLength(0, 0));
+        }
+        if (b == 0) {
+            return Optional.empty();
+        }
+        double low = 1 / Math.pow(byte315ToFloat(b + 1), 2);
+        double high = 1 / Math.pow(byte315ToFloat(b), 2);
+        long from = Math.max((long) Math.floor(low), 1);
+        long to = Math.min((long) Math.ceil(high), Integer.MAX_VALUE);
+        while (from <= to && lengthNorm(from) != b) {
+            from++;
+        }
+        while (to >= from && lengthNorm(to) != b) {
+            to--;
+        }
+        return from <= to ? Optional.of(new NormLength(from, to)) : Optional.empty();
+    }
+
+    /** The norm byte that Lucene's {@code DefaultSimilarity} before 7 stored for {@code length} terms. */
+    private static int lengthNorm(long length) {
+        return floatToByte315((float) (1.0 / Math.sqrt(length)));
+    }
+
+    /** {@code SmallFloat.byte315ToFloat}: 3 mantissa bits, 5 exponent bits, zero exponent at 15. */
+    private static float byte315ToFloat(int b) {
+        if (b == 0) {
+            return 0f;
+        }
+        int bits = (b & 0xff) << (24 - 3);
+        bits += (63 - 15) << 24;
+        return Float.intBitsToFloat(bits);
+    }
+
+    /** {@code SmallFloat.floatToByte315}, as an unsigned byte; it rounds down. */
+    private static int floatToByte315(float f) {
+        int bits = Float.floatToRawIntBits(f);
+        int smallfloat = bits >> (24 - 3);
+        if (smallfloat <= ((63 - 15) << 3)) {
+            return bits <= 0 ? 0 : 1;
+        }
+        if (smallfloat >= ((63 - 15) << 3) + 0x100) {
+            return 0xff;
+        }
+        return smallfloat - ((63 - 15) << 3);
     }
 
     /**

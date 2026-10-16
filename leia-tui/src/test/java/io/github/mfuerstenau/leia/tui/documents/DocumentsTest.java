@@ -481,22 +481,44 @@ class DocumentsTest {
     @Test
     void decodesNormsToFieldLengths() {
         // From Lucene's SmallFloat.intToByte4 and byte4ToInt.
-        assertThat(Documents.normLength(0)).hasValue(new Documents.NormLength(0, 0));
-        assertThat(Documents.normLength(23)).hasValue(new Documents.NormLength(23, 23));
-        assertThat(Documents.normLength(39)).hasValue(new Documents.NormLength(39, 39));
-        assertThat(Documents.normLength(40)).hasValue(new Documents.NormLength(40, 41));
-        assertThat(Documents.normLength(57)).hasValue(new Documents.NormLength(96, 103));
-        assertThat(Documents.normLength(88)).hasValue(new Documents.NormLength(1048, 1175));
-        assertThat(Documents.normLength(-89)).hasValue(new Documents.NormLength(983_064, 1_048_599));
-        assertThat(Documents.normLength(-1)).hasValue(new Documents.NormLength(2_013_265_944, 2_013_265_944));
-        assertThat(Documents.normLength(128)).isEmpty();
-        assertThat(Documents.normText(88)).isEqualTo("88 → length 1048–1175");
-        assertThat(Documents.normText(1000)).isEqualTo("1000");
+        assertThat(Documents.normLength(0, 10)).hasValue(new Documents.NormLength(0, 0));
+        assertThat(Documents.normLength(23, 10)).hasValue(new Documents.NormLength(23, 23));
+        assertThat(Documents.normLength(39, 10)).hasValue(new Documents.NormLength(39, 39));
+        assertThat(Documents.normLength(40, 10)).hasValue(new Documents.NormLength(40, 41));
+        assertThat(Documents.normLength(57, 10)).hasValue(new Documents.NormLength(96, 103));
+        assertThat(Documents.normLength(88, 10)).hasValue(new Documents.NormLength(1048, 1175));
+        assertThat(Documents.normLength(-89, 10)).hasValue(new Documents.NormLength(983_064, 1_048_599));
+        assertThat(Documents.normLength(-1, 10)).hasValue(new Documents.NormLength(2_013_265_944, 2_013_265_944));
+        assertThat(Documents.normLength(128, 10)).isEmpty();
+        assertThat(Documents.normText(88, 10)).isEqualTo("88 → length 1048–1175");
+        assertThat(Documents.normText(1000, 10)).isEqualTo("1000");
 
         Documents documents = documents();
         documents.loaded(document(0));
         documents.handleKey(key(KeyCode.DOWN));
         assertThat(render(documents, 140, 30)).contains("Norm        3 → length 3");
+    }
+
+    @Test
+    void decodesNormsBeforeLucene7AsBoostOverTheRootOfTheLength() {
+        // From Lucene's SmallFloat.floatToByte315 and byte315ToFloat: 118 is 0.375, 1/√6 to 1/√7.
+        assertThat(Documents.normLength(118, 5)).hasValue(new Documents.NormLength(6, 7));
+        assertThat(Documents.normLength(120, 4)).hasValue(new Documents.NormLength(3, 4));
+        assertThat(Documents.normLength(124, 3)).hasValue(new Documents.NormLength(1, 1));
+        assertThat(Documents.normLength(-1, 6)).hasValue(new Documents.NormLength(0, 0));
+        assertThat(Documents.normLength(0, 5)).isEmpty();
+        assertThat(Documents.normLength(125, 5)).isEmpty();
+        assertThat(Documents.normLength(-2, 5)).isEmpty();
+        assertThat(Documents.normLength(128, 5)).isEmpty();
+        assertThat(Documents.normText(118, 4)).isEqualTo("118 → length 6–7 at boost 1");
+        assertThat(Documents.normText(124, 2)).isEqualTo("124 → length 1 at boost 1");
+        assertThat(Documents.normText(125, 4)).isEqualTo("125");
+
+        Documents documents = documents().withIndexes(List.of(new Documents.IndexStart(0, "lucene4", 4)));
+        documents.loaded(document(0));
+        documents.handleKey(key(KeyCode.DOWN));
+        // Byte 3 is far below 1/√Integer.MAX_VALUE: no length gives it.
+        assertThat(render(documents, 140, 30)).contains("Norm        3").doesNotContain("→ length");
     }
 
     @Test

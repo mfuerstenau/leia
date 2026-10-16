@@ -113,6 +113,9 @@ public final class Commits {
     /** The index directories as shown: below the opened path. */
     private final List<String> indexes;
 
+    /** Whether a reader is open, on one of the commits; not after opening without one (ADR 0021). */
+    private final boolean readerOpen;
+
     /** The index directory whose commits are shown. */
     private int indexRow;
 
@@ -147,9 +150,13 @@ public final class Commits {
 
     private int detailsScroll;
 
-    /** The commits screen of these index directories, as shown; at least one. */
-    public Commits(List<String> indexes) {
+    /**
+     * The commits screen of these index directories, as shown; at least one. {@code readerOpen} says
+     * whether a reader is open on one of the commits.
+     */
+    public Commits(List<String> indexes, boolean readerOpen) {
         this.indexes = List.copyOf(indexes);
+        this.readerOpen = readerOpen;
         this.lists = new ArrayList<>();
         this.unreadable = new ArrayList<>();
         for (int i = 0; i < indexes.size(); i++) {
@@ -473,10 +480,10 @@ public final class Commits {
             case Fetched.Done<List<Commit>> done -> commits = done.value();
         }
         List<UnreadableCommit> unreadableCommits = unreadable.get(indexRow);
+        String legend = readerOpen ? "● opened, r reads again" : "r reads again";
         String title = unreadableCommits.isEmpty()
-                ? " Commits (" + commits.size() + "; ● opened, r reads again) "
-                : " Commits (" + commits.size() + ", " + unreadableCommits.size()
-                        + " unreadable; ● opened, r reads again) ";
+                ? " Commits (" + commits.size() + "; " + legend + ") "
+                : " Commits (" + commits.size() + ", " + unreadableCommits.size() + " unreadable; " + legend + ") ";
         if (commits.isEmpty() && unreadableCommits.isEmpty()) {
             message(frame, area, title, focused, "No readable commit.");
             return;
@@ -637,7 +644,7 @@ public final class Commits {
             }
         } else if (result.isPresent()) {
             title = " " + result.get().commit().segmentsFile() + " ";
-            lines = commitLines(result.get());
+            lines = commitLines(result.get(), readerOpen);
         } else {
             Optional<UnreadableCommit> commit = selectedUnreadable();
             if (commit.isPresent()) {
@@ -713,20 +720,22 @@ public final class Commits {
     }
 
     /**
-     * The details of a commit: what it is, where it stands to the opened one, its user data and all
-     * of its files.
+     * The details of a commit: what it is, where it stands to the opened one if {@code readerOpen},
+     * its user data and all of its files.
      */
-    static List<Line> commitLines(GetCommitResult details) {
+    static List<Line> commitLines(GetCommitResult details, boolean readerOpen) {
         Commit commit = details.commit();
         List<Line> lines = new ArrayList<>();
         lines.add(Line.from("Generation " + commit.generation() + " · version " + commit.version() + " · Lucene "
                 + commit.luceneVersion()));
         lines.add(Line.from(TextFormat.count(commit.segmentCount(), "segment") + " · "
                 + TextFormat.count(commit.maxDoc(), "doc") + " · " + commit.delCount() + " deleted"));
-        lines.add(Line.from(
-                commit.current()
-                        ? "The opened commit."
-                        : "Not the opened commit: its documents are not shown on the other screens."));
+        if (readerOpen) {
+            lines.add(Line.from(
+                    commit.current()
+                            ? "The opened commit."
+                            : "Not the opened commit: its documents are not shown on the other screens."));
+        }
         section(lines, "User data", new TreeMap<>(commit.userData()));
         fileSection(lines, details.files(), true);
         return lines;
@@ -759,14 +768,19 @@ public final class Commits {
                 .filter(min -> !min.equals(segment.luceneVersion()))
                 .map(min -> " (parts from " + min + ")")
                 .orElse("");
+        String version = segment.luceneVersion();
         List<Line> lines = new ArrayList<>();
+        // Soft deletes came with Lucene 7.4, index sorting with 6.2, and blocks with 9.10 (9.0–9.9 wrote none).
+        lines.add(Line.from(docs + " · " + segment.delCount() + " deleted"
+                + (atLeast(version, 7, 4) ? " · " + segment.softDelCount() + " soft-deleted" : "")));
         lines.add(Line.from(
-                docs + " · " + segment.delCount() + " deleted · " + segment.softDelCount() + " soft-deleted"));
-        lines.add(Line.from("Lucene " + segment.luceneVersion() + minVersion + " · codec "
-                + segment.codec().orElse(NONE)));
-        lines.add(Line.from("Compound file " + (segment.compound() ? "yes" : "no") + " · blocks "
-                + (segment.hasBlocks() ? "yes" : "no") + " · size " + sizeOr(segment.sizeInBytes(), "unknown")));
-        lines.add(Line.from("Sorted by " + segment.indexSort().orElse("document id (no index sort)")));
+                "Lucene " + version + minVersion + " · codec " + segment.codec().orElse(NONE)));
+        lines.add(Line.from("Compound file " + (segment.compound() ? "yes" : "no")
+                + (atLeast(version, 9, 10) ? " · blocks " + (segment.hasBlocks() ? "yes" : "no") : "")
+                + " · size " + sizeOr(segment.sizeInBytes(), "unknown")));
+        if (atLeast(version, 6, 2)) {
+            lines.add(Line.from("Sorted by " + segment.indexSort().orElse("document id (no index sort)")));
+        }
         lines.add(Line.from("Generations: deletes " + generation(segment.delGen()) + " · field infos "
                 + generation(segment.fieldInfosGen()) + " · doc values " + generation(segment.docValuesGen())));
         lines.add(Line.from("Id " + segment.id().orElse(NONE)));
@@ -782,6 +796,20 @@ public final class Commits {
                 .toList();
         fileSection(lines, files, false);
         return lines;
+    }
+
+    /**
+     * Whether {@code version}, such as {@code 4.10.4} or {@code 2.x}, is {@code major.minor} or later;
+     * true for one that doesn't parse, so that nothing is left out.
+     */
+    static boolean atLeast(String version, int major, int minor) {
+        String[] parts = version.split("\\.", 3);
+        if (!parts[0].matches("\\d{1,4}")) {
+            return true;
+        }
+        int itsMajor = Integer.parseInt(parts[0]);
+        int itsMinor = parts.length > 1 && parts[1].matches("\\d{1,4}") ? Integer.parseInt(parts[1]) : 0;
+        return itsMajor != major ? itsMajor > major : itsMinor >= minor;
     }
 
     private static void formatSection(List<Line> lines, CodecFormats formats) {

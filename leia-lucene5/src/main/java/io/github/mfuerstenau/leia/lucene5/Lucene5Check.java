@@ -195,6 +195,14 @@ final class Lucene5Check implements Check {
         }
     }
 
+    /**
+     * What Lucene's warnings about segments before 4.8 (no checksums) and 5.0 (no ids) say at level 1;
+     * in leia, levels 2 and 3 are what {@code -fast} leaves out.
+     */
+    static final String FAST_HINT = "Run checkindex without -fast for full verification.";
+
+    static final String LEVEL_HINT = "Check at level 2 or 3 for full verification.";
+
     /** Splits what {@code CheckIndex} prints into lines and passes them on. */
     private static final class Report extends OutputStream {
         private final Consumer<String> output;
@@ -243,7 +251,7 @@ final class Lucene5Check implements Check {
         private String text() {
             String text = line.toString(StandardCharsets.UTF_8);
             line.reset();
-            return text.endsWith("\r") ? text.substring(0, text.length() - 1) : text;
+            return (text.endsWith("\r") ? text.substring(0, text.length() - 1) : text).replace(FAST_HINT, LEVEL_HINT);
         }
     }
 

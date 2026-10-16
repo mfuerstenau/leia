@@ -31,6 +31,7 @@ import java.util.TreeMap;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
+import org.apache.lucene.store.MMapDirectory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -78,6 +79,12 @@ class Lucene3IndexTest {
                     assertThat(runtime.indexMajors()).containsExactlyInAnyOrder(2, 3);
                     assertThat(runtime.luceneVersion()).startsWith("3.6");
                 });
+    }
+
+    @Test
+    void neverUnmaps() {
+        // 3.6 unmaps through sun.misc.Cleaner, gone since Java 9: no Unsafe warning (ADR 0047).
+        assertThat(MMapDirectory.UNMAP_SUPPORTED).isFalse();
     }
 
     @Test

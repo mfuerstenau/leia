@@ -4,6 +4,10 @@
 # The JVM is -j/--java <PATH> (a java executable or a JDK/JRE directory), then $JAVA_HOME/bin/java,
 # then java on PATH. LEIA_OPTS holds options for the JVM, such as -Dleia.log.level=FINE. leia.jar
 # checks the Java version and parses the other arguments.
+#
+# -Dsun.misc.unsafe.memory.access=allow comes first: it silences the warning Java 25 prints to the
+# JVM's own stderr when the old runtimes unmap, and lets them unmap (ADR 0047). LEIA_OPTS can
+# override it.
 
 die() {
   status=$1
@@ -95,4 +99,4 @@ jar=$dir/leia.jar
 # LEIA_OPTS is split at spaces, without globbing.
 set -f
 # shellcheck disable=SC2086
-exec "$java" ${LEIA_OPTS-} -jar "$jar" "$@"
+exec "$java" -Dsun.misc.unsafe.memory.access=allow ${LEIA_OPTS-} -jar "$jar" "$@"
