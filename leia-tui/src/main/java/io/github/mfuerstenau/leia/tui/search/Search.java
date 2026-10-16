@@ -536,7 +536,9 @@ public final class Search {
                 case CLASSIC -> supports(Feature.SEARCH) || supports(Feature.CLASSIC_SEARCH);
                 case STANDARD, TERM, LIKE, LIKE_TEXT -> supports(Feature.SEARCH);
                 case DOC_VALUES -> supports(Feature.SEARCH, Feature.DOC_VALUES);
-                case KNN -> supports(Feature.SEARCH, Feature.KNN_VECTORS);
+                // A runtime searches KNN vectors with its classic search (ADR 0049).
+                case KNN ->
+                    supports(Feature.KNN_VECTORS) && (supports(Feature.SEARCH) || supports(Feature.CLASSIC_SEARCH));
                 case REGEX -> supports(Feature.STORED_SCAN);
             };
             if (available) {

@@ -281,6 +281,24 @@ class SearchTest {
         assertThat(press(search, 'H')).hasValue(new Request.Unsupported("Highlight"));
     }
 
+    /** A runtime that reads vectors searches them with its classic search (ADR 0049). */
+    @Test
+    void aClassicOnlyIndexWithVectorsSearchesTheNearestToo() {
+        Search search =
+                knnSearch().withFeatures(Set.of(Feature.CLASSIC_SEARCH, Feature.KNN_VECTORS, Feature.DOCUMENTS));
+        assertThat(search.keys()).contains("m mode");
+        assertThat(press(search, 'm')).isEmpty();
+        assertThat(search.mode()).isEqualTo(Mode.KNN);
+        assertThat(press(search, 'm')).isEmpty();
+        assertThat(search.mode()).isEqualTo(Mode.CLASSIC);
+
+        Request.Start start = started(search.knnQuery("embedding", 3));
+        assertThat(start.params().query().knn()).isPresent();
+        assertThat(start.params().highlight()).isEmpty();
+        assertThat(press(search, 's')).hasValue(new Request.Unsupported("Similarity and sort"));
+        assertThat(render(search)).doesNotContain("s similarity");
+    }
+
     @Test
     void cyclesOnlyThroughTheModesTheIndexHas() {
         Search search = search().withFeatures(Set.of(Feature.CLASSIC_SEARCH, Feature.STORED_SCAN));

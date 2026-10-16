@@ -307,26 +307,7 @@ public final class SearchQueries {
         FieldInfo field = index.fieldInfo(knn.field())
                 .orElseThrow(() ->
                         new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + knn.field() + "' in the index"));
-        if (field.getVectorDimension() == 0) {
-            throw new RpcException(
-                    ErrorCode.INVALID_PARAMS, "Invalid params: the field '" + knn.field() + "' has no KNN vectors");
-        }
-        if (knn.docId().isPresent() == knn.vector().isPresent()) {
-            throw new RpcException(
-                    ErrorCode.INVALID_PARAMS, "Invalid params: knn needs exactly one of docId and vector");
-        }
-        if (knn.exact() && knn.k().isPresent()) {
-            throw new RpcException(
-                    ErrorCode.INVALID_PARAMS,
-                    "Invalid params: an exact knn query has no k: it scores every document with a vector");
-        }
-        if (!knn.exact()
-                && (knn.k().isEmpty() || knn.k().getAsInt() < 1 || knn.k().getAsInt() > KnnQuery.MAX_K)) {
-            throw new RpcException(
-                    ErrorCode.INVALID_PARAMS,
-                    "Invalid params: an approximate knn query needs k from 1 to " + KnnQuery.MAX_K
-                            + (knn.k().isPresent() ? ": " + knn.k().getAsInt() : ""));
-        }
+        KnnChecks.check(knn, field.getVectorDimension());
         KnnVector target;
         try {
             target = knn.vector().isPresent() ? vector(knn.vector().get()) : documentVector(index, knn);

@@ -13,16 +13,19 @@ import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
-/** The old runtimes, which the shadow jars of leia-lucene3, leia-lucene5 and leia-lucene7 bring to the test runtime classpath. */
+/**
+ * The old runtimes, which the shadow jars of leia-lucene3, leia-lucene5, leia-lucene7 and leia-lucene9
+ * bring to the test runtime classpath.
+ */
 class RuntimesTest {
 
     @Test
-    void findsTheLucene3Lucene5AndLucene7Runtimes() {
+    void findsTheOldRuntimes() {
         Runtimes.Loaded loaded = Runtimes.load(RuntimesTest.class.getClassLoader());
         assertThat(loaded.refused()).isEmpty();
         assertThat(loaded.runtimes())
                 .extracting(LuceneRuntime::luceneVersion)
-                .containsExactlyInAnyOrder("3.6.2", "5.5.5", "7.7.3");
+                .containsExactlyInAnyOrder("3.6.2", "5.5.5", "7.7.3", "9.12.3");
 
         Runtimes runtimes = new Runtimes();
         assertThat(runtimes.forMajor(2))
@@ -37,7 +40,10 @@ class RuntimesTest {
                 .hasValueSatisfying(
                         runtime -> assertThat(runtime.luceneVersion()).isEqualTo("7.7.3"));
         assertThat(runtimes.forMajor(7)).isPresent();
-        assertThat(runtimes.forMajor(8)).isEmpty();
+        assertThat(runtimes.forMajor(8))
+                .hasValueSatisfying(
+                        runtime -> assertThat(runtime.luceneVersion()).isEqualTo("9.12.3"));
+        assertThat(runtimes.forMajor(9)).isEmpty();
         assertThat(runtimes.newlyRefused()).isEmpty();
     }
 

@@ -284,6 +284,35 @@ class SessionPilotTest {
         assertThat(screen()).contains("Points (16)");
     }
 
+    /**
+     * An index created by Lucene 8.x and written to by 9.x, which the relocated Lucene 9.12 reads with
+     * the KNN vectors of its 9.x segment (ADR 0049).
+     */
+    @Test
+    void opensALucene8IndexWrittenBy9AndFindsTheNearestVectors() throws Exception {
+        Path index = Path.of(System.getProperty("leia.test.index.lucene8to9")).toAbsolutePath();
+
+        openAtStart(index, OpenMode.READER);
+        assertThat(screen()).contains("Documents  9 live, 2 deleted, 11 max");
+
+        // Document 8, the first of the 9.x segment, down to its vector.
+        pilot.press('2');
+        settle();
+        pilot.press('i');
+        pilot.press('8');
+        pilot.press(KeyCode.ENTER);
+        settle();
+        for (int i = 0; i < 30 && !screen().contains("N finds the nearest"); i++) {
+            pilot.press(KeyCode.DOWN);
+            settle();
+        }
+        assertThat(screen()).contains("[1.0, 0.0, 0.0, 0.0] 4d", "N finds the nearest");
+
+        pilot.press('N');
+        settle();
+        assertThat(screen()).contains("KNN · embedding (4d float, cosine)", "3 hits");
+    }
+
     @Test
     void reopensAfterACommitAndOpensFromThePrompt() throws Exception {
         Path index = writeIndex(tmp.resolve("index"), 2);

@@ -415,6 +415,11 @@ public final class Documents {
         return features.containsAll(List.of(needed));
     }
 
+    /** Whether {@code N} can search the nearest vectors: with any search, as a runtime has (ADR 0049). */
+    private boolean nearest() {
+        return supports(Feature.KNN_VECTORS) && (supports(Feature.SEARCH) || supports(Feature.CLASSIC_SEARCH));
+    }
+
     /** What the index says about the field {@code name}; empty if it doesn't know it. */
     public Optional<IndexField> field(String name) {
         return Optional.ofNullable(schema.get(name));
@@ -1420,7 +1425,7 @@ public final class Documents {
             case 'r' -> supports(Feature.RECONSTRUCT) ? Optional.empty() : Optional.of("Rebuild");
             case 't' -> supports(Feature.POINTS) ? Optional.empty() : Optional.of("Points");
             case 's' -> supports(Feature.SEARCH, Feature.DOC_VALUES) ? Optional.empty() : Optional.of("Search value");
-            case 'N' -> supports(Feature.SEARCH, Feature.KNN_VECTORS) ? Optional.empty() : Optional.of("Nearest");
+            case 'N' -> nearest() ? Optional.empty() : Optional.of("Nearest");
             case 'm' -> supports(Feature.SEARCH) ? Optional.empty() : Optional.of("Similar");
             case 'b' -> supports(Feature.FILTER) ? Optional.empty() : Optional.of("Filter");
             default -> Optional.empty();
@@ -1440,7 +1445,7 @@ public final class Documents {
         keyIf(keys, supports(Feature.STORED_VALUES), "v view");
         keys.append("a analyze   ");
         keyIf(keys, supports(Feature.SEARCH, Feature.DOC_VALUES), "s search value");
-        keyIf(keys, supports(Feature.SEARCH, Feature.KNN_VECTORS), "N nearest");
+        keyIf(keys, nearest(), "N nearest");
         keys.append("x numbers   ");
         keyIf(keys, supports(Feature.POINTS), "t points");
         keys.append("e empty   ");

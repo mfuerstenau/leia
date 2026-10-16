@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-11
 - **Amends:** ADR 0006 §3 (`getDocument` gains each field's vector), ADR 0010 (`SearchQuery` gains a sixth alternative), ADR 0030 §2 (the export format becomes version 2)
+- **Amended by:** ADR 0049 §4–7 (vectors and KNN search on an index created by 8.x, through the runtime of Lucene 9.12)
 
 ## Context
 

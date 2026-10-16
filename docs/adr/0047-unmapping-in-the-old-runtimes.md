@@ -23,6 +23,7 @@ The options were:
 2. **The old runtimes unmap only when the property is `allow`.** `leia-lucene5`'s `Directories.open` calls `setUseUnmap(Directories.unmap(…))` on every `MMapDirectory`, including the one `FS` gives. `unmap` is true only for `allow`, and only where `MMapDirectory.UNMAP_SUPPORTED`. Without the property, as with `java -jar leia.jar`, nothing is unmapped and nothing warns. The check goes through `Directories.open` and gets the same.
 3. **Lucene 3.6 needs nothing.** Its `UNMAP_SUPPORTED` needs `sun.misc.Cleaner`, gone since Java 9, so it never unmaps. A test keeps this true.
 4. **Every later relocated runtime that brings its own `MMapDirectory` does the same**, `leia-lucene7` first. Lucene 9 and 10 map through `MemorySegment` and don't touch `Unsafe`.
+   - *Amended by ADR 0049 §3:* `leia-lucene9` has no switch: 9.12 maps through memory segments, from the classes of its jar's `META-INF/versions`, and its `setUseUnmap` throws.
 
 ## Consequences
 

@@ -27,13 +27,26 @@ public interface Documents {
      * What a document has in one field of the index.
      *
      * @param docValues its doc values; empty if it has none in the field
+     * @param vector its KNN vector; empty if it has none in the field, as always before Lucene 9
      */
     record DocumentField(
             String name,
             OptionalLong norm,
             List<RuntimeIndex.StoredValue> stored,
             Optional<DocValues> docValues,
-            boolean hasTermVector) {}
+            boolean hasTermVector,
+            Optional<RuntimeIndex.Vector> vector) {
+
+        /** What a document has in a field, without a KNN vector, as before Lucene 9. */
+        public DocumentField(
+                String name,
+                OptionalLong norm,
+                List<RuntimeIndex.StoredValue> stored,
+                Optional<DocValues> docValues,
+                boolean hasTermVector) {
+            this(name, norm, stored, docValues, hasTermVector, Optional.empty());
+        }
+    }
 
     /**
      * A document's doc values in one field.

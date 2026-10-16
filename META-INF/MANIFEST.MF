@@ -1,0 +1,5 @@
+Manifest-Version: 1.0
+Multi-Release: true
+Enable-Native-Access: ALL-UNNAMED
+Main-Class: io.github.mfuerstenau.leia.tui.Launcher
+

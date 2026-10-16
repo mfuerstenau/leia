@@ -1,8 +1,11 @@
 [versions]
 lucene = "10.5.2"
-# Older Lucene versions, only for writing test indexes (leia-core/build.gradle.kts)
-lucene9 = "9.12.3"
+# Older Lucene versions, only for writing test indexes (leia-core/build.gradle.kts and, for 8.x,
+# leia-lucene9/build.gradle.kts)
 lucene8 = "8.11.4"
+# Reads Lucene 8.x indexes, relocated in leia-lucene9 (ADR 0049); also writes leia-core's Lucene 9
+# test index
+lucene9 = "9.12.3"
 # Reads Lucene 2.x and 3.x indexes, relocated in leia-lucene3 (ADR 0044)
 lucene3 = "3.6.2"
 # Only for writing the Lucene 2.4 test index (leia-lucene3/build.gradle.kts)
@@ -44,7 +47,11 @@ lucene-analysis-nori = { module = "org.apache.lucene:lucene-analysis-nori", vers
 # ICU, for the collators of its collation analyzer (ADR 0038)
 lucene-analysis-icu = { module = "org.apache.lucene:lucene-analysis-icu", version.ref = "lucene" }
 lucene9-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene9" }
+lucene9-backward-codecs = { module = "org.apache.lucene:lucene-backward-codecs", version.ref = "lucene9" }
+lucene9-queryparser = { module = "org.apache.lucene:lucene-queryparser", version.ref = "lucene9" }
+lucene9-analysis-common = { module = "org.apache.lucene:lucene-analysis-common", version.ref = "lucene9" }
 lucene8-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene8" }
+lucene8-analyzers-common = { module = "org.apache.lucene:lucene-analyzers-common", version.ref = "lucene8" }
 lucene3-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene3" }
 lucene24-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene24" }
 lucene5-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene5" }

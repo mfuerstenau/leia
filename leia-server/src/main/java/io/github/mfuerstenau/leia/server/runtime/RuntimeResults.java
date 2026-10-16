@@ -22,6 +22,7 @@ import io.github.mfuerstenau.leia.protocol.document.GetStoredValueParams;
 import io.github.mfuerstenau.leia.protocol.document.GetStoredValueResult;
 import io.github.mfuerstenau.leia.protocol.document.GetTermVectorParams;
 import io.github.mfuerstenau.leia.protocol.document.GetTermVectorResult;
+import io.github.mfuerstenau.leia.protocol.document.KnnVector;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.document.TermPosition;
 import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
@@ -37,6 +38,8 @@ import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
+import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
+import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellParams;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellResult;
@@ -48,6 +51,7 @@ import io.github.mfuerstenau.leia.protocol.points.PointSegment;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.HitField;
+import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
 import io.github.mfuerstenau.leia.protocol.search.SearchResults;
 import io.github.mfuerstenau.leia.protocol.search.SortKey;
@@ -67,6 +71,7 @@ import io.github.mfuerstenau.leia.runtime.Check;
 import io.github.mfuerstenau.leia.runtime.Commits;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.Documents;
+import io.github.mfuerstenau.leia.runtime.Knn;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.runtime.Points;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
@@ -79,9 +84,11 @@ import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.index.IndexDirectories;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import io.github.mfuerstenau.leia.server.points.PointMapper;
+import io.github.mfuerstenau.leia.server.search.KnnChecks;
 import io.github.mfuerstenau.leia.server.terms.TermParams;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
@@ -108,8 +115,8 @@ public final class RuntimeResults {
     /**
      * What works on {@code open}: the statistics, the features of the groups its index has, and the
      * commits and the check if its runtime has them (ADR 0045, ADR 0046, ADR 0048): doc values with
-     * the documents and points if a field has them, and the check's levels if the runtime's check
-     * takes them.
+     * the documents and points and KNN vectors if a field has them (ADR 0049), and the check's levels
+     * if the runtime's check takes them.
      */
     public static Set<Feature> features(OpenRuntime open) {
         RuntimeIndex index = open.index();
@@ -128,6 +135,10 @@ public final class RuntimeResults {
         }
         if (index.points().isPresent() && index.fields().stream().anyMatch(field -> field.pointDimensionCount() > 0)) {
             features.add(Feature.POINTS);
+        }
+        if (index.knn().isPresent()
+                && index.fields().stream().anyMatch(field -> field.vectors().isPresent())) {
+            features.add(Feature.KNN_VECTORS);
         }
         if (open.runtime().commits().isPresent()) {
             features.add(Feature.COMMITS);
@@ -346,11 +357,67 @@ public final class RuntimeResults {
                 docValuesType(field.docValuesType()),
                 field.pointDimensionCount(),
                 field.pointNumBytes(),
-                0,
-                Optional.empty(),
-                Optional.empty(),
+                field.vectors().map(RuntimeIndex.VectorFormat::dimension).orElse(0),
+                field.vectors().map(vectors -> vectorEncoding(vectors.encoding())),
+                field.vectors().map(vectors -> vectorSimilarity(vectors.similarity())),
                 field.terms()
                         .map(terms -> new TermStats(terms.docCount(), terms.sumDocFreq(), terms.sumTotalTermFreq())));
+    }
+
+    private static VectorEncoding vectorEncoding(RuntimeIndex.VectorEncoding encoding) {
+        return switch (encoding) {
+            case BYTE -> VectorEncoding.BYTE;
+            case FLOAT32 -> VectorEncoding.FLOAT32;
+        };
+    }
+
+    private static VectorSimilarity vectorSimilarity(RuntimeIndex.VectorSimilarity similarity) {
+        return switch (similarity) {
+            case EUCLIDEAN -> VectorSimilarity.EUCLIDEAN;
+            case DOT_PRODUCT -> VectorSimilarity.DOT_PRODUCT;
+            case COSINE -> VectorSimilarity.COSINE;
+            case MAXIMUM_INNER_PRODUCT -> VectorSimilarity.MAXIMUM_INNER_PRODUCT;
+        };
+    }
+
+    /** {@code vector} as the protocol carries it. */
+    private static KnnVector knnVector(RuntimeIndex.Vector vector) {
+        return switch (vector) {
+            case RuntimeIndex.Vector.Floats(float[] values) -> {
+                List<Float> floats = new ArrayList<>(values.length);
+                for (float value : values) {
+                    floats.add(value);
+                }
+                yield new KnnVector(VectorEncoding.FLOAT32, List.copyOf(floats), List.of());
+            }
+            case RuntimeIndex.Vector.Bytes(byte[] values) -> {
+                List<Byte> bytes = new ArrayList<>(values.length);
+                for (byte value : values) {
+                    bytes.add(value);
+                }
+                yield new KnnVector(VectorEncoding.BYTE, List.of(), List.copyOf(bytes));
+            }
+        };
+    }
+
+    /** {@code vector} as the runtimes take it. */
+    private static RuntimeIndex.Vector runtimeVector(KnnVector vector) {
+        return switch (vector.encoding()) {
+            case FLOAT32 -> {
+                float[] values = new float[vector.floats().size()];
+                for (int i = 0; i < values.length; i++) {
+                    values[i] = vector.floats().get(i);
+                }
+                yield new RuntimeIndex.Vector.Floats(values);
+            }
+            case BYTE -> {
+                byte[] values = new byte[vector.bytes().size()];
+                for (int i = 0; i < values.length; i++) {
+                    values[i] = vector.bytes().get(i);
+                }
+                yield new RuntimeIndex.Vector.Bytes(values);
+            }
+        };
     }
 
     private static DocValuesType docValuesType(RuntimeIndex.DocValuesType type) {
@@ -394,7 +461,7 @@ public final class RuntimeResults {
                                                         .map(RuntimeResults::bytesValue)
                                                         .toList())),
                                 field.hasTermVector(),
-                                Optional.empty()))
+                                field.vector().map(RuntimeResults::knnVector)))
                         .toList());
     }
 
@@ -638,8 +705,9 @@ public final class RuntimeResults {
 
     /**
      * {@code startSearch}: a classic query, parsed with the analyzer of the params as the runtime has
-     * it ({@link RuntimeAnalyzers}), scored by its default similarity, best score first. Highlighting
-     * is left out; another query, sort or analyzer is not supported.
+     * it ({@link RuntimeAnalyzers}), scored by its default similarity, or a KNN query if the runtime
+     * reads vectors (ADR 0049), best score first. Highlighting is left out; another query, sort or
+     * analyzer is not supported.
      */
     public static JobStarted startSearch(OpenRuntime open, StartSearchParams params, Jobs jobs) throws RpcException {
         Search search = open.index().search().orElseThrow(open::notSupported);
@@ -656,7 +724,9 @@ public final class RuntimeResults {
                     "Invalid params: offset must be between 0 and " + (StartSearchParams.MAX_WINDOW - limit)
                             + " for a limit of " + limit + ", not " + offset);
         }
-        ClassicQuery classic = params.query().classic().orElseThrow(open::notSupported);
+        if (params.query().classic().isEmpty() && params.query().knn().isEmpty()) {
+            throw open.notSupported();
+        }
         if (!bestScoreFirst(params.sort())) {
             throw open.notSupported();
         }
@@ -665,10 +735,30 @@ public final class RuntimeResults {
                 checkField(open.index(), field);
             }
         }
+        Search.ParsedQuery query = params.query().classic().isPresent()
+                ? parse(open, search, params.query().classic().get())
+                : knn(open, search, params.query().knn().get());
+        Optional<List<String>> fields = params.fields().map(List::copyOf);
+        long jobId = jobs.start(
+                "search " + query + " with Lucene " + open.runtime().luceneVersion() + ", hits " + offset + " to "
+                        + (offset + limit),
+                SearchResults.class,
+                progress -> {
+                    try {
+                        return results(search.search(query, offset, limit, fields, progress::scanned));
+                    } catch (IOException e) {
+                        throw new RpcException(
+                                ErrorCode.INDEX_NOT_READABLE, "Cannot search the index: " + e.getMessage(), e);
+                    }
+                });
+        return new JobStarted(jobId);
+    }
+
+    /** {@code classic}, parsed by the runtime. */
+    private static Search.ParsedQuery parse(OpenRuntime open, Search search, ClassicQuery classic) throws RpcException {
         Search.AnalyzerSpec analyzer = RuntimeAnalyzers.spec(classic.analyzer(), open.runtime(), search);
-        Search.ParsedQuery query;
         try {
-            query = search.parse(
+            return search.parse(
                     classic.expression(),
                     new Search.ParserOptions(
                             classic.defaultField(),
@@ -687,20 +777,55 @@ public final class RuntimeResults {
                     "Not supported with Lucene " + open.runtime().luceneVersion() + ": " + e.getMessage(),
                     e);
         }
-        Optional<List<String>> fields = params.fields().map(List::copyOf);
-        long jobId = jobs.start(
-                "search " + query + " with Lucene " + open.runtime().luceneVersion() + ", hits " + offset + " to "
-                        + (offset + limit),
-                SearchResults.class,
-                progress -> {
-                    try {
-                        return results(search.search(query, offset, limit, fields, progress::scanned));
-                    } catch (IOException e) {
-                        throw new RpcException(
-                                ErrorCode.INDEX_NOT_READABLE, "Cannot search the index: " + e.getMessage(), e);
-                    }
-                });
-        return new JobStarted(jobId);
+    }
+
+    /**
+     * {@code knn}, checked as {@code SearchQueries} checks it for Lucene 10 ({@link KnnChecks}), and
+     * built by the runtime's {@link Knn}; its filter is parsed by the runtime.
+     */
+    private static Search.ParsedQuery knn(OpenRuntime open, Search search, KnnQuery knn) throws RpcException {
+        Knn group = open.index().knn().orElseThrow(open::notSupported);
+        RuntimeIndex.Field field = open.index().fields().stream()
+                .filter(f -> f.name().equals(knn.field()))
+                .findFirst()
+                .orElseThrow(() ->
+                        new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + knn.field() + "' in the index"));
+        KnnChecks.check(
+                knn, field.vectors().map(RuntimeIndex.VectorFormat::dimension).orElse(0));
+        RuntimeIndex.VectorFormat format = field.vectors().orElseThrow();
+        KnnVector target = knn.vector().isPresent() ? knn.vector().get() : documentVector(open, group, knn);
+        try {
+            KnnChecks.checkTarget(
+                    knn.field(),
+                    format.dimension(),
+                    vectorEncoding(format.encoding()),
+                    vectorSimilarity(format.similarity()),
+                    target);
+        } catch (IllegalArgumentException e) {
+            throw new RpcException(ErrorCode.INVALID_PARAMS, "Invalid params: " + e.getMessage(), e);
+        }
+        Optional<Search.ParsedQuery> filter = knn.filter().isPresent()
+                ? Optional.of(parse(open, search, knn.filter().get()))
+                : Optional.empty();
+        return knn.exact()
+                ? group.exact(knn.field(), runtimeVector(target), filter)
+                : group.approximate(knn.field(), runtimeVector(target), knn.k().getAsInt(), filter);
+    }
+
+    /** The vector of the query's document, which may be deleted. */
+    private static KnnVector documentVector(OpenRuntime open, Knn group, KnnQuery knn) throws RpcException {
+        int docId = knn.docId().getAsInt();
+        checkDocId(open.index(), docId);
+        try {
+            return group.vector(docId, knn.field())
+                    .map(RuntimeResults::knnVector)
+                    .orElseThrow(() -> new RpcException(
+                            ErrorCode.INVALID_PARAMS,
+                            "Invalid params: document " + docId + " has no vector in the field '" + knn.field() + "'"));
+        } catch (IOException e) {
+            throw new RpcException(
+                    ErrorCode.INDEX_NOT_READABLE, "Cannot read document " + docId + ": " + e.getMessage(), e);
+        }
     }
 
     /**

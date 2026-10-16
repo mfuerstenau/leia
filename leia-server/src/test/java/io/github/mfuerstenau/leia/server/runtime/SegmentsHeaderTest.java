@@ -45,6 +45,9 @@ class SegmentsHeaderTest {
         assertThat(SegmentsHeader.read(testIndex("lucene6"))).contains(new IndexVersion(6, "6.6.6"));
         assertThat(SegmentsHeader.read(testIndex("lucene7"))).contains(new IndexVersion(7, "7.7.3"));
         assertThat(SegmentsHeader.read(testIndex("lucene8"))).contains(new IndexVersion(8, "8.11.4"));
+        // Created by 8 and written by 9, as after an upgrade: still an index of 8 (ADR 0049).
+        assertThat(SegmentsHeader.read(testIndex("lucene8to9")))
+                .contains(new IndexVersion(8, "9.12.3, created with 8"));
         assertThat(SegmentsHeader.read(testIndex("lucene9"))).hasValueSatisfying(version -> {
             assertThat(version.major()).isEqualTo(9);
             assertThat(version.writtenBy()).startsWith("9.");

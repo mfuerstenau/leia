@@ -24,6 +24,7 @@ import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
 import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
+import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
 import io.github.mfuerstenau.leia.protocol.jars.GetJarsParams;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
@@ -78,6 +79,38 @@ class JarsBackendTest {
             assertThat(backend.call(Methods.GET_JARS, new GetJarsParams()).jars())
                     .containsExactly(
                             codecJar.toString(), lucene3Jar.toString(), lucene5Jar.toString(), lucene7Jar.toString());
+
+            // An index created by 8.x needs leia-lucene9.jar: without it, it opens only without a
+            // reader, with Lucene 10; once the jar is added, with its runtime (ADR 0049).
+            String lucene8 = testIndex("lucene8").toString();
+            RpcException missing =
+                    backend.fails(Methods.OPEN_INDEX, new OpenIndexParams(lucene8), ErrorCode.MISSING_RUNTIME);
+            assertThat(missing.getMessage()).contains("Lucene 8.11.4", "leia-lucene9.jar", lucene8);
+            assertThat(backend.call(
+                                    Methods.OPEN_INDEX,
+                                    new OpenIndexParams(
+                                            lucene8, Optional.empty(), Optional.of(OpenMode.DIRECTORY_ONLY)))
+                            .mode())
+                    .isEqualTo(OpenMode.DIRECTORY_ONLY);
+            Path lucene9Jar = testFile("leia.test.runtime.lucene9");
+            backend.call(Methods.ADD_JARS, new AddJarsParams(List.of(lucene9Jar.toString())));
+            for (String name : List.of("lucene8", "lucene8to9")) {
+                assertThat(backend.call(
+                                        Methods.OPEN_INDEX,
+                                        new OpenIndexParams(testIndex(name).toString()))
+                                .luceneRuntime())
+                        .isEqualTo("9.12.3");
+                assertThat(backend.call(Methods.GET_POINT_TREE, new GetPointTreeParams("pt"))
+                                .segments())
+                        .as(name)
+                        .hasSize(2);
+            }
+            // Its memory segments and the KNN vectors of the 9.x segment.
+            assertThat(backend.call(Methods.GET_DOCUMENT, new GetDocumentParams(8))
+                            .fields())
+                    .filteredOn(field -> field.name().equals("embedding"))
+                    .singleElement()
+                    .satisfies(embedding -> assertThat(embedding.vector()).isPresent());
 
             // The codec, and Lucene's codec with the jar's postings, doc values and KNN vectors formats.
             for (String name : List.of("custom-codec", "custom-formats")) {

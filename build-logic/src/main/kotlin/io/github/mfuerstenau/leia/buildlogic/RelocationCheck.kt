@@ -1,5 +1,6 @@
 package io.github.mfuerstenau.leia.buildlogic
 
+import java.util.jar.Manifest
 import java.util.zip.ZipFile
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
@@ -16,7 +17,8 @@ import org.gradle.api.tasks.TaskAction
 /**
  * Checks that a runtime's shadow jar holds no class outside [allowedPackages], and no services file
  * that names or registers one: an unrelocated Lucene must never reach leia's classpath (hard rule 5,
- * ADR 0044).
+ * ADR 0044). A jar with classes in `META-INF/versions/` must say `Multi-Release: true`, or Lucene 9's
+ * `MMapDirectory` fails at runtime, not at build time (ADR 0049).
  */
 @CacheableTask
 abstract class RelocationCheck : DefaultTask() {
@@ -40,6 +42,10 @@ abstract class RelocationCheck : DefaultTask() {
         val allowedNames = allowed.map { it.replace('/', '.') }
         val problems = mutableListOf<String>()
         ZipFile(jar.get().asFile).use { zip ->
+            val versioned = zip.entries().asSequence().any { it.name.startsWith(VERSIONS) && it.name.endsWith(".class") }
+            if (versioned && !multiRelease(zip)) {
+                problems += "$MANIFEST doesn't say Multi-Release: true, though the jar has classes in $VERSIONS"
+            }
             for (entry in zip.entries()) {
                 if (entry.isDirectory) continue
                 val name = entry.name
@@ -69,7 +75,15 @@ abstract class RelocationCheck : DefaultTask() {
         report.get().asFile.writeText("OK\n")
     }
 
+    private fun multiRelease(zip: ZipFile): Boolean {
+        val manifest = zip.getEntry(MANIFEST) ?: return false
+        return zip.getInputStream(manifest).use { Manifest(it) }
+            .mainAttributes.getValue("Multi-Release").equals("true", ignoreCase = true)
+    }
+
     private companion object {
+        const val MANIFEST = "META-INF/MANIFEST.MF"
+        const val VERSIONS = "META-INF/versions/"
         const val SERVICES = "META-INF/services/"
         const val MAX_LISTED = 20
         const val LUCENE_RUNTIME = "io.github.mfuerstenau.leia.runtime.LuceneRuntime"

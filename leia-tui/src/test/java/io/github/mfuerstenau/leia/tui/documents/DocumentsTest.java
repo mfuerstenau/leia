@@ -776,6 +776,18 @@ class DocumentsTest {
         assertThat(render(documents, 140, 12)).contains("Indexed");
     }
 
+    /** A runtime that reads vectors finds the nearest with its classic search (ADR 0049). */
+    @Test
+    void findsTheNearestWithAClassicOnlySearch() {
+        Documents documents = withVector()
+                .withFeatures(
+                        Set.of(Feature.DOCUMENTS, Feature.STORED_VALUES, Feature.CLASSIC_SEARCH, Feature.KNN_VECTORS));
+        documents.handleKey(key(KeyCode.DOWN));
+
+        assertThat(documents.keys()).contains("N nearest").doesNotContain("m similar", "s search value");
+        assertThat(documents.handleKey(key('N'))).hasValue(new Request.SearchKnn("vec", 4));
+    }
+
     @Test
     void refusesAndLeavesOutTheKeysTheIndexLacks() {
         Documents documents =

@@ -213,24 +213,6 @@ class Lucene24BackendTest {
     }
 
     @Test
-    void aLucene8IndexNeedsItsRuntime() throws Exception {
-        String lucene8 = testIndex("lucene8").toString();
-        RpcException missing =
-                backend.fails(Methods.OPEN_INDEX, new OpenIndexParams(lucene8), ErrorCode.MISSING_RUNTIME);
-        assertThat(missing.getMessage()).contains("Lucene 8.11.4", "leia-lucene9.jar", lucene8);
-        // The 2.4 index stays open.
-        assertThat(backend.call(Methods.GET_INDEX_STATS, new GetIndexStatsParams())
-                        .maxDoc())
-                .isEqualTo(3);
-
-        // Without a reader, Lucene 10 lists its commits and can check it.
-        OpenIndexResult withoutReader = backend.call(
-                Methods.OPEN_INDEX,
-                new OpenIndexParams(lucene8, Optional.empty(), Optional.of(OpenMode.DIRECTORY_ONLY)));
-        assertThat(withoutReader.mode()).isEqualTo(OpenMode.DIRECTORY_ONLY);
-    }
-
-    @Test
     void closesAndOpensAnotherIndex() throws Exception {
         assertThat(backend.call(Methods.CLOSE_INDEX, new CloseIndexParams()).path())
                 .contains(PATH);

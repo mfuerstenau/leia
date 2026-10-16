@@ -27,6 +27,7 @@ The created major matters beyond the overview. Since the fixes after the manual 
    - `Commits.Segment` gains `softDelCount`, `Optional<String> minLuceneVersion` and `Optional<String> indexSort` (`Sort.toString()`, as leia-core gives it). The constructor of interface 3, without them, fills in 0, empty, empty, and so does the one before codecs.
    - A new group, `Optional<Points> points()`: `tree(field)` and `cell(field, segment, path)`, with the records of leia-core's `Points` in JDK types (`byte[]` for `BytesRef`) and `MAX_POINTS = 10_000`. `cell` throws `IllegalArgumentException` for a bad segment or path.
    - `leia-lucene3` and `leia-lucene5` follow: no points group, fields with `0, 0`, no created major, segments with `0`, empty, empty.
+   - *Amended by ADR 0049 §4:* interface 5 adds KNN vectors: `Field.vectors`, `DocumentField.vector` and the group `knn()`.
 3. **The server.**
    - `ReaderInfo` and `IndexCommitStats` take `createdMajor()`, so the norms are decoded by the encoding of the Lucene that created the index, not that of the oldest segment.
    - Segments map soft deletes, the minimum version and the index sort; fields their point dimensions and bytes.

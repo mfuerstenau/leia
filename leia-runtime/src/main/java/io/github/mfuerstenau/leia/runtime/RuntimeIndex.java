@@ -44,6 +44,9 @@ public interface RuntimeIndex extends Closeable {
     /** The BKD trees of point fields (ADR 0048). */
     Optional<Points> points();
 
+    /** KNN vectors and the queries for the nearest ones (ADR 0049). */
+    Optional<Knn> knn();
+
     /** How a field is indexed. */
     enum IndexOptions {
         NONE,
@@ -70,6 +73,7 @@ public interface RuntimeIndex extends Closeable {
      * @param pointNumBytes bytes of each dimension of its points; 0 without points
      * @param terms its postings statistics; empty if no segment has postings for it, or the runtime's
      *     Lucene doesn't record them
+     * @param vectors its KNN vectors; empty without them, as before Lucene 9
      */
     record Field(
             String name,
@@ -81,7 +85,52 @@ public interface RuntimeIndex extends Closeable {
             DocValuesType docValuesType,
             int pointDimensionCount,
             int pointNumBytes,
-            Optional<TermStats> terms) {}
+            Optional<TermStats> terms,
+            Optional<VectorFormat> vectors) {
+
+        /** A field without KNN vectors, as before Lucene 9. */
+        public Field(
+                String name,
+                int number,
+                IndexOptions indexOptions,
+                boolean hasNorms,
+                boolean hasPayloads,
+                boolean hasTermVectors,
+                DocValuesType docValuesType,
+                int pointDimensionCount,
+                int pointNumBytes,
+                Optional<TermStats> terms) {
+            this(
+                    name,
+                    number,
+                    indexOptions,
+                    hasNorms,
+                    hasPayloads,
+                    hasTermVectors,
+                    docValuesType,
+                    pointDimensionCount,
+                    pointNumBytes,
+                    terms,
+                    Optional.empty());
+        }
+    }
+
+    /** How a field's KNN vectors are encoded, as Lucene's {@code VectorEncoding}. */
+    enum VectorEncoding {
+        BYTE,
+        FLOAT32
+    }
+
+    /** How a field's KNN vectors are compared, as Lucene's {@code VectorSimilarityFunction}. */
+    enum VectorSimilarity {
+        EUCLIDEAN,
+        DOT_PRODUCT,
+        COSINE,
+        MAXIMUM_INNER_PRODUCT
+    }
+
+    /** The KNN vectors of a field: each has {@code dimension} components of {@code encoding}. */
+    record VectorFormat(int dimension, VectorEncoding encoding, VectorSimilarity similarity) {}
 
     /**
      * The postings statistics of a field, summed over all segments, deleted documents included.
@@ -188,5 +237,27 @@ public interface RuntimeIndex extends Closeable {
 
         /** An {@link Integer}, {@link Long}, {@link Float} or {@link Double}. */
         record Numeric(Number number) implements StoredValue {}
+    }
+
+    /** A KNN vector (ADR 0049). The array is the caller's to keep, and is not copied. */
+    sealed interface Vector {
+
+        /** How many components it has. */
+        int dimension();
+
+        record Floats(float[] values) implements Vector {
+            @Override
+            public int dimension() {
+                return values.length;
+            }
+        }
+
+        /** Signed bytes. */
+        record Bytes(byte[] values) implements Vector {
+            @Override
+            public int dimension() {
+                return values.length;
+            }
+        }
     }
 }

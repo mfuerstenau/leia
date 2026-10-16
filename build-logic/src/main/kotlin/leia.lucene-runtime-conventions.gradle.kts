@@ -41,6 +41,12 @@ tasks.shadowJar {
     }
     // Lucene 9 is a JPMS module; the relocated classes are not.
     exclude("module-info.class", "META-INF/versions/*/module-info.class")
+    // Lucene 9's core is a multi-release jar: its MMapDirectory needs the memory segment classes of
+    // META-INF/versions on Java 19 and later (ADR 0049). Shadow relocates them; the attribute makes
+    // the class loader see them.
+    manifest {
+        attributes("Multi-Release" to "true")
+    }
 }
 
 // The plain jar would bring unrelocated classes to a consumer that asks for the default variant.

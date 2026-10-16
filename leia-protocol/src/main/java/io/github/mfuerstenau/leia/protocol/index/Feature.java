@@ -40,7 +40,10 @@ public enum Feature {
     COMMITS,
     /** {@code startSearch}, with every kind of query, similarity and sort. */
     SEARCH,
-    /** {@code startSearch} with a classic query only, best score first, without highlighting. */
+    /**
+     * {@code startSearch} with a classic query only, or with {@link #KNN_VECTORS} a KNN query too
+     * (ADR 0049); best score first, without highlighting.
+     */
     CLASSIC_SEARCH,
     /** {@code startExplain}. */
     EXPLAIN,

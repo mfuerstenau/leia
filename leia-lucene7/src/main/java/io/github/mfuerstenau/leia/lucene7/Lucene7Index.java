@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.lucene7;
 
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.Documents;
+import io.github.mfuerstenau.leia.runtime.Knn;
 import io.github.mfuerstenau.leia.runtime.Points;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Search;
@@ -179,6 +180,12 @@ final class Lucene7Index implements RuntimeIndex, Documents, Terms, Search {
     @Override
     public Optional<Points> points() {
         return Optional.of(new Lucene7Points(reader, fieldInfos));
+    }
+
+    /** {@inheritDoc} KNN vectors came with Lucene 9. */
+    @Override
+    public Optional<Knn> knn() {
+        return Optional.empty();
     }
 
     @Override
