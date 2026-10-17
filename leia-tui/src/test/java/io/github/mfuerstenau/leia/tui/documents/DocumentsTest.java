@@ -1152,6 +1152,54 @@ class DocumentsTest {
     }
 
     @Test
+    void notesEndWhenAnotherScreenShowsADocument() {
+        Documents documents = segmented();
+        documents.loaded(document(0));
+
+        // left segment _0, then each way another screen shows a document, or b starts a filter.
+        List<Runnable> shows = List.of(
+                () -> documents.showSearchHit(1, Optional.empty()),
+                () -> documents.showPoint("id"),
+                () -> documents.showHit(hit("body", 1, 0)),
+                () -> documents.startFilter("red", filterParams(false), 1));
+        for (Runnable show : shows) {
+            documents.handleKey(key('S'));
+            documents.handleKey(key('i'));
+            documents.handleKey(key('4'));
+            documents.handleKey(key(KeyCode.ENTER));
+            documents.loaded(document(4));
+            assertThat(render(documents, 100, 20)).contains("left segment _0");
+            show.run();
+            assertThat(render(documents, 100, 20)).doesNotContain("left segment");
+            documents.clearFilter();
+            documents.loaded(document(0));
+        }
+
+        // The filter's note ends with the commits screen's segment, and with a search hit.
+        documents.startFilter("red", filterParams(false), 0);
+        documents.filterStarted(2, 9);
+        documents.filterProgress(2, built(9, 3));
+        documents.filterStepped(
+                2, new StepFilterParams(9, 0, true), FilterStep.NEAREST, Optional.of(new FilterMatch(0, 0)));
+        documents.loaded(document(0));
+        documents.handleKey(key('S'));
+        documents.handleKey(key(KeyCode.RIGHT));
+        documents.filterStepped(
+                2, new StepFilterParams(9, 1, true), FilterStep.MOVE, Optional.of(new FilterMatch(3, 1)));
+        assertThat(render(documents, 100, 20)).contains("no next match in _0");
+        documents.showSegment(documents.segment(1, "_0").orElseThrow());
+        documents.loaded(document(3));
+        assertThat(render(documents, 100, 20)).contains("segment _0 ").doesNotContain("no next match");
+
+        documents.handleKey(key(KeyCode.RIGHT));
+        documents.filterStepped(
+                2, new StepFilterParams(9, 4, true), FilterStep.MOVE, Optional.of(new FilterMatch(5, 2)));
+        assertThat(render(documents, 100, 20)).contains("no next match in _0");
+        documents.showSearchHit(3, Optional.empty());
+        assertThat(render(documents, 100, 20)).doesNotContain("no next match");
+    }
+
+    @Test
     void aReopenKeepsThePinIfTheSegmentIsStillThere() {
         Documents documents = segmented();
         documents.loaded(document(2));

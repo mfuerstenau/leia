@@ -531,8 +531,16 @@ public final class Documents {
         positions = null;
         dropMatches();
         pinned = segment;
-        segmentNote = null;
+        clearNotes();
         return new Request.Document(segment.docBase());
+    }
+
+    /** Forgets what was said about the last move: another screen shows a document, or a filter starts. */
+    private void clearNotes() {
+        segmentNote = null;
+        if (filter != null) {
+            filter.clearNote();
+        }
     }
 
     /** Unpins the segment if {@code docId} is outside it, and says so. */
@@ -605,6 +613,7 @@ public final class Documents {
         searchHits = false;
         positions = null;
         dropMatches();
+        clearNotes();
     }
 
     /**
@@ -617,6 +626,7 @@ public final class Documents {
         searchHits = false;
         positions = null;
         dropMatches();
+        clearNotes();
     }
 
     /**
@@ -628,6 +638,7 @@ public final class Documents {
         hit = null;
         searchHits = true;
         positions = null;
+        clearNotes();
         boolean same = matches != null
                 && matches.docId == docId
                 && query.isPresent()
@@ -781,6 +792,7 @@ public final class Documents {
      * of the filter it replaces.
      */
     public Request.StartFilter startFilter(String label, StartFilterParams params, int startDoc) {
+        clearNotes();
         DocFilter old = filter;
         filter = new DocFilter(nextFilterSerial++, label, params, startDoc);
         return new Request.StartFilter(
@@ -1422,10 +1434,7 @@ public final class Documents {
                     ? filterStep(chosen.getAsInt(), true, FilterStep.NEAREST)
                     : Optional.of(new Request.Document(chosen.getAsInt()));
         }
-        if (filter != null) {
-            filter.clearNote();
-        }
-        segmentNote = null;
+        clearNotes();
         KeyCode code = key.code();
         // A key pressed before the last step's document is in goes on from that document.
         int from = wanted.orElse(docId);
