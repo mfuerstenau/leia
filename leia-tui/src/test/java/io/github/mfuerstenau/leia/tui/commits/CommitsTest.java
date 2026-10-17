@@ -250,6 +250,25 @@ class CommitsTest {
         assertThat(render(commits, 140, 40)).contains("Segment _1");
     }
 
+    @Test
+    void enterOnASegmentShowsItsDocuments() {
+        Commits commits = loaded();
+        assertThat(commits.keys()).contains("⏎ segments");
+        commits.handleKey(key(KeyCode.ENTER));
+        commits.handleKey(key(KeyCode.DOWN));
+        assertThat(commits.keys()).contains("⏎ documents");
+        assertThat(commits.handleKey(key(KeyCode.ENTER))).contains(new Commits.Request.ShowDocuments(0, "_1"));
+
+        // Without a reader, there are no documents to show.
+        Commits withoutReader = new Commits(List.of("index"), false);
+        withoutReader.initialRequest();
+        withoutReader.commitsLoaded(0, list(commit(4, false)));
+        withoutReader.commitLoaded(0, 4, details(4, false));
+        withoutReader.handleKey(key(KeyCode.ENTER));
+        assertThat(withoutReader.handleKey(key(KeyCode.ENTER))).isEmpty();
+        assertThat(withoutReader.keys()).doesNotContain("⏎");
+    }
+
     /** The first lines of the details of a segment that Lucene {@code version} wrote. */
     private static List<String> segmentHead(String version) {
         Segment segment = segment("_0", 0, 400, 2048, List.of(), Optional.empty(), version);

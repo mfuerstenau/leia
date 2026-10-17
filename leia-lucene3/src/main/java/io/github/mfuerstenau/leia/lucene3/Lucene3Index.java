@@ -35,6 +35,7 @@ import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.MultiReader;
 import org.apache.lucene.index.SegmentInfo;
 import org.apache.lucene.index.SegmentInfos;
+import org.apache.lucene.index.SegmentReader;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.TermDocs;
 import org.apache.lucene.index.TermEnum;
@@ -176,10 +177,27 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
                     // 3.6 records neither which version wrote a commit nor which created the index.
                     Optional.empty(),
                     OptionalInt.empty(),
-                    Map.copyOf(commit.getUserData())));
+                    Map.copyOf(commit.getUserData()),
+                    segments(part.reader())));
             docBase += part.reader().maxDoc();
         }
         return new Stats(reader.numDocs(), reader.maxDoc(), List.copyOf(indexes), fields());
+    }
+
+    /** The reader's segments, in document order (ADR 0051). */
+    private static List<Segment> segments(IndexReader reader) {
+        IndexReader[] subs = reader.getSequentialSubReaders();
+        List<Segment> segments = new ArrayList<>();
+        int docBase = 0;
+        for (IndexReader sub : subs == null ? new IndexReader[] {reader} : subs) {
+            segments.add(new Segment(
+                    sub instanceof SegmentReader segment ? segment.getSegmentName() : "?",
+                    docBase,
+                    sub.maxDoc(),
+                    sub.numDocs()));
+            docBase += sub.maxDoc();
+        }
+        return List.copyOf(segments);
     }
 
     /** {@inheritDoc} Lucene 3 has no doc values, and records no term statistics per field. */

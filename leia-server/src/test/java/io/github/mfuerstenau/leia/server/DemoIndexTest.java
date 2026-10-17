@@ -48,6 +48,7 @@ import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
+import io.github.mfuerstenau.leia.protocol.index.ReaderSegment;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
@@ -171,6 +172,14 @@ class DemoIndexTest {
                     .extracting(Segment::name, Segment::docBase, Segment::maxDoc, Segment::compound)
                     .containsExactly(
                             tuple("_0", 0, 200, true), tuple("_1", 200, 200, true), tuple("_2", 400, 100, false));
+            // The open reader has the same segments (ADR 0051).
+            assertThat(stats.indexes().getFirst().segments())
+                    .extracting(ReaderSegment::name, ReaderSegment::docBase, ReaderSegment::maxDoc)
+                    .containsExactly(tuple("_0", 0, 200), tuple("_1", 200, 200), tuple("_2", 400, 100));
+            assertThat(stats.indexes().getFirst().segments().stream()
+                            .mapToInt(ReaderSegment::numDocs)
+                            .sum())
+                    .isEqualTo(487);
             // The same formats per field, in a compound segment and a plain one.
             for (Segment segment : List.of(segments.get(0), segments.get(2))) {
                 assertThat(segment.fieldInfosError()).as(segment.name()).isEmpty();

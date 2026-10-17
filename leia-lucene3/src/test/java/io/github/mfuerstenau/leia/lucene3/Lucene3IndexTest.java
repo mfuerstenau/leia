@@ -98,6 +98,7 @@ class Lucene3IndexTest {
             assertThat(only.path()).isEqualTo(lucene24());
             assertThat(only.docBase()).isZero();
             assertThat(only.segmentVersions()).containsExactly("2.x");
+            assertSegments(only);
             assertThat(only.oldestMajor()).isEqualTo(2);
             assertThat(only.segmentsFile()).startsWith("segments_");
             assertThat(index.directories()).containsExactly(lucene24());
@@ -230,6 +231,7 @@ class Lucene3IndexTest {
             assertThat(only.segmentsFile()).isEqualTo("segments_2");
             assertThat(only.generation()).isEqualTo(2);
             assertThat(only.segmentVersions()).containsExactly("3.6.2", "3.6.2");
+            assertSegments(only);
             assertThat(only.oldestMajor()).isEqualTo(3);
             assertThat(only.userData()).containsEntry("commit", "second");
             assertThat(stats.fields())
@@ -482,5 +484,21 @@ class Lucene3IndexTest {
             }
         }
         return hashes;
+    }
+
+    /** The reader's segments follow each other and add up to the directory's counts (ADR 0051). */
+    private static void assertSegments(RuntimeIndex.IndexStats stats) {
+        assertThat(stats.segments()).hasSize(stats.segmentVersions().size());
+        int docBase = 0;
+        for (RuntimeIndex.Segment segment : stats.segments()) {
+            assertThat(segment.name()).matches("_[0-9a-z]+");
+            assertThat(segment.docBase()).isEqualTo(docBase);
+            docBase += segment.maxDoc();
+        }
+        assertThat(docBase).isEqualTo(stats.maxDoc());
+        assertThat(stats.segments().stream()
+                        .mapToInt(RuntimeIndex.Segment::numDocs)
+                        .sum())
+                .isEqualTo(stats.numDocs());
     }
 }

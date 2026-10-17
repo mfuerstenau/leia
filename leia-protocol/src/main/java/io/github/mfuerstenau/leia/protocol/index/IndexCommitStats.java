@@ -1,5 +1,6 @@
 package io.github.mfuerstenau.leia.protocol.index;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -19,6 +20,8 @@ import java.util.Optional;
  * @param minSegmentLuceneVersion the oldest Lucene version that wrote one of its segments; absent if
  *     the index has no segments
  * @param userData the user data of the commit
+ * @param segments the open reader's segments of the index directory, in document order (ADR 0051);
+ *     they come from the reader, not from {@code segments_N}
  */
 public record IndexCommitStats(
         String path,
@@ -32,4 +35,5 @@ public record IndexCommitStats(
         int createdVersionMajor,
         String commitLuceneVersion,
         Optional<String> minSegmentLuceneVersion,
-        Map<String, String> userData) {}
+        Map<String, String> userData,
+        List<ReaderSegment> segments) {}

@@ -27,14 +27,17 @@ import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FieldInfos;
+import org.apache.lucene.index.FilterLeafReader;
 import org.apache.lucene.index.IndexFormatTooNewException;
 import org.apache.lucene.index.IndexFormatTooOldException;
 import org.apache.lucene.index.IndexNotFoundException;
 import org.apache.lucene.index.IndexOptions;
 import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.MultiReader;
 import org.apache.lucene.index.MultiTerms;
 import org.apache.lucene.index.SegmentInfos;
+import org.apache.lucene.index.SegmentReader;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.search.Explanation;
@@ -434,13 +437,25 @@ public final class ReadOnlyIndex implements OpenedIndex {
         for (int i = 0; i < parts.size(); i++) {
             Part part = parts.get(i);
             SegmentInfos commit = part.commit();
+            int docBase = summaries.get(i).docBase();
+            List<IndexStats.SegmentStats> segments = new ArrayList<>();
+            for (LeafReaderContext leaf : part.reader().leaves()) {
+                segments.add(new IndexStats.SegmentStats(
+                        FilterLeafReader.unwrap(leaf.reader()) instanceof SegmentReader segment
+                                ? segment.getSegmentName()
+                                : "?",
+                        docBase + leaf.docBase,
+                        leaf.reader().maxDoc(),
+                        leaf.reader().numDocs()));
+            }
             indexes.add(new IndexStats.CommitStats(
                     summaries.get(i),
                     commit.getGeneration(),
                     part.reader().getVersion(),
                     commit.size(),
                     commit.getCommitLuceneVersion(),
-                    new TreeMap<>(commit.getUserData())));
+                    new TreeMap<>(commit.getUserData()),
+                    List.copyOf(segments)));
             segmentCount += commit.size();
         }
         return new IndexStats(

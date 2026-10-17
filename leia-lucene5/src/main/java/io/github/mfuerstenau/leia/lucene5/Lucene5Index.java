@@ -30,6 +30,7 @@ import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.Fields;
+import org.apache.lucene.index.FilterLeafReader;
 import org.apache.lucene.index.IndexCommit;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexableField;
@@ -42,6 +43,7 @@ import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.ReaderUtil;
 import org.apache.lucene.index.SegmentCommitInfo;
 import org.apache.lucene.index.SegmentInfos;
+import org.apache.lucene.index.SegmentReader;
 import org.apache.lucene.index.SortedDocValues;
 import org.apache.lucene.index.SortedNumericDocValues;
 import org.apache.lucene.index.SortedSetDocValues;
@@ -191,10 +193,26 @@ final class Lucene5Index implements RuntimeIndex, Documents, Terms, Search {
                     Optional.ofNullable(infos.getCommitLuceneVersion()).map(Object::toString),
                     // Recorded since 7.0.
                     OptionalInt.empty(),
-                    Map.copyOf(commit.getUserData())));
+                    Map.copyOf(commit.getUserData()),
+                    segments(part.reader())));
             docBase += part.reader().maxDoc();
         }
         return new Stats(reader.numDocs(), reader.maxDoc(), List.copyOf(indexes), fields());
+    }
+
+    /** The reader's segments, in document order (ADR 0051). */
+    private static List<Segment> segments(IndexReader reader) {
+        List<Segment> segments = new ArrayList<>();
+        for (LeafReaderContext leaf : reader.leaves()) {
+            segments.add(new Segment(
+                    FilterLeafReader.unwrap(leaf.reader()) instanceof SegmentReader segment
+                            ? segment.getSegmentName()
+                            : "?",
+                    leaf.docBase,
+                    leaf.reader().maxDoc(),
+                    leaf.reader().numDocs()));
+        }
+        return List.copyOf(segments);
     }
 
     @Override

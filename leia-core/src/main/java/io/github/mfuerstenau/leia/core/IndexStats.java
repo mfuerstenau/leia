@@ -47,6 +47,8 @@ public record IndexStats(
      * @param segmentCount segments in the commit
      * @param commitLuceneVersion the Lucene version that wrote the commit
      * @param userData the user data of the commit, sorted by key
+     * @param segments the open reader's segments of the index directory, in document order (ADR
+     *     0051); they come from the reader, not from the commit
      */
     public record CommitStats(
             IndexSummary summary,
@@ -54,5 +56,16 @@ public record IndexStats(
             long version,
             int segmentCount,
             Version commitLuceneVersion,
-            Map<String, String> userData) {}
+            Map<String, String> userData,
+            List<SegmentStats> segments) {}
+
+    /**
+     * A segment of the open reader.
+     *
+     * @param name the segment's name, such as {@code _0}; {@code ?} if the reader doesn't say
+     * @param docBase the document id of the segment's first document in the opened path
+     * @param maxDoc the documents of the segment, deleted ones included
+     * @param numDocs the live documents of the segment
+     */
+    public record SegmentStats(String name, int docBase, int maxDoc, int numDocs) {}
 }

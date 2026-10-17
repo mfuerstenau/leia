@@ -143,6 +143,12 @@ class Lucene9BackendTest {
         assertThat(commit.generation()).isEqualTo(2);
         assertThat(commit.commitLuceneVersion()).startsWith("9.");
         assertThat(commit.userData()).containsEntry("writer", "leia LegacyIndexWriter");
+        // The open reader's segments (ADR 0051).
+        assertThat(commit.segments()).singleElement().satisfies(segment -> {
+            assertThat(segment.name()).startsWith("_");
+            assertThat(List.of(segment.docBase(), segment.maxDoc(), segment.numDocs()))
+                    .containsExactly(0, 3, 2);
+        });
         assertThat(stats.fields())
                 .extracting(IndexField::name, IndexField::indexOptions, IndexField::docValuesType)
                 .containsExactly(

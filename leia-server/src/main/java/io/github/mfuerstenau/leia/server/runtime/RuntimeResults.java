@@ -36,6 +36,7 @@ import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
+import io.github.mfuerstenau.leia.protocol.index.ReaderSegment;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
@@ -223,7 +224,14 @@ public final class RuntimeResults {
                         // Before 5.3, the newest segment stands in for the version that wrote the commit.
                         commit.commitVersion(open.runtime().luceneVersion()),
                         commit.oldestSegmentVersion(),
-                        Map.copyOf(commit.userData())))
+                        Map.copyOf(commit.userData()),
+                        commit.segments().stream()
+                                .map(segment -> new ReaderSegment(
+                                        segment.name(),
+                                        commit.docBase() + segment.docBase(),
+                                        segment.maxDoc(),
+                                        segment.numDocs()))
+                                .toList()))
                 .toList();
         return new GetIndexStatsResult(
                 open.path().toString(),

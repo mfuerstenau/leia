@@ -418,7 +418,7 @@ class DocumentsTest {
         documents.handleKey(key('x'));
         assertThat(selected(documents)).isEqualTo("rank");
 
-        Documents reopened = documents.reopened(List.of(schema("id", 0), schema("rank", 1)), 10);
+        Documents reopened = documents.reopened(List.of(schema("id", 0), schema("rank", 1)), 10, List.of());
 
         assertThat(reopened.initialRequest()).isEqualTo(load(3));
         reopened.loaded(document(3));
@@ -426,7 +426,7 @@ class DocumentsTest {
         // Empty fields stay hidden, and numbers show as doubles.
         String screen = render(reopened, 140, 30);
         assertThat(screen).contains("Fields (3 of 4, e shows all", "as double bits (x)");
-        assertThat(documents.reopened(List.of(schema("id", 0)), 2).initialRequest())
+        assertThat(documents.reopened(List.of(schema("id", 0)), 2, List.of()).initialRequest())
                 .isEqualTo(load(1));
     }
 
@@ -807,7 +807,8 @@ class DocumentsTest {
         documents.loaded(document(2));
         assertThat(documents.positionsRequest()).isEmpty();
 
-        assertThat(documents.reopened(List.of(schema("id", 0)), 5).keys()).doesNotContain("r rebuild");
+        assertThat(documents.reopened(List.of(schema("id", 0)), 5, List.of()).keys())
+                .doesNotContain("r rebuild");
     }
 
     private static TermHit hit(String field, int docId, int index) {
@@ -999,7 +1000,7 @@ class DocumentsTest {
         documents.filterProgress(1, built(9, 2));
         assertThat(documents.filterToRebuild()).isEmpty();
 
-        Documents reopened = documents.reopened(List.of(schema("id", 0)), 5);
+        Documents reopened = documents.reopened(List.of(schema("id", 0)), 5, List.of());
 
         assertThat(reopened.filterToRebuild())
                 .contains(new Request.StartFilter(2, filterParams(false), OptionalLong.empty(), OptionalLong.empty()));
@@ -1015,6 +1016,163 @@ class DocumentsTest {
                         2, new StepFilterParams(12, 1, true), FilterStep.LOCATE, Optional.of(new FilterMatch(1, 0))))
                 .isEmpty();
         assertThat(render(reopened, 100, 20)).contains("filter red: 1 of 2");
+    }
+
+    /** Two index directories: {@code a} with the segments _0 (0–1) and _1 (2), {@code b} with _0 (3–4). */
+    private static Documents segmented() {
+        return documents()
+                .withIndexes(List.of(new Documents.IndexStart(0, "a", 10), new Documents.IndexStart(3, "b", 10)))
+                .withSegments(List.of(
+                        new Documents.SegmentStart(0, "_0", 0, 2, 2),
+                        new Documents.SegmentStart(0, "_1", 2, 1, 1),
+                        new Documents.SegmentStart(1, "_0", 3, 2, 1)));
+    }
+
+    @Test
+    void showsTheSegmentOfADocument() {
+        Documents documents = segmented();
+        assertThat(documents.segmentOf(2)).hasValue(new Documents.SegmentStart(0, "_1", 2, 1, 1));
+        assertThat(documents.segmentOf(4).map(Documents.SegmentStart::index)).hasValue(1);
+        assertThat(documents.segmentOf(5)).isEmpty();
+        assertThat(documents.segment(1, "_0").map(Documents.SegmentStart::docBase))
+                .hasValue(3);
+        assertThat(documents.segment(1, "_1")).isEmpty();
+
+        documents.loaded(document(4));
+        assertThat(render(documents, 100, 20)).contains("#4 of 0–4   in b   _0 #1 of 0–1");
+        assertThat(documents.keys()).contains("S < > segment");
+        // Without segments, as before.
+        Documents plain = documents();
+        plain.loaded(document(4));
+        assertThat(render(plain, 100, 20)).contains("#4 of 0–4  ").doesNotContain("_0");
+        assertThat(plain.keys()).doesNotContain("segment");
+        assertThat(plain.handleKey(key('>'))).isEmpty();
+    }
+
+    @Test
+    void aPinnedSegmentBoundsTheSteps() {
+        Documents documents = segmented();
+        documents.loaded(document(0));
+        documents.handleKey(key('S'));
+        assertThat(render(documents, 100, 20)).contains("Document segment _0 ");
+
+        assertThat(documents.handleKey(key(KeyCode.LEFT))).isEmpty();
+        assertThat(render(documents, 100, 20)).contains("segment _0 · first document of _0");
+        assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEqualTo(load(1));
+        documents.loaded(document(1));
+        assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEmpty();
+        assertThat(render(documents, 100, 20)).contains("last document of _0");
+
+        // S again unpins it.
+        documents.handleKey(key('S'));
+        assertThat(render(documents, 100, 20)).doesNotContain("segment _0");
+        assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEqualTo(load(2));
+    }
+
+    @Test
+    void anglesJumpBetweenSegmentsAcrossIndexes() {
+        Documents documents = segmented();
+        documents.loaded(document(1));
+        assertThat(documents.handleKey(key('>'))).isEqualTo(load(2));
+        documents.loaded(document(2));
+        assertThat(documents.handleKey(key('>'))).isEqualTo(load(3));
+        documents.loaded(document(3));
+        assertThat(documents.handleKey(key('>'))).isEmpty();
+        assertThat(render(documents, 100, 20)).contains("no next segment");
+        assertThat(documents.handleKey(key('<'))).isEqualTo(load(2));
+
+        // The pin moves along.
+        documents.handleKey(key('S'));
+        assertThat(documents.handleKey(key('<'))).isEqualTo(load(2));
+        documents.loaded(document(2));
+        assertThat(render(documents, 100, 20)).contains("segment _1 ");
+        assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEmpty();
+    }
+
+    @Test
+    void aFilterStaysInThePinnedSegment() {
+        Documents documents = segmented();
+        documents.loaded(document(0));
+        documents.startFilter("red", filterParams(false), 0);
+        documents.filterStarted(1, 9);
+        documents.filterProgress(1, built(9, 3));
+        documents.filterStepped(
+                1, new StepFilterParams(9, 0, true), FilterStep.NEAREST, Optional.of(new FilterMatch(0, 0)));
+        documents.loaded(document(0));
+        documents.handleKey(key('S'));
+
+        // The next match is in another segment: none in this one.
+        assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEqualTo(step(9, 1, true, FilterStep.MOVE));
+        assertThat(documents.filterStepped(
+                        1, new StepFilterParams(9, 1, true), FilterStep.MOVE, Optional.of(new FilterMatch(3, 1))))
+                .isEmpty();
+        assertThat(render(documents, 100, 20)).contains("filter red: 1 of 3 · no next match in _0");
+
+        // > goes to the next segment's first match; one without any shows its first document.
+        assertThat(documents.handleKey(key('>'))).isEqualTo(step(9, 2, true, FilterStep.MOVE));
+        assertThat(documents.filterStepped(
+                        1, new StepFilterParams(9, 2, true), FilterStep.MOVE, Optional.of(new FilterMatch(3, 1))))
+                .isEqualTo(load(2));
+        documents.loaded(document(2));
+        assertThat(render(documents, 100, 20)).contains("segment _1 ");
+        assertThat(documents.handleKey(key('>'))).isEqualTo(step(9, 3, true, FilterStep.MOVE));
+        assertThat(documents.filterStepped(
+                        1, new StepFilterParams(9, 3, true), FilterStep.MOVE, Optional.of(new FilterMatch(4, 2))))
+                .isEqualTo(load(4));
+    }
+
+    @Test
+    void goingOutsideThePinnedSegmentUnpinsIt() {
+        Documents documents = segmented();
+        documents.loaded(document(0));
+        documents.handleKey(key('S'));
+        documents.handleKey(key('i'));
+        documents.handleKey(key('4'));
+        assertThat(documents.handleKey(key(KeyCode.ENTER))).isEqualTo(load(4));
+        documents.loaded(document(4));
+        assertThat(render(documents, 100, 20)).contains("Document left segment _0 ");
+        assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEmpty();
+        assertThat(render(documents, 100, 20)).doesNotContain("segment _0");
+
+        // A hit of the terms screen, here in the pinned segment, keeps it.
+        documents.handleKey(key('S'));
+        documents.showHit(hit("body", 3, 0));
+        documents.loaded(document(3));
+        assertThat(render(documents, 100, 20)).contains("segment _0 ");
+        documents.showHit(hit("body", 1, 0));
+        documents.loaded(document(1));
+        assertThat(render(documents, 100, 20)).contains("left segment _0");
+
+        // The commits screen pins the segment it opens.
+        Documents.SegmentStart segment = documents.segment(1, "_0").orElseThrow();
+        assertThat(documents.showSegment(segment)).isEqualTo(new Request.Document(3));
+        assertThat(documents.walk()).isEmpty();
+        documents.loaded(document(3));
+        assertThat(documents.handleKey(key(KeyCode.LEFT))).isEmpty();
+    }
+
+    @Test
+    void aReopenKeepsThePinIfTheSegmentIsStillThere() {
+        Documents documents = segmented();
+        documents.loaded(document(2));
+        documents.handleKey(key('S'));
+
+        // _0 of a is merged away: _1 stays, now from document 1.
+        Documents kept = documents.reopened(
+                List.of(schema("id", 0)),
+                4,
+                List.of(
+                        new Documents.SegmentStart(0, "_1", 0, 1, 1),
+                        new Documents.SegmentStart(0, "_2", 1, 1, 1),
+                        new Documents.SegmentStart(1, "_0", 2, 2, 2)));
+        assertThat(kept.initialRequest()).isEqualTo(load(0));
+        kept.loaded(document(0));
+        assertThat(render(kept, 100, 20)).contains("segment _1 ", "_1 #0 of 0–0");
+
+        Documents dropped =
+                documents.reopened(List.of(schema("id", 0)), 2, List.of(new Documents.SegmentStart(0, "_3", 0, 2, 2)));
+        assertThat(render(dropped, 100, 20)).contains("segment _1 is gone");
+        assertThat(dropped.handleKey(key(KeyCode.LEFT))).isEqualTo(load(0));
     }
 
     private static GetReconstructResult rebuilt(String field, Map<String, int[]> terms) {

@@ -42,6 +42,7 @@ import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
+import io.github.mfuerstenau.leia.protocol.index.ReaderSegment;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
@@ -435,8 +436,9 @@ public final class App {
                 opened.features(),
                 opened.oldLucene());
         commits = new Commits(indexNames(opened), true);
-        documents =
-                documents != null ? documents.reopened(stats.fields(), stats.maxDoc()) : newDocuments(stats, opened);
+        documents = documents != null
+                ? documents.reopened(stats.fields(), stats.maxDoc(), segmentStarts(stats))
+                : newDocuments(stats, opened);
         syncTermsFilter();
         if (check != null) {
             check.stoppedByReopen();
@@ -463,8 +465,21 @@ public final class App {
         }
         return new Documents(stats.fields(), stats.maxDoc())
                 .withIndexes(starts)
+                .withSegments(segmentStarts(stats))
                 .withPointFormats(pointFormats)
                 .withFeatures(opened.features());
+    }
+
+    /** The open reader's segments of every index directory, in document order (ADR 0051). */
+    private static List<Documents.SegmentStart> segmentStarts(GetIndexStatsResult stats) {
+        List<Documents.SegmentStart> segments = new ArrayList<>();
+        for (int i = 0; i < stats.indexes().size(); i++) {
+            for (ReaderSegment segment : stats.indexes().get(i).segments()) {
+                segments.add(new Documents.SegmentStart(
+                        i, segment.name(), segment.docBase(), segment.maxDoc(), segment.numDocs()));
+            }
+        }
+        return segments;
     }
 
     /** The index has no newer commit; everything stays as it is. */
@@ -660,10 +675,28 @@ public final class App {
         return analysisAction(analysis.initialRequest());
     }
 
-    private static Optional<Action> commitsAction(Optional<Commits.Request> request) {
-        return request.map(next -> switch (next) {
-            case Commits.Request.LoadList list -> new Action.LoadCommits(list.index());
-            case Commits.Request.LoadCommit commit -> new Action.LoadCommit(commit.index(), commit.generation());
+    /**
+     * Turns what the commits screen needs into an action; a segment's documents switch to the
+     * documents screen, pinned to the segment (ADR 0051), if the open reader has it.
+     */
+    private Optional<Action> commitsAction(Optional<Commits.Request> request) {
+        return request.flatMap(next -> switch (next) {
+            case Commits.Request.LoadList list -> Optional.of(new Action.LoadCommits(list.index()));
+            case Commits.Request.LoadCommit commit ->
+                Optional.of(new Action.LoadCommit(commit.index(), commit.generation()));
+            case Commits.Request.ShowDocuments show -> {
+                if (documents == null) {
+                    yield Optional.<Action>empty();
+                }
+                Optional<Documents.SegmentStart> segment = documents.segment(show.index(), show.segment());
+                if (segment.isEmpty()) {
+                    // A segment of an older commit, merged away since.
+                    notice = new Notice.NotOpened(show.segment());
+                    yield Optional.<Action>empty();
+                }
+                screen = Screen.DOCUMENTS;
+                yield documentsAction(Optional.of(documents.showSegment(segment.get())));
+            }
         });
     }
 
@@ -1908,8 +1941,8 @@ public final class App {
             return " q quit   o open   6 analysis   X jars";
         }
         if (screen == Screen.COMMITS) {
-            return " " + cancel + "q quit   o open   c close   " + reopen
-                    + "1-7 screen   r read again   ⏎ segments   Tab panel   ↑↓";
+            String keys = commits != null ? commits.keys() : "r read again   ⏎ segments   Tab panel   ↑↓";
+            return " " + cancel + "q quit   o open   c close   " + reopen + "1-7 screen   " + keys;
         }
         if (screen == Screen.CHECK && check != null) {
             return " " + cancel + "q quit   o open   c close   " + reopen + "1-7 screen   " + check.keys();

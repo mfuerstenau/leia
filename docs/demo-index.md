@@ -178,6 +178,11 @@ other tests use their own indexes and the Lucene 9 and 8 indexes from `LegacyInd
   finds 42, 98 and 278, the exact top 3, and `b` browses them on the documents screen (`1 of 3`).
   `[1, 2]` on the line fails: `embedding` has 8 dimensions. With `f` on `fingerprint`, `[0.5]`
   can't be read, since a vector of bytes takes whole numbers.
+- Segments (ADR 0051): document 417's header says `_2 #17 of 0–99`. `S` pins `_2`, and ← stops at
+  document 400 (`first document of _2`); `<` goes to document 200, the first of `_1`, and the pin
+  moves along. With a filter (`b` on the search screen) and `S`, → stops at the segment's last
+  match with `no next match in _1`. On the commits screen, ⏎ on segment `_1` of `segments_4` shows document 200,
+  pinned; segment `_0` of `segments_1` is the same segment, also found.
 - A regex as the filter, on a copy of the demo index without `segments_4`, which has no deletions
   yet: `qu\w+` in regex mode, then `b`: 499 matches (all but document 0), starting on `1 of 499`.
   Put `segments_4` back and press `R`: the tab line says `Reopened: segments_4; rebuilding the

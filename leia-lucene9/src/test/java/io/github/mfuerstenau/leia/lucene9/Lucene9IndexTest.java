@@ -106,6 +106,7 @@ class Lucene9IndexTest {
             assertThat(only.segmentVersions())
                     .containsExactlyElementsOf(
                             nine ? List.of("8.11.4", "8.11.4", "9.12.3") : List.of("8.11.4", "8.11.4"));
+            assertSegments(only);
             assertThat(only.luceneVersion()).contains(nine ? "9.12.3" : "8.11.4");
             // Created by 8, even once 9 wrote to it: its norms are those of 8.
             assertThat(only.createdVersionMajor()).hasValue(8);
@@ -673,5 +674,21 @@ class Lucene9IndexTest {
             }
         }
         return hashes;
+    }
+
+    /** The reader's segments follow each other and add up to the directory's counts (ADR 0051). */
+    private static void assertSegments(RuntimeIndex.IndexStats stats) {
+        assertThat(stats.segments()).hasSize(stats.segmentVersions().size());
+        int docBase = 0;
+        for (RuntimeIndex.Segment segment : stats.segments()) {
+            assertThat(segment.name()).matches("_[0-9a-z]+");
+            assertThat(segment.docBase()).isEqualTo(docBase);
+            docBase += segment.maxDoc();
+        }
+        assertThat(docBase).isEqualTo(stats.maxDoc());
+        assertThat(stats.segments().stream()
+                        .mapToInt(RuntimeIndex.Segment::numDocs)
+                        .sum())
+                .isEqualTo(stats.numDocs());
     }
 }

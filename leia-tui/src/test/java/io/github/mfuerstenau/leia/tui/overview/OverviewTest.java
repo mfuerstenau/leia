@@ -10,6 +10,7 @@ import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
 import io.github.mfuerstenau.leia.protocol.index.IndexCommitStats;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
+import io.github.mfuerstenau.leia.protocol.index.ReaderSegment;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
@@ -93,7 +94,8 @@ class OverviewTest {
                         9,
                         "9.12.3",
                         Optional.of("9.12.3"),
-                        Map.of("writer", "test"))),
+                        Map.of("writer", "test"),
+                        List.of(new ReaderSegment("_0", 0, 3, 2)))),
                 fields);
     }
 

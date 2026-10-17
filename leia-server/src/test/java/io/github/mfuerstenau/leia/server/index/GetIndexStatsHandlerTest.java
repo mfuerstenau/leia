@@ -11,6 +11,7 @@ import io.github.mfuerstenau.leia.protocol.index.IndexCommitStats;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
+import io.github.mfuerstenau.leia.protocol.index.ReaderSegment;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.filter.Filters;
@@ -70,7 +71,8 @@ class GetIndexStatsHandlerTest {
                                 Version.LATEST.major,
                                 Version.LATEST.toString(),
                                 Optional.of(Version.LATEST.toString()),
-                                Map.of("source", "test"))),
+                                Map.of("source", "test"),
+                                List.of(new ReaderSegment("_0", 0, 2, 2)))),
                         List.of(
                                 new IndexField(
                                         "id",

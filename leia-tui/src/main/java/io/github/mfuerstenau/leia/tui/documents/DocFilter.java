@@ -45,6 +45,17 @@ public final class DocFilter {
         record Nothing() implements Stepped {}
     }
 
+    /**
+     * The documents a step stays in: those of a segment (ADR 0051), from {@code from} up to but not
+     * including {@code to}. A match outside counts as none.
+     */
+    public record Range(String name, int from, int to) {
+
+        boolean contains(int docId) {
+            return docId >= from && docId < to;
+        }
+    }
+
     /** What a built filter steps from: its id, the document to start from and the step to take. */
     public record Built(long filterId, int startDoc, FilterStep step) {}
 
@@ -170,6 +181,15 @@ public final class DocFilter {
 
     /** Takes what {@code stepFilter} found from {@code fromDoc} for a {@code step}. */
     public Stepped stepped(int fromDoc, boolean forward, FilterStep step, Optional<FilterMatch> found) {
+        return stepped(fromDoc, forward, step, found, Optional.empty());
+    }
+
+    /**
+     * Takes what {@code stepFilter} found from {@code fromDoc} for a {@code step} that stays {@code
+     * within} a range, if one is given: a match outside it is no match.
+     */
+    public Stepped stepped(
+            int fromDoc, boolean forward, FilterStep step, Optional<FilterMatch> found, Optional<Range> within) {
         if (step == FilterStep.LOCATE) {
             located = new Located(
                     fromDoc,
@@ -178,17 +198,20 @@ public final class DocFilter {
                             .orElse(OptionalInt.empty()));
             return new Stepped.Nothing();
         }
-        if (found.isPresent()) {
-            located =
-                    new Located(found.get().docId(), OptionalInt.of(found.get().index()));
-            return new Stepped.Show(found.get().docId());
+        Optional<FilterMatch> inside = found.filter(
+                match -> within.map(range -> range.contains(match.docId())).orElse(true));
+        if (inside.isPresent()) {
+            located = new Located(
+                    inside.get().docId(), OptionalInt.of(inside.get().index()));
+            return new Stepped.Show(inside.get().docId());
         }
         if (step == FilterStep.NEAREST && forward) {
             return new Stepped.LookBack(fromDoc);
         }
         // Without matches, the title says so already.
         if (!(state instanceof State.Ready ready && ready.matchCount() == 0)) {
-            note = forward ? "no next match" : "no previous match";
+            note = (forward ? "no next match" : "no previous match")
+                    + within.map(range -> " in " + range.name()).orElse("");
         }
         return new Stepped.Nothing();
     }

@@ -28,6 +28,9 @@ sealed interface Notice {
     /** {@code E} while an export runs. */
     record ExportRunning() implements Notice {}
 
+    /** A segment of an older commit that the open reader doesn't have (ADR 0051). */
+    record NotOpened(String segment) implements Notice {}
+
     default Line line() {
         return switch (this) {
             case Reopening _ -> Line.from("Reopening…");
@@ -39,6 +42,8 @@ sealed interface Notice {
             case Exported exported -> Line.styled(exported.text(), Style.EMPTY.green());
             case ExportFailed failed -> Line.styled("Export failed: " + failed.error(), Style.EMPTY.red());
             case ExportRunning _ -> Line.from("An export runs; Esc cancels it");
+            case NotOpened notOpened ->
+                Line.styled(notOpened.segment() + " isn't in the opened commit", Style.EMPTY.yellow());
         };
     }
 

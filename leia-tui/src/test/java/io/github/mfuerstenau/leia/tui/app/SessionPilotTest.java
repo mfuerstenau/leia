@@ -372,6 +372,13 @@ class SessionPilotTest {
         settle();
         assertThat(screen()).contains("Segment _1", "Document 2 · 0 deleted");
 
+        // ⏎ shows the segment's documents, pinned to it (ADR 0051).
+        pilot.press(KeyCode.ENTER);
+        settle();
+        assertThat(screen()).contains("Document segment _1 ", "#2 of 0–2   _1 #0 of 0–0");
+        pilot.press('4');
+        settle();
+
         // A commit written since: the writer deletes the opened one, which the reader keeps open.
         writeIndex(index, 1);
         pilot.press('r');

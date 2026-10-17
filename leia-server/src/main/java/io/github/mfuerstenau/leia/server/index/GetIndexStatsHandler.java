@@ -13,6 +13,7 @@ import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
 import io.github.mfuerstenau.leia.protocol.index.IndexCommitStats;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
+import io.github.mfuerstenau.leia.protocol.index.ReaderSegment;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
@@ -79,7 +80,11 @@ public final class GetIndexStatsHandler implements MethodHandler<GetIndexStatsPa
                 summary.createdVersionMajor(),
                 commit.commitLuceneVersion().toString(),
                 summary.minSegmentLuceneVersion().map(Version::toString),
-                commit.userData());
+                commit.userData(),
+                commit.segments().stream()
+                        .map(segment -> new ReaderSegment(
+                                segment.name(), segment.docBase(), segment.maxDoc(), segment.numDocs()))
+                        .toList());
     }
 
     private static IndexField toField(FieldStats field) {

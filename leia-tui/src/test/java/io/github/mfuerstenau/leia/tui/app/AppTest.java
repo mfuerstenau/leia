@@ -16,6 +16,7 @@ import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexResult;
 import io.github.mfuerstenau.leia.protocol.commits.Commit;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
+import io.github.mfuerstenau.leia.protocol.commits.Segment;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.DocValues;
 import io.github.mfuerstenau.leia.protocol.document.DocumentField;
@@ -40,6 +41,7 @@ import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
+import io.github.mfuerstenau.leia.protocol.index.ReaderSegment;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
@@ -112,7 +114,19 @@ class AppTest {
 
     private static IndexCommitStats index(String path, int docBase, int maxDoc, String segmentsFile) {
         return new IndexCommitStats(
-                path, docBase, segmentsFile, 1, 1, 0, maxDoc, maxDoc, 10, "10.5.2", Optional.empty(), Map.of());
+                path,
+                docBase,
+                segmentsFile,
+                1,
+                1,
+                maxDoc == 0 ? 0 : 1,
+                maxDoc,
+                maxDoc,
+                10,
+                "10.5.2",
+                Optional.empty(),
+                Map.of(),
+                maxDoc == 0 ? List.of() : List.of(new ReaderSegment("_0", docBase, maxDoc, maxDoc)));
     }
 
     private static GetIndexStatsResult stats(String path) {
@@ -849,7 +863,19 @@ class AppTest {
     private static App oldLuceneApp() {
         App app = app();
         IndexCommitStats index = new IndexCommitStats(
-                "/data/old", 0, "segments_2", 2, 1, 1, 3, 3, 2, "2.x", Optional.of("2.x"), Map.of());
+                "/data/old",
+                0,
+                "segments_2",
+                2,
+                1,
+                1,
+                3,
+                3,
+                2,
+                "2.x",
+                Optional.of("2.x"),
+                Map.of(),
+                List.of(new ReaderSegment("_0", 0, 3, 3)));
         GetIndexStatsResult stats = new GetIndexStatsResult(
                 "/data/old", "FS", 1, 3, 3, List.of(index), List.of(field("id", 0), field("body", 1)));
         app.opened(
@@ -1239,6 +1265,79 @@ class AppTest {
 
         assertThat(app.handleKey(key(KeyCode.DOWN))).hasValue(new Action.LoadCommit(0, 1));
         assertThat(app.handleKey(key('r'))).hasValue(new Action.LoadCommits(0));
+    }
+
+    /** A segment of a commit, as {@code getCommit} lists it. */
+    private static Segment commitSegment(String name, int docBase, int maxDoc) {
+        return new Segment(
+                name,
+                Optional.empty(),
+                maxDoc,
+                docBase,
+                0,
+                0,
+                OptionalLong.empty(),
+                OptionalLong.empty(),
+                OptionalLong.empty(),
+                "10.5.2",
+                Optional.empty(),
+                Optional.of("Lucene104"),
+                Optional.empty(),
+                List.of(),
+                Optional.empty(),
+                false,
+                false,
+                Optional.empty(),
+                OptionalLong.empty(),
+                Map.of(),
+                Map.of());
+    }
+
+    @Test
+    void enterOnASegmentShowsItsDocumentsPinnedToIt() {
+        App app = app();
+        IndexCommitStats index = new IndexCommitStats(
+                "/data/idx",
+                0,
+                "segments_2",
+                2,
+                1,
+                2,
+                5,
+                5,
+                10,
+                "10.5.2",
+                Optional.empty(),
+                Map.of(),
+                List.of(new ReaderSegment("_0", 0, 3, 3), new ReaderSegment("_1", 3, 2, 2)));
+        app.opened(
+                new GetIndexStatsResult("/data/idx", "MMapDirectory", 2, 5, 5, List.of(index), List.of(field("id", 0))),
+                List.of());
+        app.handleKey(key('4'));
+        app.commitsLoaded(0, list(commit(2, true), commit(1, false)));
+        app.commitLoaded(
+                0,
+                2,
+                new GetCommitResult(
+                        commit(2, true), List.of(commitSegment("_0", 0, 3), commitSegment("_1", 3, 2)), List.of()));
+        app.commitLoaded(0, 1, new GetCommitResult(commit(1, false), List.of(commitSegment("_5", 0, 3)), List.of()));
+
+        // A segment of the older commit, merged away since.
+        assertThat(app.handleKey(key(KeyCode.DOWN))).isEmpty();
+        app.handleKey(key(KeyCode.ENTER));
+        assertThat(render(app)).contains("⏎ documents");
+        assertThat(app.handleKey(key(KeyCode.ENTER))).isEmpty();
+        assertThat(render(app)).contains("_5 isn't in the opened commit", "4 Commits");
+
+        app.handleKey(KeyEvent.ofKey(KeyCode.TAB, KeyModifiers.SHIFT));
+        app.handleKey(key(KeyCode.UP));
+        app.handleKey(key(KeyCode.ENTER));
+        app.handleKey(key(KeyCode.DOWN));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(load(3));
+        app.documentLoaded(document(3));
+        assertThat(render(app)).contains("Document segment _1 ", "#3 of 0–4   _1 #0 of 0–1");
+        // ← stays in the segment.
+        assertThat(app.handleKey(key(KeyCode.LEFT))).isEmpty();
     }
 
     @Test

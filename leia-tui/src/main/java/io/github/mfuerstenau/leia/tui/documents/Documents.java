@@ -66,12 +66,14 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * The documents screen: one document of the open index at a time, field by field, as {@code
@@ -266,6 +268,27 @@ public final class Documents {
      */
     public record IndexStart(int docBase, String name, int createdVersionMajor) {}
 
+    /**
+     * A segment of the open reader (ADR 0051): the position of its index directory among those
+     * opened, its name, the document id it starts at in the opened path, and its documents, deleted
+     * ones included, and live ones.
+     */
+    public record SegmentStart(int index, String name, int docBase, int maxDoc, int numDocs) {
+
+        /** The document id after its last document. */
+        int end() {
+            return docBase + maxDoc;
+        }
+
+        boolean contains(int docId) {
+            return docId >= docBase && docId < end();
+        }
+
+        DocFilter.Range range() {
+            return new DocFilter.Range(name, docBase, end());
+        }
+    }
+
     /** What the navigation keys move. */
     private enum Focus {
         FIELDS,
@@ -381,6 +404,21 @@ public final class Documents {
      */
     private List<IndexStart> indexes = List.of();
 
+    /** The open reader's segments of every index directory, in document order (ADR 0051). */
+    private List<SegmentStart> segments = List.of();
+
+    /** The segment that ←/→ stay in (ADR 0051); or null. */
+    private SegmentStart pinned;
+
+    /** Said about the segments until the next key, such as that ← is at the pin's first document; or null. */
+    private String segmentNote;
+
+    /**
+     * The segment that {@code <}/{@code >} step to the first match of while that step is under way:
+     * the step stays in it, and its first document is shown if it has no match; or null.
+     */
+    private SegmentStart segmentJump;
+
     /** What the index can do (ADR 0044): the keys it lacks a feature for are refused and left out of the legend. */
     private Set<Feature> features = Feature.all();
 
@@ -396,6 +434,15 @@ public final class Documents {
      */
     public Documents withIndexes(List<IndexStart> indexes) {
         this.indexes = List.copyOf(indexes);
+        return this;
+    }
+
+    /**
+     * Shows which segment of the open reader a document is in, and lets {@code S} pin it (ADR
+     * 0051): {@code segments} in document order.
+     */
+    public Documents withSegments(List<SegmentStart> segments) {
+        this.segments = List.copyOf(segments);
         return this;
     }
 
@@ -449,17 +496,76 @@ public final class Documents {
         return Optional.ofNullable(in);
     }
 
+    /** The segment of the open reader that {@code docId} is in, if the segments are known. */
+    Optional<SegmentStart> segmentOf(int docId) {
+        int low = 0;
+        int high = segments.size() - 1;
+        while (low <= high) {
+            int mid = (low + high) >>> 1;
+            SegmentStart segment = segments.get(mid);
+            if (docId < segment.docBase()) {
+                high = mid - 1;
+            } else if (docId >= segment.end()) {
+                low = mid + 1;
+            } else {
+                return Optional.of(segment);
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** The segment {@code name} of the index directory at {@code index}, if the open reader has it. */
+    public Optional<SegmentStart> segment(int index, String name) {
+        return segments.stream()
+                .filter(segment -> segment.index() == index && segment.name().equals(name))
+                .findFirst();
+    }
+
+    /**
+     * Pins {@code segment}, as the commits screen asks for (ADR 0051), and forgets the term hit or
+     * search hits. Returns its first document to fetch.
+     */
+    public Request showSegment(SegmentStart segment) {
+        hit = null;
+        searchHits = false;
+        positions = null;
+        dropMatches();
+        pinned = segment;
+        segmentNote = null;
+        return new Request.Document(segment.docBase());
+    }
+
+    /** Unpins the segment if {@code docId} is outside it, and says so. */
+    private void leaveSegment(int docId) {
+        if (pinned != null && !pinned.contains(docId)) {
+            segmentNote = "left segment " + pinned.name();
+            pinned = null;
+        }
+    }
+
     /**
      * The screen for the reopened index (ADR 0019): the same document id, clamped to the new {@code
      * maxDoc}, with the same field selected, and values shown as before. The document is fetched
      * again; walks through term docs or hits end. The backend forgets the filter, which is built
-     * again under a new serial (ADR 0032).
+     * again under a new serial (ADR 0032). A pinned segment that the new reader still has stays
+     * pinned, with the same document of it shown; one merged away is dropped (ADR 0051).
      */
-    public Documents reopened(List<IndexField> fields, int maxDoc) {
+    public Documents reopened(List<IndexField> fields, int maxDoc, List<SegmentStart> segments) {
         Documents documents = new Documents(fields, maxDoc);
         documents.indexes = indexes;
+        documents.segments = List.copyOf(segments);
         documents.features = features;
         documents.docId = Math.max(Math.min(docId, maxDoc - 1), 0);
+        if (pinned != null) {
+            Optional<SegmentStart> same = documents.segment(pinned.index(), pinned.name());
+            if (same.isPresent()) {
+                documents.pinned = same.get();
+                documents.docId = same.get().docBase()
+                        + Math.clamp(docId - pinned.docBase(), 0, same.get().maxDoc() - 1);
+            } else {
+                documents.segmentNote = "segment " + pinned.name() + " is gone";
+            }
+        }
         documents.selectField = selectedField().map(DocumentField::name).orElse(null);
         documents.hideEmpty = hideEmpty;
         documents.numbers = numbers;
@@ -780,13 +886,25 @@ public final class Documents {
         if (!isFilter(serial) || !filter.filterId().equals(OptionalLong.of(params.filterId()))) {
             return Optional.empty();
         }
-        return switch (filter.stepped(params.fromDoc(), params.forward(), step, found)) {
+        // The step of < or > stays in the segment it goes to, any other one in the pinned segment.
+        SegmentStart jump = step == FilterStep.MOVE ? segmentJump : null;
+        if (step == FilterStep.MOVE) {
+            segmentJump = null;
+        }
+        Optional<DocFilter.Range> within = Optional.ofNullable(jump != null ? jump : pinned)
+                .filter(_ -> step != FilterStep.LOCATE)
+                .map(SegmentStart::range);
+        return switch (filter.stepped(params.fromDoc(), params.forward(), step, found, within)) {
             case DocFilter.Stepped.Show show -> Optional.of(new Request.Document(show.docId()));
             case DocFilter.Stepped.LookBack back ->
                 Optional.of(new Request.StepFilter(
                         serial, new StepFilterParams(params.filterId(), back.docId(), false), FilterStep.MOVE));
             case DocFilter.Stepped.Nothing _ -> {
                 steppingFilter = OptionalLong.empty();
+                if (jump != null) {
+                    // The segment has no match: its first document is shown all the same.
+                    yield Optional.of(new Request.Document(jump.docBase()));
+                }
                 yield queuedStep();
             }
         };
@@ -902,6 +1020,7 @@ public final class Documents {
                 : selectedField().map(DocumentField::name).orElse(null);
         selectField = null;
         docId = document.docId();
+        leaveSegment(docId);
         steppingFilter = OptionalLong.empty();
         this.document = document;
         error = null;
@@ -919,6 +1038,7 @@ public final class Documents {
             return;
         }
         this.docId = docId;
+        leaveSegment(docId);
         document = null;
         this.error = error;
         steppingFilter = OptionalLong.empty();
@@ -1296,6 +1416,8 @@ public final class Documents {
                 return Optional.empty();
             }
             prompt = null;
+            // i goes anywhere: a document outside the pinned segment unpins it.
+            leaveSegment(chosen.getAsInt());
             return stepsThroughFilter()
                     ? filterStep(chosen.getAsInt(), true, FilterStep.NEAREST)
                     : Optional.of(new Request.Document(chosen.getAsInt()));
@@ -1303,6 +1425,7 @@ public final class Documents {
         if (filter != null) {
             filter.clearNote();
         }
+        segmentNote = null;
         KeyCode code = key.code();
         // A key pressed before the last step's document is in goes on from that document.
         int from = wanted.orElse(docId);
@@ -1310,11 +1433,19 @@ public final class Documents {
             if (stepsThroughFilter()) {
                 return moveThroughFilter(false);
             }
+            if (pinned != null && from - 1 < pinned.docBase()) {
+                segmentNote = "first document of " + pinned.name();
+                return Optional.empty();
+            }
             return from > 0 ? Optional.of(new Request.Document(from - 1)) : Optional.empty();
         }
         if (code == KeyCode.RIGHT || key.isChar('n')) {
             if (stepsThroughFilter()) {
                 return moveThroughFilter(true);
+            }
+            if (pinned != null && from + 1 >= pinned.end()) {
+                segmentNote = "last document of " + pinned.name();
+                return Optional.empty();
             }
             return from < maxDoc - 1 ? Optional.of(new Request.Document(from + 1)) : Optional.empty();
         }
@@ -1342,6 +1473,17 @@ public final class Documents {
                         prompt = new DocIdPrompt();
                     }
                     return Optional.empty();
+                }
+                case 'S' -> {
+                    if (pinned != null) {
+                        pinned = null;
+                    } else {
+                        pinned = segmentOf(from).orElse(null);
+                    }
+                    return Optional.empty();
+                }
+                case '<', '>' -> {
+                    return jumpSegment(key.codePoint() == '>', from);
                 }
                 case '/' -> {
                     if (!rows.isEmpty()) {
@@ -1411,6 +1553,33 @@ public final class Documents {
         return Optional.empty();
     }
 
+    /**
+     * {@code <}/{@code >}: the first document of the previous or next segment from {@code from}'s,
+     * or with a filter, its first match. The pin moves along.
+     */
+    private Optional<Request> jumpSegment(boolean forward, int from) {
+        Optional<SegmentStart> current = pinned != null ? Optional.of(pinned) : segmentOf(from);
+        if (current.isEmpty()) {
+            return Optional.empty();
+        }
+        int at = segments.indexOf(current.get()) + (forward ? 1 : -1);
+        if (at < 0 || at >= segments.size()) {
+            segmentNote = forward ? "no next segment" : "no previous segment";
+            return Optional.empty();
+        }
+        SegmentStart target = segments.get(at);
+        if (pinned != null) {
+            pinned = target;
+        }
+        if (stepsThroughFilter() && filter.filterId().isPresent()) {
+            queuedSteps.clear();
+            segmentJump = target;
+            steppingFilter = OptionalLong.of(filter.serial());
+            return filterStep(target.docBase(), true, FilterStep.MOVE);
+        }
+        return Optional.of(new Request.Document(target.docBase()));
+    }
+
     /** What {@code key} is called if the index lacks a feature it needs (ADR 0044); empty otherwise. */
     private Optional<String> unsupported(KeyEvent key) {
         if (key.code() == KeyCode.ENTER) {
@@ -1441,6 +1610,7 @@ public final class Documents {
                 .orElse("");
         String step = filtered() ? "←→ match   b unfilter   " : "←→ doc   ";
         StringBuilder keys = new StringBuilder(step).append(steps).append("i go to   ");
+        keyIf(keys, !segments.isEmpty(), "S < > segment");
         keyIf(keys, supports(Feature.TERM_VECTORS), "⏎ term vector");
         keyIf(keys, supports(Feature.STORED_VALUES), "v view");
         keys.append("a analyze   ");
@@ -1563,12 +1733,20 @@ public final class Documents {
 
     /** The title of the document's panel, with what the filter says: in red if it failed. */
     private Line title() {
-        if (filter == null) {
-            return Line.from(" Document ");
+        List<Span> spans = new ArrayList<>();
+        spans.add(Span.raw(" Document "));
+        String segment = Stream.of(pinned != null ? "segment " + pinned.name() : null, segmentNote)
+                .filter(Objects::nonNull)
+                .collect(Collectors.joining(" · "));
+        if (!segment.isEmpty()) {
+            spans.add(Span.styled(segment + " ", Style.EMPTY.cyan().bold()));
         }
-        DocFilter.Title title = filter.title(docId, maxDoc);
-        Style style = (title.error() ? Style.EMPTY.red() : Style.EMPTY.yellow()).bold();
-        return Line.from(Span.raw(" Document "), Span.styled(title.text() + " ", style));
+        if (filter != null) {
+            DocFilter.Title title = filter.title(docId, maxDoc);
+            Style style = (title.error() ? Style.EMPTY.red() : Style.EMPTY.yellow()).bold();
+            spans.add(Span.styled(title.text() + " ", style));
+        }
+        return Line.from(spans);
     }
 
     private Line header() {
@@ -1581,6 +1759,9 @@ public final class Documents {
         indexOf(docId)
                 .ifPresent(index ->
                         spans.add(Span.raw("   in " + TextFormat.firstChars(TextFormat.escapeControl(index), 60))));
+        segmentOf(docId)
+                .ifPresent(segment -> spans.add(Span.raw("   " + segment.name() + " #" + (docId - segment.docBase())
+                        + " of 0–" + (segment.maxDoc() - 1))));
         if (error != null) {
             spans.add(Span.raw("   Cannot read it: " + error));
         } else if (document != null && document.deleted()) {

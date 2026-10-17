@@ -54,6 +54,10 @@ class IndexStatsTest {
             assertThat(commit.version()).isEqualTo(((DirectoryReader) index.reader()).getVersion());
             assertThat(stats.segmentCount()).isEqualTo(2);
             assertThat(commit.segmentCount()).isEqualTo(2);
+            // The open reader's segments, one deleted document in the first.
+            assertThat(commit.segments())
+                    .containsExactly(
+                            new IndexStats.SegmentStats("_0", 0, 2, 1), new IndexStats.SegmentStats("_1", 2, 1, 1));
             assertThat(commit.commitLuceneVersion()).isEqualTo(Version.LATEST);
             assertThat(commit.userData()).containsExactly(Map.entry("a", "1"), Map.entry("b", "2"));
             assertThat(stats.deletedDocs()).isEqualTo(1);

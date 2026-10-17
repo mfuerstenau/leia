@@ -23,6 +23,7 @@ import io.github.mfuerstenau.leia.protocol.commits.GetCommitParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
 import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
+import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
@@ -104,6 +105,12 @@ class JarsBackendTest {
                                 .segments())
                         .as(name)
                         .hasSize(2);
+                assertThat(backend.call(Methods.GET_INDEX_STATS, new GetIndexStatsParams())
+                                .indexes()
+                                .getFirst()
+                                .segments())
+                        .as(name)
+                        .hasSize(name.equals("lucene8") ? 2 : 3);
             }
             // Its memory segments and the KNN vectors of the 9.x segment.
             assertThat(backend.call(Methods.GET_DOCUMENT, new GetDocumentParams(8))

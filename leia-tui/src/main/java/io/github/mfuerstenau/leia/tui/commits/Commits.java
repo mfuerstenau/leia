@@ -89,6 +89,12 @@ public final class Commits {
          * with {@link #commitLoaded} or {@link #commitFailed}.
          */
         record LoadCommit(int index, long generation) implements Request {}
+
+        /**
+         * The documents of the segment {@code segment} of the index directory at this position, from
+         * its first one, pinned to it (ADR 0051).
+         */
+        record ShowDocuments(int index, String segment) implements Request {}
     }
 
     /** What a fetch brought: the value, or why there is none. */
@@ -310,7 +316,8 @@ public final class Commits {
 
     /**
      * Switches panels with Tab, moves the selection or scrolls the details, goes to the segments
-     * with Enter, and reads the commits again with {@code r}.
+     * with Enter, from a segment to its documents if a reader is open, and reads the commits again
+     * with {@code r}.
      */
     public Optional<Request> handleKey(KeyEvent key) {
         if (key.isChar('r')) {
@@ -337,6 +344,11 @@ public final class Commits {
         if (key.code() == KeyCode.ENTER && focus == Focus.COMMITS) {
             focus(Focus.SEGMENTS);
             return Optional.empty();
+        }
+        if (key.code() == KeyCode.ENTER && focus == Focus.SEGMENTS) {
+            return readerOpen
+                    ? selectedSegment().map(segment -> new Request.ShowDocuments(indexRow, segment.name()))
+                    : Optional.empty();
         }
         switch (focus) {
             case INDEXES -> {
@@ -383,6 +395,12 @@ public final class Commits {
             }
         }
         return Optional.empty();
+    }
+
+    /** The screen's keys for the footer, after the app's. */
+    public String keys() {
+        String enter = focus == Focus.SEGMENTS ? (readerOpen ? "⏎ documents   " : "") : "⏎ segments   ";
+        return "r read again   " + enter + "Tab panel   ↑↓";
     }
 
     private void focus(Focus focus) {

@@ -71,6 +71,10 @@ class MultiIndexTest {
             assertThat(stats.indexes())
                     .extracting(commit -> commit.summary().path(), IndexStats.CommitStats::generation)
                     .containsExactly(tuple(a, 1L), tuple(b, 1L));
+            // The second directory's segments start at its docBase.
+            assertThat(stats.indexes().get(1).segments())
+                    .singleElement()
+                    .isEqualTo(new IndexStats.SegmentStats("_0", 2, 3, 3));
             assertThat(stats.field("id").orElseThrow().terms().orElseThrow().docCount())
                     .isEqualTo(5);
         }

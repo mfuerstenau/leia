@@ -99,6 +99,7 @@ class Lucene7IndexTest {
             assertThat(only.userData()).containsEntry("commit", "second");
             String version = seven ? "7.7.3" : "6.6.6";
             assertThat(only.segmentVersions()).containsExactly(version, version);
+            assertSegments(only);
             assertThat(only.luceneVersion()).contains(version);
             // Recorded since 7.0; 7.7 takes a commit of 6.x as created by 6.
             assertThat(only.createdVersionMajor()).hasValue(seven ? 7 : 6);
@@ -652,5 +653,21 @@ class Lucene7IndexTest {
             }
         }
         return hashes;
+    }
+
+    /** The reader's segments follow each other and add up to the directory's counts (ADR 0051). */
+    private static void assertSegments(RuntimeIndex.IndexStats stats) {
+        assertThat(stats.segments()).hasSize(stats.segmentVersions().size());
+        int docBase = 0;
+        for (RuntimeIndex.Segment segment : stats.segments()) {
+            assertThat(segment.name()).matches("_[0-9a-z]+");
+            assertThat(segment.docBase()).isEqualTo(docBase);
+            docBase += segment.maxDoc();
+        }
+        assertThat(docBase).isEqualTo(stats.maxDoc());
+        assertThat(stats.segments().stream()
+                        .mapToInt(RuntimeIndex.Segment::numDocs)
+                        .sum())
+                .isEqualTo(stats.numDocs());
     }
 }

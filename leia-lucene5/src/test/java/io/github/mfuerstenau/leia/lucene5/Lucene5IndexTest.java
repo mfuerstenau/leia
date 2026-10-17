@@ -96,6 +96,7 @@ class Lucene5IndexTest {
             assertThat(only.userData()).containsEntry("commit", "second");
             String version = name.equals("lucene4") ? "4.10.4" : "5.5.5";
             assertThat(only.segmentVersions()).containsExactly(version, version);
+            assertSegments(only);
             assertThat(only.oldestMajor()).isEqualTo(name.equals("lucene4") ? 4 : 5);
             // Recorded since 5.3.
             assertThat(only.luceneVersion())
@@ -574,5 +575,21 @@ class Lucene5IndexTest {
             }
         }
         return hashes;
+    }
+
+    /** The reader's segments follow each other and add up to the directory's counts (ADR 0051). */
+    private static void assertSegments(RuntimeIndex.IndexStats stats) {
+        assertThat(stats.segments()).hasSize(stats.segmentVersions().size());
+        int docBase = 0;
+        for (RuntimeIndex.Segment segment : stats.segments()) {
+            assertThat(segment.name()).matches("_[0-9a-z]+");
+            assertThat(segment.docBase()).isEqualTo(docBase);
+            docBase += segment.maxDoc();
+        }
+        assertThat(docBase).isEqualTo(stats.maxDoc());
+        assertThat(stats.segments().stream()
+                        .mapToInt(RuntimeIndex.Segment::numDocs)
+                        .sum())
+                .isEqualTo(stats.numDocs());
     }
 }

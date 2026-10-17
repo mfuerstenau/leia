@@ -149,6 +149,16 @@ public interface RuntimeIndex extends Closeable {
     record Stats(int numDocs, int maxDoc, List<IndexStats> indexes, List<Field> fields) {}
 
     /**
+     * A segment of the open reader (ADR 0051).
+     *
+     * @param name the segment's name, such as {@code _0}; {@code ?} if the reader doesn't say
+     * @param docBase the document id of the segment's first document within its directory
+     * @param maxDoc the documents of the segment, deleted ones included
+     * @param numDocs the live documents of the segment
+     */
+    record Segment(String name, int docBase, int maxDoc, int numDocs) {}
+
+    /**
      * The opened commit of one directory.
      *
      * @param docBase the document id of its first document in the opened index
@@ -158,6 +168,7 @@ public interface RuntimeIndex extends Closeable {
      *     before 5.3
      * @param createdVersionMajor the major version of the Lucene that created the index; empty if it
      *     isn't recorded, as before 7.0 (though 7.x reports 6 for a commit of 6.x)
+     * @param segments the open reader's segments of the directory, in document order (ADR 0051)
      */
     record IndexStats(
             Path path,
@@ -170,7 +181,8 @@ public interface RuntimeIndex extends Closeable {
             List<String> segmentVersions,
             Optional<String> luceneVersion,
             OptionalInt createdVersionMajor,
-            Map<String, String> userData) {
+            Map<String, String> userData,
+            List<Segment> segments) {
 
         /**
          * The major version of the Lucene that created the index, or else of its oldest segment. It

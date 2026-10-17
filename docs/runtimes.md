@@ -48,6 +48,8 @@ The first index of a path decides which Lucene opens it, by the major in its new
 3. Only if a field has KNN vectors, which no 8.x segment has: only the 9.x segments of an index created by 8.x (ADR 0049 §6).
 4. With `KNN_VECTORS`, `CLASSIC_SEARCH` takes a KNN query too, approximate or exact, with a filter (ADR 0049 §6).
 
+Every runtime reports the open reader's segments in `getIndexStats`, from runtime interface 6 on (ADR 0051), so the documents screen shows and pins segments on every index with a reader.
+
 **Without a reader** (ADR 0021), an index has `COMMITS` and `CHECK_INDEX`, and `CHECK_LEVELS` too unless its first index goes to a runtime without levels, which is 3.6.2 for 2.x and 3.x (ADR 0045 §4, ADR 0046 §6). Indexes of 4.x to 8.x go to Lucene 10 then, which lists their commits as unreadable.
 
 ## Differences
