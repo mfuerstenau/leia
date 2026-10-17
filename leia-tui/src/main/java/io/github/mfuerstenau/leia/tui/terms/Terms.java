@@ -115,6 +115,9 @@ public final class Terms {
         /** Show this document, which has a point of {@code field}, on the documents screen. */
         record PointDocument(String field, int docId) implements Request {}
 
+        /** Search the documents with this term on the search screen (ADR 0052). */
+        record Search(String field, BytesValue term) implements Request {}
+
         /** A key that the index lacks a feature for (ADR 0044); {@code what} names it. Nothing changed. */
         record Unsupported(String what) implements Request {}
     }
@@ -668,9 +671,18 @@ public final class Terms {
 
     /** Shows the terms of {@code field} from {@code term} on, with the focus on the term's postings. */
     public Optional<Request> browse(String field, BytesValue term) {
+        return show(field, Optional.of(term), false);
+    }
+
+    /**
+     * Shows {@code field}, as another screen asks for (ADR 0052): with {@code points} its BKD tree,
+     * with a term its terms from there on with the focus on the term's postings, and otherwise its
+     * terms with the focus on them. Nothing changes if the screen has no such row.
+     */
+    public Optional<Request> show(String field, Optional<BytesValue> term, boolean points) {
         int row = -1;
         for (int i = 0; i < fields.size(); i++) {
-            if (!fields.get(i).points() && fields.get(i).field().name().equals(field)) {
+            if (fields.get(i).points() == points && fields.get(i).field().name().equals(field)) {
                 row = i;
                 break;
             }
@@ -680,8 +692,13 @@ public final class Terms {
         }
         fieldRow = row;
         seek = null;
+        note = null;
+        if (points || term.isEmpty()) {
+            focus = Column.TERMS;
+            return nextRequest();
+        }
         focus = Column.POSTINGS;
-        wantedFirst = new Request.LoadTerms(field, Optional.of(term), false);
+        wantedFirst = new Request.LoadTerms(field, term, false);
         return send(wantedFirst);
     }
 
@@ -693,8 +710,9 @@ public final class Terms {
     /**
      * Moves the selection in the focused column, switches columns with ←/→ and Tab, seeks with
      * {@code /}, with Enter goes one column to the right or shows the selected posting's document,
-     * with {@code e} exports the selected field's terms, and with {@code b} switches between all
-     * postings and those in the filter, if there is one. On a point field's tree, Enter expands or
+     * with {@code e} exports the selected field's terms, with {@code s} searches for the selected
+     * term or the postings' term (ADR 0052), and with {@code b} switches between all postings and
+     * those in the filter, if there is one. On a point field's tree, Enter expands or
      * collapses a cell, or shows a leaf's points, and on a point shows its document; {@code t}
      * cycles the format the points are shown in.
      */
@@ -713,8 +731,8 @@ public final class Terms {
                 pointFormats.cycle(pointField.get());
                 return Optional.empty();
             }
-            if (key.isChar('/') || key.isChar('e')) {
-                note = (key.isChar('/') ? "/ seeks" : "e exports") + " terms only";
+            if (key.isChar('/') || key.isChar('e') || key.isChar('s')) {
+                note = (key.isChar('/') ? "/ seeks" : key.isChar('e') ? "e exports" : "s searches") + " terms only";
                 return Optional.empty();
             }
             if (key.code() == KeyCode.ENTER && pointTree != null) {
@@ -730,6 +748,9 @@ public final class Terms {
         }
         if (key.isChar('e')) {
             return selectedField().map(field -> new Request.Export(field.name()));
+        }
+        if (key.isChar('s')) {
+            return searchedTerm();
         }
         if (key.isChar('b') && filter.isPresent()) {
             onlyFiltered = !onlyFiltered;
@@ -779,6 +800,9 @@ public final class Terms {
         } else if (key.isChar('e') && !points) {
             needed = Feature.EXPORT_TERMS;
             what = "Export";
+        } else if (key.isChar('s') && !points) {
+            needed = Feature.SEARCH;
+            what = "Search term";
         } else if (key.isChar('b') && filter.isPresent()) {
             needed = Feature.FILTER;
             what = "Filter";
@@ -800,7 +824,25 @@ public final class Terms {
         String open = features.contains(Feature.DOCUMENTS) ? "⏎ open doc   " : "";
         String only = !filtered() ? "" : onlyFiltered ? "b all postings   " : "b filter only   ";
         String export = features.contains(Feature.EXPORT_TERMS) ? "e export   " : "";
-        return "/ seek   " + open + only + export + "←/→ column   ↑↓";
+        String search = features.contains(Feature.SEARCH) ? "s search   " : "";
+        return "/ seek   " + open + search + only + export + "←/→ column   ↑↓";
+    }
+
+    /**
+     * {@code s}: the term to search for (ADR 0052), the postings' on the postings column, otherwise
+     * the selected one.
+     */
+    private Optional<Request> searchedTerm() {
+        if (focus == Column.POSTINGS && postings != null) {
+            return Optional.of(new Request.Search(postings.field, postings.term));
+        }
+        if (terms == null
+                || selectedField()
+                        .filter(field -> field.name().equals(terms.field))
+                        .isEmpty()) {
+            return Optional.empty();
+        }
+        return terms.selectedTerm().map(term -> new Request.Search(terms.field, term));
     }
 
     private Optional<Request> seekKey(KeyEvent key) {

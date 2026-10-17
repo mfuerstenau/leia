@@ -15,7 +15,9 @@ From the read-only checklist in `docs/luke-features.md` §7. Ordered roughly by 
 - [ ] Open options: Elasticsearch/OpenSearch indexes (left out of ADR 0018): their codecs need the server's `lib/`, which has its own `lucene-*.jar` of another version; skipping those jars, or saying which ones clash, untested without an installation
 - [ ] Tools: check only the selected index or segments, and the thread count (left out of ADR 0022)
 - [ ] Tools: export terms with `totalTermFreq` and a marker for binary terms (left out of ADR 0022, which keeps Luke's format)
-- [ ] Misc: log view with level filter, cross-screen navigation (`docs/luke-features.md` §5), themes, about
+- [ ] Misc: log view with level filter
+- [ ] Misc: themes
+- [ ] Misc: about
 - [ ] Improvements over Luke (§6). Done already: deleted documents (ADR 0006, the filter's `includeDeleted`), binary values as text or hex (ADR 0006), cancellation of long operations (ADR 0005), KNN vectors (ADR 0040), point values (ADR 0041), highlighting of hits (ADR 0042), the per-segment document view (ADR 0051). Left:
   - [ ] KNN: HNSW graph inspection (a node's levels and neighbours through `HnswGraphProvider`), and a recall check of approximate against exact (left out of ADR 0040)
 

@@ -86,6 +86,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -174,6 +175,15 @@ public final class App {
 
     /** The screen shown; kept when another index is opened. */
     private Screen screen = Screen.OVERVIEW;
+
+    /** How many jumps Backspace can retrace at most (ADR 0052). */
+    private static final int BACK_DEPTH = 16;
+
+    /**
+     * The screens that the jumps to the shown one came from, the last one first (ADR 0052). A number
+     * key, an open and a close forget them.
+     */
+    private final Deque<Screen> back = new ArrayDeque<>();
 
     /** The open-index prompt, or null. */
     private PathPrompt prompt;
@@ -324,6 +334,7 @@ public final class App {
         if (!supports(screen)) {
             screen = Screen.OVERVIEW;
         }
+        back.clear();
         commits = new Commits(indexNames(opened), true);
         check = new Check(stats.path(), opened.supports(Feature.CHECK_LEVELS));
         pointFormats = new PointFormats();
@@ -390,6 +401,7 @@ public final class App {
         if (screen != Screen.ANALYSIS && screen != Screen.CHECK) {
             screen = Screen.COMMITS;
         }
+        back.clear();
         prompt = null;
         forgetExport();
         busy = false;
@@ -529,6 +541,7 @@ public final class App {
         search = null;
         forgetScans();
         forgetExport();
+        back.clear();
         busy = false;
     }
 
@@ -694,7 +707,7 @@ public final class App {
                     notice = new Notice.NotOpened(show.segment());
                     yield Optional.<Action>empty();
                 }
-                screen = Screen.DOCUMENTS;
+                jump(Screen.DOCUMENTS);
                 yield documentsAction(Optional.of(documents.showSegment(segment.get())));
             }
         });
@@ -739,7 +752,7 @@ public final class App {
                     yield Optional.<Action>empty();
                 }
                 documents.showHit(document.hit());
-                screen = Screen.DOCUMENTS;
+                jump(Screen.DOCUMENTS);
                 yield loadDocument(document.hit().docId());
             }
             case Terms.Request.LoadPointTree load -> Optional.of(new Action.LoadPointTree(load.field(), load.serial()));
@@ -750,8 +763,15 @@ public final class App {
                     yield Optional.<Action>empty();
                 }
                 documents.showPoint(document.field());
-                screen = Screen.DOCUMENTS;
+                jump(Screen.DOCUMENTS);
                 yield loadDocument(document.docId());
+            }
+            case Terms.Request.Search searched -> {
+                if (search == null) {
+                    yield Optional.<Action>empty();
+                }
+                jump(Screen.SEARCH);
+                yield searchAction(search.termQuery(searched.field(), searched.term()));
             }
             case Terms.Request.Export asked -> {
                 if (export != null) {
@@ -786,7 +806,7 @@ public final class App {
                     yield Optional.<Action>empty();
                 }
                 documents.showSearchHit(document.docId(), search.matchesQuery());
-                screen = Screen.DOCUMENTS;
+                jump(Screen.DOCUMENTS);
                 yield loadDocument(document.docId());
             }
             case Search.Request.View view -> {
@@ -794,7 +814,7 @@ public final class App {
                     yield Optional.<Action>empty();
                 }
                 documents.showSearchHit(view.docId(), search.matchesQuery());
-                screen = Screen.DOCUMENTS;
+                jump(Screen.DOCUMENTS);
                 Optional<Action> action = documentsAction(documents.viewMatches(
                         view.docId(), view.field(), view.index(), view.spans(), view.matchCount()));
                 documents.forgetUnsentMatches();
@@ -903,7 +923,7 @@ public final class App {
         if (documents == null) {
             return Optional.empty();
         }
-        screen = Screen.DOCUMENTS;
+        jump(Screen.DOCUMENTS);
         return documentsAction(Optional.of(documents.startFilter(label, params, startDoc)));
     }
 
@@ -971,7 +991,7 @@ public final class App {
             when step.walk() == Documents.Walk.TERM_DOCS ->
                 terms == null ? Optional.empty() : termsAction(terms.step(step.forward()));
             case Documents.Request.Analyze analyze -> {
-                screen = Screen.ANALYSIS;
+                jump(Screen.ANALYSIS);
                 yield analysisAction(
                         analysis.analyzeValue("doc " + analyze.docId() + " · " + analyze.field(), analyze.text()));
             }
@@ -981,23 +1001,37 @@ public final class App {
                 if (search == null) {
                     yield Optional.<Action>empty();
                 }
-                screen = Screen.SEARCH;
+                jump(Screen.SEARCH);
                 yield searchAction(search.moreLikeThis(like.docId()));
             }
             case Documents.Request.SearchKnn knn -> {
                 if (search == null) {
                     yield Optional.<Action>empty();
                 }
-                screen = Screen.SEARCH;
+                jump(Screen.SEARCH);
                 yield searchAction(search.knnQuery(knn.field(), knn.docId()));
             }
             case Documents.Request.SearchDocValues values -> {
                 if (search == null) {
                     yield Optional.<Action>empty();
                 }
-                screen = Screen.SEARCH;
+                jump(Screen.SEARCH);
                 yield searchAction(
                         search.docValuesQuery(values.field(), values.number(), values.hex(), values.values()));
+            }
+            case Documents.Request.ShowCommit show -> {
+                if (commits == null) {
+                    yield Optional.<Action>empty();
+                }
+                jump(Screen.COMMITS);
+                yield commitsAction(commits.showSegment(show.index(), show.segment()));
+            }
+            case Documents.Request.BrowseTerms browse -> {
+                if (terms == null) {
+                    yield Optional.<Action>empty();
+                }
+                jump(Screen.TERMS);
+                yield termsAction(terms.show(browse.field(), browse.term(), browse.points()));
             }
         };
     }
@@ -1586,7 +1620,7 @@ public final class App {
                     notice = new Notice.NotSupported("Term's docs", reason());
                     return Optional.empty();
                 }
-                screen = Screen.TERMS;
+                jump(Screen.TERMS);
                 return termsAction(terms.browse(top.get().field(), top.get().term()));
             }
             return overview.selectedField()
@@ -1600,7 +1634,7 @@ public final class App {
                 return Optional.empty();
             }
             if (top.isPresent() && search != null) {
-                screen = Screen.SEARCH;
+                jump(Screen.SEARCH);
                 return searchAction(
                         search.termQuery(top.get().field(), top.get().term()));
             }
@@ -1713,6 +1747,9 @@ public final class App {
             }
             return Optional.of(new Action.Quit());
         }
+        if (key.code() == KeyCode.BACKSPACE) {
+            return goBack();
+        }
         if (!isChar) {
             return screenKey(key);
         }
@@ -1723,25 +1760,25 @@ public final class App {
             case '1' -> showIf(hasIndex() && supported(Screen.OVERVIEW), Screen.OVERVIEW);
             case '2' -> {
                 if (hasIndex() && supported(Screen.DOCUMENTS)) {
-                    screen = Screen.DOCUMENTS;
+                    show(Screen.DOCUMENTS);
                     return initialRequest();
                 }
             }
             case '3' -> {
                 if (hasIndex() && supported(Screen.TERMS)) {
-                    screen = Screen.TERMS;
+                    show(Screen.TERMS);
                     return initialRequest();
                 }
             }
             case '4' -> {
                 if (hasIndex() && supported(Screen.COMMITS)) {
-                    screen = Screen.COMMITS;
+                    show(Screen.COMMITS);
                     return initialRequest();
                 }
             }
             case '5' -> showIf(hasIndex() && supported(Screen.SEARCH), Screen.SEARCH);
             case '6' -> {
-                screen = Screen.ANALYSIS;
+                show(Screen.ANALYSIS);
                 return initialRequest();
             }
             case '7' -> showIf(check != null && supported(Screen.CHECK), Screen.CHECK);
@@ -1869,8 +1906,57 @@ public final class App {
 
     private void showIf(boolean available, Screen screen) {
         if (available) {
-            this.screen = screen;
+            show(screen);
         }
+    }
+
+    /** Shows {@code to} as a number key does: Backspace retraces no jump from before it (ADR 0052). */
+    private void show(Screen to) {
+        back.clear();
+        screen = to;
+    }
+
+    /**
+     * Shows {@code to} as a jump from the shown screen, which Backspace goes back to (ADR 0052). The
+     * oldest jump is forgotten beyond {@link #BACK_DEPTH}.
+     */
+    private void jump(Screen to) {
+        if (to != screen) {
+            back.push(screen);
+            if (back.size() > BACK_DEPTH) {
+                back.removeLast();
+            }
+        }
+        screen = to;
+    }
+
+    /**
+     * Backspace: the screen that the last jump came from, as it was left, skipping those the open
+     * index can't show anymore (ADR 0052). Returns what it has to fetch first.
+     */
+    private Optional<Action> goBack() {
+        while (!back.isEmpty()) {
+            Screen to = back.pop();
+            if (canShow(to)) {
+                screen = to;
+                return initialRequest();
+            }
+        }
+        return Optional.empty();
+    }
+
+    /** Whether {@code screen} is there to go back to: the open index supports it, and it was made. */
+    private boolean canShow(Screen screen) {
+        boolean made = switch (screen) {
+            case OVERVIEW -> overview != null;
+            case DOCUMENTS -> documents != null;
+            case TERMS -> terms != null;
+            case COMMITS -> commits != null;
+            case SEARCH -> search != null;
+            case ANALYSIS -> true;
+            case CHECK -> check != null;
+        };
+        return made && supports(screen);
     }
 
     public void render(Frame frame) {
@@ -1929,12 +2015,13 @@ public final class App {
     private String footerKeys() {
         String reopen = overview != null && opened.supports(Feature.REOPEN) ? "R reopen   " : "";
         String cancel = scan != null ? "Esc cancel scan   " : export != null ? "Esc cancel export   " : "";
+        String screens = "1-7 screen   " + (back.isEmpty() ? "" : "⌫ back   ");
         if (screen == Screen.ANALYSIS) {
             if (analysis.prompting()) {
                 return analysis.keys();
             }
             return hasIndex()
-                    ? " " + cancel + "q quit   o open   c close   1-7 screen   " + analysis.keys()
+                    ? " " + cancel + "q quit   o open   c close   " + screens + analysis.keys()
                     : " q quit   o open   " + analysis.keys();
         }
         if (opened == null) {
@@ -1942,10 +2029,10 @@ public final class App {
         }
         if (screen == Screen.COMMITS) {
             String keys = commits != null ? commits.keys() : "r read again   ⏎ segments   Tab panel   ↑↓";
-            return " " + cancel + "q quit   o open   c close   " + reopen + "1-7 screen   " + keys;
+            return " " + cancel + "q quit   o open   c close   " + reopen + screens + keys;
         }
         if (screen == Screen.CHECK && check != null) {
-            return " " + cancel + "q quit   o open   c close   " + reopen + "1-7 screen   " + check.keys();
+            return " " + cancel + "q quit   o open   c close   " + reopen + screens + check.keys();
         }
         if (overview == null) {
             return " q quit   o open   c close   1-7 screen";
@@ -1955,13 +2042,13 @@ public final class App {
                 return search.keys();
             }
             String stop = scan != null || search.running() ? "Esc cancel   " : "";
-            return " " + stop + "q quit   o open   c close   1-7 screen   " + search.keys();
+            return " " + stop + "q quit   o open   c close   " + screens + search.keys();
         }
         if (screen == Screen.TERMS) {
             if (terms.prompting()) {
                 return " type to seek   ⏎/Esc done";
             }
-            return " " + cancel + "q quit   o open   c close   1-7 screen   " + terms.keys();
+            return " " + cancel + "q quit   o open   c close   " + screens + terms.keys();
         }
         if (screen == Screen.DOCUMENTS) {
             if (documents.viewer().isPresent()) {
@@ -1976,20 +2063,19 @@ public final class App {
             } else if (cancel.isEmpty() && documents.filterBuilding()) {
                 cancel = "Esc stop filter   ";
             }
-            return " " + cancel + "q quit   o open   c close   1-7 screen   " + documents.keys();
+            return " " + cancel + "q quit   o open   c close   " + screens + documents.keys();
         }
         if (scan != null) {
-            return " Esc cancel scan   q quit   o open   c close   " + reopen
-                    + "1-7 screen   s/S sort   Tab panel   ↑↓";
+            return " Esc cancel scan   q quit   o open   c close   " + reopen + screens + "s/S sort   Tab panel   ↑↓";
         }
         if (overview.selectedTopTerm().isPresent()) {
             String docs = opened.supports(Feature.TERMS) ? "⏎ term's docs   " : "";
             String searchTerm = opened.supports(Feature.SEARCH) ? "/ search term   " : "";
-            return " q quit   o open   c close   " + reopen + "1-7 screen   " + docs + searchTerm + "+/- top N   "
+            return " q quit   o open   c close   " + reopen + screens + docs + searchTerm + "+/- top N   "
                     + "s/S sort   Tab panel   ↑↓";
         }
         String topTerms = opened.supports(Feature.TOP_TERMS) ? "⏎ terms   a all terms   +/- top N   " : "";
-        return " q quit   o open   c close   " + reopen + "1-7 screen   " + topTerms + "s/S sort   Tab panel   ↑↓";
+        return " q quit   o open   c close   " + reopen + screens + topTerms + "s/S sort   Tab panel   ↑↓";
     }
 
     private void renderAbout(Frame frame, Rect body) {

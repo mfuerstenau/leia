@@ -1050,6 +1050,77 @@ class DocumentsTest {
     }
 
     @Test
+    void cShowsTheSegmentOfTheDocumentOnTheCommitsScreen() {
+        Documents documents = segmented();
+        documents.loaded(document(1));
+        assertThat(documents.keys()).contains("C commit");
+        assertThat(documents.handleKey(key('C'))).hasValue(new Request.ShowCommit(0, "_0"));
+        // In the second index directory, its own _0.
+        documents.loaded(document(4));
+        assertThat(documents.handleKey(key('C'))).hasValue(new Request.ShowCommit(1, "_0"));
+
+        // Without segments, there is nothing to show.
+        Documents plain = documents();
+        plain.loaded(document(1));
+        assertThat(plain.keys()).doesNotContain("C commit");
+        assertThat(plain.handleKey(key('C'))).isEmpty();
+
+        Documents withoutCommits = segmented().withFeatures(Set.of(Feature.DOCUMENTS, Feature.TERMS));
+        withoutCommits.loaded(document(1));
+        assertThat(withoutCommits.handleKey(key('C'))).hasValue(new Request.Unsupported("Commits"));
+    }
+
+    @Test
+    void tShowsTheSelectedFieldOnTheTermsScreen() {
+        Documents documents = new Documents(
+                List.of(
+                        schema("id", 0),
+                        schema("body", 1, IndexOptions.DOCS_AND_FREQS_AND_POSITIONS, true),
+                        new IndexField(
+                                "rank",
+                                2,
+                                IndexOptions.NONE,
+                                false,
+                                false,
+                                false,
+                                DocValuesType.SORTED_NUMERIC,
+                                1,
+                                8,
+                                0,
+                                Optional.empty(),
+                                Optional.empty(),
+                                Optional.empty()),
+                        schema("extra", 3, IndexOptions.NONE, false)),
+                5);
+        documents.loaded(document(0));
+        assertThat(documents.keys()).contains("T terms");
+        assertThat(documents.handleKey(key('T'))).hasValue(new Request.BrowseTerms("id", Optional.empty(), false));
+
+        // From a hit of the terms screen, its field opens at its term; another field doesn't.
+        documents.showHit(hit("body", 2, 1));
+        documents.loaded(document(2));
+        assertThat(documents.handleKey(key('T')))
+                .hasValue(new Request.BrowseTerms("body", Optional.of(new BytesValue("red", false)), false));
+        documents.handleKey(key(KeyCode.UP));
+        assertThat(documents.handleKey(key('T'))).hasValue(new Request.BrowseTerms("id", Optional.empty(), false));
+
+        // A field with points and no terms opens its points; one with neither says so.
+        documents.handleKey(key(KeyCode.DOWN));
+        documents.handleKey(key(KeyCode.DOWN));
+        assertThat(documents.handleKey(key('T'))).hasValue(new Request.BrowseTerms("rank", Optional.empty(), true));
+        documents.handleKey(key(KeyCode.DOWN));
+        assertThat(documents.handleKey(key('T'))).isEmpty();
+        assertThat(render(documents, 100, 20)).contains("extra has no terms");
+        documents.handleKey(key(KeyCode.UP));
+        assertThat(render(documents, 100, 20)).doesNotContain("has no terms");
+
+        Documents withoutTerms = documents().withFeatures(Set.of(Feature.DOCUMENTS));
+        withoutTerms.loaded(document(0));
+        assertThat(withoutTerms.keys()).doesNotContain("T terms");
+        assertThat(withoutTerms.handleKey(key('T'))).hasValue(new Request.Unsupported("Terms"));
+    }
+
+    @Test
     void aPinnedSegmentBoundsTheSteps() {
         Documents documents = segmented();
         documents.loaded(document(0));

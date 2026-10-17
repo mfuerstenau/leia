@@ -172,6 +172,7 @@ where it is: if it is deleted or replaced, no more jars can be added until leia 
 | `X` | list the loaded jars and add more (see [Jars](#jars)) |
 | `R` | reopen the open index, if another process committed to it since: the screens keep their place, and the tab line says `Reopened: segments_N`, `Unchanged: segments_N` (with several indexes, how many changed) or why it failed |
 | `1` … `7` | switch between the overview, the documents, the terms, the commits, the search, the analysis and the check; only the analysis works without an open index |
+| `Backspace` | go back to the screen that the last jump came from (a term's documents, a hit, a search from a document, …), as it was left; the footer shows `⌫ back` while there is one, and `1` … `7`, an open or a close forget the jumps |
 | `Esc` | stop the running term scans, then a running export, or on the search and check screens the running search or check; with none running, quit |
 | `q`, `Ctrl+C` | quit |
 
@@ -217,6 +218,8 @@ scans it again; a smaller N needs no new scan.
 | `e` | hide or show the fields in which the document has nothing |
 | `m` | search for documents like this one (More-Like-This) on the search screen |
 | `E` | export the document as JSON to a file, or copy it (see below) |
+| `T` | show the selected field on the terms screen: at the term of the posting that opened the document, if it is that field's, otherwise from its first term; a field with points and no terms shows its BKD tree |
+| `C` | show the document's segment on the commits screen, in the opened commit, with its details |
 | `Tab` | switch between the field table and the details of the selected field |
 | `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the fields or scroll the details |
 
@@ -321,6 +324,7 @@ takes about 1 MiB.
 | `/` | seek: type a text, and the terms start from the first one that is not smaller; `Enter` or `Esc` ends it, and an empty text goes back to the first term |
 | `Enter` | go to the next column; on a posting, show its document on the documents screen |
 | `e` | export the selected field's terms to a file |
+| `s` | search for the documents with the selected term on the search screen; on the postings, with their term |
 | `b` | with a filter on the documents screen, show only the postings in it, or all of them again |
 | `t` | on a point field, show its values as int, long, float, double, lat/lon, address or hex, as fit their size; the documents screen shows them the same way |
 | `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the focused column |
@@ -339,7 +343,7 @@ a field with postings and points has two. Its row shows the field's BKD tree (AD
 of terms: the title says how many segments, points and documents it has, and a row per segment its
 points and their range. `Enter` expands a segment or a cell into its children, fetched a level at a
 time, and collapses it again; on a leaf (`•`), it lists the leaf's points with their documents on
-the right, deleted ones in red, and `Enter` on a point shows its document. `/` and `e` work on terms
+the right, deleted ones in red, and `Enter` on a point shows its document. `/`, `e` and `s` work on terms
 only. Points are shown as `t` chooses, a guess from their size at first (see Documents). A reopen
 that finds a new commit fetches the tree again, collapsed.
 

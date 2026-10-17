@@ -202,6 +202,18 @@ public final class Documents {
 
         /** A key that the index lacks a feature for (ADR 0044); {@code what} names it. Nothing changed. */
         record Unsupported(String what) implements Request {}
+
+        /**
+         * Show the segment {@code segment} of the index directory at {@code index} in its opened
+         * commit on the commits screen (ADR 0052).
+         */
+        record ShowCommit(int index, String segment) implements Request {}
+
+        /**
+         * Show {@code field} on the terms screen (ADR 0052): with {@code points} its BKD tree, with a
+         * term its terms from there on, and otherwise its terms from the first one.
+         */
+        record BrowseTerms(String field, Optional<BytesValue> term, boolean points) implements Request {}
     }
 
     /** The filter to locate a document in once it is loaded: its serial and the backend's id. */
@@ -410,8 +422,11 @@ public final class Documents {
     /** The segment that ←/→ stay in (ADR 0051); or null. */
     private SegmentStart pinned;
 
-    /** Said about the segments until the next key, such as that ← is at the pin's first document; or null. */
-    private String segmentNote;
+    /**
+     * Said about the last key until the next one, such as that ← is at the pin's first document, or
+     * that a field has no terms; or null.
+     */
+    private String note;
 
     /**
      * The segment that {@code <}/{@code >} step to the first match of while that step is under way:
@@ -537,7 +552,7 @@ public final class Documents {
 
     /** Forgets what was said about the last move: another screen shows a document, or a filter starts. */
     private void clearNotes() {
-        segmentNote = null;
+        note = null;
         if (filter != null) {
             filter.clearNote();
         }
@@ -546,7 +561,7 @@ public final class Documents {
     /** Unpins the segment if {@code docId} is outside it, and says so. */
     private void leaveSegment(int docId) {
         if (pinned != null && !pinned.contains(docId)) {
-            segmentNote = "left segment " + pinned.name();
+            note = "left segment " + pinned.name();
             pinned = null;
         }
     }
@@ -571,7 +586,7 @@ public final class Documents {
                 documents.docId = same.get().docBase()
                         + Math.clamp(docId - pinned.docBase(), 0, same.get().maxDoc() - 1);
             } else {
-                documents.segmentNote = "segment " + pinned.name() + " is gone";
+                documents.note = "segment " + pinned.name() + " is gone";
             }
         }
         documents.selectField = selectedField().map(DocumentField::name).orElse(null);
@@ -1403,8 +1418,9 @@ public final class Documents {
      * the documents nearest to its vector with {@code N}, cycles
      * the number format with {@code x} and the point format with {@code t}, hides empty fields with
      * {@code e}, searches for documents like this one with {@code m}, rebuilds the field's indexed
-     * terms and points with {@code r}, switches the focus with Tab, and moves the selection or
-     * scrolls the details.
+     * terms and points with {@code r}, shows the field on the terms screen with {@code T} and the
+     * document's segment on the commits screen with {@code C} (ADR 0052), switches the focus with
+     * Tab, and moves the selection or scrolls the details.
      */
     public Optional<Request> handleKey(KeyEvent key) {
         if (viewer != null) {
@@ -1443,7 +1459,7 @@ public final class Documents {
                 return moveThroughFilter(false);
             }
             if (pinned != null && from - 1 < pinned.docBase()) {
-                segmentNote = "first document of " + pinned.name();
+                note = "first document of " + pinned.name();
                 return Optional.empty();
             }
             return from > 0 ? Optional.of(new Request.Document(from - 1)) : Optional.empty();
@@ -1453,7 +1469,7 @@ public final class Documents {
                 return moveThroughFilter(true);
             }
             if (pinned != null && from + 1 >= pinned.end()) {
-                segmentNote = "last document of " + pinned.name();
+                note = "last document of " + pinned.name();
                 return Optional.empty();
             }
             return from < maxDoc - 1 ? Optional.of(new Request.Document(from + 1)) : Optional.empty();
@@ -1542,6 +1558,12 @@ public final class Documents {
                 case 'E' -> {
                     return Optional.ofNullable(document).map(doc -> new Request.Export(doc.docId()));
                 }
+                case 'C' -> {
+                    return segmentOf(from).map(segment -> new Request.ShowCommit(segment.index(), segment.name()));
+                }
+                case 'T' -> {
+                    return browseTerms();
+                }
                 case 'e' -> {
                     hideEmpty = !hideEmpty;
                     updateRows(selectedField().map(DocumentField::name).orElse(null));
@@ -1563,6 +1585,30 @@ public final class Documents {
     }
 
     /**
+     * {@code T}: the selected field on the terms screen (ADR 0052), at the hit's term if the terms
+     * screen opened the document from that field; its points if it has no terms; or a note if it has
+     * neither.
+     */
+    private Optional<Request> browseTerms() {
+        Optional<DocumentField> selected = selectedField();
+        if (selected.isEmpty()) {
+            return Optional.empty();
+        }
+        String name = selected.get().name();
+        Optional<IndexField> field = Optional.ofNullable(schema.get(name));
+        if (field.filter(f -> f.indexOptions() != IndexOptions.NONE).isPresent()) {
+            Optional<BytesValue> term =
+                    hit != null && hit.field().equals(name) ? Optional.of(hit.term()) : Optional.empty();
+            return Optional.of(new Request.BrowseTerms(name, term, false));
+        }
+        if (field.filter(f -> f.pointDimensionCount() > 0).isPresent()) {
+            return Optional.of(new Request.BrowseTerms(name, Optional.empty(), true));
+        }
+        note = TextFormat.escapeControl(name) + " has no terms";
+        return Optional.empty();
+    }
+
+    /**
      * {@code <}/{@code >}: the first document of the previous or next segment from {@code from}'s,
      * or with a filter, its first match. The pin moves along.
      */
@@ -1573,7 +1619,7 @@ public final class Documents {
         }
         int at = segments.indexOf(current.get()) + (forward ? 1 : -1);
         if (at < 0 || at >= segments.size()) {
-            segmentNote = forward ? "no next segment" : "no previous segment";
+            note = forward ? "no next segment" : "no previous segment";
             return Optional.empty();
         }
         SegmentStart target = segments.get(at);
@@ -1606,6 +1652,8 @@ public final class Documents {
             case 'N' -> nearest() ? Optional.empty() : Optional.of("Nearest");
             case 'm' -> supports(Feature.SEARCH) ? Optional.empty() : Optional.of("Similar");
             case 'b' -> supports(Feature.FILTER) ? Optional.empty() : Optional.of("Filter");
+            case 'C' -> supports(Feature.COMMITS) ? Optional.empty() : Optional.of("Commits");
+            case 'T' -> supports(Feature.TERMS) ? Optional.empty() : Optional.of("Terms");
             default -> Optional.empty();
         };
     }
@@ -1631,6 +1679,8 @@ public final class Documents {
         keyIf(keys, supports(Feature.SEARCH), "m similar");
         keyIf(keys, supports(Feature.RECONSTRUCT), "r rebuild");
         keyIf(keys, supports(Feature.STORED_VALUES), "E export");
+        keyIf(keys, supports(Feature.TERMS), "T terms");
+        keyIf(keys, supports(Feature.COMMITS) && !segments.isEmpty(), "C commit");
         return keys.append("Tab panel   ↑↓").toString();
     }
 
@@ -1744,7 +1794,7 @@ public final class Documents {
     private Line title() {
         List<Span> spans = new ArrayList<>();
         spans.add(Span.raw(" Document "));
-        String segment = Stream.of(pinned != null ? "segment " + pinned.name() : null, segmentNote)
+        String segment = Stream.of(pinned != null ? "segment " + pinned.name() : null, note)
                 .filter(Objects::nonNull)
                 .collect(Collectors.joining(" · "));
         if (!segment.isEmpty()) {

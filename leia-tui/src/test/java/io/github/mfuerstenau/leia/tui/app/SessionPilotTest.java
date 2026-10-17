@@ -302,11 +302,11 @@ class SessionPilotTest {
         pilot.press('8');
         pilot.press(KeyCode.ENTER);
         settle();
-        for (int i = 0; i < 30 && !screen().contains("N finds the nearest"); i++) {
+        for (int i = 0; i < 30 && !screen().contains("┌ embedding "); i++) {
             pilot.press(KeyCode.DOWN);
             settle();
         }
-        assertThat(screen()).contains("[1.0, 0.0, 0.0, 0.0] 4d", "N finds the nearest");
+        assertThat(screen()).contains("[1.0, 0.0, 0.0, 0.0] 4d", "Field has   vectors 4d float");
 
         pilot.press('N');
         settle();

@@ -512,6 +512,48 @@ class TermsTest {
     }
 
     @Test
+    void sSearchesTheSelectedTermOrThePostingsTerm() {
+        Terms terms = loaded();
+        assertThat(terms.keys()).contains("s search");
+        // On the fields column, the selected term.
+        assertThat(terms.handleKey(key('s'))).hasValue(new Request.Search("id", text("a")));
+
+        terms.handleKey(key(KeyCode.RIGHT));
+        terms.handleKey(key(KeyCode.DOWN));
+        assertThat(terms.handleKey(key('s'))).hasValue(new Request.Search("id", text("b")));
+        // On the postings column, the postings' term, which is a's until b's are in.
+        terms.handleKey(key(KeyCode.RIGHT));
+        assertThat(terms.handleKey(key('s'))).hasValue(new Request.Search("id", text("a")));
+    }
+
+    @Test
+    void sNeedsSearchAndWorksOnTermsOnly() {
+        Terms terms = terms().withFeatures(Set.of(Feature.TERMS, Feature.POSTINGS));
+        assertThat(terms.keys()).doesNotContain("s search");
+        assertThat(terms.handleKey(key('s'))).hasValue(new Request.Unsupported("Search term"));
+
+        Terms points = codeTree();
+        assertThat(points.handleKey(key('s'))).isEmpty();
+        assertThat(render(points)).contains("s searches terms only");
+    }
+
+    @Test
+    void showOpensAFieldsTermsOrItsPoints() {
+        Terms terms = pointTerms();
+        terms.initialRequest();
+
+        // Points: the field's points row, which fetches its tree.
+        assertThat(terms.show("code", Optional.empty(), true)).hasValue(new Request.LoadPointTree("code", 1));
+        // Terms without a term: the field's terms from the first one, with the focus on them.
+        assertThat(terms.show("code", Optional.empty(), false)).hasValue(termsRequest("code", null, false));
+        terms.termsLoaded(termsRequest("code", null, false), page(List.of("x", "y"), null));
+        terms.handleKey(key(KeyCode.DOWN));
+        assertThat(terms.handleKey(key('s'))).hasValue(new Request.Search("code", text("y")));
+        // A row the screen doesn't have.
+        assertThat(terms.show("price", Optional.empty(), false)).isEmpty();
+    }
+
+    @Test
     void repliesOfAnotherTreeAreDropped() {
         Terms terms = codeTree();
         terms.handleKey(key(KeyCode.RIGHT));

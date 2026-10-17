@@ -188,6 +188,29 @@ other tests use their own indexes and the Lucene 9 and 8 indexes from `LegacyInd
   Put `segments_4` back and press `R`: the tab line says `Reopened: segments_4; rebuilding the
   filter`, and the title then says `1 of 486`, on the same document.
 
+## Jumps between screens worth a try
+
+Cross-screen navigation (ADR 0052). `⌫ back` in the footer says when `Backspace` has somewhere to go.
+
+- **Terms → documents → commits, and back:** on the terms screen, `labels`, any term, `Enter` twice
+  and `Enter` on a posting shows its document. `C` there opens the commits screen on `segments_4`,
+  the opened commit, with the document's segment selected (`_1` for a document in 200–399) and its
+  details shown. `Backspace` shows the document again, as it was, then the terms with the same term
+  and posting selected; one more does nothing, and `⌫ back` is gone.
+- **Documents → terms (`T`):** on that document, `T` on `labels` opens the terms screen at the
+  hit's term with the postings focused; `T` on `title` opens `title` from its first term; `T` on
+  `price` (points, no terms) opens `price pt 1×8`'s tree; `T` on `checksum` (doc values only) says
+  `checksum has no terms` in the document's title.
+- **Terms → search (`s`):** on `category`, any term, `s` runs the term query on the search screen;
+  on the postings column, `s` searches the postings' term. On `price pt 1×8`, `s` says
+  `s searches terms only`.
+- **The number keys forget:** after a jump, `2` (or any of `1`–`7`) clears the way back, and
+  `Backspace` does nothing. In a prompt (`i` on the documents screen, `/` on the terms screen, the
+  viewer), `Backspace` edits the text as before.
+- **Old indexes:** on the `lucene3` test index, `C` and `T` work as on the demo index, every
+  runtime has commits and terms. `s` on the terms screen says `Search term: not for Lucene 3.x` and
+  is not in the legend, as `/` on the overview's top terms: the term query needs `SEARCH`.
+
 ## Analysis worth a try
 
 The analysis screen (`6`) needs no index, but these go with the demo index's text:

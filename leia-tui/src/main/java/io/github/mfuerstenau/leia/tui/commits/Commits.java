@@ -158,6 +158,12 @@ public final class Commits {
     private int detailsScroll;
 
     /**
+     * The segment to select once the opened commit of the shown index directory is in, as the
+     * documents screen asked for (ADR 0052); or null.
+     */
+    private String wantedSegment;
+
+    /**
      * The commits screen of these index directories, as shown; at least one. {@code readerOpen} says
      * whether a reader is open on one of the commits.
      */
@@ -232,7 +238,7 @@ public final class Commits {
                         i -> unreadableCommits.get(i).segmentsFile().equals(file.get()));
                 row = at.isPresent() ? OptionalInt.of(commits.size() + at.getAsInt()) : at;
             }
-            if (row.isEmpty()) {
+            if (row.isEmpty() || wantedSegment != null) {
                 row = firstIndex(commits.size(), i -> commits.get(i).current());
             }
             commitRow = row.orElse(0);
@@ -250,10 +256,53 @@ public final class Commits {
     public void commitLoaded(int index, long generation, GetCommitResult result) {
         pending.remove(new Request.LoadCommit(index, generation));
         details.put(new CommitKey(index, generation), new Fetched.Done<>(result));
+        if (wantedSegment != null
+                && index == indexRow
+                && selectedCommit()
+                        .filter(commit -> commit.generation() == generation)
+                        .isPresent()) {
+            selectSegment(result, wantedSegment);
+        }
+    }
+
+    /**
+     * Shows the segment {@code segment} of the opened commit of the index directory at {@code
+     * index}, with its details, as the documents screen asks for (ADR 0052). Returns what that
+     * needs fetched first; the segment is selected once it is in.
+     */
+    public Optional<Request> showSegment(int index, String segment) {
+        selectIndex(index);
+        OptionalInt current = commits()
+                .map(commits -> firstIndex(commits.size(), i -> commits.get(i).current()))
+                .orElse(OptionalInt.empty());
+        if (current.isPresent() && current.getAsInt() != commitRow) {
+            commitRow = current.getAsInt();
+            segmentRow = 0;
+            detailsScroll = 0;
+        }
+        focus(Focus.SEGMENTS);
+        wantedSegment = segment;
+        selectedResult().ifPresent(result -> selectSegment(result, segment));
+        return nextRequest();
+    }
+
+    /** Selects the segment {@code name} of {@code result}, if it has it, and forgets the wanted one. */
+    private void selectSegment(GetCommitResult result, String name) {
+        wantedSegment = null;
+        firstIndex(
+                        result.segments().size(),
+                        i -> result.segments().get(i).name().equals(name))
+                .ifPresent(row -> {
+                    segmentRow = row;
+                    detailsScroll = 0;
+                });
     }
 
     public void commitFailed(int index, long generation, String error) {
         pending.remove(new Request.LoadCommit(index, generation));
+        if (index == indexRow) {
+            wantedSegment = null;
+        }
         details.put(new CommitKey(index, generation), new Fetched.Failed<>(error));
     }
 
@@ -321,6 +370,8 @@ public final class Commits {
      * with {@code r}.
      */
     public Optional<Request> handleKey(KeyEvent key) {
+        // A key moves on from the segment that was asked for.
+        wantedSegment = null;
         if (key.isChar('r')) {
             // The commits stay until the new ones are in, so the selection can stay on its commit.
             int index = indexRow;

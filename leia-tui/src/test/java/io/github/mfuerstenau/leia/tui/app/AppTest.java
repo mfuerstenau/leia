@@ -657,7 +657,7 @@ class AppTest {
         String screen = TestScreens.render(app::render, 60, 30);
         assertThat(screen).contains(" q quit   o open   c close   1-7 screen   ←→ doc   i go to");
         assertThat(screen.lines().toList().getLast())
-                .isEqualTo(" r rebuild   E export   Tab panel   ↑↓" + " ".repeat(22));
+                .isEqualTo(" r rebuild   E export   T terms   Tab panel   ↑↓" + " ".repeat(12));
     }
 
     @Test
@@ -1340,6 +1340,124 @@ class AppTest {
         assertThat(app.handleKey(key(KeyCode.LEFT))).isEmpty();
     }
 
+    /** On the terms screen of an index of 3 documents in segment _0, with id's terms "1" and "2". */
+    private static App appOnSegmentTerms() {
+        App app = app();
+        app.opened(
+                new GetIndexStatsResult(
+                        "/data/idx",
+                        "MMapDirectory",
+                        1,
+                        3,
+                        3,
+                        List.of(index("/data/idx", 0, 3, "segments_1")),
+                        List.of(field("id", 0), field("body", 1))),
+                List.of());
+        assertThat(app.handleKey(key('3'))).hasValue(loadTerms("id", null));
+        app.termsLoaded(loadTerms("id", null), termPage("1", "2"));
+        app.postingsLoaded(loadPostings("id", "1"), postingsOf());
+        return app;
+    }
+
+    @Test
+    void backspaceRetracesTheJumps() {
+        App app = appOnSegmentTerms();
+        assertThat(legend(app)).doesNotContain("⌫ back");
+        assertThat(app.handleKey(key(KeyCode.BACKSPACE))).isEmpty();
+
+        // Terms ⏎ → documents.
+        app.handleKey(key(KeyCode.ENTER));
+        app.handleKey(key(KeyCode.ENTER));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(load(0));
+        app.documentLoaded(document(0));
+        assertThat(legend(app)).contains("⌫ back", "C commit", "T terms");
+
+        // Documents C → the commits screen, on the document's segment of the opened commit.
+        assertThat(app.handleKey(key('C'))).hasValue(new Action.LoadCommits(0));
+        assertThat(app.commitsLoaded(0, list(commit(2, false), commit(1, true))))
+                .hasValue(new Action.LoadCommit(0, 1));
+        app.commitLoaded(0, 1, new GetCommitResult(commit(1, true), List.of(commitSegment("_0", 0, 3)), List.of()));
+        assertThat(legend(app)).contains("Segments of segments_1", "Segment _0", "⏎ documents", "⌫ back");
+
+        // Back to the document as it was left, then to the terms.
+        assertThat(app.handleKey(key(KeyCode.BACKSPACE))).isEmpty();
+        assertThat(legend(app)).contains("Document ", "#0 of 0–2");
+        assertThat(app.handleKey(key(KeyCode.BACKSPACE))).isEmpty();
+        assertThat(legend(app)).contains("id (/ seeks)", "Postings (2)").doesNotContain("⌫ back");
+        assertThat(app.handleKey(key(KeyCode.BACKSPACE))).isEmpty();
+        assertThat(legend(app)).contains("id (/ seeks)");
+    }
+
+    @Test
+    void aNumberKeyForgetsTheJumps() {
+        App app = appOnSegmentTerms();
+        app.handleKey(key(KeyCode.ENTER));
+        app.handleKey(key(KeyCode.ENTER));
+        app.handleKey(key(KeyCode.ENTER));
+        app.documentLoaded(document(0));
+
+        app.handleKey(key('2'));
+        assertThat(legend(app)).doesNotContain("⌫ back");
+        app.handleKey(key(KeyCode.BACKSPACE));
+        assertThat(legend(app)).contains("Document ");
+    }
+
+    @Test
+    void backspaceInAPromptEditsIt() {
+        App app = appOnSegmentTerms();
+        app.handleKey(key(KeyCode.ENTER));
+        app.handleKey(key(KeyCode.ENTER));
+        app.handleKey(key(KeyCode.ENTER));
+        app.documentLoaded(document(0));
+
+        app.handleKey(key('i'));
+        app.handleKey(key('1'));
+        app.handleKey(key(KeyCode.BACKSPACE));
+        // Still the documents screen, with the prompt open.
+        assertThat(legend(app)).contains("Document ", "⌫ back");
+        app.handleKey(key(KeyCode.ESCAPE));
+        app.handleKey(key(KeyCode.BACKSPACE));
+        assertThat(legend(app)).contains("id (/ seeks)");
+    }
+
+    @Test
+    void tOpensTheFieldOnTheTermsScreenAndSSearchesTheTerm() {
+        App app = appOnSegmentTerms();
+        app.handleKey(key(KeyCode.ENTER));
+        app.handleKey(key(KeyCode.ENTER));
+        app.handleKey(key(KeyCode.ENTER));
+        app.documentLoaded(document(0));
+        app.handleKey(key('1'));
+        app.handleKey(key('2'));
+
+        // The hit's field opens at the hit's term, whose page is fetched again.
+        assertThat(app.handleKey(key('T'))).hasValue(loadTerms("id", "1"));
+        assertThat(legend(app)).contains("⌫ back");
+
+        // s on the terms screen searches for the term.
+        assertThat(app.handleKey(key('s')))
+                .hasValueSatisfying(action -> assertThat(action).isInstanceOf(Action.StartSearch.class));
+        assertThat(legend(app)).contains("5 Search");
+        app.handleKey(key(KeyCode.BACKSPACE));
+        app.handleKey(key(KeyCode.BACKSPACE));
+        assertThat(legend(app)).contains("Document ").doesNotContain("⌫ back");
+    }
+
+    @Test
+    void theJumpsRefuseWhatAnOldLuceneIndexLacks() {
+        App app = oldLuceneApp();
+        assertThat(app.handleKey(key('2'))).isEqualTo(load(0));
+        app.documentLoaded(document(0));
+        assertThat(legend(app)).doesNotContain("C commit");
+        assertThat(app.handleKey(key('C'))).isEmpty();
+        assertThat(render(app)).contains("Commits: not for Lucene 2.x");
+
+        app.handleKey(key('3'));
+        app.termsLoaded(loadTerms("id", null), termPage("1", "2"));
+        assertThat(app.handleKey(key('s'))).isEmpty();
+        assertThat(render(app)).contains("Search term: not for Lucene 2.x");
+    }
+
     @Test
     void openingAnotherIndexOnTheCommitsScreenFetchesItsCommits() {
         App app = appWithFields();
@@ -1717,7 +1835,7 @@ class AppTest {
         app.handleKey(key(KeyCode.TAB));
         app.handleKey(key(KeyCode.END));
         assertThat(render(app)).contains("Esc stop rebuild", "rebuilding… 1024 of 3000 terms");
-        assertThat(TestScreens.render(app::render, 230, 20)).contains("m similar   r rebuild   E export   Tab panel");
+        assertThat(TestScreens.render(app::render, 230, 20)).contains("m similar   r rebuild   E export   T terms");
 
         // Another document stops it.
         assertThat(app.handleKey(key(KeyCode.RIGHT)))

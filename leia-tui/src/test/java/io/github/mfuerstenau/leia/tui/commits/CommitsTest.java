@@ -269,6 +269,46 @@ class CommitsTest {
         assertThat(withoutReader.keys()).doesNotContain("⏎");
     }
 
+    @Test
+    void showSegmentSelectsTheOpenedCommitAndTheSegment() {
+        Commits commits = loaded();
+        commits.handleKey(key(KeyCode.DOWN));
+        commits.commitLoaded(0, 3, details(3, false));
+
+        // Commit 4 is in already: the segment is selected at once, with its details.
+        assertThat(commits.showSegment(0, "_1")).isEmpty();
+        assertThat(render(commits, 140, 40)).contains("Segments of segments_4").contains("Segment _1");
+        assertThat(commits.keys()).contains("⏎ documents");
+        assertThat(commits.handleKey(key(KeyCode.ENTER))).contains(new Commits.Request.ShowDocuments(0, "_1"));
+    }
+
+    @Test
+    void showSegmentWaitsForTheCommitsOfItsIndex() {
+        Commits commits = new Commits(List.of("a", "b"), true);
+        assertThat(commits.initialRequest()).isEqualTo(loadList(0));
+        assertThat(commits.showSegment(1, "_1")).isEqualTo(loadList(1));
+        // The opened commit, not the first one, though nothing was selected yet.
+        assertThat(commits.commitsLoaded(1, list(commit(7, false), commit(6, true))))
+                .isEqualTo(loadCommit(1, 6));
+        commits.commitLoaded(1, 6, details(6, true));
+        assertThat(render(commits, 140, 40)).contains("Segments of segments_6").contains("Segment _1");
+    }
+
+    @Test
+    void showSegmentOverridesTheSelectionWhileTheCommitsAreReadAgain() {
+        Commits commits = loaded();
+        commits.handleKey(key(KeyCode.DOWN));
+        assertThat(commits.handleKey(key('r'))).isEqualTo(loadList(0));
+        // The list is still the old one; commit 4 is fetched again after r.
+        assertThat(commits.showSegment(0, "_1")).isEqualTo(loadCommit(0, 4));
+        // The new list keeps the opened commit selected, not commit 3.
+        assertThat(commits.commitsLoaded(0, list(commit(5, true), commit(4, false), commit(3, false))))
+                .isEqualTo(loadCommit(0, 5));
+        commits.commitLoaded(0, 4, details(4, false));
+        commits.commitLoaded(0, 5, details(5, true));
+        assertThat(render(commits, 140, 40)).contains("Segments of segments_5").contains("Segment _1");
+    }
+
     /** The first lines of the details of a segment that Lucene {@code version} wrote. */
     private static List<String> segmentHead(String version) {
         Segment segment = segment("_0", 0, 400, 2048, List.of(), Optional.empty(), version);

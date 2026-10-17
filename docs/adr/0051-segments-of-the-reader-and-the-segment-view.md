@@ -27,5 +27,5 @@ The documents screen knows where each index directory starts (`IndexStart`, from
 ## Consequences
 
 - `getIndexStats` grows with the segment count, which stays small next to the fields.
-- The reverse jump, from a document to its segment on the commits screen, is left to the cross-screen navigation item.
+- The reverse jump, from a document to its segment on the commits screen, is left to the cross-screen navigation item. ADR 0052 adds it as `C` on the documents screen.
 - The segment list is as old as the last `getIndexStats`; it is fetched again on every reopen, which is the only time the reader changes.
