@@ -29,7 +29,7 @@ leia / leia.cmd  ──finds the JVM, runs──▶  <java> -jar leia.jar
 | `leia-protocol/` | Records for every method's params and result, `Methods` (the registry), `RpcMethod` and `ErrorCode`: the API between the UI and the backend. |
 | `leia-server/` | Library: a handler per method, with Dagger wiring, mapping core results to the records. `LeiaBackend` runs the calls in order on one thread; `RpcException` carries an expected failure's `ErrorCode`. |
 | `leia-tui/` | The application: the CLI (`Cli`, `Main`), the version-check entry class `Launcher` (compiled for Java 8), the log, and a package per screen (`…tui.overview`, `…tui.documents`, …). Builds the **fat jar** `leia.jar`; the scripts `leia` and `leia.cmd` are in `leia-tui/src/scripts/`. |
-| `docs/` | `adr/`, `tasklist.md`, `SESSION-SUMMARIES.md`, `demo-index.md` (the manual-testing index), `luke-features.md` (the Luke analysis). |
+| `docs/` | `adr/`, `tasklist.md`, `SESSION-SUMMARIES.md`, `demo-index.md` (the manual-testing index), `luke-features.md` (the Luke analysis), `runtimes.md` (the features and differences per Lucene runtime). |
 
 Dependency direction: `leia-server → leia-protocol` (api), `leia-server → leia-core`, `leia-server → leia-runtime`, `leia-server → leia-lucene3`, `leia-lucene5`, `leia-lucene7`, `leia-lucene9` (shadow jars, tests only), `leia-lucene3`, `leia-lucene5`, `leia-lucene7`, `leia-lucene9 → leia-runtime` (compileOnly), `leia-tui → leia-server`, `leia-tui → leia-protocol` (`leia-tui` can't compile against core or Lucene), and `leia-tui` puts the runtimes' shadow jars into `runtimes/`. `leia-core` and `leia-protocol` do not depend on each other.
 

@@ -96,7 +96,11 @@ fun Test.testFiles(properties: Map<String, FileCollection>) {
 }
 
 tasks.test {
-    testFiles(testIndexFiles.mapKeys { "leia.test.index.${it.key}" })
+    // docs/runtimes.md, whose feature table RuntimeFeaturesTest checks against the runtimes.
+    testFiles(
+        testIndexFiles.mapKeys { "leia.test.index.${it.key}" } +
+            mapOf("leia.test.doc.runtimes" to files(rootProject.file("docs/runtimes.md"))),
+    )
 }
 
 val jarsTest = tasks.register<Test>("jarsTest") {

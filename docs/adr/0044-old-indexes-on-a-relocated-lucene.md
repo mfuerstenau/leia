@@ -20,6 +20,8 @@ Lucene 3.6.2 reads every index from 2.1 to 3.6, the formats whose `segments_N` s
 | 9.12.3 | 8.x | KNN vectors from 9.0 (8.x indexes have none) |
 | 10.5.2 | 9.x, 10.x | what leia has now |
 
+The features and differences per runtime: `docs/runtimes.md`.
+
 Every Lucene version uses the package `org.apache.lucene`, so two of them can't share a classpath under their own names.
 
 ## Decision
