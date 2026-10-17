@@ -8,12 +8,6 @@ Goal: every index from Lucene 2.1 to 10 opens in one leia, each read by a reloca
 
 The lane is done. What each runtime can do, and how they differ: `docs/runtimes.md`.
 
-## Bugs
-
-From the manual run of the per-segment document view (ADR 0051) on the demo index, `lucene3` and `lucene24` + `lucene3` as one; every check of `docs/demo-index.md` passed.
-
-- [ ] Commits: at 100 columns the details panel's file list wraps each size onto the next line (`_0.cfe   842` / `B  _0`). Keep a file's name, size and segment on one row, or drop the segment column when it doesn't fit.
-
 ## Backlog — future capabilities
 
 From the read-only checklist in `docs/luke-features.md` §7. Ordered roughly by value. Each area will need its own records, handlers and probably an ADR for the cross-cutting parts.

@@ -9,6 +9,7 @@ import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
+import dev.tamboui.text.CharWidth;
 import dev.tamboui.text.Line;
 import dev.tamboui.text.Span;
 import dev.tamboui.text.Text;
@@ -662,7 +663,7 @@ public final class Commits {
             }
         } else if (result.isPresent()) {
             title = " " + result.get().commit().segmentsFile() + " ";
-            lines = commitLines(result.get(), readerOpen);
+            lines = commitLines(result.get(), readerOpen, width);
         } else {
             Optional<UnreadableCommit> commit = selectedUnreadable();
             if (commit.isPresent()) {
@@ -739,9 +740,9 @@ public final class Commits {
 
     /**
      * The details of a commit: what it is, where it stands to the opened one if {@code readerOpen},
-     * its user data and all of its files.
+     * its user data and all of its files, laid out within {@code width}, the panel's inner width.
      */
-    static List<Line> commitLines(GetCommitResult details, boolean readerOpen) {
+    static List<Line> commitLines(GetCommitResult details, boolean readerOpen, int width) {
         Commit commit = details.commit();
         List<Line> lines = new ArrayList<>();
         lines.add(Line.from("Generation " + commit.generation() + " · version " + commit.version() + " · Lucene "
@@ -755,7 +756,7 @@ public final class Commits {
                             : "Not the opened commit: its documents are not shown on the other screens."));
         }
         section(lines, "User data", new TreeMap<>(commit.userData()));
-        fileSection(lines, details.files(), true);
+        fileSection(lines, details.files(), true, width);
         return lines;
     }
 
@@ -812,7 +813,7 @@ public final class Commits {
         List<CommitFile> files = details.files().stream()
                 .filter(file -> file.segment().filter(segment.name()::equals).isPresent())
                 .toList();
-        fileSection(lines, files, false);
+        fileSection(lines, files, false, width);
         return lines;
     }
 
@@ -941,23 +942,48 @@ public final class Commits {
         }));
     }
 
-    /** The files with their sizes, and with {@code withSegment} the segment they belong to. */
-    private static void fileSection(List<Line> lines, List<CommitFile> files, boolean withSegment) {
+    /**
+     * A blank line, the bold heading, and a row per file with its size, and with {@code withSegment}
+     * the segment it belongs to; all within {@code width}. The segment column goes first when a row
+     * doesn't fit, and then a name too long for its column wraps inside it.
+     */
+    private static void fileSection(List<Line> lines, List<CommitFile> files, boolean withSegment, int width) {
         OptionalLong total = files.stream().allMatch(file -> file.size().isPresent())
                 ? OptionalLong.of(files.stream()
                         .mapToLong(file -> file.size().getAsLong())
                         .sum())
                 : OptionalLong.empty();
-        String heading = "Files (" + files.size() + ", " + sizeOr(total, "size unknown") + ")";
-        Map<String, String> pairs = new LinkedHashMap<>();
-        for (CommitFile file : files) {
-            String size = sizeOr(file.size(), "missing");
-            String value = " ".repeat(Math.max(10 - size.length(), 0)) + size;
-            if (withSegment && file.segment().isPresent()) {
-                value += "  " + file.segment().get();
-            }
-            pairs.put(file.name(), value);
+        lines.add(Line.empty());
+        lines.add(
+                Line.styled("Files (" + files.size() + ", " + sizeOr(total, "size unknown") + ")", Style.EMPTY.bold()));
+        if (files.isEmpty()) {
+            lines.add(Line.styled("none", Style.EMPTY.dim()));
+            return;
         }
-        section(lines, heading, pairs);
+        List<String> names = files.stream()
+                .map(file -> TextFormat.escapeControl(file.name()))
+                .toList();
+        List<String> sizes =
+                files.stream().map(file -> sizeOr(file.size(), "missing")).toList();
+        int nameWidth = names.stream().mapToInt(CharWidth::of).max().orElse(0);
+        int sizeWidth = sizes.stream().mapToInt(String::length).max().orElse(0);
+        int segmentWidth = files.stream()
+                .mapToInt(file -> file.segment().map(CharWidth::of).orElse(0))
+                .max()
+                .orElse(0);
+        boolean segments = withSegment && segmentWidth > 0 && nameWidth + sizeWidth + segmentWidth + 4 <= width;
+        int column = Math.max(Math.min(nameWidth, width - 2 - sizeWidth), 1);
+        for (int i = 0; i < files.size(); i++) {
+            List<String> parts = TextFormat.wrap(names.get(i), column, Integer.MAX_VALUE);
+            String size = sizes.get(i);
+            StringBuilder row = new StringBuilder(parts.getFirst())
+                    .append(" ".repeat(column - CharWidth.of(parts.getFirst()) + 2 + sizeWidth - size.length()))
+                    .append(size);
+            if (segments) {
+                files.get(i).segment().ifPresent(segment -> row.append("  ").append(segment));
+            }
+            lines.add(Line.from(row.toString()));
+            parts.stream().skip(1).map(Line::from).forEach(lines::add);
+        }
     }
 }

@@ -231,7 +231,7 @@ class CommitsTest {
                 .contains("Generation 4 · version 12")
                 .contains("The opened commit.")
                 .contains("Files (4, size unknown)")
-                .contains("_1.fdt         missing  _1");
+                .contains("_1.fdt      missing  _1");
 
         commits.handleKey(key(KeyCode.ENTER));
         commits.handleKey(key(KeyCode.DOWN));
@@ -322,13 +322,13 @@ class CommitsTest {
 
     @Test
     void withoutAReaderACommitIsNotSaidToBeOpenedOrNot() {
-        assertThat(Commits.commitLines(details(4, true), false))
+        assertThat(Commits.commitLines(details(4, true), false, 80))
                 .extracting(Line::rawContent)
                 .noneMatch(line -> line.contains("opened commit"));
-        assertThat(Commits.commitLines(details(3, false), false))
+        assertThat(Commits.commitLines(details(3, false), false, 80))
                 .extracting(Line::rawContent)
                 .noneMatch(line -> line.contains("opened commit"));
-        assertThat(Commits.commitLines(details(3, false), true))
+        assertThat(Commits.commitLines(details(3, false), true, 80))
                 .extracting(Line::rawContent)
                 .contains("Not the opened commit: its documents are not shown on the other screens.");
     }
@@ -350,6 +350,65 @@ class CommitsTest {
                         "  embedding",
                         "",
                         "Files (2, 2.0 KiB)");
+    }
+
+    /** Commit 4 with a long file name, as Lucene's HNSW format writes them. */
+    private static GetCommitResult longNames() {
+        return new GetCommitResult(
+                commit(4, true),
+                List.of(segment("_0", 0, 400), segment("_2", 400, 100)),
+                List.of(
+                        file("_0.cfe", "_0", OptionalLong.of(842)),
+                        file("_2_Lucene99HnswVectorsFormat_0.vemf", "_2", OptionalLong.of(1234)),
+                        file("_2.si", "_2", OptionalLong.of(400)),
+                        file("segments_4", null, OptionalLong.of(300))));
+    }
+
+    private static List<String> rows(List<Line> lines) {
+        List<String> texts = lines.stream().map(Line::rawContent).toList();
+        int heading = texts.size() - 1;
+        while (!texts.get(heading).startsWith("Files (")) {
+            heading--;
+        }
+        return texts.subList(heading + 1, texts.size());
+    }
+
+    @Test
+    void theFilesKeepTheirSizeOnTheirRow() {
+        GetCommitResult details = longNames();
+        // Wide enough for every column.
+        assertThat(rows(Commits.commitLines(details, true, 80)))
+                .containsExactly(
+                        "_0.cfe" + " ".repeat(29) + "    842 B  _0",
+                        "_2_Lucene99HnswVectorsFormat_0.vemf  1.2 KiB  _2",
+                        "_2.si" + " ".repeat(30) + "    400 B  _2",
+                        "segments_4" + " ".repeat(25) + "    300 B");
+        // Too narrow for the segments, which the names start with anyway.
+        assertThat(rows(Commits.commitLines(details, true, 45)))
+                .containsExactly(
+                        "_0.cfe" + " ".repeat(29) + "    842 B",
+                        "_2_Lucene99HnswVectorsFormat_0.vemf  1.2 KiB",
+                        "_2.si" + " ".repeat(30) + "    400 B",
+                        "segments_4" + " ".repeat(25) + "    300 B");
+        // Too narrow for the long name, which wraps in its column.
+        List<String> narrow = rows(Commits.commitLines(details, true, 38));
+        assertThat(narrow)
+                .containsExactly(
+                        "_0.cfe" + " ".repeat(23) + "    842 B",
+                        "_2_Lucene99HnswVectorsFormat_  1.2 KiB",
+                        "0.vemf",
+                        "_2.si" + " ".repeat(24) + "    400 B",
+                        "segments_4" + " ".repeat(19) + "    300 B");
+        assertThat(narrow).allMatch(row -> row.length() <= 38);
+        assertThat(rows(Commits.segmentLines(details.segments().getLast(), details, 38)))
+                .containsExactly(
+                        "_2_Lucene99HnswVectorsFormat_  1.2 KiB", "0.vemf", "_2.si" + " ".repeat(24) + "    400 B");
+
+        // At 100 columns the details are 38 wide inside: no size breaks off its row.
+        Commits commits = loaded();
+        commits.commitLoaded(0, 4, details);
+        String screen = render(commits, 100, 30);
+        assertThat(screen).contains("_0.cfe" + " ".repeat(23) + "    842 B").doesNotContain("│B ");
     }
 
     @Test
@@ -502,7 +561,7 @@ class CommitsTest {
         assertThat(screen)
                 .doesNotContain("2 segments · 500 docs")
                 .contains("The opened commit.")
-                .contains("segments_4       300 B");
+                .contains("segments_4    300 B");
         // The next key moves at once.
         commits.handleKey(key(KeyCode.UP));
         assertThat(render(commits, 140, 17))
