@@ -1309,6 +1309,11 @@ public final class Documents {
         return seek != null;
     }
 
+    /** Whether the go-to-document prompt takes the keys. */
+    public boolean goingTo() {
+        return prompt != null;
+    }
+
     /**
      * Edits the field seek, and selects the first shown field whose name starts with its text,
      * ignoring case, or else the first that contains it. Enter and Esc close it.

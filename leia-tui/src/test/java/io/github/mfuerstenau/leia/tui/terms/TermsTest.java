@@ -538,6 +538,31 @@ class TermsTest {
     }
 
     @Test
+    void leavingTheScreenEndsTheNote() {
+        Terms terms = codeTree();
+        terms.handleKey(key('s'));
+        assertThat(render(terms)).contains("s searches terms only");
+
+        terms.leave();
+        assertThat(render(terms)).doesNotContain("terms only");
+    }
+
+    @Test
+    void thePointTreeTitleFitsItsPanel() {
+        Terms terms = codeTree();
+        terms.handleKey(key('s'));
+
+        // Too narrow for the whole title: it leaves out the segments, inside the corners.
+        String wide = TestScreens.render(frame -> terms.render(frame, frame.area()), 120, 12);
+        assertThat(wide.lines().findFirst().orElseThrow())
+                .contains("┌ code · s searches terms only · 3 points in 3 docs · as int ─")
+                .doesNotContain("segment");
+        // Narrower than the note: the title is cut and the corner stays.
+        String narrow = TestScreens.render(frame -> terms.render(frame, frame.area()), 60, 12);
+        assertThat(narrow.lines().findFirst().orElseThrow()).contains("┓┌ c", "┐┌ Points");
+    }
+
+    @Test
     void restoreShowsWhatTheMarkLeftWithoutAFetch() {
         Terms terms = loaded();
         terms.handleKey(key(KeyCode.RIGHT));

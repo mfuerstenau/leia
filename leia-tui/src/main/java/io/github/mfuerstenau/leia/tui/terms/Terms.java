@@ -11,6 +11,7 @@ import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Color;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
+import dev.tamboui.text.CharWidth;
 import dev.tamboui.text.Line;
 import dev.tamboui.text.Span;
 import dev.tamboui.tui.event.KeyCode;
@@ -748,6 +749,11 @@ public final class Terms {
         note = null;
     }
 
+    /** The screen is left: its note ends with it. */
+    public void leave() {
+        note = null;
+    }
+
     /** Whether the seek prompt takes the keys, Esc included. */
     public boolean prompting() {
         return seek != null;
@@ -1128,20 +1134,34 @@ public final class Terms {
         boolean focused = focus == Column.TERMS;
         IndexField field = selectedPointField().orElseThrow();
         String name = TextFormat.firstChars(TextFormat.escapeControl(field.name()), 30);
+        int width = area.width() - 2;
         if (pointTree == null) {
-            frame.renderWidget(panel(" " + name + " ", focused), area);
+            frame.renderWidget(panel(fitTitle(name, "", List.of(), width), focused), area);
             return;
         }
         PointFormat format = pointFormats.of(field);
         if (pointTree.tree == null) {
-            message(frame, area, " " + name + " ", focused, "Cannot read the points: " + pointTree.error.orElse(""));
+            message(
+                    frame,
+                    area,
+                    fitTitle(name, "", List.of(), width),
+                    focused,
+                    "Cannot read the points: " + pointTree.error.orElse(""));
             return;
         }
         GetPointTreeResult tree = pointTree.tree;
         // A note goes first, where a narrow title doesn't cut it.
-        String title = " " + name + (note != null ? " · " + note : "") + " · "
-                + TextFormat.count(tree.segments().size(), "segment") + " · " + TextFormat.count(tree.size(), "point")
-                + " in " + TextFormat.count(tree.docCount(), "doc") + " · as " + format.label() + " ";
+        String points = TextFormat.count(tree.size(), "point");
+        String as = " · as " + format.label();
+        String title = fitTitle(
+                name,
+                note != null ? " · " + note : "",
+                List.of(
+                        " · " + TextFormat.count(tree.segments().size(), "segment") + " · " + points + " in "
+                                + TextFormat.count(tree.docCount(), "doc") + as,
+                        " · " + points + " in " + TextFormat.count(tree.docCount(), "doc") + as,
+                        as),
+                width);
         if (pointTree.segments.isEmpty()) {
             message(frame, area, title, focused, "The field has no points.");
             return;
@@ -1178,6 +1198,33 @@ public final class Terms {
                 .block(panel(title, focused))
                 .build();
         frame.renderStatefulWidget(table, area, pointTree.table);
+    }
+
+    /**
+     * The title {@code name}, {@code note} and the first of {@code tails}, fullest first, that fits
+     * {@code width} cells; with none of them if none fits, and the name cut if even that doesn't.
+     */
+    private static String fitTitle(String name, String note, List<String> tails, int width) {
+        for (String tail : tails) {
+            String title = " " + name + note + tail + " ";
+            if (CharWidth.of(title) <= width) {
+                return title;
+            }
+        }
+        String bare = " " + name + note + " ";
+        int chars = name.codePointCount(0, name.length());
+        while (CharWidth.of(bare) > width && chars > 1) {
+            chars--;
+            bare = " " + TextFormat.firstChars(name, chars) + note + " ";
+        }
+        // A panel narrower than the note cuts it too.
+        chars = bare.codePointCount(0, bare.length());
+        String cut = bare;
+        while (CharWidth.of(cut) > width && chars > 1) {
+            chars--;
+            cut = TextFormat.firstChars(bare, chars);
+        }
+        return cut;
     }
 
     private void renderLeaf(Frame frame, Rect area) {

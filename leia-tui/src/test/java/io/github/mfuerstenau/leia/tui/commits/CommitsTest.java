@@ -309,6 +309,19 @@ class CommitsTest {
         assertThat(render(commits, 140, 40)).contains("Segments of segments_5").contains("Segment _1");
     }
 
+    @Test
+    void restoreSelectsWhatTheMarkLeft() {
+        Commits commits = loaded();
+        commits.showSegment(0, "_0");
+        Commits.Mark mark = commits.mark();
+        commits.showSegment(0, "_1");
+        assertThat(render(commits, 140, 40)).contains("Segment _1");
+
+        commits.restore(mark);
+        assertThat(render(commits, 140, 40)).contains("Segment _0").doesNotContain("Segment _1");
+        assertThat(commits.handleKey(key(KeyCode.ENTER))).contains(new Commits.Request.ShowDocuments(0, "_0"));
+    }
+
     /** The first lines of the details of a segment that Lucene {@code version} wrote. */
     private static List<String> segmentHead(String version) {
         Segment segment = segment("_0", 0, 400, 2048, List.of(), Optional.empty(), version);

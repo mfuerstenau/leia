@@ -48,6 +48,9 @@ import io.github.mfuerstenau.leia.protocol.index.TermStats;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsResult;
 import io.github.mfuerstenau.leia.protocol.jars.JarComponents;
+import io.github.mfuerstenau.leia.protocol.points.GetPointTreeResult;
+import io.github.mfuerstenau.leia.protocol.points.PointSegment;
+import io.github.mfuerstenau.leia.protocol.points.PointValue;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocumentHighlight;
@@ -1469,6 +1472,137 @@ class AppTest {
     }
 
     @Test
+    void backspaceShowsTheSearchAsTheJumpLeftIt() {
+        App app = appOnSegmentTerms();
+        // s searches the term id:1; ⏎ on its first hit shows document 0.
+        Action.StartSearch term = (Action.StartSearch) app.handleKey(key('s')).orElseThrow();
+        app.searchStarted(term.searchId(), 1);
+        app.searchProgress(term.searchId(), page(0, 2));
+        assertThat(docId(app.handleKey(key(KeyCode.ENTER)))).isEqualTo(0);
+        app.documentLoaded(document(0));
+
+        // m searches for documents like it, whose job still runs.
+        Action.StartSearch like = (Action.StartSearch) app.handleKey(key('m')).orElseThrow();
+        app.searchStarted(like.searchId(), 2);
+        assertThat(legend(app)).contains("More like this document");
+
+        // Back to the document, which cancels the search like it; ] steps along id:1's hits.
+        assertThat(app.handleKey(key(KeyCode.BACKSPACE))).hasValue(new Action.CancelSearch(List.of(2L)));
+        assertThat(legend(app)).contains("Document ", "[ ] hits");
+        assertThat(docId(app.handleKey(key(']')))).isEqualTo(2);
+        app.documentLoaded(document(2));
+
+        // Back to the search of id:1, on the hit ] stepped to.
+        assertThat(app.handleKey(key(KeyCode.BACKSPACE))).isEmpty();
+        assertThat(legend(app)).contains("Term · field id", "2 hits").doesNotContain("More like this");
+        Action.StartExplain explain =
+                (Action.StartExplain) app.handleKey(key('x')).orElseThrow();
+        assertThat(explain.params().docId()).isEqualTo(2);
+    }
+
+    private static int docId(Optional<Action> load) {
+        return ((Action.LoadDocument) load.orElseThrow()).docId();
+    }
+
+    @Test
+    void backspaceShowsTheCommitsAsTheJumpLeftThem() {
+        App app = app();
+        IndexCommitStats index = new IndexCommitStats(
+                "/data/idx",
+                0,
+                "segments_2",
+                2,
+                1,
+                2,
+                5,
+                5,
+                10,
+                "10.5.2",
+                Optional.empty(),
+                Map.of(),
+                List.of(new ReaderSegment("_0", 0, 3, 3), new ReaderSegment("_1", 3, 2, 2)));
+        app.opened(
+                new GetIndexStatsResult("/data/idx", "MMapDirectory", 2, 5, 5, List.of(index), List.of(field("id", 0))),
+                List.of());
+        app.handleKey(key('4'));
+        app.commitsLoaded(0, list(commit(2, true)));
+        app.commitLoaded(
+                0,
+                2,
+                new GetCommitResult(
+                        commit(2, true), List.of(commitSegment("_0", 0, 3), commitSegment("_1", 3, 2)), List.of()));
+
+        // ⏎ on segment _0 shows its documents; i goes to document 3, of _1, and C shows _1.
+        app.handleKey(key(KeyCode.ENTER));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(load(0));
+        app.documentLoaded(document(0));
+        app.handleKey(key('i'));
+        app.handleKey(key('3'));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(load(3));
+        app.documentLoaded(document(3));
+        assertThat(app.handleKey(key('C'))).isEmpty();
+        assertThat(legend(app)).contains("Segment _1");
+
+        // Back to document 3, then to the commits screen on _0.
+        app.handleKey(key(KeyCode.BACKSPACE));
+        assertThat(legend(app)).contains("Document ");
+        app.handleKey(key(KeyCode.BACKSPACE));
+        assertThat(legend(app)).contains("Segment _0").doesNotContain("Segment _1");
+    }
+
+    @Test
+    void theTermsNoteEndsWhenTheScreenIsLeft() {
+        App app = app();
+        IndexField price = new IndexField(
+                "price",
+                1,
+                IndexOptions.NONE,
+                false,
+                false,
+                false,
+                DocValuesType.NONE,
+                1,
+                8,
+                0,
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty());
+        app.opened(
+                new GetIndexStatsResult(
+                        "/data/idx",
+                        "MMapDirectory",
+                        1,
+                        3,
+                        3,
+                        List.of(index("/data/idx", 0, 3, "segments_1")),
+                        List.of(field("id", 0), price)),
+                List.of());
+        app.handleKey(key('3'));
+        app.termsLoaded(loadTerms("id", null), termPage("1", "2"));
+        Action.LoadPointTree load =
+                (Action.LoadPointTree) app.handleKey(key(KeyCode.DOWN)).orElseThrow();
+        PointValue value = new PointValue(List.of("00"));
+        app.pointTreeLoaded(
+                load,
+                new GetPointTreeResult(
+                        "price",
+                        1,
+                        1,
+                        8,
+                        3,
+                        3,
+                        Optional.of(value),
+                        Optional.of(value),
+                        List.of(new PointSegment(0, 0, Optional.of("_0"), 0, 3, 3, 3, value, value))));
+        app.handleKey(key('s'));
+        assertThat(legend(app)).contains("s searches terms only");
+
+        app.handleKey(key('2'));
+        app.handleKey(key('3'));
+        assertThat(legend(app)).contains("price · 1 segment").doesNotContain("terms only");
+    }
+
+    @Test
     void aReopenForgetsWhatTheJumpsLeft() {
         App app = appOnSegmentTerms();
         app.handleKey(key(KeyCode.ENTER));
@@ -1523,8 +1657,10 @@ class AppTest {
         app.handleKey(key('i'));
         app.handleKey(key('1'));
         app.handleKey(key(KeyCode.BACKSPACE));
-        // Still the documents screen, with the prompt open.
-        assertThat(legend(app)).contains("Document ", "⌫ back");
+        // Still the documents screen, with the prompt open and its keys in the footer.
+        assertThat(legend(app))
+                .contains("Document ", "type a document id   ⏎ go   Esc cancel")
+                .doesNotContain("⌫ back");
         app.handleKey(key(KeyCode.ESCAPE));
         app.handleKey(key(KeyCode.BACKSPACE));
         assertThat(legend(app)).contains("id (/ seeks)");

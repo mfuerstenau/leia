@@ -905,6 +905,51 @@ class SearchTest {
         assertThat(search.prompting()).isFalse();
     }
 
+    @Test
+    void restoreShowsTheMarkedSearchAndCancelsTheNewOne() {
+        Search search = searched(3, 3);
+        search.step(true);
+        Search.Mark mark = search.mark();
+
+        // A More-Like-This search replaces it and runs.
+        start(search, search.moreLikeThis(1), 7);
+        assertThat(render(search)).contains("More like this");
+
+        assertThat(search.restore(mark)).hasValue(new Request.Cancel(List.of(7L)));
+        assertThat(search.mode()).isEqualTo(Mode.CLASSIC);
+        assertThat(search.jobs()).isEmpty();
+        assertThat(search.running()).isFalse();
+        assertThat(render(search)).contains("│red", "3 hits").doesNotContain("More like this");
+        // The selection is the marked one: the next step goes to the third hit.
+        assertThat(search.step(true)).hasValue(new Request.Document(2));
+    }
+
+    @Test
+    void restoreOfAMarkWhoseFirstPageNeverCameShowsItCancelled() {
+        Search search = search();
+        press(search, '/');
+        typed(search, "red");
+        start(search, press(search, KeyCode.ENTER), 1);
+        Search.Mark mark = search.mark();
+        // The next search stops the first one.
+        start(search, search.moreLikeThis(1), 2);
+
+        assertThat(search.restore(mark)).hasValue(new Request.Cancel(List.of(2L)));
+        assertThat(search.running()).isFalse();
+        assertThat(render(search)).contains("Cancelled.");
+    }
+
+    @Test
+    void restoreOfTheShownSearchChangesNothing() {
+        Search search = searched(3, 3);
+        Search.Mark mark = search.mark();
+        search.step(true);
+
+        assertThat(search.restore(mark)).isEmpty();
+        // The step made since stays.
+        assertThat(search.step(true)).hasValue(new Request.Document(2));
+    }
+
     private static MoreLikeThisQuery like(OptionalInt docId, Optional<String> text, boolean boost) {
         return new MoreLikeThisQuery(
                 docId,

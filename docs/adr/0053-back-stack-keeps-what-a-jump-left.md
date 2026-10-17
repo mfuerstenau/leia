@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-13
 - **Amends:** ADR 0052 (§2 The back stack, and Consequences)
+- **Amended by:** ADR 0054 (marks for the search and commits screens)
 
 ## Context
 
@@ -21,4 +22,4 @@ Under ADR 0052 §2 an entry of the back stack is only a `Screen`, and `Backspace
 ## Consequences
 
 - Going back along terms → document → terms shows each as the jump left it, without a fetch where the objects are still there.
-- The search and commits screens still show their latest state: after a search hit → document → `m` → `⌫ ⌫` the search screen shows the More Like This hits, and after a segment → document → `C` in another segment → `⌫ ⌫` the commits screen shows the other segment. Both are logged as bugs.
+- The search and commits screens still show their latest state: after a search hit → document → `m` → `⌫ ⌫` the search screen shows the More Like This hits, and after a segment → document → `C` in another segment → `⌫ ⌫` the commits screen shows the other segment. Both are logged as bugs; ADR 0054 fixes them with marks of their own.

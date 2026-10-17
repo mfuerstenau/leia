@@ -659,6 +659,104 @@ public final class Search {
         return jobs;
     }
 
+    /**
+     * What a jump leaves the screen at, for Backspace to show again (ADR 0054): the query line, the
+     * submitted search with its hits, the selection, the explanation, the highlight and the regex
+     * scan, which a jump into the screen or the next search replaces. The settings are not marked.
+     */
+    public static final class Mark {
+        private final Mode mode;
+        private final int field;
+        private final String input;
+        private final boolean binary;
+        private final int docValuesField;
+        private final DocValuesNumber number;
+        private final boolean hex;
+        private final int vectorField;
+        private final String lineError;
+        private final Submitted submitted;
+        private final Running running;
+        private final int selected;
+        private final int detailsScroll;
+        private final Focus focus;
+        private final Explain explain;
+        private final Highlighting highlighting;
+        private final StoredScan scan;
+        private final long scanId;
+
+        private Mark(Search of) {
+            this.mode = of.mode;
+            this.field = of.field;
+            this.input = of.input.text();
+            this.binary = of.binary;
+            this.docValuesField = of.docValuesField;
+            this.number = of.number;
+            this.hex = of.hex;
+            this.vectorField = of.vectorField;
+            this.lineError = of.lineError;
+            this.submitted = of.submitted;
+            this.running = of.running;
+            this.selected = of.selected;
+            this.detailsScroll = of.detailsScroll;
+            this.focus = of.focus;
+            this.explain = of.explain;
+            this.highlighting = of.highlighting;
+            this.scan = of.scan;
+            this.scanId = of.scanId;
+        }
+    }
+
+    /** Where the screen is, for {@link #restore} to come back to (ADR 0054). */
+    public Mark mark() {
+        return new Mark(this);
+    }
+
+    /**
+     * Shows the screen as {@code mark} left it (ADR 0054). If it still shows that search, nothing
+     * changes; otherwise returns the jobs of the newer one to cancel, if any run. What the mark left
+     * running was stopped by the newer search, and shows so, as Esc would have.
+     */
+    public Optional<Request.Cancel> restore(Mark mark) {
+        if (submitted == mark.submitted && scan == mark.scan && mode == mark.mode) {
+            return Optional.empty();
+        }
+        List<Long> cancel = jobs();
+        mode = mark.mode;
+        field = mark.field;
+        input.set(mark.input);
+        binary = mark.binary;
+        docValuesField = mark.docValuesField;
+        number = mark.number;
+        hex = mark.hex;
+        vectorField = mark.vectorField;
+        lineError = mark.lineError;
+        submitted = mark.submitted;
+        selected = mark.selected;
+        detailsScroll = mark.detailsScroll;
+        focus = mark.focus;
+        explain = mark.explain;
+        highlighting = mark.highlighting;
+        scan = mark.scan;
+        scanId = mark.scanId;
+        editing = false;
+        running = null;
+        stepPending = false;
+        // A next page that never came is fetched again on scroll; a first page shows as cancelled.
+        if (mark.running != null && !mark.running.more()) {
+            fail(mark.running, "Cancelled.");
+        }
+        if (explain != null && explain.running()) {
+            explain.error = "Cancelled.";
+        }
+        if (highlighting != null && highlighting.error == null) {
+            highlighting.error = "Cancelled.";
+        }
+        if (scan != null) {
+            scan.cancelled();
+        }
+        return cancel.isEmpty() ? Optional.empty() : Optional.of(new Request.Cancel(cancel));
+    }
+
     /** Searches for exactly {@code term} in {@code fieldName}, as the overview's top terms ask for. */
     public Optional<Request> termQuery(String fieldName, BytesValue term) {
         int row = fields.indexOf(fieldName);

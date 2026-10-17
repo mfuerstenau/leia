@@ -186,14 +186,20 @@ public final class App {
     private final Deque<Back> back = new ArrayDeque<>();
 
     /**
-     * A screen that a jump came from, with where the jump left the terms and documents screens
-     * (ADR 0053): the terms screen when it was left, or when the document left steps through its
-     * postings; the documents screen when it was left. A reopen drops the marks.
+     * A screen that a jump came from, with where the jump left the terms, documents, search and
+     * commits screens (ADR 0053, ADR 0054): the terms screen when it was left, or when the document
+     * left steps through its postings; the search screen likewise, when the document steps through
+     * its hits; the documents and commits screens when they were left. A reopen drops the marks.
      */
-    private record Back(Screen screen, Optional<Terms.Mark> terms, Optional<Documents.Mark> documents) {
+    private record Back(
+            Screen screen,
+            Optional<Terms.Mark> terms,
+            Optional<Documents.Mark> documents,
+            Optional<Search.Mark> search,
+            Optional<Commits.Mark> commits) {
 
         Back withoutMarks() {
-            return new Back(screen, Optional.empty(), Optional.empty());
+            return new Back(screen, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty());
         }
     }
 
@@ -1928,8 +1934,16 @@ public final class App {
 
     /** Shows {@code to} as a number key does: Backspace retraces no jump from before it (ADR 0052). */
     private void show(Screen to) {
+        leaving(to);
         back.clear();
         screen = to;
+    }
+
+    /** Ends what the shown screen notes until it is left, as it is left for {@code to}. */
+    private void leaving(Screen to) {
+        if (screen == Screen.TERMS && to != Screen.TERMS && terms != null) {
+            terms.leave();
+        }
     }
 
     /**
@@ -1945,14 +1959,24 @@ public final class App {
                                     .walk()
                                     .filter(Documents.Walk.TERM_DOCS::equals)
                                     .isPresent();
+            // A search hit's [/] step the search screen, as a term's document's step the terms screen.
+            boolean leavesSearch = screen == Screen.SEARCH
+                    || leavesDocuments
+                            && documents
+                                    .walk()
+                                    .filter(Documents.Walk.SEARCH_HITS::equals)
+                                    .isPresent();
             back.push(new Back(
                     screen,
                     leavesTerms && terms != null ? Optional.of(terms.mark()) : Optional.empty(),
-                    leavesDocuments ? Optional.of(documents.mark()) : Optional.empty()));
+                    leavesDocuments ? Optional.of(documents.mark()) : Optional.empty(),
+                    leavesSearch && search != null ? Optional.of(search.mark()) : Optional.empty(),
+                    screen == Screen.COMMITS && commits != null ? Optional.of(commits.mark()) : Optional.empty()));
             if (back.size() > BACK_DEPTH) {
                 back.removeLast();
             }
         }
+        leaving(to);
         screen = to;
     }
 
@@ -1967,10 +1991,29 @@ public final class App {
                 if (terms != null) {
                     to.terms().ifPresent(terms::restore);
                 }
+                if (commits != null) {
+                    to.commits().ifPresent(commits::restore);
+                }
+                Optional<Search.Request.Cancel> searchCancel = to.search().isPresent() && search != null
+                        ? search.restore(to.search().get())
+                        : Optional.empty();
                 Optional<Action> document = to.documents().isPresent() && documents != null
                         ? documentsAction(documents.restore(to.documents().get()))
                         : Optional.empty();
+                leaving(to.screen());
                 screen = to.screen();
+                if (searchCancel.isPresent()) {
+                    // The newer search's jobs are cancelled with the fetch, if the document needs one.
+                    if (document.orElse(null) instanceof Action.LoadDocument load) {
+                        List<Long> cancel = new ArrayList<>(load.cancel());
+                        cancel.addAll(searchCancel.get().jobs());
+                        return Optional.of(new Action.LoadDocument(
+                                load.docId(), List.copyOf(cancel), load.locate(), load.matches()));
+                    }
+                    if (document.isEmpty()) {
+                        return searchAction(searchCancel.map(Search.Request.class::cast));
+                    }
+                }
                 return document.isPresent() ? document : initialRequest();
             }
         }
@@ -2088,6 +2131,9 @@ public final class App {
             }
             if (documents.seeking()) {
                 return " type to seek a field   ⏎/Esc done";
+            }
+            if (documents.goingTo()) {
+                return " type a document id   ⏎ go   Esc cancel";
             }
             // Esc stops the scan first.
             if (cancel.isEmpty() && documents.rebuilding()) {

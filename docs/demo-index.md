@@ -201,16 +201,21 @@ Cross-screen navigation (ADR 0052). `⌫ back` in the footer says when `Backspac
   `Enter` on a posting; on its document `T` on `title`, then `Backspace`: the document again, whose
   `]` still steps along the `labels` term's postings; one more `Backspace` shows `labels` at that
   term, with the posting `]` stepped to selected.
+- **Back keeps the search and the commits (ADR 0054):** on the search screen, `labels:2024`, `Enter`
+  on a hit, `m` on its document: More Like This hits. `Backspace` shows the document, whose `]`
+  steps along the `labels:2024` hits; one more shows those hits, with the hit `]` stepped to
+  selected. On the commits screen, `Enter`, `↓` to segment `_1`, `Enter` on its documents, `i` to
+  450 (in `_2`), `C`: segment `_2`; `Backspace` twice shows `_1` again.
 - **Documents → terms (`T`):** on that document, `T` on `labels` opens the terms screen at the
   hit's term with the postings focused; `T` on `title` opens `title` from its first term; `T` on
   `price` (points, no terms) opens `price pt 1×8`'s tree; `T` on `checksum` (doc values only) says
   `checksum has no terms` in the document's title.
 - **Terms → search (`s`):** on `category`, any term, `s` runs the term query on the search screen;
   on the postings column, `s` searches the postings' term. On `price pt 1×8`, `s` says
-  `s searches terms only`.
+  `s searches terms only`, in a title that fits its panel at 100 columns; `2` and `3` end the note.
 - **The number keys forget:** after a jump, `2` (or any of `1`–`7`) clears the way back, and
   `Backspace` does nothing. In a prompt (`i` on the documents screen, `/` on the terms screen, the
-  viewer), `Backspace` edits the text as before.
+  viewer), `Backspace` edits the text as before, and the footer shows the prompt's keys without `⌫ back`.
 - **Old indexes:** on the `lucene3` test index, `C` and `T` work as on the demo index, every
   runtime has commits and terms. `s` on the terms screen says `Search term: not for Lucene 3.x` and
   is not in the legend, as `/` on the overview's top terms: the term query needs `SEARCH`.

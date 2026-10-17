@@ -268,7 +268,7 @@ class SessionPilotTest {
             pilot.press(KeyCode.DOWN);
             settle();
         }
-        assertThat(screen()).contains("pt · 2 segments · 120 points in 8 docs", "▸ _0  60 pts  100 … 414");
+        assertThat(screen()).contains("pt · 120 points in 8 docs · as int ─", "▸ _0  60 pts  100 … 414");
         // Into the tree: _0, then its left cell, then that cell's first leaf.
         pilot.press(KeyCode.RIGHT);
         pilot.press(KeyCode.ENTER);

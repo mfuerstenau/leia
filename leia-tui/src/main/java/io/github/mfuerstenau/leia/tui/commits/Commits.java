@@ -286,6 +286,47 @@ public final class Commits {
         return nextRequest();
     }
 
+    /**
+     * What a jump leaves the screen at, for Backspace to show again (ADR 0054): the selection, the
+     * panel and the details. The fetched commits are not marked; a jump doesn't replace them.
+     */
+    public static final class Mark {
+        private final int indexRow;
+        private final int commitRow;
+        private final int segmentRow;
+        private final Focus focus;
+        private final boolean segmentDetails;
+        private final int detailsScroll;
+
+        private Mark(Commits of) {
+            this.indexRow = of.indexRow;
+            this.commitRow = of.commitRow;
+            this.segmentRow = of.segmentRow;
+            this.focus = of.focus;
+            this.segmentDetails = of.segmentDetails;
+            this.detailsScroll = of.detailsScroll;
+        }
+    }
+
+    /** Where the screen is, for {@link #restore} to come back to (ADR 0054). */
+    public Mark mark() {
+        return new Mark(this);
+    }
+
+    /**
+     * Selects what {@code mark} left selected (ADR 0054), and forgets the segment a jump asked for.
+     * What is missing comes with {@link #initialRequest}.
+     */
+    public void restore(Mark mark) {
+        indexRow = mark.indexRow;
+        commitRow = mark.commitRow;
+        segmentRow = mark.segmentRow;
+        focus = mark.focus;
+        segmentDetails = mark.segmentDetails;
+        detailsScroll = mark.detailsScroll;
+        wantedSegment = null;
+    }
+
     /** Selects the segment {@code name} of {@code result}, if it has it, and forgets the wanted one. */
     private void selectSegment(GetCommitResult result, String name) {
         wantedSegment = null;
