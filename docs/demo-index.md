@@ -197,6 +197,10 @@ Cross-screen navigation (ADR 0052). `⌫ back` in the footer says when `Backspac
   the opened commit, with the document's segment selected (`_1` for a document in 200–399) and its
   details shown. `Backspace` shows the document again, as it was, then the terms with the same term
   and posting selected; one more does nothing, and `⌫ back` is gone.
+- **Back keeps what a jump left (ADR 0053):** on the terms screen, `labels`, any term and
+  `Enter` on a posting; on its document `T` on `title`, then `Backspace`: the document again, whose
+  `]` still steps along the `labels` term's postings; one more `Backspace` shows `labels` at that
+  term, with the posting `]` stepped to selected.
 - **Documents → terms (`T`):** on that document, `T` on `labels` opens the terms screen at the
   hit's term with the postings focused; `T` on `title` opens `title` from its first term; `T` on
   `price` (points, no terms) opens `price pt 1×8`'s tree; `T` on `checksum` (doc values only) says

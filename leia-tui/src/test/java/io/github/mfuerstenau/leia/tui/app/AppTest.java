@@ -1388,6 +1388,116 @@ class AppTest {
         assertThat(legend(app)).contains("id (/ seeks)");
     }
 
+    /** Document 0 with the fields id and body, body selected once {@code ↓} is pressed. */
+    private static GetDocumentResult documentWithBody(int docId) {
+        return new GetDocumentResult(
+                docId,
+                false,
+                List.of(
+                        new DocumentField(
+                                "id",
+                                OptionalLong.empty(),
+                                List.of(new StoredValue(StoredType.STRING, "doc-" + docId, false)),
+                                Optional.empty(),
+                                false,
+                                Optional.empty()),
+                        new DocumentField(
+                                "body",
+                                OptionalLong.empty(),
+                                List.of(new StoredValue(StoredType.STRING, "text", false)),
+                                Optional.empty(),
+                                false,
+                                Optional.empty())));
+    }
+
+    @Test
+    void backspaceShowsTheTermsAsTheJumpLeftThem() {
+        App app = appOnSegmentTerms();
+        app.handleKey(key(KeyCode.ENTER));
+        app.handleKey(key(KeyCode.ENTER));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(load(0));
+        app.documentLoaded(documentWithBody(0));
+
+        // T on body: the terms screen shows body's terms and postings.
+        app.handleKey(key(KeyCode.DOWN));
+        assertThat(app.handleKey(key('T'))).hasValue(loadTerms("body", null));
+        app.termsLoaded(loadTerms("body", null), termPage("text"));
+        app.postingsLoaded(
+                loadPostings("body", "text"),
+                new GetPostingsResult(
+                        1,
+                        1,
+                        List.of(new Posting(1, false, OptionalInt.empty(), Optional.empty())),
+                        OptionalInt.empty()));
+        assertThat(legend(app)).contains("body (/ seeks)", "Postings (1)");
+
+        // Back to the document, which fetches nothing, and whose ] steps along id/1's postings.
+        assertThat(app.handleKey(key(KeyCode.BACKSPACE))).isEmpty();
+        assertThat(legend(app)).contains("Document ", "[ ] term docs");
+        assertThat(app.handleKey(key(']'))).isEqualTo(load(2));
+        app.documentLoaded(documentWithBody(2));
+
+        // Back to the terms of id at 1, with the posting ] stepped to.
+        assertThat(app.handleKey(key(KeyCode.BACKSPACE))).isEmpty();
+        assertThat(legend(app)).contains("id (/ seeks)", "Postings (2)").doesNotContain("body (/ seeks)");
+    }
+
+    @Test
+    void backspaceShowsTheDocumentAsTheJumpLeftIt() {
+        App app = appOnSegmentTerms();
+        app.handleKey(key(KeyCode.ENTER));
+        app.handleKey(key(KeyCode.ENTER));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(load(0));
+        app.documentLoaded(document(0));
+
+        // m searches for documents like it; ⏎ on a hit shows document 2.
+        Action.StartSearch like = (Action.StartSearch) app.handleKey(key('m')).orElseThrow();
+        app.searchStarted(like.searchId(), 1);
+        app.searchProgress(like.searchId(), page(2));
+        Action.LoadDocument hit =
+                (Action.LoadDocument) app.handleKey(key(KeyCode.ENTER)).orElseThrow();
+        assertThat(hit.docId()).isEqualTo(2);
+        app.documentLoaded(document(2));
+        assertThat(legend(app)).contains("[ ] hits");
+
+        // Back to the search, then to document 0 of the term, fetched again.
+        app.handleKey(key(KeyCode.BACKSPACE));
+        assertThat(legend(app)).contains("5 Search");
+        assertThat(app.handleKey(key(KeyCode.BACKSPACE))).isEqualTo(load(0));
+        app.documentLoaded(document(0));
+        assertThat(legend(app)).contains("Document ", "[ ] term docs").doesNotContain("[ ] hits");
+    }
+
+    @Test
+    void aReopenForgetsWhatTheJumpsLeft() {
+        App app = appOnSegmentTerms();
+        app.handleKey(key(KeyCode.ENTER));
+        app.handleKey(key(KeyCode.ENTER));
+        app.handleKey(key(KeyCode.ENTER));
+        app.documentLoaded(documentWithBody(0));
+        app.handleKey(key(KeyCode.DOWN));
+        app.handleKey(key('T'));
+        app.termsLoaded(loadTerms("body", null), termPage("text"));
+
+        app.handleKey(key('R'));
+        Optional<Action> fetch = app.reopened(new GetIndexStatsResult(
+                "/data/idx",
+                "MMapDirectory",
+                1,
+                3,
+                3,
+                List.of(index("/data/idx", 0, 3, "segments_2")),
+                List.of(field("id", 0), field("body", 1))));
+        assertThat(fetch).hasValue(loadTerms("body", null));
+
+        // Back still goes to the document and then the terms, as they are now: fetched again, on body.
+        assertThat(app.handleKey(key(KeyCode.BACKSPACE))).isEqualTo(load(0));
+        assertThat(legend(app)).contains("2 Documents", "⌫ back");
+        assertThat(app.handleKey(key(KeyCode.BACKSPACE))).isEmpty();
+        app.termsLoaded(loadTerms("body", null), termPage("text"));
+        assertThat(legend(app)).contains("body (/ seeks)").doesNotContain("⌫ back");
+    }
+
     @Test
     void aNumberKeyForgetsTheJumps() {
         App app = appOnSegmentTerms();

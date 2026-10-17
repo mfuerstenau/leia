@@ -702,6 +702,52 @@ public final class Terms {
         return send(wantedFirst);
     }
 
+    /**
+     * What a jump leaves the screen at, for Backspace to show again (ADR 0053): the field, the focus,
+     * and the terms, postings and tree it had loaded. They are the screen's own objects, so moves made
+     * in them afterwards, such as a document's {@code ]}, still show.
+     */
+    public static final class Mark {
+        private final int fieldRow;
+        private final Column focus;
+        private final TermList terms;
+        private final PostingList postings;
+        private final PointTree pointTree;
+        private final Request.LoadTerms wantedFirst;
+        private final Request.LoadPointTree wantedTree;
+
+        private Mark(Terms of) {
+            this.fieldRow = of.fieldRow;
+            this.focus = of.focus;
+            this.terms = of.terms;
+            this.postings = of.postings;
+            this.pointTree = of.pointTree;
+            this.wantedFirst = of.wantedFirst;
+            this.wantedTree = of.wantedTree;
+        }
+    }
+
+    /** Where the screen is, for {@link #restore} to come back to (ADR 0053). */
+    public Mark mark() {
+        return new Mark(this);
+    }
+
+    /**
+     * Shows the screen as {@code mark} left it (ADR 0053). It sends nothing: what is still missing,
+     * such as a page that was loading when the screen was left, comes from {@link #initialRequest}.
+     */
+    public void restore(Mark mark) {
+        fieldRow = mark.fieldRow;
+        focus = mark.focus;
+        terms = mark.terms;
+        postings = mark.postings;
+        pointTree = mark.pointTree;
+        wantedFirst = mark.wantedFirst;
+        wantedTree = mark.wantedTree;
+        seek = null;
+        note = null;
+    }
+
     /** Whether the seek prompt takes the keys, Esc included. */
     public boolean prompting() {
         return seek != null;

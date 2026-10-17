@@ -25,7 +25,8 @@ From the read-only checklist in `docs/luke-features.md` §7. Ordered roughly by 
 
 From the manual run of cross-screen navigation (ADR 0052), demo index and `lucene3`.
 
-- [ ] `Backspace` shows a screen in its latest state, also when a later jump changed it: terms on `id`/`1`, `⏎` on the posting, then `T` on `body`, `⌫`, `⌫` ends on the terms of `body`, not `id`/`1`. ADR 0052's Consequences cover keys pressed before a jump, not a later jump into the same screen. A fix needs the jump to keep what it left (Terms: field, term, posting; Documents: document, steps).
+- [ ] `Backspace` shows the search screen in its latest state (ADR 0053 covers terms and documents only): a search hit → document → `m` → `⌫ ⌫` shows the More Like This hits, not the search the hit came from.
+- [ ] `Backspace` shows the commits screen in its latest state (ADR 0053 covers terms and documents only): segment → document → `C` on a document of another segment → `⌫ ⌫` shows the other segment, not the one `⏎` came from.
 - [ ] The terms screen's `… terms only` note (`s`, `/` or `e` on a point field) outlives leaving the screen: after `⌫` or `2` and back with `3`, the title still says `s searches terms only`, until the next key on the terms screen. Same class as the documents notes fixed in `f3330e7`.
 - [ ] At 100 columns the point tree's title is wider than its panel and covers the top-right corner: `┏ price · 3 segments · 499 points in 499 docs ┌ Points`. Since ADR 0041, not from ADR 0052.
 - [ ] While the documents `i` prompt is open, the footer still shows the screen's legend with `⌫ back`, though `Backspace` edits the prompt. The terms `/` seek shows `type to seek   ⏎/Esc done` instead.

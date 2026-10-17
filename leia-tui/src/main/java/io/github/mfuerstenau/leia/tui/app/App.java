@@ -180,10 +180,22 @@ public final class App {
     private static final int BACK_DEPTH = 16;
 
     /**
-     * The screens that the jumps to the shown one came from, the last one first (ADR 0052). A number
-     * key, an open and a close forget them.
+     * The screens that the jumps to the shown one came from, the last one first (ADR 0052), with
+     * where the jumps left them (ADR 0053). A number key, an open and a close forget them.
      */
-    private final Deque<Screen> back = new ArrayDeque<>();
+    private final Deque<Back> back = new ArrayDeque<>();
+
+    /**
+     * A screen that a jump came from, with where the jump left the terms and documents screens
+     * (ADR 0053): the terms screen when it was left, or when the document left steps through its
+     * postings; the documents screen when it was left. A reopen drops the marks.
+     */
+    private record Back(Screen screen, Optional<Terms.Mark> terms, Optional<Documents.Mark> documents) {
+
+        Back withoutMarks() {
+            return new Back(screen, Optional.empty(), Optional.empty());
+        }
+    }
 
     /** The open-index prompt, or null. */
     private PathPrompt prompt;
@@ -452,6 +464,10 @@ public final class App {
                 ? documents.reopened(stats.fields(), stats.maxDoc(), segmentStarts(stats))
                 : newDocuments(stats, opened);
         syncTermsFilter();
+        // The marks hold the old reader's terms, postings and documents: back shows the latest state.
+        List<Back> jumps = back.stream().map(Back::withoutMarks).toList();
+        back.clear();
+        back.addAll(jumps);
         if (check != null) {
             check.stoppedByReopen();
         }
@@ -1922,7 +1938,17 @@ public final class App {
      */
     private void jump(Screen to) {
         if (to != screen) {
-            back.push(screen);
+            boolean leavesDocuments = screen == Screen.DOCUMENTS && documents != null;
+            boolean leavesTerms = screen == Screen.TERMS
+                    || leavesDocuments
+                            && documents
+                                    .walk()
+                                    .filter(Documents.Walk.TERM_DOCS::equals)
+                                    .isPresent();
+            back.push(new Back(
+                    screen,
+                    leavesTerms && terms != null ? Optional.of(terms.mark()) : Optional.empty(),
+                    leavesDocuments ? Optional.of(documents.mark()) : Optional.empty()));
             if (back.size() > BACK_DEPTH) {
                 back.removeLast();
             }
@@ -1931,15 +1957,21 @@ public final class App {
     }
 
     /**
-     * Backspace: the screen that the last jump came from, as it was left, skipping those the open
-     * index can't show anymore (ADR 0052). Returns what it has to fetch first.
+     * Backspace: the screen that the last jump came from, as it was left (ADR 0053), skipping those
+     * the open index can't show anymore (ADR 0052). Returns what it has to fetch first.
      */
     private Optional<Action> goBack() {
         while (!back.isEmpty()) {
-            Screen to = back.pop();
-            if (canShow(to)) {
-                screen = to;
-                return initialRequest();
+            Back to = back.pop();
+            if (canShow(to.screen())) {
+                if (terms != null) {
+                    to.terms().ifPresent(terms::restore);
+                }
+                Optional<Action> document = to.documents().isPresent() && documents != null
+                        ? documentsAction(documents.restore(to.documents().get()))
+                        : Optional.empty();
+                screen = to.screen();
+                return document.isPresent() ? document : initialRequest();
             }
         }
         return Optional.empty();

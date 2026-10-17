@@ -538,6 +538,26 @@ class TermsTest {
     }
 
     @Test
+    void restoreShowsWhatTheMarkLeftWithoutAFetch() {
+        Terms terms = loaded();
+        terms.handleKey(key(KeyCode.RIGHT));
+        terms.handleKey(key(KeyCode.DOWN));
+        terms.postingsLoaded(postingsRequest("id", "b", 0, false), postings(List.of(2, 9), null));
+        Terms.Mark mark = terms.mark();
+
+        assertThat(terms.show("body", Optional.empty(), false)).hasValue(termsRequest("body", null, false));
+        terms.termsLoaded(termsRequest("body", null, false), page(List.of("x", "y"), null));
+        terms.postingsLoaded(postingsRequest("body", "x", 0, false), postings(List.of(3), null));
+        assertThat(render(terms)).contains("body (/ seeks)");
+
+        terms.restore(mark);
+        assertThat(terms.initialRequest()).isEmpty();
+        assertThat(render(terms)).contains("id (/ seeks)", "9").doesNotContain("body (/ seeks)");
+        // The selection is on b, with the focus on the terms.
+        assertThat(terms.handleKey(key(KeyCode.UP))).hasValue(postingsRequest("id", "a", 0, false));
+    }
+
+    @Test
     void showOpensAFieldsTermsOrItsPoints() {
         Terms terms = pointTerms();
         terms.initialRequest();

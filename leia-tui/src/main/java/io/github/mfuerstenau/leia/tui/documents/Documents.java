@@ -793,6 +793,61 @@ public final class Documents {
         return viewer.fetch().flatMap(Documents::viewerRequest);
     }
 
+    /**
+     * What a jump leaves the screen at, for Backspace to show again (ADR 0053): the document, the
+     * term hit or search hits that {@code [}/{@code ]} step through, the pinned segment, the selected
+     * field, and the matches if they were found.
+     */
+    public static final class Mark {
+        private final int docId;
+        private final TermHit hit;
+        private final boolean searchHits;
+        private final SegmentStart pinned;
+        private final String field;
+        private final Matches matches;
+
+        private Mark(Documents of) {
+            this.docId = of.wanted.orElse(of.docId);
+            this.hit = of.hit;
+            this.searchHits = of.searchHits;
+            this.pinned = of.pinned;
+            this.field = of.selectedField().map(DocumentField::name).orElse(null);
+            // Running matches are stopped by the next jump's dropMatches: they are found again, or not at all.
+            this.matches = of.matches != null && of.matches.fields != null ? of.matches : null;
+        }
+    }
+
+    /** Where the screen is, for {@link #restore} to come back to (ADR 0053). */
+    public Mark mark() {
+        return new Mark(this);
+    }
+
+    /**
+     * Shows the screen as {@code mark} left it (ADR 0053). If it still shows that document, hit and
+     * pin, nothing changes; otherwise returns the document to fetch, which shows the hit again.
+     */
+    public Optional<Request> restore(Mark mark) {
+        boolean unchanged = document != null
+                && docId == mark.docId
+                && wanted.orElse(docId) == mark.docId
+                && Objects.equals(hit, mark.hit)
+                && searchHits == mark.searchHits
+                && Objects.equals(pinned, mark.pinned);
+        if (unchanged) {
+            return Optional.empty();
+        }
+        hit = mark.hit;
+        searchHits = mark.searchHits;
+        pinned = mark.pinned;
+        positions = null;
+        dropMatches();
+        matches = mark.matches;
+        clearNotes();
+        queuedSteps.clear();
+        selectField = mark.field;
+        return Optional.of(new Request.Document(mark.docId));
+    }
+
     /** What {@code [}/{@code ]} step through, if anything. */
     public Optional<Walk> walk() {
         if (hit != null) {
