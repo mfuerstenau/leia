@@ -10,7 +10,10 @@ The lane is done. What each runtime can do, and how they differ: `docs/runtimes.
 
 ## Bugs
 
-None open. The last ones, from the manual run on `lucene4`/`lucene5`, are in `docs/tasklist-done.md`.
+From the manual run of the per-segment document view (ADR 0051) on the demo index, `lucene3` and `lucene24` + `lucene3` as one; every check of `docs/demo-index.md` passed.
+
+- [ ] Documents: a segment or filter note outlives the move it was about. `segmentNote` is cleared only by a step key and `showSegment`, the filter's note only by a step key. Demo index: `2`, `i 37` (title `left segment _2`), then on the search screen `title:lamp AND body:qu*` and `b`: document 223 still says `left segment _2`. Then `S`, → to `no next match in _1`, and on the commits screen ⏎ on `_0` of `segments_1`: the title says `segment _0 … · no next match in _1`. Clear both notes when another screen shows a document (`showHit`, `showPoint`, `showSearchHit`, `showSegment`) and when a filter starts.
+- [ ] Commits: at 100 columns the details panel's file list wraps each size onto the next line (`_0.cfe   842` / `B  _0`). Keep a file's name, size and segment on one row, or drop the segment column when it doesn't fit.
 
 ## Backlog — future capabilities
 
