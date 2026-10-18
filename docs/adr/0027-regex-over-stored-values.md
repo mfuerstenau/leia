@@ -33,6 +33,8 @@ Several questions are new:
    - **Fields:** the stored fields named in `fields`, or all of them. Each document is read through a `StoredFieldVisitor` that decodes only those fields.
    - **Order:** document id order, segment by segment. Doc ids are those of the whole index, over every index below the path (ADR 0021).
    - **Deleted documents:** skipped unless `includeDeleted` is set. A hit says whether its document is deleted.
+
+   *Amended (ADR 0055):* the scan works on an index read with a runtime too. Core's matching reads a `StoredSource` a page of 64 document ids at a time; on a runtime, the server pages through `Documents.storedValues`.
 4. **A hit is one value with at least one match** (`Matcher.find`, not a whole-value match). It carries:
    - `docId`, `deleted`, `field`, and `valueIndex` (as `getStoredValue` counts values);
    - `length`, the value's size in bytes;

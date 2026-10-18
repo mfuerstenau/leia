@@ -83,6 +83,7 @@ class Lucene24BackendTest {
         assertThat(opened.features())
                 .contains(
                         Feature.DOCUMENTS,
+                        Feature.STORED_SCAN,
                         Feature.TERMS,
                         Feature.TOP_TERMS,
                         Feature.EXPORT_TERMS,

@@ -2,9 +2,11 @@ package io.github.mfuerstenau.leia.runtime;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
+import java.util.Set;
 
 /** The documents of a {@link RuntimeIndex}. */
 public interface Documents {
@@ -15,6 +17,17 @@ public interface Documents {
      * @throws IllegalArgumentException if there is no such document
      */
     IndexDocument document(int docId) throws IOException;
+
+    /**
+     * The stored values of the documents from {@code fromDoc} up to {@code toDoc} (exclusive), in
+     * document id order: every live one, and the deleted ones too if {@code includeDeleted}. Nothing
+     * else of a document is read (ADR 0055).
+     *
+     * @param fields the fields whose values to read; empty for all of them
+     * @throws IllegalArgumentException unless {@code 0 <= fromDoc <= toDoc <= maxDoc}
+     */
+    List<StoredDocument> storedValues(int fromDoc, int toDoc, Optional<Set<String>> fields, boolean includeDeleted)
+            throws IOException;
 
     /**
      * The term vector of a document in {@code field}, in term order; empty if it has none.
@@ -58,6 +71,14 @@ public interface Documents {
      *     ascending for the latter; empty for the other types
      */
     record DocValues(RuntimeIndex.DocValuesType type, List<Long> numbers, List<byte[]> values) {}
+
+    /**
+     * A document's stored values (ADR 0055).
+     *
+     * @param values the values by field, the fields in the order of their first value, each field's
+     *     values in stored order, as {@link DocumentField#stored()} has them
+     */
+    record StoredDocument(int docId, boolean deleted, Map<String, List<RuntimeIndex.StoredValue>> values) {}
 
     /** A document, with every field of the index in field-number order. */
     record IndexDocument(int docId, boolean deleted, List<DocumentField> fields) {}

@@ -25,6 +25,7 @@ import java.util.Set;
 import java.util.function.LongConsumer;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.document.Document;
+import org.apache.lucene.document.DocumentStoredFieldVisitor;
 import org.apache.lucene.index.BinaryDocValues;
 import org.apache.lucene.index.ByteVectorValues;
 import org.apache.lucene.index.DirectoryReader;
@@ -419,6 +420,40 @@ final class Lucene9Index implements RuntimeIndex, Documents, Terms, Search, Knn 
         };
     }
 
+    @Override
+    public List<StoredDocument> storedValues(
+            int fromDoc, int toDoc, Optional<Set<String>> fields, boolean includeDeleted) throws IOException {
+        checkRange(fromDoc, toDoc);
+        StoredFields storedFields = reader.storedFields();
+        Bits liveDocs = MultiBits.getLiveDocs(reader);
+        List<StoredDocument> documents = new ArrayList<>();
+        for (int doc = fromDoc; doc < toDoc; doc++) {
+            boolean deleted = liveDocs != null && !liveDocs.get(doc);
+            if (deleted && !includeDeleted) {
+                continue;
+            }
+            Document document;
+            if (fields.isPresent()) {
+                DocumentStoredFieldVisitor visitor = new DocumentStoredFieldVisitor(fields.get());
+                storedFields.document(doc, visitor);
+                document = visitor.getDocument();
+            } else {
+                document = storedFields.document(doc);
+            }
+            documents.add(new StoredDocument(doc, deleted, storedValues(document)));
+        }
+        return List.copyOf(documents);
+    }
+
+    /** A document's stored values by field, in stored order. */
+    private static Map<String, List<StoredValue>> storedValues(Document document) {
+        Map<String, List<StoredValue>> values = new LinkedHashMap<>();
+        for (IndexableField field : document.getFields()) {
+            values.computeIfAbsent(field.name(), _ -> new ArrayList<>()).add(storedValue(field));
+        }
+        return values;
+    }
+
     private static StoredValue storedValue(IndexableField field) {
         Number number = field.numericValue();
         if (number != null) {
@@ -768,6 +803,13 @@ final class Lucene9Index implements RuntimeIndex, Documents, Terms, Search, Knn 
     private void checkDoc(int docId) {
         if (docId < 0 || docId >= reader.maxDoc()) {
             throw new IllegalArgumentException("No document " + docId + ": maxDoc is " + reader.maxDoc());
+        }
+    }
+
+    private void checkRange(int fromDoc, int toDoc) {
+        if (fromDoc < 0 || fromDoc > toDoc || toDoc > reader.maxDoc()) {
+            throw new IllegalArgumentException(
+                    "No documents " + fromDoc + " to " + toDoc + ": maxDoc is " + reader.maxDoc());
         }
     }
 

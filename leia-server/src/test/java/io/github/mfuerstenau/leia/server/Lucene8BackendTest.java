@@ -99,6 +99,7 @@ class Lucene8BackendTest {
                 Feature.INDEX_STATS,
                 Feature.DOCUMENTS,
                 Feature.STORED_VALUES,
+                Feature.STORED_SCAN,
                 Feature.TERM_VECTORS,
                 Feature.DOC_VALUES,
                 Feature.TERMS,
@@ -151,6 +152,14 @@ class Lucene8BackendTest {
                     assertThat(body.vectorEncoding()).isEmpty();
                     assertThat(body.vectorSimilarity()).isEmpty();
                 });
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene8", "lucene8to9"})
+    void scansTheStoredValues(String name) throws Exception {
+        OpenIndexResult opened = open(testIndex(name));
+
+        RuntimeStoredScans.scansTheStoredValues(backend, opened.maxDoc().orElseThrow(), true);
     }
 
     @Test

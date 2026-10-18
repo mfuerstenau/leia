@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.server.runtime;
 
 import io.github.mfuerstenau.leia.core.IndexDocument;
 import io.github.mfuerstenau.leia.core.ScanProgress;
+import io.github.mfuerstenau.leia.core.StoredScan;
 import io.github.mfuerstenau.leia.core.TermExport;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.check.IndexCheck;
@@ -93,6 +94,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -124,7 +126,8 @@ public final class RuntimeResults {
         RuntimeIndex index = open.index();
         Set<Feature> features = EnumSet.of(Feature.INDEX_STATS);
         if (index.documents().isPresent()) {
-            features.addAll(List.of(Feature.DOCUMENTS, Feature.STORED_VALUES, Feature.TERM_VECTORS));
+            features.addAll(
+                    List.of(Feature.DOCUMENTS, Feature.STORED_VALUES, Feature.TERM_VECTORS, Feature.STORED_SCAN));
             if (index.fields().stream().anyMatch(field -> field.docValuesType() != RuntimeIndex.DocValuesType.NONE)) {
                 features.add(Feature.DOC_VALUES);
             }
@@ -901,6 +904,45 @@ public final class RuntimeResults {
     }
 
     /**
+     * {@code startStoredScan}: the stored values of the documents in {@code fields} (all if empty)
+     * for {@link StoredScan#scan}, read a page at a time through {@link Documents#storedValues} (ADR
+     * 0055).
+     */
+    public static StoredScan.StoredSource storedSource(
+            OpenRuntime open, Optional<Set<String>> fields, boolean includeDeleted) throws RpcException {
+        Documents documents = open.index().documents().orElseThrow(open::notSupported);
+        if (fields.isPresent()) {
+            for (String field : fields.get()) {
+                checkField(open.index(), field);
+            }
+        }
+        int maxDoc = open.index().maxDoc();
+        return new StoredScan.StoredSource() {
+            @Override
+            public int maxDoc() {
+                return maxDoc;
+            }
+
+            @Override
+            public List<StoredScan.Document> read(int fromDoc, int toDoc) throws IOException {
+                return documents.storedValues(fromDoc, toDoc, fields, includeDeleted).stream()
+                        .map(RuntimeResults::storedDocument)
+                        .toList();
+            }
+        };
+    }
+
+    /** A runtime's stored document as {@link StoredScan} reads it. */
+    static StoredScan.Document storedDocument(Documents.StoredDocument document) {
+        Map<String, List<IndexDocument.StoredValue>> values = new LinkedHashMap<>();
+        document.values()
+                .forEach((field, fieldValues) -> values.put(
+                        field,
+                        fieldValues.stream().map(RuntimeResults::coreValue).toList()));
+        return new StoredScan.Document(document.docId(), document.deleted(), values);
+    }
+
+    /**
      * Checks {@code dir} with {@code runtime}'s {@code CheckIndex}, read-only, at {@code level} if it
      * takes levels, otherwise at its one level (ADR 0045, ADR 0046). The report goes to {@code line};
      * {@code progress} stops the check by throwing.
@@ -997,7 +1039,12 @@ public final class RuntimeResults {
 
     /** {@code value} as the protocol carries it, cut as {@link GetDocumentHandler#storedValue} cuts. */
     private static StoredValue storedValue(RuntimeIndex.StoredValue value, int maxLength) {
-        IndexDocument.StoredValue core = switch (value) {
+        return GetDocumentHandler.storedValue(coreValue(value), maxLength);
+    }
+
+    /** {@code value} as core has it: a number by its type. */
+    private static IndexDocument.StoredValue coreValue(RuntimeIndex.StoredValue value) {
+        return switch (value) {
             case RuntimeIndex.StoredValue.Text(String text) -> new IndexDocument.StoredValue.Text(text);
             case RuntimeIndex.StoredValue.Binary(byte[] bytes) ->
                 new IndexDocument.StoredValue.Binary(new BytesRef(bytes));
@@ -1007,7 +1054,6 @@ public final class RuntimeResults {
             case RuntimeIndex.StoredValue.Numeric(Number number) ->
                 new IndexDocument.StoredValue.DoubleValue(number.doubleValue());
         };
-        return GetDocumentHandler.storedValue(core, maxLength);
     }
 
     /** A term of the params as the runtimes take it. */

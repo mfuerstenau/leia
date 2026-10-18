@@ -14,6 +14,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
@@ -228,6 +229,57 @@ class StoredScanTest {
         }
 
         assertThat(reports).containsExactly(0L, 64L, 100L);
+    }
+
+    @Test
+    void scansASourceInPages() throws Exception {
+        // 150 documents; every tenth is deleted, and the source leaves those out.
+        List<List<Integer>> pages = new ArrayList<>();
+        StoredScan.StoredSource source = new StoredScan.StoredSource() {
+            @Override
+            public int maxDoc() {
+                return 150;
+            }
+
+            @Override
+            public List<StoredScan.Document> read(int fromDoc, int toDoc) {
+                pages.add(List.of(fromDoc, toDoc));
+                List<StoredScan.Document> documents = new ArrayList<>();
+                for (int docId = fromDoc; docId < toDoc; docId++) {
+                    if (docId % 10 != 0) {
+                        String text = docId % 7 == 0 ? "seven" : "other";
+                        documents.add(new StoredScan.Document(
+                                docId,
+                                false,
+                                Map.of(
+                                        "text",
+                                        List.of(
+                                                new IndexDocument.StoredValue.LongValue(7),
+                                                new IndexDocument.StoredValue.Text(text)))));
+                    }
+                }
+                return documents;
+            }
+        };
+        List<Hit> hits = new ArrayList<>();
+        List<Long> reports = new ArrayList<>();
+
+        Summary summary =
+                StoredScan.scan(source, Pattern.compile("seven"), 100, LIMIT, listener(hits, _ -> {}), reports::add);
+
+        assertThat(pages).containsExactly(List.of(0, 64), List.of(64, 128), List.of(128, 150));
+        assertThat(reports).containsExactly(0L, 64L, 128L, 150L);
+        // Multiples of 7 that aren't multiples of 10: 21 of them below 150, without 0, 70 and 140.
+        assertThat(summary.scannedDocs()).isEqualTo(150);
+        assertThat(summary.matchedDocs()).isEqualTo(19);
+        assertThat(hits).extracting(Hit::docId).startsWith(7, 14, 21).doesNotContain(0, 70, 140);
+        // The number before the text counts for the value index.
+        assertThat(hits).extracting(Hit::valueIndex).containsOnly(1);
+
+        DocFilter filter = StoredScan.matches(source, Pattern.compile("seven"), LIMIT, ScanProgress.NONE);
+        assertThat(filter.matchCount()).isEqualTo(19);
+        assertThat(filter.contains(147)).isTrue();
+        assertThat(filter.contains(140)).isFalse();
     }
 
     @Test

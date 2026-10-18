@@ -109,6 +109,7 @@ class Lucene3BackendTest {
                         Feature.INDEX_STATS,
                         Feature.DOCUMENTS,
                         Feature.STORED_VALUES,
+                        Feature.STORED_SCAN,
                         Feature.TERM_VECTORS,
                         Feature.TERMS,
                         Feature.POSTINGS,
@@ -229,6 +230,13 @@ class Lucene3BackendTest {
                         new TopTerm("beta", false, 4, 4));
         backend.fails(
                 Methods.START_FIELD_TERM_SCAN, new StartFieldTermScanParams("nothing", 3), ErrorCode.FIELD_NOT_FOUND);
+    }
+
+    @Test
+    void scansTheStoredValues() throws Exception {
+        OpenIndexResult opened = open(Path.of(PATH));
+
+        RuntimeStoredScans.scansTheStoredValues(backend, opened.maxDoc().orElseThrow(), false);
     }
 
     @Test

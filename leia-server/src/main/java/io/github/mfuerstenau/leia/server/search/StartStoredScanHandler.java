@@ -14,6 +14,8 @@ import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
+import io.github.mfuerstenau.leia.server.runtime.OpenRuntime;
+import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
 import jakarta.inject.Inject;
 import java.io.IOException;
 import java.time.Duration;
@@ -24,7 +26,8 @@ import java.util.regex.PatternSyntaxException;
 
 /**
  * {@code startStoredScan}: checks the params and compiles the pattern at once, then scans the stored
- * values of the {@link CurrentIndex} in a job ({@link GetStoredScanHandler}, ADR 0027).
+ * values of the {@link CurrentIndex} in a job ({@link GetStoredScanHandler}, ADR 0027), on Lucene 10
+ * or a runtime (ADR 0055).
  */
 public final class StartStoredScanHandler implements MethodHandler<StartStoredScanParams, JobStarted> {
 
@@ -47,22 +50,32 @@ public final class StartStoredScanHandler implements MethodHandler<StartStoredSc
 
     @Override
     public JobStarted handle(StartStoredScanParams params) throws RpcException {
-        ReadOnlyIndex index = currentIndex.readable();
         Optional<Set<String>> fields = params.fields().map(Set::copyOf);
-        if (fields.isPresent()) {
-            for (String field : fields.get()) {
-                SearchQueries.checkField(index, field);
+        boolean includeDeleted = params.includeDeleted();
+        StoredScan.StoredSource source;
+        String lucene = "";
+        if (currentIndex.runtime().isPresent()) {
+            OpenRuntime open = currentIndex.runtime().get();
+            source = RuntimeResults.storedSource(open, fields, includeDeleted);
+            lucene = " with Lucene " + open.runtime().luceneVersion();
+        } else {
+            ReadOnlyIndex index = currentIndex.readable();
+            if (fields.isPresent()) {
+                for (String field : fields.get()) {
+                    SearchQueries.checkField(index, field);
+                }
             }
+            source = index.storedValues(fields, includeDeleted);
         }
         Pattern pattern = pattern(params.pattern(), params.caseInsensitive());
-        boolean includeDeleted = params.includeDeleted();
         StoredScanHits hits = new StoredScanHits();
         long jobId = jobs.start(
                 "scan stored values" + fields.map(names -> " of " + names).orElse("") + " for /" + pattern + "/"
-                        + (params.caseInsensitive() ? "i" : "") + (includeDeleted ? ", deleted documents too" : ""),
+                        + (params.caseInsensitive() ? "i" : "") + (includeDeleted ? ", deleted documents too" : "")
+                        + lucene,
                 StoredScanResult.class,
                 hits,
-                progress -> scan(index, pattern, fields, includeDeleted, hits, progress));
+                progress -> scan(source, pattern, hits, progress));
         return new JobStarted(jobId);
     }
 
@@ -83,16 +96,11 @@ public final class StartStoredScanHandler implements MethodHandler<StartStoredSc
     }
 
     private static StoredScanResult scan(
-            ReadOnlyIndex index,
-            Pattern pattern,
-            Optional<Set<String>> fields,
-            boolean includeDeleted,
-            StoredScanHits hits,
-            ScanProgress progress)
+            StoredScan.StoredSource source, Pattern pattern, StoredScanHits hits, ScanProgress progress)
             throws RpcException {
         try {
-            StoredScan.Summary summary = index.storedScan(
-                    pattern, fields, includeDeleted, StartStoredScanParams.MAX_HITS, VALUE_TIME_LIMIT, hits, progress);
+            StoredScan.Summary summary =
+                    StoredScan.scan(source, pattern, StartStoredScanParams.MAX_HITS, VALUE_TIME_LIMIT, hits, progress);
             return new StoredScanResult(
                     summary.scannedDocs(),
                     summary.matchedDocs(),

@@ -36,7 +36,7 @@ The first index of a path decides which Lucene opens it, by the major in its new
 | `CLASSIC_SEARCH` | ✓ | ✓ | ✓ | ✓⁴ | ✓ |
 | `EXPLAIN` | – | – | – | – | ✓ |
 | `HIGHLIGHT` | – | – | – | – | ✓ |
-| `STORED_SCAN` | – | – | – | – | ✓ |
+| `STORED_SCAN` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `CHECK_INDEX` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `CHECK_LEVELS` | – | ✓ | ✓ | ✓ | ✓ |
 | `EXPORT_TERMS` | ✓ | ✓ | ✓ | ✓ | ✓ |

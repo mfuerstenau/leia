@@ -332,3 +332,4 @@ Finished items, moved here from `docs/tasklist.md` (the open work queue).
 ## Lucene 9.12 beyond classic search — done
 
 - [x] Export terms (`EXPORT_TERMS`) on every runtime, with no runtime change: `startExportTerms` pages through `Terms.terms` (`RuntimeResults.exportTerms`), and `TermExport` writes bytes and a docFreq from a `TermSource`. Luke's format stays (ADR 0022); the backlog's `totalTermFreq` and binary-term marker stay open
+- [x] Stored-value scan (`STORED_SCAN`) on every runtime, with runtime interface 7 (ADR 0055): `Documents.storedValues` reads the stored values of a range of document ids, filtered by field, deleted ones on request; core `StoredScan` matches over a `StoredSource`, which `RuntimeResults.storedSource` pages through the runtime; 3.6 included

@@ -26,7 +26,9 @@ import java.util.Set;
 import java.util.function.LongConsumer;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.document.Document;
+import org.apache.lucene.document.FieldSelector;
 import org.apache.lucene.document.Fieldable;
+import org.apache.lucene.document.MapFieldSelector;
 import org.apache.lucene.document.NumericField;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FieldInfos;
@@ -260,6 +262,28 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
                     hasTermVector));
         }
         return new IndexDocument(docId, reader.isDeleted(docId), List.copyOf(fields));
+    }
+
+    @Override
+    public List<StoredDocument> storedValues(
+            int fromDoc, int toDoc, Optional<Set<String>> fields, boolean includeDeleted) throws IOException {
+        checkRange(fromDoc, toDoc);
+        FieldSelector selector = fields.map(names -> new MapFieldSelector(new ArrayList<>(names)))
+                .orElse(null);
+        List<StoredDocument> documents = new ArrayList<>();
+        for (int doc = fromDoc; doc < toDoc; doc++) {
+            boolean deleted = reader.isDeleted(doc);
+            if (deleted && !includeDeleted) {
+                continue;
+            }
+            Document document = selector == null ? reader.document(doc) : reader.document(doc, selector);
+            Map<String, List<StoredValue>> values = new LinkedHashMap<>();
+            for (Fieldable field : document.getFields()) {
+                values.computeIfAbsent(field.name(), _ -> new ArrayList<>()).add(storedValue(field));
+            }
+            documents.add(new StoredDocument(doc, deleted, values));
+        }
+        return List.copyOf(documents);
     }
 
     private static StoredValue storedValue(Fieldable field) {
@@ -554,6 +578,13 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
     private void checkDoc(int docId) {
         if (docId < 0 || docId >= reader.maxDoc()) {
             throw new IllegalArgumentException("No document " + docId + ": maxDoc is " + reader.maxDoc());
+        }
+    }
+
+    private void checkRange(int fromDoc, int toDoc) {
+        if (fromDoc < 0 || fromDoc > toDoc || toDoc > reader.maxDoc()) {
+            throw new IllegalArgumentException(
+                    "No documents " + fromDoc + " to " + toDoc + ": maxDoc is " + reader.maxDoc());
         }
     }
 

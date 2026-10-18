@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.ServiceLoader;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -215,6 +216,42 @@ class Lucene9IndexTest {
     }
 
     /** The raw norms: 8.x encodes the length, as 7.x does, which leia-server decodes by the created major. */
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene8", "lucene8to9"})
+    void readsStoredValuesOfARange(String name) throws IOException {
+        try (RuntimeIndex index = open(name)) {
+            Documents documents = index.documents().orElseThrow();
+            int maxDoc = index.maxDoc();
+            List<Documents.StoredDocument> live = documents.storedValues(0, maxDoc, Optional.of(Set.of("id")), false);
+            assertThat(live).extracting(Documents.StoredDocument::docId).doesNotContain(1);
+            assertThat(live).extracting(Documents.StoredDocument::deleted).containsOnly(false);
+            assertThat(live.getFirst().values())
+                    .containsExactly(Map.entry("id", List.of(new RuntimeIndex.StoredValue.Text("1"))));
+
+            List<Documents.StoredDocument> page = documents.storedValues(1, 3, Optional.empty(), true);
+            assertThat(page)
+                    .extracting(Documents.StoredDocument::docId, Documents.StoredDocument::deleted)
+                    .containsExactly(tuple(1, true), tuple(2, false));
+            // All fields, each with the values that document() reads.
+            for (Documents.StoredDocument doc : page) {
+                for (Documents.DocumentField field :
+                        documents.document(doc.docId()).fields()) {
+                    assertThat(doc.values().getOrDefault(field.name(), List.of()))
+                            .usingRecursiveFieldByFieldElementComparator()
+                            .isEqualTo(field.stored());
+                }
+            }
+            assertThat(documents.storedValues(maxDoc, maxDoc, Optional.empty(), true))
+                    .isEmpty();
+            assertThatThrownBy(() -> documents.storedValues(-1, 1, Optional.empty(), true))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> documents.storedValues(2, 1, Optional.empty(), true))
+                    .isInstanceOf(IllegalArgumentException.class);
+            assertThatThrownBy(() -> documents.storedValues(0, maxDoc + 1, Optional.empty(), true))
+                    .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
     @Test
     void readsTheRawNorms() throws IOException {
         try (RuntimeIndex index = open("lucene8")) {

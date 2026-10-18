@@ -1011,7 +1011,13 @@ public final class ReadOnlyIndex implements OpenedIndex {
         if (maxHits < 0) {
             throw new IllegalArgumentException("maxHits must not be negative: " + maxHits);
         }
-        return StoredScan.scan(reader, pattern, fields, includeDeleted, maxHits, valueTimeLimit, listener, progress);
+        return StoredScan.scan(
+                StoredScan.source(reader, fields, includeDeleted),
+                pattern,
+                maxHits,
+                valueTimeLimit,
+                listener,
+                progress);
     }
 
     /**
@@ -1035,7 +1041,21 @@ public final class ReadOnlyIndex implements OpenedIndex {
         if (fields.isPresent()) {
             fields.get().forEach(this::checkField);
         }
-        return StoredScan.matches(reader, pattern, fields, includeDeleted, valueTimeLimit, progress);
+        return StoredScan.matches(StoredScan.source(reader, fields, includeDeleted), pattern, valueTimeLimit, progress);
+    }
+
+    /**
+     * The stored values of the documents for {@link StoredScan#scan} and {@link StoredScan#matches}
+     * (ADR 0055): of the live documents, and of the deleted ones too if {@code includeDeleted}.
+     *
+     * @param fields the stored fields to read; empty for all of them
+     * @throws IllegalArgumentException if a field doesn't exist
+     */
+    public StoredScan.StoredSource storedValues(Optional<Set<String>> fields, boolean includeDeleted) {
+        if (fields.isPresent()) {
+            fields.get().forEach(this::checkField);
+        }
+        return StoredScan.source(reader, fields, includeDeleted);
     }
 
     @Override

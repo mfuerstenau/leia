@@ -91,6 +91,7 @@ class Lucene7BackendTest {
                         Feature.INDEX_STATS,
                         Feature.DOCUMENTS,
                         Feature.STORED_VALUES,
+                        Feature.STORED_SCAN,
                         Feature.TERM_VECTORS,
                         Feature.DOC_VALUES,
                         Feature.TERMS,
@@ -114,6 +115,14 @@ class Lucene7BackendTest {
                 .filteredOn(field -> field.pointDimensionCount() > 0)
                 .extracting(IndexField::name, IndexField::pointDimensionCount, IndexField::pointNumBytes)
                 .containsExactly(tuple("pt", 1, 4), tuple("loc", 2, 4), tuple("amount", 1, 8));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene6", "lucene7"})
+    void scansTheStoredValues(String name) throws Exception {
+        OpenIndexResult opened = open(testIndex(name));
+
+        RuntimeStoredScans.scansTheStoredValues(backend, opened.maxDoc().orElseThrow(), true);
     }
 
     @ParameterizedTest

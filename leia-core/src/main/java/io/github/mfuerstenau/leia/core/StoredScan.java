@@ -22,6 +22,7 @@ import java.util.regex.Pattern;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
+import org.apache.lucene.index.ReaderUtil;
 import org.apache.lucene.index.StoredFields;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
@@ -128,8 +129,6 @@ public final class StoredScan {
     }
 
     private final Pattern pattern;
-    private final Optional<Set<String>> fields;
-    private final boolean includeDeleted;
     private final int maxHits;
     private final long valueTimeLimitNanos;
     private final Listener listener;
@@ -149,16 +148,12 @@ public final class StoredScan {
 
     private StoredScan(
             Pattern pattern,
-            Optional<Set<String>> fields,
-            boolean includeDeleted,
             int maxHits,
             Duration valueTimeLimit,
             Listener listener,
             IntConsumer matchedDoc,
             ScanProgress progress) {
         this.pattern = pattern;
-        this.fields = fields;
-        this.includeDeleted = includeDeleted;
         this.maxHits = maxHits;
         this.valueTimeLimitNanos = valueTimeLimit.toNanos();
         this.listener = listener;
@@ -167,74 +162,120 @@ public final class StoredScan {
     }
 
     /**
-     * Scans every document of {@code reader}, in document id order.
+     * A document's stored values, as a {@link StoredSource} reads them.
      *
-     * @param fields the stored fields to scan; empty for all of them
-     * @param includeDeleted whether to scan deleted documents too
+     * @param values the values by field, each field's values in stored order
+     */
+    public record Document(int docId, boolean deleted, Map<String, List<StoredValue>> values) {}
+
+    /**
+     * The stored values of an index, read a range of document ids at a time (ADR 0055). Its creator
+     * decides which fields it reads and whether it reads deleted documents.
+     */
+    public interface StoredSource {
+
+        /** The documents of the index, deleted ones included. */
+        int maxDoc();
+
+        /**
+         * The documents from {@code fromDoc} up to {@code toDoc} (exclusive) that the source reads,
+         * in document id order.
+         */
+        List<Document> read(int fromDoc, int toDoc) throws IOException;
+    }
+
+    /**
+     * The stored values of {@code reader} in {@code fields} (all if empty): of the live documents,
+     * and of the deleted ones too if {@code includeDeleted}. It keeps each leaf's stored fields across
+     * reads, so a scan opens them once.
+     */
+    static StoredSource source(IndexReader reader, Optional<Set<String>> fields, boolean includeDeleted) {
+        List<LeafReaderContext> leaves = reader.leaves();
+        StoredFields[] storedFields = new StoredFields[leaves.size()];
+        return new StoredSource() {
+            @Override
+            public int maxDoc() {
+                return reader.maxDoc();
+            }
+
+            @Override
+            public List<Document> read(int fromDoc, int toDoc) throws IOException {
+                List<Document> documents = new ArrayList<>();
+                int leafIndex = ReaderUtil.subIndex(fromDoc, leaves);
+                for (int docId = fromDoc; docId < toDoc; docId++) {
+                    while (docId
+                            >= leaves.get(leafIndex).docBase
+                                    + leaves.get(leafIndex).reader().maxDoc()) {
+                        leafIndex++;
+                    }
+                    LeafReaderContext context = leaves.get(leafIndex);
+                    LeafReader leaf = context.reader();
+                    int doc = docId - context.docBase;
+                    Bits liveDocs = leaf.getLiveDocs();
+                    boolean deleted = liveDocs != null && !liveDocs.get(doc);
+                    if (deleted && !includeDeleted) {
+                        continue;
+                    }
+                    if (storedFields[leafIndex] == null) {
+                        storedFields[leafIndex] = leaf.storedFields();
+                    }
+                    StoredValues values = new StoredValues(
+                            name -> fields.isEmpty() || fields.get().contains(name));
+                    storedFields[leafIndex].document(doc, values);
+                    documents.add(new Document(docId, deleted, values.values));
+                }
+                return documents;
+            }
+        };
+    }
+
+    /**
+     * Scans every document of {@code source}, in document id order.
+     *
      * @param maxHits how many hits to pass on; later matches are only counted
      * @param valueTimeLimit how long matching one value may take before it is skipped
      * @throws CancellationException from {@code progress}, to stop the scan
      * @throws IOException if reading a document fails
      */
-    static Summary scan(
-            IndexReader reader,
+    public static Summary scan(
+            StoredSource source,
             Pattern pattern,
-            Optional<Set<String>> fields,
-            boolean includeDeleted,
             int maxHits,
             Duration valueTimeLimit,
             Listener listener,
             ScanProgress progress)
             throws IOException {
-        return new StoredScan(pattern, fields, includeDeleted, maxHits, valueTimeLimit, listener, docId -> {}, progress)
-                .run(reader);
+        return new StoredScan(pattern, maxHits, valueTimeLimit, listener, docId -> {}, progress).run(source);
     }
 
     /**
-     * Scans every document of {@code reader} as {@link #scan} does, and keeps the documents with a
+     * Scans every document of {@code source} as {@link #scan} does, and keeps the documents with a
      * value in which the pattern was found as a filter (ADR 0032).
      *
      * @throws CancellationException from {@code progress}, to stop the scan
      * @throws IOException if reading a document fails
      */
-    static DocFilter matches(
-            IndexReader reader,
-            Pattern pattern,
-            Optional<Set<String>> fields,
-            boolean includeDeleted,
-            Duration valueTimeLimit,
-            ScanProgress progress)
-            throws IOException {
-        FixedBitSet matches = new FixedBitSet(reader.maxDoc());
-        Summary summary = new StoredScan(
-                        pattern, fields, includeDeleted, 0, valueTimeLimit, NO_HITS, matches::set, progress)
-                .run(reader);
+    public static DocFilter matches(
+            StoredSource source, Pattern pattern, Duration valueTimeLimit, ScanProgress progress) throws IOException {
+        FixedBitSet matches = new FixedBitSet(source.maxDoc());
+        Summary summary = new StoredScan(pattern, 0, valueTimeLimit, NO_HITS, matches::set, progress).run(source);
         String label = "/" + pattern.pattern() + "/" + ((pattern.flags() & Pattern.CASE_INSENSITIVE) != 0 ? "i" : "");
         return new DocFilter(matches, label, label, summary.took(), OptionalLong.of(summary.timedOutValues()));
     }
 
-    private Summary run(IndexReader reader) throws IOException {
+    private Summary run(StoredSource source) throws IOException {
         long start = System.nanoTime();
-        for (LeafReaderContext context : reader.leaves()) {
-            LeafReader leaf = context.reader();
-            Bits liveDocs = leaf.getLiveDocs();
-            StoredFields storedFields = leaf.storedFields();
-            for (int doc = 0; doc < leaf.maxDoc(); doc++) {
-                if (scannedDocs % PROGRESS_INTERVAL == 0) {
-                    progress.scanned(scannedDocs);
+        int maxDoc = source.maxDoc();
+        for (int from = 0; from < maxDoc; from += PROGRESS_INTERVAL) {
+            progress.scanned(scannedDocs);
+            int to = Math.min(maxDoc, from + PROGRESS_INTERVAL);
+            for (Document document : source.read(from, to)) {
+                if (scanDocument(document.docId(), document.deleted(), document.values())) {
+                    matchedDocs++;
+                    matchedDoc.accept(document.docId());
                 }
-                boolean deleted = liveDocs != null && !liveDocs.get(doc);
-                if (!deleted || includeDeleted) {
-                    StoredValues values = new StoredValues(
-                            name -> fields.isEmpty() || fields.get().contains(name));
-                    storedFields.document(doc, values);
-                    if (scanDocument(context.docBase + doc, deleted, values.values)) {
-                        matchedDocs++;
-                        matchedDoc.accept(context.docBase + doc);
-                    }
-                }
-                scannedDocs++;
             }
+            scannedDocs = to;
         }
         progress.scanned(scannedDocs);
         return new Summary(

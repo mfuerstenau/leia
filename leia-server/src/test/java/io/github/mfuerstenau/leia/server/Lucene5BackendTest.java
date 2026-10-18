@@ -123,6 +123,7 @@ class Lucene5BackendTest {
                         Feature.INDEX_STATS,
                         Feature.DOCUMENTS,
                         Feature.STORED_VALUES,
+                        Feature.STORED_SCAN,
                         Feature.TERM_VECTORS,
                         Feature.DOC_VALUES,
                         Feature.TERMS,
@@ -153,6 +154,14 @@ class Lucene5BackendTest {
                         DocValuesType.SORTED,
                         DocValuesType.SORTED_SET,
                         DocValuesType.SORTED_NUMERIC);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene4", "lucene5"})
+    void scansTheStoredValues(String name) throws Exception {
+        OpenIndexResult opened = open(testIndex(name));
+
+        RuntimeStoredScans.scansTheStoredValues(backend, opened.maxDoc().orElseThrow(), true);
     }
 
     @ParameterizedTest
