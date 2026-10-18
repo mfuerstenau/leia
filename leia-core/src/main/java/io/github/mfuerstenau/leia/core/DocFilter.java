@@ -1,6 +1,8 @@
 package io.github.mfuerstenau.leia.core;
 
 import java.time.Duration;
+import java.util.Arrays;
+import java.util.BitSet;
 import java.util.Optional;
 import java.util.OptionalLong;
 import org.apache.lucene.search.DocIdSetIterator;
@@ -39,6 +41,21 @@ public final class DocFilter {
         this.rewrittenQuery = rewrittenQuery;
         this.took = took;
         this.timedOutValues = timedOutValues;
+    }
+
+    /**
+     * The filter of the documents set in {@code docs}, such as a runtime's matches of a query (ADR
+     * 0056).
+     *
+     * @throws IllegalArgumentException if a document from {@code maxDoc} on is set
+     */
+    public static DocFilter of(BitSet docs, int maxDoc, String query, String rewrittenQuery, Duration took) {
+        if (docs.length() > maxDoc) {
+            throw new IllegalArgumentException(
+                    "Document " + (docs.length() - 1) + " is not in the index: maxDoc is " + maxDoc);
+        }
+        long[] words = Arrays.copyOf(docs.toLongArray(), FixedBitSet.bits2words(maxDoc));
+        return new DocFilter(new FixedBitSet(words, maxDoc), query, rewrittenQuery, took);
     }
 
     /** How many documents match. */

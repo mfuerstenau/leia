@@ -108,6 +108,7 @@ class Lucene8BackendTest {
                 Feature.TOP_TERMS,
                 Feature.EXPORT_TERMS,
                 Feature.CLASSIC_SEARCH,
+                Feature.FILTER,
                 Feature.POINTS,
                 Feature.COMMITS,
                 Feature.CHECK_INDEX,
@@ -160,6 +161,14 @@ class Lucene8BackendTest {
         OpenIndexResult opened = open(testIndex(name));
 
         RuntimeStoredScans.scansTheStoredValues(backend, opened.maxDoc().orElseThrow(), true);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene8", "lucene8to9"})
+    void filtersTheDocuments(String name) throws Exception {
+        open(testIndex(name));
+
+        RuntimeFilters.filtersTheDocuments(backend, true);
     }
 
     @Test

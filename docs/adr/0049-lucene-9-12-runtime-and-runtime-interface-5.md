@@ -28,7 +28,7 @@ Two things about Lucene 9.12 decide how it is built:
    - A new group, `Optional<Knn> knn()`: `approximate(field, target, k, filter)` and `exact(field, target, filter)` return a `Search.ParsedQuery`, so `Search.search` runs them with paging, stored fields and progress as it runs classic ones; the filter is a query of `Search.parse`. `vector(docId, field)` reads a document's vector for a `docId` target, a deleted document's too, as ADR 0040 allows.
    - `leia-lucene3`, `leia-lucene5` and `leia-lucene7` follow: no `knn()` group, and fields and document fields without vectors.
 
-   *Amended (ADR 0051, ADR 0055):* interface 6 adds the reader's segments, interface 7 `Documents.storedValues` for the stored-values scan.
+   *Amended (ADR 0051, ADR 0055, ADR 0056):* interface 6 adds the reader's segments, interface 7 `Documents.storedValues` for the stored-values scan, interface 8 `Search.matches` and `matchesDeleted` for the filter.
 5. **9.12 implements all of it** (`Lucene9Index`, `Lucene9Commits`, `Lucene9Check`, `Lucene9Analyzers`, `Lucene9Points`, `ExactKnnQuery`):
    - Documents through `storedFields()` and `termVectors()`; `MultiTerms`, `MultiBits` and `FieldInfos.getMergedFieldInfos` in place of `MultiFields`; `TotalHits.value`, every hit counted.
    - A field's `VectorFormat` from its `FieldInfo`. A document's vector from its segment, through a fresh `FloatVectorValues` or `ByteVectorValues` (in 9.x themselves iterators), `advance(doc)` and a copy of `vectorValue()`. A segment of 8.x has none.

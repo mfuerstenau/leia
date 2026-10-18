@@ -14,6 +14,7 @@ import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
+import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
 import io.github.mfuerstenau.leia.server.search.SearchQueries;
 import io.github.mfuerstenau.leia.server.search.StartStoredScanHandler;
 import jakarta.inject.Inject;
@@ -25,7 +26,7 @@ import java.util.regex.Pattern;
 /**
  * {@code startFilter}: checks the params and parses the query or compiles the pattern at once, then
  * finds the matching documents of the {@link CurrentIndex} in a job ({@link GetFilterHandler}, ADR
- * 0031, ADR 0032).
+ * 0031, ADR 0032), on Lucene 10 or a runtime (ADR 0056).
  */
 public final class StartFilterHandler implements MethodHandler<StartFilterParams, JobStarted> {
 
@@ -50,11 +51,14 @@ public final class StartFilterHandler implements MethodHandler<StartFilterParams
      */
     @Override
     public JobStarted handle(StartFilterParams params) throws RpcException {
-        ReadOnlyIndex index = currentIndex.readable();
         if (params.query().isPresent() == params.pattern().isPresent()) {
             throw new RpcException(
                     ErrorCode.INVALID_PARAMS, "Invalid params: the filter needs exactly one of query and pattern");
         }
+        if (currentIndex.runtime().isPresent()) {
+            return RuntimeResults.startFilter(currentIndex.runtime().get(), params, jobs);
+        }
+        ReadOnlyIndex index = currentIndex.readable();
         boolean includeDeleted = params.includeDeleted();
         long jobId = params.query().isPresent()
                 ? startQuery(index, params.query().get(), includeDeleted)

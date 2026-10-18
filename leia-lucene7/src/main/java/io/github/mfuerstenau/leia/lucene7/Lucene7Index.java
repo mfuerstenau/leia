@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -57,6 +58,7 @@ import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.LeafCollector;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
+import org.apache.lucene.search.Scorer;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.TopScoreDocCollector;
 import org.apache.lucene.store.Directory;
@@ -656,6 +658,111 @@ final class Lucene7Index implements RuntimeIndex, Documents, Terms, Search {
         @Override
         public boolean needsScores() {
             return delegate.needsScores();
+        }
+    }
+
+    /**
+     * {@inheritDoc} Deleted documents match through a reader whose leaves have no deletions. The
+     * progress is reported once per segment, and every {@link #PROGRESS_INTERVAL} matches in between.
+     */
+    @Override
+    public Matches matches(ParsedQuery parsed, boolean includeDeleted, LongConsumer progress) throws IOException {
+        if (!(parsed instanceof Lucene7Query lucene7)) {
+            throw new IllegalArgumentException("Not a query of this index: " + parsed);
+        }
+        Query query = lucene7.query;
+        long start = System.nanoTime();
+        IndexSearcher searcher = new IndexSearcher(includeDeleted ? undeleted(reader) : reader);
+        // No cache: a query is run once.
+        searcher.setQueryCache(null);
+        Query rewritten = searcher.rewrite(query);
+        BitSet docs = new BitSet(reader.maxDoc());
+        searcher.search(rewritten, new MatchCollector(docs, progress));
+        progress.accept(reader.maxDoc());
+        return new Matches(docs, query.toString(), rewritten.toString(), (System.nanoTime() - start) / 1_000_000);
+    }
+
+    @Override
+    public boolean matchesDeleted() {
+        return true;
+    }
+
+    /**
+     * The leaves of {@code reader} without deletions, as one reader with the same document ids. It is
+     * never closed: closing it would leave the leaves open, but it takes nothing that needs closing.
+     */
+    private static IndexReader undeleted(IndexReader reader) throws IOException {
+        return new MultiReader(
+                reader.leaves().stream()
+                        .map(leaf -> new UndeletedLeaf(leaf.reader()))
+                        .toArray(IndexReader[]::new),
+                false);
+    }
+
+    /** A leaf in which every document is live. */
+    private static final class UndeletedLeaf extends FilterLeafReader {
+
+        UndeletedLeaf(LeafReader in) {
+            super(in);
+        }
+
+        @Override
+        public Bits getLiveDocs() {
+            return null;
+        }
+
+        @Override
+        public int numDocs() {
+            return maxDoc();
+        }
+
+        @Override
+        public CacheHelper getCoreCacheHelper() {
+            return null;
+        }
+
+        @Override
+        public CacheHelper getReaderCacheHelper() {
+            return null;
+        }
+    }
+
+    /**
+     * Sets the bit of each matching document, by its id in the whole index, without scores. Reports
+     * the documents searched at the start of each segment and every {@link #PROGRESS_INTERVAL}
+     * matches, since this Lucene has no other way to ask the progress during a search.
+     */
+    private static final class MatchCollector implements Collector {
+        private final BitSet docs;
+        private final LongConsumer progress;
+        private long collected;
+
+        MatchCollector(BitSet docs, LongConsumer progress) {
+            this.docs = docs;
+            this.progress = progress;
+        }
+
+        @Override
+        public LeafCollector getLeafCollector(LeafReaderContext context) {
+            int docBase = context.docBase;
+            progress.accept(docBase);
+            return new LeafCollector() {
+                @Override
+                public void setScorer(Scorer scorer) {}
+
+                @Override
+                public void collect(int doc) {
+                    docs.set(docBase + doc);
+                    if (++collected % PROGRESS_INTERVAL == 0) {
+                        progress.accept(docBase + doc);
+                    }
+                }
+            };
+        }
+
+        @Override
+        public boolean needsScores() {
+            return false;
         }
     }
 

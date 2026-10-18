@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -540,6 +541,77 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
                     (System.nanoTime() - start) / 1_000_000);
         } finally {
             searcher.close();
+        }
+    }
+
+    /**
+     * {@inheritDoc} Live documents only: the scorers of Lucene 3.6 read the postings through the
+     * deletions. The progress is reported once per segment, and every {@link #PROGRESS_INTERVAL}
+     * matches in between.
+     */
+    @Override
+    public Matches matches(ParsedQuery parsed, boolean includeDeleted, LongConsumer progress) throws IOException {
+        if (!(parsed instanceof Lucene3Query lucene3)) {
+            throw new IllegalArgumentException("Not a query of this index: " + parsed);
+        }
+        if (includeDeleted) {
+            throw new IllegalArgumentException("Lucene 3.6 can't match deleted documents");
+        }
+        Query query = lucene3.query;
+        long start = System.nanoTime();
+        IndexSearcher searcher = new IndexSearcher(reader);
+        try {
+            Query rewritten = searcher.rewrite(query);
+            BitSet docs = new BitSet(reader.maxDoc());
+            searcher.search(rewritten, new MatchCollector(docs, progress));
+            progress.accept(reader.maxDoc());
+            return new Matches(docs, query.toString(), rewritten.toString(), (System.nanoTime() - start) / 1_000_000);
+        } finally {
+            searcher.close();
+        }
+    }
+
+    @Override
+    public boolean matchesDeleted() {
+        return false;
+    }
+
+    /**
+     * Sets the bit of each matching document, by its id in the whole index, without scores. Reports
+     * the documents searched at the start of each segment and every {@link #PROGRESS_INTERVAL}
+     * matches.
+     */
+    private static final class MatchCollector extends Collector {
+        private final BitSet docs;
+        private final LongConsumer progress;
+        private int docBase;
+        private long collected;
+
+        MatchCollector(BitSet docs, LongConsumer progress) {
+            this.docs = docs;
+            this.progress = progress;
+        }
+
+        @Override
+        public void setScorer(Scorer scorer) {}
+
+        @Override
+        public void collect(int doc) {
+            docs.set(docBase + doc);
+            if (++collected % PROGRESS_INTERVAL == 0) {
+                progress.accept(docBase + doc);
+            }
+        }
+
+        @Override
+        public void setNextReader(IndexReader segment, int docBase) {
+            this.docBase = docBase;
+            progress.accept(docBase);
+        }
+
+        @Override
+        public boolean acceptsDocsOutOfOrder() {
+            return true;
         }
     }
 

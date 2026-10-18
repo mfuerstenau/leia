@@ -88,6 +88,7 @@ class Lucene24BackendTest {
                         Feature.TOP_TERMS,
                         Feature.EXPORT_TERMS,
                         Feature.CLASSIC_SEARCH,
+                        Feature.FILTER,
                         Feature.COMMITS,
                         Feature.CHECK_INDEX)
                 .doesNotContain(Feature.SEARCH, Feature.POINTS, Feature.AUTO_STOP_WORDS, Feature.CHECK_LEVELS);

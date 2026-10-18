@@ -132,6 +132,7 @@ class Lucene5BackendTest {
                         Feature.TOP_TERMS,
                         Feature.EXPORT_TERMS,
                         Feature.CLASSIC_SEARCH,
+                        Feature.FILTER,
                         Feature.COMMITS,
                         Feature.CHECK_INDEX,
                         Feature.CHECK_LEVELS);
@@ -162,6 +163,14 @@ class Lucene5BackendTest {
         OpenIndexResult opened = open(testIndex(name));
 
         RuntimeStoredScans.scansTheStoredValues(backend, opened.maxDoc().orElseThrow(), true);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene4", "lucene5"})
+    void filtersTheDocuments(String name) throws Exception {
+        open(testIndex(name));
+
+        RuntimeFilters.filtersTheDocuments(backend, true);
     }
 
     @ParameterizedTest

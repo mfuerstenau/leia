@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -63,6 +64,7 @@ import org.apache.lucene.search.KnnByteVectorQuery;
 import org.apache.lucene.search.KnnFloatVectorQuery;
 import org.apache.lucene.search.LeafCollector;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.Scorable;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.ScoreMode;
 import org.apache.lucene.search.TopDocs;
@@ -704,6 +706,95 @@ final class Lucene9Index implements RuntimeIndex, Documents, Terms, Search, Knn 
                 docs.totalHits.value,
                 List.copyOf(hits),
                 (System.nanoTime() - start) / 1_000_000);
+    }
+
+    /**
+     * {@inheritDoc} Deleted documents match through a reader whose leaves have no deletions. The
+     * progress is reported once per segment, and asked from time to time in between.
+     */
+    @Override
+    public Matches matches(ParsedQuery parsed, boolean includeDeleted, LongConsumer progress) throws IOException {
+        Query query = query(parsed);
+        long start = System.nanoTime();
+        SearchProgress searchProgress = new SearchProgress(progress);
+        IndexSearcher searcher = new IndexSearcher(includeDeleted ? undeleted(reader) : reader);
+        // No cache: a query is run once.
+        searcher.setQueryCache(null);
+        // Never a timeout: only a way to ask the progress, which throws to stop the search.
+        searcher.setTimeout(searchProgress);
+        Query rewritten = searcher.rewrite(query);
+        BitSet docs = new BitSet(reader.maxDoc());
+        searcher.search(rewritten, new ProgressCollector(new MatchCollector(docs), searchProgress));
+        progress.accept(reader.maxDoc());
+        return new Matches(docs, query.toString(), rewritten.toString(), (System.nanoTime() - start) / 1_000_000);
+    }
+
+    @Override
+    public boolean matchesDeleted() {
+        return true;
+    }
+
+    /**
+     * The leaves of {@code reader} without deletions, as one reader with the same document ids. It is
+     * never closed: closing it would leave the leaves open, but it takes nothing that needs closing.
+     */
+    private static IndexReader undeleted(IndexReader reader) throws IOException {
+        return new MultiReader(
+                reader.leaves().stream()
+                        .map(leaf -> new UndeletedLeaf(leaf.reader()))
+                        .toArray(IndexReader[]::new),
+                false);
+    }
+
+    /** A leaf in which every document is live. */
+    private static final class UndeletedLeaf extends FilterLeafReader {
+
+        UndeletedLeaf(LeafReader in) {
+            super(in);
+        }
+
+        @Override
+        public Bits getLiveDocs() {
+            return null;
+        }
+
+        @Override
+        public int numDocs() {
+            return maxDoc();
+        }
+
+        @Override
+        public CacheHelper getCoreCacheHelper() {
+            return null;
+        }
+
+        @Override
+        public CacheHelper getReaderCacheHelper() {
+            return null;
+        }
+    }
+
+    /** Sets the bit of each matching document, by its id in the whole index; no scores. */
+    private record MatchCollector(BitSet docs) implements Collector {
+
+        @Override
+        public LeafCollector getLeafCollector(LeafReaderContext context) {
+            int docBase = context.docBase;
+            return new LeafCollector() {
+                @Override
+                public void setScorer(Scorable scorer) {}
+
+                @Override
+                public void collect(int doc) {
+                    docs.set(docBase + doc);
+                }
+            };
+        }
+
+        @Override
+        public ScoreMode scoreMode() {
+            return ScoreMode.COMPLETE_NO_SCORES;
+        }
     }
 
     /** The Lucene query of {@code parsed}. */

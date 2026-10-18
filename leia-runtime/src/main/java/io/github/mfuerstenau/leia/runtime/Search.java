@@ -1,6 +1,7 @@
 package io.github.mfuerstenau.leia.runtime;
 
 import java.io.IOException;
+import java.util.BitSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -31,6 +32,22 @@ public interface Search {
      */
     SearchResults search(ParsedQuery query, int offset, int limit, Optional<List<String>> fields, LongConsumer progress)
             throws IOException;
+
+    /**
+     * Every document that matches a query from {@link #parse}, unscored, for a filter (ADR 0056):
+     * the live ones, and the deleted ones too if {@code includeDeleted}.
+     *
+     * @param progress receives the documents searched so far, from time to time; it may throw to stop
+     *     the matching
+     * @throws IllegalArgumentException if {@code includeDeleted} and not {@link #matchesDeleted()}
+     */
+    Matches matches(ParsedQuery query, boolean includeDeleted, LongConsumer progress) throws IOException;
+
+    /**
+     * Whether {@link #matches} takes {@code includeDeleted}: false if the runtime's Lucene can't read
+     * the postings of deleted documents, as 3.6 can't.
+     */
+    boolean matchesDeleted();
 
     /** A query from {@link #parse}; its {@code toString} is the parsed query. */
     interface ParsedQuery {}
@@ -85,6 +102,14 @@ public interface Search {
 
     /** A hit, with the stored values of the fields asked for. */
     record Hit(int docId, float score, Map<String, List<RuntimeIndex.StoredValue>> fields) {}
+
+    /**
+     * The documents that match a query, by document id of the whole index.
+     *
+     * @param query the parsed query
+     * @param rewrittenQuery the query after rewriting
+     */
+    record Matches(BitSet docs, String query, String rewrittenQuery, long tookMillis) {}
 
     record SearchResults(String query, String rewrittenQuery, long totalHits, List<Hit> hits, long tookMillis) {}
 }

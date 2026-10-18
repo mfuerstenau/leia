@@ -1,8 +1,10 @@
 package io.github.mfuerstenau.leia.core;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.time.Duration;
+import java.util.BitSet;
 import java.util.Optional;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.util.FixedBitSet;
@@ -58,6 +60,37 @@ class DocFilterTest {
         assertThat(filter(0).step(0, false)).isEmpty();
         assertThat(filter(5).matchCount()).isZero();
         assertThat(filter(5).step(0, true)).isEqualTo(Optional.empty());
+    }
+
+    @Test
+    void takesTheDocumentsOfABitSet() {
+        BitSet docs = new BitSet();
+        docs.set(3);
+        docs.set(64);
+        docs.set(129);
+
+        DocFilter filter = DocFilter.of(docs, 130, "body:beta", "body:beta", Duration.ofMillis(7));
+
+        assertThat(filter.matchCount()).isEqualTo(3);
+        assertThat(filter.contains(64)).isTrue();
+        assertThat(filter.contains(65)).isFalse();
+        assertThat(filter.step(65, true)).contains(new DocFilter.Match(129, 2));
+        assertThat(filter.step(63, false)).contains(new DocFilter.Match(3, 0));
+        assertThat(filter.next(130)).isEqualTo(DocIdSetIterator.NO_MORE_DOCS);
+        assertThat(filter.query()).isEqualTo("body:beta");
+        assertThat(filter.took()).isEqualTo(Duration.ofMillis(7));
+        assertThat(DocFilter.of(new BitSet(), 0, "q", "q", Duration.ZERO).matchCount())
+                .isZero();
+    }
+
+    @Test
+    void refusesABitSetWithADocumentBeyondMaxDoc() {
+        BitSet docs = new BitSet();
+        docs.set(10);
+
+        assertThatThrownBy(() -> DocFilter.of(docs, 10, "q", "q", Duration.ZERO))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("maxDoc is 10");
     }
 
     private static DocFilter filter(int maxDoc, int... matches) {

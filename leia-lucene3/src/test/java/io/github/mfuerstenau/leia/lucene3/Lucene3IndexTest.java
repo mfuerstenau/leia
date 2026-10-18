@@ -21,6 +21,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -246,6 +247,32 @@ class Lucene3IndexTest {
             assertThat(results.hits().getFirst().fields()).containsOnlyKeys("id");
             assertThatThrownBy(() -> index.search().orElseThrow().parse("body:(", BODY, standard()))
                     .isInstanceOf(Search.InvalidQueryException.class);
+        }
+    }
+
+    @Test
+    void matchesAQueryInTheLiveDocumentsOnly() throws Exception {
+        try (RuntimeIndex index = open3()) {
+            Search search = index.search().orElseThrow();
+            Search.ParsedQuery query = search.parse("alpha", BODY, standard());
+            List<Long> progress = new ArrayList<>();
+            Search.Matches live = search.matches(query, false, progress::add);
+            assertThat(live.query()).isEqualTo("body:alpha");
+            assertThat(live.rewrittenQuery()).isEqualTo("body:alpha");
+            // Every document has alpha; one of the 7 is deleted.
+            BitSet hits = new BitSet();
+            search.search(query, 0, 10, Optional.empty(), _ -> {}).hits().forEach(hit -> hits.set(hit.docId()));
+            assertThat(live.docs()).isEqualTo(hits);
+            assertThat(live.docs().cardinality()).isEqualTo(6);
+            assertThat(progress).last().isEqualTo(7L);
+
+            assertThat(search.matchesDeleted()).isFalse();
+            assertThatThrownBy(() -> search.matches(query, true, _ -> {})).isInstanceOf(IllegalArgumentException.class);
+            CancellationException stop = new CancellationException("stop");
+            assertThatThrownBy(() -> search.matches(query, false, _ -> {
+                        throw stop;
+                    }))
+                    .isSameAs(stop);
         }
     }
 

@@ -25,7 +25,7 @@ The first index of a path decides which Lucene opens it, by the major in its new
 | `TERM_VECTORS` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `POSITIONS` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `RECONSTRUCT` | – | – | – | – | ✓ |
-| `FILTER` | – | – | – | – | ✓ |
+| `FILTER` | ✓⁵ | ✓ | ✓ | ✓ | ✓ |
 | `TERMS` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `POSTINGS` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `POINTS` | – | – | ✓² | ✓² | ✓ |
@@ -47,6 +47,7 @@ The first index of a path decides which Lucene opens it, by the major in its new
 2. Only if a field has points (ADR 0048 §3).
 3. Only if a field has KNN vectors, which no 8.x segment has: only the 9.x segments of an index created by 8.x (ADR 0049 §6).
 4. With `KNN_VECTORS`, `CLASSIC_SEARCH` takes a KNN query too, approximate or exact, with a filter (ADR 0049 §6).
+5. A query filter takes no deleted documents: Lucene 3.6 doesn't read their postings, so `startFilter` refuses a query with `includeDeleted` (ADR 0056 §4). A pattern filter takes them.
 
 Every runtime reports the open reader's segments in `getIndexStats`, from runtime interface 6 on (ADR 0051), so the documents screen shows and pins segments on every index with a reader.
 
@@ -60,6 +61,8 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 |---|---|---|---|---|---|
 | Terms | strings, as UTF-8 | bytes | bytes | bytes | bytes |
 | Postings of deleted documents | skipped, though `docFreq` counts them | marked | marked | marked | marked |
+| Query filter with deleted documents (ADR 0056) | refused | ✓, through leaves without deletions | as 5.5.5 | as 5.5.5 | ✓, through readers without deletions |
+| Filter cancellation | per segment and every 1024 matches | per segment and every 1024 matches | as 5.5.5 | through the searcher's `QueryTimeout` | through `ExitableDirectoryReader` |
 | `totalTermFreq` | counted from the live postings | recorded | recorded | recorded | recorded |
 | Export terms | reads every posting, as its term pages count `totalTermFreq` from them | the term dictionary only | the term dictionary only | the term dictionary only | the term dictionary only |
 | Term statistics per field | absent | ✓ | ✓ | ✓ | ✓ |

@@ -117,6 +117,7 @@ class Lucene3BackendTest {
                         Feature.TOP_TERMS,
                         Feature.EXPORT_TERMS,
                         Feature.CLASSIC_SEARCH,
+                        Feature.FILTER,
                         Feature.COMMITS,
                         Feature.CHECK_INDEX);
         assertThat(opened.indexes().getFirst().reader().orElseThrow().createdVersionMajor())
@@ -237,6 +238,13 @@ class Lucene3BackendTest {
         OpenIndexResult opened = open(Path.of(PATH));
 
         RuntimeStoredScans.scansTheStoredValues(backend, opened.maxDoc().orElseThrow(), false);
+    }
+
+    @Test
+    void filtersTheDocuments() throws Exception {
+        open(Path.of(PATH));
+
+        RuntimeFilters.filtersTheDocuments(backend, false);
     }
 
     @Test

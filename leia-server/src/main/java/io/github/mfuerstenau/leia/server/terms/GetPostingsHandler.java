@@ -20,7 +20,7 @@ import org.apache.lucene.util.BytesRef;
 
 /**
  * {@code getPostings}: a page of the postings of a term of the {@link CurrentIndex}, through the
- * kept filter if asked (ADR 0032).
+ * kept filter if asked (ADR 0032), on Lucene 10 or a runtime (ADR 0056).
  */
 public final class GetPostingsHandler implements MethodHandler<GetPostingsParams, GetPostingsResult> {
 
@@ -40,8 +40,14 @@ public final class GetPostingsHandler implements MethodHandler<GetPostingsParams
 
     @Override
     public GetPostingsResult handle(GetPostingsParams params) throws RpcException {
+        Optional<PostingsPage.Filter> filter = Optional.empty();
+        if (params.filter().isPresent()) {
+            filter = Optional.of(new PostingsPage.Filter(
+                    filters.get(params.filter().get().filterId()),
+                    params.filter().get().onlyMatches()));
+        }
         if (currentIndex.runtime().isPresent()) {
-            return RuntimeResults.postings(currentIndex.runtime().get(), params);
+            return RuntimeResults.postings(currentIndex.runtime().get(), params, filter);
         }
         TermParams.checkLimit(params.limit(), GetPostingsParams.MAX_LIMIT);
         if (params.fromDoc() < 0) {
@@ -52,12 +58,6 @@ public final class GetPostingsHandler implements MethodHandler<GetPostingsParams
         ReadOnlyIndex index = currentIndex.readable();
         String field = params.field();
         TermParams.checkField(index, field);
-        Optional<PostingsPage.Filter> filter = Optional.empty();
-        if (params.filter().isPresent()) {
-            filter = Optional.of(new PostingsPage.Filter(
-                    filters.get(params.filter().get().filterId()),
-                    params.filter().get().onlyMatches()));
-        }
         try {
             PostingsPage page = index.postings(field, term, params.fromDoc(), params.limit(), filter)
                     .orElseThrow(() -> new RpcException(

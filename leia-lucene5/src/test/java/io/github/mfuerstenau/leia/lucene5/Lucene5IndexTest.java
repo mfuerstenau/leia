@@ -20,6 +20,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
@@ -359,6 +360,33 @@ class Lucene5IndexTest {
             assertThat(results.hits().getFirst().fields()).containsOnlyKeys("id");
             assertThatThrownBy(() -> search.parse("body:(", BODY, named("StandardAnalyzer")))
                     .isInstanceOf(Search.InvalidQueryException.class);
+        }
+    }
+
+    @Test
+    void matchesAQuery() throws Exception {
+        try (RuntimeIndex index = open("lucene5")) {
+            Search search = index.search().orElseThrow();
+            Search.ParsedQuery query = search.parse("alpha", BODY, named("StandardAnalyzer"));
+            List<Long> progress = new ArrayList<>();
+            Search.Matches live = search.matches(query, false, progress::add);
+            assertThat(live.query()).isEqualTo("body:alpha");
+            assertThat(live.rewrittenQuery()).isEqualTo("body:alpha");
+            // Every document has alpha; document 1 is deleted.
+            BitSet all = new BitSet();
+            all.set(0, index.maxDoc());
+            BitSet undeleted = (BitSet) all.clone();
+            undeleted.clear(1);
+            assertThat(live.docs()).isEqualTo(undeleted);
+            assertThat(progress).last().isEqualTo((long) index.maxDoc());
+            assertThat(search.matchesDeleted()).isTrue();
+            assertThat(search.matches(query, true, _ -> {}).docs()).isEqualTo(all);
+
+            CancellationException stop = new CancellationException("stop");
+            assertThatThrownBy(() -> search.matches(query, true, _ -> {
+                        throw stop;
+                    }))
+                    .isSameAs(stop);
         }
     }
 

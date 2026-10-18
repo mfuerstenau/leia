@@ -1,6 +1,8 @@
 package io.github.mfuerstenau.leia.server.runtime;
 
+import io.github.mfuerstenau.leia.core.DocFilter;
 import io.github.mfuerstenau.leia.core.IndexDocument;
+import io.github.mfuerstenau.leia.core.PostingsPage;
 import io.github.mfuerstenau.leia.core.ScanProgress;
 import io.github.mfuerstenau.leia.core.StoredScan;
 import io.github.mfuerstenau.leia.core.TermExport;
@@ -28,6 +30,8 @@ import io.github.mfuerstenau.leia.protocol.document.KnnVector;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.document.TermPosition;
 import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
+import io.github.mfuerstenau.leia.protocol.filter.FilterPattern;
+import io.github.mfuerstenau.leia.protocol.filter.StartFilterParams;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.protocol.index.Feature;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
@@ -56,6 +60,7 @@ import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.HitField;
 import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
+import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
 import io.github.mfuerstenau.leia.protocol.search.SearchResults;
 import io.github.mfuerstenau.leia.protocol.search.SortKey;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
@@ -88,9 +93,11 @@ import io.github.mfuerstenau.leia.server.index.IndexDirectories;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import io.github.mfuerstenau.leia.server.points.PointMapper;
 import io.github.mfuerstenau.leia.server.search.KnnChecks;
+import io.github.mfuerstenau.leia.server.search.StartStoredScanHandler;
 import io.github.mfuerstenau.leia.server.terms.TermParams;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumSet;
@@ -102,6 +109,8 @@ import java.util.OptionalInt;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
+import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.util.BytesRef;
 
 /**
@@ -137,7 +146,7 @@ public final class RuntimeResults {
                     Feature.TERMS, Feature.POSTINGS, Feature.TOP_TERMS, Feature.POSITIONS, Feature.EXPORT_TERMS));
         }
         if (index.search().isPresent()) {
-            features.add(Feature.CLASSIC_SEARCH);
+            features.addAll(List.of(Feature.CLASSIC_SEARCH, Feature.FILTER));
         }
         if (index.points().isPresent() && index.fields().stream().anyMatch(field -> field.pointDimensionCount() > 0)) {
             features.add(Feature.POINTS);
@@ -555,24 +564,30 @@ public final class RuntimeResults {
     }
 
     /**
-     * {@code getPostings}. A runtime marks deleted documents if its Lucene reads their postings, and
-     * otherwise gives live documents only, though {@code docFreq} counts them; a filter isn't supported.
+     * {@code getPostings}, through {@code filter} if present (ADR 0056). A runtime marks deleted
+     * documents if its Lucene reads their postings, and otherwise gives live documents only, though
+     * {@code docFreq} counts them.
      */
-    public static GetPostingsResult postings(OpenRuntime open, GetPostingsParams params) throws RpcException {
+    public static GetPostingsResult postings(
+            OpenRuntime open, GetPostingsParams params, Optional<PostingsPage.Filter> filter) throws RpcException {
         Terms terms = open.index().terms().orElseThrow(open::notSupported);
         TermParams.checkLimit(params.limit(), GetPostingsParams.MAX_LIMIT);
         if (params.fromDoc() < 0) {
             throw new RpcException(
                     ErrorCode.INVALID_PARAMS, "Invalid params: fromDoc must not be negative, not " + params.fromDoc());
         }
-        if (params.filter().isPresent()) {
-            throw open.notSupported();
-        }
         checkField(open.index(), params.field());
         String term = TermParams.text(params.term());
         try {
-            Terms.PostingsPage page =
-                    terms.postings(params.field(), bytes(params.term()), params.fromDoc(), params.limit());
+            Terms.PostingsPage page = filter.isPresent() && filter.get().onlyMatches()
+                    ? matchingPostings(
+                            terms,
+                            params.field(),
+                            bytes(params.term()),
+                            params.fromDoc(),
+                            params.limit(),
+                            filter.get().filter())
+                    : terms.postings(params.field(), bytes(params.term()), params.fromDoc(), params.limit());
             if (page.docFreq() == 0) {
                 throw new RpcException(
                         ErrorCode.TERM_NOT_FOUND, "No term '" + term + "' in field '" + params.field() + "'");
@@ -585,7 +600,7 @@ public final class RuntimeResults {
                                     posting.docId(),
                                     posting.deleted(),
                                     OptionalInt.of(posting.freq()),
-                                    Optional.empty()))
+                                    filter.map(through -> through.filter().contains(posting.docId()))))
                             .toList(),
                     page.nextDoc());
         } catch (IOException e) {
@@ -594,6 +609,41 @@ public final class RuntimeResults {
                     "Cannot read the postings of '" + term + "' in field '" + params.field() + "': " + e.getMessage(),
                     e);
         }
+    }
+
+    /**
+     * Up to {@code limit} postings of {@code term} from {@code fromDoc} on that are in {@code filter},
+     * as core's {@code TermReader} shows them: the filter and the runtime's pages of postings leapfrog
+     * to the next document they share. {@code nextDoc} is the next such document.
+     */
+    static Terms.PostingsPage matchingPostings(
+            Terms terms, String field, byte[] term, int fromDoc, int limit, DocFilter filter) throws IOException {
+        List<Terms.Posting> shown = new ArrayList<>();
+        int first = filter.next(fromDoc);
+        boolean any = first != DocIdSetIterator.NO_MORE_DOCS;
+        // Read even if the filter has no match left, for the term's statistics.
+        Terms.PostingsPage page = terms.postings(field, term, any ? first : fromDoc, any ? limit + 1 : 0);
+        int docFreq = page.docFreq();
+        long totalTermFreq = page.totalTermFreq();
+        while (true) {
+            for (Terms.Posting posting : page.postings()) {
+                if (filter.contains(posting.docId()) && shown.size() <= limit) {
+                    shown.add(posting);
+                }
+            }
+            if (shown.size() > limit || page.nextDoc().isEmpty()) {
+                break;
+            }
+            int from = filter.next(page.nextDoc().getAsInt());
+            if (from == DocIdSetIterator.NO_MORE_DOCS) {
+                break;
+            }
+            page = terms.postings(field, term, from, limit + 1 - shown.size());
+        }
+        OptionalInt nextDoc =
+                shown.size() > limit ? OptionalInt.of(shown.get(limit).docId()) : OptionalInt.empty();
+        return new Terms.PostingsPage(
+                docFreq, totalTermFreq, List.copyOf(shown.subList(0, Math.min(limit, shown.size()))), nextDoc);
     }
 
     /** {@code getPositions}. */
@@ -737,9 +787,6 @@ public final class RuntimeResults {
                     "Invalid params: offset must be between 0 and " + (StartSearchParams.MAX_WINDOW - limit)
                             + " for a limit of " + limit + ", not " + offset);
         }
-        if (params.query().classic().isEmpty() && params.query().knn().isEmpty()) {
-            throw open.notSupported();
-        }
         if (!bestScoreFirst(params.sort())) {
             throw open.notSupported();
         }
@@ -748,9 +795,7 @@ public final class RuntimeResults {
                 checkField(open.index(), field);
             }
         }
-        Search.ParsedQuery query = params.query().classic().isPresent()
-                ? parse(open, search, params.query().classic().get())
-                : knn(open, search, params.query().knn().get());
+        Search.ParsedQuery query = parsedQuery(open, search, params.query());
         Optional<List<String>> fields = params.fields().map(List::copyOf);
         long jobId = jobs.start(
                 "search " + query + " with Lucene " + open.runtime().luceneVersion() + ", hits " + offset + " to "
@@ -765,6 +810,76 @@ public final class RuntimeResults {
                     }
                 });
         return new JobStarted(jobId);
+    }
+
+    /**
+     * {@code query} as the runtime runs it: a classic query parsed by it, or a KNN query if it reads
+     * vectors. Another query is not supported.
+     */
+    private static Search.ParsedQuery parsedQuery(OpenRuntime open, Search search, SearchQuery query)
+            throws RpcException {
+        if (query.classic().isPresent()) {
+            return parse(open, search, query.classic().get());
+        }
+        if (query.knn().isPresent()) {
+            return knn(open, search, query.knn().get());
+        }
+        throw open.notSupported();
+    }
+
+    /**
+     * {@code startFilter} (ADR 0056): the documents that match a query, as {@link #parsedQuery} runs
+     * it, found by the runtime's {@link Search#matches}, or those with a stored value in which a
+     * pattern is found, scanned through {@link #storedSource}. A query with deleted documents is not
+     * supported by a runtime that can't match them.
+     */
+    public static JobStarted startFilter(OpenRuntime open, StartFilterParams params, Jobs jobs) throws RpcException {
+        boolean includeDeleted = params.includeDeleted();
+        String lucene = " with Lucene " + open.runtime().luceneVersion();
+        String deleted = includeDeleted ? ", deleted documents too" : "";
+        int maxDoc = open.index().maxDoc();
+        if (params.pattern().isPresent()) {
+            FilterPattern filterPattern = params.pattern().get();
+            Optional<Set<String>> fields = filterPattern.fields().map(Set::copyOf);
+            StoredScan.StoredSource source = storedSource(open, fields, includeDeleted);
+            Pattern pattern = StartStoredScanHandler.pattern(filterPattern.pattern(), filterPattern.caseInsensitive());
+            return new JobStarted(jobs.start(
+                    "filter by /" + pattern + "/" + (filterPattern.caseInsensitive() ? "i" : "")
+                            + fields.map(names -> " in " + names).orElse("") + deleted + lucene,
+                    DocFilter.class,
+                    progress -> {
+                        try {
+                            return StoredScan.matches(
+                                    source, pattern, StartStoredScanHandler.VALUE_TIME_LIMIT, progress);
+                        } catch (IOException e) {
+                            throw new RpcException(
+                                    ErrorCode.INDEX_NOT_READABLE,
+                                    "Cannot read the stored values: " + e.getMessage(),
+                                    e);
+                        }
+                    }));
+        }
+        Search search = open.index().search().orElseThrow(open::notSupported);
+        if (includeDeleted && !search.matchesDeleted()) {
+            throw new RpcException(
+                    ErrorCode.NOT_SUPPORTED,
+                    "Not supported with Lucene " + open.runtime().luceneVersion()
+                            + ": it doesn't read the postings of deleted documents");
+        }
+        Search.ParsedQuery query = parsedQuery(open, search, params.query().orElseThrow());
+        return new JobStarted(jobs.start("filter by " + query + deleted + lucene, DocFilter.class, progress -> {
+            try {
+                Search.Matches matches = search.matches(query, includeDeleted, progress::scanned);
+                return DocFilter.of(
+                        matches.docs(),
+                        maxDoc,
+                        matches.query(),
+                        matches.rewrittenQuery(),
+                        Duration.ofMillis(matches.tookMillis()));
+            } catch (IOException e) {
+                throw new RpcException(ErrorCode.INDEX_NOT_READABLE, "Cannot search the index: " + e.getMessage(), e);
+            }
+        }));
     }
 
     /** {@code classic}, parsed by the runtime. */
