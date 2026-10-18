@@ -2,6 +2,23 @@
 
 The work queue for leia. Check items off (`[x]`) as they land, and keep it aligned with the "Remaining / next" section of the latest entry in `docs/SESSION-SUMMARIES.md`. Finished items move to `docs/tasklist-done.md`.
 
+## Lucene 9.12 beyond classic search
+
+Goal: an index created by Lucene 8.x (read with `leia-lucene9`, ADR 0049) gets the features that are greyed out for it today. 9.12 has the APIs that leia-core uses for them on Lucene 10, so most are ports. What needs no runtime change goes to every runtime at once. The others need runtime interface 7 (one ADR for the interface, amending ADR 0049 §4). They land in 9.12 first, and in 5.5 and 7.7 where the copy is the same (ADR 0050). Each item adds its feature in `RuntimeResults.features`, a `runtime()` branch in its handlers, and its row in `docs/runtimes.md` (checked by `RuntimeFeaturesTest`). The TUI already gates on the features.
+
+- [ ] Export terms (`EXPORT_TERMS`) on every runtime, with no runtime change: `startExportTerms` pages through `Terms.terms`. `TermExport`'s writer takes bytes and a docFreq rather than a `BytesRef` from a `ReadOnlyIndex`. This is a good moment for the backlog's `totalTermFreq` and binary-term marker, since `TermEntry` has `totalTermFreq` too.
+- [ ] Stored-value scan (`STORED_SCAN`, ADR 0027): a runtime method that reads a document's stored values only, filtered by field, with whether it is deleted. Today `Documents.document` also reads norms, doc values and vectors. The matching part of `StoredScan` (the time-limited matcher, spans, snippet, UTF-8 offsets) is split from its Lucene loop so that the server can run it over the runtime's values. Cancellation through `progress`, as `topTerms` has it. 9.12, 7.7, 5.5; 3.6 if its `document()` keeps up.
+- [ ] Filter (`FILTER`, ADR 0031, ADR 0032): `Search` collects a parsed query's doc ids without scores, deleted documents included on request (9.12's `FilterDirectoryReader` without live docs, as ADR 0031 §4 has it). The pattern filter comes from the stored-value scan. The server builds `DocFilter` from them, so `stepFilter`, `releaseFilter` and the postings' `PostingsFilter` work unchanged. Depends on the stored-value scan for `b`/`B` in regex mode.
+- [ ] Explain (`EXPLAIN`): `Search.explain(ParsedQuery, docId)`, a runtime record tree (value, description, details) from 9.12's `IndexSearcher.explain`, mapped to the protocol's explanation. A classic and a KNN query alike. 9.12, 7.7, 5.5.
+- [ ] Term query: a `Search.term(field, bytes)` `ParsedQuery`, so that the terms screen's `s` and the overview's `/ search term` work on a runtime (today they need `SEARCH`). Decide whether this means splitting `SEARCH` (see the search item below).
+- [ ] Rebuild a document (`RECONSTRUCT`, ADR 0029, ADR 0041): a port of leia-core's `Reconstruct` and its `count` for the progress. It reads the term vector when it covers the postings, else every term of the field in the document's segment, plus 9.12's `PointTree` for points. A runtime record per field.
+- [ ] Reopen (`REOPEN`): `RuntimeIndex.reopen()` through 9.12's `DirectoryReader.openIfChanged`. It returns the new index or empty when nothing changed. `CurrentIndex` forgets the filter on a new commit (ADR 0031 §5). Nothing is written (hard rule 1).
+- [ ] Auto stop words (`AUTO_STOP_WORDS`, ADR 0039) on every runtime, with no runtime change: the server pages through `Terms.terms` for the terms above the threshold. Check where the TUI applies the words to the search analyzer: on a runtime they go into `AnalyzerSpec.Named`'s `stopwords`. This is also ADR 0045's "auto stop words on 3.6".
+- [ ] Highlight (`HIGHLIGHT`, ADR 0042, ADR 0043): 9.12's `lucene-highlighter` in the runtime jar (check the size against `runtimes/`'s 8.8 MB), a port of leia-core's `Highlights` over 9.12's `uhighlight`, for `startHighlight` and the search's `highlight`.
+- [ ] Search beyond classic (`SEARCH`): similarity (BM25, classic, boolean), sort by score, doc id and doc values, the standard parser (point fields), More-Like-This (ADR 0013, ADR 0028), and doc-values queries (ADR 0033, ADR 0036). Decide first, in the ADR, whether `SEARCH` splits into a feature per part, or comes only once all parts have landed.
+- [ ] Check on more threads on 9.12 (`CheckIndex.setThreadCount`, now fixed at 1, ADR 0049 §5). It goes with the backlog's "check thread count".
+- [ ] Run the new features by hand on `lucene8` and `lucene8to9`, as `docs/demo-index.md` does for Lucene 10.
+
 ## Lucene 2 to 10 (ADR 0044)
 
 Goal: every index from Lucene 2.1 to 10 opens in one leia, each read by a relocated Lucene that can read it, with the features of that Lucene and the rest switched off. The spike did Lucene 2.x and 3.x on Lucene 3.6.2 (`leia-lucene3`). Each Lucene major reads its own indexes and those of the major before it, so four runtimes besides Lucene 10 are needed; all four are done.
@@ -19,7 +36,7 @@ From the read-only checklist in `docs/luke-features.md` §7. Ordered roughly by 
 - [ ] Misc: themes
 - [ ] Misc: about
 - [ ] Improvements over Luke (§6). Done already: deleted documents (ADR 0006, the filter's `includeDeleted`), binary values as text or hex (ADR 0006), cancellation of long operations (ADR 0005), KNN vectors (ADR 0040), point values (ADR 0041), highlighting of hits (ADR 0042), the per-segment document view (ADR 0051). Left:
-  - [ ] KNN: HNSW graph inspection (a node's levels and neighbours through `HnswGraphProvider`), and a recall check of approximate against exact (left out of ADR 0040)
+  - [ ] KNN: HNSW graph inspection (a node's levels and neighbours through `HnswGraphProvider`, on 9.12 too, which has it), and a recall check of approximate against exact (left out of ADR 0040)
 
 ## Bugs
 
