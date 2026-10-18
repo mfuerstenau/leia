@@ -34,7 +34,7 @@ The first index of a path decides which Lucene opens it, by the major in its new
 | `COMMITS` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `SEARCH` | – | – | – | – | ✓ |
 | `CLASSIC_SEARCH` | ✓ | ✓ | ✓ | ✓⁴ | ✓ |
-| `EXPLAIN` | – | – | – | – | ✓ |
+| `EXPLAIN` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `HIGHLIGHT` | – | – | – | – | ✓ |
 | `STORED_SCAN` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `CHECK_INDEX` | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -63,6 +63,10 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 | Postings of deleted documents | skipped, though `docFreq` counts them | marked | marked | marked | marked |
 | Query filter with deleted documents (ADR 0056) | refused | ✓, through leaves without deletions | as 5.5.5 | as 5.5.5 | ✓, through readers without deletions |
 | Filter cancellation | per segment and every 1024 matches | per segment and every 1024 matches | as 5.5.5 | through the searcher's `QueryTimeout` | through `ExitableDirectoryReader` |
+| Explain similarity (ADR 0057) | the runtime's default, classic TF-IDF | as 3.6.2 | the runtime's default, BM25 | as 7.7.3 | the one chosen |
+| Explain cancellation | before and after | before and after | before and after | through the searcher's `QueryTimeout` | through `ExitableDirectoryReader` |
+| Explanation of a deleted document | no match, by the facade | no match, by Lucene | no match, by Lucene | no match, by Lucene | no match, by Lucene |
+| Explained value against the score | the same | the same | BM25 may differ in the last bits | the same | the same |
 | `totalTermFreq` | counted from the live postings | recorded | recorded | recorded | recorded |
 | Export terms | reads every posting, as its term pages count `totalTermFreq` from them | the term dictionary only | the term dictionary only | the term dictionary only | the term dictionary only |
 | Term statistics per field | absent | ✓ | ✓ | ✓ | ✓ |

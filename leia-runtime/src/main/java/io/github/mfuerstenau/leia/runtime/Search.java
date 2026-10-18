@@ -49,6 +49,16 @@ public interface Search {
      */
     boolean matchesDeleted();
 
+    /**
+     * How a query from {@link #parse} or {@link Knn} scores document {@code docId} (ADR 0057), with
+     * the runtime's default similarity, as {@link #search} scores it. A deleted document doesn't
+     * match.
+     *
+     * @param progress receives the documents searched so far, from time to time; it may throw to stop
+     *     the explanation
+     */
+    Explanation explain(ParsedQuery query, int docId, LongConsumer progress) throws IOException;
+
     /** A query from {@link #parse}; its {@code toString} is the parsed query. */
     interface ParsedQuery {}
 
@@ -110,6 +120,13 @@ public interface Search {
      * @param rewrittenQuery the query after rewriting
      */
     record Matches(BitSet docs, String query, String rewrittenQuery, long tookMillis) {}
+
+    /**
+     * How a document is scored.
+     *
+     * @param value the score: a {@code Float} where the runtime's Lucene gives a {@code float}
+     */
+    record Explanation(boolean match, Number value, String description, List<Explanation> details) {}
 
     record SearchResults(String query, String rewrittenQuery, long totalHits, List<Hit> hits, long tookMillis) {}
 }

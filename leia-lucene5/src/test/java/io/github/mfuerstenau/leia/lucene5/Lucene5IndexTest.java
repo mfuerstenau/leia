@@ -390,6 +390,41 @@ class Lucene5IndexTest {
         }
     }
 
+    @Test
+    void explainsAQuery() throws Exception {
+        try (RuntimeIndex index = open("lucene5")) {
+            Search search = index.search().orElseThrow();
+            Search.ParsedQuery alpha = search.parse("alpha", BODY, named("StandardAnalyzer"));
+            Search.Hit hit =
+                    search.search(alpha, 0, 1, Optional.empty(), _ -> {}).hits().getFirst();
+            List<Long> progress = new ArrayList<>();
+            Search.Explanation explanation = search.explain(alpha, hit.docId(), progress::add);
+            assertThat(explanation.match()).isTrue();
+            assertThat(explanation.value().floatValue()).isEqualTo(hit.score());
+            assertThat(explanation.details()).isNotEmpty();
+            assertThat(progress).last().isEqualTo((long) index.maxDoc());
+
+            // Every document has alpha: the one without a match is deleted.
+            int deleted = search.matches(alpha, false, _ -> {}).docs().nextClearBit(0);
+            assertThat(deleted).isLessThan(index.maxDoc());
+            assertThat(search.explain(alpha, deleted, _ -> {}))
+                    .isEqualTo(new Search.Explanation(false, 0.0f, "Document " + deleted + " is deleted", List.of()));
+
+            Search.ParsedQuery beta = search.parse("beta", BODY, named("StandardAnalyzer"));
+            BitSet withoutBeta = search.matches(beta, false, _ -> {}).docs();
+            withoutBeta.flip(0, index.maxDoc());
+            withoutBeta.clear(deleted);
+            assertThat(search.explain(beta, withoutBeta.nextSetBit(0), _ -> {}).match())
+                    .isFalse();
+
+            CancellationException stop = new CancellationException("stop");
+            assertThatThrownBy(() -> search.explain(alpha, hit.docId(), _ -> {
+                        throw stop;
+                    }))
+                    .isSameAs(stop);
+        }
+    }
+
     private static Search.AnalyzerSpec named(String name) {
         return new Search.AnalyzerSpec.Named(name, Optional.empty(), OptionalInt.empty());
     }

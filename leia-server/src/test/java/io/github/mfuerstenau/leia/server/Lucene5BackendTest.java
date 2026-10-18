@@ -133,6 +133,7 @@ class Lucene5BackendTest {
                         Feature.EXPORT_TERMS,
                         Feature.CLASSIC_SEARCH,
                         Feature.FILTER,
+                        Feature.EXPLAIN,
                         Feature.COMMITS,
                         Feature.CHECK_INDEX,
                         Feature.CHECK_LEVELS);
@@ -171,6 +172,14 @@ class Lucene5BackendTest {
         open(testIndex(name));
 
         RuntimeFilters.filtersTheDocuments(backend, true);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene4", "lucene5"})
+    void explainsAHit(String name) throws Exception {
+        OpenIndexResult opened = open(testIndex(name));
+
+        RuntimeExplains.explainsAHit(backend, opened.maxDoc().orElseThrow(), true);
     }
 
     @ParameterizedTest

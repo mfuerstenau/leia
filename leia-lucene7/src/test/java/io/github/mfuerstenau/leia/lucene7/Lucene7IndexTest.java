@@ -3,6 +3,7 @@ package io.github.mfuerstenau.leia.lucene7;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
+import static org.assertj.core.api.Assertions.withinPercentage;
 
 import io.github.mfuerstenau.leia.runtime.Check;
 import io.github.mfuerstenau.leia.runtime.Commits;
@@ -446,6 +447,42 @@ class Lucene7IndexTest {
 
             CancellationException stop = new CancellationException("stop");
             assertThatThrownBy(() -> search.matches(query, true, _ -> {
+                        throw stop;
+                    }))
+                    .isSameAs(stop);
+        }
+    }
+
+    @Test
+    void explainsAQuery() throws Exception {
+        try (RuntimeIndex index = open("lucene7")) {
+            Search search = index.search().orElseThrow();
+            Search.ParsedQuery alpha = search.parse("alpha", BODY, named("StandardAnalyzer"));
+            Search.Hit hit =
+                    search.search(alpha, 0, 1, Optional.empty(), _ -> {}).hits().getFirst();
+            List<Long> progress = new ArrayList<>();
+            Search.Explanation explanation = search.explain(alpha, hit.docId(), progress::add);
+            assertThat(explanation.match()).isTrue();
+            // BM25 explains in another order than it scores: the last bits may differ.
+            assertThat(explanation.value().floatValue()).isCloseTo(hit.score(), withinPercentage(0.001));
+            assertThat(explanation.details()).isNotEmpty();
+            assertThat(progress).last().isEqualTo((long) index.maxDoc());
+
+            // Every document has alpha: the one without a match is deleted.
+            int deleted = search.matches(alpha, false, _ -> {}).docs().nextClearBit(0);
+            assertThat(deleted).isLessThan(index.maxDoc());
+            assertThat(search.explain(alpha, deleted, _ -> {}))
+                    .isEqualTo(new Search.Explanation(false, 0.0f, "Document " + deleted + " is deleted", List.of()));
+
+            Search.ParsedQuery beta = search.parse("beta", BODY, named("StandardAnalyzer"));
+            BitSet withoutBeta = search.matches(beta, false, _ -> {}).docs();
+            withoutBeta.flip(0, index.maxDoc());
+            withoutBeta.clear(deleted);
+            assertThat(search.explain(beta, withoutBeta.nextSetBit(0), _ -> {}).match())
+                    .isFalse();
+
+            CancellationException stop = new CancellationException("stop");
+            assertThatThrownBy(() -> search.explain(alpha, hit.docId(), _ -> {
                         throw stop;
                     }))
                     .isSameAs(stop);

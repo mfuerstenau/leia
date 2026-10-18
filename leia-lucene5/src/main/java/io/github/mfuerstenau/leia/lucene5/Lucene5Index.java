@@ -680,6 +680,34 @@ final class Lucene5Index implements RuntimeIndex, Documents, Terms, Search {
     }
 
     /**
+     * {@inheritDoc} Lucene 5.5 has no way to ask the progress while it explains: it is reported
+     * before and after.
+     */
+    @Override
+    public Explanation explain(ParsedQuery parsed, int docId, LongConsumer progress) throws IOException {
+        if (!(parsed instanceof Lucene5Query lucene5)) {
+            throw new IllegalArgumentException("Not a query of this index: " + parsed);
+        }
+        progress.accept(0);
+        IndexSearcher searcher = new IndexSearcher(reader);
+        // No cache: a query is run once.
+        searcher.setQueryCache(null);
+        Explanation explanation = explanation(searcher.explain(lucene5.query, docId));
+        progress.accept(reader.maxDoc());
+        return explanation;
+    }
+
+    private static Explanation explanation(org.apache.lucene.search.Explanation explanation) {
+        return new Explanation(
+                explanation.isMatch(),
+                explanation.getValue(),
+                explanation.getDescription(),
+                Arrays.stream(explanation.getDetails())
+                        .map(Lucene5Index::explanation)
+                        .toList());
+    }
+
+    /**
      * The leaves of {@code reader} without deletions, as one reader with the same document ids. It is
      * never closed: closing it would leave the leaves open, but it takes nothing that needs closing.
      */

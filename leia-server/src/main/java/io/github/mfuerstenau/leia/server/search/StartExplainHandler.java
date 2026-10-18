@@ -14,6 +14,7 @@ import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
+import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
 import jakarta.inject.Inject;
 import java.io.IOException;
 import java.util.Arrays;
@@ -22,7 +23,7 @@ import org.apache.lucene.search.similarities.Similarity;
 
 /**
  * {@code startExplain}: checks the params and parses the query at once, then explains a document of
- * the {@link CurrentIndex} in a job ({@link GetExplainHandler}).
+ * the {@link CurrentIndex} in a job ({@link GetExplainHandler}), on Lucene 10 or a runtime (ADR 0057).
  */
 public final class StartExplainHandler implements MethodHandler<StartExplainParams, JobStarted> {
 
@@ -42,6 +43,9 @@ public final class StartExplainHandler implements MethodHandler<StartExplainPara
 
     @Override
     public JobStarted handle(StartExplainParams params) throws RpcException {
+        if (currentIndex.runtime().isPresent()) {
+            return RuntimeResults.startExplain(currentIndex.runtime().get(), params, jobs);
+        }
         ReadOnlyIndex index = currentIndex.readable();
         int docId = params.docId();
         GetDocumentHandler.checkDocId(index, docId);

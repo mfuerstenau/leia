@@ -56,6 +56,7 @@ import io.github.mfuerstenau.leia.protocol.points.LeafPoint;
 import io.github.mfuerstenau.leia.protocol.points.PointCell;
 import io.github.mfuerstenau.leia.protocol.points.PointSegment;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
+import io.github.mfuerstenau.leia.protocol.search.Explanation;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.HitField;
 import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
@@ -63,6 +64,7 @@ import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
 import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
 import io.github.mfuerstenau.leia.protocol.search.SearchResults;
 import io.github.mfuerstenau.leia.protocol.search.SortKey;
+import io.github.mfuerstenau.leia.protocol.search.StartExplainParams;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.TotalHitsRelation;
 import io.github.mfuerstenau.leia.protocol.terms.FieldTerms;
@@ -146,7 +148,7 @@ public final class RuntimeResults {
                     Feature.TERMS, Feature.POSTINGS, Feature.TOP_TERMS, Feature.POSITIONS, Feature.EXPORT_TERMS));
         }
         if (index.search().isPresent()) {
-            features.addAll(List.of(Feature.CLASSIC_SEARCH, Feature.FILTER));
+            features.addAll(List.of(Feature.CLASSIC_SEARCH, Feature.FILTER, Feature.EXPLAIN));
         }
         if (index.points().isPresent() && index.fields().stream().anyMatch(field -> field.pointDimensionCount() > 0)) {
             features.add(Feature.POINTS);
@@ -880,6 +882,40 @@ public final class RuntimeResults {
                 throw new RpcException(ErrorCode.INDEX_NOT_READABLE, "Cannot search the index: " + e.getMessage(), e);
             }
         }));
+    }
+
+    /**
+     * {@code startExplain} (ADR 0057): how a query, as {@link #parsedQuery} runs it, scores a
+     * document, explained by the runtime. The similarity of the params is ignored: the runtime scores
+     * with its default one, as {@link #startSearch} does, so the explanation matches the hit's score.
+     */
+    public static JobStarted startExplain(OpenRuntime open, StartExplainParams params, Jobs jobs) throws RpcException {
+        Search search = open.index().search().orElseThrow(open::notSupported);
+        int docId = params.docId();
+        checkDocId(open.index(), docId);
+        Search.ParsedQuery query = parsedQuery(open, search, params.query());
+        return new JobStarted(jobs.start(
+                "explain " + query + " for document " + docId + " with Lucene "
+                        + open.runtime().luceneVersion(),
+                Explanation.class,
+                progress -> {
+                    try {
+                        return explanation(search.explain(query, docId, progress::scanned));
+                    } catch (IOException e) {
+                        throw new RpcException(
+                                ErrorCode.INDEX_NOT_READABLE,
+                                "Cannot explain document " + docId + ": " + e.getMessage(),
+                                e);
+                    }
+                }));
+    }
+
+    private static Explanation explanation(Search.Explanation explanation) {
+        return new Explanation(
+                explanation.match(),
+                explanation.value().toString(),
+                explanation.description(),
+                explanation.details().stream().map(RuntimeResults::explanation).toList());
     }
 
     /** {@code classic}, parsed by the runtime. */

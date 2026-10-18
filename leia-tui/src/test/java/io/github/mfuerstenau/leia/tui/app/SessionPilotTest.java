@@ -223,10 +223,10 @@ class SessionPilotTest {
         pilot.press(KeyCode.ENTER);
         settle();
         assertThat(screen()).contains("2 hits", "body=document number 3 of the old index");
-        // A key that Lucene 3 lacks is refused before it reaches the backend.
+        // Explained by Lucene 3.6, with its TF-IDF (ADR 0057).
         pilot.press('x');
         settle();
-        assertThat(screen()).contains("Explain: not for Lucene 2.x");
+        assertThat(screen()).contains("Explanation of doc 0", "0.3116391  fieldWeight(body:number in 0)");
     }
 
     /** An index written by Lucene 5.5, which the relocated Lucene 5.5 reads (ADR 0046). */

@@ -109,6 +109,7 @@ class Lucene8BackendTest {
                 Feature.EXPORT_TERMS,
                 Feature.CLASSIC_SEARCH,
                 Feature.FILTER,
+                Feature.EXPLAIN,
                 Feature.POINTS,
                 Feature.COMMITS,
                 Feature.CHECK_INDEX,
@@ -171,6 +172,14 @@ class Lucene8BackendTest {
         RuntimeFilters.filtersTheDocuments(backend, true);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene8", "lucene8to9"})
+    void explainsAHit(String name) throws Exception {
+        OpenIndexResult opened = open(testIndex(name));
+
+        RuntimeExplains.explainsAHit(backend, opened.maxDoc().orElseThrow(), true);
+    }
+
     @Test
     void readsTheNormsAndTheVectorsOfDocuments() throws Exception {
         open(testIndex("lucene8to9"));
@@ -217,6 +226,18 @@ class Lucene8BackendTest {
                 k.isEmpty(),
                 filter.map(expression ->
                         new ClassicQuery(expression, "title", QueryOperator.OR, DEFAULTS, 2, false, false, STANDARD))));
+    }
+
+    @Test
+    void explainsANearestVector() throws Exception {
+        open(testIndex("lucene8to9"));
+        for (SearchQuery query : List.of(
+                knn("embedding", NORTH, OptionalInt.of(2), Optional.empty()),
+                knn("embedding", NORTH, OptionalInt.empty(), Optional.empty()))) {
+            for (Hit hit : backend.search(query, 2).hits()) {
+                RuntimeExplains.explainsTheHit(backend, query, hit, true);
+            }
+        }
     }
 
     @Test

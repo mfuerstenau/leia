@@ -688,6 +688,34 @@ final class Lucene7Index implements RuntimeIndex, Documents, Terms, Search {
     }
 
     /**
+     * {@inheritDoc} Lucene 7.7 has no way to ask the progress while it explains: it is reported
+     * before and after.
+     */
+    @Override
+    public Explanation explain(ParsedQuery parsed, int docId, LongConsumer progress) throws IOException {
+        if (!(parsed instanceof Lucene7Query lucene7)) {
+            throw new IllegalArgumentException("Not a query of this index: " + parsed);
+        }
+        progress.accept(0);
+        IndexSearcher searcher = new IndexSearcher(reader);
+        // No cache: a query is run once.
+        searcher.setQueryCache(null);
+        Explanation explanation = explanation(searcher.explain(lucene7.query, docId));
+        progress.accept(reader.maxDoc());
+        return explanation;
+    }
+
+    private static Explanation explanation(org.apache.lucene.search.Explanation explanation) {
+        return new Explanation(
+                explanation.isMatch(),
+                explanation.getValue(),
+                explanation.getDescription(),
+                Arrays.stream(explanation.getDetails())
+                        .map(Lucene7Index::explanation)
+                        .toList());
+    }
+
+    /**
      * The leaves of {@code reader} without deletions, as one reader with the same document ids. It is
      * never closed: closing it would leave the leaves open, but it takes nothing that needs closing.
      */

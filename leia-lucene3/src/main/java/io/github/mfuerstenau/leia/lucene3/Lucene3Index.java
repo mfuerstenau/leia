@@ -577,6 +577,42 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
     }
 
     /**
+     * {@inheritDoc} Lucene 3.6 has no way to ask the progress while it explains: it is reported before
+     * and after. It would explain a deleted document as a live one, so a deleted one is answered as
+     * Lucene 5.5 and later answer it.
+     */
+    @Override
+    public Explanation explain(ParsedQuery parsed, int docId, LongConsumer progress) throws IOException {
+        if (!(parsed instanceof Lucene3Query lucene3)) {
+            throw new IllegalArgumentException("Not a query of this index: " + parsed);
+        }
+        progress.accept(0);
+        if (reader.isDeleted(docId)) {
+            progress.accept(reader.maxDoc());
+            return new Explanation(false, 0.0f, "Document " + docId + " is deleted", List.of());
+        }
+        IndexSearcher searcher = new IndexSearcher(reader);
+        try {
+            Explanation explanation = explanation(searcher.explain(lucene3.query, docId));
+            progress.accept(reader.maxDoc());
+            return explanation;
+        } finally {
+            searcher.close();
+        }
+    }
+
+    private static Explanation explanation(org.apache.lucene.search.Explanation explanation) {
+        org.apache.lucene.search.Explanation[] details = explanation.getDetails();
+        return new Explanation(
+                explanation.isMatch(),
+                explanation.getValue(),
+                explanation.getDescription(),
+                details == null
+                        ? List.of()
+                        : Arrays.stream(details).map(Lucene3Index::explanation).toList());
+    }
+
+    /**
      * Sets the bit of each matching document, by its id in the whole index, without scores. Reports
      * the documents searched at the start of each segment and every {@link #PROGRESS_INTERVAL}
      * matches.

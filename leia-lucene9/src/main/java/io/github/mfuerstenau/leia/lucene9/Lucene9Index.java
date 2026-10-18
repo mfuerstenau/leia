@@ -735,6 +735,34 @@ final class Lucene9Index implements RuntimeIndex, Documents, Terms, Search, Knn 
     }
 
     /**
+     * {@inheritDoc} The progress is asked from time to time, also by the graph search of an
+     * approximate KNN query, which runs when it is rewritten.
+     */
+    @Override
+    public Explanation explain(ParsedQuery parsed, int docId, LongConsumer progress) throws IOException {
+        Query query = query(parsed);
+        SearchProgress searchProgress = new SearchProgress(progress);
+        IndexSearcher searcher = new IndexSearcher(reader);
+        // No cache: a query is run once.
+        searcher.setQueryCache(null);
+        // Never a timeout: only a way to ask the progress, which throws to stop the explanation.
+        searcher.setTimeout(searchProgress);
+        Explanation explanation = explanation(searcher.explain(query, docId));
+        progress.accept(reader.maxDoc());
+        return explanation;
+    }
+
+    private static Explanation explanation(org.apache.lucene.search.Explanation explanation) {
+        return new Explanation(
+                explanation.isMatch(),
+                explanation.getValue(),
+                explanation.getDescription(),
+                Arrays.stream(explanation.getDetails())
+                        .map(Lucene9Index::explanation)
+                        .toList());
+    }
+
+    /**
      * The leaves of {@code reader} without deletions, as one reader with the same document ids. It is
      * never closed: closing it would leave the leaves open, but it takes nothing that needs closing.
      */
