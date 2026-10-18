@@ -94,3 +94,11 @@ To see every call and its result, start leia with `LEIA_OPTS=-Dleia.log.level=FI
 - After a unit of work, append an entry to `docs/SESSION-SUMMARIES.md`. The `/session-summary` skill writes it, and `/catch-up` reads it.
 - Don't commit unless asked.
 - End each task with a proposed commit message of at most 4 lines, without a `Co-Authored-By` trailer.
+
+### Commit messages
+
+- Keep the subject to about 50 characters. 72 is the hard limit where tools start truncating or wrapping. Git itself doesn't enforce either number.
+- Use the imperative mood, as if completing the sentence "If applied, this commit will ___": "Add retry to upload client," not "Added" or "Adds."
+- Capitalize the first word and don't end with a period.
+- Separate the subject from the body with a blank line. Tools use that blank line to tell the two apart. Wrap body lines at 72 characters, since `git log` (without `--oneline`) shows them as-is.
+- Put the explanation in the body, not the subject. The subject says what changed, and the body explains why.
