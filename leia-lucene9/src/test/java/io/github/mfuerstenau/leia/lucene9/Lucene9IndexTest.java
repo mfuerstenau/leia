@@ -410,6 +410,50 @@ class Lucene9IndexTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene8", "lucene8to9"})
+    void searchesATerm(String name) throws Exception {
+        try (RuntimeIndex index = open(name)) {
+            for (Terms.TermEntry term : index.terms()
+                    .orElseThrow()
+                    .terms("body", Optional.empty(), 100)
+                    .terms()) {
+                searchesTheTerm(index, "body", term.term());
+            }
+
+            Search search = index.search().orElseThrow();
+            Search.ParsedQuery nothing = search.term("body", utf8("nothing"));
+            assertThat(nothing.toString()).isEqualTo("body:nothing");
+            assertThat(search.search(nothing, 0, 10, Optional.empty(), _ -> {}).totalHits())
+                    .isZero();
+            assertThat(search.matches(nothing, false, _ -> {}).docs().isEmpty()).isTrue();
+        }
+    }
+
+    /**
+     * The hits of a term query are the live postings of the term, and so are its matches; a hit is
+     * explained with its score.
+     */
+    private static void searchesTheTerm(RuntimeIndex index, String field, byte[] term) throws IOException {
+        Search search = index.search().orElseThrow();
+        Search.ParsedQuery query = search.term(field, term);
+        List<Integer> live = index.terms().orElseThrow().postings(field, term, 0, index.maxDoc()).postings().stream()
+                .filter(posting -> !posting.deleted())
+                .map(Terms.Posting::docId)
+                .toList();
+        Search.SearchResults results = search.search(query, 0, index.maxDoc(), Optional.empty(), _ -> {});
+        assertThat(results.totalHits()).isEqualTo(live.size());
+        assertThat(results.hits()).extracting(Search.Hit::docId).containsExactlyInAnyOrderElementsOf(live);
+        assertThat(search.matches(query, false, _ -> {}).docs().stream().boxed().toList())
+                .containsExactlyElementsOf(live);
+        if (!live.isEmpty()) {
+            Search.Hit hit = results.hits().getFirst();
+            Search.Explanation explanation = search.explain(query, hit.docId(), _ -> {});
+            assertThat(explanation.match()).isTrue();
+            assertThat(explanation.value().floatValue()).isEqualTo(hit.score());
+        }
+    }
+
     @Test
     void explainsAQuery() throws Exception {
         try (RuntimeIndex index = open("lucene8")) {

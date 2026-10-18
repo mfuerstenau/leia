@@ -1651,7 +1651,7 @@ public final class App {
         }
         if (key.isChar('/')) {
             Optional<Overview.FieldTerm> top = overview.selectedTopTerm();
-            if (top.isPresent() && !opened.supports(Feature.SEARCH)) {
+            if (top.isPresent() && !searchesTerms()) {
                 notice = new Notice.NotSupported("Search term", reason());
                 return Optional.empty();
             }
@@ -1884,10 +1884,18 @@ public final class App {
             case DOCUMENTS -> opened.supports(Feature.DOCUMENTS);
             case TERMS -> opened.supports(Feature.TERMS);
             case COMMITS -> opened.supports(Feature.COMMITS);
-            case SEARCH -> opened.supports(Feature.SEARCH) || opened.supports(Feature.CLASSIC_SEARCH);
+            case SEARCH ->
+                opened.supports(Feature.SEARCH)
+                        || opened.supports(Feature.CLASSIC_SEARCH)
+                        || opened.supports(Feature.TERM_SEARCH);
             case ANALYSIS -> true;
             case CHECK -> opened.supports(Feature.CHECK_INDEX);
         };
+    }
+
+    /** Whether the open index can search a term: with all of search, or term queries alone (ADR 0058). */
+    private boolean searchesTerms() {
+        return opened.supports(Feature.SEARCH) || opened.supports(Feature.TERM_SEARCH);
     }
 
     /**
@@ -2148,7 +2156,7 @@ public final class App {
         }
         if (overview.selectedTopTerm().isPresent()) {
             String docs = opened.supports(Feature.TERMS) ? "⏎ term's docs   " : "";
-            String searchTerm = opened.supports(Feature.SEARCH) ? "/ search term   " : "";
+            String searchTerm = searchesTerms() ? "/ search term   " : "";
             return " q quit   o open   c close   " + reopen + screens + docs + searchTerm + "+/- top N   "
                     + "s/S sort   Tab panel   ↑↓";
         }

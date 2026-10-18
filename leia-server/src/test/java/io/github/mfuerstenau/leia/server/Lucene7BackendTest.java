@@ -100,6 +100,7 @@ class Lucene7BackendTest {
                         Feature.TOP_TERMS,
                         Feature.EXPORT_TERMS,
                         Feature.CLASSIC_SEARCH,
+                        Feature.TERM_SEARCH,
                         Feature.FILTER,
                         Feature.EXPLAIN,
                         Feature.POINTS,
@@ -141,6 +142,14 @@ class Lucene7BackendTest {
         OpenIndexResult opened = open(testIndex(name));
 
         RuntimeExplains.explainsAHit(backend, opened.maxDoc().orElseThrow(), false);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene6", "lucene7"})
+    void searchesATerm(String name) throws Exception {
+        OpenIndexResult opened = open(testIndex(name));
+
+        RuntimeSearches.searchesATerm(backend, opened.maxDoc().orElseThrow(), "beta", false);
     }
 
     @ParameterizedTest

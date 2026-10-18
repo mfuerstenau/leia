@@ -532,6 +532,11 @@ class TermsTest {
         assertThat(terms.keys()).doesNotContain("s search");
         assertThat(terms.handleKey(key('s'))).hasValue(new Request.Unsupported("Search term"));
 
+        // A runtime searches a term with term queries alone (ADR 0058).
+        Terms runtime = loaded().withFeatures(Set.of(Feature.TERMS, Feature.POSTINGS, Feature.TERM_SEARCH));
+        assertThat(runtime.keys()).contains("s search");
+        assertThat(runtime.handleKey(key('s'))).hasValue(new Request.Search("id", text("a")));
+
         Terms points = codeTree();
         assertThat(points.handleKey(key('s'))).isEmpty();
         assertThat(render(points)).contains("s searches terms only");

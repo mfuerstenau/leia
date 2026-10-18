@@ -38,13 +38,19 @@ public enum Feature {
     KNN_VECTORS,
     /** {@code getCommits} and {@code getCommit}. */
     COMMITS,
-    /** {@code startSearch}, with every kind of query, similarity and sort. */
+    /**
+     * {@code startSearch}, with every kind of query, similarity and sort: every part of search. A
+     * runtime reports the parts it has instead, such as {@link #CLASSIC_SEARCH} and {@link
+     * #TERM_SEARCH} (ADR 0058).
+     */
     SEARCH,
     /**
      * {@code startSearch} with a classic query only, or with {@link #KNN_VECTORS} a KNN query too
      * (ADR 0049); best score first, without highlighting.
      */
     CLASSIC_SEARCH,
+    /** {@code startSearch}, {@code startFilter} and {@code startExplain} with a term query, best score first (ADR 0058). */
+    TERM_SEARCH,
     /** {@code startExplain}. */
     EXPLAIN,
     /** Highlighting in {@code startSearch}, and {@code startHighlight}. */

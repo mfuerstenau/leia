@@ -92,6 +92,7 @@ import io.github.mfuerstenau.leia.tui.jars.DefaultJars;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -862,8 +863,11 @@ class AppTest {
                 "10.5.2"));
     }
 
-    /** An index written by Lucene 2.4, which Lucene 3.6 reads with fewer features (ADR 0044). */
-    private static App oldLuceneApp() {
+    /**
+     * An index written by Lucene 2.4, which Lucene 3.6 reads with fewer features (ADR 0044), and
+     * {@code more} of them.
+     */
+    private static App oldLuceneApp(Feature... more) {
         App app = app();
         IndexCommitStats index = new IndexCommitStats(
                 "/data/old",
@@ -881,18 +885,16 @@ class AppTest {
                 List.of(new ReaderSegment("_0", 0, 3, 3)));
         GetIndexStatsResult stats = new GetIndexStatsResult(
                 "/data/old", "FS", 1, 3, 3, List.of(index), List.of(field("id", 0), field("body", 1)));
-        app.opened(
-                stats,
-                List.of(),
-                Set.of(
-                        Feature.INDEX_STATS,
-                        Feature.DOCUMENTS,
-                        Feature.STORED_VALUES,
-                        Feature.TERM_VECTORS,
-                        Feature.TERMS,
-                        Feature.POSTINGS,
-                        Feature.CLASSIC_SEARCH),
-                "3.6.2");
+        Set<Feature> features = EnumSet.of(
+                Feature.INDEX_STATS,
+                Feature.DOCUMENTS,
+                Feature.STORED_VALUES,
+                Feature.TERM_VECTORS,
+                Feature.TERMS,
+                Feature.POSTINGS,
+                Feature.CLASSIC_SEARCH);
+        features.addAll(List.of(more));
+        app.opened(stats, List.of(), features, "3.6.2");
         return app;
     }
 
@@ -1702,6 +1704,30 @@ class AppTest {
         app.termsLoaded(loadTerms("id", null), termPage("1", "2"));
         assertThat(app.handleKey(key('s'))).isEmpty();
         assertThat(render(app)).contains("Search term: not for Lucene 2.x");
+    }
+
+    /** A runtime searches a term without the rest of search (ADR 0058). */
+    @Test
+    void anOldLuceneIndexWithTermQueriesSearchesATerm() {
+        App app = oldLuceneApp(Feature.TOP_TERMS, Feature.TERM_SEARCH);
+        app.handleKey(key(KeyCode.DOWN));
+        assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(start(1, "body"));
+        app.scanStarted(1, 1);
+        app.scanProgress(
+                1,
+                new GetFieldTermScanResult(
+                        1, Optional.of(new FieldTerms("body", 1, List.of(new TopTerm("ff", true, 1, 1))))));
+        app.handleKey(key(KeyCode.TAB));
+        assertThat(wide(app)).contains("/ search term");
+        Action.StartSearch top = (Action.StartSearch) app.handleKey(key('/')).orElseThrow();
+        assertThat(top.params().query().term()).hasValue(new TermQuery("body", new BytesValue("ff", true)));
+        assertThat(legend(app)).contains("m mode").doesNotContain("p/s/l settings");
+
+        app.handleKey(key('3'));
+        app.termsLoaded(loadTerms("id", null), termPage("1", "2"));
+        assertThat(legend(app)).contains("s search");
+        Action.StartSearch term = (Action.StartSearch) app.handleKey(key('s')).orElseThrow();
+        assertThat(term.params().query().term()).hasValue(new TermQuery("id", new BytesValue("1", false)));
     }
 
     @Test

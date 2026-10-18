@@ -49,6 +49,7 @@ import org.apache.lucene.index.SegmentReader;
 import org.apache.lucene.index.SortedDocValues;
 import org.apache.lucene.index.SortedNumericDocValues;
 import org.apache.lucene.index.SortedSetDocValues;
+import org.apache.lucene.index.Term;
 import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.queryparser.classic.ParseException;
 import org.apache.lucene.queryparser.classic.QueryParser;
@@ -59,6 +60,7 @@ import org.apache.lucene.search.LeafCollector;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.Scorer;
+import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.TopScoreDocCollector;
 import org.apache.lucene.store.Directory;
@@ -608,6 +610,11 @@ final class Lucene7Index implements RuntimeIndex, Documents, Terms, Search {
         } finally {
             analyzer.close();
         }
+    }
+
+    @Override
+    public ParsedQuery term(String field, byte[] term) {
+        return new Lucene7Query(new TermQuery(new Term(field, new BytesRef(term))));
     }
 
     /** {@inheritDoc} The progress is reported once per segment. */

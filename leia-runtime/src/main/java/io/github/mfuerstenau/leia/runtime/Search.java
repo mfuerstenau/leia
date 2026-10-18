@@ -9,7 +9,7 @@ import java.util.OptionalInt;
 import java.util.Set;
 import java.util.function.LongConsumer;
 
-/** The classic query parser and search of a {@link RuntimeIndex}. */
+/** The classic query parser, term queries and search of a {@link RuntimeIndex}. */
 public interface Search {
 
     /** The simple class names of the analyzers that {@link AnalyzerSpec.Named} can name. */
@@ -22,6 +22,12 @@ public interface Search {
      */
     ParsedQuery parse(String expression, ParserOptions options, AnalyzerSpec analyzer)
             throws InvalidQueryException, UnsupportedAnalyzerException;
+
+    /**
+     * A query for exactly one term of {@code field}, neither analyzed nor split (ADR 0058), for
+     * {@link #search}, {@link #matches} and {@link #explain}.
+     */
+    ParsedQuery term(String field, byte[] term);
 
     /**
      * Searches with a query from {@link #parse}, best score first.
@@ -59,7 +65,7 @@ public interface Search {
      */
     Explanation explain(ParsedQuery query, int docId, LongConsumer progress) throws IOException;
 
-    /** A query from {@link #parse}; its {@code toString} is the parsed query. */
+    /** A query from {@link #parse} or {@link #term}; its {@code toString} is the parsed query. */
     interface ParsedQuery {}
 
     /** The classic query parser's options. */

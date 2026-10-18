@@ -21,7 +21,7 @@ leia / leia.cmd  ──finds the JVM, runs──▶  <java> -jar leia.jar
 | Path | Role |
 |---|---|
 | `leia-core/` | Java library with the Lucene functionality. No UI or protocol code. |
-| `leia-runtime/` | The runtime interface (ADR 0044, ADR 0045, ADR 0046, ADR 0048, ADR 0049, ADR 0051, ADR 0055, ADR 0056, ADR 0057): `LuceneRuntime` (with `API_VERSION`), its path-based `Commits` and `Check`, and `RuntimeIndex` with the groups `Documents`, `Terms`, `Search`, `Points` and `Knn`, with records of its own, and, in `…runtime.support`, the JDK-only helpers the runtimes share (ADR 0050). JDK types only; part of `leia.jar`. |
+| `leia-runtime/` | The runtime interface (ADR 0044, ADR 0045, ADR 0046, ADR 0048, ADR 0049, ADR 0051, ADR 0055, ADR 0056, ADR 0057, ADR 0058): `LuceneRuntime` (with `API_VERSION`), its path-based `Commits` and `Check`, and `RuntimeIndex` with the groups `Documents`, `Terms`, `Search`, `Points` and `Knn`, with records of its own, and, in `…runtime.support`, the JDK-only helpers the runtimes share (ADR 0050). JDK types only; part of `leia.jar`. |
 | `leia-lucene3/` | Lucene 3.6.2, relocated into `…lucene3.shaded`, for indexes written by Lucene 2.x and 3.x (ADR 0044). `Lucene3Runtime` implements `LuceneRuntime` and is found through `ServiceLoader`. Its shadow jar is `runtimes/leia-lucene3.jar` beside `leia.jar`, not part of it (ADR 0044). Also writes the Lucene 2.4 and 3.x test indexes. |
 | `leia-lucene5/` | Lucene 5.5.5 with backward-codecs, queryparser and analyzers-common, relocated into `…lucene5.shaded`, for indexes written by Lucene 4.x and 5.x (ADR 0046). `Lucene5Runtime`, found as `Lucene3Runtime` is; its shadow jar is `runtimes/leia-lucene5.jar`. Also writes the Lucene 4.x and 5.x test indexes. |
 | `leia-lucene7/` | Lucene 7.7.3 with backward-codecs, queryparser and analyzers-common, relocated into `…lucene7.shaded`, for indexes written by Lucene 6.x and 7.x (ADR 0048). `Lucene7Runtime`, found as `Lucene3Runtime` is, with points; its shadow jar is `runtimes/leia-lucene7.jar`. Also writes the Lucene 6.x and 7.x test indexes. |
@@ -49,7 +49,7 @@ Java 25 via a Gradle toolchain · Gradle 9 (Kotlin DSL, version catalog in `grad
 
 ## Commands
 
-The Gradle wrapper only needs some Java 17+ runtime to start, for example `JAVA_HOME=$PWD/.jdks/jdk-21.0.12.1+1-jre` (a local, git-ignored Temurin JRE). The build daemon itself runs on Temurin 25. Gradle downloads that JDK automatically via foojay into `~/.gradle/jdks`, as pinned in `gradle/gradle-daemon-jvm.properties`. To change it, run `./gradlew updateDaemonJvm --jvm-version=<N> --jvm-vendor=adoptium`.
+The Gradle wrapper only needs some Java 17+ runtime to start, for example `JAVA_HOME=~/.gradle/jdks/eclipse_adoptium-25-amd64-linux.2` (the Temurin 25 that Gradle downloads for the daemon, once it has). The build daemon itself runs on Temurin 25. Gradle downloads that JDK automatically via foojay into `~/.gradle/jdks`, as pinned in `gradle/gradle-daemon-jvm.properties`. To change it, run `./gradlew updateDaemonJvm --jvm-version=<N> --jvm-vendor=adoptium`.
 
 Keep these in sync with the build:
 

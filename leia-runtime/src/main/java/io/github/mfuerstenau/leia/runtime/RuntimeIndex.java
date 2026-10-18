@@ -38,7 +38,7 @@ public interface RuntimeIndex extends Closeable {
     /** The terms of a field and their postings. */
     Optional<Terms> terms();
 
-    /** The classic query parser and search. */
+    /** The classic query parser, term queries and search. */
     Optional<Search> search();
 
     /** The BKD trees of point fields (ADR 0048). */

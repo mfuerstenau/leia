@@ -66,6 +66,7 @@ import io.github.mfuerstenau.leia.protocol.search.SearchResults;
 import io.github.mfuerstenau.leia.protocol.search.SortKey;
 import io.github.mfuerstenau.leia.protocol.search.StartExplainParams;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
+import io.github.mfuerstenau.leia.protocol.search.TermQuery;
 import io.github.mfuerstenau.leia.protocol.search.TotalHitsRelation;
 import io.github.mfuerstenau.leia.protocol.terms.FieldTerms;
 import io.github.mfuerstenau.leia.protocol.terms.GetPositionsParams;
@@ -148,7 +149,7 @@ public final class RuntimeResults {
                     Feature.TERMS, Feature.POSTINGS, Feature.TOP_TERMS, Feature.POSITIONS, Feature.EXPORT_TERMS));
         }
         if (index.search().isPresent()) {
-            features.addAll(List.of(Feature.CLASSIC_SEARCH, Feature.FILTER, Feature.EXPLAIN));
+            features.addAll(List.of(Feature.CLASSIC_SEARCH, Feature.TERM_SEARCH, Feature.FILTER, Feature.EXPLAIN));
         }
         if (index.points().isPresent() && index.fields().stream().anyMatch(field -> field.pointDimensionCount() > 0)) {
             features.add(Feature.POINTS);
@@ -770,8 +771,8 @@ public final class RuntimeResults {
 
     /**
      * {@code startSearch}: a classic query, parsed with the analyzer of the params as the runtime has
-     * it ({@link RuntimeAnalyzers}), scored by its default similarity, or a KNN query if the runtime
-     * reads vectors (ADR 0049), best score first. Highlighting is left out; another query, sort or
+     * it ({@link RuntimeAnalyzers}), a term query (ADR 0058), or a KNN query if the runtime reads
+     * vectors (ADR 0049), scored by its default similarity, best score first. Highlighting is left out; another query, sort or
      * analyzer is not supported.
      */
     public static JobStarted startSearch(OpenRuntime open, StartSearchParams params, Jobs jobs) throws RpcException {
@@ -815,13 +816,18 @@ public final class RuntimeResults {
     }
 
     /**
-     * {@code query} as the runtime runs it: a classic query parsed by it, or a KNN query if it reads
-     * vectors. Another query is not supported.
+     * {@code query} as the runtime runs it: a classic query parsed by it, a term query (ADR 0058), or
+     * a KNN query if it reads vectors. Another query is not supported.
      */
     private static Search.ParsedQuery parsedQuery(OpenRuntime open, Search search, SearchQuery query)
             throws RpcException {
         if (query.classic().isPresent()) {
             return parse(open, search, query.classic().get());
+        }
+        if (query.term().isPresent()) {
+            TermQuery term = query.term().get();
+            checkField(open.index(), term.field());
+            return search.term(term.field(), bytes(term.term()));
         }
         if (query.knn().isPresent()) {
             return knn(open, search, query.knn().get());

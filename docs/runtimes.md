@@ -34,6 +34,7 @@ The first index of a path decides which Lucene opens it, by the major in its new
 | `COMMITS` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `SEARCH` | – | – | – | – | ✓ |
 | `CLASSIC_SEARCH` | ✓ | ✓ | ✓ | ✓⁴ | ✓ |
+| `TERM_SEARCH` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `EXPLAIN` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `HIGHLIGHT` | – | – | – | – | ✓ |
 | `STORED_SCAN` | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -49,6 +50,8 @@ The first index of a path decides which Lucene opens it, by the major in its new
 4. With `KNN_VECTORS`, `CLASSIC_SEARCH` takes a KNN query too, approximate or exact, with a filter (ADR 0049 §6).
 5. A query filter takes no deleted documents: Lucene 3.6 doesn't read their postings, so `startFilter` refuses a query with `includeDeleted` (ADR 0056 §4). A pattern filter takes them.
 
+`SEARCH` is every part of search; a runtime reports the parts it has, such as `CLASSIC_SEARCH` and `TERM_SEARCH`, and the TUI offers a part with `SEARCH` or with that part (ADR 0058).
+
 Every runtime reports the open reader's segments in `getIndexStats`, from runtime interface 6 on (ADR 0051), so the documents screen shows and pins segments on every index with a reader.
 
 **Without a reader** (ADR 0021), an index has `COMMITS` and `CHECK_INDEX`, and `CHECK_LEVELS` too unless its first index goes to a runtime without levels, which is 3.6.2 for 2.x and 3.x (ADR 0045 §4, ADR 0046 §6). Indexes of 4.x to 8.x go to Lucene 10 then, which lists their commits as unreadable.
@@ -63,6 +66,7 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 | Postings of deleted documents | skipped, though `docFreq` counts them | marked | marked | marked | marked |
 | Query filter with deleted documents (ADR 0056) | refused | ✓, through leaves without deletions | as 5.5.5 | as 5.5.5 | ✓, through readers without deletions |
 | Filter cancellation | per segment and every 1024 matches | per segment and every 1024 matches | as 5.5.5 | through the searcher's `QueryTimeout` | through `ExitableDirectoryReader` |
+| Term query (ADR 0058) | the bytes decoded as UTF-8 | the bytes | the bytes | the bytes | the bytes |
 | Explain similarity (ADR 0057) | the runtime's default, classic TF-IDF | as 3.6.2 | the runtime's default, BM25 | as 7.7.3 | the one chosen |
 | Explain cancellation | before and after | before and after | before and after | through the searcher's `QueryTimeout` | through `ExitableDirectoryReader` |
 | Explanation of a deleted document | no match, by the facade | no match, by Lucene | no match, by Lucene | no match, by Lucene | no match, by Lucene |

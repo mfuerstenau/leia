@@ -132,6 +132,7 @@ class Lucene5BackendTest {
                         Feature.TOP_TERMS,
                         Feature.EXPORT_TERMS,
                         Feature.CLASSIC_SEARCH,
+                        Feature.TERM_SEARCH,
                         Feature.FILTER,
                         Feature.EXPLAIN,
                         Feature.COMMITS,
@@ -180,6 +181,14 @@ class Lucene5BackendTest {
         OpenIndexResult opened = open(testIndex(name));
 
         RuntimeExplains.explainsAHit(backend, opened.maxDoc().orElseThrow(), true);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene4", "lucene5"})
+    void searchesATerm(String name) throws Exception {
+        OpenIndexResult opened = open(testIndex(name));
+
+        RuntimeSearches.searchesATerm(backend, opened.maxDoc().orElseThrow(), "beta", true);
     }
 
     @ParameterizedTest

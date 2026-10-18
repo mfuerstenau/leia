@@ -88,6 +88,7 @@ class Lucene24BackendTest {
                         Feature.TOP_TERMS,
                         Feature.EXPORT_TERMS,
                         Feature.CLASSIC_SEARCH,
+                        Feature.TERM_SEARCH,
                         Feature.FILTER,
                         Feature.EXPLAIN,
                         Feature.COMMITS,
@@ -181,6 +182,11 @@ class Lucene24BackendTest {
         backend.fails(Methods.START_SEARCH, params(classic("body:(number")), ErrorCode.INVALID_QUERY);
         backend.fails(
                 Methods.START_SEARCH, params(standard("number", QueryOperator.OR, List.of())), ErrorCode.NOT_SUPPORTED);
+    }
+
+    @Test
+    void searchesATerm() throws Exception {
+        RuntimeSearches.searchesATerm(backend, opened.maxDoc().orElseThrow(), "number", true);
     }
 
     @Test

@@ -853,8 +853,8 @@ public final class Terms {
             needed = Feature.EXPORT_TERMS;
             what = "Export";
         } else if (key.isChar('s') && !points) {
-            needed = Feature.SEARCH;
-            what = "Search term";
+            // A runtime has term queries without the rest of search (ADR 0058).
+            return searchesTerms() ? Optional.empty() : Optional.of("Search term");
         } else if (key.isChar('b') && filter.isPresent()) {
             needed = Feature.FILTER;
             what = "Filter";
@@ -862,6 +862,11 @@ public final class Terms {
             return Optional.empty();
         }
         return features.contains(needed) ? Optional.empty() : Optional.of(what);
+    }
+
+    /** Whether the index can search a term: with all of search, or term queries alone (ADR 0058). */
+    private boolean searchesTerms() {
+        return features.contains(Feature.SEARCH) || features.contains(Feature.TERM_SEARCH);
     }
 
     /**
@@ -876,7 +881,7 @@ public final class Terms {
         String open = features.contains(Feature.DOCUMENTS) ? "⏎ open doc   " : "";
         String only = !filtered() ? "" : onlyFiltered ? "b all postings   " : "b filter only   ";
         String export = features.contains(Feature.EXPORT_TERMS) ? "e export   " : "";
-        String search = features.contains(Feature.SEARCH) ? "s search   " : "";
+        String search = searchesTerms() ? "s search   " : "";
         return "/ seek   " + open + search + only + export + "←/→ column   ↑↓";
     }
 

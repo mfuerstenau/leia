@@ -53,6 +53,7 @@ import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.Scorer;
+import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.TopScoreDocCollector;
 import org.apache.lucene.store.Directory;
@@ -503,6 +504,12 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
         } finally {
             analyzer.close();
         }
+    }
+
+    /** {@inheritDoc} A term of Lucene 3 is text: {@code term} is decoded as UTF-8. */
+    @Override
+    public ParsedQuery term(String field, byte[] term) {
+        return new Lucene3Query(new TermQuery(new Term(field, text(term))));
     }
 
     /** {@inheritDoc} The progress is reported once per segment. */

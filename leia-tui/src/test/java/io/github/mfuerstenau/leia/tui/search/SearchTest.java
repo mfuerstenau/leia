@@ -281,6 +281,18 @@ class SearchTest {
         assertThat(press(search, 'H')).hasValue(new Request.Unsupported("Highlight"));
     }
 
+    /** A runtime with term queries has the term mode, without similarity and sort (ADR 0058). */
+    @Test
+    void aRuntimeWithTermQueriesHasTheTermMode() {
+        Search search = search().withFeatures(Set.of(Feature.CLASSIC_SEARCH, Feature.TERM_SEARCH, Feature.DOCUMENTS));
+        assertThat(search.keys()).contains("m mode");
+        assertThat(press(search, 'm')).isEmpty();
+        assertThat(search.mode()).isEqualTo(Mode.TERM);
+        assertThat(press(search, 'm')).isEmpty();
+        assertThat(search.mode()).isEqualTo(Mode.CLASSIC);
+        assertThat(press(search, 's')).hasValue(new Request.Unsupported("Similarity and sort"));
+    }
+
     /** A runtime that reads vectors searches them with its classic search (ADR 0049). */
     @Test
     void aClassicOnlyIndexWithVectorsSearchesTheNearestToo() {

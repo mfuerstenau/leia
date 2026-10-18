@@ -117,6 +117,7 @@ class Lucene3BackendTest {
                         Feature.TOP_TERMS,
                         Feature.EXPORT_TERMS,
                         Feature.CLASSIC_SEARCH,
+                        Feature.TERM_SEARCH,
                         Feature.FILTER,
                         Feature.EXPLAIN,
                         Feature.COMMITS,
@@ -253,6 +254,13 @@ class Lucene3BackendTest {
         OpenIndexResult opened = open(Path.of(PATH));
 
         RuntimeExplains.explainsAHit(backend, opened.maxDoc().orElseThrow(), true);
+    }
+
+    @Test
+    void searchesATerm() throws Exception {
+        OpenIndexResult opened = open(Path.of(PATH));
+
+        RuntimeSearches.searchesATerm(backend, opened.maxDoc().orElseThrow(), "beta", true);
     }
 
     @Test

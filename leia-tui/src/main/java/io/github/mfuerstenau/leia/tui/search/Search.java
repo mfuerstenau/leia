@@ -534,7 +534,8 @@ public final class Search {
         for (Mode each : MODE_CYCLE) {
             boolean available = switch (each) {
                 case CLASSIC -> supports(Feature.SEARCH) || supports(Feature.CLASSIC_SEARCH);
-                case STANDARD, TERM, LIKE, LIKE_TEXT -> supports(Feature.SEARCH);
+                case TERM -> supports(Feature.SEARCH) || supports(Feature.TERM_SEARCH);
+                case STANDARD, LIKE, LIKE_TEXT -> supports(Feature.SEARCH);
                 case DOC_VALUES -> supports(Feature.SEARCH, Feature.DOC_VALUES);
                 // A runtime searches KNN vectors with its classic search (ADR 0049).
                 case KNN ->

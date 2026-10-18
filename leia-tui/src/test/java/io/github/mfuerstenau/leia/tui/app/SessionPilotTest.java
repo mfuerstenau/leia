@@ -227,6 +227,13 @@ class SessionPilotTest {
         pilot.press('x');
         settle();
         assertThat(screen()).contains("Explanation of doc 0", "0.3116391  fieldWeight(body:number in 0)");
+
+        // The terms screen's s searches the selected term with a term query (ADR 0058).
+        pilot.press('3');
+        settle();
+        pilot.press('s');
+        settle();
+        assertThat(screen()).contains("Term · field", "1 hit").doesNotContain("not for");
     }
 
     /** An index written by Lucene 5.5, which the relocated Lucene 5.5 reads (ADR 0046). */
