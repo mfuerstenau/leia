@@ -328,3 +328,7 @@ Finished items, moved here from `docs/tasklist.md` (the open work queue).
   - The terms screen's `… terms only` note outlived leaving the screen: `Terms.leave` clears it whenever another screen is shown
   - At 100 columns the point tree's title ran over its panel's corner: the title drops the segments, then the points, then all but the name and note, and is cut last
   - While the documents `i` prompt was open, the footer showed the screen's legend with `⌫ back`: it shows `type a document id   ⏎ go   Esc cancel`
+
+## Lucene 9.12 beyond classic search — done
+
+- [x] Export terms (`EXPORT_TERMS`) on every runtime, with no runtime change: `startExportTerms` pages through `Terms.terms` (`RuntimeResults.exportTerms`), and `TermExport` writes bytes and a docFreq from a `TermSource`. Luke's format stays (ADR 0022); the backlog's `totalTermFreq` and binary-term marker stay open

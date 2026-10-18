@@ -39,7 +39,7 @@ The first index of a path decides which Lucene opens it, by the major in its new
 | `STORED_SCAN` | – | – | – | – | ✓ |
 | `CHECK_INDEX` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `CHECK_LEVELS` | – | ✓ | ✓ | ✓ | ✓ |
-| `EXPORT_TERMS` | – | – | – | – | ✓ |
+| `EXPORT_TERMS` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `REOPEN` | – | – | – | – | ✓ |
 | `AUTO_STOP_WORDS` | – | – | – | – | ✓ |
 
@@ -61,6 +61,7 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 | Terms | strings, as UTF-8 | bytes | bytes | bytes | bytes |
 | Postings of deleted documents | skipped, though `docFreq` counts them | marked | marked | marked | marked |
 | `totalTermFreq` | counted from the live postings | recorded | recorded | recorded | recorded |
+| Export terms | reads every posting, as its term pages count `totalTermFreq` from them | the term dictionary only | the term dictionary only | the term dictionary only | the term dictionary only |
 | Term statistics per field | absent | ✓ | ✓ | ✓ | ✓ |
 | Offsets in positions | – | ✓ | ✓ | ✓ | ✓ |
 | Commit's Lucene version | the newest segment's | recorded from 5.3, else the newest segment's | recorded | recorded | recorded |

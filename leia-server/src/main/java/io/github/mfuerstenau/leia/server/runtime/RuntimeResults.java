@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.server.runtime;
 
 import io.github.mfuerstenau.leia.core.IndexDocument;
 import io.github.mfuerstenau.leia.core.ScanProgress;
+import io.github.mfuerstenau.leia.core.TermExport;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.check.IndexCheck;
 import io.github.mfuerstenau.leia.protocol.check.SegmentCheck;
@@ -129,7 +130,8 @@ public final class RuntimeResults {
             }
         }
         if (index.terms().isPresent()) {
-            features.addAll(List.of(Feature.TERMS, Feature.POSTINGS, Feature.TOP_TERMS, Feature.POSITIONS));
+            features.addAll(List.of(
+                    Feature.TERMS, Feature.POSTINGS, Feature.TOP_TERMS, Feature.POSITIONS, Feature.EXPORT_TERMS));
         }
         if (index.search().isPresent()) {
             features.add(Feature.CLASSIC_SEARCH);
@@ -872,6 +874,30 @@ public final class RuntimeResults {
                     }
                 });
         return new JobStarted(jobId);
+    }
+
+    /**
+     * {@code startExportTerms}: the terms of a field for {@link TermExport#export}, read page by
+     * page.
+     */
+    public static TermExport.TermSource exportTerms(OpenRuntime open, String field) throws RpcException {
+        Terms terms = open.index().terms().orElseThrow(open::notSupported);
+        checkField(open.index(), field);
+        return pages(terms, field, TermExport.PROGRESS_INTERVAL);
+    }
+
+    /** Every term of {@code field}, read {@code pageSize} at a time through {@link Terms#terms}. */
+    static TermExport.TermSource pages(Terms terms, String field, int pageSize) {
+        return sink -> {
+            Optional<byte[]> from = Optional.empty();
+            do {
+                Terms.TermsPage page = terms.terms(field, from, pageSize);
+                for (Terms.TermEntry entry : page.terms()) {
+                    sink.term(entry.term(), 0, entry.term().length, entry.docFreq());
+                }
+                from = page.next();
+            } while (from.isPresent());
+        };
     }
 
     /**

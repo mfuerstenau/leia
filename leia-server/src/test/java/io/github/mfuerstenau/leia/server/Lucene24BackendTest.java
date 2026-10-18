@@ -85,6 +85,7 @@ class Lucene24BackendTest {
                         Feature.DOCUMENTS,
                         Feature.TERMS,
                         Feature.TOP_TERMS,
+                        Feature.EXPORT_TERMS,
                         Feature.CLASSIC_SEARCH,
                         Feature.COMMITS,
                         Feature.CHECK_INDEX)

@@ -43,7 +43,9 @@ import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
+import io.github.mfuerstenau.leia.protocol.terms.ExportTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.FieldTerms;
+import io.github.mfuerstenau.leia.protocol.terms.GetExportTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetPositionsParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsParams;
@@ -51,9 +53,11 @@ import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.Posting;
+import io.github.mfuerstenau.leia.protocol.terms.StartExportTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.StartFieldTermScanParams;
 import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -63,6 +67,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -124,6 +129,7 @@ class Lucene5BackendTest {
                         Feature.POSTINGS,
                         Feature.POSITIONS,
                         Feature.TOP_TERMS,
+                        Feature.EXPORT_TERMS,
                         Feature.CLASSIC_SEARCH,
                         Feature.COMMITS,
                         Feature.CHECK_INDEX,
@@ -233,6 +239,40 @@ class Lucene5BackendTest {
         assertThat(top.uniqueTerms()).isEqualTo(11);
         assertThat(top.topTerms())
                 .containsExactly(new TopTerm("alpha", false, 7, 7), new TopTerm("document", false, 7, 7));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene4", "lucene5"})
+    void exportsTrieEncodedTermsAsTheTermsScreenShowsThem(String name) throws Exception {
+        open(testIndex(name));
+        Path file = tmp.resolve(name + "-price.tsv");
+        ExportTermsResult result = exportTerms("price", file);
+        List<String> expected = termLines("price");
+        assertThat(expected).isNotEmpty();
+        // Trie terms use 7 bits a byte, so they are UTF-8 and written as they are, a newline too.
+        assertThat(Files.readString(file, StandardCharsets.UTF_8))
+                .isEqualTo(expected.stream().map(line -> line + "\n").collect(Collectors.joining()));
+        assertThat(result.terms()).isEqualTo(expected.size());
+    }
+
+    /** The lines an export of {@code field} should write: the terms screen's pages, tab-separated. */
+    private List<String> termLines(String field) throws Exception {
+        List<String> lines = new ArrayList<>();
+        Optional<BytesValue> from = Optional.empty();
+        do {
+            GetTermsResult page = backend.call(Methods.GET_TERMS, new GetTermsParams(field, from, 3));
+            page.terms().forEach(term -> lines.add(term.term() + "\t" + term.docFreq()));
+            from = page.next();
+        } while (from.isPresent());
+        return lines;
+    }
+
+    private ExportTermsResult exportTerms(String field, Path file) throws Exception {
+        return backend.job(
+                Methods.START_EXPORT_TERMS,
+                new StartExportTermsParams(field, file.toString()),
+                Methods.GET_EXPORT_TERMS,
+                GetExportTermsResult::result);
     }
 
     @Test

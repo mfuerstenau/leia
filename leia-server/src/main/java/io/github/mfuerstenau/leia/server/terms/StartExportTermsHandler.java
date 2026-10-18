@@ -13,24 +13,31 @@ import io.github.mfuerstenau.leia.protocol.terms.TermDelimiter;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
+import io.github.mfuerstenau.leia.server.index.IndexDirectories;
 import io.github.mfuerstenau.leia.server.job.Jobs;
+import io.github.mfuerstenau.leia.server.runtime.OpenRuntime;
+import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
 import jakarta.inject.Inject;
 import java.io.IOException;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.util.List;
 
 /**
  * {@code startExportTerms}: checks the field and the file at once, then writes the terms of the
- * field of the {@link CurrentIndex} to the file in a job ({@link GetExportTermsHandler}, ADR 0022).
+ * field of the {@link CurrentIndex} to the file in a job ({@link GetExportTermsHandler}, ADR 0022),
+ * on Lucene 10 or a runtime (ADR 0044).
  */
 public final class StartExportTermsHandler implements MethodHandler<StartExportTermsParams, JobStarted> {
 
     private final CurrentIndex currentIndex;
+    private final IndexDirectories indexDirectories;
     private final Jobs jobs;
 
     @Inject
-    StartExportTermsHandler(CurrentIndex currentIndex, Jobs jobs) {
+    StartExportTermsHandler(CurrentIndex currentIndex, IndexDirectories indexDirectories, Jobs jobs) {
         this.currentIndex = currentIndex;
+        this.indexDirectories = indexDirectories;
         this.jobs = jobs;
     }
 
@@ -41,21 +48,33 @@ public final class StartExportTermsHandler implements MethodHandler<StartExportT
 
     @Override
     public JobStarted handle(StartExportTermsParams params) throws RpcException {
-        ReadOnlyIndex index = currentIndex.readable();
         String field = params.field();
-        TermParams.checkField(index, field);
+        TermExport.TermSource terms;
+        String lucene = "";
+        if (currentIndex.runtime().isPresent()) {
+            OpenRuntime open = currentIndex.runtime().get();
+            terms = RuntimeResults.exportTerms(open, field);
+            lucene = " with Lucene " + open.runtime().luceneVersion();
+        } else {
+            ReadOnlyIndex index = currentIndex.readable();
+            TermParams.checkField(index, field);
+            terms = TermExport.terms(index, field);
+        }
         Path file = path(params.path());
         boolean overwrite = params.overwrite().orElse(false);
+        List<Path> directories = indexDirectories.all().stream()
+                .map(IndexDirectories.IndexDirectory::path)
+                .toList();
         try {
-            TermExport.checkTarget(index, file, overwrite);
+            TermExport.checkTarget(directories, file, overwrite);
         } catch (TermExport.OutputException e) {
             throw new RpcException(ErrorCode.OUTPUT_NOT_WRITABLE, e.getMessage(), e);
         }
         TermExport.Delimiter delimiter = delimiter(params.delimiter().orElse(TermDelimiter.TAB));
         long jobId = jobs.start(
-                "export of the terms of field " + field + " to " + file,
+                "export of the terms of field " + field + " to " + file + lucene,
                 ExportTermsResult.class,
-                progress -> export(index, field, file, delimiter, overwrite, progress));
+                progress -> export(directories, terms, field, file, delimiter, overwrite, progress));
         return new JobStarted(jobId);
     }
 
@@ -80,7 +99,8 @@ public final class StartExportTermsHandler implements MethodHandler<StartExportT
     }
 
     private static ExportTermsResult export(
-            ReadOnlyIndex index,
+            List<Path> directories,
+            TermExport.TermSource terms,
             String field,
             Path file,
             TermExport.Delimiter delimiter,
@@ -88,7 +108,7 @@ public final class StartExportTermsHandler implements MethodHandler<StartExportT
             ScanProgress progress)
             throws RpcException {
         try {
-            TermExport.Result result = TermExport.export(index, field, file, delimiter, overwrite, progress);
+            TermExport.Result result = TermExport.export(directories, terms, file, delimiter, overwrite, progress);
             return new ExportTermsResult(result.path().toString(), result.terms(), result.bytes());
         } catch (TermExport.OutputException e) {
             throw new RpcException(ErrorCode.OUTPUT_NOT_WRITABLE, e.getMessage(), e);

@@ -6,7 +6,6 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 
 Goal: an index created by Lucene 8.x (read with `leia-lucene9`, ADR 0049) gets the features that are greyed out for it today. 9.12 has the APIs that leia-core uses for them on Lucene 10, so most are ports. What needs no runtime change goes to every runtime at once. The others need runtime interface 7 (one ADR for the interface, amending ADR 0049 §4). They land in 9.12 first, and in 5.5 and 7.7 where the copy is the same (ADR 0050). Each item adds its feature in `RuntimeResults.features`, a `runtime()` branch in its handlers, and its row in `docs/runtimes.md` (checked by `RuntimeFeaturesTest`). The TUI already gates on the features.
 
-- [ ] Export terms (`EXPORT_TERMS`) on every runtime, with no runtime change: `startExportTerms` pages through `Terms.terms`. `TermExport`'s writer takes bytes and a docFreq rather than a `BytesRef` from a `ReadOnlyIndex`. This is a good moment for the backlog's `totalTermFreq` and binary-term marker, since `TermEntry` has `totalTermFreq` too.
 - [ ] Stored-value scan (`STORED_SCAN`, ADR 0027): a runtime method that reads a document's stored values only, filtered by field, with whether it is deleted. Today `Documents.document` also reads norms, doc values and vectors. The matching part of `StoredScan` (the time-limited matcher, spans, snippet, UTF-8 offsets) is split from its Lucene loop so that the server can run it over the runtime's values. Cancellation through `progress`, as `topTerms` has it. 9.12, 7.7, 5.5; 3.6 if its `document()` keeps up.
 - [ ] Filter (`FILTER`, ADR 0031, ADR 0032): `Search` collects a parsed query's doc ids without scores, deleted documents included on request (9.12's `FilterDirectoryReader` without live docs, as ADR 0031 §4 has it). The pattern filter comes from the stored-value scan. The server builds `DocFilter` from them, so `stepFilter`, `releaseFilter` and the postings' `PostingsFilter` work unchanged. Depends on the stored-value scan for `b`/`B` in regex mode.
 - [ ] Explain (`EXPLAIN`): `Search.explain(ParsedQuery, docId)`, a runtime record tree (value, description, details) from 9.12's `IndexSearcher.explain`, mapped to the protocol's explanation. A classic and a KNN query alike. 9.12, 7.7, 5.5.
@@ -31,7 +30,7 @@ From the read-only checklist in `docs/luke-features.md` §7. Ordered roughly by 
 
 - [ ] Open options: Elasticsearch/OpenSearch indexes (left out of ADR 0018): their codecs need the server's `lib/`, which has its own `lucene-*.jar` of another version; skipping those jars, or saying which ones clash, untested without an installation
 - [ ] Tools: check only the selected index or segments, and the thread count (left out of ADR 0022)
-- [ ] Tools: export terms with `totalTermFreq` and a marker for binary terms (left out of ADR 0022, which keeps Luke's format)
+- [ ] Tools: export terms with `totalTermFreq` and a marker for binary terms (left out of ADR 0022, which keeps Luke's format). Trie-encoded terms of 4.x to 7.x (7 bits a byte, so valid UTF-8) are written raw today, and one can hold a newline, which breaks the line format
 - [ ] Misc: log view with level filter
 - [ ] Misc: themes
 - [ ] Misc: about

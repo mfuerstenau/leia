@@ -105,6 +105,7 @@ class Lucene8BackendTest {
                 Feature.POSTINGS,
                 Feature.POSITIONS,
                 Feature.TOP_TERMS,
+                Feature.EXPORT_TERMS,
                 Feature.CLASSIC_SEARCH,
                 Feature.POINTS,
                 Feature.COMMITS,

@@ -44,9 +44,14 @@ import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
+import io.github.mfuerstenau.leia.protocol.terms.ExportTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.FieldTerms;
+import io.github.mfuerstenau.leia.protocol.terms.GetExportTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetPositionsParams;
+import io.github.mfuerstenau.leia.protocol.terms.GetTermsParams;
+import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
+import io.github.mfuerstenau.leia.protocol.terms.StartExportTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.StartFieldTermScanParams;
 import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
 import java.io.IOException;
@@ -109,6 +114,7 @@ class Lucene3BackendTest {
                         Feature.POSTINGS,
                         Feature.POSITIONS,
                         Feature.TOP_TERMS,
+                        Feature.EXPORT_TERMS,
                         Feature.CLASSIC_SEARCH,
                         Feature.COMMITS,
                         Feature.CHECK_INDEX);
@@ -223,6 +229,47 @@ class Lucene3BackendTest {
                         new TopTerm("beta", false, 4, 4));
         backend.fails(
                 Methods.START_FIELD_TERM_SCAN, new StartFieldTermScanParams("nothing", 3), ErrorCode.FIELD_NOT_FOUND);
+    }
+
+    @Test
+    void exportsTheTermsOfAField() throws Exception {
+        open(Path.of(PATH));
+        Path file = tmp.resolve("body.tsv");
+        ExportTermsResult result = exportTerms("body", file);
+        assertThat(result.terms()).isEqualTo(11);
+        assertThat(result.bytes()).isEqualTo(Files.size(file));
+        assertThat(Files.readAllLines(file))
+                .hasSize(11)
+                .containsSubsequence("1\t1", "7\t1", "alpha\t7", "beta\t4", "document\t7", "gamma\t1")
+                .isEqualTo(termLines("body"));
+        backend.fails(
+                Methods.START_EXPORT_TERMS,
+                new StartExportTermsParams("nothing", tmp.resolve("x.tsv").toString()),
+                ErrorCode.FIELD_NOT_FOUND);
+        backend.fails(
+                Methods.START_EXPORT_TERMS,
+                new StartExportTermsParams("body", Path.of(PATH, "body.tsv").toString()),
+                ErrorCode.OUTPUT_NOT_WRITABLE);
+    }
+
+    /** The lines an export of {@code field} should write: the terms screen's pages, tab-separated. */
+    private List<String> termLines(String field) throws Exception {
+        List<String> lines = new ArrayList<>();
+        Optional<BytesValue> from = Optional.empty();
+        do {
+            GetTermsResult page = backend.call(Methods.GET_TERMS, new GetTermsParams(field, from, 3));
+            page.terms().forEach(term -> lines.add(term.term() + "\t" + term.docFreq()));
+            from = page.next();
+        } while (from.isPresent());
+        return lines;
+    }
+
+    private ExportTermsResult exportTerms(String field, Path file) throws Exception {
+        return backend.job(
+                Methods.START_EXPORT_TERMS,
+                new StartExportTermsParams(field, file.toString()),
+                Methods.GET_EXPORT_TERMS,
+                GetExportTermsResult::result);
     }
 
     @Test

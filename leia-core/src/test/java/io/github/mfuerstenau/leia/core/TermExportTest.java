@@ -9,6 +9,9 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.HexFormat;
+import java.util.List;
 import java.util.concurrent.CancellationException;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
@@ -33,7 +36,7 @@ class TermExportTest {
         Path file = tmp.resolve("terms.out");
 
         try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
-            TermExport.Result result = TermExport.export(index, "tag", file, Delimiter.TAB, false, ScanProgress.NONE);
+            TermExport.Result result = export(index, "tag", file, Delimiter.TAB, false, ScanProgress.NONE);
 
             assertThat(result.path()).isEqualTo(file);
             assertThat(result.terms()).isEqualTo(3);
@@ -49,8 +52,8 @@ class TermExportTest {
         Path space = tmp.resolve("space.out");
 
         try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
-            TermExport.export(index, "tag", comma, Delimiter.COMMA, false, ScanProgress.NONE);
-            TermExport.export(index, "tag", space, Delimiter.SPACE, false, ScanProgress.NONE);
+            export(index, "tag", comma, Delimiter.COMMA, false, ScanProgress.NONE);
+            export(index, "tag", space, Delimiter.SPACE, false, ScanProgress.NONE);
         }
         assertThat(Files.readString(comma)).isEqualTo("a,b,1\nblue,2\ngrün,1\n");
         assertThat(Files.readString(space)).isEqualTo("a,b 1\nblue 2\ngrün 1\n");
@@ -62,7 +65,7 @@ class TermExportTest {
         Path file = tmp.resolve("raw.out");
 
         try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
-            TermExport.export(index, "raw", file, Delimiter.TAB, false, ScanProgress.NONE);
+            export(index, "raw", file, Delimiter.TAB, false, ScanProgress.NONE);
         }
         assertThat(Files.readString(file, StandardCharsets.US_ASCII)).isEqualTo("00ff\t1\n");
     }
@@ -73,7 +76,7 @@ class TermExportTest {
         Path file = tmp.resolve("rank.out");
 
         try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
-            TermExport.Result result = TermExport.export(index, "rank", file, Delimiter.TAB, false, ScanProgress.NONE);
+            TermExport.Result result = export(index, "rank", file, Delimiter.TAB, false, ScanProgress.NONE);
 
             assertThat(result.terms()).isZero();
         }
@@ -86,7 +89,7 @@ class TermExportTest {
         Path file = tmp.resolve("terms.out");
 
         try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
-            assertThatThrownBy(() -> TermExport.export(index, "tag", file, Delimiter.TAB, false, _ -> {
+            assertThatThrownBy(() -> export(index, "tag", file, Delimiter.TAB, false, _ -> {
                         throw new CancellationException("cancelled");
                     }))
                     .isInstanceOf(CancellationException.class);
@@ -102,7 +105,7 @@ class TermExportTest {
 
         try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
             for (Path file : new Path[] {dir.resolve("terms.out"), below.resolve("terms.out"), link.resolve("t.out")}) {
-                assertThatThrownBy(() -> TermExport.export(index, "tag", file, Delimiter.TAB, true, ScanProgress.NONE))
+                assertThatThrownBy(() -> export(index, "tag", file, Delimiter.TAB, true, ScanProgress.NONE))
                         .isInstanceOf(OutputException.class)
                         .hasMessageContaining("Not writing into the index directory " + dir);
             }
@@ -118,10 +121,10 @@ class TermExportTest {
 
         try (ReadOnlyIndex index = ReadOnlyIndex.open(tmp.resolve("indexes"))) {
             assertThat(index.skippedDirectories()).containsExactly(b);
-            assertThatThrownBy(() -> TermExport.checkTarget(index, b.resolve("terms.out"), false))
+            assertThatThrownBy(() -> TermExport.checkTarget(directories(index), b.resolve("terms.out"), false))
                     .isInstanceOf(OutputException.class)
                     .hasMessageContaining("Not writing into the index directory " + b);
-            TermExport.checkTarget(index, tmp.resolve("indexes/terms.out"), false);
+            TermExport.checkTarget(directories(index), tmp.resolve("indexes/terms.out"), false);
         }
     }
 
@@ -131,12 +134,12 @@ class TermExportTest {
         Path file = Files.writeString(tmp.resolve("terms.out"), "old");
 
         try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
-            assertThatThrownBy(() -> TermExport.export(index, "tag", file, Delimiter.TAB, false, ScanProgress.NONE))
+            assertThatThrownBy(() -> export(index, "tag", file, Delimiter.TAB, false, ScanProgress.NONE))
                     .isInstanceOf(OutputException.class)
                     .hasMessage("File exists: " + file);
             assertThat(file).hasContent("old");
 
-            TermExport.export(index, "tag", file, Delimiter.TAB, true, ScanProgress.NONE);
+            export(index, "tag", file, Delimiter.TAB, true, ScanProgress.NONE);
         }
         assertThat(Files.readString(file)).startsWith("a,b\t1\n");
     }
@@ -148,23 +151,54 @@ class TermExportTest {
         Path link = Files.createSymbolicLink(tmp.resolve("link.out"), target);
 
         try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
-            assertThatThrownBy(() -> TermExport.checkTarget(index, tmp.resolve("missing/terms.out"), false))
+            assertThatThrownBy(
+                            () -> TermExport.checkTarget(directories(index), tmp.resolve("missing/terms.out"), false))
                     .isInstanceOf(OutputException.class)
                     .hasMessage("No such directory: " + tmp.resolve("missing"));
-            assertThatThrownBy(() -> TermExport.checkTarget(index, tmp, true))
+            assertThatThrownBy(() -> TermExport.checkTarget(directories(index), tmp, true))
                     .isInstanceOf(OutputException.class)
                     .hasMessage("Is a directory: " + tmp);
-            assertThatThrownBy(() -> TermExport.checkTarget(index, link, true))
+            assertThatThrownBy(() -> TermExport.checkTarget(directories(index), link, true))
                     .isInstanceOf(OutputException.class)
                     .hasMessage("Not writing through a symbolic link: " + link);
-            assertThatThrownBy(() -> TermExport.checkTarget(index, Path.of("terms.out"), false))
+            assertThatThrownBy(() -> TermExport.checkTarget(directories(index), Path.of("terms.out"), false))
                     .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(() -> TermExport.export(
-                            index, "nope", tmp.resolve("x.out"), Delimiter.TAB, false, ScanProgress.NONE))
+            assertThatThrownBy(
+                            () -> export(index, "nope", tmp.resolve("x.out"), Delimiter.TAB, false, ScanProgress.NONE))
                     .isInstanceOf(IllegalArgumentException.class);
         }
         assertThat(target).hasContent("keep");
         assertThat(tmp.resolve("x.out")).doesNotExist();
+    }
+
+    @Test
+    void writesOnlyTheSliceOfEachTerm() throws Exception {
+        Path file = tmp.resolve("slices.out");
+        byte[] text = "xxblueyy".getBytes(StandardCharsets.UTF_8);
+        byte[] binary = HexFormat.of().parseHex("aa00ffbb");
+        TermExport.TermSource terms = sink -> {
+            sink.term(text, 2, 4, 3);
+            sink.term(binary, 1, 2, 1);
+        };
+
+        TermExport.Result result = TermExport.export(List.of(), terms, file, Delimiter.TAB, false, ScanProgress.NONE);
+
+        assertThat(result.terms()).isEqualTo(2);
+        assertThat(Files.readString(file, StandardCharsets.US_ASCII)).isEqualTo("blue\t3\n00ff\t1\n");
+    }
+
+    private static TermExport.Result export(
+            ReadOnlyIndex index, String field, Path file, Delimiter delimiter, boolean overwrite, ScanProgress progress)
+            throws IOException {
+        return TermExport.export(
+                directories(index), TermExport.terms(index, field), file, delimiter, overwrite, progress);
+    }
+
+    /** The opened and the skipped index directories, as the server passes them. */
+    private static List<Path> directories(OpenedIndex index) {
+        List<Path> directories = new ArrayList<>(index.directories());
+        directories.addAll(index.skippedDirectories());
+        return directories;
     }
 
     /** Three documents: tags "blue", "a,b" and "grün", a binary term, and a field without postings. */
