@@ -2,6 +2,10 @@
 
 The work queue for leia. Check items off (`[x]`) as they land, and keep it aligned with the "Remaining / next" section of the latest entry in `docs/SESSION-SUMMARIES.md`. Finished items move to `docs/tasklist-done.md`.
 
+## Distribution
+
+- [ ] Distribution: an option of the start scripts (`leia` and `leia.cmd`) that downloads the runtime jars (`leia-lucene3.jar`, `leia-lucene5.jar`, `leia-lucene7.jar`, `leia-lucene9.jar`) from Maven Central into `runtimes/` beside `leia.jar` (ADR 0044). `--help` advertises it. Needs: publishing the runtime jars to Maven Central, the option's name, checksum checks, and what happens when `runtimes/` isn't writable
+
 ## Lucene 9.12 beyond classic search
 
 Goal: an index created by Lucene 8.x (read with `leia-lucene9`, ADR 0049) gets the features that are greyed out for it today. 9.12 has the APIs that leia-core uses for them on Lucene 10, so most are ports. What needs no runtime change goes to every runtime at once. The others need runtime interface 7 (one ADR for the interface, amending ADR 0049 §4). They land in 9.12 first, and in 5.5 and 7.7 where the copy is the same (ADR 0050). Each item adds its feature in `RuntimeResults.features`, a `runtime()` branch in its handlers, and its row in `docs/runtimes.md` (checked by `RuntimeFeaturesTest`). The TUI already gates on the features.
@@ -28,7 +32,6 @@ From the read-only checklist in `docs/luke-features.md` §7. Ordered roughly by 
 - [ ] Open options: Elasticsearch/OpenSearch indexes (left out of ADR 0018): their codecs need the server's `lib/`, which has its own `lucene-*.jar` of another version; skipping those jars, or saying which ones clash, untested without an installation
 - [ ] Tools: check only the selected index or segments, and the thread count (left out of ADR 0022)
 - [ ] Tools: export terms with `totalTermFreq` and a marker for binary terms (left out of ADR 0022, which keeps Luke's format). Trie-encoded terms of 4.x to 7.x (7 bits a byte, so valid UTF-8) are written raw today, and one can hold a newline, which breaks the line format
-- [ ] Distribution: an option of the start scripts (`leia` and `leia.cmd`) that downloads the runtime jars (`leia-lucene3.jar`, `leia-lucene5.jar`, `leia-lucene7.jar`, `leia-lucene9.jar`) from Maven Central into `runtimes/` beside `leia.jar` (ADR 0044). `--help` advertises it. Needs: publishing the runtime jars to Maven Central, the option's name, checksum checks, and what happens when `runtimes/` isn't writable
 - [ ] Misc: log view with level filter
 - [ ] Misc: themes
 - [ ] Misc: about
