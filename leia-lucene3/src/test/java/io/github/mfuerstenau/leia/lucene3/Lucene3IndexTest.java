@@ -9,6 +9,7 @@ import io.github.mfuerstenau.leia.runtime.Commits;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.Documents;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
+import io.github.mfuerstenau.leia.runtime.Rebuild;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.Terms;
@@ -27,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.OptionalLong;
 import java.util.ServiceLoader;
 import java.util.Set;
 import java.util.TreeMap;
@@ -378,7 +380,7 @@ class Lucene3IndexTest {
             assertThat(only.userData()).containsEntry("commit", "second");
             assertThat(stats.fields())
                     .extracting(RuntimeIndex.Field::name)
-                    .containsExactly("id", "body", "tag", "price");
+                    .containsExactly("id", "body", "tag", "price", "payload");
             RuntimeIndex.Field tag = stats.fields().get(2);
             assertThat(tag.indexOptions()).isEqualTo(RuntimeIndex.IndexOptions.DOCS);
             assertThat(tag.hasNorms()).isFalse();
@@ -400,7 +402,7 @@ class Lucene3IndexTest {
                     .containsExactly(tuple(lucene24(), 0), tuple(lucene3(), 3));
             assertThat(stats.fields())
                     .extracting(RuntimeIndex.Field::name)
-                    .containsExactlyInAnyOrder("id", "body", "raw", "tag", "price");
+                    .containsExactlyInAnyOrder("id", "body", "raw", "tag", "price", "payload");
             assertThat(index.documents()
                             .orElseThrow()
                             .document(3)
@@ -539,6 +541,150 @@ class Lucene3IndexTest {
                             }
                         }))
                 .isSameAs(stop);
+    }
+
+    /**
+     * Rebuilds every live document in every indexed field, and checks it against what the term
+     * vectors, postings and positions say; then the deleted document, which 3.6's postings skip.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene24", "lucene3"})
+    void rebuildsADocument(String name) throws IOException {
+        try (RuntimeIndex index = new Lucene3Runtime().open(List.of(testIndex(name)), DirectoryKind.FS)) {
+            Rebuild rebuild = index.rebuild().orElseThrow();
+            List<RuntimeIndex.Field> fields = index.fields().stream()
+                    .filter(field -> field.indexOptions() != RuntimeIndex.IndexOptions.NONE)
+                    .toList();
+            List<String> names = fields.stream().map(RuntimeIndex.Field::name).toList();
+            for (int doc = 0; doc < index.maxDoc(); doc++) {
+                if (index.documents().orElseThrow().document(doc).deleted()) {
+                    continue;
+                }
+                List<Long> progress = new ArrayList<>();
+                List<Rebuild.RebuiltField> rebuilt = rebuild.rebuild(doc, names, progress::add);
+                assertThat(rebuilt).extracting(Rebuild.RebuiltField::field).containsExactlyElementsOf(names);
+                // 3.6 doesn't know how many terms a field has.
+                boolean postings = rebuilt.stream().anyMatch(one -> one.source() == Rebuild.Source.POSTINGS);
+                assertThat(rebuild.count(doc, names)).isEqualTo(postings ? OptionalLong.empty() : OptionalLong.of(0));
+                assertThat(progress).isNotEmpty();
+                for (int i = 0; i < fields.size(); i++) {
+                    RuntimeIndex.Field field = fields.get(i);
+                    Rebuild.RebuiltField one = rebuilt.get(i);
+                    List<Documents.VectorTerm> expected = one.source() == Rebuild.Source.TERM_VECTOR
+                            ? index.documents().orElseThrow().termVector(doc, field.name())
+                            : postingsOf(index, doc, field);
+                    assertThat(describe(one.terms()))
+                            .as("%s of document %d", field.name(), doc)
+                            .isEqualTo(describe(expected));
+                    assertThat(one.terms())
+                            .as("%s of document %d", field.name(), doc)
+                            .isNotEmpty();
+                    assertThat(one.points()).isEmpty();
+                }
+            }
+            // Document 1 is deleted, and rebuilt too: its body from the term vector, its id from the raw postings.
+            List<Rebuild.RebuiltField> deleted = rebuild.rebuild(1, List.of("body", "id"), _ -> {});
+            assertThat(deleted)
+                    .extracting(Rebuild.RebuiltField::source)
+                    .containsExactly(Rebuild.Source.TERM_VECTOR, Rebuild.Source.POSTINGS);
+            assertThat(deleted.get(1).terms())
+                    .extracting(term -> text(term.term()))
+                    .containsExactly("2");
+            CancellationException stop = new CancellationException("stop");
+            assertThatThrownBy(() -> rebuild.rebuild(0, names, _ -> {
+                        throw stop;
+                    }))
+                    .isSameAs(stop);
+        }
+    }
+
+    /** The 3.x index: payloads aren't in 3.6's term vectors, so payload comes from the postings. */
+    @Test
+    void rebuildsPayloadsFromThePostings() throws IOException {
+        try (RuntimeIndex index = open3()) {
+            Rebuild rebuild = index.rebuild().orElseThrow();
+            List<String> names = List.of("body", "id", "tag", "payload");
+            assertThat(rebuild.rebuild(0, names, _ -> {}))
+                    .extracting(Rebuild.RebuiltField::source, Rebuild.RebuiltField::indexOptions)
+                    .containsExactly(
+                            tuple(Rebuild.Source.TERM_VECTOR, RuntimeIndex.IndexOptions.DOCS_AND_FREQS_AND_POSITIONS),
+                            tuple(Rebuild.Source.POSTINGS, RuntimeIndex.IndexOptions.DOCS_AND_FREQS_AND_POSITIONS),
+                            tuple(Rebuild.Source.POSTINGS, RuntimeIndex.IndexOptions.DOCS),
+                            tuple(Rebuild.Source.POSTINGS, RuntimeIndex.IndexOptions.DOCS_AND_FREQS_AND_POSITIONS));
+            assertThat(rebuild.count(0, names)).isEmpty();
+            assertThat(rebuild.count(0, List.of("body"))).hasValue(0);
+
+            // The deleted document 1, id 2.
+            List<Long> progress = new ArrayList<>();
+            List<Rebuild.RebuiltField> deleted = rebuild.rebuild(1, names, progress::add);
+            assertThat(deleted.get(0).terms())
+                    .extracting(term -> text(term.term()))
+                    .contains("2", "alpha");
+            assertThat(deleted.get(1).terms()).singleElement().satisfies(id -> {
+                assertThat(text(id.term())).isEqualTo("2");
+                assertThat(id.freq()).isEqualTo(1);
+                // Not analyzed: one position, without a payload.
+                assertThat(id.positions())
+                        .singleElement()
+                        .isEqualTo(new Documents.Position(
+                                OptionalInt.of(0), OptionalInt.empty(), OptionalInt.empty(), Optional.empty()));
+            });
+            assertThat(deleted.get(2).terms())
+                    .extracting(term -> text(term.term()))
+                    .containsExactly("even");
+            assertThat(deleted.get(3).terms())
+                    .extracting(term -> text(term.term()))
+                    .containsExactly("2", "alpha", "document");
+            assertThat(deleted.get(3).terms())
+                    .flatExtracting(Documents.VectorTerm::positions)
+                    .extracting(
+                            position -> position.position().getAsInt(),
+                            position -> position.payload()
+                                    .map(Lucene3IndexTest::text)
+                                    .orElseThrow())
+                    .containsExactly(tuple(2, "p2"), tuple(0, "p2"), tuple(1, "p2"));
+            // The terms of id, tag and payload in the segment _0 of documents 1 to 4: 4 ids, 2 tags, and
+            // alpha, document and 4 numbers.
+            assertThat(progress).last().isEqualTo(12L);
+        }
+    }
+
+    /** The terms of {@code doc} in {@code field}, read from the postings and positions of every term. */
+    private static List<Documents.VectorTerm> postingsOf(RuntimeIndex index, int doc, RuntimeIndex.Field field)
+            throws IOException {
+        List<Documents.VectorTerm> result = new ArrayList<>();
+        boolean positions = field.indexOptions() == RuntimeIndex.IndexOptions.DOCS_AND_FREQS_AND_POSITIONS;
+        Terms terms = index.terms().orElseThrow();
+        Optional<byte[]> from = Optional.empty();
+        do {
+            Terms.TermsPage page = terms.terms(field.name(), from, 100);
+            for (Terms.TermEntry entry : page.terms()) {
+                List<Terms.Posting> postings =
+                        terms.postings(field.name(), entry.term(), doc, 1).postings();
+                if (!postings.isEmpty() && postings.getFirst().docId() == doc) {
+                    result.add(new Documents.VectorTerm(
+                            entry.term(),
+                            postings.getFirst().freq(),
+                            positions
+                                    ? terms.positions(doc, field.name(), entry.term())
+                                            .orElseThrow()
+                                    : List.of()));
+                }
+            }
+            from = page.next();
+        } while (from.isPresent());
+        return result;
+    }
+
+    private static List<String> describe(List<Documents.VectorTerm> terms) {
+        return terms.stream()
+                .map(term -> HexFormat.of().formatHex(term.term()) + " " + term.freq() + " "
+                        + term.positions().stream()
+                                .map(position -> position.position() + "/" + position.startOffset() + "/"
+                                        + position.endOffset() + "/"
+                                        + position.payload().map(HexFormat.of()::formatHex))
+                                .toList())
+                .toList();
     }
 
     @Test

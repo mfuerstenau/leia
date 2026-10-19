@@ -221,7 +221,7 @@ class Lucene8BackendTest {
     void rebuildsADocument(String name) throws Exception {
         OpenIndexResult opened = open(testIndex(name));
 
-        RuntimeRebuilds.rebuildsADocument(backend, opened.maxDoc().orElseThrow(), true);
+        RuntimeRebuilds.rebuildsADocument(backend, opened.maxDoc().orElseThrow(), true, true);
     }
 
     @Test

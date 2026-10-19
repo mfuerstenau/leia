@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-13
 - **Amends:** ADR 0049 §4 (the runtime interface); ADR 0044 §4 (the features of an index)
+- **Amended by:** ADR 0062 (3.6 rebuilds too: §2's last line and the Consequences no longer hold)
 
 ## Context
 

@@ -18,6 +18,7 @@ luceneRuntime {
         }
     }
     // The Lucene 3.x test index, written by Lucene3IndexWriter on the unrelocated lucene-core 3.6.2:
-    // two commits, a compound and a plain segment, a deletion, a NumericField and term vectors.
+    // two commits, a compound and a plain segment, a deletion, a NumericField, term vectors
+    // and a field with payloads, which its term vectors don't cover.
     testIndex("lucene3", "io.github.mfuerstenau.leia.lucene3.Lucene3IndexWriter", libs.lucene3.core)
 }

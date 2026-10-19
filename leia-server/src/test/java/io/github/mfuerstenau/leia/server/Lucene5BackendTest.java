@@ -214,7 +214,7 @@ class Lucene5BackendTest {
     void rebuildsADocument(String name) throws Exception {
         OpenIndexResult opened = open(testIndex(name));
 
-        RuntimeRebuilds.rebuildsADocument(backend, opened.maxDoc().orElseThrow(), false);
+        RuntimeRebuilds.rebuildsADocument(backend, opened.maxDoc().orElseThrow(), false, true);
     }
 
     @ParameterizedTest

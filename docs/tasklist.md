@@ -8,7 +8,6 @@ Goal: an index created by Lucene 8.x (read with `leia-lucene9`, ADR 0049) gets t
 
 - [ ] Highlight (`HIGHLIGHT`, ADR 0042, ADR 0043): 9.12's `lucene-highlighter` in the runtime jar (check the size against `runtimes/`'s 8.8 MB), a port of leia-core's `Highlights` over 9.12's `uhighlight`, for `startHighlight` and the search's `highlight`.
 - [ ] Search beyond classic (`SEARCH`): similarity (BM25, classic, boolean), sort by score, doc id and doc values, the standard parser (point fields), More-Like-This (ADR 0013, ADR 0028), and doc-values queries (ADR 0033, ADR 0036). `SEARCH` splits into a feature per part (ADR 0058 §4): each part gets its own feature, as `TERM_SEARCH` did, and the TUI gates it on `SEARCH ||` that part.
-- [ ] Rebuild on 3.6 (`RECONSTRUCT`, ADR 0059): a `Rebuild` for `Lucene3Index` over `TermEnum` and `TermPositions`; its term vectors have no payloads, so a field with payloads is rebuilt from the postings; no `Terms.size()`, so no total.
 - [ ] Check on more threads on 9.12 (`CheckIndex.setThreadCount`, now fixed at 1, ADR 0049 §5). It goes with the backlog's "check thread count".
 - [ ] Run the new features by hand on `lucene8` and `lucene8to9`, as `docs/demo-index.md` does for Lucene 10.
 

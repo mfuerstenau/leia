@@ -12,8 +12,11 @@ import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
+import io.github.mfuerstenau.leia.protocol.document.GetReconstructResult;
 import io.github.mfuerstenau.leia.protocol.document.GetStoredValueParams;
 import io.github.mfuerstenau.leia.protocol.document.GetTermVectorParams;
+import io.github.mfuerstenau.leia.protocol.document.ReconstructSource;
+import io.github.mfuerstenau.leia.protocol.document.ReconstructedField;
 import io.github.mfuerstenau.leia.protocol.document.StartReconstructParams;
 import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
@@ -93,7 +96,8 @@ class Lucene24BackendTest {
                         Feature.EXPLAIN,
                         Feature.COMMITS,
                         Feature.CHECK_INDEX,
-                        Feature.REOPEN)
+                        Feature.REOPEN,
+                        Feature.RECONSTRUCT)
                 .doesNotContain(Feature.SEARCH, Feature.POINTS, Feature.CHECK_LEVELS);
         ReaderInfo reader = opened.indexes().getFirst().reader().orElseThrow();
         assertThat(reader.createdVersionMajor()).isEqualTo(2);
@@ -193,8 +197,23 @@ class Lucene24BackendTest {
     @Test
     void refusesWhatLucene3Lacks() throws Exception {
         backend.fails(Methods.GET_POINT_TREE, new GetPointTreeParams("id"), ErrorCode.NOT_SUPPORTED);
-        backend.fails(
-                Methods.START_RECONSTRUCT, new StartReconstructParams(0, Optional.empty()), ErrorCode.NOT_SUPPORTED);
+    }
+
+    /** The deleted document 1: body from its term vector, id from the raw postings, with no total (ADR 0062). */
+    @Test
+    void rebuildsTheDeletedDocument() throws Exception {
+        GetReconstructResult done = backend.job(
+                Methods.START_RECONSTRUCT,
+                new StartReconstructParams(1, Optional.of(List.of("body", "id"))),
+                Methods.GET_RECONSTRUCT,
+                result -> result.result().isPresent() ? Optional.of(result) : Optional.empty());
+        assertThat(done.total()).isEmpty();
+        List<ReconstructedField> fields = done.result().orElseThrow().fields();
+        assertThat(fields)
+                .extracting(ReconstructedField::source)
+                .containsExactly(ReconstructSource.TERM_VECTOR, ReconstructSource.POSTINGS);
+        assertThat(fields.get(0).terms()).extracting(TermVectorTerm::term).contains("2", "document", "number");
+        assertThat(fields.get(1).terms()).extracting(TermVectorTerm::term).containsExactly("2");
     }
 
     @Test

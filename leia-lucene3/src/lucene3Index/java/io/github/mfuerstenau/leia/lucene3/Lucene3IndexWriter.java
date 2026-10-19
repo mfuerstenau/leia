@@ -2,8 +2,14 @@ package io.github.mfuerstenau.leia.lucene3;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.StringReader;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import org.apache.lucene.analysis.TokenFilter;
+import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.analysis.WhitespaceTokenizer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.analysis.tokenattributes.PayloadAttribute;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.NumericField;
@@ -12,6 +18,7 @@ import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.LogDocMergePolicy;
 import org.apache.lucene.index.NoDeletionPolicy;
+import org.apache.lucene.index.Payload;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
@@ -30,7 +37,9 @@ import org.apache.lucene.util.Version;
  *   <li>{@code body}, stored and analyzed, with term vectors (positions and offsets): {@code alpha}
  *       in every document, {@code beta} in every other, {@code gamma} in the first only;
  *   <li>{@code tag}, indexed docs-only without norms;
- *   <li>{@code price}, a stored {@code NumericField} of ints.
+ *   <li>{@code price}, a stored {@code NumericField} of ints;
+ *   <li>{@code payload}, "alpha document <i>" with the payload {@code p<i>} on every position, and
+ *       term vectors with positions, which so don't cover its postings.
  * </ul>
  */
 public final class Lucene3IndexWriter {
@@ -98,6 +107,29 @@ public final class Lucene3IndexWriter {
         tag.setIndexOptions(FieldInfo.IndexOptions.DOCS_ONLY);
         doc.add(tag);
         doc.add(new NumericField("price", Field.Store.YES, true).setIntValue(i * 10));
+        TokenStream payloads = new PayloadFilter(
+                new WhitespaceTokenizer(Version.LUCENE_36, new StringReader("alpha document " + i)), "p" + i);
+        doc.add(new Field("payload", payloads, Field.TermVector.WITH_POSITIONS));
         return doc;
+    }
+
+    /** Sets one payload on every token. */
+    private static final class PayloadFilter extends TokenFilter {
+        private final PayloadAttribute payload = addAttribute(PayloadAttribute.class);
+        private final byte[] bytes;
+
+        PayloadFilter(TokenStream input, String payload) {
+            super(input);
+            this.bytes = payload.getBytes(StandardCharsets.UTF_8);
+        }
+
+        @Override
+        public boolean incrementToken() throws IOException {
+            if (!input.incrementToken()) {
+                return false;
+            }
+            payload.setPayload(new Payload(bytes.clone()));
+            return true;
+        }
     }
 }

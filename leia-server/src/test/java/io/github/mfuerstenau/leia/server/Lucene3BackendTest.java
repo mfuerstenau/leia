@@ -123,9 +123,17 @@ class Lucene3BackendTest {
                         Feature.FILTER,
                         Feature.EXPLAIN,
                         Feature.COMMITS,
-                        Feature.CHECK_INDEX);
+                        Feature.CHECK_INDEX,
+                        Feature.RECONSTRUCT);
         assertThat(opened.indexes().getFirst().reader().orElseThrow().createdVersionMajor())
                 .isEqualTo(3);
+    }
+
+    /** 3.6 doesn't know how many terms a field has, so the rebuild has no total (ADR 0062). */
+    @Test
+    void rebuildsADocument() throws Exception {
+        OpenIndexResult opened = open(Path.of(PATH));
+        RuntimeRebuilds.rebuildsADocument(backend, opened.maxDoc().orElseThrow(), false, false);
     }
 
     @Test

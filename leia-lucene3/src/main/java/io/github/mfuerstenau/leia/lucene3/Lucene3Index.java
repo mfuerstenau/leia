@@ -177,10 +177,13 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
         return Optional.empty();
     }
 
-    /** {@inheritDoc} Not yet ported to Lucene 3.6's term enums. */
+    /**
+     * {@inheritDoc} Over Lucene 3.6's term enums and term vectors, deleted documents through raw
+     * postings (ADR 0062).
+     */
     @Override
     public Optional<Rebuild> rebuild() {
-        return Optional.empty();
+        return Optional.of(new Lucene3Rebuild(reader));
     }
 
     /**
@@ -285,17 +288,10 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
         List<Field> fields = new ArrayList<>();
         for (int i = 0; i < fieldInfos.size(); i++) {
             FieldInfo info = fieldInfos.fieldInfo(i);
-            IndexOptions options = !info.isIndexed
-                    ? IndexOptions.NONE
-                    : switch (info.indexOptions) {
-                        case DOCS_ONLY -> IndexOptions.DOCS;
-                        case DOCS_AND_FREQS -> IndexOptions.DOCS_AND_FREQS;
-                        case DOCS_AND_FREQS_AND_POSITIONS -> IndexOptions.DOCS_AND_FREQS_AND_POSITIONS;
-                    };
             fields.add(new Field(
                     info.name,
                     info.number,
-                    options,
+                    indexOptions(info),
                     info.isIndexed && !info.omitNorms,
                     info.storePayloads,
                     info.storeTermVector,
@@ -306,6 +302,18 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
         }
         fields.sort(Comparator.comparingInt(Field::number));
         return List.copyOf(fields);
+    }
+
+    /** What the postings of a field hold. */
+    static IndexOptions indexOptions(FieldInfo info) {
+        if (!info.isIndexed) {
+            return IndexOptions.NONE;
+        }
+        return switch (info.indexOptions) {
+            case DOCS_ONLY -> IndexOptions.DOCS;
+            case DOCS_AND_FREQS -> IndexOptions.DOCS_AND_FREQS;
+            case DOCS_AND_FREQS_AND_POSITIONS -> IndexOptions.DOCS_AND_FREQS_AND_POSITIONS;
+        };
     }
 
     @Override
@@ -382,6 +390,11 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
         if (vector == null) {
             return List.of();
         }
+        return vectorTerms(vector);
+    }
+
+    /** The terms of a term vector, with their positions and offsets if it has them, and no payloads. */
+    static List<VectorTerm> vectorTerms(TermFreqVector vector) {
         String[] terms = vector.getTerms();
         int[] freqs = vector.getTermFrequencies();
         List<VectorTerm> result = new ArrayList<>();
@@ -521,19 +534,24 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
             }
             List<Position> result = new ArrayList<>();
             for (int i = 0; i < positions.freq(); i++) {
-                int position = positions.nextPosition();
-                Optional<byte[]> payload = Optional.empty();
-                if (positions.isPayloadAvailable()) {
-                    payload = Optional.of(positions.getPayload(new byte[positions.getPayloadLength()], 0));
-                }
-                result.add(new Position(OptionalInt.of(position), OptionalInt.empty(), OptionalInt.empty(), payload));
+                result.add(position(positions));
             }
             return Optional.of(List.copyOf(result));
         }
     }
 
+    /** The next position of {@code positions}, with its payload; 3.6 has no offsets in the postings. */
+    static Position position(TermPositions positions) throws IOException {
+        int position = positions.nextPosition();
+        Optional<byte[]> payload = Optional.empty();
+        if (positions.isPayloadAvailable()) {
+            payload = Optional.of(positions.getPayload(new byte[positions.getPayloadLength()], 0));
+        }
+        return new Position(OptionalInt.of(position), OptionalInt.empty(), OptionalInt.empty(), payload);
+    }
+
     /** A term of Lucene 3 as bytes. */
-    private static byte[] utf8(String text) {
+    static byte[] utf8(String text) {
         return text.getBytes(StandardCharsets.UTF_8);
     }
 
