@@ -42,7 +42,7 @@ class ReopenIndexHandlerTest {
 
     private final Jobs jobs = new Jobs();
     private final CurrentIndex currentIndex = new CurrentIndex(jobs, new Filters());
-    private final OpenIndexHandler openHandler = new OpenIndexHandler(currentIndex, new Runtimes());
+    private final OpenIndexHandler openHandler = new OpenIndexHandler(currentIndex, new Runtimes(), Routing.DEFAULT);
     private final ReopenIndexHandler handler = new ReopenIndexHandler(currentIndex);
 
     @AfterEach

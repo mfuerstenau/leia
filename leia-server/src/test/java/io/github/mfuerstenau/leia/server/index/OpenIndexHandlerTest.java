@@ -47,7 +47,7 @@ class OpenIndexHandlerTest {
     Path tmp;
 
     private final CurrentIndex currentIndex = new CurrentIndex(new Jobs(), new Filters());
-    private final OpenIndexHandler handler = new OpenIndexHandler(currentIndex, new Runtimes());
+    private final OpenIndexHandler handler = new OpenIndexHandler(currentIndex, new Runtimes(), Routing.DEFAULT);
 
     @Test
     void opensIndexAndMakesItCurrent() throws Exception {

@@ -29,7 +29,7 @@ class CloseIndexHandlerTest {
     @Test
     void closesTheOpenIndex() throws Exception {
         Path dir = writeEmptyIndex(tmp.resolve("index"));
-        new OpenIndexHandler(currentIndex, new Runtimes()).handle(new OpenIndexParams(dir.toString()));
+        new OpenIndexHandler(currentIndex, new Runtimes(), Routing.DEFAULT).handle(new OpenIndexParams(dir.toString()));
         ReadOnlyIndex open = currentIndex.readable();
 
         CloseIndexResult result = handler.handle(new CloseIndexParams());
@@ -48,7 +48,7 @@ class CloseIndexHandlerTest {
     @Test
     void closingTwiceReportsTheIndexOnce() throws Exception {
         Path dir = writeEmptyIndex(tmp.resolve("index"));
-        new OpenIndexHandler(currentIndex, new Runtimes()).handle(new OpenIndexParams(dir.toString()));
+        new OpenIndexHandler(currentIndex, new Runtimes(), Routing.DEFAULT).handle(new OpenIndexParams(dir.toString()));
 
         handler.handle(new CloseIndexParams());
 

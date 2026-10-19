@@ -315,7 +315,7 @@ public final class Highlights {
      *
      * @param query the query as built, not rewritten: the highlighter handles multi-term queries itself
      */
-    static TextHighlighter lucene(IndexSearcher searcher, Query query, HighlightSpec spec) {
+    public static TextHighlighter lucene(IndexSearcher searcher, Query query, HighlightSpec spec) {
         return (fields, docIds, maxPassages, mode) -> {
             Highlighter highlighter = new Highlighter(
                     switch (mode) {

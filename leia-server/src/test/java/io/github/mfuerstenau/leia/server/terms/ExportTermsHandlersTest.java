@@ -16,6 +16,7 @@ import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.index.IndexDirectories;
+import io.github.mfuerstenau.leia.server.index.Routing;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import java.nio.file.Files;
@@ -43,8 +44,8 @@ class ExportTermsHandlersTest {
 
     private final Jobs jobs = new Jobs();
     private final CurrentIndex currentIndex = new CurrentIndex(jobs, new Filters());
-    private final StartExportTermsHandler start =
-            new StartExportTermsHandler(currentIndex, new IndexDirectories(currentIndex, new Runtimes()), jobs);
+    private final StartExportTermsHandler start = new StartExportTermsHandler(
+            currentIndex, new IndexDirectories(currentIndex, new Runtimes(), Routing.DEFAULT), jobs);
     private final GetExportTermsHandler get = new GetExportTermsHandler(jobs);
 
     @Test

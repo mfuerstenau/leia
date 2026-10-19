@@ -52,11 +52,13 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
 
     private final CurrentIndex currentIndex;
     private final Runtimes runtimes;
+    private final Routing routing;
 
     @Inject
-    OpenIndexHandler(CurrentIndex currentIndex, Runtimes runtimes) {
+    OpenIndexHandler(CurrentIndex currentIndex, Runtimes runtimes, Routing routing) {
         this.currentIndex = currentIndex;
         this.runtimes = runtimes;
+        this.routing = routing;
     }
 
     @Override
@@ -89,7 +91,12 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
         // Routed by the version of the first index found, which decides for all (ADR 0044 §3, ADR 0045).
         Optional<IndexVersion> version = SegmentsHeader.read(dirs.getFirst());
         boolean old = version.isPresent() && version.get().major() < Version.MIN_SUPPORTED_MAJOR;
-        if (old && mode == OpenMode.READER) {
+        // With the routing of Lucene10ParityTest, one of 9 or 10 too, if a runtime reads it (ADR 0065).
+        boolean viaRuntime = old
+                || (version.isPresent()
+                        && !routing.core(version.get().major(), Version.MIN_SUPPORTED_MAJOR)
+                        && runtimes.forMajor(version.get().major()).isPresent());
+        if (viaRuntime && mode == OpenMode.READER) {
             return openWithRuntime(root, dirs, version.get(), directoryImpl);
         }
         // Without a reader, the commits and the check of each index go to the Lucene that reads it:

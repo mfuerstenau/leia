@@ -4,7 +4,19 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 
 ## Distribution
 
-- [ ] Distribution: an option of the start scripts (`leia` and `leia.cmd`) that downloads the runtime jars (`leia-lucene3.jar`, `leia-lucene5.jar`, `leia-lucene7.jar`, `leia-lucene9.jar`) from Maven Central into `runtimes/` beside `leia.jar` (ADR 0044). `--help` advertises it. Needs: publishing the runtime jars to Maven Central, the option's name, checksum checks, and what happens when `runtimes/` isn't writable
+Goal: an option of `leia.jar` downloads the runtime jars from Maven Central into `runtimes/` beside it, checked against SHA-256s that the build bakes in, and the release folders ship without `runtimes/`. That pays off only once Lucene 10 is a runtime too, so the lane starts there (ADR 0065). Each step is a commit; steps 2 to 7 get their own plan when reached.
+
+- [x] 1. `leia-lucene10`: Lucene 10 behind today's runtime interface, through leia-core, and `Lucene10ParityTest`, which lists what the interface lacks (ADR 0065 §6). Nothing is routed to it yet.
+- [ ] 2. The interface for what only Lucene 10 has, each part an optional group, an `API_VERSION` bump and an ADR:
+  - [ ] (a) Doc-values queries, the standard parser with point fields, and More-Like-This; leia-lucene9 gets them too (the open 9.12 items below).
+  - [ ] (b) Analysis on `LuceneRuntime`: the components, `analyze`, custom analyzers, shingles and the preset options for search (ADR 0016).
+  - [ ] (c) Extension jars: the class-loader chain moves from `ExtensionJars` into leia-server, with a hook through which a runtime reloads its SPI lists and reports the `JarComponents` it added.
+  - [ ] (d) The other gaps of ADR 0065 §6: the directory class in the stats, the classic parser's fuzzy edits, dates and `splitOnWhitespace`, `hasBlocks` of a segment, and presets told apart by more than their simple name.
+- [ ] 3. Switch the server: `Runtimes`/`route` send every index to a runtime, leia-lucene10 claiming 9, 10 and versions it can't detect; `Runtimes.jarFor` names `leia-lucene10.jar`; `CurrentIndex` holds only `OpenRuntime`; the handlers' core branches go, and leia-server stops compiling against leia-core. The TUI gates the analysis tab when no runtime has analysis. Rewrite hard rules 2, 5 and 6 and the architecture section of `AGENTS.md`.
+- [ ] 4. Packaging: `leia.jar` without Lucene; `runtimeJars` gains leia-lucene10; a `jarsTest` opens a Lucene 9/10 index from `runtimes/`; without `runtimes/`, leia starts and says what is missing. Fix `Cli.HELP`, which still says "runtimes for indexes of Lucene 2 and 3".
+- [ ] 5. Publishing setup: `maven-publish` and `signing` for the five runtime shadow jars as `io.github.mfuerstenau.leia:leia-luceneN:<version>`, with POM metadata and sources/javadoc jars; a Central Portal bundle task; reproducible jars. The upload is the user's.
+- [ ] 6. `--download-runtimes` in `leia.jar`: the baked-in SHA-256s, `repo1.maven.org` with a base URL for tests, a temp file moved into place, a jar with the right hash skipped, refused for a SNAPSHOT build, exit 1 with a message if `runtimes/` isn't writable or a download fails; listed in `--help`, tested against the JDK's `HttpServer`.
+- [ ] 7. Slim dist: `build-dist.sh` leaves `runtimes/` out; the `MISSING_RUNTIME` hint and the startup message point to `leia --download-runtimes`; amend ADR 0004 and ADR 0044.
 
 ## Lucene 9.12 beyond classic search
 

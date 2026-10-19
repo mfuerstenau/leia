@@ -167,7 +167,40 @@ public final class ReadOnlyIndex implements OpenedIndex {
      */
     public static ReadOnlyIndex open(Path path, DirectoryImpl directoryImpl) throws IndexOpenException {
         Path root = IndexFinder.root(path);
-        List<Path> dirs = IndexFinder.find(root);
+        return open(root, IndexFinder.find(root), directoryImpl);
+    }
+
+    /**
+     * Opens the latest commit of each of {@code dirs}, index directories found by {@link IndexFinder},
+     * through {@code directoryImpl}, as {@link #open(Path, DirectoryImpl)} opens those it finds: for a
+     * runtime, which is handed the directories (ADR 0065). Its {@link #path()} is the only directory,
+     * or else the deepest directory that holds them all.
+     *
+     * @throws IllegalArgumentException if {@code dirs} is empty
+     * @throws IndexOpenException if none of them opens
+     */
+    public static ReadOnlyIndex open(List<Path> dirs, DirectoryImpl directoryImpl) throws IndexOpenException {
+        if (dirs.isEmpty()) {
+            throw new IllegalArgumentException("No directory to open");
+        }
+        List<Path> normalized =
+                dirs.stream().map(dir -> dir.toAbsolutePath().normalize()).toList();
+        return open(commonAncestor(normalized), normalized, directoryImpl);
+    }
+
+    /** The deepest directory that holds each of {@code dirs}, or the first if they share none. */
+    private static Path commonAncestor(List<Path> dirs) {
+        for (Path root = dirs.getFirst(); root != null; root = root.getParent()) {
+            Path candidate = root;
+            if (dirs.stream().allMatch(dir -> dir.startsWith(candidate))) {
+                return root;
+            }
+        }
+        return dirs.getFirst();
+    }
+
+    private static ReadOnlyIndex open(Path root, List<Path> dirs, DirectoryImpl directoryImpl)
+            throws IndexOpenException {
         if (dirs.size() == 1) {
             Path dir = dirs.getFirst();
             Part part;

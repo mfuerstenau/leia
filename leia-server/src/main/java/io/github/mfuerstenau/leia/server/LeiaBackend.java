@@ -4,6 +4,7 @@ import io.github.mfuerstenau.leia.core.ExtensionJarException;
 import io.github.mfuerstenau.leia.core.ExtensionJars;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
+import io.github.mfuerstenau.leia.server.index.Routing;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -58,6 +59,11 @@ public final class LeiaBackend implements AutoCloseable {
      *     leia refuses (ADR 0044); nothing is started then
      */
     public static LeiaBackend start(List<Path> jars) throws RpcException {
+        return start(jars, Routing.DEFAULT);
+    }
+
+    /** As {@link #start(List)}, routing indexes to the runtimes as {@code routing} says (ADR 0065). */
+    static LeiaBackend start(List<Path> jars, Routing routing) throws RpcException {
         try {
             List<Path> loaded = ExtensionJars.load(jars);
             if (!loaded.isEmpty()) {
@@ -76,7 +82,7 @@ public final class LeiaBackend implements AutoCloseable {
                     // For libraries in the jars that load through the context class loader; the job
                     // threads, started from this thread, inherit it. addJars sets it again (ADR 0024).
                     Thread.currentThread().setContextClassLoader(ExtensionJars.classLoader());
-                    return DaggerServerComponent.create();
+                    return DaggerServerComponent.factory().create(routing);
                 },
                 executor));
         BuildInfo buildInfo = BuildInfo.load();

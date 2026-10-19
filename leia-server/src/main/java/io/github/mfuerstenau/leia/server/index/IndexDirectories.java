@@ -33,11 +33,13 @@ public final class IndexDirectories {
 
     private final CurrentIndex currentIndex;
     private final Runtimes runtimes;
+    private final Routing routing;
 
     @Inject
-    public IndexDirectories(CurrentIndex currentIndex, Runtimes runtimes) {
+    public IndexDirectories(CurrentIndex currentIndex, Runtimes runtimes, Routing routing) {
         this.currentIndex = currentIndex;
         this.runtimes = runtimes;
+        this.routing = routing;
     }
 
     /**
@@ -153,11 +155,12 @@ public final class IndexDirectories {
     /**
      * The Lucene that reads {@code dir}, by the version of its newest {@code segments_N} (ADR 0044
      * §3): an old one that a loaded runtime reads goes to it, one before 4.0 without a runtime is
-     * missing it, and every other one goes to Lucene 10, as 4.x to 8.x do without a reader.
+     * missing it, and every other one goes to Lucene 10, as 4.x to 8.x do without a reader. With
+     * {@link Routing#lucene10Runtime()}, one of Lucene 9 or 10 goes to a runtime too, if one reads it.
      */
     public Route route(Path dir) {
         Optional<IndexVersion> version = SegmentsHeader.read(dir);
-        if (version.isEmpty() || version.get().major() >= Version.MIN_SUPPORTED_MAJOR) {
+        if (version.isEmpty() || routing.core(version.get().major(), Version.MIN_SUPPORTED_MAJOR)) {
             return new Route.Core();
         }
         Optional<LuceneRuntime> runtime = runtimes.forMajor(version.get().major());

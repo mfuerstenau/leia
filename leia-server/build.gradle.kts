@@ -18,6 +18,9 @@ dependencies {
     testRuntimeOnly(project(mapOf("path" to ":leia-lucene5", "configuration" to "shadowRuntimeElements")))
     testRuntimeOnly(project(mapOf("path" to ":leia-lucene7", "configuration" to "shadowRuntimeElements")))
     testRuntimeOnly(project(mapOf("path" to ":leia-lucene9", "configuration" to "shadowRuntimeElements")))
+    // Lucene 10 behind the runtime interface, for Lucene10ParityTest (ADR 0065): not the shadow jar, as
+    // Lucene 10 is on the test classpath already.
+    testRuntimeOnly(project(":leia-lucene10"))
     implementation(libs.dagger)
     annotationProcessor(libs.dagger.compiler)
 }

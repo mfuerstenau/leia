@@ -20,6 +20,7 @@ import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.index.IndexDirectories;
+import io.github.mfuerstenau.leia.server.index.Routing;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import java.nio.file.Files;
@@ -49,7 +50,7 @@ class CommitHandlersTest {
     Path tmp;
 
     private final CurrentIndex currentIndex = new CurrentIndex(new Jobs(), new Filters());
-    private final IndexDirectories directories = new IndexDirectories(currentIndex, new Runtimes());
+    private final IndexDirectories directories = new IndexDirectories(currentIndex, new Runtimes(), Routing.DEFAULT);
     private final GetCommitsHandler getCommits = new GetCommitsHandler(currentIndex, directories);
     private final GetCommitHandler getCommit = new GetCommitHandler(currentIndex, directories);
 

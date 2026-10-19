@@ -48,7 +48,7 @@ class GetIndexStatsHandlerTest {
     @Test
     void reportsTheOpenIndex() throws Exception {
         Path dir = writeIndex(tmp.resolve("index"));
-        new OpenIndexHandler(currentIndex, new Runtimes()).handle(new OpenIndexParams(dir.toString()));
+        new OpenIndexHandler(currentIndex, new Runtimes(), Routing.DEFAULT).handle(new OpenIndexParams(dir.toString()));
 
         GetIndexStatsResult result = handler.handle(new GetIndexStatsParams());
 
