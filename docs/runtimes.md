@@ -42,7 +42,7 @@ The first index of a path decides which Lucene opens it, by the major in its new
 | `CHECK_LEVELS` | – | ✓ | ✓ | ✓ | ✓ |
 | `EXPORT_TERMS` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `REOPEN` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `AUTO_STOP_WORDS` | – | – | – | – | ✓ |
+| `AUTO_STOP_WORDS` | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 1. Only if a field has doc values (ADR 0046 §6).
 2. Only if a field has points (ADR 0048 §3).
@@ -73,6 +73,7 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 | Explained value against the score | the same | the same | BM25 may differ in the last bits | the same | the same |
 | `totalTermFreq` | counted from the live postings | recorded | recorded | recorded | recorded |
 | Export terms | reads every posting, as its term pages count `totalTermFreq` from them | the term dictionary only | the term dictionary only | the term dictionary only | the term dictionary only |
+| Auto stop words scan (ADR 0061) | reads every posting, as export terms does | the term dictionary only | the term dictionary only | the term dictionary only | the term dictionary only |
 | Term statistics per field | absent | ✓ | ✓ | ✓ | ✓ |
 | Offsets in positions | – | ✓ | ✓ | ✓ | ✓ |
 | Commit's Lucene version | the newest segment's | recorded from 5.3, else the newest segment's | recorded | recorded | recorded |

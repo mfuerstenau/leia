@@ -1,5 +1,6 @@
 package io.github.mfuerstenau.leia.server.runtime;
 
+import io.github.mfuerstenau.leia.core.AutoStopWords;
 import io.github.mfuerstenau.leia.core.DocFilter;
 import io.github.mfuerstenau.leia.core.IndexDocument;
 import io.github.mfuerstenau.leia.core.PostingsPage;
@@ -7,6 +8,7 @@ import io.github.mfuerstenau.leia.core.ScanProgress;
 import io.github.mfuerstenau.leia.core.StoredScan;
 import io.github.mfuerstenau.leia.core.TermExport;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
+import io.github.mfuerstenau.leia.protocol.analysis.StartAutoStopWordsParams;
 import io.github.mfuerstenau.leia.protocol.check.IndexCheck;
 import io.github.mfuerstenau.leia.protocol.check.SegmentCheck;
 import io.github.mfuerstenau.leia.protocol.commits.CodecFormats;
@@ -96,6 +98,7 @@ import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.Terms;
 import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.analysis.StartAutoStopWordsHandler;
 import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
 import io.github.mfuerstenau.leia.server.document.StartReconstructHandler;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
@@ -141,7 +144,8 @@ public final class RuntimeResults {
      * What works on {@code open}: the statistics, the features of the groups its index has, and the
      * commits and the check if its runtime has them (ADR 0045, ADR 0046, ADR 0048): doc values with
      * the documents and points and KNN vectors if a field has them (ADR 0049), and the check's levels
-     * if the runtime's check takes them. Reopen works on every runtime (ADR 0060).
+     * if the runtime's check takes them. Reopen works on every runtime (ADR 0060), and auto stop
+     * words wherever there are terms (ADR 0061).
      */
     public static Set<Feature> features(OpenRuntime open) {
         RuntimeIndex index = open.index();
@@ -156,7 +160,12 @@ public final class RuntimeResults {
         }
         if (index.terms().isPresent()) {
             features.addAll(List.of(
-                    Feature.TERMS, Feature.POSTINGS, Feature.TOP_TERMS, Feature.POSITIONS, Feature.EXPORT_TERMS));
+                    Feature.TERMS,
+                    Feature.POSTINGS,
+                    Feature.TOP_TERMS,
+                    Feature.POSITIONS,
+                    Feature.EXPORT_TERMS,
+                    Feature.AUTO_STOP_WORDS));
         }
         if (index.search().isPresent()) {
             features.addAll(List.of(Feature.CLASSIC_SEARCH, Feature.TERM_SEARCH, Feature.FILTER, Feature.EXPLAIN));
@@ -1176,6 +1185,43 @@ public final class RuntimeResults {
         Terms terms = open.index().terms().orElseThrow(open::notSupported);
         checkField(open.index(), field);
         return pages(terms, field, TermExport.PROGRESS_INTERVAL);
+    }
+
+    /**
+     * {@code startAutoStopWords}: the stop words of {@code fields}, or of every indexed field if
+     * empty, found in a job over the terms read page by page (ADR 0061).
+     *
+     * @throws RpcException {@code FIELD_NOT_FOUND} for a field that is missing or not indexed
+     */
+    public static JobStarted startAutoStopWords(
+            OpenRuntime open, List<String> fields, AutoStopWords.Threshold threshold, Jobs jobs) throws RpcException {
+        Terms terms = open.index().terms().orElseThrow(open::notSupported);
+        List<String> indexed = open.index().fields().stream()
+                .filter(field -> field.indexOptions() != RuntimeIndex.IndexOptions.NONE)
+                .map(RuntimeIndex.Field::name)
+                .toList();
+        for (String field : fields) {
+            if (!indexed.contains(field)) {
+                throw new RpcException(ErrorCode.FIELD_NOT_FOUND, "No indexed field '" + field + "' in the index");
+            }
+        }
+        List<String> scanned = (fields.isEmpty() ? indexed : fields)
+                .stream().distinct().sorted().toList();
+        RuntimeIndex index = open.index();
+        long jobId = jobs.start(
+                "auto stop words of " + (fields.isEmpty() ? "every indexed field" : "fields " + List.copyOf(fields))
+                        + " with Lucene " + open.runtime().luceneVersion(),
+                io.github.mfuerstenau.leia.protocol.analysis.AutoStopWords.class,
+                progress -> StartAutoStopWordsHandler.found(() -> {
+                    // Inside the job, so the statistics aren't read on the backend thread.
+                    int maxDocFreq = threshold.maxDocFreq(index.stats().numDocs());
+                    Map<String, TermExport.TermSource> sources = new LinkedHashMap<>();
+                    for (String field : scanned) {
+                        sources.put(field, pages(terms, field, TermExport.PROGRESS_INTERVAL));
+                    }
+                    return AutoStopWords.find(sources, maxDocFreq, StartAutoStopWordsParams.MAX_WORDS, progress);
+                }));
+        return new JobStarted(jobId);
     }
 
     /** Every term of {@code field}, read {@code pageSize} at a time through {@link Terms#terms}. */

@@ -117,6 +117,7 @@ class Lucene3BackendTest {
                         Feature.POSITIONS,
                         Feature.TOP_TERMS,
                         Feature.EXPORT_TERMS,
+                        Feature.AUTO_STOP_WORDS,
                         Feature.CLASSIC_SEARCH,
                         Feature.TERM_SEARCH,
                         Feature.FILTER,
@@ -260,6 +261,14 @@ class Lucene3BackendTest {
     @Test
     void reopensAChangedIndex() throws Exception {
         RuntimeReopens.reopensAChangedIndex(backend, Path.of(PATH), tmp.resolve("copy"), "segments_2");
+    }
+
+    @Test
+    void findsTheAutoStopWords() throws Exception {
+        OpenIndexResult opened = open(Path.of(PATH));
+
+        RuntimeAutoStopWords.findsTheWords(backend, "body");
+        RuntimeAutoStopWords.searchesWithoutTheWords(backend, opened.maxDoc().orElseThrow(), "body", "beta");
     }
 
     @Test

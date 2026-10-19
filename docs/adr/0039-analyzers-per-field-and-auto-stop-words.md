@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-11
 - **Amends:** ADR 0014 §3 (`analyze` gains `field`), ADR 0023 (the last two analyzers it deferred)
+- **Amended by:** ADR 0061 (auto stop words on an index that a runtime reads)
 
 ## Context
 
@@ -33,6 +34,7 @@ ADR 0023 deferred `PerFieldAnalyzerWrapper` and `QueryAutoStopWordAnalyzer`. ADR
    - Empty `fields` means every indexed field. A field that is missing or not indexed is `FIELD_NOT_FOUND`. It needs a reader (`NO_READER`).
    - The result is `GetAutoStopWordsResult {termsScanned, stopWords?}`, and `AutoStopWords {maxDocFreq, fields}` carries the threshold that was used. Each scanned field is listed, sorted by name, with its words in term order, and a field without words is listed too.
    - The loop is Lucene's: `MultiTerms.getTerms`, then `docFreq > maxDocFreq`, then `utf8ToString`. Progress and cancellation go through `ScanProgress`.
+   - *Amended by ADR 0061 §2, §3:* it works on an index that a runtime reads too. The loop is `AutoStopWords.find`, over the terms of `Terms.terms` there, and a search there takes the words through the runtime's `AnalyzerSpec.AutoStopWords`.
 5. **At most `MAX_WORDS` = 10,000 words per field.** With more, the job fails with `INVALID_PARAMS` and asks for a higher threshold. A partial list would mislead, and every later request would carry it.
 6. **The TUI holds the analysis** (`AnalysisSettings`): the default analyzer, the field analyzers and the stop words.
    - On the analysis screen, `f`/`F` pick the field that the text is analyzed for, out of the open index's indexed fields, or the default.

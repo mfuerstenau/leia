@@ -52,3 +52,4 @@ The 3.6 runtime is the template for those of 5, 7 and 9, so the shape of the run
 - A walk with indexes of several Lucene majors opens only those of the first one's Lucene; the others are listed as skipped and still checked. Opening them together would need several runtimes in one index, which is out of scope.
 - Every runtime jar built for interface 1 is refused (`INVALID_JAR`) and has to be built again.
 - Left for later: per-field postings statistics for 3.x (`IndexField.terms` stays absent; a full scan at open would be too slow), the reason of a failed open reader in 3.6's check (3.6 prints it only), and auto stop words on 3.6.
+  - *Amended by ADR 0061:* auto stop words work on 3.6 and every other runtime.

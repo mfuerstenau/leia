@@ -496,6 +496,20 @@ class Lucene9IndexTest {
     }
 
     @Test
+    void dropsTheAutoStopWordsAfterTheWholeChain() throws Exception {
+        try (RuntimeIndex index = open("lucene8")) {
+            Search search = index.search().orElseThrow();
+            // The filter runs after stemming, so the word run drops running, in body only.
+            assertThat(search.parse(
+                            "running beta id:running",
+                            BODY,
+                            new Search.AnalyzerSpec.AutoStopWords(
+                                    named("EnglishAnalyzer"), Map.of("body", List.of("run")))))
+                    .hasToString("body:beta id:run");
+        }
+    }
+
+    @Test
     void parsesWithTheAnalyzersOf912() throws Exception {
         try (RuntimeIndex index = open("lucene8")) {
             Search search = index.search().orElseThrow();

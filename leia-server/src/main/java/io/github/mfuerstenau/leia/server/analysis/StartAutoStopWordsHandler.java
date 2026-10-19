@@ -1,7 +1,6 @@
 package io.github.mfuerstenau.leia.server.analysis;
 
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
-import io.github.mfuerstenau.leia.core.ScanProgress;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
@@ -13,6 +12,7 @@ import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
+import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
 import jakarta.inject.Inject;
 import java.io.IOException;
 import java.util.List;
@@ -22,7 +22,7 @@ import org.apache.lucene.index.IndexOptions;
 /**
  * {@code startAutoStopWords}: checks the params at once, then finds the stop words of fields of the
  * {@link CurrentIndex} in a job ({@link GetAutoStopWordsHandler}), as Lucene's {@code
- * QueryAutoStopWordAnalyzer} does (ADR 0039).
+ * QueryAutoStopWordAnalyzer} does (ADR 0039), on Lucene 10 or a runtime (ADR 0061).
  */
 public final class StartAutoStopWordsHandler implements MethodHandler<StartAutoStopWordsParams, JobStarted> {
 
@@ -43,6 +43,9 @@ public final class StartAutoStopWordsHandler implements MethodHandler<StartAutoS
     @Override
     public JobStarted handle(StartAutoStopWordsParams params) throws RpcException {
         io.github.mfuerstenau.leia.core.AutoStopWords.Threshold threshold = threshold(params);
+        if (currentIndex.runtime().isPresent()) {
+            return RuntimeResults.startAutoStopWords(currentIndex.runtime().get(), params.fields(), threshold, jobs);
+        }
         ReadOnlyIndex index = currentIndex.readable();
         for (String field : params.fields()) {
             FieldInfo info = index.fieldInfo(field).orElse(null);
@@ -54,7 +57,8 @@ public final class StartAutoStopWordsHandler implements MethodHandler<StartAutoS
         long jobId = jobs.start(
                 "auto stop words of " + (fields.isEmpty() ? "every indexed field" : "fields " + fields),
                 AutoStopWords.class,
-                progress -> scan(index, fields, threshold, progress));
+                progress -> found(
+                        () -> index.autoStopWords(fields, threshold, StartAutoStopWordsParams.MAX_WORDS, progress)));
         return new JobStarted(jobId);
     }
 
@@ -81,15 +85,23 @@ public final class StartAutoStopWordsHandler implements MethodHandler<StartAutoS
         return new RpcException(ErrorCode.INVALID_PARAMS, "Invalid params: " + message);
     }
 
-    private static AutoStopWords scan(
-            ReadOnlyIndex index,
-            List<String> fields,
-            io.github.mfuerstenau.leia.core.AutoStopWords.Threshold threshold,
-            ScanProgress progress)
-            throws RpcException {
+    /** Finds the stop words of an index. */
+    @FunctionalInterface
+    public interface Scan {
+
+        io.github.mfuerstenau.leia.core.AutoStopWords find()
+                throws IOException, io.github.mfuerstenau.leia.core.AutoStopWords.TooManyWordsException;
+    }
+
+    /**
+     * What {@code scan} finds, for Lucene 10 and the runtimes (ADR 0061).
+     *
+     * @throws RpcException {@code INVALID_PARAMS} for too many words, {@code INDEX_NOT_READABLE} if
+     *     the terms can't be read
+     */
+    public static AutoStopWords found(Scan scan) throws RpcException {
         try {
-            io.github.mfuerstenau.leia.core.AutoStopWords found =
-                    index.autoStopWords(fields, threshold, StartAutoStopWordsParams.MAX_WORDS, progress);
+            io.github.mfuerstenau.leia.core.AutoStopWords found = scan.find();
             return new AutoStopWords(
                     found.maxDocFreq(),
                     found.words().entrySet().stream()

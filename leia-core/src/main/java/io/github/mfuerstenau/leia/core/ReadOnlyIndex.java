@@ -14,6 +14,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
@@ -606,48 +607,12 @@ public final class ReadOnlyIndex implements OpenedIndex {
                 throw new IllegalArgumentException("No indexed field '" + field + "' in the index");
             }
         }
-        int maxDocFreq = switch (threshold) {
-            case AutoStopWords.Threshold.MaxDocFreq given -> {
-                if (given.maxDocFreq() < 0) {
-                    throw new IllegalArgumentException("maxDocFreq must not be negative: " + given.maxDocFreq());
-                }
-                yield given.maxDocFreq();
-            }
-            case AutoStopWords.Threshold.MaxPercentDocs percent -> {
-                double fraction = percent.maxPercentDocs();
-                if (!(fraction >= 0 && fraction <= 1)) {
-                    throw new IllegalArgumentException("maxPercentDocs must be from 0 to 1: " + fraction);
-                }
-                yield (int) (reader.numDocs() * fraction);
-            }
-        };
-        List<String> scanned = fields.isEmpty()
-                ? FieldInfos.getIndexedFields(reader).stream().sorted().toList()
-                : fields.stream().distinct().sorted().toList();
-        TreeMap<String, List<String>> words = new TreeMap<>();
-        long terms = 0;
-        for (String field : scanned) {
-            List<String> fieldWords = new ArrayList<>();
-            Terms fieldTerms = MultiTerms.getTerms(reader, field);
-            if (fieldTerms != null) {
-                TermsEnum termsEnum = fieldTerms.iterator();
-                for (BytesRef term = termsEnum.next(); term != null; term = termsEnum.next()) {
-                    terms++;
-                    if (termsEnum.docFreq() > maxDocFreq) {
-                        if (fieldWords.size() == maxWords) {
-                            throw new AutoStopWords.TooManyWordsException(field, maxWords);
-                        }
-                        fieldWords.add(term.utf8ToString());
-                    }
-                    if (terms % PROGRESS_INTERVAL == 0) {
-                        progress.scanned(terms);
-                    }
-                }
-            }
-            words.put(field, fieldWords);
+        int maxDocFreq = threshold.maxDocFreq(reader.numDocs());
+        Map<String, TermExport.TermSource> sources = new TreeMap<>();
+        for (String field : fields.isEmpty() ? FieldInfos.getIndexedFields(reader) : fields) {
+            sources.put(field, TermExport.terms(this, field));
         }
-        progress.scanned(terms);
-        return new AutoStopWords(maxDocFreq, words);
+        return AutoStopWords.find(sources, maxDocFreq, maxWords, progress);
     }
 
     /** Whether {@code docId} is a document id of the index, deleted or not: from 0 to maxDoc - 1. */

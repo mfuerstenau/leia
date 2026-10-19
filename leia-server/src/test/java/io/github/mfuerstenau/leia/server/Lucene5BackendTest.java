@@ -132,6 +132,7 @@ class Lucene5BackendTest {
                         Feature.POSITIONS,
                         Feature.TOP_TERMS,
                         Feature.EXPORT_TERMS,
+                        Feature.AUTO_STOP_WORDS,
                         Feature.CLASSIC_SEARCH,
                         Feature.TERM_SEARCH,
                         Feature.FILTER,
@@ -183,6 +184,15 @@ class Lucene5BackendTest {
         OpenIndexResult opened = open(testIndex(name));
 
         RuntimeExplains.explainsAHit(backend, opened.maxDoc().orElseThrow(), true);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene4", "lucene5"})
+    void findsTheAutoStopWords(String name) throws Exception {
+        OpenIndexResult opened = open(testIndex(name));
+
+        RuntimeAutoStopWords.findsTheWords(backend, "body");
+        RuntimeAutoStopWords.searchesWithoutTheWords(backend, opened.maxDoc().orElseThrow(), "body", "beta");
     }
 
     @ParameterizedTest

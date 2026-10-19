@@ -96,6 +96,14 @@ public interface Search {
 
         /** At most {@code maxTokenCount} tokens of {@code analyzer}. */
         record LimitTokenCount(AnalyzerSpec analyzer, int maxTokenCount) implements AnalyzerSpec {}
+
+        /**
+         * {@code analyzer}, whose tokens of each field in {@code words} lose those words,
+         * case-sensitive, after the analyzer's whole chain, as Lucene's {@code
+         * QueryAutoStopWordAnalyzer} removes them (ADR 0039, ADR 0061). A field without an entry keeps
+         * every token.
+         */
+        record AutoStopWords(AnalyzerSpec analyzer, Map<String, List<String>> words) implements AnalyzerSpec {}
     }
 
     /** An analyzer the runtime can't build; the message says what it has. */

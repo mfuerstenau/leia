@@ -86,6 +86,7 @@ class Lucene24BackendTest {
                         Feature.TERMS,
                         Feature.TOP_TERMS,
                         Feature.EXPORT_TERMS,
+                        Feature.AUTO_STOP_WORDS,
                         Feature.CLASSIC_SEARCH,
                         Feature.TERM_SEARCH,
                         Feature.FILTER,
@@ -93,7 +94,7 @@ class Lucene24BackendTest {
                         Feature.COMMITS,
                         Feature.CHECK_INDEX,
                         Feature.REOPEN)
-                .doesNotContain(Feature.SEARCH, Feature.POINTS, Feature.AUTO_STOP_WORDS, Feature.CHECK_LEVELS);
+                .doesNotContain(Feature.SEARCH, Feature.POINTS, Feature.CHECK_LEVELS);
         ReaderInfo reader = opened.indexes().getFirst().reader().orElseThrow();
         assertThat(reader.createdVersionMajor()).isEqualTo(2);
         assertThat(reader.minSegmentLuceneVersion()).contains("2.x");

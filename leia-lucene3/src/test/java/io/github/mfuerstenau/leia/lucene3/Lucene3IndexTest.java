@@ -559,6 +559,19 @@ class Lucene3IndexTest {
     }
 
     @Test
+    void dropsTheAutoStopWords() throws Exception {
+        try (RuntimeIndex index = open3()) {
+            Search search = index.search().orElseThrow();
+            // Case-sensitive, after the analyzer lowercased Alpha, in body only.
+            assertThat(search.parse(
+                            "Alpha beta id:alpha",
+                            BODY,
+                            new Search.AnalyzerSpec.AutoStopWords(standard(), Map.of("body", List.of("alpha")))))
+                    .hasToString("body:beta id:alpha");
+        }
+    }
+
+    @Test
     void parsesWithTheAnalyzersOf36() throws Exception {
         try (RuntimeIndex index = open3()) {
             Search search = index.search().orElseThrow();

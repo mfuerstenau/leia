@@ -3,6 +3,7 @@ package io.github.mfuerstenau.leia.server.runtime;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.FieldAnalyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.FieldStopWords;
 import io.github.mfuerstenau.leia.protocol.analysis.PresetAnalyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.WordSet;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
@@ -24,8 +25,9 @@ import java.util.stream.Stream;
 
 /**
  * The analyzer of a search as a runtime builds it (ADR 0045): the standard analyzer, a preset of the
- * runtime's own by its simple class name with stop words and the longest token, analyzers per field
- * and a token limit. Anything else is refused with {@code NOT_SUPPORTED}, naming what the runtime has.
+ * runtime's own by its simple class name with stop words and the longest token, analyzers per field,
+ * a token limit and auto stop words (ADR 0061). Anything else is refused with {@code
+ * NOT_SUPPORTED}, naming what the runtime has.
  */
 final class RuntimeAnalyzers {
 
@@ -39,13 +41,25 @@ final class RuntimeAnalyzers {
      *     file can't be read
      */
     static AnalyzerSpec spec(Analyzer analyzer, LuceneRuntime runtime, Search search) throws RpcException {
-        if (!analyzer.autoStopWords().isEmpty()) {
-            throw unsupported("auto stop words", runtime, search);
-        }
         AnalyzerSpec spec = single(analyzer, runtime, search);
-        if (analyzer.fields().isEmpty()) {
-            return spec;
+        if (!analyzer.fields().isEmpty()) {
+            spec = new AnalyzerSpec.PerField(spec, fields(analyzer, runtime, search));
         }
+        if (!analyzer.autoStopWords().isEmpty()) {
+            // After the whole chain, as on Lucene 10 (ADR 0061).
+            Map<String, List<String>> words = new LinkedHashMap<>();
+            for (FieldStopWords field : analyzer.autoStopWords()) {
+                if (words.putIfAbsent(field.field(), field.words()) != null) {
+                    throw invalid("field '" + field.field() + "' has more than one set of auto stop words");
+                }
+            }
+            spec = new AnalyzerSpec.AutoStopWords(spec, words);
+        }
+        return spec;
+    }
+
+    private static Map<String, AnalyzerSpec> fields(Analyzer analyzer, LuceneRuntime runtime, Search search)
+            throws RpcException {
         Map<String, AnalyzerSpec> fields = new LinkedHashMap<>();
         for (FieldAnalyzer field : analyzer.fields()) {
             String name = field.field();
@@ -61,7 +75,7 @@ final class RuntimeAnalyzers {
             }
             fields.put(name, single(own, runtime, search));
         }
-        return new AnalyzerSpec.PerField(spec, fields);
+        return fields;
     }
 
     private static AnalyzerSpec single(Analyzer analyzer, LuceneRuntime runtime, Search search) throws RpcException {

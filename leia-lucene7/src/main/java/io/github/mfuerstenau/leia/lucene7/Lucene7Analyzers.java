@@ -139,6 +139,8 @@ final class Lucene7Analyzers {
             }
             case AnalyzerSpec.LimitTokenCount(AnalyzerSpec analyzer, int maxTokenCount) ->
                 new LimitTokenCountAnalyzer(analyzer(analyzer), maxTokenCount);
+            case AnalyzerSpec.AutoStopWords(AnalyzerSpec analyzer, Map<String, List<String>> words) ->
+                new Lucene7AutoStopWordsAnalyzer(analyzer(analyzer), words);
         };
     }
 
