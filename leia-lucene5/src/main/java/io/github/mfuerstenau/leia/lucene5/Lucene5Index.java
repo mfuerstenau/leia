@@ -4,6 +4,7 @@ import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.Documents;
 import io.github.mfuerstenau.leia.runtime.Knn;
 import io.github.mfuerstenau.leia.runtime.Points;
+import io.github.mfuerstenau.leia.runtime.Rebuild;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.Terms;
@@ -172,6 +173,11 @@ final class Lucene5Index implements RuntimeIndex, Documents, Terms, Search {
     @Override
     public Optional<Knn> knn() {
         return Optional.empty();
+    }
+
+    @Override
+    public Optional<Rebuild> rebuild() {
+        return Optional.of(new Lucene5Rebuild(reader));
     }
 
     @Override
@@ -413,6 +419,11 @@ final class Lucene5Index implements RuntimeIndex, Documents, Terms, Search {
         if (terms == null) {
             return List.of();
         }
+        return vectorTerms(terms);
+    }
+
+    /** The terms of a term vector, in term order. */
+    static List<VectorTerm> vectorTerms(org.apache.lucene.index.Terms terms) throws IOException {
         boolean withPositions = terms.hasPositions();
         boolean withOffsets = terms.hasOffsets();
         List<VectorTerm> result = new ArrayList<>();
@@ -434,8 +445,7 @@ final class Lucene5Index implements RuntimeIndex, Documents, Terms, Search {
     }
 
     /** The next position of {@code postings}, with what was indexed of it. */
-    private static Position position(PostingsEnum postings, boolean withPositions, boolean withOffsets)
-            throws IOException {
+    static Position position(PostingsEnum postings, boolean withPositions, boolean withOffsets) throws IOException {
         int position = postings.nextPosition();
         BytesRef payload = postings.getPayload();
         return new Position(

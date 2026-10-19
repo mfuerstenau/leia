@@ -1731,6 +1731,33 @@ class AppTest {
     }
 
     @Test
+    void anOldLuceneIndexWithRebuildRebuildsADocument() {
+        App app = oldLuceneApp(Feature.RECONSTRUCT);
+        assertThat(app.handleKey(key('2'))).isEqualTo(load(0));
+        app.documentLoaded(document(0));
+        assertThat(legend(app)).contains("r rebuild");
+
+        assertThat(app.handleKey(key('r'))).hasValue(new Action.StartReconstruct(0, "id", List.of()));
+        app.reconstructStarted(0, "id", 7);
+        app.reconstructProgress(
+                7,
+                new GetReconstructResult(
+                        3,
+                        OptionalLong.of(3),
+                        Optional.of(new ReconstructResult(
+                                List.of(new ReconstructedField(
+                                        "id",
+                                        IndexOptions.DOCS,
+                                        ReconstructSource.POSTINGS,
+                                        List.of(new TermVectorTerm("doc-0", false, 1, List.of())),
+                                        List.of())),
+                                2))));
+        app.handleKey(key(KeyCode.TAB));
+        app.handleKey(key(KeyCode.END));
+        assertThat(render(app)).contains("1 term, from the postings", "  doc-0");
+    }
+
+    @Test
     void openingAnotherIndexOnTheCommitsScreenFetchesItsCommits() {
         App app = appWithFields();
         app.handleKey(key('4'));

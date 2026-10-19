@@ -47,6 +47,9 @@ public interface RuntimeIndex extends Closeable {
     /** KNN vectors and the queries for the nearest ones (ADR 0049). */
     Optional<Knn> knn();
 
+    /** The rebuild of a document's terms and points (ADR 0059). */
+    Optional<Rebuild> rebuild();
+
     /** How a field is indexed. */
     enum IndexOptions {
         NONE,

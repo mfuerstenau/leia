@@ -12,6 +12,7 @@ import io.github.mfuerstenau.leia.runtime.Documents;
 import io.github.mfuerstenau.leia.runtime.Knn;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.runtime.Points;
+import io.github.mfuerstenau.leia.runtime.Rebuild;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.Terms;
@@ -23,6 +24,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.BitSet;
 import java.util.HexFormat;
 import java.util.List;
@@ -621,6 +623,145 @@ class Lucene9IndexTest {
                         throw stop;
                     }))
                     .isSameAs(stop);
+        }
+    }
+
+    /**
+     * Rebuilds every document, deleted ones included, in every field with postings or points, and
+     * checks it against what the term vectors, postings, positions and point leaves say.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene8", "lucene8to9"})
+    void rebuildsADocument(String name) throws IOException {
+        try (RuntimeIndex index = open(name)) {
+            Rebuild rebuild = index.rebuild().orElseThrow();
+            List<RuntimeIndex.Field> fields = index.fields().stream()
+                    .filter(field ->
+                            field.indexOptions() != RuntimeIndex.IndexOptions.NONE || field.pointDimensionCount() > 0)
+                    .toList();
+            List<String> names = fields.stream().map(RuntimeIndex.Field::name).toList();
+            for (int doc = 0; doc < index.maxDoc(); doc++) {
+                List<Long> progress = new ArrayList<>();
+                List<Rebuild.RebuiltField> rebuilt = rebuild.rebuild(doc, names, progress::add);
+                assertThat(rebuilt).extracting(Rebuild.RebuiltField::field).containsExactlyElementsOf(names);
+                // The count is what the rebuild goes through.
+                assertThat(rebuild.count(doc, names)).hasValue(progress.getLast());
+                for (int i = 0; i < fields.size(); i++) {
+                    RuntimeIndex.Field field = fields.get(i);
+                    Rebuild.RebuiltField one = rebuilt.get(i);
+                    List<Documents.VectorTerm> expected = one.source() == Rebuild.Source.TERM_VECTOR
+                            ? index.documents().orElseThrow().termVector(doc, field.name())
+                            : postingsOf(index, doc, field);
+                    assertThat(describe(one.terms()))
+                            .as("%s of document %d", field.name(), doc)
+                            .isEqualTo(describe(expected));
+                    assertThat(one.points().stream()
+                                    .map(HexFormat.of()::formatHex)
+                                    .toList())
+                            .as("points of %s of document %d", field.name(), doc)
+                            .isEqualTo(pointsOf(index, doc, field));
+                }
+            }
+            List<Rebuild.RebuiltField> first = rebuild.rebuild(0, List.of("body", "id", "tag"), _ -> {});
+            assertThat(first)
+                    .extracting(Rebuild.RebuiltField::source, Rebuild.RebuiltField::indexOptions)
+                    .containsExactly(
+                            tuple(
+                                    Rebuild.Source.TERM_VECTOR,
+                                    RuntimeIndex.IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS),
+                            tuple(Rebuild.Source.POSTINGS, RuntimeIndex.IndexOptions.DOCS),
+                            tuple(Rebuild.Source.POSTINGS, RuntimeIndex.IndexOptions.DOCS));
+            assertThat(first.get(2).terms()).singleElement().satisfies(tag -> {
+                assertThat(text(tag.term())).isEqualTo("odd");
+                assertThat(tag.freq()).isEqualTo(1);
+                assertThat(tag.positions()).isEmpty();
+            });
+            // Document 1 is deleted, and rebuilt too.
+            assertThat(rebuild.rebuild(1, List.of("id"), _ -> {}).getFirst().terms())
+                    .extracting(term -> text(term.term()))
+                    .containsExactly("2");
+            // Its points too, 15 in pt, in unsigned order.
+            assertThat(rebuild.rebuild(1, List.of("pt"), _ -> {}).getFirst().points())
+                    .hasSize(15)
+                    .isSortedAccordingTo(Arrays::compareUnsigned);
+            CancellationException stop = new CancellationException("stop");
+            assertThatThrownBy(() -> rebuild.rebuild(0, names, _ -> {
+                        throw stop;
+                    }))
+                    .isSameAs(stop);
+        }
+    }
+
+    /** The terms of {@code doc} in {@code field}, read from the postings and positions of every term. */
+    private static List<Documents.VectorTerm> postingsOf(RuntimeIndex index, int doc, RuntimeIndex.Field field)
+            throws IOException {
+        List<Documents.VectorTerm> result = new ArrayList<>();
+        if (field.indexOptions() == RuntimeIndex.IndexOptions.NONE) {
+            return result;
+        }
+        boolean positions = field.indexOptions().compareTo(RuntimeIndex.IndexOptions.DOCS_AND_FREQS_AND_POSITIONS) >= 0;
+        Terms terms = index.terms().orElseThrow();
+        Optional<byte[]> from = Optional.empty();
+        do {
+            Terms.TermsPage page = terms.terms(field.name(), from, 100);
+            for (Terms.TermEntry entry : page.terms()) {
+                List<Terms.Posting> postings =
+                        terms.postings(field.name(), entry.term(), doc, 1).postings();
+                if (!postings.isEmpty() && postings.getFirst().docId() == doc) {
+                    result.add(new Documents.VectorTerm(
+                            entry.term(),
+                            postings.getFirst().freq(),
+                            positions
+                                    ? terms.positions(doc, field.name(), entry.term())
+                                            .orElseThrow()
+                                    : List.of()));
+                }
+            }
+            from = page.next();
+        } while (from.isPresent());
+        return result;
+    }
+
+    private static List<String> describe(List<Documents.VectorTerm> terms) {
+        return terms.stream()
+                .map(term -> HexFormat.of().formatHex(term.term()) + " " + term.freq() + " "
+                        + term.positions().stream()
+                                .map(position -> position.position() + "/" + position.startOffset() + "/"
+                                        + position.endOffset() + "/"
+                                        + position.payload().map(HexFormat.of()::formatHex))
+                                .toList())
+                .toList();
+    }
+
+    /** The points of {@code doc} in {@code field}, read from the leaves of its segment's tree. */
+    private static List<String> pointsOf(RuntimeIndex index, int doc, RuntimeIndex.Field field) throws IOException {
+        if (field.pointDimensionCount() == 0) {
+            return List.of();
+        }
+        Points points = index.points().orElseThrow();
+        List<Points.LeafPoint> all = new ArrayList<>();
+        for (Points.Segment segment : points.tree(field.name()).segments()) {
+            if (doc >= segment.docBase() && doc < segment.docBase() + segment.maxDoc()) {
+                collectPoints(points, field.name(), segment.segment(), new ArrayList<>(), all);
+            }
+        }
+        return all.stream()
+                .filter(point -> point.docId() == doc)
+                .map(Points.LeafPoint::value)
+                .sorted(Arrays::compareUnsigned)
+                .map(HexFormat.of()::formatHex)
+                .toList();
+    }
+
+    private static void collectPoints(
+            Points points, String field, int segment, List<Integer> path, List<Points.LeafPoint> all)
+            throws IOException {
+        Points.CellContents contents = points.cell(field, segment, List.copyOf(path));
+        all.addAll(contents.points());
+        for (int i = 0; i < contents.children().size(); i++) {
+            path.add(i);
+            collectPoints(points, field, segment, path, all);
+            path.removeLast();
         }
     }
 

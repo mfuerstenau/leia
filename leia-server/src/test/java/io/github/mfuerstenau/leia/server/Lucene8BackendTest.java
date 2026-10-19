@@ -111,6 +111,7 @@ class Lucene8BackendTest {
                 Feature.TERM_SEARCH,
                 Feature.FILTER,
                 Feature.EXPLAIN,
+                Feature.RECONSTRUCT,
                 Feature.POINTS,
                 Feature.COMMITS,
                 Feature.CHECK_INDEX,
@@ -187,6 +188,14 @@ class Lucene8BackendTest {
         OpenIndexResult opened = open(testIndex(name));
 
         RuntimeSearches.searchesATerm(backend, opened.maxDoc().orElseThrow(), "beta", true);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene8", "lucene8to9"})
+    void rebuildsADocument(String name) throws Exception {
+        OpenIndexResult opened = open(testIndex(name));
+
+        RuntimeRebuilds.rebuildsADocument(backend, opened.maxDoc().orElseThrow(), true);
     }
 
     @Test

@@ -16,7 +16,6 @@ import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
 import io.github.mfuerstenau.leia.protocol.commits.Segment;
 import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
-import io.github.mfuerstenau.leia.protocol.document.StartReconstructParams;
 import io.github.mfuerstenau.leia.protocol.index.Feature;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
@@ -24,6 +23,7 @@ import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
+import io.github.mfuerstenau.leia.protocol.index.ReopenIndexParams;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellParams;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellResult;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
@@ -103,6 +103,7 @@ class Lucene7BackendTest {
                         Feature.TERM_SEARCH,
                         Feature.FILTER,
                         Feature.EXPLAIN,
+                        Feature.RECONSTRUCT,
                         Feature.POINTS,
                         Feature.COMMITS,
                         Feature.CHECK_INDEX,
@@ -150,6 +151,14 @@ class Lucene7BackendTest {
         OpenIndexResult opened = open(testIndex(name));
 
         RuntimeSearches.searchesATerm(backend, opened.maxDoc().orElseThrow(), "beta", false);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene6", "lucene7"})
+    void rebuildsADocument(String name) throws Exception {
+        OpenIndexResult opened = open(testIndex(name));
+
+        RuntimeRebuilds.rebuildsADocument(backend, opened.maxDoc().orElseThrow(), true);
     }
 
     @ParameterizedTest
@@ -281,8 +290,7 @@ class Lucene7BackendTest {
     @Test
     void refusesWhatTheRuntimeLacks() throws Exception {
         open(testIndex("lucene7"));
-        backend.fails(
-                Methods.START_RECONSTRUCT, new StartReconstructParams(0, Optional.empty()), ErrorCode.NOT_SUPPORTED);
+        backend.fails(Methods.REOPEN_INDEX, new ReopenIndexParams(), ErrorCode.NOT_SUPPORTED);
     }
 
     @Test

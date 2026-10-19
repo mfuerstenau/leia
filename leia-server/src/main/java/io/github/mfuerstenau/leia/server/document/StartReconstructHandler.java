@@ -17,6 +17,7 @@ import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.index.GetIndexStatsHandler;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import io.github.mfuerstenau.leia.server.points.PointMapper;
+import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
 import jakarta.inject.Inject;
 import java.io.IOException;
 import java.time.Duration;
@@ -43,7 +44,7 @@ public final class StartReconstructHandler implements MethodHandler<StartReconst
     }
 
     /** What a poll of the job needs besides its progress. */
-    record Count(OptionalLong total) {}
+    public record Count(OptionalLong total) {}
 
     @Override
     public RpcMethod<StartReconstructParams, JobStarted> method() {
@@ -52,6 +53,9 @@ public final class StartReconstructHandler implements MethodHandler<StartReconst
 
     @Override
     public JobStarted handle(StartReconstructParams params) throws RpcException {
+        if (currentIndex.runtime().isPresent()) {
+            return RuntimeResults.startReconstruct(currentIndex.runtime().get(), params, jobs);
+        }
         ReadOnlyIndex index = currentIndex.readable();
         int docId = params.docId();
         GetDocumentHandler.checkDocId(index, docId);

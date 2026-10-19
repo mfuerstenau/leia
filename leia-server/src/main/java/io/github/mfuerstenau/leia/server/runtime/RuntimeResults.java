@@ -27,6 +27,10 @@ import io.github.mfuerstenau.leia.protocol.document.GetStoredValueResult;
 import io.github.mfuerstenau.leia.protocol.document.GetTermVectorParams;
 import io.github.mfuerstenau.leia.protocol.document.GetTermVectorResult;
 import io.github.mfuerstenau.leia.protocol.document.KnnVector;
+import io.github.mfuerstenau.leia.protocol.document.ReconstructResult;
+import io.github.mfuerstenau.leia.protocol.document.ReconstructSource;
+import io.github.mfuerstenau.leia.protocol.document.ReconstructedField;
+import io.github.mfuerstenau.leia.protocol.document.StartReconstructParams;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.document.TermPosition;
 import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
@@ -85,12 +89,14 @@ import io.github.mfuerstenau.leia.runtime.Documents;
 import io.github.mfuerstenau.leia.runtime.Knn;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.runtime.Points;
+import io.github.mfuerstenau.leia.runtime.Rebuild;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.Terms;
 import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
+import io.github.mfuerstenau.leia.server.document.StartReconstructHandler;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.index.IndexDirectories;
 import io.github.mfuerstenau.leia.server.job.Jobs;
@@ -103,12 +109,14 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.OptionalLong;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.logging.Logger;
@@ -153,6 +161,9 @@ public final class RuntimeResults {
         }
         if (index.points().isPresent() && index.fields().stream().anyMatch(field -> field.pointDimensionCount() > 0)) {
             features.add(Feature.POINTS);
+        }
+        if (index.rebuild().isPresent()) {
+            features.add(Feature.RECONSTRUCT);
         }
         if (index.knn().isPresent()
                 && index.fields().stream().anyMatch(field -> field.vectors().isPresent())) {
@@ -368,14 +379,7 @@ public final class RuntimeResults {
         return new IndexField(
                 field.name(),
                 field.number(),
-                switch (field.indexOptions()) {
-                    case NONE -> IndexOptions.NONE;
-                    case DOCS -> IndexOptions.DOCS;
-                    case DOCS_AND_FREQS -> IndexOptions.DOCS_AND_FREQS;
-                    case DOCS_AND_FREQS_AND_POSITIONS -> IndexOptions.DOCS_AND_FREQS_AND_POSITIONS;
-                    case DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS ->
-                        IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS;
-                },
+                indexOptions(field.indexOptions()),
                 field.hasNorms(),
                 field.hasPayloads(),
                 field.hasTermVectors(),
@@ -387,6 +391,16 @@ public final class RuntimeResults {
                 field.vectors().map(vectors -> vectorSimilarity(vectors.similarity())),
                 field.terms()
                         .map(terms -> new TermStats(terms.docCount(), terms.sumDocFreq(), terms.sumTotalTermFreq())));
+    }
+
+    private static IndexOptions indexOptions(RuntimeIndex.IndexOptions options) {
+        return switch (options) {
+            case NONE -> IndexOptions.NONE;
+            case DOCS -> IndexOptions.DOCS;
+            case DOCS_AND_FREQS -> IndexOptions.DOCS_AND_FREQS;
+            case DOCS_AND_FREQS_AND_POSITIONS -> IndexOptions.DOCS_AND_FREQS_AND_POSITIONS;
+            case DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS -> IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS;
+        };
     }
 
     private static VectorEncoding vectorEncoding(RuntimeIndex.VectorEncoding encoding) {
@@ -524,20 +538,20 @@ public final class RuntimeResults {
         checkField(open.index(), params.field());
         try {
             return new GetTermVectorResult(documents.termVector(params.docId(), params.field()).stream()
-                    .map(term -> {
-                        ByteStrings.Encoded encoded = ByteStrings.encode(new BytesRef(term.term()));
-                        return new TermVectorTerm(
-                                encoded.value(),
-                                encoded.binary(),
-                                term.freq(),
-                                term.positions().stream()
-                                        .map(RuntimeResults::position)
-                                        .toList());
-                    })
+                    .map(RuntimeResults::termVectorTerm)
                     .toList());
         } catch (IOException e) {
             throw new RpcException(ErrorCode.INDEX_NOT_READABLE, "Cannot read the term vector: " + e.getMessage(), e);
         }
+    }
+
+    private static TermVectorTerm termVectorTerm(Documents.VectorTerm term) {
+        ByteStrings.Encoded encoded = ByteStrings.encode(new BytesRef(term.term()));
+        return new TermVectorTerm(
+                encoded.value(),
+                encoded.binary(),
+                term.freq(),
+                term.positions().stream().map(RuntimeResults::position).toList());
     }
 
     /** {@code getTerms}. Terms are text if they are UTF-8, as Lucene 10's are (ADR 0006). */
@@ -914,6 +928,97 @@ public final class RuntimeResults {
                                 e);
                     }
                 }));
+    }
+
+    /**
+     * {@code startReconstruct} (ADR 0059): checks the document and fields at once, as {@link
+     * StartReconstructHandler} does for Lucene 10, counts the terms and points to go through, then
+     * rebuilds the document with the runtime in a job. Without fields, every field with postings or
+     * points is rebuilt, in field number order.
+     */
+    public static JobStarted startReconstruct(OpenRuntime open, StartReconstructParams params, Jobs jobs)
+            throws RpcException {
+        Rebuild rebuild = open.index().rebuild().orElseThrow(open::notSupported);
+        int docId = params.docId();
+        checkDocId(open.index(), docId);
+        Map<String, RuntimeIndex.Field> byName = new LinkedHashMap<>();
+        for (RuntimeIndex.Field field : open.index().fields()) {
+            byName.put(field.name(), field);
+        }
+        List<RuntimeIndex.Field> fields = new ArrayList<>();
+        if (params.fields().isPresent()) {
+            for (String name : params.fields().get()) {
+                RuntimeIndex.Field field = byName.get(name);
+                if (field == null) {
+                    throw new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + name + "' in the index");
+                }
+                if (!rebuildable(field)) {
+                    throw new RpcException(
+                            ErrorCode.INVALID_PARAMS,
+                            "Invalid params: the field '" + name + "' has no terms or points to rebuild");
+                }
+                fields.add(field);
+            }
+        } else {
+            open.index().fields().stream()
+                    .filter(RuntimeResults::rebuildable)
+                    .sorted(Comparator.comparingInt(RuntimeIndex.Field::number))
+                    .forEach(fields::add);
+        }
+        List<String> names = fields.stream().map(RuntimeIndex.Field::name).toList();
+        OptionalLong total;
+        try {
+            total = rebuild.count(docId, names);
+        } catch (IOException e) {
+            throw notRebuilt(docId, e);
+        }
+        return new JobStarted(jobs.start(
+                "reconstruct document " + docId
+                        + params.fields().map(given -> ", fields " + given).orElse("")
+                        + " with Lucene " + open.runtime().luceneVersion(),
+                ReconstructResult.class,
+                new StartReconstructHandler.Count(total),
+                progress -> {
+                    long start = System.nanoTime();
+                    try {
+                        List<Rebuild.RebuiltField> rebuilt = rebuild.rebuild(docId, names, progress::scanned);
+                        List<ReconstructedField> result = new ArrayList<>(rebuilt.size());
+                        for (int i = 0; i < rebuilt.size(); i++) {
+                            result.add(reconstructedField(rebuilt.get(i), fields.get(i)));
+                        }
+                        return new ReconstructResult(
+                                List.copyOf(result),
+                                Duration.ofNanos(System.nanoTime() - start).toMillis());
+                    } catch (IOException e) {
+                        throw notRebuilt(docId, e);
+                    }
+                }));
+    }
+
+    /** Whether a field has postings or points to rebuild. */
+    private static boolean rebuildable(RuntimeIndex.Field field) {
+        return field.indexOptions() != RuntimeIndex.IndexOptions.NONE || field.pointDimensionCount() > 0;
+    }
+
+    private static ReconstructedField reconstructedField(Rebuild.RebuiltField rebuilt, RuntimeIndex.Field field) {
+        return new ReconstructedField(
+                rebuilt.field(),
+                indexOptions(rebuilt.indexOptions()),
+                switch (rebuilt.source()) {
+                    case TERM_VECTOR -> ReconstructSource.TERM_VECTOR;
+                    case POSTINGS -> ReconstructSource.POSTINGS;
+                },
+                rebuilt.terms().stream().map(RuntimeResults::termVectorTerm).toList(),
+                rebuilt.points().stream()
+                        .map(point -> PointMapper.pointValue(point, field.pointNumBytes()))
+                        .toList());
+    }
+
+    private static RpcException notRebuilt(int docId, IOException e) {
+        return new RpcException(
+                ErrorCode.INDEX_NOT_READABLE,
+                "Cannot rebuild the terms and points of document " + docId + ": " + e.getMessage(),
+                e);
     }
 
     private static Explanation explanation(Search.Explanation explanation) {
