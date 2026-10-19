@@ -50,6 +50,9 @@ public interface RuntimeIndex extends Closeable {
     /** The rebuild of a document's terms and points (ADR 0059). */
     Optional<Rebuild> rebuild();
 
+    /** The highlighter of query matches in stored text (ADR 0063). */
+    Optional<Highlight> highlight();
+
     /**
      * Opens the latest commit of each directory again if it differs from the opened one (ADR 0060).
      * The new index shares the directories, the readers of the directories that didn't change, and the

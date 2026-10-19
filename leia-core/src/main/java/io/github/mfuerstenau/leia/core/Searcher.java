@@ -202,7 +202,8 @@ final class Searcher {
             DocumentReader.StoredValues stored = new DocumentReader.StoredValues(
                     name -> field.map(name::equals).orElse(true));
             reader.storedFields().document(docId, stored);
-            DocumentHighlight highlight = Highlights.document(searcher, built, spec, docId, stored.values, maxSpans);
+            DocumentHighlight highlight =
+                    Highlights.document(Highlights.lucene(searcher, built, spec), docId, stored.values, maxSpans);
             cancellation.check();
             return highlight;
         } catch (ExitableDirectoryReader.ExitingReaderException e) {
@@ -263,10 +264,10 @@ final class Searcher {
         if (highlighting.isPresent()) {
             int[] docIds =
                     Arrays.stream(page).mapToInt(scoreDoc -> scoreDoc.doc).toArray();
+            Highlighting given = highlighting.get();
             highlights = Highlights.passages(
-                    highlighting.get().searcher(),
-                    highlighting.get().query(),
-                    highlighting.get().spec(),
+                    Highlights.lucene(given.searcher(), given.query(), given.spec()),
+                    given.spec().maxPassages(),
                     docIds,
                     stored);
         }

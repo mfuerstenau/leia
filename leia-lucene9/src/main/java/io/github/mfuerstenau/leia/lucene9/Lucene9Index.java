@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.lucene9;
 
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.Documents;
+import io.github.mfuerstenau.leia.runtime.Highlight;
 import io.github.mfuerstenau.leia.runtime.Knn;
 import io.github.mfuerstenau.leia.runtime.Points;
 import io.github.mfuerstenau.leia.runtime.Rebuild;
@@ -198,6 +199,11 @@ final class Lucene9Index implements RuntimeIndex, Documents, Terms, Search, Knn 
     @Override
     public Optional<Rebuild> rebuild() {
         return Optional.of(new Lucene9Rebuild(reader));
+    }
+
+    @Override
+    public Optional<Highlight> highlight() {
+        return Optional.of(new Lucene9Highlight(reader));
     }
 
     /**
@@ -903,7 +909,7 @@ final class Lucene9Index implements RuntimeIndex, Documents, Terms, Search, Knn 
     }
 
     /** The Lucene query of {@code parsed}. */
-    private static Query query(ParsedQuery parsed) {
+    static Query query(ParsedQuery parsed) {
         if (!(parsed instanceof Lucene9Query lucene9)) {
             throw new IllegalArgumentException("Not a query of this index: " + parsed);
         }

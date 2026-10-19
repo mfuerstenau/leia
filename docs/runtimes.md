@@ -36,7 +36,7 @@ The first index of a path decides which Lucene opens it, by the major in its new
 | `CLASSIC_SEARCH` | ✓ | ✓ | ✓ | ✓⁴ | ✓ |
 | `TERM_SEARCH` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `EXPLAIN` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `HIGHLIGHT` | – | – | – | – | ✓ |
+| `HIGHLIGHT` | – | – | – | ✓ | ✓ |
 | `STORED_SCAN` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `CHECK_INDEX` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `CHECK_LEVELS` | – | ✓ | ✓ | ✓ | ✓ |
@@ -89,3 +89,5 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 | Search analyzers | 6 of lucene-core | 41 of analyzers-common | 42 (+ Bengali) | 47 (+ Estonian, Nepali, Serbian, Tamil, Telugu) | every analyzer of `startSearch`, custom ones included |
 | Unmapping | never (no `sun.misc.Cleaner`) | only with `-Dsun.misc.unsafe.memory.access=allow` | as 5.5.5 | memory segments | memory segments |
 | KNN search cancellation | – | – | – | through the searcher's `QueryTimeout` | through the searcher's `QueryTimeout` |
+| Highlight (ADR 0063) | – | – (no `UnifiedHighlighter`) | – (its `UnifiedHighlighter` differs; not yet) | ✓, by analysis with its own search analyzers only | ✓, with every analyzer of `startSearch` |
+| Highlight cancellation (ADR 0063) | – | – | – | before each field of each document | through `ExitableDirectoryReader` |

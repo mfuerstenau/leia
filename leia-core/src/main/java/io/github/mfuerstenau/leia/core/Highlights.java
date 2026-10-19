@@ -7,6 +7,8 @@ import io.github.mfuerstenau.leia.core.SearchResults.FieldHighlight;
 import io.github.mfuerstenau.leia.core.SearchResults.Passage;
 import io.github.mfuerstenau.leia.core.StoredScan.Span;
 import io.github.mfuerstenau.leia.core.StoredScan.Utf8Offsets;
+import io.github.mfuerstenau.leia.core.TextHighlighter.FoundPassage;
+import io.github.mfuerstenau.leia.core.TextHighlighter.FoundText;
 import java.io.IOException;
 import java.text.BreakIterator;
 import java.util.ArrayList;
@@ -17,6 +19,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 import org.apache.lucene.index.LeafReader;
@@ -42,10 +45,13 @@ import org.apache.lucene.search.uhighlight.WholeBreakIterator;
  * values are highlighted, so the n-th text value is mapped back to its index among all the field's
  * stored values.
  *
+ * <p>Finding the passages is a {@link TextHighlighter}'s work: Lucene 10's from {@link #lucene}, or a
+ * runtime's (ADR 0063). The rest uses only the JDK.
+ *
  * <p>A field with term vectors but without offsets in them can't give the highlighter offsets. It
  * is then analyzed again instead, and says so by its offset source.
  */
-final class Highlights {
+public final class Highlights {
 
     /** The most characters of a passage's text. */
     static final int MAX_PASSAGE_CHARS = 300;
@@ -54,10 +60,10 @@ final class Highlights {
     static final int PASSAGE_BEFORE = 60;
 
     /** How many characters of a field the passages of a hit are found in. */
-    static final int MAX_HIT_CHARS = 100_000;
+    public static final int MAX_HIT_CHARS = 100_000;
 
     /** How many characters of a field the matches of one document are found in. */
-    static final int MAX_DOCUMENT_CHARS = 1 << 20;
+    public static final int MAX_DOCUMENT_CHARS = 1 << 20;
 
     /** The highlighter's separator between the values of a field. */
     private static final char SEPARATOR = 0;
@@ -67,16 +73,13 @@ final class Highlights {
     /**
      * The best passages of each hit, per field, in the order of each hit's {@code stored} fields.
      *
-     * @param searcher the searcher that found the hits
+     * @param highlighter finds the passages of the search's query
+     * @param maxPassages the most passages per field and hit
      * @param docIds the hits' document ids
      * @param stored per hit, its stored values by field: the fields to highlight
      */
-    static List<List<FieldHighlight>> passages(
-            IndexSearcher searcher,
-            Query query,
-            HighlightSpec spec,
-            int[] docIds,
-            List<Map<String, List<StoredValue>>> stored)
+    public static List<List<FieldHighlight>> passages(
+            TextHighlighter highlighter, int maxPassages, int[] docIds, List<Map<String, List<StoredValue>>> stored)
             throws IOException {
         Set<String> fields = new LinkedHashSet<>();
         for (Map<String, List<StoredValue>> values : stored) {
@@ -93,18 +96,20 @@ final class Highlights {
             }
             return List.copyOf(highlights);
         }
-        Highlighter highlighter = new Highlighter(
-                builder(searcher, spec, MAX_HIT_CHARS, () -> BreakIterator.getSentenceInstance(Locale.ROOT)));
-        Map<String, Object[]> byField =
-                highlighter.highlight(fields.toArray(String[]::new), query, docIds, spec.maxPassages());
+        int[] max = new int[fields.size()];
+        Arrays.fill(max, maxPassages);
+        Map<String, List<Optional<FoundText>>> byField = highlighter
+                .highlight(List.copyOf(fields), docIds, max, TextHighlighter.Mode.PASSAGES)
+                .found();
         for (int i = 0; i < docIds.length; i++) {
             List<FieldHighlight> hit = new ArrayList<>();
             for (Map.Entry<String, List<StoredValue>> entry : stored.get(i).entrySet()) {
-                Object[] perDoc = byField.get(entry.getKey());
-                if (perDoc != null && perDoc[i] instanceof Raw raw) {
-                    List<Passage> passages = passages(raw, textIndexes(entry.getValue()));
+                List<Optional<FoundText>> perDoc = byField.get(entry.getKey());
+                if (perDoc != null && perDoc.get(i).isPresent()) {
+                    FoundText found = perDoc.get(i).get();
+                    List<Passage> passages = passages(found, textIndexes(entry.getValue()));
                     if (!passages.isEmpty()) {
-                        hit.add(new FieldHighlight(entry.getKey(), raw.source(), passages));
+                        hit.add(new FieldHighlight(entry.getKey(), found.source(), passages));
                     }
                 }
             }
@@ -117,15 +122,11 @@ final class Highlights {
      * Every match in the text values of each field of {@code stored} of a document, up to {@code
      * maxSpans} per value. Fields without a text value are left out.
      *
+     * @param highlighter finds the matches of the query
      * @param stored the document's stored values by field, in stored order: the fields to highlight
      */
-    static DocumentHighlight document(
-            IndexSearcher searcher,
-            Query query,
-            HighlightSpec spec,
-            int docId,
-            Map<String, List<StoredValue>> stored,
-            int maxSpans)
+    public static DocumentHighlight document(
+            TextHighlighter highlighter, int docId, Map<String, List<StoredValue>> stored, int maxSpans)
             throws IOException {
         List<String> fields = new ArrayList<>();
         List<List<Integer>> textIndexes = new ArrayList<>();
@@ -139,11 +140,10 @@ final class Highlights {
         if (fields.isEmpty()) {
             return new DocumentHighlight(List.of());
         }
-        Highlighter highlighter = new Highlighter(builder(searcher, spec, MAX_DOCUMENT_CHARS, WholeBreakIterator::new));
         // One passage per value: the whole value.
         int[] maxPassages = textIndexes.stream().mapToInt(List::size).toArray();
-        Map<String, Object[]> byField =
-                highlighter.highlight(fields.toArray(String[]::new), query, new int[] {docId}, maxPassages);
+        TextHighlighter.Highlighted highlighted =
+                highlighter.highlight(List.copyOf(fields), new int[] {docId}, maxPassages, TextHighlighter.Mode.VALUES);
         List<FieldMatches> matches = new ArrayList<>(fields.size());
         for (int f = 0; f < fields.size(); f++) {
             String field = fields.get(f);
@@ -153,11 +153,13 @@ final class Highlights {
             for (int index : indexes) {
                 chars += ((StoredValue.Text) values.get(index)).value().length();
             }
-            OffsetSource source = highlighter.source(field);
+            OffsetSource source = highlighted.sources().getOrDefault(field, OffsetSource.NONE);
             List<ValueHighlight> valueHighlights = List.of();
-            if (byField.get(field)[0] instanceof Raw raw) {
-                source = raw.source();
-                valueHighlights = valueHighlights(raw, indexes, maxSpans);
+            List<Optional<FoundText>> perDoc = highlighted.found().get(field);
+            if (perDoc != null && perDoc.getFirst().isPresent()) {
+                FoundText found = perDoc.getFirst().get();
+                source = found.source();
+                valueHighlights = valueHighlights(found, indexes, maxSpans);
             }
             matches.add(new FieldMatches(field, source, valueHighlights, chars > MAX_DOCUMENT_CHARS));
         }
@@ -165,14 +167,14 @@ final class Highlights {
     }
 
     /** Every match in each value of a field, up to {@code maxSpans} per value, with UTF-8 offsets. */
-    private static List<ValueHighlight> valueHighlights(Raw raw, List<Integer> textIndexes, int maxSpans) {
+    private static List<ValueHighlight> valueHighlights(FoundText raw, List<Integer> textIndexes, int maxSpans) {
         List<ValueHighlight> valueHighlights = new ArrayList<>();
-        for (RawPassage passage : raw.passages()) {
+        for (FoundPassage passage : raw.passages()) {
             Value value = Value.of(raw.content(), passage.start());
             if (value.ordinal() >= textIndexes.size()) {
                 continue;
             }
-            List<int[]> matches = passage.matches(value.start(), value.end());
+            List<int[]> matches = matches(passage, value.start(), value.end());
             if (matches.isEmpty()) {
                 continue;
             }
@@ -188,15 +190,15 @@ final class Highlights {
     }
 
     /** The passages of a field of a hit, cut around their first match, with UTF-8 offsets. */
-    private static List<Passage> passages(Raw raw, List<Integer> textIndexes) {
+    private static List<Passage> passages(FoundText raw, List<Integer> textIndexes) {
         String content = raw.content();
         List<Passage> passages = new ArrayList<>(raw.passages().size());
-        for (RawPassage passage : raw.passages()) {
+        for (FoundPassage passage : raw.passages()) {
             Value value = Value.of(content, passage.start());
             if (value.ordinal() >= textIndexes.size()) {
                 continue;
             }
-            List<int[]> matches = passage.matches(value.start(), value.end());
+            List<int[]> matches = matches(passage, value.start(), value.end());
             if (matches.isEmpty()) {
                 continue;
             }
@@ -252,21 +254,6 @@ final class Highlights {
         return indexes;
     }
 
-    private static UnifiedHighlighter.Builder builder(
-            IndexSearcher searcher, HighlightSpec spec, int maxLength, Supplier<BreakIterator> breakIterator) {
-        UnifiedHighlighter.Builder builder = UnifiedHighlighter.builder(searcher, spec.analyzer())
-                .withMaxLength(maxLength)
-                .withBreakIterator(breakIterator)
-                .withFormatter(new CopyingFormatter())
-                .withMaxNoHighlightPassages(0);
-        if (!spec.requireFieldMatch()) {
-            // Weight matches run the whole query against one field's text, so a clause on another
-            // field would make the query fail there: the query's terms are highlighted instead.
-            builder.withFieldMatcher(_ -> true).withWeightMatches(false);
-        }
-        return builder;
-    }
-
     private static OffsetSource of(UnifiedHighlighter.OffsetSource source) {
         return switch (source) {
             case POSTINGS -> OffsetSource.POSTINGS;
@@ -297,45 +284,85 @@ final class Highlights {
         }
     }
 
-    /** A passage as the highlighter found it, in UTF-16 positions into the field's content. */
-    private record RawPassage(int start, int end, float score, int[] matchStarts, int[] matchEnds) {
-
-        /** The matches inside {@code from} to {@code to}, in order, overlapping ones merged. */
-        List<int[]> matches(int from, int to) {
-            List<int[]> matches = new ArrayList<>(matchStarts.length);
-            for (int i = 0; i < matchStarts.length; i++) {
-                int start = Math.max(matchStarts[i], from);
-                int end = Math.min(matchEnds[i], to);
-                if (start < end) {
-                    matches.add(new int[] {start, end});
-                }
+    /** The matches of {@code passage} inside {@code from} to {@code to}, in order, overlapping ones merged. */
+    private static List<int[]> matches(FoundPassage passage, int from, int to) {
+        int[] matchStarts = passage.matchStarts();
+        int[] matchEnds = passage.matchEnds();
+        List<int[]> matches = new ArrayList<>(matchStarts.length);
+        for (int i = 0; i < matchStarts.length; i++) {
+            int start = Math.max(matchStarts[i], from);
+            int end = Math.min(matchEnds[i], to);
+            if (start < end) {
+                matches.add(new int[] {start, end});
             }
-            matches.sort(Comparator.comparingInt(match -> match[0]));
-            List<int[]> merged = new ArrayList<>(matches.size());
-            for (int[] match : matches) {
-                int[] previous = merged.isEmpty() ? null : merged.getLast();
-                if (previous != null && match[0] < previous[1]) {
-                    previous[1] = Math.max(previous[1], match[1]);
-                } else {
-                    merged.add(match);
-                }
-            }
-            return merged;
         }
+        matches.sort(Comparator.comparingInt(match -> match[0]));
+        List<int[]> merged = new ArrayList<>(matches.size());
+        for (int[] match : matches) {
+            int[] previous = merged.isEmpty() ? null : merged.getLast();
+            if (previous != null && match[0] < previous[1]) {
+                previous[1] = Math.max(previous[1], match[1]);
+            } else {
+                merged.add(match);
+            }
+        }
+        return merged;
     }
 
-    /** What the highlighter found in one field of one document. */
-    private record Raw(OffsetSource source, String content, List<RawPassage> passages) {}
+    /**
+     * Lucene 10's {@link UnifiedHighlighter} for {@code query} on {@code searcher}, with the analyzer
+     * and field matching of {@code spec}.
+     *
+     * @param query the query as built, not rewritten: the highlighter handles multi-term queries itself
+     */
+    static TextHighlighter lucene(IndexSearcher searcher, Query query, HighlightSpec spec) {
+        return (fields, docIds, maxPassages, mode) -> {
+            Highlighter highlighter = new Highlighter(
+                    switch (mode) {
+                        case PASSAGES ->
+                            builder(
+                                    searcher,
+                                    spec,
+                                    MAX_HIT_CHARS,
+                                    () -> BreakIterator.getSentenceInstance(Locale.ROOT));
+                        case VALUES -> builder(searcher, spec, MAX_DOCUMENT_CHARS, WholeBreakIterator::new);
+                    });
+            Map<String, Object[]> byField =
+                    highlighter.highlight(fields.toArray(String[]::new), query, docIds, maxPassages);
+            Map<String, List<Optional<FoundText>>> found = new HashMap<>();
+            byField.forEach((field, perDoc) -> found.put(
+                    field,
+                    Arrays.stream(perDoc)
+                            .map(raw -> Optional.ofNullable((FoundText) raw))
+                            .toList()));
+            return new TextHighlighter.Highlighted(Map.copyOf(highlighter.sources), Map.copyOf(found));
+        };
+    }
+
+    private static UnifiedHighlighter.Builder builder(
+            IndexSearcher searcher, HighlightSpec spec, int maxLength, Supplier<BreakIterator> breakIterator) {
+        UnifiedHighlighter.Builder builder = UnifiedHighlighter.builder(searcher, spec.analyzer())
+                .withMaxLength(maxLength)
+                .withBreakIterator(breakIterator)
+                .withFormatter(new CopyingFormatter())
+                .withMaxNoHighlightPassages(0);
+        if (!spec.requireFieldMatch()) {
+            // Weight matches run the whole query against one field's text, so a clause on another
+            // field would make the query fail there: the query's terms are highlighted instead.
+            builder.withFieldMatcher(_ -> true).withWeightMatches(false);
+        }
+        return builder;
+    }
 
     /** Keeps the highlighter's passages instead of formatting them. */
     private static final class CopyingFormatter extends PassageFormatter {
 
         @Override
         public Object format(org.apache.lucene.search.uhighlight.Passage[] passages, String content) {
-            List<RawPassage> copies = new ArrayList<>(passages.length);
+            List<FoundPassage> copies = new ArrayList<>(passages.length);
             for (org.apache.lucene.search.uhighlight.Passage passage : passages) {
                 int count = passage.getNumMatches();
-                copies.add(new RawPassage(
+                copies.add(new FoundPassage(
                         passage.getStartOffset(),
                         passage.getEndOffset(),
                         passage.getScore(),
@@ -357,25 +384,12 @@ final class Highlights {
         }
 
         /**
-         * Per field, what was found in each document of {@code docIds}: a {@link Raw}, or {@code null}
-         * without a match.
+         * Per field, what was found in each document of {@code docIds}: a {@link FoundText}, or
+         * {@code null} without a match.
          */
-        Map<String, Object[]> highlight(String[] fields, Query query, int[] docIds, int maxPassages)
-                throws IOException {
-            int[] max = new int[fields.length];
-            Arrays.fill(max, maxPassages);
-            return highlight(fields, query, docIds, max);
-        }
-
-        /** As {@link #highlight(String[], Query, int[], int)}, with the most passages per field. */
         Map<String, Object[]> highlight(String[] fields, Query query, int[] docIds, int[] maxPassages)
                 throws IOException {
             return highlightFieldsAsObjects(fields, query, docIds, maxPassages);
-        }
-
-        /** Where the offsets of {@code field} come from, as chosen for the last query. */
-        io.github.mfuerstenau.leia.core.OffsetSource source(String field) {
-            return sources.getOrDefault(field, io.github.mfuerstenau.leia.core.OffsetSource.NONE);
         }
 
         @Override
@@ -397,7 +411,7 @@ final class Highlights {
 
     /**
      * Highlights a field, and analyzes the value again where its term vector has no offsets. Its
-     * result is a {@link Raw} that names the offset source used.
+     * result is a {@link FoundText} that names the offset source used.
      */
     private static final class CheckedFieldHighlighter extends FieldHighlighter {
 
@@ -441,7 +455,7 @@ final class Highlights {
                                 passageSortComparator)
                         .highlightFieldForDoc(reader, docId, content);
             }
-            return found == null ? null : new Raw(of(source), content, (List<RawPassage>) found);
+            return found == null ? null : new FoundText(of(source), content, (List<FoundPassage>) found);
         }
     }
 }

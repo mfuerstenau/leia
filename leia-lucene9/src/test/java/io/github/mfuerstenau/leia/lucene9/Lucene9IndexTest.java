@@ -9,6 +9,7 @@ import io.github.mfuerstenau.leia.runtime.Check;
 import io.github.mfuerstenau.leia.runtime.Commits;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.Documents;
+import io.github.mfuerstenau.leia.runtime.Highlight;
 import io.github.mfuerstenau.leia.runtime.Knn;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.runtime.Points;
@@ -37,6 +38,16 @@ import java.util.TreeMap;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.document.FieldType;
+import org.apache.lucene.document.TextField;
+import org.apache.lucene.index.IndexOptions;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.FSDirectory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -638,6 +649,160 @@ class Lucene9IndexTest {
                     }))
                     .isSameAs(stop);
         }
+    }
+
+    /** Sentences in the first 100 000 characters, with the query's terms of every field. */
+    private static final Highlight.Options PASSAGES =
+            new Highlight.Options(false, named("StandardAnalyzer"), false, 100_000);
+
+    /** Highlights {@code field} of {@code docIds} with {@code options}, one field and every passage. */
+    private static Highlight.Highlighted highlight(
+            RuntimeIndex index,
+            String expression,
+            Search.ParserOptions parser,
+            Highlight.Options options,
+            int... docIds)
+            throws Exception {
+        Search.ParsedQuery query = index.search().orElseThrow().parse(expression, parser, named("StandardAnalyzer"));
+        return index.highlight()
+                .orElseThrow()
+                .highlight(query, options, List.of(parser.defaultField()), docIds, new int[] {10}, _ -> {});
+    }
+
+    /** The matched text of each passage. */
+    private static List<String> marked(Highlight.FieldText text) {
+        List<String> marked = new ArrayList<>();
+        for (Highlight.Passage passage : text.passages()) {
+            for (int i = 0; i < passage.matchStarts().length; i++) {
+                marked.add(text.content().substring(passage.matchStarts()[i], passage.matchEnds()[i]));
+            }
+        }
+        return marked;
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene8", "lucene8to9"})
+    void highlightsPassages(String name) throws Exception {
+        try (RuntimeIndex index = open(name)) {
+            Search search = index.search().orElseThrow();
+            int[] hits = search
+                    .search(search.parse("beta", BODY, named("StandardAnalyzer")), 0, 10, Optional.empty(), _ -> {})
+                    .hits()
+                    .stream()
+                    .mapToInt(Search.Hit::docId)
+                    .toArray();
+            assertThat(hits).isNotEmpty();
+
+            Highlight.Highlighted highlighted = highlight(index, "beta", BODY, PASSAGES, hits);
+            assertThat(highlighted.sources()).containsEntry("body", Highlight.OffsetSource.POSTINGS);
+            assertThat(highlighted.found().get("body"))
+                    .hasSize(hits.length)
+                    .allSatisfy(found -> assertThat(found).hasValueSatisfying(text -> {
+                        assertThat(text.source()).isEqualTo(Highlight.OffsetSource.POSTINGS);
+                        assertThat(text.content()).startsWith("alpha|a");
+                        assertThat(text.passages())
+                                .singleElement()
+                                .satisfies(
+                                        passage -> assertThat(passage.score()).isPositive());
+                        assertThat(marked(text)).containsExactly("beta");
+                    }));
+        }
+    }
+
+    @Test
+    void highlightsByAnalysis() throws Exception {
+        try (RuntimeIndex index = open("lucene8to9")) {
+            // Documents 8 to 10: north, north east, east.
+            Highlight.Highlighted highlighted = highlight(index, "north", TITLE, PASSAGES, 8, 9, 10);
+            assertThat(highlighted.sources()).containsEntry("title", Highlight.OffsetSource.ANALYSIS);
+            List<Optional<Highlight.FieldText>> found = highlighted.found().get("title");
+            assertThat(found).hasSize(3);
+            assertThat(found.get(0)).hasValueSatisfying(text -> {
+                assertThat(text.source()).isEqualTo(Highlight.OffsetSource.ANALYSIS);
+                assertThat(text.content()).isEqualTo("north");
+                assertThat(marked(text)).containsExactly("north");
+            });
+            assertThat(found.get(1))
+                    .hasValueSatisfying(text -> assertThat(marked(text)).containsExactly("north"));
+            assertThat(found.get(2)).isEmpty();
+        }
+    }
+
+    @Test
+    void highlightsWholeValues(@TempDir Path dir) throws Exception {
+        writeIndex(dir, TextField.TYPE_STORED, "a fox. a cat.", "the fox again. no.");
+        try (RuntimeIndex index = new Lucene9Runtime().open(List.of(dir), DirectoryKind.FS)) {
+            Search.ParserOptions text = new Search.ParserOptions("text", false, false, 0, 0, true, false);
+            Search.ParsedQuery query = index.search().orElseThrow().parse("fox", text, named("StandardAnalyzer"));
+            Highlight.FieldText found = index.highlight()
+                    .orElseThrow()
+                    .highlight(
+                            query,
+                            new Highlight.Options(true, named("StandardAnalyzer"), true, 1 << 20),
+                            List.of("text"),
+                            new int[] {0},
+                            new int[] {2},
+                            _ -> {})
+                    .found()
+                    .get("text")
+                    .getFirst()
+                    .orElseThrow();
+            assertThat(found.content()).isEqualTo("a fox. a cat.\0the fox again. no.");
+            // One passage per value, not per sentence.
+            assertThat(found.passages())
+                    .extracting(Highlight.Passage::start, Highlight.Passage::end)
+                    .containsExactlyInAnyOrder(tuple(0, 13), tuple(14, 32));
+            assertThat(marked(found)).containsExactlyInAnyOrder("fox", "fox");
+        }
+        assertThat(dir.resolve("write.lock")).doesNotExist();
+    }
+
+    @Test
+    void fallsBackToAnalysisOnTermVectorsWithoutOffsets(@TempDir Path dir) throws Exception {
+        FieldType bare = new FieldType(TextField.TYPE_STORED);
+        bare.setIndexOptions(IndexOptions.DOCS_AND_FREQS_AND_POSITIONS);
+        bare.setStoreTermVectors(true);
+        bare.setStoreTermVectorPositions(true);
+        bare.freeze();
+        writeIndex(dir, bare, "A cow moos.");
+        try (RuntimeIndex index = new Lucene9Runtime().open(List.of(dir), DirectoryKind.FS)) {
+            Search.ParserOptions text = new Search.ParserOptions("text", false, false, 0, 0, true, false);
+            Highlight.Highlighted highlighted = highlight(index, "cow", text, PASSAGES, 0);
+            // The term vector was chosen, but has no offsets: the value is analyzed again.
+            assertThat(highlighted.sources()).containsEntry("text", Highlight.OffsetSource.TERM_VECTORS);
+            assertThat(highlighted.found().get("text").getFirst()).hasValueSatisfying(found -> {
+                assertThat(found.source()).isEqualTo(Highlight.OffsetSource.ANALYSIS);
+                assertThat(marked(found)).containsExactly("cow");
+            });
+        }
+    }
+
+    @Test
+    void stopsAHighlightWhenProgressThrows() throws Exception {
+        try (RuntimeIndex index = open("lucene8")) {
+            Search.ParsedQuery query = index.search().orElseThrow().parse("beta", BODY, named("StandardAnalyzer"));
+            CancellationException stop = new CancellationException("stop");
+            assertThatThrownBy(() -> index.highlight()
+                            .orElseThrow()
+                            .highlight(query, PASSAGES, List.of("body"), new int[] {0, 1}, new int[] {1}, _ -> {
+                                throw stop;
+                            }))
+                    .isSameAs(stop);
+        }
+    }
+
+    /** Writes one document with the values of {@code text} in {@code dir}, with Lucene 9.12. */
+    private static void writeIndex(Path dir, FieldType type, String... values) throws IOException {
+        try (Directory directory = FSDirectory.open(dir);
+                IndexWriter writer = new IndexWriter(directory, new IndexWriterConfig(new StandardAnalyzer()))) {
+            Document doc = new Document();
+            for (String value : values) {
+                doc.add(new Field("text", value, type));
+            }
+            writer.addDocument(doc);
+        }
+        // Gone once the writer is closed: the test opens the index as leia does.
+        Files.deleteIfExists(dir.resolve("write.lock"));
     }
 
     /**

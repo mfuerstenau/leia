@@ -16,6 +16,7 @@ import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
+import io.github.mfuerstenau.leia.server.runtime.RuntimeHighlights;
 import jakarta.inject.Inject;
 import java.io.IOException;
 import java.util.List;
@@ -26,7 +27,8 @@ import org.apache.lucene.search.Query;
 /**
  * {@code startHighlight}: checks the params and parses the query at once, then finds the query's
  * matches in one field, or all stored fields, of a document of the {@link CurrentIndex} in a job
- * ({@link GetHighlightHandler}, ADR 0042, ADR 0043).
+ * ({@link GetHighlightHandler}, ADR 0042, ADR 0043), or of an index a runtime opened ({@link
+ * RuntimeHighlights}, ADR 0063).
  */
 public final class StartHighlightHandler implements MethodHandler<StartHighlightParams, JobStarted> {
 
@@ -46,6 +48,9 @@ public final class StartHighlightHandler implements MethodHandler<StartHighlight
 
     @Override
     public JobStarted handle(StartHighlightParams params) throws RpcException {
+        if (currentIndex.runtime().isPresent()) {
+            return RuntimeHighlights.startHighlight(currentIndex.runtime().get(), params, jobs);
+        }
         ReadOnlyIndex index = currentIndex.readable();
         int docId = params.docId();
         Optional<String> field = params.field();

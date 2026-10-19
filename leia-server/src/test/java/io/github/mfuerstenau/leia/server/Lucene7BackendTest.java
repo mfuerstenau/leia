@@ -1,5 +1,6 @@
 package io.github.mfuerstenau.leia.server;
 
+import static io.github.mfuerstenau.leia.server.RealBackend.STANDARD;
 import static io.github.mfuerstenau.leia.server.RealBackend.testIndex;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.tuple;
@@ -31,6 +32,8 @@ import io.github.mfuerstenau.leia.protocol.points.LeafPoint;
 import io.github.mfuerstenau.leia.protocol.points.PointCell;
 import io.github.mfuerstenau.leia.protocol.points.PointSegment;
 import io.github.mfuerstenau.leia.protocol.points.PointValue;
+import io.github.mfuerstenau.leia.protocol.search.HighlightOptions;
+import io.github.mfuerstenau.leia.protocol.search.StartHighlightParams;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -136,6 +139,20 @@ class Lucene7BackendTest {
         open(testIndex(name));
 
         RuntimeFilters.filtersTheDocuments(backend, true);
+    }
+
+    /** 7.7 doesn't highlight (ADR 0063). */
+    @Test
+    void doesNotHighlight() throws Exception {
+        open(testIndex("lucene7"));
+        backend.fails(
+                Methods.START_HIGHLIGHT,
+                new StartHighlightParams(
+                        RealBackend.classic("body:beta"),
+                        0,
+                        Optional.empty(),
+                        new HighlightOptions(1, false, STANDARD)),
+                ErrorCode.NOT_SUPPORTED);
     }
 
     @ParameterizedTest

@@ -50,6 +50,7 @@ lucene9-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene
 lucene9-backward-codecs = { module = "org.apache.lucene:lucene-backward-codecs", version.ref = "lucene9" }
 lucene9-queryparser = { module = "org.apache.lucene:lucene-queryparser", version.ref = "lucene9" }
 lucene9-analysis-common = { module = "org.apache.lucene:lucene-analysis-common", version.ref = "lucene9" }
+lucene9-highlighter = { module = "org.apache.lucene:lucene-highlighter", version.ref = "lucene9" }
 lucene8-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene8" }
 lucene8-analyzers-common = { module = "org.apache.lucene:lucene-analyzers-common", version.ref = "lucene8" }
 lucene3-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene3" }

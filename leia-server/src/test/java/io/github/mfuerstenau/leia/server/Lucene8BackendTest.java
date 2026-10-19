@@ -114,6 +114,7 @@ class Lucene8BackendTest {
                 Feature.TERM_SEARCH,
                 Feature.FILTER,
                 Feature.EXPLAIN,
+                Feature.HIGHLIGHT,
                 Feature.RECONSTRUCT,
                 Feature.POINTS,
                 Feature.COMMITS,
@@ -192,6 +193,20 @@ class Lucene8BackendTest {
 
         RuntimeAutoStopWords.findsTheWords(backend, "body");
         RuntimeAutoStopWords.searchesWithoutTheWords(backend, opened.maxDoc().orElseThrow(), "body", "beta");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene8", "lucene8to9"})
+    void highlightsTheMatches(String name) throws Exception {
+        OpenIndexResult opened = open(testIndex(name));
+        RuntimeHighlights.highlightsTheMatches(backend, opened.maxDoc().orElseThrow());
+    }
+
+    @Test
+    void marksNothingForANearestVector() throws Exception {
+        open(testIndex("lucene8to9"));
+        RuntimeHighlights.marksNothingWithoutTerms(
+                backend, knn("embedding", NORTH, OptionalInt.of(2), Optional.empty()), 8);
     }
 
     @ParameterizedTest

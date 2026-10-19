@@ -11,6 +11,8 @@ dependencies {
     implementation(libs.lucene9.queryparser)
     // The language analyzers for the query parser.
     implementation(libs.lucene9.analysis.common)
+    // The UnifiedHighlighter (ADR 0063); brings lucene-memory along.
+    implementation(libs.lucene9.highlighter)
 }
 
 luceneRuntime {

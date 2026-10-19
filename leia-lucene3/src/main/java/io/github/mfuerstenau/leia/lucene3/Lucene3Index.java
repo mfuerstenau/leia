@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.lucene3;
 
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.Documents;
+import io.github.mfuerstenau.leia.runtime.Highlight;
 import io.github.mfuerstenau.leia.runtime.Knn;
 import io.github.mfuerstenau.leia.runtime.Points;
 import io.github.mfuerstenau.leia.runtime.Rebuild;
@@ -184,6 +185,12 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
     @Override
     public Optional<Rebuild> rebuild() {
         return Optional.of(new Lucene3Rebuild(reader));
+    }
+
+    /** {@inheritDoc} Lucene 3.6 has no {@code UnifiedHighlighter}. */
+    @Override
+    public Optional<Highlight> highlight() {
+        return Optional.empty();
     }
 
     /**

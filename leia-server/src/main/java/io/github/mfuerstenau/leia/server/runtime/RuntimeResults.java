@@ -5,6 +5,7 @@ import io.github.mfuerstenau.leia.core.DocFilter;
 import io.github.mfuerstenau.leia.core.IndexDocument;
 import io.github.mfuerstenau.leia.core.PostingsPage;
 import io.github.mfuerstenau.leia.core.ScanProgress;
+import io.github.mfuerstenau.leia.core.SearchResults.FieldHighlight;
 import io.github.mfuerstenau.leia.core.StoredScan;
 import io.github.mfuerstenau.leia.core.TermExport;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
@@ -64,6 +65,7 @@ import io.github.mfuerstenau.leia.protocol.points.PointCell;
 import io.github.mfuerstenau.leia.protocol.points.PointSegment;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
 import io.github.mfuerstenau.leia.protocol.search.Explanation;
+import io.github.mfuerstenau.leia.protocol.search.HighlightOptions;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.HitField;
 import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
@@ -105,6 +107,7 @@ import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.index.IndexDirectories;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import io.github.mfuerstenau.leia.server.points.PointMapper;
+import io.github.mfuerstenau.leia.server.search.Highlighting;
 import io.github.mfuerstenau.leia.server.search.KnnChecks;
 import io.github.mfuerstenau.leia.server.search.StartStoredScanHandler;
 import io.github.mfuerstenau.leia.server.terms.TermParams;
@@ -144,8 +147,9 @@ public final class RuntimeResults {
      * What works on {@code open}: the statistics, the features of the groups its index has, and the
      * commits and the check if its runtime has them (ADR 0045, ADR 0046, ADR 0048): doc values with
      * the documents and points and KNN vectors if a field has them (ADR 0049), and the check's levels
-     * if the runtime's check takes them. Reopen works on every runtime (ADR 0060), and auto stop
-     * words wherever there are terms (ADR 0061).
+     * if the runtime's check takes them. Reopen works on every runtime (ADR 0060), auto stop words
+     * wherever there are terms (ADR 0061), and highlighting where the runtime highlights and searches
+     * (ADR 0063).
      */
     public static Set<Feature> features(OpenRuntime open) {
         RuntimeIndex index = open.index();
@@ -169,6 +173,9 @@ public final class RuntimeResults {
         }
         if (index.search().isPresent()) {
             features.addAll(List.of(Feature.CLASSIC_SEARCH, Feature.TERM_SEARCH, Feature.FILTER, Feature.EXPLAIN));
+        }
+        if (index.highlight().isPresent() && index.search().isPresent()) {
+            features.add(Feature.HIGHLIGHT);
         }
         if (index.points().isPresent() && index.fields().stream().anyMatch(field -> field.pointDimensionCount() > 0)) {
             features.add(Feature.POINTS);
@@ -822,8 +829,9 @@ public final class RuntimeResults {
     /**
      * {@code startSearch}: a classic query, parsed with the analyzer of the params as the runtime has
      * it ({@link RuntimeAnalyzers}), a term query (ADR 0058), or a KNN query if the runtime reads
-     * vectors (ADR 0049), scored by its default similarity, best score first. Highlighting is left out; another query, sort or
-     * analyzer is not supported.
+     * vectors (ADR 0049), scored by its default similarity, best score first. The hits are highlighted
+     * in the same job if the runtime highlights ({@link RuntimeHighlights}, ADR 0063); otherwise the
+     * highlight options are ignored. Another query, sort or analyzer is not supported.
      */
     public static JobStarted startSearch(OpenRuntime open, StartSearchParams params, Jobs jobs) throws RpcException {
         Search search = open.index().search().orElseThrow(open::notSupported);
@@ -848,15 +856,39 @@ public final class RuntimeResults {
                 checkField(open.index(), field);
             }
         }
+        // Doc values and KNN queries have no terms to highlight.
+        Optional<HighlightOptions> options = params.highlight()
+                .filter(_ -> Highlighting.hasTerms(params.query()))
+                .filter(_ -> open.index().highlight().isPresent());
+        if (options.isPresent()) {
+            Highlighting.checkPassages(options.get());
+        }
         Search.ParsedQuery query = parsedQuery(open, search, params.query());
+        Optional<Search.AnalyzerSpec> analyzer = options.isPresent()
+                ? Optional.of(RuntimeAnalyzers.spec(options.get().analyzer(), open.runtime(), search))
+                : Optional.empty();
         Optional<List<String>> fields = params.fields().map(List::copyOf);
+        int maxDoc = open.index().maxDoc();
         long jobId = jobs.start(
                 "search " + query + " with Lucene " + open.runtime().luceneVersion() + ", hits " + offset + " to "
-                        + (offset + limit),
+                        + (offset + limit) + (options.isPresent() ? ", highlighted" : ""),
                 SearchResults.class,
                 progress -> {
                     try {
-                        return results(search.search(query, offset, limit, fields, progress::scanned));
+                        Search.SearchResults results = search.search(query, offset, limit, fields, progress::scanned);
+                        List<List<FieldHighlight>> highlights = List.of();
+                        if (options.isPresent()) {
+                            // The search is done: the count stays at maxDoc.
+                            highlights = RuntimeHighlights.passages(
+                                    open,
+                                    open.index().highlight().orElseThrow(),
+                                    query,
+                                    options.get(),
+                                    analyzer.orElseThrow(),
+                                    results,
+                                    _ -> progress.scanned(maxDoc));
+                        }
+                        return results(results, highlights);
                     } catch (IOException e) {
                         throw new RpcException(
                                 ErrorCode.INDEX_NOT_READABLE, "Cannot search the index: " + e.getMessage(), e);
@@ -869,8 +901,7 @@ public final class RuntimeResults {
      * {@code query} as the runtime runs it: a classic query parsed by it, a term query (ADR 0058), or
      * a KNN query if it reads vectors. Another query is not supported.
      */
-    private static Search.ParsedQuery parsedQuery(OpenRuntime open, Search search, SearchQuery query)
-            throws RpcException {
+    static Search.ParsedQuery parsedQuery(OpenRuntime open, Search search, SearchQuery query) throws RpcException {
         if (query.classic().isPresent()) {
             return parse(open, search, query.classic().get());
         }
@@ -1346,18 +1377,25 @@ public final class RuntimeResults {
                         && !sort.getFirst().score().get().reverse();
     }
 
-    private static SearchResults results(Search.SearchResults results) {
+    /**
+     * @param highlights per hit, its highlighted fields; empty without highlighting
+     */
+    private static SearchResults results(Search.SearchResults results, List<List<FieldHighlight>> highlights) {
+        List<Hit> hits = new ArrayList<>(results.hits().size());
+        for (int h = 0; h < results.hits().size(); h++) {
+            hits.add(hit(results.hits().get(h), highlights.isEmpty() ? List.of() : highlights.get(h)));
+        }
         return new SearchResults(
                 results.query(),
                 results.rewrittenQuery(),
                 results.totalHits(),
                 TotalHitsRelation.EQUAL_TO,
-                results.hits().stream().map(RuntimeResults::hit).toList(),
+                List.copyOf(hits),
                 results.tookMillis(),
                 Optional.empty());
     }
 
-    private static Hit hit(Search.Hit hit) {
+    private static Hit hit(Search.Hit hit, List<FieldHighlight> highlights) {
         return new Hit(
                 hit.docId(),
                 hit.score(),
@@ -1369,7 +1407,7 @@ public final class RuntimeResults {
                                         .map(value -> storedValue(value, SearchResults.MAX_VALUE_LENGTH))
                                         .toList()))
                         .toList(),
-                List.of());
+                highlights.stream().map(Highlighting::toHighlight).toList());
     }
 
     /** {@code value} as the protocol carries it, cut as {@link GetDocumentHandler#storedValue} cuts. */
@@ -1378,7 +1416,7 @@ public final class RuntimeResults {
     }
 
     /** {@code value} as core has it: a number by its type. */
-    private static IndexDocument.StoredValue coreValue(RuntimeIndex.StoredValue value) {
+    static IndexDocument.StoredValue coreValue(RuntimeIndex.StoredValue value) {
         return switch (value) {
             case RuntimeIndex.StoredValue.Text(String text) -> new IndexDocument.StoredValue.Text(text);
             case RuntimeIndex.StoredValue.Binary(byte[] bytes) ->
@@ -1401,14 +1439,14 @@ public final class RuntimeResults {
         return ByteStrings.bytesValue(new BytesRef(bytes));
     }
 
-    private static void checkDocId(RuntimeIndex index, int docId) throws RpcException {
+    static void checkDocId(RuntimeIndex index, int docId) throws RpcException {
         if (docId < 0 || docId >= index.maxDoc()) {
             throw new RpcException(
                     ErrorCode.DOC_NOT_FOUND, "No document " + docId + " in the index: maxDoc is " + index.maxDoc());
         }
     }
 
-    private static void checkField(RuntimeIndex index, String field) throws RpcException {
+    static void checkField(RuntimeIndex index, String field) throws RpcException {
         if (index.fields().stream().noneMatch(f -> f.name().equals(field))) {
             throw new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + field + "' in the index");
         }

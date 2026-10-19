@@ -19,8 +19,11 @@ import io.github.mfuerstenau.leia.server.analysis.AnalyzerSpecs;
 import java.util.List;
 import org.apache.lucene.analysis.Analyzer;
 
-/** Turns the highlight options of {@code startSearch} and {@code startHighlight} into core's, and back (ADR 0042). */
-final class Highlighting {
+/**
+ * Turns the highlight options of {@code startSearch} and {@code startHighlight} into core's, and back
+ * (ADR 0042), also for a runtime (ADR 0063).
+ */
+public final class Highlighting {
 
     private Highlighting() {}
 
@@ -28,7 +31,7 @@ final class Highlighting {
      * Whether {@code query} has terms to highlight: a doc values or KNN query has none, so it is not
      * highlighted at all.
      */
-    static boolean hasTerms(SearchQuery query) {
+    public static boolean hasTerms(SearchQuery query) {
         return query.docValues().isEmpty() && query.knn().isEmpty();
     }
 
@@ -37,7 +40,7 @@ final class Highlighting {
      *
      * @throws RpcException {@code INVALID_PARAMS} if it is not from 1 to {@link HighlightOptions#MAX_PASSAGES}
      */
-    static void checkPassages(HighlightOptions options) throws RpcException {
+    public static void checkPassages(HighlightOptions options) throws RpcException {
         int maxPassages = options.maxPassages();
         if (maxPassages < 1 || maxPassages > HighlightOptions.MAX_PASSAGES) {
             throw new RpcException(
@@ -61,7 +64,7 @@ final class Highlighting {
         return new HighlightSpec(Math.max(options.maxPassages(), 1), options.requireFieldMatch(), analyzer);
     }
 
-    static HitHighlight toHighlight(FieldHighlight highlight) {
+    public static HitHighlight toHighlight(FieldHighlight highlight) {
         return new HitHighlight(
                 highlight.field(),
                 toSource(highlight.offsetSource()),
@@ -74,7 +77,8 @@ final class Highlighting {
                         .toList());
     }
 
-    static io.github.mfuerstenau.leia.protocol.search.DocumentHighlight toHighlight(DocumentHighlight highlight) {
+    public static io.github.mfuerstenau.leia.protocol.search.DocumentHighlight toHighlight(
+            DocumentHighlight highlight) {
         return new io.github.mfuerstenau.leia.protocol.search.DocumentHighlight(
                 highlight.fields().stream().map(Highlighting::toMatches).toList());
     }

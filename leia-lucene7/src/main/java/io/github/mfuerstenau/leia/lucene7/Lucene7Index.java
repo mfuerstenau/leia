@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.lucene7;
 
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.Documents;
+import io.github.mfuerstenau.leia.runtime.Highlight;
 import io.github.mfuerstenau.leia.runtime.Knn;
 import io.github.mfuerstenau.leia.runtime.Points;
 import io.github.mfuerstenau.leia.runtime.Rebuild;
@@ -190,6 +191,12 @@ final class Lucene7Index implements RuntimeIndex, Documents, Terms, Search {
     @Override
     public Optional<Rebuild> rebuild() {
         return Optional.of(new Lucene7Rebuild(reader));
+    }
+
+    /** {@inheritDoc} Not yet: Lucene 7.7's {@code UnifiedHighlighter} has no builder, and its {@code FieldHighlighter} differs from 9.12's (ADR 0063). */
+    @Override
+    public Optional<Highlight> highlight() {
+        return Optional.empty();
     }
 
     /**
