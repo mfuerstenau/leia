@@ -54,6 +54,7 @@ import java.util.OptionalInt;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -97,6 +98,7 @@ class Lucene8BackendTest {
         assertThat(opened.maxDoc()).hasValue(nine ? 11 : 8);
         List<Feature> features = new ArrayList<>(List.of(
                 Feature.INDEX_STATS,
+                Feature.REOPEN,
                 Feature.DOCUMENTS,
                 Feature.STORED_VALUES,
                 Feature.STORED_SCAN,
@@ -188,6 +190,20 @@ class Lucene8BackendTest {
         OpenIndexResult opened = open(testIndex(name));
 
         RuntimeSearches.searchesATerm(backend, opened.maxDoc().orElseThrow(), "beta", true);
+    }
+
+    @Test
+    void reopensAChangedIndex(@TempDir Path tmp) throws Exception {
+        RuntimeReopens.reopensAChangedIndex(backend, testIndex("lucene8"), tmp.resolve("lucene8"), "segments_2");
+    }
+
+    /** The commit of 9.12 adds the KNN vectors, so the reopen reports them (ADR 0060). */
+    @Test
+    void reopensWithTheFeaturesOfTheNewCommit(@TempDir Path tmp) throws Exception {
+        RuntimeReopens.Reopened reopened = RuntimeReopens.reopensAChangedIndex(
+                backend, testIndex("lucene8to9"), tmp.resolve("lucene8to9"), "segments_3");
+        assertThat(reopened.opened().features()).doesNotContain(Feature.KNN_VECTORS);
+        assertThat(reopened.changed().features()).contains(Feature.KNN_VECTORS);
     }
 
     @ParameterizedTest

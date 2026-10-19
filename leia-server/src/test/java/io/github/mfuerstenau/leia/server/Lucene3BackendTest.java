@@ -107,6 +107,7 @@ class Lucene3BackendTest {
         assertThat(opened.features())
                 .containsExactlyInAnyOrder(
                         Feature.INDEX_STATS,
+                        Feature.REOPEN,
                         Feature.DOCUMENTS,
                         Feature.STORED_VALUES,
                         Feature.STORED_SCAN,
@@ -254,6 +255,11 @@ class Lucene3BackendTest {
         OpenIndexResult opened = open(Path.of(PATH));
 
         RuntimeExplains.explainsAHit(backend, opened.maxDoc().orElseThrow(), true);
+    }
+
+    @Test
+    void reopensAChangedIndex() throws Exception {
+        RuntimeReopens.reopensAChangedIndex(backend, Path.of(PATH), tmp.resolve("copy"), "segments_2");
     }
 
     @Test

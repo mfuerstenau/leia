@@ -121,6 +121,7 @@ class Lucene5BackendTest {
         assertThat(opened.features())
                 .containsExactlyInAnyOrder(
                         Feature.INDEX_STATS,
+                        Feature.REOPEN,
                         Feature.DOCUMENTS,
                         Feature.STORED_VALUES,
                         Feature.STORED_SCAN,
@@ -190,6 +191,12 @@ class Lucene5BackendTest {
         OpenIndexResult opened = open(testIndex(name));
 
         RuntimeSearches.searchesATerm(backend, opened.maxDoc().orElseThrow(), "beta", true);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene4", "lucene5"})
+    void reopensAChangedIndex(String name) throws Exception {
+        RuntimeReopens.reopensAChangedIndex(backend, testIndex(name), tmp.resolve(name), "segments_2");
     }
 
     @ParameterizedTest

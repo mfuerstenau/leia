@@ -1,6 +1,7 @@
 package io.github.mfuerstenau.leia.runtime.support;
 
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex.Skipped;
+import java.io.Closeable;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -50,5 +51,35 @@ public final class IndexParts {
             throw firstFailure;
         }
         return new Opened<>(parts, skipped);
+    }
+
+    /** Closes each of {@code closeables}, then throws the first failure, with the others suppressed. */
+    public static void closeAll(List<? extends Closeable> closeables) throws IOException {
+        IOException failure = null;
+        for (Closeable closeable : closeables) {
+            try {
+                closeable.close();
+            } catch (IOException e) {
+                if (failure == null) {
+                    failure = e;
+                } else {
+                    failure.addSuppressed(e);
+                }
+            }
+        }
+        if (failure != null) {
+            throw failure;
+        }
+    }
+
+    /** Closes each of {@code closeables} after {@code failure}, to which their failures are added. */
+    public static void closeAll(Throwable failure, List<? extends Closeable> closeables) {
+        for (Closeable closeable : closeables) {
+            try {
+                closeable.close();
+            } catch (IOException | RuntimeException e) {
+                failure.addSuppressed(e);
+            }
+        }
     }
 }

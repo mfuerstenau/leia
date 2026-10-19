@@ -1041,7 +1041,7 @@ public final class Session {
             backend.call(Methods.GET_INDEX_STATS, new GetIndexStatsParams()).whenComplete((stats, statsError) -> {
                 if (statsError == null) {
                     reply(runner, app -> {
-                        Optional<Action> next = app.reopened(stats);
+                        Optional<Action> next = app.reopened(stats, result.features());
                         // The backend forgot the filter with the old index: build it again (ADR 0032).
                         app.rebuildFilter().ifPresent(rebuild -> perform(rebuild, runner));
                         return next;

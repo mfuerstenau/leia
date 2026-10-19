@@ -41,7 +41,7 @@ The first index of a path decides which Lucene opens it, by the major in its new
 | `CHECK_INDEX` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `CHECK_LEVELS` | – | ✓ | ✓ | ✓ | ✓ |
 | `EXPORT_TERMS` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `REOPEN` | – | – | – | – | ✓ |
+| `REOPEN` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `AUTO_STOP_WORDS` | – | – | – | – | ✓ |
 
 1. Only if a field has doc values (ADR 0046 §6).

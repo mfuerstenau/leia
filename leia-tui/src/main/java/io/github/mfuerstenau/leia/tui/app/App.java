@@ -428,10 +428,11 @@ public final class App {
 
     /**
      * Shows the reopened index (ADR 0019) where the user was. The backend stopped the jobs of the old
-     * index, and forgot the filter, which {@link #rebuildFilter} builds again. Returns what the shown
-     * screen has to fetch first.
+     * index, and forgot the filter, which {@link #rebuildFilter} builds again. The screens offer what
+     * {@code features} allow: on an index that a runtime reads, a new commit can add fields with doc
+     * values, points or KNN vectors (ADR 0060). Returns what the shown screen has to fetch first.
      */
-    public Optional<Action> reopened(GetIndexStatsResult stats) {
+    public Optional<Action> reopened(GetIndexStatsResult stats, Set<Feature> features) {
         if (overview == null) {
             return opened(stats, List.of());
         }
@@ -449,25 +450,34 @@ public final class App {
             }
             reopened = changed + " of " + indexes.size() + " indexes";
         }
-        boolean sameFields = schema(overview.stats().fields()).equals(schema(stats.fields()));
-        analysis.indexChanged(indexedFields(stats), autoStopWordsReason(), true);
-        search = search != null ? search.reopened(stats.fields(), stats.maxDoc(), sameFields) : newSearch(stats);
-        overview = overview.reopened(stats, topN);
-        terms = terms != null
-                ? terms.reopened(stats.fields())
-                : new Terms(stats.fields()).withPointFormats(pointFormats).withFeatures(opened.features());
-        forgetScans();
+        // Before anything below reads it.
         opened = new Opened(
                 opened.path(),
                 false,
                 opened.directory(),
                 indexes.stream().map(IndexCommitStats::path).toList(),
                 opened.skipped(),
-                opened.features(),
+                features,
                 opened.oldLucene());
+        // A commit that dropped the last field with points, say, leaves a screen without its feature.
+        if (!supports(screen)) {
+            screen = Screen.OVERVIEW;
+        }
+        boolean sameFields = schema(overview.stats().fields()).equals(schema(stats.fields()));
+        analysis.indexChanged(indexedFields(stats), autoStopWordsReason(), true);
+        search = search != null
+                ? search.reopened(stats.fields(), stats.maxDoc(), sameFields).withFeatures(features)
+                : newSearch(stats);
+        overview = overview.reopened(stats, topN);
+        terms = terms != null
+                ? terms.reopened(stats.fields()).withFeatures(features)
+                : new Terms(stats.fields()).withPointFormats(pointFormats).withFeatures(opened.features());
+        forgetScans();
         commits = new Commits(indexNames(opened), true);
         documents = documents != null
-                ? documents.reopened(stats.fields(), stats.maxDoc(), segmentStarts(stats))
+                ? documents
+                        .reopened(stats.fields(), stats.maxDoc(), segmentStarts(stats))
+                        .withFeatures(features)
                 : newDocuments(stats, opened);
         syncTermsFilter();
         // The marks hold the old reader's terms, postings and documents: back shows the latest state.

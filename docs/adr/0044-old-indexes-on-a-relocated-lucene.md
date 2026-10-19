@@ -51,6 +51,7 @@ Every Lucene version uses the package `org.apache.lucene`, so two of them can't 
    - *Amended by ADR 0048 §3 and ADR 0049 §6:* `POINTS` with the points group if a field has points, `KNN_VECTORS` with the KNN group if a field has vectors.
    - *Amended by ADR 0058 §4:* `SEARCH` splits into one feature per part: a runtime reports the parts it has, such as `CLASSIC_SEARCH` and the new `TERM_SEARCH`, and `SEARCH` means all of them.
    - *Amended by ADR 0059 §1:* `RECONSTRUCT` with the rebuild group, which 5.5, 7.7 and 9.12 have and 3.6 lacks.
+   - *Amended by ADR 0060 §3:* `REOPEN` on every runtime, and `reopenIndex` reports the features again, since a new commit can add fields with doc values, points or vectors.
 5. **The backend refuses what an index can't do with `NOT_SUPPORTED` (-32019).**
    - `CurrentIndex` holds either a Lucene 10 index or a `Lucene3Index`. With the latter, `opened()` and `readable()` throw `NOT_SUPPORTED`, so every handler without a branch of its own refuses.
    - Handlers reach a runtime through the runtime interface of decision 1. The spike's `legacy()` branches in the handlers and its `Lucene3Results` are interim, until that interface exists.

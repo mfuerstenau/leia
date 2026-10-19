@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
+import io.github.mfuerstenau.leia.protocol.index.Feature;
 import io.github.mfuerstenau.leia.protocol.index.IndexEntry;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
@@ -82,7 +83,8 @@ class ReopenIndexHandlerTest {
                                         2,
                                         Version.LATEST.major,
                                         Optional.of(Version.LATEST.toString()))))),
-                        List.of()));
+                        List.of(),
+                        Feature.all()));
         assertThat(currentIndex.get()).containsSame(open);
         assertThat(jobs.cancel(jobId)).as("the job was still running").isTrue();
     }
@@ -113,7 +115,8 @@ class ReopenIndexHandlerTest {
                                         3,
                                         Version.LATEST.major,
                                         Optional.of(Version.LATEST.toString()))))),
-                        List.of()));
+                        List.of(),
+                        Feature.all()));
         assertThat(jobs.cancel(jobId)).as("the job was stopped").isFalse();
         assertThat(old.reader().tryIncRef()).as("the old reader is closed").isFalse();
         ReadOnlyIndex reopened = currentIndex.readable();

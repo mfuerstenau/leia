@@ -23,7 +23,6 @@ import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
-import io.github.mfuerstenau.leia.protocol.index.ReopenIndexParams;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellParams;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellResult;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
@@ -89,6 +88,7 @@ class Lucene7BackendTest {
         assertThat(opened.features())
                 .containsExactlyInAnyOrder(
                         Feature.INDEX_STATS,
+                        Feature.REOPEN,
                         Feature.DOCUMENTS,
                         Feature.STORED_VALUES,
                         Feature.STORED_SCAN,
@@ -151,6 +151,12 @@ class Lucene7BackendTest {
         OpenIndexResult opened = open(testIndex(name));
 
         RuntimeSearches.searchesATerm(backend, opened.maxDoc().orElseThrow(), "beta", false);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene6", "lucene7"})
+    void reopensAChangedIndex(String name) throws Exception {
+        RuntimeReopens.reopensAChangedIndex(backend, testIndex(name), tmp.resolve(name), "segments_2");
     }
 
     @ParameterizedTest
@@ -285,12 +291,6 @@ class Lucene7BackendTest {
                         .segments())
                 .allSatisfy(segment -> assertThat(segment.codec()).contains("Lucene62"));
         backend.fails(Methods.GET_POINT_TREE, new GetPointTreeParams("pt"), ErrorCode.NO_READER);
-    }
-
-    @Test
-    void refusesWhatTheRuntimeLacks() throws Exception {
-        open(testIndex("lucene7"));
-        backend.fails(Methods.REOPEN_INDEX, new ReopenIndexParams(), ErrorCode.NOT_SUPPORTED);
     }
 
     @Test

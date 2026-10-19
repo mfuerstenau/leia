@@ -8,7 +8,9 @@ import io.github.mfuerstenau.leia.runtime.Rebuild;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.Terms;
+import io.github.mfuerstenau.leia.runtime.support.Failures;
 import io.github.mfuerstenau.leia.runtime.support.IndexParts;
+import java.io.Closeable;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -102,6 +104,8 @@ final class Lucene9Index implements RuntimeIndex, Documents, Terms, Search, Knn 
     private final IndexReader reader;
     private final FieldInfos fieldInfos;
     private final List<Field> fields;
+    private boolean ownsDirectories = true;
+    private boolean closed;
 
     private Lucene9Index(DirectoryKind directoryKind, List<Part> parts, List<Skipped> skipped) throws IOException {
         this.directoryKind = directoryKind;
@@ -109,9 +113,16 @@ final class Lucene9Index implements RuntimeIndex, Documents, Terms, Search, Knn 
         this.skipped = List.copyOf(skipped);
         this.reader = parts.size() == 1
                 ? parts.getFirst().reader()
-                : new MultiReader(parts.stream().map(Part::reader).toArray(IndexReader[]::new), true);
-        this.fieldInfos = FieldInfos.getMergedFieldInfos(reader);
-        this.fields = readFields();
+                : new MultiReader(parts.stream().map(Part::reader).toArray(IndexReader[]::new), false);
+        try {
+            this.fieldInfos = FieldInfos.getMergedFieldInfos(reader);
+            this.fields = readFields();
+        } catch (IOException | RuntimeException e) {
+            if (parts.size() > 1) {
+                IndexParts.closeAll(e, List.of(reader));
+            }
+            throw e;
+        }
     }
 
     /**
@@ -187,6 +198,55 @@ final class Lucene9Index implements RuntimeIndex, Documents, Terms, Search, Knn 
     @Override
     public Optional<Rebuild> rebuild() {
         return Optional.of(new Lucene9Rebuild(reader));
+    }
+
+    /**
+     * {@inheritDoc} The readers are counted, as in leia-core: each index holds a reference to each
+     * part's reader, and the {@link MultiReader} of several parts holds one more.
+     */
+    @Override
+    public Optional<RuntimeIndex> reopen() throws IOException {
+        if (!ownsDirectories) {
+            throw new IllegalStateException("Already reopened: " + directories());
+        }
+        List<Part> newParts = new ArrayList<>();
+        List<Part> reopened = new ArrayList<>();
+        for (Part part : parts) {
+            try {
+                // Like open, it takes no lock and changes nothing.
+                DirectoryReader changed = DirectoryReader.openIfChanged(part.reader());
+                if (changed == null) {
+                    newParts.add(part);
+                } else {
+                    Part newPart = new Part(part.dir(), part.directory(), changed);
+                    reopened.add(newPart);
+                    newParts.add(newPart);
+                }
+            } catch (IOException | RuntimeException e) {
+                IndexParts.closeAll(e, reopened.stream().map(Part::reader).toList());
+                if (parts.size() > 1) {
+                    throw new IOException(part.dir() + ": " + Failures.message(e), e);
+                }
+                throw e;
+            }
+        }
+        if (reopened.isEmpty()) {
+            return Optional.empty();
+        }
+
+        List<Part> shared = newParts.stream().filter(parts::contains).toList();
+        shared.forEach(part -> part.reader().incRef());
+        try {
+            Lucene9Index index = new Lucene9Index(directoryKind, newParts, skipped);
+            ownsDirectories = false;
+            return Optional.of(index);
+        } catch (IOException | RuntimeException e) {
+            List<Closeable> release = new ArrayList<>();
+            shared.forEach(part -> release.add(part.reader()::decRef));
+            reopened.forEach(part -> release.add(part.reader()));
+            IndexParts.closeAll(e, release);
+            throw e;
+        }
     }
 
     @Override
@@ -949,27 +1009,28 @@ final class Lucene9Index implements RuntimeIndex, Documents, Terms, Search, Knn 
         }
     }
 
-    /** Closes the reader, which closes those of the parts, then the directories. */
+    /**
+     * Releases this index's references to the readers, which closes those that no reopened index
+     * shares, then the directories unless a reopened index owns them.
+     */
     @Override
     public void close() throws IOException {
-        try {
-            reader.close();
-        } finally {
-            IOException failure = null;
+        if (closed) {
+            return;
+        }
+        closed = true;
+        List<Closeable> closeables = new ArrayList<>();
+        if (parts.size() > 1) {
+            closeables.add(reader);
+        }
+        for (Part part : parts) {
+            closeables.add(part.reader()::decRef);
+        }
+        if (ownsDirectories) {
             for (Part part : parts) {
-                try {
-                    part.directory().close();
-                } catch (IOException e) {
-                    if (failure == null) {
-                        failure = e;
-                    } else {
-                        failure.addSuppressed(e);
-                    }
-                }
-            }
-            if (failure != null) {
-                throw failure;
+                closeables.add(part.directory());
             }
         }
+        IndexParts.closeAll(closeables);
     }
 }

@@ -50,6 +50,19 @@ public interface RuntimeIndex extends Closeable {
     /** The rebuild of a document's terms and points (ADR 0059). */
     Optional<Rebuild> rebuild();
 
+    /**
+     * Opens the latest commit of each directory again if it differs from the opened one (ADR 0060).
+     * The new index shares the directories, the readers of the directories that didn't change, and the
+     * readers of the segments in both commits. It owns the directories from then on: closing this index
+     * then closes only its readers. This index stays usable until it is closed. Neither the directories
+     * nor the skipped ones change.
+     *
+     * @return the new index; empty if every latest commit is the opened one
+     * @throws IOException if a latest commit can't be read; this index is unaffected
+     * @throws IllegalStateException if this index was reopened before
+     */
+    Optional<RuntimeIndex> reopen() throws IOException;
+
     /** How a field is indexed. */
     enum IndexOptions {
         NONE,

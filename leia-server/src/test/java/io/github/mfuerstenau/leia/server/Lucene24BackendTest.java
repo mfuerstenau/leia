@@ -29,7 +29,6 @@ import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
-import io.github.mfuerstenau.leia.protocol.index.ReopenIndexParams;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.HitField;
@@ -92,7 +91,8 @@ class Lucene24BackendTest {
                         Feature.FILTER,
                         Feature.EXPLAIN,
                         Feature.COMMITS,
-                        Feature.CHECK_INDEX)
+                        Feature.CHECK_INDEX,
+                        Feature.REOPEN)
                 .doesNotContain(Feature.SEARCH, Feature.POINTS, Feature.AUTO_STOP_WORDS, Feature.CHECK_LEVELS);
         ReaderInfo reader = opened.indexes().getFirst().reader().orElseThrow();
         assertThat(reader.createdVersionMajor()).isEqualTo(2);
@@ -194,7 +194,6 @@ class Lucene24BackendTest {
         backend.fails(Methods.GET_POINT_TREE, new GetPointTreeParams("id"), ErrorCode.NOT_SUPPORTED);
         backend.fails(
                 Methods.START_RECONSTRUCT, new StartReconstructParams(0, Optional.empty()), ErrorCode.NOT_SUPPORTED);
-        backend.fails(Methods.REOPEN_INDEX, new ReopenIndexParams(), ErrorCode.NOT_SUPPORTED);
     }
 
     @Test

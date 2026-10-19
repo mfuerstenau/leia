@@ -45,6 +45,8 @@ import io.github.mfuerstenau.leia.protocol.index.ReaderSegment;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
+import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
+import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsResult;
 import io.github.mfuerstenau.leia.protocol.jars.JarComponents;
@@ -467,7 +469,7 @@ class AppTest {
         app.handleKey(key('R'));
 
         // id would be the default field of a new search screen, as it is the first with postings.
-        app.reopened(withDocs(stats("/data/idx"), 3, field("title", 0), field("id", 1)));
+        app.reopened(withDocs(stats("/data/idx"), 3, field("title", 0), field("id", 1)), Feature.all());
 
         assertThat(app.polls()).isEmpty();
         app.handleKey(key('/'));
@@ -777,7 +779,8 @@ class AppTest {
                 OptionalInt.of(0),
                 OptionalInt.of(0),
                 java.util.Collections.nCopies(indexes, entry),
-                List.of());
+                List.of(),
+                Feature.all());
     }
 
     @Test
@@ -798,14 +801,16 @@ class AppTest {
 
         app.handleKey(key('R'));
         GetIndexStatsResult changed = stats("/data/idx");
-        app.reopened(new GetIndexStatsResult(
-                changed.path(),
-                changed.directoryImpl(),
-                0,
-                0,
-                0,
-                List.of(index("/data/idx", 0, 0, "segments_2")),
-                List.of()));
+        app.reopened(
+                new GetIndexStatsResult(
+                        changed.path(),
+                        changed.directoryImpl(),
+                        0,
+                        0,
+                        0,
+                        List.of(index("/data/idx", 0, 0, "segments_2")),
+                        List.of()),
+                Feature.all());
         assertThat(render(app)).contains("Reopened: segments_2");
     }
 
@@ -843,7 +848,7 @@ class AppTest {
         App app = app();
         app.opened(multiStats("segments_1"), List.of());
         app.handleKey(key('R'));
-        app.reopened(multiStats("segments_2"));
+        app.reopened(multiStats("segments_2"), Feature.all());
         assertThat(render(app)).contains("Reopened: 1 of 2 indexes");
 
         app.handleKey(key('R'));
@@ -918,6 +923,44 @@ class AppTest {
         assertThat(render(app)).doesNotContain("not for");
         app.handleKey(key('5'));
         assertThat(render(app)).doesNotContain("not for");
+    }
+
+    /** A new commit that adds KNN vectors to an index that a runtime reads brings the KNN mode (ADR 0060). */
+    @Test
+    void aReopenOffersWhatTheNewCommitAdds() {
+        App app = oldLuceneApp(Feature.REOPEN);
+        app.handleKey(key('5'));
+        app.handleKey(key('m'));
+        assertThat(render(app)).doesNotContain(" KNN · ");
+
+        assertThat(app.handleKey(key('R'))).hasValue(new Action.Reopen());
+        IndexField embedding = new IndexField(
+                "embedding",
+                2,
+                IndexOptions.NONE,
+                false,
+                false,
+                false,
+                DocValuesType.NONE,
+                0,
+                0,
+                4,
+                Optional.of(VectorEncoding.FLOAT32),
+                Optional.of(VectorSimilarity.COSINE),
+                Optional.empty());
+        Set<Feature> features = EnumSet.of(
+                Feature.INDEX_STATS,
+                Feature.DOCUMENTS,
+                Feature.STORED_VALUES,
+                Feature.TERM_VECTORS,
+                Feature.TERMS,
+                Feature.POSTINGS,
+                Feature.CLASSIC_SEARCH,
+                Feature.REOPEN,
+                Feature.KNN_VECTORS);
+        app.reopened(withFields(stats("/data/old"), field("id", 0), field("body", 1), embedding), features);
+        app.handleKey(key('m'));
+        assertThat(render(app)).contains(" KNN · embedding");
     }
 
     @Test
@@ -1232,7 +1275,7 @@ class AppTest {
         assertThat(app.polls()).hasSize(1);
 
         app.handleKey(key('R'));
-        app.reopened(stats("/data/idx"));
+        app.reopened(stats("/data/idx"), Feature.all());
         assertThat(app.polls()).isEmpty();
     }
 
@@ -1616,14 +1659,16 @@ class AppTest {
         app.termsLoaded(loadTerms("body", null), termPage("text"));
 
         app.handleKey(key('R'));
-        Optional<Action> fetch = app.reopened(new GetIndexStatsResult(
-                "/data/idx",
-                "MMapDirectory",
-                1,
-                3,
-                3,
-                List.of(index("/data/idx", 0, 3, "segments_2")),
-                List.of(field("id", 0), field("body", 1))));
+        Optional<Action> fetch = app.reopened(
+                new GetIndexStatsResult(
+                        "/data/idx",
+                        "MMapDirectory",
+                        1,
+                        3,
+                        3,
+                        List.of(index("/data/idx", 0, 3, "segments_2")),
+                        List.of(field("id", 0), field("body", 1))),
+                Feature.all());
         assertThat(fetch).hasValue(loadTerms("body", null));
 
         // Back still goes to the document and then the terms, as they are now: fetched again, on body.
@@ -1774,7 +1819,7 @@ class AppTest {
         app.commitsLoaded(0, list(commit(1, true)));
         app.handleKey(key('R'));
 
-        assertThat(app.reopened(stats("/data/idx"))).hasValue(new Action.LoadCommits(0));
+        assertThat(app.reopened(stats("/data/idx"), Feature.all())).hasValue(new Action.LoadCommits(0));
     }
 
     private static BytesValue text(String value) {
@@ -1852,7 +1897,9 @@ class AppTest {
         assertThat(app.handleKey(key(KeyCode.DOWN))).hasValue(loadTerms("body", null));
         app.handleKey(key('R'));
 
-        assertThat(app.reopened(withFields(stats("/data/idx"), field("title", 0), field("id", 1), field("body", 2))))
+        assertThat(app.reopened(
+                        withFields(stats("/data/idx"), field("title", 0), field("id", 1), field("body", 2)),
+                        Feature.all()))
                 .hasValue(loadTerms("body", null));
     }
 
@@ -2030,11 +2077,11 @@ class AppTest {
         app.handleKey(key(KeyCode.ENTER));
         app.documentLoaded(document(2));
 
-        assertThat(app.reopened(withDocs(stats("/data/idx"), 5, field("id", 0))))
+        assertThat(app.reopened(withDocs(stats("/data/idx"), 5, field("id", 0)), Feature.all()))
                 .isEqualTo(load(2));
-        assertThat(app.reopened(withDocs(stats("/data/idx"), 2, field("id", 0))))
+        assertThat(app.reopened(withDocs(stats("/data/idx"), 2, field("id", 0)), Feature.all()))
                 .isEqualTo(load(1));
-        assertThat(app.reopened(withDocs(stats("/data/idx"), 0, field("id", 0))))
+        assertThat(app.reopened(withDocs(stats("/data/idx"), 0, field("id", 0)), Feature.all()))
                 .isEmpty();
     }
 
@@ -2272,7 +2319,7 @@ class AppTest {
         app.documentLoaded(document(1));
         assertThat(app.rebuildFilter()).isEmpty();
 
-        assertThat(app.reopened(withDocs(stats("/data/idx"), 3, field("id", 0))))
+        assertThat(app.reopened(withDocs(stats("/data/idx"), 3, field("id", 0)), Feature.all()))
                 .isEqualTo(load(1));
 
         assertThat(render(app)).contains("Reopened: segments_1; rebuilding");
@@ -2407,7 +2454,7 @@ class AppTest {
         app.handleKey(key(KeyCode.ENTER));
         assertThat(app.documentExportLoaded(1, data(0))).hasValue(new Action.StartDocumentExport(1, 0));
 
-        assertThat(app.reopened(withDocs(stats("/data/idx"), 3, field("id", 0))))
+        assertThat(app.reopened(withDocs(stats("/data/idx"), 3, field("id", 0)), Feature.all()))
                 .isEqualTo(load(0));
         app.documentLoaded(document(0));
 
@@ -2481,7 +2528,7 @@ class AppTest {
         app.handleKey(key('7'));
         app.handleKey(key(KeyCode.ENTER));
         app.checkStarted(1, 2);
-        app.reopened(stats("/data/idx"));
+        app.reopened(stats("/data/idx"), Feature.all());
         assertThat(app.polls()).isEmpty();
         assertThat(render(app)).contains("Stopped: the index was reopened.");
 

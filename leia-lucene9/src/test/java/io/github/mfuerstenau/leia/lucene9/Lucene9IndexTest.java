@@ -909,6 +909,98 @@ class Lucene9IndexTest {
                 .isSameAs(stop);
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene8:segments_2", "lucene8to9:segments_3"})
+    void reopensAChangedIndex(String nameAndNewest, @TempDir Path dir) throws IOException {
+        String name = nameAndNewest.substring(0, nameAndNewest.indexOf(':'));
+        String newest = nameAndNewest.substring(nameAndNewest.indexOf(':') + 1);
+        Path index0 = testIndex(name);
+        copyWithout(index0, dir, newest);
+        RuntimeIndex index = new Lucene9Runtime().open(List.of(dir), DirectoryKind.FS);
+        try (index;
+                RuntimeIndex latest = new Lucene9Runtime().open(List.of(index0), DirectoryKind.FS)) {
+            String older = index.stats().indexes().getFirst().segmentsFile();
+            assertThat(older).isNotEqualTo(newest);
+            if (name.equals("lucene8to9")) {
+                // The commit of 9.12 adds the KNN vector fields.
+                assertThat(index.fields()).extracting(RuntimeIndex.Field::name).doesNotContain("embedding");
+            }
+            assertThat(index.reopen()).isEmpty();
+
+            Files.copy(index0.resolve(newest), dir.resolve(newest));
+            try (RuntimeIndex reopened = index.reopen().orElseThrow()) {
+                assertThat(reopened.directories()).containsExactly(dir);
+                assertThat(reopened.stats().indexes().getFirst().segmentsFile()).isEqualTo(newest);
+                assertThat(reopened.maxDoc()).isEqualTo(latest.maxDoc()).isGreaterThan(index.maxDoc());
+                assertThat(reopened.stats().numDocs()).isEqualTo(latest.stats().numDocs());
+                assertThat(reopened.fields()).isEqualTo(latest.fields());
+                if (name.equals("lucene8to9")) {
+                    assertThat(reopened.fields())
+                            .extracting(RuntimeIndex.Field::name)
+                            .contains("embedding");
+                }
+                // The old index stays usable until it is closed, and can't reopen again.
+                assertThat(index.stats().indexes().getFirst().segmentsFile()).isEqualTo(older);
+                assertThat(index.documents().orElseThrow().document(0).fields()).isNotEmpty();
+                assertThatThrownBy(index::reopen).isInstanceOf(IllegalStateException.class);
+                index.close();
+                // The first segment is in both commits, and its reader is shared.
+                assertThat(reopened.documents().orElseThrow().document(0).fields())
+                        .isNotEmpty();
+                assertThat(reopened.terms()
+                                .orElseThrow()
+                                .terms("id", Optional.empty(), 20)
+                                .terms())
+                        .isNotEmpty();
+            }
+        }
+        assertThat(dir.resolve("write.lock")).doesNotExist();
+    }
+
+    /** Of several directories, only one changed: the other one's reader is shared, and stays open. */
+    @Test
+    void reopensOneOfSeveralDirectories(@TempDir Path dir) throws IOException {
+        Path unchanged = testIndex("lucene8");
+        copyWithout(testIndex("lucene8to9"), dir, "segments_3");
+        RuntimeIndex index = new Lucene9Runtime().open(List.of(unchanged, dir), DirectoryKind.FS);
+        try (index;
+                RuntimeIndex latest =
+                        new Lucene9Runtime().open(List.of(unchanged, testIndex("lucene8to9")), DirectoryKind.FS)) {
+            assertThat(index.reopen()).isEmpty();
+            Files.copy(testIndex("lucene8to9").resolve("segments_3"), dir.resolve("segments_3"));
+            try (RuntimeIndex reopened = index.reopen().orElseThrow()) {
+                index.close();
+                assertThat(reopened.directories()).containsExactly(unchanged, dir);
+                assertThat(reopened.stats().indexes().get(1).segmentsFile()).isEqualTo("segments_3");
+                assertThat(reopened.maxDoc()).isEqualTo(latest.maxDoc());
+                assertThat(reopened.fields()).isEqualTo(latest.fields());
+                // The unchanged directory's reader, still open.
+                assertThat(reopened.documents().orElseThrow().document(0).fields())
+                        .isNotEmpty();
+                assertThat(reopened.terms()
+                                .orElseThrow()
+                                .terms("id", Optional.empty(), 20)
+                                .terms())
+                        .extracting(term -> text(term.term()), Terms.TermEntry::docFreq)
+                        .isEqualTo(latest.terms().orElseThrow().terms("id", Optional.empty(), 20).terms().stream()
+                                .map(term -> tuple(text(term.term()), term.docFreq()))
+                                .toList());
+            }
+        }
+    }
+
+    /** Copies {@code index} into {@code dir} without the commit {@code segmentsFile}, nor {@code segments.gen}. */
+    private static void copyWithout(Path index, Path dir, String segmentsFile) throws IOException {
+        try (Stream<Path> files = Files.list(index)) {
+            for (Path file : files.toList()) {
+                String fileName = file.getFileName().toString();
+                if (!fileName.equals(segmentsFile) && !fileName.equals("segments.gen")) {
+                    Files.copy(file, dir.resolve(fileName));
+                }
+            }
+        }
+    }
+
     /** Hard rule 1: reading changes nothing in the index directory, and leaves no lock. */
     @ParameterizedTest
     @EnumSource(DirectoryKind.class)

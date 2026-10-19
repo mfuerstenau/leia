@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-07
+- **Amended by:** ADR 0060 (reopen on an index that a runtime reads, and the features in the result)
 
 ## Context
 
@@ -14,8 +15,10 @@ The other open options (directory choice, `MultiReader`, no-reader mode, recent 
 ## Decision
 
 1. **A method of its own: `reopenIndex {}`.** It reopens the open index with `openIfChanged`. The result has the fields of `openIndex`'s result plus `changed`. If nothing changed, `changed` is `false`, the fields describe the index as it is, and nothing else happens: the jobs keep running. If it changed, the new reader becomes the open index, and the jobs of the old one are stopped before the old reader is closed, as for `openIndex`. With no index open, it fails with `NO_INDEX_OPEN`.
+   *Amended by ADR 0060 §3, §4:* it works on an index that a runtime reads too, and the result has `features`, as `openIndex`'s has, which the TUI's screens take over.
 2. **A failed reopen keeps the old index.** The errors are those of `openIndex` (`INDEX_NOT_FOUND`, `NOT_AN_INDEX`, `CORRUPT_INDEX`, `MISSING_CODEC`, …), and the index that was open stays open, with its jobs.
 3. **Core: `ReadOnlyIndex.reopen()`** returns the new `ReadOnlyIndex`, or nothing if the index is unchanged. Both share the `Directory`. The new one owns it from then on, so closing the old one closes only its reader.
+   *Amended by ADR 0060 §1, §2:* each runtime's `RuntimeIndex.reopen()` does the same, with the reference counting of `ReadOnlyIndex`.
 4. **The TUI reopens with `R`,** on every screen with an index open. The overview and the commits screen list it with their keys; the other screens' key lines are full. A notice on the tab line says what came of it, until the next key: "Unchanged: segments_N", "Reopened: segments_N", or why it failed. No reopen happens by itself.
 5. **The TUI keeps the user's place.** An unchanged index changes nothing. A changed one is shown as after opening it, with the term scans forgotten, since their counts are stale. But these are kept:
    - the screen;

@@ -43,6 +43,7 @@ import io.github.mfuerstenau.leia.protocol.filter.FilterPattern;
 import io.github.mfuerstenau.leia.protocol.filter.FilterResult;
 import io.github.mfuerstenau.leia.protocol.filter.StartFilterParams;
 import io.github.mfuerstenau.leia.protocol.filter.StepFilterParams;
+import io.github.mfuerstenau.leia.protocol.index.Feature;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
@@ -1141,6 +1142,8 @@ class DemoIndexTest {
                 assertThat(reopened.changed()).isTrue();
                 assertThat(reopened.indexes().getFirst().reader().orElseThrow().segmentsFile())
                         .isEqualTo("segments_4");
+                // Lucene 10 reads it: everything works.
+                assertThat(reopened.features()).isEqualTo(Feature.all());
                 assertThat(before.filter(regex).matchCount()).isEqualTo(486);
             }
         }

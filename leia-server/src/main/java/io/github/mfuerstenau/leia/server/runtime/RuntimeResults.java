@@ -47,6 +47,7 @@ import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
 import io.github.mfuerstenau.leia.protocol.index.ReaderSegment;
+import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
@@ -140,11 +141,12 @@ public final class RuntimeResults {
      * What works on {@code open}: the statistics, the features of the groups its index has, and the
      * commits and the check if its runtime has them (ADR 0045, ADR 0046, ADR 0048): doc values with
      * the documents and points and KNN vectors if a field has them (ADR 0049), and the check's levels
-     * if the runtime's check takes them.
+     * if the runtime's check takes them. Reopen works on every runtime (ADR 0060).
      */
     public static Set<Feature> features(OpenRuntime open) {
         RuntimeIndex index = open.index();
-        Set<Feature> features = EnumSet.of(Feature.INDEX_STATS);
+        // Every runtime reopens (ADR 0060).
+        Set<Feature> features = EnumSet.of(Feature.INDEX_STATS, Feature.REOPEN);
         if (index.documents().isPresent()) {
             features.addAll(
                     List.of(Feature.DOCUMENTS, Feature.STORED_VALUES, Feature.TERM_VECTORS, Feature.STORED_SCAN));
@@ -189,22 +191,47 @@ public final class RuntimeResults {
                 OpenMode.READER,
                 OptionalInt.of(stats.numDocs()),
                 OptionalInt.of(stats.maxDoc()),
-                stats.indexes().stream()
-                        .map(index -> new IndexEntry(
-                                index.path().toString(),
-                                Optional.of(new ReaderInfo(
-                                        index.docBase(),
-                                        index.segmentsFile(),
-                                        index.numDocs(),
-                                        index.maxDoc(),
-                                        index.createdMajor(),
-                                        index.oldestSegmentVersion()))))
-                        .toList(),
-                open.skipped().stream()
-                        .map(skipped -> new SkippedIndex(skipped.path().toString(), skipped.message()))
-                        .toList(),
+                entries(stats),
+                skipped(open),
                 features(open),
                 open.runtime().luceneVersion());
+    }
+
+    /**
+     * {@code reopenIndex}: the result for {@code open}, reopened if {@code changed}, else as it was
+     * (ADR 0060).
+     */
+    public static ReopenIndexResult reopened(boolean changed, OpenRuntime open) throws RpcException {
+        RuntimeIndex.Stats stats = stats(open.index());
+        return new ReopenIndexResult(
+                changed,
+                open.path().toString(),
+                OpenMode.READER,
+                OptionalInt.of(stats.numDocs()),
+                OptionalInt.of(stats.maxDoc()),
+                entries(stats),
+                skipped(open),
+                features(open));
+    }
+
+    private static List<IndexEntry> entries(RuntimeIndex.Stats stats) {
+        return stats.indexes().stream()
+                .map(index -> new IndexEntry(
+                        index.path().toString(),
+                        Optional.of(new ReaderInfo(
+                                index.docBase(),
+                                index.segmentsFile(),
+                                index.numDocs(),
+                                index.maxDoc(),
+                                index.createdMajor(),
+                                index.oldestSegmentVersion()))))
+                .toList();
+    }
+
+    private static List<SkippedIndex> skipped(OpenRuntime open) {
+        return open.skipped().stream()
+                .map(skipped -> new SkippedIndex(skipped.path().toString(), skipped.message()))
+                .toList();
     }
 
     /** What the log says about {@code open}. */
