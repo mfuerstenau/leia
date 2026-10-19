@@ -53,6 +53,9 @@ public interface RuntimeIndex extends Closeable {
     /** The highlighter of query matches in stored text (ADR 0063). */
     Optional<Highlight> highlight();
 
+    /** Search and explain with a similarity of choice, and search in an order of choice (ADR 0064). */
+    Optional<Scoring> scoring();
+
     /**
      * Opens the latest commit of each directory again if it differs from the opened one (ADR 0060).
      * The new index shares the directories, the readers of the directories that didn't change, and the

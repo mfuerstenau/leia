@@ -141,6 +141,13 @@ class Lucene7BackendTest {
         RuntimeFilters.filtersTheDocuments(backend, true);
     }
 
+    /** 7.7 doesn't sort (ADR 0064). */
+    @Test
+    void doesNotSort() throws Exception {
+        open(testIndex("lucene7"));
+        RuntimeScorings.doesNotSort(backend);
+    }
+
     /** 7.7 doesn't highlight (ADR 0063). */
     @Test
     void doesNotHighlight() throws Exception {

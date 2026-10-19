@@ -96,6 +96,7 @@ import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.runtime.Points;
 import io.github.mfuerstenau.leia.runtime.Rebuild;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
+import io.github.mfuerstenau.leia.runtime.Scoring;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.Terms;
 import io.github.mfuerstenau.leia.server.ByteStrings;
@@ -148,8 +149,8 @@ public final class RuntimeResults {
      * commits and the check if its runtime has them (ADR 0045, ADR 0046, ADR 0048): doc values with
      * the documents and points and KNN vectors if a field has them (ADR 0049), and the check's levels
      * if the runtime's check takes them. Reopen works on every runtime (ADR 0060), auto stop words
-     * wherever there are terms (ADR 0061), and highlighting where the runtime highlights and searches
-     * (ADR 0063).
+     * wherever there are terms (ADR 0061), highlighting where the runtime highlights and searches
+     * (ADR 0063), and the similarity and sort where it scores and searches (ADR 0064).
      */
     public static Set<Feature> features(OpenRuntime open) {
         RuntimeIndex index = open.index();
@@ -176,6 +177,9 @@ public final class RuntimeResults {
         }
         if (index.highlight().isPresent() && index.search().isPresent()) {
             features.add(Feature.HIGHLIGHT);
+        }
+        if (index.scoring().isPresent() && index.search().isPresent()) {
+            features.add(Feature.SCORING);
         }
         if (index.points().isPresent() && index.fields().stream().anyMatch(field -> field.pointDimensionCount() > 0)) {
             features.add(Feature.POINTS);
@@ -829,9 +833,11 @@ public final class RuntimeResults {
     /**
      * {@code startSearch}: a classic query, parsed with the analyzer of the params as the runtime has
      * it ({@link RuntimeAnalyzers}), a term query (ADR 0058), or a KNN query if the runtime reads
-     * vectors (ADR 0049), scored by its default similarity, best score first. The hits are highlighted
-     * in the same job if the runtime highlights ({@link RuntimeHighlights}, ADR 0063); otherwise the
-     * highlight options are ignored. Another query, sort or analyzer is not supported.
+     * vectors (ADR 0049). If the runtime scores ({@link RuntimeScoring}, ADR 0064), the similarity
+     * and sort of the params apply; otherwise its default similarity scores, the similarity of the
+     * params is ignored, and a sort other than the best score first is not supported. The hits are
+     * highlighted in the same job if the runtime highlights ({@link RuntimeHighlights}, ADR 0063);
+     * otherwise the highlight options are ignored. Another query or analyzer is not supported.
      */
     public static JobStarted startSearch(OpenRuntime open, StartSearchParams params, Jobs jobs) throws RpcException {
         Search search = open.index().search().orElseThrow(open::notSupported);
@@ -848,9 +854,17 @@ public final class RuntimeResults {
                     "Invalid params: offset must be between 0 and " + (StartSearchParams.MAX_WINDOW - limit)
                             + " for a limit of " + limit + ", not " + offset);
         }
-        if (!bestScoreFirst(params.sort())) {
+        Optional<Scoring> scoring = open.index().scoring();
+        if (scoring.isEmpty() && !bestScoreFirst(params.sort())) {
             throw open.notSupported();
         }
+        Optional<Scoring.Similarity> similarity =
+                scoring.isPresent() ? Optional.of(RuntimeScoring.similarity(params.similarity())) : Optional.empty();
+        List<Scoring.SortKey> sort = scoring.isPresent() ? RuntimeScoring.sort(open.index(), params.sort()) : List.of();
+        String scored = scoring.isPresent()
+                ? (sort.isEmpty() ? "" : " sorted by " + RuntimeScoring.describe(sort)) + ", scored by "
+                        + RuntimeScoring.describe(params.similarity()) + ","
+                : "";
         if (params.fields().isPresent()) {
             for (String field : params.fields().get()) {
                 checkField(open.index(), field);
@@ -870,12 +884,23 @@ public final class RuntimeResults {
         Optional<List<String>> fields = params.fields().map(List::copyOf);
         int maxDoc = open.index().maxDoc();
         long jobId = jobs.start(
-                "search " + query + " with Lucene " + open.runtime().luceneVersion() + ", hits " + offset + " to "
+                "search " + query + scored + " with Lucene " + open.runtime().luceneVersion() + ", hits " + offset
+                        + " to "
                         + (offset + limit) + (options.isPresent() ? ", highlighted" : ""),
                 SearchResults.class,
                 progress -> {
                     try {
-                        Search.SearchResults results = search.search(query, offset, limit, fields, progress::scanned);
+                        Search.SearchResults results = scoring.isPresent()
+                                ? scoring.get()
+                                        .search(
+                                                query,
+                                                similarity.orElseThrow(),
+                                                sort,
+                                                offset,
+                                                limit,
+                                                fields,
+                                                progress::scanned)
+                                : search.search(query, offset, limit, fields, progress::scanned);
                         List<List<FieldHighlight>> highlights = List.of();
                         if (options.isPresent()) {
                             // The search is done: the count stays at maxDoc.
@@ -973,21 +998,30 @@ public final class RuntimeResults {
 
     /**
      * {@code startExplain} (ADR 0057): how a query, as {@link #parsedQuery} runs it, scores a
-     * document, explained by the runtime. The similarity of the params is ignored: the runtime scores
-     * with its default one, as {@link #startSearch} does, so the explanation matches the hit's score.
+     * document, explained by the runtime with the similarity of the params if it scores (ADR 0064).
+     * Otherwise the similarity is ignored: the runtime scores with its default one, as {@link
+     * #startSearch} does, so the explanation matches the hit's score either way.
      */
     public static JobStarted startExplain(OpenRuntime open, StartExplainParams params, Jobs jobs) throws RpcException {
         Search search = open.index().search().orElseThrow(open::notSupported);
         int docId = params.docId();
         checkDocId(open.index(), docId);
+        Optional<Scoring> scoring = open.index().scoring();
+        Optional<Scoring.Similarity> similarity =
+                scoring.isPresent() ? Optional.of(RuntimeScoring.similarity(params.similarity())) : Optional.empty();
+        String scored = scoring.isPresent() ? ", scored by " + RuntimeScoring.describe(params.similarity()) + "," : "";
         Search.ParsedQuery query = parsedQuery(open, search, params.query());
         return new JobStarted(jobs.start(
-                "explain " + query + " for document " + docId + " with Lucene "
+                "explain " + query + " for document " + docId + scored + " with Lucene "
                         + open.runtime().luceneVersion(),
                 Explanation.class,
                 progress -> {
                     try {
-                        return explanation(search.explain(query, docId, progress::scanned));
+                        return explanation(
+                                scoring.isPresent()
+                                        ? scoring.get()
+                                                .explain(query, similarity.orElseThrow(), docId, progress::scanned)
+                                        : search.explain(query, docId, progress::scanned));
                     } catch (IOException e) {
                         throw new RpcException(
                                 ErrorCode.INDEX_NOT_READABLE,
@@ -1399,7 +1433,7 @@ public final class RuntimeResults {
         return new Hit(
                 hit.docId(),
                 hit.score(),
-                List.of(),
+                hit.sortValues().stream().map(RuntimeScoring::sortValue).toList(),
                 hit.fields().entrySet().stream()
                         .map(field -> new HitField(
                                 field.getKey(),

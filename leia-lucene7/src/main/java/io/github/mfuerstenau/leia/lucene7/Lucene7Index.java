@@ -7,6 +7,7 @@ import io.github.mfuerstenau.leia.runtime.Knn;
 import io.github.mfuerstenau.leia.runtime.Points;
 import io.github.mfuerstenau.leia.runtime.Rebuild;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
+import io.github.mfuerstenau.leia.runtime.Scoring;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.Terms;
 import io.github.mfuerstenau.leia.runtime.support.Failures;
@@ -196,6 +197,12 @@ final class Lucene7Index implements RuntimeIndex, Documents, Terms, Search {
     /** {@inheritDoc} Not yet: Lucene 7.7's {@code UnifiedHighlighter} has no builder, and its {@code FieldHighlighter} differs from 9.12's (ADR 0063). */
     @Override
     public Optional<Highlight> highlight() {
+        return Optional.empty();
+    }
+
+    /** {@inheritDoc} Not yet (ADR 0064). */
+    @Override
+    public Optional<Scoring> scoring() {
         return Optional.empty();
     }
 

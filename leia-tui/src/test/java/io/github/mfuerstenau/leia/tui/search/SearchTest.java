@@ -293,6 +293,22 @@ class SearchTest {
         assertThat(press(search, 's')).hasValue(new Request.Unsupported("Similarity and sort"));
     }
 
+    /** A runtime that scores has the similarity and sort popup in its modes (ADR 0064). */
+    @Test
+    void aRuntimeThatScoresHasTheSimilarityAndSort() {
+        Search search = search().withFeatures(Set.of(Feature.CLASSIC_SEARCH, Feature.SCORING, Feature.DOCUMENTS));
+        assertThat(search.keys()).contains("p/s/l settings");
+
+        press(search, '/');
+        typed(search, "red");
+        Request.Start start = started(press(search, KeyCode.ENTER));
+        search.searchProgress(start.searchId(), results(0, 2, 2));
+        assertThat(render(search)).contains("p parser options · s similarity and sort · l stored fields per hit");
+        assertThat(press(search, 's')).isEmpty();
+        assertThat(search.prompting()).isTrue();
+        assertThat(render(search)).contains("Similarity and sort");
+    }
+
     /** A runtime that reads vectors searches them with its classic search (ADR 0049). */
     @Test
     void aClassicOnlyIndexWithVectorsSearchesTheNearestToo() {

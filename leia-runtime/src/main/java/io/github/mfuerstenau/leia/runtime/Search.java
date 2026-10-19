@@ -124,8 +124,22 @@ public interface Search {
         }
     }
 
-    /** A hit, with the stored values of the fields asked for. */
-    record Hit(int docId, float score, Map<String, List<RuntimeIndex.StoredValue>> fields) {}
+    /**
+     * A hit, with the stored values of the fields asked for.
+     *
+     * @param sortValues its value of each key of a {@link Scoring#search} sort; empty without a sort
+     */
+    record Hit(
+            int docId,
+            float score,
+            List<Scoring.SortValue> sortValues,
+            Map<String, List<RuntimeIndex.StoredValue>> fields) {
+
+        /** A hit of a search without a sort. */
+        public Hit(int docId, float score, Map<String, List<RuntimeIndex.StoredValue>> fields) {
+            this(docId, score, List.of(), fields);
+        }
+    }
 
     /**
      * The documents that match a query, by document id of the whole index.

@@ -7,6 +7,7 @@ import io.github.mfuerstenau.leia.runtime.Knn;
 import io.github.mfuerstenau.leia.runtime.Points;
 import io.github.mfuerstenau.leia.runtime.Rebuild;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
+import io.github.mfuerstenau.leia.runtime.Scoring;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.Terms;
 import io.github.mfuerstenau.leia.runtime.support.Failures;
@@ -195,6 +196,12 @@ final class Lucene5Index implements RuntimeIndex, Documents, Terms, Search {
     /** {@inheritDoc} Lucene 5.5 has no {@code UnifiedHighlighter}. */
     @Override
     public Optional<Highlight> highlight() {
+        return Optional.empty();
+    }
+
+    /** {@inheritDoc} Not yet: 5.5 has no {@code BooleanSimilarity} (ADR 0064). */
+    @Override
+    public Optional<Scoring> scoring() {
         return Optional.empty();
     }
 

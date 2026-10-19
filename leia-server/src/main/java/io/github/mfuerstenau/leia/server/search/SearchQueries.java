@@ -140,7 +140,8 @@ public final class SearchQueries {
      * @throws RpcException {@code INVALID_PARAMS} unless exactly one alternative is present, or for
      *     BM25 parameters out of range
      */
-    static org.apache.lucene.search.similarities.Similarity similarity(Similarity similarity) throws RpcException {
+    public static org.apache.lucene.search.similarities.Similarity similarity(Similarity similarity)
+            throws RpcException {
         long present = Stream.of(similarity.bm25(), similarity.classic(), similarity.booleanSimilarity())
                 .filter(alternative -> alternative.isPresent())
                 .count();

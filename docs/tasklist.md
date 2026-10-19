@@ -6,7 +6,12 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 
 Goal: an index created by Lucene 8.x (read with `leia-lucene9`, ADR 0049) gets the features that are greyed out for it today. 9.12 has the APIs that leia-core uses for them on Lucene 10, so most are ports. What needs no runtime change goes to every runtime at once. The others need runtime interface 7 (one ADR for the interface, amending ADR 0049 §4). They land in 9.12 first, and in 5.5 and 7.7 where the copy is the same (ADR 0050). Each item adds its feature in `RuntimeResults.features`, a `runtime()` branch in its handlers, and its row in `docs/runtimes.md` (checked by `RuntimeFeaturesTest`). The TUI already gates on the features.
 
-- [ ] Search beyond classic (`SEARCH`): similarity (BM25, classic, boolean), sort by score, doc id and doc values, the standard parser (point fields), More-Like-This (ADR 0013, ADR 0028), and doc-values queries (ADR 0033, ADR 0036). `SEARCH` splits into a feature per part (ADR 0058 §4): each part gets its own feature, as `TERM_SEARCH` did, and the TUI gates it on `SEARCH ||` that part.
+- [ ] Search beyond classic on 9.12 (`SEARCH`), one part per step (ADR 0013, ADR 0028, ADR 0033, ADR 0036). `SEARCH` splits into a feature per part (ADR 0058 §4): each part gets its own feature, as `TERM_SEARCH` and `SCORING` (ADR 0064) did, and the TUI gates it on `SEARCH ||` that part. Left, in this order:
+  - [ ] Doc-values queries (for example `DOC_VALUES_SEARCH`).
+  - [ ] The standard parser with point fields (for example `STANDARD_SEARCH`).
+  - [ ] More-Like-This (for example `MORE_LIKE_THIS`).
+- [ ] Similarity and sort (`SCORING`) on 7.7 and 5.5 (ADR 0064 §2): 7.7 has the API of 9.12 apart from `Pruning`; 5.5 has no `BooleanSimilarity`.
+- [ ] The classic parser options a runtime ignores: date resolution, locale and time zone, `splitOnWhitespace`, `fuzzyMaxEdits`.
 - [ ] Check on more threads on 9.12 (`CheckIndex.setThreadCount`, now fixed at 1, ADR 0049 §5). It goes with the backlog's "check thread count".
 - [ ] Run the new features by hand on `lucene8` and `lucene8to9`, as `docs/demo-index.md` does for Lucene 10.
 

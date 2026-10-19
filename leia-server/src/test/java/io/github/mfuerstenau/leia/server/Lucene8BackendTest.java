@@ -115,6 +115,7 @@ class Lucene8BackendTest {
                 Feature.FILTER,
                 Feature.EXPLAIN,
                 Feature.HIGHLIGHT,
+                Feature.SCORING,
                 Feature.RECONSTRUCT,
                 Feature.POINTS,
                 Feature.COMMITS,
@@ -200,6 +201,13 @@ class Lucene8BackendTest {
     void highlightsTheMatches(String name) throws Exception {
         OpenIndexResult opened = open(testIndex(name));
         RuntimeHighlights.highlightsTheMatches(backend, opened.maxDoc().orElseThrow());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene8", "lucene8to9"})
+    void sortsAndScores(String name) throws Exception {
+        open(testIndex(name));
+        RuntimeScorings.sortsAndScores(backend);
     }
 
     @Test

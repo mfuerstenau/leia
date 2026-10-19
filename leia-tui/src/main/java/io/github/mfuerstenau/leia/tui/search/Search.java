@@ -528,6 +528,11 @@ public final class Search {
         return features.containsAll(List.of(needed));
     }
 
+    /** Whether the similarity and sort apply: with every part of search, or with them (ADR 0064). */
+    private boolean scores() {
+        return supports(Feature.SEARCH) || supports(Feature.SCORING);
+    }
+
     /** The modes the index has the features for, in the order {@code m} cycles through them. */
     private List<Mode> modes() {
         List<Mode> modes = new ArrayList<>();
@@ -565,7 +570,7 @@ public final class Search {
         return switch (key.codePoint()) {
             case 'm' -> modes().size() > 1 ? Optional.empty() : Optional.of("Other modes");
             case 'b', 'B' -> need("Browse", Feature.FILTER);
-            case 's' -> regex ? Optional.empty() : need("Similarity and sort", Feature.SEARCH);
+            case 's' -> regex || scores() ? Optional.empty() : Optional.of("Similarity and sort");
             case 'x' -> regex ? Optional.empty() : need("Explain", Feature.EXPLAIN);
             case 'H' -> regex ? Optional.empty() : need("Highlight", Feature.HIGHLIGHT);
             case 'v' -> regex ? Optional.empty() : need("View", Feature.HIGHLIGHT);
@@ -1883,8 +1888,8 @@ public final class Search {
         for (String entry : keys.split("   ")) {
             String kept = switch (entry) {
                 case "m mode" -> modes().size() > 1 ? entry : "";
-                case "p/s/l settings" -> supports(Feature.SEARCH) ? entry : "p/l settings";
-                case "s/l settings" -> supports(Feature.SEARCH) ? entry : "l settings";
+                case "p/s/l settings" -> scores() ? entry : "p/l settings";
+                case "s/l settings" -> scores() ? entry : "l settings";
                 case "x explain" -> supports(Feature.EXPLAIN) ? entry : "";
                 case "H highlight", "v view" -> supports(Feature.HIGHLIGHT) ? entry : "";
                 case "⏎ open doc" -> supports(Feature.DOCUMENTS) ? entry : "";
@@ -2304,7 +2309,7 @@ public final class Search {
             case CLASSIC, STANDARD -> "p parser options · s similarity and sort · l stored fields per hit";
             case KNN -> "p filter's parser options · s similarity and sort · l stored fields per hit";
         };
-        if (!supports(Feature.SEARCH)) {
+        if (!scores()) {
             popups = popups.replace("s similarity and sort · ", "");
         }
         return Line.styled(popups, Form.dim());

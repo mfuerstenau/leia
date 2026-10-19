@@ -7,6 +7,7 @@ import io.github.mfuerstenau.leia.runtime.Knn;
 import io.github.mfuerstenau.leia.runtime.Points;
 import io.github.mfuerstenau.leia.runtime.Rebuild;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
+import io.github.mfuerstenau.leia.runtime.Scoring;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.Terms;
 import io.github.mfuerstenau.leia.runtime.support.Failures;
@@ -64,6 +65,7 @@ import org.apache.lucene.queryparser.classic.ParseException;
 import org.apache.lucene.queryparser.classic.QueryParser;
 import org.apache.lucene.search.Collector;
 import org.apache.lucene.search.DocIdSetIterator;
+import org.apache.lucene.search.FieldDoc;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.KnnByteVectorQuery;
 import org.apache.lucene.search.KnnFloatVectorQuery;
@@ -72,8 +74,12 @@ import org.apache.lucene.search.Query;
 import org.apache.lucene.search.Scorable;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.ScoreMode;
+import org.apache.lucene.search.Sort;
+import org.apache.lucene.search.SortField;
 import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.search.TopDocsCollector;
+import org.apache.lucene.search.TopFieldCollector;
 import org.apache.lucene.search.TopScoreDocCollector;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.util.Bits;
@@ -91,7 +97,10 @@ import org.apache.lucene.util.BytesRef;
  * threads, so jobs can read it. Soft-deleted documents are live, as a plain {@code DirectoryReader}
  * has them.
  */
-final class Lucene9Index implements RuntimeIndex, Documents, Terms, Search, Knn {
+final class Lucene9Index implements RuntimeIndex, Documents, Terms, Search, Knn, Scoring {
+
+    /** 9.12's default similarity, which {@link Search} scores with. */
+    private static final Similarity DEFAULT_SIMILARITY = new Similarity.Bm25(1.2f, 0.75f);
 
     /** How many terms {@link #topTerms} scans between two reports of its progress. */
     static final int PROGRESS_INTERVAL = 1024;
@@ -204,6 +213,11 @@ final class Lucene9Index implements RuntimeIndex, Documents, Terms, Search, Knn 
     @Override
     public Optional<Highlight> highlight() {
         return Optional.of(new Lucene9Highlight(reader));
+    }
+
+    @Override
+    public Optional<Scoring> scoring() {
+        return Optional.of(this);
     }
 
     /**
@@ -750,28 +764,47 @@ final class Lucene9Index implements RuntimeIndex, Documents, Terms, Search, Knn 
         return new Lucene9Query(new TermQuery(new Term(field, new BytesRef(term))));
     }
 
-    /**
-     * {@inheritDoc} The progress is reported once per segment, and asked from time to time in
-     * between, also by the graph search of an approximate KNN query, which runs when it is rewritten.
-     */
+    /** {@inheritDoc} It scores with 9.12's default, BM25 with k1 1.2 and b 0.75. */
     @Override
     public SearchResults search(
             ParsedQuery parsed, int offset, int limit, Optional<List<String>> fields, LongConsumer progress)
             throws IOException {
+        return search(parsed, DEFAULT_SIMILARITY, List.of(), offset, limit, fields, progress);
+    }
+
+    /**
+     * {@inheritDoc} The progress is reported once per segment, and asked from time to time in
+     * between, also by the graph search of an approximate KNN query, which runs when it is rewritten.
+     * A field sort leaves the scores out, so the page's hits get theirs in one more pass.
+     */
+    @Override
+    public SearchResults search(
+            ParsedQuery parsed,
+            Similarity similarity,
+            List<SortKey> sortKeys,
+            int offset,
+            int limit,
+            Optional<List<String>> fields,
+            LongConsumer progress)
+            throws IOException {
         Query query = query(parsed);
+        Optional<Sort> sort =
+                sortKeys.isEmpty() ? Optional.empty() : Optional.of(Lucene9Sorts.sort(fieldInfos, sortKeys));
         long start = System.nanoTime();
         SearchProgress searchProgress = new SearchProgress(progress);
-        IndexSearcher searcher = new IndexSearcher(reader);
-        // No cache: a query is run once.
-        searcher.setQueryCache(null);
-        // Never a timeout: only a way to ask the progress, which throws to stop the search.
-        searcher.setTimeout(searchProgress);
+        IndexSearcher searcher = searcher(similarity, searchProgress);
         Query rewritten = searcher.rewrite(query);
-        // Every hit counted, as 7.7 counts them.
-        TopScoreDocCollector top = TopScoreDocCollector.create(offset + limit, Integer.MAX_VALUE);
+        // Every hit counted, as 7.7 counts them; that also keeps an index sort from ending the search early.
+        TopDocsCollector<?> top = sort.isPresent()
+                ? TopFieldCollector.create(sort.get(), offset + limit, Integer.MAX_VALUE)
+                : TopScoreDocCollector.create(offset + limit, Integer.MAX_VALUE);
         searcher.search(rewritten, new ProgressCollector(top, searchProgress));
-        progress.accept(reader.maxDoc());
         TopDocs docs = top.topDocs(offset, limit);
+        if (sort.isPresent()) {
+            TopFieldCollector.populateScores(docs.scoreDocs, searcher, rewritten);
+        }
+        progress.accept(reader.maxDoc());
+        SortField[] sortFields = sort.map(Sort::getSort).orElse(new SortField[0]);
         StoredFields storedFields = reader.storedFields();
         List<Hit> hits = new ArrayList<>();
         for (ScoreDoc scoreDoc : docs.scoreDocs) {
@@ -781,7 +814,16 @@ final class Lucene9Index implements RuntimeIndex, Documents, Terms, Search, Knn 
                     values.computeIfAbsent(field.name(), _ -> new ArrayList<>()).add(storedValue(field));
                 }
             }
-            hits.add(new Hit(scoreDoc.doc, scoreDoc.score, values));
+            List<SortValue> sortValues = new ArrayList<>(sortFields.length);
+            if (scoreDoc instanceof FieldDoc fieldDoc) {
+                for (int i = 0; i < sortFields.length; i++) {
+                    sortValues.add(
+                            Lucene9Sorts.numeric(sortFields[i]) && !hasNumber(sortFields[i].getField(), scoreDoc.doc)
+                                    ? new SortValue(Optional.empty(), Optional.empty())
+                                    : sortValue(fieldDoc.fields[i]));
+                }
+            }
+            hits.add(new Hit(scoreDoc.doc, scoreDoc.score, List.copyOf(sortValues), values));
         }
         return new SearchResults(
                 query.toString(),
@@ -789,6 +831,36 @@ final class Lucene9Index implements RuntimeIndex, Documents, Terms, Search, Knn 
                 docs.totalHits.value,
                 List.copyOf(hits),
                 (System.nanoTime() - start) / 1_000_000);
+    }
+
+    /** A searcher of the whole index that scores with {@code similarity} and asks {@code progress}. */
+    private IndexSearcher searcher(Similarity similarity, SearchProgress progress) {
+        IndexSearcher searcher = new IndexSearcher(reader);
+        searcher.setSimilarity(Lucene9Sorts.similarity(similarity));
+        // No cache: a query is run once.
+        searcher.setQueryCache(null);
+        // Never a timeout: only a way to ask the progress, which throws to stop the search.
+        searcher.setTimeout(progress);
+        return searcher;
+    }
+
+    /** A value of {@link FieldDoc#fields}: a number, a term, or null for a missing string. */
+    private static SortValue sortValue(Object value) {
+        return switch (value) {
+            case Number number -> new SortValue(Optional.of(number), Optional.empty());
+            case BytesRef term -> new SortValue(Optional.empty(), Optional.of(BytesRef.deepCopyOf(term).bytes));
+            case null, default -> new SortValue(Optional.empty(), Optional.empty());
+        };
+    }
+
+    /**
+     * Whether the document has a value in the numeric or sorted numeric doc values of {@code field},
+     * so that its sort value is not the missing value that Lucene put in its place (ADR 0025).
+     */
+    private boolean hasNumber(String field, int docId) throws IOException {
+        LeafReaderContext leaf = leaf(docId);
+        return org.apache.lucene.index.DocValues.getSortedNumeric(leaf.reader(), field)
+                .advanceExact(docId - leaf.docBase);
     }
 
     /**
@@ -817,19 +889,21 @@ final class Lucene9Index implements RuntimeIndex, Documents, Terms, Search, Knn 
         return true;
     }
 
+    /** {@inheritDoc} It scores with 9.12's default, BM25 with k1 1.2 and b 0.75. */
+    @Override
+    public Explanation explain(ParsedQuery parsed, int docId, LongConsumer progress) throws IOException {
+        return explain(parsed, DEFAULT_SIMILARITY, docId, progress);
+    }
+
     /**
      * {@inheritDoc} The progress is asked from time to time, also by the graph search of an
      * approximate KNN query, which runs when it is rewritten.
      */
     @Override
-    public Explanation explain(ParsedQuery parsed, int docId, LongConsumer progress) throws IOException {
+    public Explanation explain(ParsedQuery parsed, Similarity similarity, int docId, LongConsumer progress)
+            throws IOException {
         Query query = query(parsed);
-        SearchProgress searchProgress = new SearchProgress(progress);
-        IndexSearcher searcher = new IndexSearcher(reader);
-        // No cache: a query is run once.
-        searcher.setQueryCache(null);
-        // Never a timeout: only a way to ask the progress, which throws to stop the explanation.
-        searcher.setTimeout(searchProgress);
+        IndexSearcher searcher = searcher(similarity, new SearchProgress(progress));
         Explanation explanation = explanation(searcher.explain(query, docId));
         progress.accept(reader.maxDoc());
         return explanation;
