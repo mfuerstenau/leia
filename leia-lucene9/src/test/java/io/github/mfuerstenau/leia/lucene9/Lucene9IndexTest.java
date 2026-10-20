@@ -8,15 +8,18 @@ import static org.assertj.core.api.Assertions.within;
 import io.github.mfuerstenau.leia.runtime.Check;
 import io.github.mfuerstenau.leia.runtime.Commits;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
+import io.github.mfuerstenau.leia.runtime.DocValuesSearch;
 import io.github.mfuerstenau.leia.runtime.Documents;
 import io.github.mfuerstenau.leia.runtime.Highlight;
 import io.github.mfuerstenau.leia.runtime.Knn;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
+import io.github.mfuerstenau.leia.runtime.MoreLikeThisSearch;
 import io.github.mfuerstenau.leia.runtime.Points;
 import io.github.mfuerstenau.leia.runtime.Rebuild;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Scoring;
 import io.github.mfuerstenau.leia.runtime.Search;
+import io.github.mfuerstenau.leia.runtime.StandardSearch;
 import io.github.mfuerstenau.leia.runtime.Terms;
 import java.io.IOException;
 import java.io.InputStream;
@@ -1397,5 +1400,292 @@ class Lucene9IndexTest {
                         .mapToInt(RuntimeIndex.Segment::numDocs)
                         .sum())
                 .isEqualTo(stats.numDocs());
+    }
+
+    private static final StandardSearch.Options STANDARD_BODY =
+            new StandardSearch.Options("body", false, false, 0, 0, true);
+
+    /** The live documents that {@code query} matches, by document id. */
+    private static List<Integer> matched(RuntimeIndex index, Search.ParsedQuery query) throws IOException {
+        return index.search().orElseThrow().matches(query, false, _ -> {}).docs().stream()
+                .boxed()
+                .toList();
+    }
+
+    @Test
+    void parsesWithTheStandardParserAndPoints() throws Exception {
+        try (RuntimeIndex index = open("lucene8")) {
+            StandardSearch standard = index.standardSearch().orElseThrow();
+            Search.ParsedQuery query = standard.parse(
+                    "pt:[100 TO 114] OR amount:5000 OR gamma",
+                    STANDARD_BODY,
+                    Map.of("pt", StandardSearch.PointType.INT, "amount", StandardSearch.PointType.LONG),
+                    named("StandardAnalyzer"));
+            assertThat(query).hasToString("pt:[100 TO 114] amount:[5000 TO 5000] body:gamma");
+            Search.SearchResults results = index.search().orElseThrow().search(query, 0, 10, Optional.empty(), _ -> {});
+            // Document 1 (0 of the index) and document 5.
+            assertThat(results.hits()).extracting(Search.Hit::docId).containsExactlyInAnyOrder(0, 5);
+            assertThat(results.likeTerms()).isEmpty();
+
+            // Without its points config, the range is a term range.
+            assertThat(standard.parse("pt:[100 TO 114]", STANDARD_BODY, Map.of(), named("StandardAnalyzer")))
+                    .hasToString("pt:[100 TO 114]");
+            assertThat(matched(
+                            index,
+                            standard.parse("pt:[100 TO 114]", STANDARD_BODY, Map.of(), named("StandardAnalyzer"))))
+                    .isEmpty();
+            assertThatThrownBy(() -> standard.parse("body:(", STANDARD_BODY, Map.of(), named("StandardAnalyzer")))
+                    .isInstanceOf(Search.InvalidQueryException.class)
+                    .hasMessage("Cannot parse 'body:(': Encountered \"<EOF>\" at column 6.");
+            assertThatThrownBy(() -> standard.parse(
+                            "pt:abc",
+                            STANDARD_BODY,
+                            Map.of("pt", StandardSearch.PointType.INT),
+                            named("StandardAnalyzer")))
+                    .isInstanceOf(Search.InvalidQueryException.class);
+            assertThatThrownBy(() -> standard.parse("x", STANDARD_BODY, Map.of(), named("NoSuchAnalyzer")))
+                    .isInstanceOf(Search.UnsupportedAnalyzerException.class);
+        }
+    }
+
+    private static MoreLikeThisSearch.Options likeBody(boolean boost) {
+        return new MoreLikeThisSearch.Options(
+                List.of("body"), 1, 1, OptionalInt.empty(), 25, boost, 0, OptionalInt.empty(), Set.of());
+    }
+
+    @Test
+    void findsDocumentsLikeADocumentWithTheTermsChosen() throws Exception {
+        try (RuntimeIndex index = open("lucene8")) {
+            MoreLikeThisSearch like = index.moreLikeThisSearch().orElseThrow();
+            Search search = index.search().orElseThrow();
+            Search.ParsedQuery query =
+                    like.like(new MoreLikeThisSearch.Source.Doc(0), likeBody(false), named("StandardAnalyzer"));
+            assertThat(query).hasToString("like(doc 0, fields [body], minTermFreq 1, minDocFreq 1, maxQueryTerms 25)");
+            List<Long> progress = new ArrayList<>();
+            Search.SearchResults results = search.search(query, 0, 10, Optional.empty(), progress::add);
+            assertThat(results.query()).isEqualTo(query.toString());
+            assertThat(results.hits().getFirst().docId()).isZero();
+            assertThat(progress).last().isEqualTo((long) index.maxDoc());
+            // From the term vector of document 1: gamma twice, the rarest, ranks first.
+            List<MoreLikeThisSearch.LikeTerm> terms = results.likeTerms().orElseThrow();
+            assertThat(terms).extracting(MoreLikeThisSearch.LikeTerm::term).contains("gamma", "beta", "alpha");
+            MoreLikeThisSearch.LikeTerm gamma = terms.getFirst();
+            assertThat(gamma.field()).isEqualTo("body");
+            assertThat(gamma.term()).isEqualTo("gamma");
+            assertThat(gamma.tf()).isEqualTo(2);
+            assertThat(gamma.docFreq()).isEqualTo(1);
+            assertThat(gamma.score()).isEqualTo(gamma.tf() * gamma.idf());
+
+            // Matches and explanations build the query too.
+            assertThat(matched(index, query)).hasSize(index.maxDoc() - 1);
+            Search.Explanation explanation =
+                    search.explain(query, results.hits().getFirst().docId(), _ -> {});
+            assertThat(explanation.match()).isTrue();
+            assertThat(explanation.value().floatValue())
+                    .isEqualTo(results.hits().getFirst().score());
+
+            // Sorted and scored by another similarity, as Scoring searches.
+            Search.SearchResults scored = index.scoring()
+                    .orElseThrow()
+                    .search(query, new Scoring.Similarity.Classic(), List.of(), 0, 10, Optional.empty(), _ -> {});
+            assertThat(scored.likeTerms()).isEqualTo(results.likeTerms());
+
+            assertThatThrownBy(() ->
+                            like.like(new MoreLikeThisSearch.Source.Doc(0), likeBody(false), named("NoSuchAnalyzer")))
+                    .isInstanceOf(Search.UnsupportedAnalyzerException.class);
+        }
+    }
+
+    @Test
+    void findsDocumentsLikeAText() throws Exception {
+        try (RuntimeIndex index = open("lucene8")) {
+            Search.ParsedQuery query = index.moreLikeThisSearch()
+                    .orElseThrow()
+                    .like(new MoreLikeThisSearch.Source.Text("gamma \"x\""), likeBody(true), named("StandardAnalyzer"));
+            assertThat(query)
+                    .hasToString("like(text \"gamma \\\"x\\\"\", fields [body], minTermFreq 1, minDocFreq 1,"
+                            + " maxQueryTerms 25, boost)");
+            Search.SearchResults results = index.search().orElseThrow().search(query, 0, 10, Optional.empty(), _ -> {});
+            assertThat(results.hits()).extracting(Search.Hit::docId).containsExactly(0);
+            assertThat(results.likeTerms().orElseThrow())
+                    .extracting(MoreLikeThisSearch.LikeTerm::term, MoreLikeThisSearch.LikeTerm::tf)
+                    .containsExactly(tuple("gamma", 1));
+        }
+    }
+
+    @Test
+    void refusesMoreLikeThisOptionsOutOfRange() {
+        assertThatThrownBy(() -> new MoreLikeThisSearch.Options(
+                        List.of("body", "body"),
+                        1,
+                        1,
+                        OptionalInt.empty(),
+                        25,
+                        false,
+                        0,
+                        OptionalInt.empty(),
+                        Set.of()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("the field 'body' is listed twice");
+        assertThatThrownBy(() -> new MoreLikeThisSearch.Options(
+                        List.of("body"), 1, 1, OptionalInt.empty(), 1025, false, 0, OptionalInt.empty(), Set.of()))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("maxQueryTerms must be from 1 to 1024, not 1025");
+    }
+
+    private static DocValuesSearch.Match<String> numbers(String... values) {
+        return new DocValuesSearch.Match.Values<>(List.of(values));
+    }
+
+    private static <T> DocValuesSearch.Match<T> range(T lower, T upper) {
+        return new DocValuesSearch.Match.Range<>(Optional.ofNullable(lower), Optional.ofNullable(upper), true, true);
+    }
+
+    @Test
+    void searchesNumberDocValues() throws Exception {
+        try (RuntimeIndex index = open("lucene8")) {
+            DocValuesSearch docValues = index.docValuesSearch().orElseThrow();
+            DocValuesSearch.NumberEncoding longs = DocValuesSearch.NumberEncoding.LONG;
+            // dv_num is i, but 400 for document 4 (3 of the index), and none for document 3.
+            assertThat(matched(index, docValues.numbers("dv_num", longs, numbers("5", "400", "5"))))
+                    .containsExactly(3, 5);
+            assertThat(matched(index, docValues.numbers("dv_num", longs, numbers("400"))))
+                    .containsExactly(3);
+            assertThat(matched(index, docValues.numbers("dv_num", longs, range("2", "6"))))
+                    .containsExactly(5, 6);
+            assertThat(matched(
+                            index,
+                            docValues.numbers(
+                                    "dv_num",
+                                    longs,
+                                    new DocValuesSearch.Match.Range<>(
+                                            Optional.of("5"), Optional.empty(), false, true))))
+                    .containsExactly(3, 6, 7);
+            // As raw double bits, every small long is a tiny positive double.
+            assertThat(matched(
+                            index, docValues.numbers("dv_num", DocValuesSearch.NumberEncoding.DOUBLE, range("0", "1"))))
+                    .containsExactly(0, 3, 5, 6, 7);
+            assertThat(matched(
+                            index,
+                            docValues.numbers("dv_num", DocValuesSearch.NumberEncoding.DOUBLE, range(null, "-1"))))
+                    .isEmpty();
+            // dv_sorted_num has -i and i.
+            assertThat(matched(index, docValues.numbers("dv_sorted_num", longs, numbers("-5"))))
+                    .containsExactly(5);
+            assertThat(matched(index, docValues.numbers("dv_sorted_num", longs, range("6", null))))
+                    .containsExactly(6, 7);
+
+            Search.ParsedQuery query = docValues.numbers("dv_num", longs, numbers("5"));
+            assertThat(query).hasToString("dv_num:[5 TO 5]");
+            Search.Hit hit = index.search()
+                    .orElseThrow()
+                    .search(query, 0, 1, Optional.empty(), _ -> {})
+                    .hits()
+                    .getFirst();
+            Search.Explanation explanation = index.search().orElseThrow().explain(query, hit.docId(), _ -> {});
+            assertThat(explanation.match()).isTrue();
+            assertThat(explanation.value().floatValue()).isEqualTo(hit.score());
+        }
+    }
+
+    @Test
+    void searchesByteDocValues() throws Exception {
+        try (RuntimeIndex index = open("lucene8")) {
+            DocValuesSearch docValues = index.docValuesSearch().orElseThrow();
+            // dv_sorted is s<i % 3>: documents 1, 4 and 7 (0, 3 and 7 of the index) have s1, 3 and 6 s0.
+            assertThat(matched(
+                            index,
+                            docValues.bytes("dv_sorted", new DocValuesSearch.Match.Values<>(List.of(utf8("s1"))))))
+                    .containsExactly(0, 3, 7);
+            assertThat(matched(
+                            index,
+                            docValues.bytes(
+                                    "dv_sorted", new DocValuesSearch.Match.Values<>(List.of(utf8("s1"), utf8("s0"))))))
+                    .containsExactly(0, 2, 3, 4, 6, 7);
+            assertThat(matched(index, docValues.bytes("dv_sorted", range(utf8("s2"), null))))
+                    .containsExactly(5);
+            // dv_set has x and y<i>.
+            assertThat(matched(
+                            index, docValues.bytes("dv_set", new DocValuesSearch.Match.Values<>(List.of(utf8("y5"))))))
+                    .containsExactly(5);
+            assertThat(matched(index, docValues.prefix("dv_set", utf8("y")))).hasSize(index.maxDoc() - 1);
+            assertThat(matched(index, docValues.prefix("dv_set", new byte[0]))).hasSize(index.maxDoc() - 1);
+            assertThat(matched(index, docValues.prefix("dv_sorted", utf8("s0"))))
+                    .containsExactly(2, 4, 6);
+            // dv_bin is b<i>.
+            assertThat(matched(index, docValues.bytes("dv_bin", range(utf8("b5"), utf8("b7")))))
+                    .containsExactly(5, 6, 7);
+            assertThat(matched(
+                            index, docValues.bytes("dv_bin", new DocValuesSearch.Match.Values<>(List.of(utf8("b4"))))))
+                    .containsExactly(3);
+            assertThat(matched(index, docValues.prefix("dv_bin", utf8("b")))).hasSize(index.maxDoc() - 1);
+            Search.ParsedQuery binary = docValues.bytes("dv_bin", range(utf8("b5"), utf8("b7")));
+            assertThat(binary).hasToString("dv_bin:[[62 35] TO [62 37]]");
+            Search.Hit hit = index.search()
+                    .orElseThrow()
+                    .search(binary, 0, 1, Optional.empty(), _ -> {})
+                    .hits()
+                    .getFirst();
+            assertThat(index.search()
+                            .orElseThrow()
+                            .explain(binary, hit.docId(), _ -> {})
+                            .match())
+                    .isTrue();
+        }
+    }
+
+    @Test
+    void refusesDocValuesOfTheWrongType() throws Exception {
+        try (RuntimeIndex index = open("lucene8")) {
+            DocValuesSearch docValues = index.docValuesSearch().orElseThrow();
+            DocValuesSearch.NumberEncoding longs = DocValuesSearch.NumberEncoding.LONG;
+            assertThatThrownBy(() -> docValues.numbers("dv_bin", longs, numbers("1")))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("the field 'dv_bin' has BINARY doc values, which hold bytes, not numbers");
+            assertThatThrownBy(() -> docValues.numbers("body", longs, numbers("1")))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("the field 'body' has no doc values");
+            assertThatThrownBy(() -> docValues.bytes("dv_num", new DocValuesSearch.Match.Values<>(List.of(utf8("1")))))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage(
+                            "the field 'dv_num' has NUMERIC doc values, which hold numbers: say how they are encoded");
+            assertThatThrownBy(() -> docValues.prefix("body", utf8("a")))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("the field 'body' has no doc values");
+            assertThatThrownBy(() -> docValues.numbers("dv_num", longs, numbers("1.5")))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("'1.5' is not a LONG");
+            assertThatThrownBy(() -> docValues.numbers("dv_num", DocValuesSearch.NumberEncoding.FLOAT, numbers("x")))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("'x' is not a FLOAT");
+            assertThatThrownBy(() -> docValues.numbers("dv_num", DocValuesSearch.NumberEncoding.DOUBLE, numbers("NaN")))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("NaN can't be searched for");
+            assertThatThrownBy(() -> docValues.numbers("nothing", longs, numbers("1")))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("No field 'nothing' in the index");
+            assertThatThrownBy(() -> new DocValuesSearch.Match.Values<String>(List.of()))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("no values to match");
+        }
+    }
+
+    @Test
+    void highlightsStandardAndMoreLikeThisQueries() throws Exception {
+        try (RuntimeIndex index = open("lucene8")) {
+            Search.ParsedQuery standard = index.standardSearch()
+                    .orElseThrow()
+                    .parse("gamma", STANDARD_BODY, Map.of(), named("StandardAnalyzer"));
+            Search.ParsedQuery like = index.moreLikeThisSearch()
+                    .orElseThrow()
+                    .like(new MoreLikeThisSearch.Source.Text("gamma"), likeBody(false), named("StandardAnalyzer"));
+            for (Search.ParsedQuery query : List.of(standard, like)) {
+                Highlight.Highlighted highlighted = index.highlight()
+                        .orElseThrow()
+                        .highlight(query, PASSAGES, List.of("body"), new int[] {0}, new int[] {10}, _ -> {});
+                assertThat(marked(highlighted.found().get("body").getFirst().orElseThrow()))
+                        .containsExactly("gamma", "gamma");
+            }
+        }
     }
 }

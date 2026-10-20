@@ -482,6 +482,16 @@ public final class Documents {
         return supports(Feature.KNN_VECTORS) && (supports(Feature.SEARCH) || supports(Feature.CLASSIC_SEARCH));
     }
 
+    /** Whether {@code s} can search a doc value: with all of search, or doc values queries (ADR 0066). */
+    private boolean searchesValues() {
+        return supports(Feature.DOC_VALUES) && (supports(Feature.SEARCH) || supports(Feature.DOC_VALUES_SEARCH));
+    }
+
+    /** Whether {@code m} can find similar documents: with all of search, or More-Like-This (ADR 0066). */
+    private boolean findsSimilar() {
+        return supports(Feature.SEARCH) || supports(Feature.MORE_LIKE_THIS);
+    }
+
     /** What the index says about the field {@code name}; empty if it doesn't know it. */
     public Optional<IndexField> field(String name) {
         return Optional.ofNullable(schema.get(name));
@@ -1708,9 +1718,9 @@ public final class Documents {
             case 'E' -> supports(Feature.STORED_VALUES) ? Optional.empty() : Optional.of("Export");
             case 'r' -> supports(Feature.RECONSTRUCT) ? Optional.empty() : Optional.of("Rebuild");
             case 't' -> supports(Feature.POINTS) ? Optional.empty() : Optional.of("Points");
-            case 's' -> supports(Feature.SEARCH, Feature.DOC_VALUES) ? Optional.empty() : Optional.of("Search value");
+            case 's' -> searchesValues() ? Optional.empty() : Optional.of("Search value");
             case 'N' -> nearest() ? Optional.empty() : Optional.of("Nearest");
-            case 'm' -> supports(Feature.SEARCH) ? Optional.empty() : Optional.of("Similar");
+            case 'm' -> findsSimilar() ? Optional.empty() : Optional.of("Similar");
             case 'b' -> supports(Feature.FILTER) ? Optional.empty() : Optional.of("Filter");
             case 'C' -> supports(Feature.COMMITS) ? Optional.empty() : Optional.of("Commits");
             case 'T' -> supports(Feature.TERMS) ? Optional.empty() : Optional.of("Terms");
@@ -1731,12 +1741,12 @@ public final class Documents {
         keyIf(keys, supports(Feature.TERM_VECTORS), "⏎ term vector");
         keyIf(keys, supports(Feature.STORED_VALUES), "v view");
         keys.append("a analyze   ");
-        keyIf(keys, supports(Feature.SEARCH, Feature.DOC_VALUES), "s search value");
+        keyIf(keys, searchesValues(), "s search value");
         keyIf(keys, nearest(), "N nearest");
         keys.append("x numbers   ");
         keyIf(keys, supports(Feature.POINTS), "t points");
         keys.append("e empty   ");
-        keyIf(keys, supports(Feature.SEARCH), "m similar");
+        keyIf(keys, findsSimilar(), "m similar");
         keyIf(keys, supports(Feature.RECONSTRUCT), "r rebuild");
         keyIf(keys, supports(Feature.STORED_VALUES), "E export");
         keyIf(keys, supports(Feature.TERMS), "T terms");

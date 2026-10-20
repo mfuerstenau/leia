@@ -40,7 +40,9 @@ import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
 import io.github.mfuerstenau.leia.protocol.search.ClassicSimilarity;
 import io.github.mfuerstenau.leia.protocol.search.DateResolution;
 import io.github.mfuerstenau.leia.protocol.search.DocSort;
+import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
+import io.github.mfuerstenau.leia.protocol.search.DocValuesRange;
 import io.github.mfuerstenau.leia.protocol.search.FieldSort;
 import io.github.mfuerstenau.leia.protocol.search.HighlightOptions;
 import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
@@ -101,9 +103,9 @@ class Lucene10ParityTest {
     private static final Map<String, String> EXPECTED = Map.ofEntries(
             Map.entry(
                     "openIndex",
-                    "the features: SEARCH needs the standard parser with points, doc values queries and More-Like-This,"
-                            + " which the interface lacks (step 2a); DOC_VALUES only where a field has doc values, as"
-                            + " for every runtime, while leia-core names it always"),
+                    "the features: SEARCH needs the parser's dates and fuzzy edits and every analyzer, which the"
+                            + " interface lacks (steps 2b and 2d); DOC_VALUES only where a field has doc values, as for"
+                            + " every runtime, while leia-core names it always (until step 3)"),
             Map.entry(
                     "getIndexStats",
                     "the Directory class: RuntimeIndex.Stats doesn't name it, so the kind it was opened through"
@@ -116,10 +118,7 @@ class Lucene10ParityTest {
             Map.entry("startSearch shingles", "AnalyzerSpec has no shingles (step 2b)"),
             Map.entry(
                     "startSearch preset stem exclusion",
-                    "AnalyzerSpec.Named has stop words and the longest token only (step 2b)"),
-            Map.entry("startSearch standard", "no standard parser with points (step 2a)"),
-            Map.entry("startSearch moreLikeThis", "no More-Like-This (step 2a)"),
-            Map.entry("startSearch docValues", "no doc values queries (step 2a)"));
+                    "AnalyzerSpec.Named has stop words and the longest token only (step 2b)"));
 
     /**
      * What the calls on an index use.
@@ -128,6 +127,9 @@ class Lucene10ParityTest {
      * @param point a field with points
      * @param sorts fields to sort by, with their type
      * @param knn a field with KNN vectors, and a document with one
+     * @param docValues a field with sorted doc values
+     * @param numbers a field with numeric doc values of longs
+     * @param dates a field of dates as {@code DateTools} writes them
      */
     private record Index(
             String name,
@@ -137,6 +139,7 @@ class Lucene10ParityTest {
             String knn,
             int knnDoc,
             Optional<String> docValues,
+            Optional<String> numbers,
             Optional<String> dates) {}
 
     private static final Map<String, Index> INDEXES = Map.of(
@@ -149,10 +152,19 @@ class Lucene10ParityTest {
                     "embedding",
                     1,
                     Optional.of("category"),
+                    Optional.of("quantity"),
                     Optional.of("published")),
             "lucene9",
             new Index(
-                    "lucene9", List.of(0, 1, 2), "number", Map.of(), "vector", 0, Optional.empty(), Optional.empty()));
+                    "lucene9",
+                    List.of(0, 1, 2),
+                    "number",
+                    Map.of(),
+                    "vector",
+                    0,
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.empty()));
 
     private final Map<String, String> differences = new LinkedHashMap<>();
     /**
@@ -312,6 +324,48 @@ class Lucene10ParityTest {
                                 query.getValue(), BM25, List.of(), 0, 20, true, Optional.empty(), Optional.empty()));
             }
             HighlightOptions highlight = new HighlightOptions(3, false, STANDARD);
+            // The queries of ADR 0066 in each job that takes a query.
+            for (Map.Entry<String, SearchQuery> query : searches(word, index).entrySet()) {
+                String kind = query.getKey().substring("startSearch ".length());
+                if (!OTHER_QUERIES.contains(kind)) {
+                    continue;
+                }
+                same(
+                        "startFilter " + kind,
+                        core.filter(new StartFilterParams(Optional.of(query.getValue()), Optional.empty(), false)),
+                        runtime.filter(new StartFilterParams(Optional.of(query.getValue()), Optional.empty(), false)));
+                for (int docId : index.docIds()) {
+                    sameJob(
+                            "startExplain " + kind,
+                            core,
+                            runtime,
+                            Methods.START_EXPLAIN,
+                            new StartExplainParams(query.getValue(), BM25, docId),
+                            Methods.GET_EXPLAIN,
+                            result -> result.explanation());
+                    sameJob(
+                            "startHighlight " + kind,
+                            core,
+                            runtime,
+                            Methods.START_HIGHLIGHT,
+                            new StartHighlightParams(query.getValue(), docId, Optional.empty(), highlight),
+                            Methods.GET_HIGHLIGHT,
+                            result -> result.highlight());
+                }
+                same(
+                        "startSearch highlighted " + kind,
+                        core,
+                        runtime,
+                        new StartSearchParams(
+                                query.getValue(),
+                                BM25,
+                                List.of(),
+                                0,
+                                10,
+                                true,
+                                Optional.empty(),
+                                Optional.of(highlight)));
+            }
             same(
                     "startSearch highlighted",
                     core,
@@ -395,9 +449,6 @@ class Lucene10ParityTest {
         }
         assertThat(succeeded).as("the calls that succeeded with leia-core").containsAll(calls);
         Set<String> expected = new HashSet<>(EXPECTED.keySet());
-        if (index.docValues().isEmpty()) {
-            expected.remove("startSearch docValues");
-        }
         if (index.dates().isEmpty()) {
             expected.remove("startSearch dates");
         }
@@ -405,6 +456,16 @@ class Lucene10ParityTest {
                 .as("differences, of which only those of EXPECTED may be:%n%s", report())
                 .containsExactlyInAnyOrderElementsOf(expected);
     }
+
+    /** The kinds of {@link #searches} that ADR 0066 adds, which every job that takes a query runs too. */
+    private static final Set<String> OTHER_QUERIES = Set.of(
+            "standard",
+            "standard points",
+            "moreLikeThis",
+            "moreLikeThis text",
+            "docValues",
+            "docValues numbers",
+            "docValues range");
 
     /** Searches with what {@code classic} doesn't vary: the parser's other options, analyzers, other queries. */
     private static Map<String, SearchQuery> searches(String word, Index index) {
@@ -511,6 +572,61 @@ class Lucene10ParityTest {
                                 OptionalInt.empty(),
                                 List.of())),
                         Optional.empty()));
+        searches.put(
+                "startSearch standard points",
+                other(
+                        Optional.of(new StandardQuery(
+                                index.point() + ":[0 TO 30] OR " + word,
+                                "body",
+                                QueryOperator.OR,
+                                DEFAULTS,
+                                List.of(new PointField(index.point(), PointType.INT)),
+                                STANDARD)),
+                        Optional.empty(),
+                        Optional.empty()));
+        searches.put(
+                "startSearch moreLikeThis text",
+                other(
+                        Optional.empty(),
+                        Optional.of(new MoreLikeThisQuery(
+                                OptionalInt.empty(),
+                                Optional.of(word + " " + word + " chairs"),
+                                List.of("body", "id"),
+                                1,
+                                1,
+                                OptionalInt.empty(),
+                                25,
+                                true,
+                                STANDARD,
+                                0,
+                                OptionalInt.empty(),
+                                List.of())),
+                        Optional.empty()));
+        index.numbers().ifPresent(field -> {
+            searches.put(
+                    "startSearch docValues numbers",
+                    other(
+                            Optional.empty(),
+                            Optional.empty(),
+                            Optional.of(new DocValuesQuery(
+                                    field,
+                                    Optional.of(DocValuesNumber.LONG),
+                                    Optional.of(List.of(new BytesValue("1", false), new BytesValue("2", false))),
+                                    Optional.empty(),
+                                    Optional.empty()))));
+            searches.put(
+                    "startSearch docValues range",
+                    other(
+                            Optional.empty(),
+                            Optional.empty(),
+                            Optional.of(new DocValuesQuery(
+                                    field,
+                                    Optional.of(DocValuesNumber.LONG),
+                                    Optional.empty(),
+                                    Optional.of(new DocValuesRange(
+                                            Optional.empty(), Optional.of(new BytesValue("5", false)), true, false)),
+                                    Optional.empty()))));
+        });
         index.docValues()
                 .ifPresent(field -> searches.put(
                         "startSearch docValues",

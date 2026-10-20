@@ -8,7 +8,10 @@ import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.filter.FilterResult;
 import io.github.mfuerstenau.leia.protocol.filter.StartFilterParams;
+import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
+import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
+import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
 import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
 import io.github.mfuerstenau.leia.protocol.search.SearchResults;
 import io.github.mfuerstenau.leia.protocol.search.StartExplainParams;
@@ -18,6 +21,7 @@ import io.github.mfuerstenau.leia.protocol.terms.GetPostingsParams;
 import io.github.mfuerstenau.leia.protocol.terms.Posting;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 
 /** Term queries on an index of the runtimes' writers (ADR 0058), with a {@code body} field. */
 final class RuntimeSearches {
@@ -66,6 +70,31 @@ final class RuntimeSearches {
                 Methods.START_EXPLAIN,
                 new StartExplainParams(term("nothing", term), BM25, 0),
                 ErrorCode.FIELD_NOT_FOUND);
+    }
+
+    /**
+     * Refuses the standard parser, More-Like-This and doc values queries, which only the runtimes of
+     * 9.12 and 10 have (ADR 0066), in a search, a filter and an explanation.
+     */
+    static void refusesTheQueriesOf912(RealBackend backend) {
+        List<SearchQuery> queries = List.of(
+                RealBackend.standard("alpha", QueryOperator.OR, List.of()),
+                RealBackend.moreLikeThis(OptionalInt.of(0), Optional.empty()),
+                RealBackend.moreLikeThis(OptionalInt.empty(), Optional.of("alpha")),
+                RealBackend.docValues(new DocValuesQuery(
+                        "dv_num",
+                        Optional.of(DocValuesNumber.LONG),
+                        Optional.of(List.of(new BytesValue("1", false))),
+                        Optional.empty(),
+                        Optional.empty())));
+        for (SearchQuery query : queries) {
+            backend.fails(Methods.START_SEARCH, params(query, 10), ErrorCode.NOT_SUPPORTED);
+            backend.fails(
+                    Methods.START_FILTER,
+                    new StartFilterParams(Optional.of(query), Optional.empty(), false),
+                    ErrorCode.NOT_SUPPORTED);
+            backend.fails(Methods.START_EXPLAIN, new StartExplainParams(query, BM25, 0), ErrorCode.NOT_SUPPORTED);
+        }
     }
 
     static SearchQuery term(String field, BytesValue term) {

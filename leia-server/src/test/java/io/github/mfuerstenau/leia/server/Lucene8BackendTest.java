@@ -18,10 +18,13 @@ import io.github.mfuerstenau.leia.protocol.commits.FieldFormats;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
 import io.github.mfuerstenau.leia.protocol.commits.Segment;
+import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
 import io.github.mfuerstenau.leia.protocol.document.KnnVector;
+import io.github.mfuerstenau.leia.protocol.filter.FilterResult;
+import io.github.mfuerstenau.leia.protocol.filter.StartFilterParams;
 import io.github.mfuerstenau.leia.protocol.index.Feature;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
@@ -37,13 +40,23 @@ import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeResult;
 import io.github.mfuerstenau.leia.protocol.points.PointSegment;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
+import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
+import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
+import io.github.mfuerstenau.leia.protocol.search.DocValuesRange;
+import io.github.mfuerstenau.leia.protocol.search.Explanation;
+import io.github.mfuerstenau.leia.protocol.search.HighlightOptions;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
+import io.github.mfuerstenau.leia.protocol.search.LikeTerm;
+import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
+import io.github.mfuerstenau.leia.protocol.search.PointField;
+import io.github.mfuerstenau.leia.protocol.search.PointType;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
 import io.github.mfuerstenau.leia.protocol.search.ScoreSort;
 import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
 import io.github.mfuerstenau.leia.protocol.search.SearchResults;
 import io.github.mfuerstenau.leia.protocol.search.SortKey;
+import io.github.mfuerstenau.leia.protocol.search.StartHighlightParams;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -116,6 +129,9 @@ class Lucene8BackendTest {
                 Feature.EXPLAIN,
                 Feature.HIGHLIGHT,
                 Feature.SCORING,
+                Feature.DOC_VALUES_SEARCH,
+                Feature.STANDARD_SEARCH,
+                Feature.MORE_LIKE_THIS,
                 Feature.RECONSTRUCT,
                 Feature.POINTS,
                 Feature.COMMITS,
@@ -528,5 +544,245 @@ class Lucene8BackendTest {
                         .segments())
                 .hasSize(3);
         backend.fails(Methods.GET_POINT_TREE, new GetPointTreeParams("pt"), ErrorCode.NO_READER);
+    }
+
+    private static StartSearchParams params(SearchQuery query) {
+        return new StartSearchParams(query, BM25, List.of(), 0, 10, true, Optional.empty(), Optional.empty());
+    }
+
+    private static List<Integer> docIds(SearchResults results) {
+        return results.hits().stream().map(Hit::docId).toList();
+    }
+
+    /** The search, the filter and the explanation of the first hit agree; returns the hits' ids. */
+    private List<Integer> searchFilterAndExplain(SearchQuery query) throws Exception {
+        SearchResults results = backend.search(query, 10);
+        assertThat(results.hits()).isNotEmpty();
+        FilterResult filter = backend.filter(new StartFilterParams(Optional.of(query), Optional.empty(), false));
+        assertThat(filter.matchCount()).isEqualTo(results.totalHits());
+        assertThat(filter.query()).isEqualTo(results.query());
+        Hit first = results.hits().getFirst();
+        Explanation explanation = backend.explain(query, BM25, first.docId());
+        assertThat(explanation.match()).isTrue();
+        assertThat(Float.parseFloat(explanation.value())).isEqualTo(first.score());
+        return docIds(results);
+    }
+
+    private static final List<PointField> POINTS =
+            List.of(new PointField("pt", PointType.INT), new PointField("amount", PointType.LONG));
+
+    /** The standard parser, with point fields (ADR 0066). */
+    @Test
+    void searchesWithTheStandardParserAndPoints() throws Exception {
+        open(testIndex("lucene8"));
+        SearchQuery query = RealBackend.standard("pt:[100 TO 114] OR amount:5000 OR gamma", QueryOperator.OR, POINTS);
+        assertThat(searchFilterAndExplain(query)).containsExactlyInAnyOrder(0, 5);
+        assertThat(backend.search(query, 10).query()).isEqualTo("pt:[100 TO 114] amount:[5000 TO 5000] body:gamma");
+        assertThat(backend.highlight(new StartHighlightParams(
+                                RealBackend.standard("gamma", QueryOperator.OR, List.of()),
+                                0,
+                                Optional.of("body"),
+                                new HighlightOptions(2, false, STANDARD)))
+                        .fields())
+                .singleElement()
+                .satisfies(field ->
+                        assertThat(field.values().getFirst().matchCount()).isEqualTo(2));
+
+        backend.fails(
+                Methods.START_SEARCH,
+                params(RealBackend.standard("pt:1", QueryOperator.OR, List.of(new PointField("pt", PointType.LONG)))),
+                ErrorCode.INVALID_PARAMS);
+        backend.fails(
+                Methods.START_SEARCH,
+                params(RealBackend.standard(
+                        "pt:1",
+                        QueryOperator.OR,
+                        List.of(new PointField("pt", PointType.INT), new PointField("pt", PointType.INT)))),
+                ErrorCode.INVALID_PARAMS);
+        backend.fails(
+                Methods.START_SEARCH,
+                params(RealBackend.standard("x", QueryOperator.OR, List.of(new PointField("nothing", PointType.INT)))),
+                ErrorCode.FIELD_NOT_FOUND);
+        RpcException syntax = backend.fails(
+                Methods.START_SEARCH,
+                params(RealBackend.standard("body:(", QueryOperator.OR, List.of())),
+                ErrorCode.INVALID_QUERY);
+        assertThat(syntax).hasMessage("Invalid query: Cannot parse 'body:(': Encountered \"<EOF>\" at column 6.");
+    }
+
+    /** More-Like-This, by a document and by a text, with the terms it chose (ADR 0066). */
+    @Test
+    void findsSimilarDocuments() throws Exception {
+        open(testIndex("lucene8"));
+        SearchQuery byDoc = RealBackend.moreLikeThis(OptionalInt.of(0), Optional.empty());
+        assertThat(searchFilterAndExplain(byDoc)).startsWith(0);
+        SearchResults results = backend.search(byDoc, 10);
+        assertThat(results.query())
+                .isEqualTo("like(doc 0, fields [body], minTermFreq 1, minDocFreq 1, maxQueryTerms 25)");
+        assertThat(results.moreLikeThisTerms().orElseThrow().getFirst())
+                .extracting(LikeTerm::term, LikeTerm::tf, LikeTerm::docFreq)
+                .containsExactly("gamma", 2, 1);
+
+        SearchQuery byText = RealBackend.moreLikeThis(OptionalInt.empty(), Optional.of("gamma"));
+        assertThat(searchFilterAndExplain(byText)).containsExactly(0);
+        assertThat(backend.search(byText, 10).moreLikeThisTerms().orElseThrow())
+                .extracting(LikeTerm::term)
+                .containsExactly("gamma");
+        assertThat(backend.highlight(new StartHighlightParams(
+                                byText, 0, Optional.of("body"), new HighlightOptions(2, false, STANDARD)))
+                        .fields())
+                .singleElement()
+                .satisfies(field ->
+                        assertThat(field.values().getFirst().matchCount()).isEqualTo(2));
+        // Other queries choose no terms.
+        assertThat(backend.search(RealBackend.classic("gamma"), 10).moreLikeThisTerms())
+                .isEmpty();
+
+        backend.fails(
+                Methods.START_SEARCH,
+                params(RealBackend.moreLikeThis(OptionalInt.of(0), Optional.of("gamma"))),
+                ErrorCode.INVALID_PARAMS);
+        backend.fails(
+                Methods.START_SEARCH,
+                params(RealBackend.moreLikeThis(OptionalInt.of(8), Optional.empty())),
+                ErrorCode.DOC_NOT_FOUND);
+        backend.fails(Methods.START_SEARCH, params(like("nothing")), ErrorCode.FIELD_NOT_FOUND);
+        RpcException stored = backend.fails(Methods.START_SEARCH, params(like("price")), ErrorCode.INVALID_PARAMS);
+        assertThat(stored)
+                .hasMessage("Invalid params: the field 'price' is not indexed, so it has no terms to search for");
+    }
+
+    /** More-Like-This by text from {@code field}. */
+    private static SearchQuery like(String field) {
+        MoreLikeThisQuery body = RealBackend.moreLikeThis(OptionalInt.empty(), Optional.of("gamma"))
+                .moreLikeThis()
+                .orElseThrow();
+        return new SearchQuery(
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(new MoreLikeThisQuery(
+                        body.docId(),
+                        body.text(),
+                        List.of(field),
+                        body.minTermFreq(),
+                        body.minDocFreq(),
+                        body.maxDocFreq(),
+                        body.maxQueryTerms(),
+                        body.boost(),
+                        body.analyzer(),
+                        body.minWordLen(),
+                        body.maxWordLen(),
+                        body.stopWords())),
+                Optional.empty(),
+                Optional.empty());
+    }
+
+    private static BytesValue text(String text) {
+        return new BytesValue(text, false);
+    }
+
+    private static SearchQuery docValues(
+            String field,
+            Optional<DocValuesNumber> number,
+            Optional<List<BytesValue>> values,
+            Optional<DocValuesRange> range,
+            Optional<BytesValue> prefix) {
+        return RealBackend.docValues(new DocValuesQuery(field, number, values, range, prefix));
+    }
+
+    /** Doc values queries of each type (ADR 0066), on what leia-lucene9's writer puts in them. */
+    @Test
+    void searchesDocValues() throws Exception {
+        open(testIndex("lucene8"));
+        Optional<DocValuesNumber> longs = Optional.of(DocValuesNumber.LONG);
+        // dv_num is i, but 400 for document 4 (3 of the index), and none for document 3.
+        assertThat(searchFilterAndExplain(docValues(
+                        "dv_num",
+                        longs,
+                        Optional.empty(),
+                        Optional.of(new DocValuesRange(Optional.of(text("2")), Optional.of(text("6")), true, true)),
+                        Optional.empty())))
+                .containsExactlyInAnyOrder(5, 6);
+        assertThat(searchFilterAndExplain(docValues(
+                        "dv_num", longs, Optional.of(List.of(text("400"))), Optional.empty(), Optional.empty())))
+                .containsExactly(3);
+        assertThat(searchFilterAndExplain(docValues(
+                        "dv_sorted_num",
+                        longs,
+                        Optional.of(List.of(text("-5"), text("-7"))),
+                        Optional.empty(),
+                        Optional.empty())))
+                .containsExactlyInAnyOrder(5, 7);
+        assertThat(searchFilterAndExplain(docValues(
+                        "dv_num",
+                        Optional.of(DocValuesNumber.SORTABLE_DOUBLE),
+                        Optional.empty(),
+                        Optional.of(new DocValuesRange(Optional.of(text("0")), Optional.of(text("1")), true, true)),
+                        Optional.empty())))
+                // As sortable bits, a small long is a tiny positive double.
+                .containsExactlyInAnyOrder(0, 3, 5, 6, 7);
+        assertThat(searchFilterAndExplain(docValues(
+                        "dv_sorted",
+                        Optional.empty(),
+                        Optional.of(List.of(text("s1"))),
+                        Optional.empty(),
+                        Optional.empty())))
+                .containsExactlyInAnyOrder(0, 3, 7);
+        assertThat(searchFilterAndExplain(docValues(
+                        "dv_set", Optional.empty(), Optional.empty(), Optional.empty(), Optional.of(text("y5")))))
+                .containsExactly(5);
+        // dv_bin is b<i>: 62 is b, 35 to 37 are 5 to 7.
+        assertThat(searchFilterAndExplain(docValues(
+                        "dv_bin",
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.of(new DocValuesRange(
+                                Optional.of(new BytesValue("6235", true)), Optional.of(text("b7")), true, false)),
+                        Optional.empty())))
+                .containsExactlyInAnyOrder(5, 6);
+
+        backend.fails(
+                Methods.START_SEARCH,
+                params(docValues(
+                        "nothing", longs, Optional.of(List.of(text("1"))), Optional.empty(), Optional.empty())),
+                ErrorCode.FIELD_NOT_FOUND);
+        RpcException none = backend.fails(
+                Methods.START_SEARCH,
+                params(docValues("body", longs, Optional.of(List.of(text("1"))), Optional.empty(), Optional.empty())),
+                ErrorCode.INVALID_PARAMS);
+        assertThat(none).hasMessage("Invalid params: the field 'body' has no doc values");
+        backend.fails(
+                Methods.START_SEARCH,
+                params(docValues("dv_num", longs, Optional.empty(), Optional.empty(), Optional.empty())),
+                ErrorCode.INVALID_PARAMS);
+        backend.fails(
+                Methods.START_SEARCH,
+                params(docValues("dv_num", longs, Optional.empty(), Optional.empty(), Optional.of(text("1")))),
+                ErrorCode.INVALID_PARAMS);
+        backend.fails(
+                Methods.START_SEARCH,
+                params(docValues(
+                        "dv_num",
+                        longs,
+                        Optional.of(List.of(new BytesValue("01", true))),
+                        Optional.empty(),
+                        Optional.empty())),
+                ErrorCode.INVALID_PARAMS);
+        backend.fails(
+                Methods.START_SEARCH,
+                params(docValues(
+                        "dv_bin",
+                        Optional.empty(),
+                        Optional.of(List.of(new BytesValue("zz", true))),
+                        Optional.empty(),
+                        Optional.empty())),
+                ErrorCode.INVALID_PARAMS);
+        RpcException binary = backend.fails(
+                Methods.START_SEARCH,
+                params(docValues("dv_bin", longs, Optional.of(List.of(text("1"))), Optional.empty(), Optional.empty())),
+                ErrorCode.INVALID_PARAMS);
+        assertThat(binary)
+                .hasMessage("Invalid params: the field 'dv_bin' has BINARY doc values, which hold bytes, not numbers");
     }
 }

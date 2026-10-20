@@ -18,6 +18,7 @@ import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
 import io.github.mfuerstenau.leia.protocol.search.Bm25Similarity;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
+import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocumentHighlight;
 import io.github.mfuerstenau.leia.protocol.search.Explanation;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
@@ -25,6 +26,7 @@ import io.github.mfuerstenau.leia.protocol.search.GetHighlightResult;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanResult;
+import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
 import io.github.mfuerstenau.leia.protocol.search.ParserOptions;
 import io.github.mfuerstenau.leia.protocol.search.PointField;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
@@ -44,6 +46,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
@@ -230,6 +233,42 @@ final class RealBackend implements AutoCloseable {
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty(),
+                Optional.empty());
+    }
+
+    /**
+     * More-Like-This with Lucene's defaults but minimum frequencies of 1, like {@code docId} or {@code
+     * text}, from {@code body}.
+     */
+    static SearchQuery moreLikeThis(OptionalInt docId, Optional<String> text) {
+        return new SearchQuery(
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(new MoreLikeThisQuery(
+                        docId,
+                        text,
+                        List.of("body"),
+                        1,
+                        1,
+                        OptionalInt.empty(),
+                        25,
+                        false,
+                        STANDARD,
+                        0,
+                        OptionalInt.empty(),
+                        List.of())),
+                Optional.empty(),
+                Optional.empty());
+    }
+
+    static SearchQuery docValues(DocValuesQuery query) {
+        return new SearchQuery(
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(query),
                 Optional.empty());
     }
 

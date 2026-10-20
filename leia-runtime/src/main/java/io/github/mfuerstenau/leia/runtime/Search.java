@@ -65,7 +65,10 @@ public interface Search {
      */
     Explanation explain(ParsedQuery query, int docId, LongConsumer progress) throws IOException;
 
-    /** A query from {@link #parse} or {@link #term}; its {@code toString} is the parsed query. */
+    /**
+     * A query from {@link #parse}, {@link #term}, {@link Knn}, {@link DocValuesSearch}, {@link
+     * StandardSearch} or {@link MoreLikeThisSearch}; its {@code toString} is the parsed query.
+     */
     interface ParsedQuery {}
 
     /** The classic query parser's options. */
@@ -156,5 +159,23 @@ public interface Search {
      */
     record Explanation(boolean match, Number value, String description, List<Explanation> details) {}
 
-    record SearchResults(String query, String rewrittenQuery, long totalHits, List<Hit> hits, long tookMillis) {}
+    /**
+     * What a search found.
+     *
+     * @param likeTerms for a query of {@link MoreLikeThisSearch}, the terms it chose, best first (ADR
+     *     0066); empty for any other query
+     */
+    record SearchResults(
+            String query,
+            String rewrittenQuery,
+            long totalHits,
+            List<Hit> hits,
+            long tookMillis,
+            Optional<List<MoreLikeThisSearch.LikeTerm>> likeTerms) {
+
+        /** What a search with a query other than More-Like-This found. */
+        public SearchResults(String query, String rewrittenQuery, long totalHits, List<Hit> hits, long tookMillis) {
+            this(query, rewrittenQuery, totalHits, hits, tookMillis, Optional.empty());
+        }
+    }
 }

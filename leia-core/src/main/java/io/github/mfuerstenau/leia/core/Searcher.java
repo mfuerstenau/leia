@@ -241,7 +241,7 @@ final class Searcher {
 
     /** The query to rewrite: a More-Like-This query is built from the searcher's reader first. */
     private static Query built(IndexSearcher searcher, Query query) throws IOException {
-        return query instanceof MoreLikeQuery like ? like.build(searcher.getIndexReader()) : query;
+        return Queries.built(searcher.getIndexReader(), query);
     }
 
     private static List<Hit> hits(

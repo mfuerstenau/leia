@@ -76,6 +76,7 @@ import io.github.mfuerstenau.leia.tui.documents.Documents;
 import io.github.mfuerstenau.leia.tui.search.Search.Mode;
 import io.github.mfuerstenau.leia.tui.search.Search.Request;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -325,6 +326,33 @@ class SearchTest {
         assertThat(start.params().highlight()).isEmpty();
         assertThat(press(search, 's')).hasValue(new Request.Unsupported("Similarity and sort"));
         assertThat(render(search)).doesNotContain("s similarity");
+    }
+
+    /** A runtime with the parts of ADR 0066 has their modes; doc values need DOC_VALUES too. */
+    @Test
+    void aRuntimeWithTheOtherQueriesHasTheirModes() {
+        Set<Feature> classic = Set.of(Feature.CLASSIC_SEARCH, Feature.DOCUMENTS, Feature.DOC_VALUES);
+        assertThat(cycle(search().withFeatures(classic))).containsExactly(Mode.CLASSIC);
+
+        Set<Feature> parts = new HashSet<>(classic);
+        parts.addAll(List.of(Feature.STANDARD_SEARCH, Feature.MORE_LIKE_THIS, Feature.DOC_VALUES_SEARCH));
+        assertThat(cycle(search().withFeatures(parts)))
+                .containsExactly(Mode.CLASSIC, Mode.STANDARD, Mode.DOC_VALUES, Mode.LIKE, Mode.LIKE_TEXT);
+        parts.remove(Feature.DOC_VALUES);
+        assertThat(cycle(search().withFeatures(parts)))
+                .containsExactly(Mode.CLASSIC, Mode.STANDARD, Mode.LIKE, Mode.LIKE_TEXT);
+    }
+
+    /** The modes that {@code m} goes through, from the first back to it. */
+    private static List<Mode> cycle(Search search) {
+        List<Mode> modes = new ArrayList<>(List.of(search.mode()));
+        while (true) {
+            press(search, 'm');
+            if (search.mode() == modes.getFirst()) {
+                return modes;
+            }
+            modes.add(search.mode());
+        }
     }
 
     @Test

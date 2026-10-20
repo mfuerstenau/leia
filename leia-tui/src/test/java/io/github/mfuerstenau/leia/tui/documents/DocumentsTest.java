@@ -49,6 +49,7 @@ import io.github.mfuerstenau.leia.tui.points.PointFormat;
 import io.github.mfuerstenau.leia.tui.points.PointFormats;
 import io.github.mfuerstenau.leia.tui.terms.Terms.TermHit;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -786,6 +787,32 @@ class DocumentsTest {
 
         assertThat(documents.keys()).contains("N nearest").doesNotContain("m similar", "s search value");
         assertThat(documents.handleKey(key('N'))).hasValue(new Request.SearchKnn("vec", 4));
+    }
+
+    /** A runtime with doc values and More-Like-This queries searches a value and similar documents (ADR 0066). */
+    @Test
+    void searchesValuesAndSimilarDocumentsWithTheirParts() {
+        Set<Feature> classic =
+                Set.of(Feature.DOCUMENTS, Feature.STORED_VALUES, Feature.CLASSIC_SEARCH, Feature.DOC_VALUES);
+        Documents without = documents().withFeatures(classic);
+        without.loaded(document(0));
+        assertThat(without.keys()).doesNotContain("m similar", "s search value");
+        assertThat(without.handleKey(key('m'))).hasValue(new Request.Unsupported("Similar"));
+
+        Set<Feature> parts = new HashSet<>(classic);
+        parts.addAll(List.of(Feature.DOC_VALUES_SEARCH, Feature.MORE_LIKE_THIS));
+        Documents documents = documents().withFeatures(parts);
+        documents.loaded(document(0));
+        assertThat(documents.keys()).contains("m similar", "s search value");
+        assertThat(documents.handleKey(key('m'))).hasValue(new Request.MoreLikeThis(0));
+        documents.handleKey(key(KeyCode.DOWN));
+        documents.handleKey(key(KeyCode.DOWN));
+        assertThat(documents.handleKey(key('s')))
+                .isEqualTo(search(DocValuesNumber.LONG, false, "-1", "4612811918334230528"));
+
+        // Doc values queries need doc values.
+        parts.remove(Feature.DOC_VALUES);
+        assertThat(documents().withFeatures(parts).keys()).doesNotContain("s search value");
     }
 
     @Test

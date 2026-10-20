@@ -1,14 +1,17 @@
 package io.github.mfuerstenau.leia.lucene9;
 
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
+import io.github.mfuerstenau.leia.runtime.DocValuesSearch;
 import io.github.mfuerstenau.leia.runtime.Documents;
 import io.github.mfuerstenau.leia.runtime.Highlight;
 import io.github.mfuerstenau.leia.runtime.Knn;
+import io.github.mfuerstenau.leia.runtime.MoreLikeThisSearch;
 import io.github.mfuerstenau.leia.runtime.Points;
 import io.github.mfuerstenau.leia.runtime.Rebuild;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Scoring;
 import io.github.mfuerstenau.leia.runtime.Search;
+import io.github.mfuerstenau.leia.runtime.StandardSearch;
 import io.github.mfuerstenau.leia.runtime.Terms;
 import io.github.mfuerstenau.leia.runtime.support.Failures;
 import io.github.mfuerstenau.leia.runtime.support.IndexParts;
@@ -97,7 +100,16 @@ import org.apache.lucene.util.BytesRef;
  * threads, so jobs can read it. Soft-deleted documents are live, as a plain {@code DirectoryReader}
  * has them.
  */
-final class Lucene9Index implements RuntimeIndex, Documents, Terms, Search, Knn, Scoring {
+final class Lucene9Index
+        implements RuntimeIndex,
+                Documents,
+                Terms,
+                Search,
+                Knn,
+                Scoring,
+                DocValuesSearch,
+                StandardSearch,
+                MoreLikeThisSearch {
 
     /** 9.12's default similarity, which {@link Search} scores with. */
     private static final Similarity DEFAULT_SIMILARITY = new Similarity.Bm25(1.2f, 0.75f);
@@ -217,6 +229,21 @@ final class Lucene9Index implements RuntimeIndex, Documents, Terms, Search, Knn,
 
     @Override
     public Optional<Scoring> scoring() {
+        return Optional.of(this);
+    }
+
+    @Override
+    public Optional<DocValuesSearch> docValuesSearch() {
+        return Optional.of(this);
+    }
+
+    @Override
+    public Optional<StandardSearch> standardSearch() {
+        return Optional.of(this);
+    }
+
+    @Override
+    public Optional<MoreLikeThisSearch> moreLikeThisSearch() {
         return Optional.of(this);
     }
 
@@ -764,6 +791,76 @@ final class Lucene9Index implements RuntimeIndex, Documents, Terms, Search, Knn,
         return new Lucene9Query(new TermQuery(new Term(field, new BytesRef(term))));
     }
 
+    @Override
+    public ParsedQuery numbers(String field, NumberEncoding number, Match<String> match) {
+        return new Lucene9Query(Lucene9DocValuesQueries.numbers(fieldInfo(field), number, match));
+    }
+
+    @Override
+    public ParsedQuery bytes(String field, Match<byte[]> match) {
+        return new Lucene9Query(Lucene9DocValuesQueries.bytes(fieldInfo(field), match));
+    }
+
+    @Override
+    public ParsedQuery prefix(String field, byte[] prefix) {
+        return new Lucene9Query(Lucene9DocValuesQueries.prefix(fieldInfo(field), prefix));
+    }
+
+    /** @throws IllegalArgumentException if the index has no field {@code field} */
+    private FieldInfo fieldInfo(String field) {
+        FieldInfo info = fieldInfos.fieldInfo(field);
+        if (info == null) {
+            throw new IllegalArgumentException("No field '" + field + "' in the index");
+        }
+        return info;
+    }
+
+    @Override
+    public ParsedQuery parse(
+            String expression,
+            StandardSearch.Options options,
+            Map<String, StandardSearch.PointType> points,
+            AnalyzerSpec spec)
+            throws InvalidQueryException, UnsupportedAnalyzerException {
+        try (Analyzer analyzer = Lucene9Analyzers.analyzer(spec)) {
+            return new Lucene9Query(Lucene9StandardParser.parse(expression, options, points, analyzer));
+        } catch (RuntimeException e) {
+            throw new InvalidQueryException(e.getMessage(), e);
+        }
+    }
+
+    /** {@inheritDoc} The query is built in each search, from the reader searched (ADR 0013). */
+    @Override
+    public ParsedQuery like(Source source, MoreLikeThisSearch.Options options, AnalyzerSpec spec)
+            throws UnsupportedAnalyzerException {
+        Lucene9Analyzers.analyzer(spec).close();
+        return new Lucene9Query(new Lucene9MoreLikeQuery(source, options, spec));
+    }
+
+    /**
+     * The analyzer that a More-Like-This query analyzes with while it is built; null for any other
+     * query. The caller closes it.
+     */
+    static Analyzer likeAnalyzer(Query query) {
+        if (!(query instanceof Lucene9MoreLikeQuery like)) {
+            return null;
+        }
+        try {
+            return Lucene9Analyzers.analyzer(like.analyzer());
+        } catch (UnsupportedAnalyzerException e) {
+            // MoreLikeThisSearch.like built it before.
+            throw new IllegalStateException(e.getMessage(), e);
+        }
+    }
+
+    /**
+     * The query to rewrite: a More-Like-This query is built from the searcher's reader with {@code
+     * analyzer} from {@link #likeAnalyzer} first, as leia-core's {@code Searcher} builds it.
+     */
+    static Query built(IndexSearcher searcher, Query query, Analyzer analyzer) throws IOException {
+        return query instanceof Lucene9MoreLikeQuery like ? like.build(searcher.getIndexReader(), analyzer) : query;
+    }
+
     /** {@inheritDoc} It scores with 9.12's default, BM25 with k1 1.2 and b 0.75. */
     @Override
     public SearchResults search(
@@ -793,7 +890,17 @@ final class Lucene9Index implements RuntimeIndex, Documents, Terms, Search, Knn,
         long start = System.nanoTime();
         SearchProgress searchProgress = new SearchProgress(progress);
         IndexSearcher searcher = searcher(similarity, searchProgress);
-        Query rewritten = searcher.rewrite(query);
+        Optional<List<MoreLikeThisSearch.LikeTerm>> likeTerms = Optional.empty();
+        Query rewritten;
+        try (Analyzer analyzer = likeAnalyzer(query)) {
+            Query built = built(searcher, query, analyzer);
+            if (query instanceof Lucene9MoreLikeQuery like) {
+                // Explained before the rewrite merges a lone clause or drops a ^1.0.
+                likeTerms = Optional.of(Lucene9LikeTerms.of(
+                        searcher.getIndexReader(), like, analyzer, built, () -> searchProgress.searched(0)));
+            }
+            rewritten = searcher.rewrite(built);
+        }
         // Every hit counted, as 7.7 counts them; that also keeps an index sort from ending the search early.
         TopDocsCollector<?> top = sort.isPresent()
                 ? TopFieldCollector.create(sort.get(), offset + limit, Integer.MAX_VALUE)
@@ -830,7 +937,8 @@ final class Lucene9Index implements RuntimeIndex, Documents, Terms, Search, Knn,
                 rewritten.toString(),
                 docs.totalHits.value,
                 List.copyOf(hits),
-                (System.nanoTime() - start) / 1_000_000);
+                (System.nanoTime() - start) / 1_000_000,
+                likeTerms);
     }
 
     /** A searcher of the whole index that scores with {@code similarity} and asks {@code progress}. */
@@ -877,7 +985,10 @@ final class Lucene9Index implements RuntimeIndex, Documents, Terms, Search, Knn,
         searcher.setQueryCache(null);
         // Never a timeout: only a way to ask the progress, which throws to stop the search.
         searcher.setTimeout(searchProgress);
-        Query rewritten = searcher.rewrite(query);
+        Query rewritten;
+        try (Analyzer analyzer = likeAnalyzer(query)) {
+            rewritten = searcher.rewrite(built(searcher, query, analyzer));
+        }
         BitSet docs = new BitSet(reader.maxDoc());
         searcher.search(rewritten, new ProgressCollector(new MatchCollector(docs), searchProgress));
         progress.accept(reader.maxDoc());
@@ -904,7 +1015,10 @@ final class Lucene9Index implements RuntimeIndex, Documents, Terms, Search, Knn,
             throws IOException {
         Query query = query(parsed);
         IndexSearcher searcher = searcher(similarity, new SearchProgress(progress));
-        Explanation explanation = explanation(searcher.explain(query, docId));
+        Explanation explanation;
+        try (Analyzer analyzer = likeAnalyzer(query)) {
+            explanation = explanation(searcher.explain(built(searcher, query, analyzer), docId));
+        }
         progress.accept(reader.maxDoc());
         return explanation;
     }

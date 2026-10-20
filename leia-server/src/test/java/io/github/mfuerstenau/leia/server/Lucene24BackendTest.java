@@ -2,7 +2,6 @@ package io.github.mfuerstenau.leia.server;
 
 import static io.github.mfuerstenau.leia.server.RealBackend.BM25;
 import static io.github.mfuerstenau.leia.server.RealBackend.classic;
-import static io.github.mfuerstenau.leia.server.RealBackend.standard;
 import static io.github.mfuerstenau.leia.server.RealBackend.testIndex;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -35,7 +34,6 @@ import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.HitField;
-import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
 import io.github.mfuerstenau.leia.protocol.search.SearchResults;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsParams;
@@ -185,8 +183,7 @@ class Lucene24BackendTest {
                 .containsExactly("id");
 
         backend.fails(Methods.START_SEARCH, params(classic("body:(number")), ErrorCode.INVALID_QUERY);
-        backend.fails(
-                Methods.START_SEARCH, params(standard("number", QueryOperator.OR, List.of())), ErrorCode.NOT_SUPPORTED);
+        RuntimeSearches.refusesTheQueriesOf912(backend);
     }
 
     @Test

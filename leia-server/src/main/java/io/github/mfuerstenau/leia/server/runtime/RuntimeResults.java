@@ -69,6 +69,7 @@ import io.github.mfuerstenau.leia.protocol.search.HighlightOptions;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.HitField;
 import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
+import io.github.mfuerstenau.leia.protocol.search.LikeTerm;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
 import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
 import io.github.mfuerstenau.leia.protocol.search.SearchResults;
@@ -90,14 +91,17 @@ import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
 import io.github.mfuerstenau.leia.runtime.Check;
 import io.github.mfuerstenau.leia.runtime.Commits;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
+import io.github.mfuerstenau.leia.runtime.DocValuesSearch;
 import io.github.mfuerstenau.leia.runtime.Documents;
 import io.github.mfuerstenau.leia.runtime.Knn;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
+import io.github.mfuerstenau.leia.runtime.MoreLikeThisSearch;
 import io.github.mfuerstenau.leia.runtime.Points;
 import io.github.mfuerstenau.leia.runtime.Rebuild;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Scoring;
 import io.github.mfuerstenau.leia.runtime.Search;
+import io.github.mfuerstenau.leia.runtime.StandardSearch;
 import io.github.mfuerstenau.leia.runtime.Terms;
 import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.RpcException;
@@ -150,7 +154,8 @@ public final class RuntimeResults {
      * the documents and points and KNN vectors if a field has them (ADR 0049), and the check's levels
      * if the runtime's check takes them. Reopen works on every runtime (ADR 0060), auto stop words
      * wherever there are terms (ADR 0061), highlighting where the runtime highlights and searches
-     * (ADR 0063), and the similarity and sort where it scores and searches (ADR 0064).
+     * (ADR 0063), the similarity and sort where it scores and searches (ADR 0064), and the doc
+     * values, standard and More-Like-This queries where it has them and searches (ADR 0066).
      */
     public static Set<Feature> features(OpenRuntime open) {
         RuntimeIndex index = open.index();
@@ -180,6 +185,15 @@ public final class RuntimeResults {
         }
         if (index.scoring().isPresent() && index.search().isPresent()) {
             features.add(Feature.SCORING);
+        }
+        if (index.docValuesSearch().isPresent() && index.search().isPresent()) {
+            features.add(Feature.DOC_VALUES_SEARCH);
+        }
+        if (index.standardSearch().isPresent() && index.search().isPresent()) {
+            features.add(Feature.STANDARD_SEARCH);
+        }
+        if (index.moreLikeThisSearch().isPresent() && index.search().isPresent()) {
+            features.add(Feature.MORE_LIKE_THIS);
         }
         if (index.points().isPresent() && index.fields().stream().anyMatch(field -> field.pointDimensionCount() > 0)) {
             features.add(Feature.POINTS);
@@ -832,8 +846,9 @@ public final class RuntimeResults {
 
     /**
      * {@code startSearch}: a classic query, parsed with the analyzer of the params as the runtime has
-     * it ({@link RuntimeAnalyzers}), a term query (ADR 0058), or a KNN query if the runtime reads
-     * vectors (ADR 0049). If the runtime scores ({@link RuntimeScoring}, ADR 0064), the similarity
+     * it ({@link RuntimeAnalyzers}), a term query (ADR 0058), a KNN query if the runtime reads vectors
+     * (ADR 0049), or a standard, More-Like-This or doc values query if it has them (ADR 0066); a
+     * More-Like-This search returns the terms it chose. If the runtime scores ({@link RuntimeScoring}, ADR 0064), the similarity
      * and sort of the params apply; otherwise its default similarity scores, the similarity of the
      * params is ignored, and a sort other than the best score first is not supported. The hits are
      * highlighted in the same job if the runtime highlights ({@link RuntimeHighlights}, ADR 0063);
@@ -923,8 +938,9 @@ public final class RuntimeResults {
     }
 
     /**
-     * {@code query} as the runtime runs it: a classic query parsed by it, a term query (ADR 0058), or
-     * a KNN query if it reads vectors. Another query is not supported.
+     * {@code query} as the runtime runs it: a classic query parsed by it, a term query (ADR 0058), a
+     * KNN query if it reads vectors, or a standard, More-Like-This or doc values query if it has their
+     * groups ({@link RuntimeQueries}, ADR 0066). Another query is not supported.
      */
     static Search.ParsedQuery parsedQuery(OpenRuntime open, Search search, SearchQuery query) throws RpcException {
         if (query.classic().isPresent()) {
@@ -937,6 +953,20 @@ public final class RuntimeResults {
         }
         if (query.knn().isPresent()) {
             return knn(open, search, query.knn().get());
+        }
+        if (query.standard().isPresent()) {
+            StandardSearch standard = open.index().standardSearch().orElseThrow(open::notSupported);
+            return RuntimeQueries.standard(
+                    open, search, standard, query.standard().get());
+        }
+        if (query.moreLikeThis().isPresent()) {
+            MoreLikeThisSearch like = open.index().moreLikeThisSearch().orElseThrow(open::notSupported);
+            return RuntimeQueries.moreLikeThis(
+                    open, search, like, query.moreLikeThis().get());
+        }
+        if (query.docValues().isPresent()) {
+            DocValuesSearch docValues = open.index().docValuesSearch().orElseThrow(open::notSupported);
+            return RuntimeQueries.docValues(open, docValues, query.docValues().get());
         }
         throw open.notSupported();
     }
@@ -1426,7 +1456,11 @@ public final class RuntimeResults {
                 TotalHitsRelation.EQUAL_TO,
                 List.copyOf(hits),
                 results.tookMillis(),
-                Optional.empty());
+                results.likeTerms()
+                        .map(terms -> terms.stream()
+                                .map(term -> new LikeTerm(
+                                        term.field(), term.term(), term.tf(), term.docFreq(), term.idf(), term.score()))
+                                .toList()));
     }
 
     private static Hit hit(Search.Hit hit, List<FieldHighlight> highlights) {

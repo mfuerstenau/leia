@@ -540,8 +540,11 @@ public final class Search {
             boolean available = switch (each) {
                 case CLASSIC -> supports(Feature.SEARCH) || supports(Feature.CLASSIC_SEARCH);
                 case TERM -> supports(Feature.SEARCH) || supports(Feature.TERM_SEARCH);
-                case STANDARD, LIKE, LIKE_TEXT -> supports(Feature.SEARCH);
-                case DOC_VALUES -> supports(Feature.SEARCH, Feature.DOC_VALUES);
+                // A runtime has each of them as a part of search (ADR 0066).
+                case STANDARD -> supports(Feature.SEARCH) || supports(Feature.STANDARD_SEARCH);
+                case LIKE, LIKE_TEXT -> supports(Feature.SEARCH) || supports(Feature.MORE_LIKE_THIS);
+                case DOC_VALUES ->
+                    (supports(Feature.SEARCH) || supports(Feature.DOC_VALUES_SEARCH)) && supports(Feature.DOC_VALUES);
                 // A runtime searches KNN vectors with its classic search (ADR 0049).
                 case KNN ->
                     supports(Feature.KNN_VECTORS) && (supports(Feature.SEARCH) || supports(Feature.CLASSIC_SEARCH));

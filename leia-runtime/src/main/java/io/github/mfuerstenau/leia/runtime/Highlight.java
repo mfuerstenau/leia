@@ -21,8 +21,9 @@ public interface Highlight {
      * What the matches of {@code query} are in {@code fields} of each of {@code docIds}. A deleted
      * document is highlighted too.
      *
-     * @param query a query from {@link Search#parse} or {@link Search#term}, highlighted as parsed, not
-     *     rewritten: the highlighter rewrites multi-term queries itself
+     * @param query a query from {@link Search#parse}, {@link Search#term}, {@link StandardSearch} or
+     *     {@link MoreLikeThisSearch}, highlighted as parsed, not rewritten: the highlighter rewrites
+     *     multi-term queries itself. A More-Like-This query is built first.
      * @param maxPassages per field, the most passages per document
      * @param progress receives how many fields of documents were highlighted so far, before each field
      *     of each document; it may throw to stop the highlight

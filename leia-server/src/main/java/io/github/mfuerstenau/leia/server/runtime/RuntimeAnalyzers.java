@@ -24,7 +24,8 @@ import java.util.TreeSet;
 import java.util.stream.Stream;
 
 /**
- * The analyzer of a search as a runtime builds it (ADR 0045): the standard analyzer, a preset of the
+ * The analyzer of a search as a runtime builds it (ADR 0045), for the classic and the standard parser,
+ * More-Like-This (ADR 0066) and highlighting: the standard analyzer, a preset of the
  * runtime's own by its simple class name with stop words and the longest token, analyzers per field,
  * a token limit and auto stop words (ADR 0061). Anything else is refused with {@code
  * NOT_SUPPORTED}, naming what the runtime has.

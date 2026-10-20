@@ -1,14 +1,17 @@
 package io.github.mfuerstenau.leia.lucene3;
 
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
+import io.github.mfuerstenau.leia.runtime.DocValuesSearch;
 import io.github.mfuerstenau.leia.runtime.Documents;
 import io.github.mfuerstenau.leia.runtime.Highlight;
 import io.github.mfuerstenau.leia.runtime.Knn;
+import io.github.mfuerstenau.leia.runtime.MoreLikeThisSearch;
 import io.github.mfuerstenau.leia.runtime.Points;
 import io.github.mfuerstenau.leia.runtime.Rebuild;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Scoring;
 import io.github.mfuerstenau.leia.runtime.Search;
+import io.github.mfuerstenau.leia.runtime.StandardSearch;
 import io.github.mfuerstenau.leia.runtime.Terms;
 import io.github.mfuerstenau.leia.runtime.support.Failures;
 import io.github.mfuerstenau.leia.runtime.support.IndexParts;
@@ -197,6 +200,21 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
     /** {@inheritDoc} Not yet (ADR 0064). */
     @Override
     public Optional<Scoring> scoring() {
+        return Optional.empty();
+    }
+
+    @Override
+    public Optional<DocValuesSearch> docValuesSearch() {
+        return Optional.empty();
+    }
+
+    @Override
+    public Optional<StandardSearch> standardSearch() {
+        return Optional.empty();
+    }
+
+    @Override
+    public Optional<MoreLikeThisSearch> moreLikeThisSearch() {
         return Optional.empty();
     }
 

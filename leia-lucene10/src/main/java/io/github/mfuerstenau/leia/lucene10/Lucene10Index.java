@@ -3,12 +3,16 @@ package io.github.mfuerstenau.leia.lucene10;
 import io.github.mfuerstenau.leia.core.ClassicOptions;
 import io.github.mfuerstenau.leia.core.DirectoryImpl;
 import io.github.mfuerstenau.leia.core.DocFilter;
+import io.github.mfuerstenau.leia.core.DocValuesMatch;
+import io.github.mfuerstenau.leia.core.DocValuesNumber;
+import io.github.mfuerstenau.leia.core.DocValuesQueries;
 import io.github.mfuerstenau.leia.core.FieldStats;
 import io.github.mfuerstenau.leia.core.IndexOpenException;
 import io.github.mfuerstenau.leia.core.IndexStats.CommitStats;
 import io.github.mfuerstenau.leia.core.IndexStats.SegmentStats;
 import io.github.mfuerstenau.leia.core.KnnQueries;
 import io.github.mfuerstenau.leia.core.KnnVector;
+import io.github.mfuerstenau.leia.core.MoreLikeThisOptions;
 import io.github.mfuerstenau.leia.core.PostingsPage;
 import io.github.mfuerstenau.leia.core.Queries;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
@@ -18,14 +22,17 @@ import io.github.mfuerstenau.leia.core.TermPage;
 import io.github.mfuerstenau.leia.core.TermPosition;
 import io.github.mfuerstenau.leia.core.TermVectorTerm;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
+import io.github.mfuerstenau.leia.runtime.DocValuesSearch;
 import io.github.mfuerstenau.leia.runtime.Documents;
 import io.github.mfuerstenau.leia.runtime.Highlight;
 import io.github.mfuerstenau.leia.runtime.Knn;
+import io.github.mfuerstenau.leia.runtime.MoreLikeThisSearch;
 import io.github.mfuerstenau.leia.runtime.Points;
 import io.github.mfuerstenau.leia.runtime.Rebuild;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Scoring;
 import io.github.mfuerstenau.leia.runtime.Search;
+import io.github.mfuerstenau.leia.runtime.StandardSearch;
 import io.github.mfuerstenau.leia.runtime.Terms;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -57,7 +64,16 @@ import org.apache.lucene.util.BytesRef;
  * the rest of leia, and several directories open as one, as leia-core opens them (ADR 0021): one whose
  * fields conflict with those before it is skipped too.
  */
-final class Lucene10Index implements RuntimeIndex, Documents, Terms, Search, Knn, Scoring {
+final class Lucene10Index
+        implements RuntimeIndex,
+                Documents,
+                Terms,
+                Search,
+                Knn,
+                Scoring,
+                DocValuesSearch,
+                StandardSearch,
+                MoreLikeThisSearch {
 
     /** Lucene 10's default similarity, which {@link Search} scores with. */
     private static final Similarity DEFAULT_SIMILARITY = new Similarity.Bm25(1.2f, 0.75f);
@@ -169,6 +185,21 @@ final class Lucene10Index implements RuntimeIndex, Documents, Terms, Search, Knn
 
     @Override
     public Optional<Scoring> scoring() {
+        return Optional.of(this);
+    }
+
+    @Override
+    public Optional<DocValuesSearch> docValuesSearch() {
+        return Optional.of(this);
+    }
+
+    @Override
+    public Optional<StandardSearch> standardSearch() {
+        return Optional.of(this);
+    }
+
+    @Override
+    public Optional<MoreLikeThisSearch> moreLikeThisSearch() {
         return Optional.of(this);
     }
 
@@ -434,12 +465,60 @@ final class Lucene10Index implements RuntimeIndex, Documents, Terms, Search, Knn
         }
     }
 
-    /** The Lucene query of {@code parsed}. */
+    /**
+     * A More-Like-This query: the source, the options and the analyzer's spec. Each use builds the
+     * analyzer and leia-core's query with it, and closes the analyzer afterwards (ADR 0066).
+     *
+     * @param description leia-core's {@code toString} of the query
+     */
+    private record Lucene10Like(
+            MoreLikeThisSearch.Source source, MoreLikeThisOptions options, AnalyzerSpec spec, String description)
+            implements ParsedQuery {
+
+        /** leia-core's query, which analyzes with {@code analyzer} until it has run. */
+        Query query(Analyzer analyzer) {
+            return moreLikeThis(source, options, analyzer);
+        }
+
+        @Override
+        public String toString() {
+            return description;
+        }
+    }
+
+    /** The Lucene query of {@code parsed}, which is not a More-Like-This query. */
     static Query query(ParsedQuery parsed) {
         if (!(parsed instanceof Lucene10Query lucene10)) {
             throw new IllegalArgumentException("Not a query of this index: " + parsed);
         }
         return lucene10.query();
+    }
+
+    /** A use of a Lucene query. */
+    @FunctionalInterface
+    interface QueryUse<T> {
+        T use(Query query) throws IOException, io.github.mfuerstenau.leia.core.InvalidQueryException;
+    }
+
+    /**
+     * What {@code use} makes of the Lucene query of {@code parsed}; a More-Like-This query's analyzer
+     * is built for it, and closed afterwards.
+     */
+    static <T> T withQuery(ParsedQuery parsed, QueryUse<T> use)
+            throws IOException, io.github.mfuerstenau.leia.core.InvalidQueryException {
+        if (!(parsed instanceof Lucene10Like like)) {
+            return use.use(query(parsed));
+        }
+        Analyzer analyzer;
+        try {
+            analyzer = Lucene10Analyzers.analyzer(like.spec());
+        } catch (UnsupportedAnalyzerException e) {
+            // MoreLikeThisSearch.like built it before.
+            throw new IllegalStateException(e.getMessage(), e);
+        }
+        try (analyzer) {
+            return use.use(like.query(analyzer));
+        }
     }
 
     @Override
@@ -484,6 +563,106 @@ final class Lucene10Index implements RuntimeIndex, Documents, Terms, Search, Knn
         return new Lucene10Query(Queries.term(field, new BytesRef(term)));
     }
 
+    @Override
+    public ParsedQuery numbers(String field, NumberEncoding number, Match<String> match) {
+        return new Lucene10Query(DocValuesQueries.numbers(
+                fieldInfo(field), DocValuesNumber.valueOf(number.name()), docValuesMatch(match)));
+    }
+
+    @Override
+    public ParsedQuery bytes(String field, Match<byte[]> match) {
+        Match<BytesRef> refs = switch (match) {
+            case Match.Values<byte[]> values ->
+                new Match.Values<>(values.values().stream().map(BytesRef::new).toList());
+            case Match.Range<byte[]> range ->
+                new Match.Range<>(
+                        range.lower().map(BytesRef::new),
+                        range.upper().map(BytesRef::new),
+                        range.includeLower(),
+                        range.includeUpper());
+        };
+        return new Lucene10Query(DocValuesQueries.bytes(fieldInfo(field), docValuesMatch(refs)));
+    }
+
+    @Override
+    public ParsedQuery prefix(String field, byte[] prefix) {
+        return new Lucene10Query(DocValuesQueries.prefix(fieldInfo(field), new BytesRef(prefix)));
+    }
+
+    private static <T> DocValuesMatch<T> docValuesMatch(Match<T> match) {
+        return switch (match) {
+            case Match.Values<T> values -> new DocValuesMatch.Values<>(values.values());
+            case Match.Range<T> range ->
+                new DocValuesMatch.Range<>(range.lower(), range.upper(), range.includeLower(), range.includeUpper());
+        };
+    }
+
+    /** @throws IllegalArgumentException if the index has no field {@code field} */
+    private FieldInfo fieldInfo(String field) {
+        return index.fieldInfo(field)
+                .orElseThrow(() -> new IllegalArgumentException("No field '" + field + "' in the index"));
+    }
+
+    /** {@inheritDoc} With leia-core's standard parser, without dates. */
+    @Override
+    public ParsedQuery parse(
+            String expression,
+            StandardSearch.Options options,
+            Map<String, StandardSearch.PointType> points,
+            AnalyzerSpec spec)
+            throws InvalidQueryException, UnsupportedAnalyzerException {
+        Map<String, io.github.mfuerstenau.leia.core.PointType> types = new LinkedHashMap<>();
+        points.forEach(
+                (field, type) -> types.put(field, io.github.mfuerstenau.leia.core.PointType.valueOf(type.name())));
+        try (Analyzer analyzer = Lucene10Analyzers.analyzer(spec)) {
+            return new Lucene10Query(Queries.standard(
+                    expression,
+                    options.defaultField(),
+                    new io.github.mfuerstenau.leia.core.ParserOptions(
+                            options.defaultAnd() ? Queries.Operator.AND : Queries.Operator.OR,
+                            options.allowLeadingWildcard(),
+                            options.phraseSlop(),
+                            options.fuzzyPrefixLength(),
+                            options.enablePositionIncrements()),
+                    types,
+                    analyzer));
+        } catch (io.github.mfuerstenau.leia.core.InvalidQueryException e) {
+            throw new InvalidQueryException(e.getMessage(), e);
+        } catch (RuntimeException e) {
+            throw new InvalidQueryException(e.getMessage(), e);
+        }
+    }
+
+    /** {@inheritDoc} leia-core's query is built in each search, from the reader searched (ADR 0013). */
+    @Override
+    public ParsedQuery like(Source source, MoreLikeThisSearch.Options options, AnalyzerSpec spec)
+            throws UnsupportedAnalyzerException {
+        MoreLikeThisOptions coreOptions = new MoreLikeThisOptions(
+                options.fields(),
+                options.minTermFreq(),
+                options.minDocFreq(),
+                options.maxDocFreq(),
+                options.maxQueryTerms(),
+                options.boost(),
+                options.minWordLen(),
+                options.maxWordLen(),
+                options.stopWords());
+        try (Analyzer analyzer = Lucene10Analyzers.analyzer(spec)) {
+            return new Lucene10Like(
+                    source,
+                    coreOptions,
+                    spec,
+                    moreLikeThis(source, coreOptions, analyzer).toString());
+        }
+    }
+
+    private static Query moreLikeThis(Source source, MoreLikeThisOptions options, Analyzer analyzer) {
+        return switch (source) {
+            case Source.Doc(int docId) -> Queries.moreLikeThis(docId, options, analyzer);
+            case Source.Text(String text) -> Queries.moreLikeText(text, options, analyzer);
+        };
+    }
+
     /** {@inheritDoc} It scores with Lucene 10's default, BM25 with k1 1.2 and b 0.75. */
     @Override
     public SearchResults search(
@@ -511,15 +690,17 @@ final class Lucene10Index implements RuntimeIndex, Documents, Terms, Search, Knn
         Optional<Sort> sort = sortKeys.isEmpty() ? Optional.empty() : Optional.of(sort(sortKeys));
         io.github.mfuerstenau.leia.core.SearchResults results;
         try {
-            results = index.search(
-                    query(parsed),
-                    similarity(similarity),
-                    sort,
-                    offset,
-                    limit,
-                    true,
-                    fields.map(Set::copyOf),
-                    progress::accept);
+            results = withQuery(
+                    parsed,
+                    query -> index.search(
+                            query,
+                            similarity(similarity),
+                            sort,
+                            offset,
+                            limit,
+                            true,
+                            fields.map(Set::copyOf),
+                            progress::accept));
         } catch (io.github.mfuerstenau.leia.core.InvalidQueryException e) {
             throw new IllegalArgumentException(e.getMessage(), e);
         }
@@ -545,7 +726,12 @@ final class Lucene10Index implements RuntimeIndex, Documents, Terms, Search, Knn
                 results.rewrittenQuery(),
                 results.totalHits().value(),
                 List.copyOf(hits),
-                results.took().toMillis());
+                results.took().toMillis(),
+                results.moreLikeThisTerms()
+                        .map(terms -> terms.stream()
+                                .map(term -> new LikeTerm(
+                                        term.field(), term.term(), term.tf(), term.docFreq(), term.idf(), term.score()))
+                                .toList()));
     }
 
     private static org.apache.lucene.search.similarities.Similarity similarity(Similarity similarity) {
@@ -598,7 +784,7 @@ final class Lucene10Index implements RuntimeIndex, Documents, Terms, Search, Knn
     public Matches matches(ParsedQuery parsed, boolean includeDeleted, LongConsumer progress) throws IOException {
         DocFilter filter;
         try {
-            filter = index.matches(query(parsed), includeDeleted, progress::accept);
+            filter = withQuery(parsed, query -> index.matches(query, includeDeleted, progress::accept));
         } catch (io.github.mfuerstenau.leia.core.InvalidQueryException e) {
             throw new IllegalArgumentException(e.getMessage(), e);
         }
@@ -626,7 +812,8 @@ final class Lucene10Index implements RuntimeIndex, Documents, Terms, Search, Knn
     public Explanation explain(ParsedQuery parsed, Similarity similarity, int docId, LongConsumer progress)
             throws IOException {
         try {
-            return explanation(index.explain(query(parsed), similarity(similarity), docId, progress::accept));
+            return explanation(
+                    withQuery(parsed, query -> index.explain(query, similarity(similarity), docId, progress::accept)));
         } catch (io.github.mfuerstenau.leia.core.InvalidQueryException e) {
             throw new IllegalArgumentException(e.getMessage(), e);
         }

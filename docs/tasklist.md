@@ -7,11 +7,10 @@ The work queue for leia. Check items off (`[x]`) as they land, and keep it align
 Goal: an option of `leia.jar` downloads the runtime jars from Maven Central into `runtimes/` beside it, checked against SHA-256s that the build bakes in, and the release folders ship without `runtimes/`. That pays off only once Lucene 10 is a runtime too, so the lane starts there (ADR 0065). Each step is a commit; steps 2 to 7 get their own plan when reached.
 
 - [x] 1. `leia-lucene10`: Lucene 10 behind today's runtime interface, through leia-core, and `Lucene10ParityTest`, which lists what the interface lacks (ADR 0065 §6). Nothing is routed to it yet.
-- [ ] 2. The interface for what only Lucene 10 has, each part an optional group, an `API_VERSION` bump and an ADR:
-  - [ ] (a) Doc-values queries, the standard parser with point fields, and More-Like-This; leia-lucene9 gets them too (the open 9.12 items below).
+- [ ] 2. The interface for what only Lucene 10 has, each part an optional group, an `API_VERSION` bump and an ADR (step (a), doc-values, standard and More-Like-This queries: ADR 0066, done):
   - [ ] (b) Analysis on `LuceneRuntime`: the components, `analyze`, custom analyzers, shingles and the preset options for search (ADR 0016).
   - [ ] (c) Extension jars: the class-loader chain moves from `ExtensionJars` into leia-server, with a hook through which a runtime reloads its SPI lists and reports the `JarComponents` it added.
-  - [ ] (d) The other gaps of ADR 0065 §6: the directory class in the stats, the classic parser's fuzzy edits, dates and `splitOnWhitespace`, `hasBlocks` of a segment, and presets told apart by more than their simple name.
+  - [ ] (d) The other gaps of ADR 0065 §6: the directory class in the stats, the classic parser's fuzzy edits, dates and `splitOnWhitespace`, the standard parser's dates (ADR 0066), `hasBlocks` of a segment, and presets told apart by more than their simple name.
 - [ ] 3. Switch the server: `Runtimes`/`route` send every index to a runtime, leia-lucene10 claiming 9, 10 and versions it can't detect; `Runtimes.jarFor` names `leia-lucene10.jar`; `CurrentIndex` holds only `OpenRuntime`; the handlers' core branches go, and leia-server stops compiling against leia-core. The TUI gates the analysis tab when no runtime has analysis. Rewrite hard rules 2, 5 and 6 and the architecture section of `AGENTS.md`.
 - [ ] 4. Packaging: `leia.jar` without Lucene; `runtimeJars` gains leia-lucene10; a `jarsTest` opens a Lucene 9/10 index from `runtimes/`; without `runtimes/`, leia starts and says what is missing. Fix `Cli.HELP`, which still says "runtimes for indexes of Lucene 2 and 3".
 - [ ] 5. Publishing setup: `maven-publish` and `signing` for the five runtime shadow jars as `io.github.mfuerstenau.leia:leia-luceneN:<version>`, with POM metadata and sources/javadoc jars; a Central Portal bundle task; reproducible jars. The upload is the user's.
@@ -22,14 +21,11 @@ Goal: an option of `leia.jar` downloads the runtime jars from Maven Central into
 
 Goal: an index created by Lucene 8.x (read with `leia-lucene9`, ADR 0049) gets the features that are greyed out for it today. 9.12 has the APIs that leia-core uses for them on Lucene 10, so most are ports. What needs no runtime change goes to every runtime at once. The others need runtime interface 7 (one ADR for the interface, amending ADR 0049 §4). They land in 9.12 first, and in 5.5 and 7.7 where the copy is the same (ADR 0050). Each item adds its feature in `RuntimeResults.features`, a `runtime()` branch in its handlers, and its row in `docs/runtimes.md` (checked by `RuntimeFeaturesTest`). The TUI already gates on the features.
 
-- [ ] Search beyond classic on 9.12 (`SEARCH`), one part per step (ADR 0013, ADR 0028, ADR 0033, ADR 0036). `SEARCH` splits into a feature per part (ADR 0058 §4): each part gets its own feature, as `TERM_SEARCH` and `SCORING` (ADR 0064) did, and the TUI gates it on `SEARCH ||` that part. Left, in this order:
-  - [ ] Doc-values queries (for example `DOC_VALUES_SEARCH`).
-  - [ ] The standard parser with point fields (for example `STANDARD_SEARCH`).
-  - [ ] More-Like-This (for example `MORE_LIKE_THIS`).
+- [ ] Doc-values, standard and More-Like-This queries (ADR 0066) on 7.7 and 5.5, as copies of 9.12's.
 - [ ] Similarity and sort (`SCORING`) on 7.7 and 5.5 (ADR 0064 §2): 7.7 has the API of 9.12 apart from `Pruning`; 5.5 has no `BooleanSimilarity`.
-- [ ] The classic parser options a runtime ignores: date resolution, locale and time zone, `splitOnWhitespace`, `fuzzyMaxEdits`.
+- [ ] The classic parser options a runtime ignores: date resolution, locale and time zone, `splitOnWhitespace`, `fuzzyMaxEdits`; and the standard parser's dates (ADR 0066).
 - [ ] Check on more threads on 9.12 (`CheckIndex.setThreadCount`, now fixed at 1, ADR 0049 §5). It goes with the backlog's "check thread count".
-- [ ] Run the new features by hand on `lucene8` and `lucene8to9`, as `docs/demo-index.md` does for Lucene 10.
+- [ ] Run the new features by hand on `lucene8` and `lucene8to9`, as `docs/demo-index.md` does for Lucene 10. For the queries of ADR 0066: on the search screen `m` through standard (a point range), doc values (a range) and like (its terms), `x` on a hit, a filter with each; on the documents screen `s` and `m`.
 
 ## Lucene 2 to 10 (ADR 0044)
 

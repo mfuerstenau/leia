@@ -56,6 +56,15 @@ public interface RuntimeIndex extends Closeable {
     /** Search and explain with a similarity of choice, and search in an order of choice (ADR 0064). */
     Optional<Scoring> scoring();
 
+    /** Queries over doc values (ADR 0066). */
+    Optional<DocValuesSearch> docValuesSearch();
+
+    /** The standard query parser, with point fields (ADR 0066). */
+    Optional<StandardSearch> standardSearch();
+
+    /** More-Like-This queries, by a document or a text (ADR 0066). */
+    Optional<MoreLikeThisSearch> moreLikeThisSearch();
+
     /**
      * Opens the latest commit of each directory again if it differs from the opened one (ADR 0060).
      * The new index shares the directories, the readers of the directories that didn't change, and the

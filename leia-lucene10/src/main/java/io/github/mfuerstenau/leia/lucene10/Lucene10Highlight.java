@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.lucene10;
 
 import io.github.mfuerstenau.leia.core.HighlightSpec;
 import io.github.mfuerstenau.leia.core.Highlights;
+import io.github.mfuerstenau.leia.core.Queries;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.core.TextHighlighter;
 import io.github.mfuerstenau.leia.runtime.Highlight;
@@ -16,6 +17,7 @@ import java.util.Optional;
 import java.util.function.LongConsumer;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.Query;
 
 /**
  * Lucene 10's {@code UnifiedHighlighter}, as leia-core's {@link Highlights#lucene} sets it up (ADR
@@ -54,35 +56,51 @@ final class Lucene10Highlight implements Highlight {
         IndexSearcher searcher = new IndexSearcher(index.reader());
         // No cache: a query is run once.
         searcher.setQueryCache(null);
-        Analyzer analyzer = Lucene10Analyzers.analyzer(options.analyzer());
-        try {
-            TextHighlighter highlighter = Highlights.lucene(
-                    searcher, Lucene10Index.query(parsed), new HighlightSpec(1, options.requireFieldMatch(), analyzer));
-            Map<String, OffsetSource> sources = new HashMap<>();
-            Map<String, List<Optional<FieldText>>> found = new HashMap<>();
-            long done = 0;
-            for (int f = 0; f < fields.size(); f++) {
-                String field = fields.get(f);
-                List<Optional<FieldText>> texts = new ArrayList<>(docIds.length);
-                for (int docId : docIds) {
-                    progress.accept(done++);
-                    TextHighlighter.Highlighted one =
-                            highlighter.highlight(List.of(field), new int[] {docId}, new int[] {maxPassages[f]}, mode);
-                    Optional.ofNullable(one.sources().get(field))
-                            .ifPresent(source -> sources.put(field, OffsetSource.valueOf(source.name())));
-                    List<Optional<TextHighlighter.FoundText>> perDoc =
-                            one.found().getOrDefault(field, List.of());
-                    texts.add(
-                            perDoc.isEmpty()
-                                    ? Optional.empty()
-                                    : perDoc.getFirst().map(Lucene10Highlight::text));
-                }
-                found.put(field, List.copyOf(texts));
-            }
-            return new Highlighted(Map.copyOf(sources), Map.copyOf(found));
-        } finally {
-            analyzer.close();
+        try (Analyzer analyzer = Lucene10Analyzers.analyzer(options.analyzer())) {
+            return Lucene10Index.withQuery(
+                    parsed,
+                    query ->
+                            highlight(searcher, query, mode, options, analyzer, fields, docIds, maxPassages, progress));
+        } catch (io.github.mfuerstenau.leia.core.InvalidQueryException e) {
+            throw new IllegalArgumentException(e.getMessage(), e);
         }
+    }
+
+    /** Highlights with {@code query}, built first as a search builds it. */
+    private Highlighted highlight(
+            IndexSearcher searcher,
+            Query query,
+            TextHighlighter.Mode mode,
+            Options options,
+            Analyzer analyzer,
+            List<String> fields,
+            int[] docIds,
+            int[] maxPassages,
+            LongConsumer progress)
+            throws IOException {
+        TextHighlighter highlighter = Highlights.lucene(
+                searcher,
+                Queries.built(searcher.getIndexReader(), query),
+                new HighlightSpec(1, options.requireFieldMatch(), analyzer));
+        Map<String, OffsetSource> sources = new HashMap<>();
+        Map<String, List<Optional<FieldText>>> found = new HashMap<>();
+        long done = 0;
+        for (int f = 0; f < fields.size(); f++) {
+            String field = fields.get(f);
+            List<Optional<FieldText>> texts = new ArrayList<>(docIds.length);
+            for (int docId : docIds) {
+                progress.accept(done++);
+                TextHighlighter.Highlighted one =
+                        highlighter.highlight(List.of(field), new int[] {docId}, new int[] {maxPassages[f]}, mode);
+                Optional.ofNullable(one.sources().get(field))
+                        .ifPresent(source -> sources.put(field, OffsetSource.valueOf(source.name())));
+                List<Optional<TextHighlighter.FoundText>> perDoc = one.found().getOrDefault(field, List.of());
+                texts.add(
+                        perDoc.isEmpty() ? Optional.empty() : perDoc.getFirst().map(Lucene10Highlight::text));
+            }
+            found.put(field, List.copyOf(texts));
+        }
+        return new Highlighted(Map.copyOf(sources), Map.copyOf(found));
     }
 
     private static FieldText text(TextHighlighter.FoundText text) {

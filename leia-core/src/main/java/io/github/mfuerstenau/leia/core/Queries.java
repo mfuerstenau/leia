@@ -1,11 +1,13 @@
 package io.github.mfuerstenau.leia.core;
 
+import java.io.IOException;
 import java.text.NumberFormat;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.TimeZone;
 import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.queryparser.classic.ParseException;
 import org.apache.lucene.queryparser.classic.QueryParser;
@@ -146,6 +148,16 @@ public final class Queries {
      */
     public static Query moreLikeText(String text, MoreLikeThisOptions options, Analyzer analyzer) {
         return new MoreLikeQuery(new MoreLikeQuery.Source.Text(text), options, analyzer);
+    }
+
+    /**
+     * The query to rewrite, as a search builds it: a query of {@link #moreLikeThis} or {@link
+     * #moreLikeText} is built from {@code reader} with Lucene's {@code MoreLikeThis}, while its
+     * analyzer is still open; any other query is itself. A highlighter needs the built query, since
+     * it doesn't rewrite a More-Like-This query.
+     */
+    public static Query built(IndexReader reader, Query query) throws IOException {
+        return query instanceof MoreLikeQuery like ? like.build(reader) : query;
     }
 
     /**

@@ -6,15 +6,18 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import io.github.mfuerstenau.leia.runtime.Check;
 import io.github.mfuerstenau.leia.runtime.Commits;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
+import io.github.mfuerstenau.leia.runtime.DocValuesSearch;
 import io.github.mfuerstenau.leia.runtime.Documents;
 import io.github.mfuerstenau.leia.runtime.Highlight;
 import io.github.mfuerstenau.leia.runtime.Knn;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
+import io.github.mfuerstenau.leia.runtime.MoreLikeThisSearch;
 import io.github.mfuerstenau.leia.runtime.Points;
 import io.github.mfuerstenau.leia.runtime.Rebuild;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Scoring;
 import io.github.mfuerstenau.leia.runtime.Search;
+import io.github.mfuerstenau.leia.runtime.StandardSearch;
 import io.github.mfuerstenau.leia.runtime.Terms;
 import java.io.IOException;
 import java.io.InputStream;
@@ -443,5 +446,106 @@ class Lucene10IndexTest {
             }
         }
         return hashes;
+    }
+
+    @Test
+    void parsesWithTheStandardParserAndPoints() throws Exception {
+        try (RuntimeIndex index = open("lucene9")) {
+            Search.ParsedQuery query = index.standardSearch()
+                    .orElseThrow()
+                    .parse(
+                            "number:[15 TO 30] OR missing",
+                            new StandardSearch.Options("body", false, false, 0, 0, true),
+                            Map.of("number", StandardSearch.PointType.INT),
+                            STANDARD);
+            assertThat(query).hasToString("number:[15 TO 30] body:missing");
+            assertThat(index.search()
+                            .orElseThrow()
+                            .search(query, 0, 10, Optional.empty(), _ -> {})
+                            .hits())
+                    .extracting(Search.Hit::docId)
+                    .containsExactly(2);
+            assertThatThrownBy(() -> index.standardSearch()
+                            .orElseThrow()
+                            .parse(
+                                    "body:(",
+                                    new StandardSearch.Options("body", false, false, 0, 0, true),
+                                    Map.of(),
+                                    STANDARD))
+                    .isInstanceOf(Search.InvalidQueryException.class)
+                    .hasMessage("Cannot parse 'body:(': Encountered \"<EOF>\" at column 6.");
+        }
+    }
+
+    @Test
+    void findsDocumentsLikeATextAndHighlightsThem() throws Exception {
+        try (RuntimeIndex index = open("lucene9")) {
+            Search.ParsedQuery query = index.moreLikeThisSearch()
+                    .orElseThrow()
+                    .like(
+                            new MoreLikeThisSearch.Source.Text("number"),
+                            new MoreLikeThisSearch.Options(
+                                    List.of("body"),
+                                    1,
+                                    1,
+                                    OptionalInt.empty(),
+                                    25,
+                                    false,
+                                    0,
+                                    OptionalInt.empty(),
+                                    Set.of()),
+                            STANDARD);
+            assertThat(query)
+                    .hasToString("like(text \"number\", fields [body], minTermFreq 1, minDocFreq 1, maxQueryTerms 25)");
+            Search.SearchResults results = index.search().orElseThrow().search(query, 0, 10, Optional.empty(), _ -> {});
+            assertThat(results.hits()).extracting(Search.Hit::docId).containsExactlyInAnyOrder(0, 2);
+            assertThat(results.likeTerms().orElseThrow())
+                    .singleElement()
+                    .satisfies(term -> assertThat(term.term()).isEqualTo("number"));
+            assertThat(index.search().orElseThrow().matches(query, true, _ -> {}).docs().stream())
+                    .containsExactly(0, 1, 2);
+            assertThat(index.search().orElseThrow().explain(query, 0, _ -> {}).match())
+                    .isTrue();
+            Highlight.Highlighted found = index.highlight()
+                    .orElseThrow()
+                    .highlight(
+                            query,
+                            new Highlight.Options(false, STANDARD, false, 100_000),
+                            List.of("body"),
+                            new int[] {0},
+                            new int[] {3},
+                            _ -> {});
+            assertThat(found.found().get("body").getFirst().orElseThrow().passages())
+                    .singleElement()
+                    .satisfies(passage -> assertThat(passage.matchStarts()).containsExactly(9));
+        }
+    }
+
+    @Test
+    void searchesDocValues() throws Exception {
+        try (RuntimeIndex index = open("demo")) {
+            DocValuesSearch docValues = index.docValuesSearch().orElseThrow();
+            Search search = index.search().orElseThrow();
+            Search.ParsedQuery numbers = docValues.numbers(
+                    "quantity",
+                    DocValuesSearch.NumberEncoding.LONG,
+                    new DocValuesSearch.Match.Range<>(Optional.of("0"), Optional.empty(), true, true));
+            Search.ParsedQuery prefix = docValues.prefix("category", new byte[0]);
+            Search.ParsedQuery binary = docValues.bytes(
+                    "checksum", new DocValuesSearch.Match.Range<>(Optional.empty(), Optional.empty(), true, true));
+            for (Search.ParsedQuery query : List.of(numbers, prefix, binary)) {
+                Search.SearchResults results = search.search(query, 0, 1, Optional.empty(), _ -> {});
+                assertThat(results.totalHits()).as(query.toString()).isPositive();
+                assertThat(search.explain(query, results.hits().getFirst().docId(), _ -> {})
+                                .match())
+                        .isTrue();
+            }
+            assertThatThrownBy(() -> docValues.numbers(
+                            "category",
+                            DocValuesSearch.NumberEncoding.LONG,
+                            new DocValuesSearch.Match.Values<>(List.of("1"))))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("the field 'category' has SORTED doc values, which hold bytes, not numbers");
+        }
     }
 }

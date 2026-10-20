@@ -57,7 +57,9 @@ final class Lucene9Highlight implements Highlight {
         // No cache: a query is run once.
         searcher.setQueryCache(null);
         Analyzer analyzer = Lucene9Analyzers.analyzer(options.analyzer());
-        try {
+        try (Analyzer likeAnalyzer = Lucene9Index.likeAnalyzer(query)) {
+            // A More-Like-This query is built first, as leia-core builds it.
+            query = Lucene9Index.built(searcher, query, likeAnalyzer);
             Highlighter highlighter = new Highlighter(builder(searcher, analyzer, options), progress);
             Map<String, Object[]> byField =
                     highlighter.highlight(fields.toArray(String[]::new), query, docIds, maxPassages);

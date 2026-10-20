@@ -41,7 +41,8 @@ public enum Feature {
     /**
      * {@code startSearch}, with every kind of query, similarity and sort: every part of search. A
      * runtime reports the parts it has instead, such as {@link #CLASSIC_SEARCH}, {@link
-     * #TERM_SEARCH} and {@link #SCORING} (ADR 0058).
+     * #TERM_SEARCH}, {@link #SCORING}, {@link #DOC_VALUES_SEARCH}, {@link #STANDARD_SEARCH} and {@link
+     * #MORE_LIKE_THIS} (ADR 0058, ADR 0066).
      */
     SEARCH,
     /**
@@ -59,6 +60,21 @@ public enum Feature {
      * 0064).
      */
     SCORING,
+    /**
+     * {@code startSearch}, {@code startFilter} and {@code startExplain} with a doc values query, with
+     * {@link #DOC_VALUES} (ADR 0066).
+     */
+    DOC_VALUES_SEARCH,
+    /**
+     * {@code startSearch}, {@code startFilter}, {@code startExplain} and, with {@link #HIGHLIGHT},
+     * {@code startHighlight} with a query of the standard parser, without dates (ADR 0066).
+     */
+    STANDARD_SEARCH,
+    /**
+     * {@code startSearch}, {@code startFilter}, {@code startExplain} and, with {@link #HIGHLIGHT},
+     * {@code startHighlight} with a More-Like-This query, by a document or a text (ADR 0066).
+     */
+    MORE_LIKE_THIS,
     /** {@code startExplain}. */
     EXPLAIN,
     /** Highlighting in {@code startSearch}, and {@code startHighlight}. */
