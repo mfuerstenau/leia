@@ -25,7 +25,6 @@ Goal: an index created by Lucene 8.x (read with `leia-lucene9`, ADR 0049) gets t
 - [ ] Similarity and sort (`SCORING`) on 7.7 and 5.5 (ADR 0064 §2): 7.7 has the API of 9.12 apart from `Pruning`; 5.5 has no `BooleanSimilarity`.
 - [ ] The classic parser options a runtime ignores: date resolution, locale and time zone, `splitOnWhitespace`, `fuzzyMaxEdits`; and the standard parser's dates (ADR 0066).
 - [ ] Check on more threads on 9.12 (`CheckIndex.setThreadCount`, now fixed at 1, ADR 0049 §5). It goes with the backlog's "check thread count".
-- [ ] Run the new features by hand on `lucene8` and `lucene8to9`, as `docs/demo-index.md` does for Lucene 10. For the queries of ADR 0066: on the search screen `m` through standard (a point range), doc values (a range) and like (its terms), `x` on a hit, a filter with each; on the documents screen `s` and `m`.
 
 ## Lucene 2 to 10 (ADR 0044)
 
