@@ -2,9 +2,11 @@ package io.github.mfuerstenau.leia.server.runtime;
 
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
+import io.github.mfuerstenau.leia.protocol.search.DateResolution;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesRange;
 import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
+import io.github.mfuerstenau.leia.protocol.search.ParserOptions;
 import io.github.mfuerstenau.leia.protocol.search.PointField;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
 import io.github.mfuerstenau.leia.protocol.search.StandardQuery;
@@ -15,11 +17,15 @@ import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.StandardSearch;
 import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.search.ParserChecks;
 import io.github.mfuerstenau.leia.server.search.SearchQueries;
 import java.nio.charset.StandardCharsets;
+import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 import org.apache.lucene.util.BytesRef;
@@ -28,7 +34,7 @@ import org.apache.lucene.util.BytesRef;
  * The standard, More-Like-This and doc values queries of {@code startSearch}, {@code startFilter},
  * {@code startExplain} and {@code startHighlight} on a runtime with their groups (ADR 0066). They are
  * checked here, with the errors and messages that Lucene 10 gives ({@link SearchQueries}), before the
- * runtime gets them. As for the classic parser, the standard parser's dates are left out.
+ * runtime gets them.
  */
 final class RuntimeQueries {
 
@@ -37,8 +43,9 @@ final class RuntimeQueries {
     /**
      * {@code standard} parsed by the runtime.
      *
-     * @throws RpcException {@code FIELD_NOT_FOUND} for an unknown default or point field; {@code
-     *     INVALID_PARAMS} for a point type that doesn't fit its field, or a point field listed twice;
+     * @throws RpcException {@code FIELD_NOT_FOUND} for an unknown default, date resolution or point
+     *     field; {@code INVALID_PARAMS} for a date resolution or point field listed twice, a locale or
+     *     time zone that doesn't exist, or a point type that doesn't fit its field;
      *     {@code INVALID_QUERY} if the expression doesn't parse; {@code NOT_SUPPORTED} for an analyzer
      *     the runtime doesn't have
      */
@@ -62,6 +69,7 @@ final class RuntimeQueries {
                         "Invalid params: the point field '" + point.field() + "' is listed twice");
             }
         }
+        Search.Dates dates = dates(open.index(), standard.options());
         Search.AnalyzerSpec analyzer = RuntimeAnalyzers.spec(standard.analyzer());
         try {
             return group.parse(
@@ -72,7 +80,8 @@ final class RuntimeQueries {
                             standard.options().allowLeadingWildcard(),
                             standard.options().phraseSlop(),
                             standard.options().fuzzyPrefixLength(),
-                            standard.options().enablePositionIncrements()),
+                            standard.options().enablePositionIncrements(),
+                            dates),
                     points,
                     analyzer);
         } catch (Search.InvalidQueryException e) {
@@ -80,6 +89,31 @@ final class RuntimeQueries {
         } catch (Search.UnsupportedAnalyzerException | Search.InvalidAnalyzerException e) {
             throw RuntimeAnalyzers.failed(open.runtime(), e);
         }
+    }
+
+    /**
+     * The dates of {@code options}, checked as {@code SearchQueries} checks them for Lucene 10
+     * ({@link ParserChecks}).
+     *
+     * @throws RpcException {@code FIELD_NOT_FOUND} for an unknown field of a date resolution; {@code
+     *     INVALID_PARAMS} for a field listed twice, or a locale or time zone that doesn't exist
+     */
+    static Search.Dates dates(RuntimeIndex index, ParserOptions options) throws RpcException {
+        Map<String, Search.DateResolution> fields = new LinkedHashMap<>();
+        ParserChecks.fieldDateResolutions(
+                        options.fieldDateResolutions(), field -> RuntimeResults.checkField(index, field))
+                .forEach((field, resolution) -> fields.put(field, resolution(resolution)));
+        Optional<Locale> locale = options.locale().isPresent()
+                ? Optional.of(ParserChecks.locale(options.locale().get()))
+                : Optional.empty();
+        Optional<ZoneId> timeZone = options.timeZone().isPresent()
+                ? Optional.of(ParserChecks.timeZone(options.timeZone().get()))
+                : Optional.empty();
+        return new Search.Dates(options.dateResolution().map(RuntimeQueries::resolution), fields, locale, timeZone);
+    }
+
+    private static Search.DateResolution resolution(DateResolution resolution) {
+        return Search.DateResolution.valueOf(resolution.name());
     }
 
     /** How many bytes a point of {@code type} has in one dimension. */

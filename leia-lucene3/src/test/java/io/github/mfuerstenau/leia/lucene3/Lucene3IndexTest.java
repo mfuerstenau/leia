@@ -20,11 +20,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.BitSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -889,5 +891,57 @@ class Lucene3IndexTest {
                         .mapToInt(RuntimeIndex.Segment::numDocs)
                         .sum())
                 .isEqualTo(stats.numDocs());
+    }
+
+    @Test
+    void namesTheDirectoryClass() throws IOException {
+        try (RuntimeIndex mmap = new Lucene3Runtime().open(List.of(lucene24()), DirectoryKind.MMAP);
+                RuntimeIndex nio = new Lucene3Runtime().open(List.of(lucene24()), DirectoryKind.NIO)) {
+            assertThat(mmap.stats().directoryClass()).isEqualTo("MMapDirectory");
+            assertThat(nio.stats().directoryClass()).isEqualTo("NIOFSDirectory");
+        }
+    }
+
+    /** Options of the classic parser with these fuzzy edits, split and dates. */
+    private static Search.ParserOptions parserOptions(
+            int fuzzyMaxEdits, boolean splitOnWhitespace, boolean autoGeneratePhraseQueries, Search.Dates dates) {
+        return new Search.ParserOptions(
+                "body", false, false, 0, 0, true, autoGeneratePhraseQueries, fuzzyMaxEdits, splitOnWhitespace, dates);
+    }
+
+    @Test
+    void readsRangeBoundsAsDates() throws Exception {
+        Search.Dates dates = new Search.Dates(
+                Optional.of(Search.DateResolution.YEAR),
+                Map.of("published", Search.DateResolution.MILLISECOND),
+                Optional.of(Locale.GERMANY),
+                Optional.of(ZoneId.of("Europe/Berlin")));
+        try (RuntimeIndex index = open(DirectoryKind.NIO)) {
+            Search.ParsedQuery query = index.search()
+                    .orElseThrow()
+                    .parse(
+                            "published:[15.01.26 TO 31.01.26] other:{15.01.26 TO 31.01.26}",
+                            parserOptions(2, true, false, dates),
+                            new Search.AnalyzerSpec.Standard());
+
+            // The field's own resolution, and the default one for the other field; the short dates of the
+            // locale, read in the zone; an inclusive upper bound takes the whole day.
+            assertThat(query).hasToString("published:[20260114230000000 TO 20260131225959999] other:{2026 TO 2026}");
+        }
+    }
+
+    @Test
+    void takesTheFuzzyEdits() throws Exception {
+        try (RuntimeIndex index = open(DirectoryKind.NIO)) {
+            Search.ParsedQuery query = index.search()
+                    .orElseThrow()
+                    .parse(
+                            "word~",
+                            parserOptions(1, true, false, Search.Dates.NONE),
+                            new Search.AnalyzerSpec.Standard());
+
+            // 3.6 has no edit distance: fuzzy terms keep a minimum similarity of 0.5.
+            assertThat(query).hasToString("body:word~0.5");
+        }
     }
 }

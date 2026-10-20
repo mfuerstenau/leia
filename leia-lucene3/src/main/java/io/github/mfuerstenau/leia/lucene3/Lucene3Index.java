@@ -66,7 +66,6 @@ import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.TopScoreDocCollector;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.util.ReaderUtil;
-import org.apache.lucene.util.Version;
 
 /**
  * An index written by Lucene 2.x or 3.x, read with Lucene 3.6 (ADR 0044). Lucene 10 can't read such
@@ -295,7 +294,12 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
                     segments(part.reader())));
             docBase += part.reader().maxDoc();
         }
-        return new Stats(reader.numDocs(), reader.maxDoc(), List.copyOf(indexes), fields());
+        return new Stats(
+                reader.numDocs(),
+                reader.maxDoc(),
+                List.copyOf(indexes),
+                fields(),
+                parts.getFirst().directory().getClass().getSimpleName());
     }
 
     /** The reader's segments, in document order (ADR 0051). */
@@ -611,12 +615,14 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
             throws InvalidQueryException, UnsupportedAnalyzerException, InvalidAnalyzerException {
         Analyzer analyzer = Lucene3Analyzers.analyzer(spec);
         try {
-            QueryParser parser = new QueryParser(Version.LUCENE_36, options.defaultField(), analyzer);
+            QueryParser parser = new Lucene3DateRangeQueryParser(options.defaultField(), analyzer, options.dates());
             parser.setDefaultOperator(options.defaultAnd() ? QueryParser.AND_OPERATOR : QueryParser.OR_OPERATOR);
             parser.setAllowLeadingWildcard(options.allowLeadingWildcard());
             parser.setPhraseSlop(options.phraseSlop());
             parser.setFuzzyPrefixLength(options.fuzzyPrefixLength());
             parser.setEnablePositionIncrements(options.enablePositionIncrements());
+            // 3.6 has no edit distance (fuzzy terms keep a minimum similarity of 0.5) and always splits
+            // on whitespace (ADR 0069).
             parser.setAutoGeneratePhraseQueries(options.autoGeneratePhraseQueries());
             return new Lucene3Query(parser.parse(expression));
         } catch (ParseException | RuntimeException e) {

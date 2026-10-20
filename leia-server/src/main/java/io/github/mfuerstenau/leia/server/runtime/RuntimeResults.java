@@ -114,6 +114,7 @@ import io.github.mfuerstenau.leia.server.job.Jobs;
 import io.github.mfuerstenau.leia.server.points.PointMapper;
 import io.github.mfuerstenau.leia.server.search.Highlighting;
 import io.github.mfuerstenau.leia.server.search.KnnChecks;
+import io.github.mfuerstenau.leia.server.search.ParserChecks;
 import io.github.mfuerstenau.leia.server.search.StartStoredScanHandler;
 import io.github.mfuerstenau.leia.server.terms.TermParams;
 import java.io.IOException;
@@ -324,7 +325,7 @@ public final class RuntimeResults {
                 .toList();
         return new GetIndexStatsResult(
                 open.path().toString(),
-                index.directory().name(),
+                stats.directoryClass(),
                 commits.stream().mapToInt(IndexCommitStats::segmentCount).sum(),
                 stats.numDocs(),
                 stats.maxDoc(),
@@ -394,7 +395,7 @@ public final class RuntimeResults {
     /**
      * A segment of a runtime: before Lucene 4 without id, codec or formats (ADR 0045), before 6.2
      * without an index sort, before 7.0 without a minimum version, before 7.4 without soft deletes
-     * (ADR 0048), and never with document blocks, which came with 9.9.
+     * (ADR 0048), and before 9.9 without document blocks (ADR 0069).
      */
     private static Segment segment(Commits.Segment segment) {
         return new Segment(
@@ -429,7 +430,7 @@ public final class RuntimeResults {
                         .toList(),
                 segment.fieldInfosError(),
                 segment.compound(),
-                false,
+                segment.hasBlocks(),
                 segment.indexSort(),
                 segment.sizeInBytes(),
                 Map.copyOf(segment.diagnostics()),
@@ -1162,6 +1163,8 @@ public final class RuntimeResults {
 
     /** {@code classic}, parsed by the runtime. */
     private static Search.ParsedQuery parse(OpenRuntime open, Search search, ClassicQuery classic) throws RpcException {
+        Search.Dates dates = RuntimeQueries.dates(open.index(), classic.options());
+        ParserChecks.classic(classic.fuzzyMaxEdits(), classic.splitOnWhitespace(), classic.autoGeneratePhraseQueries());
         Search.AnalyzerSpec analyzer = RuntimeAnalyzers.spec(classic.analyzer());
         try {
             return search.parse(
@@ -1173,7 +1176,10 @@ public final class RuntimeResults {
                             classic.options().phraseSlop(),
                             classic.options().fuzzyPrefixLength(),
                             classic.options().enablePositionIncrements(),
-                            classic.autoGeneratePhraseQueries()),
+                            classic.autoGeneratePhraseQueries(),
+                            classic.fuzzyMaxEdits(),
+                            classic.splitOnWhitespace(),
+                            dates),
                     analyzer);
         } catch (Search.InvalidQueryException e) {
             throw new RpcException(ErrorCode.INVALID_QUERY, "Invalid query: " + e.getMessage(), e);

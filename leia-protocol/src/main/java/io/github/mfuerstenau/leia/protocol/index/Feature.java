@@ -67,7 +67,7 @@ public enum Feature {
     DOC_VALUES_SEARCH,
     /**
      * {@code startSearch}, {@code startFilter}, {@code startExplain} and, with {@link #HIGHLIGHT},
-     * {@code startHighlight} with a query of the standard parser, without dates (ADR 0066).
+     * {@code startHighlight} with a query of the standard parser, with dates (ADR 0066, ADR 0069).
      */
     STANDARD_SEARCH,
     /**

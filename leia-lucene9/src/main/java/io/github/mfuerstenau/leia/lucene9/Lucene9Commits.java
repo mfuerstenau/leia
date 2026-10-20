@@ -177,7 +177,9 @@ final class Lucene9Commits implements Commits {
                 // Since 7.0: the oldest version of the segments it was merged from.
                 Optional.ofNullable(info.getMinVersion()).map(Object::toString),
                 // Since 6.2.
-                Optional.ofNullable(info.getIndexSort()).map(Object::toString));
+                Optional.ofNullable(info.getIndexSort()).map(Object::toString),
+                // Since 9.9; false for a segment written before.
+                info.getHasBlocks());
     }
 
     /**

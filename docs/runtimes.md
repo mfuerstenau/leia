@@ -37,7 +37,7 @@ The first index of a path decides which Lucene opens it, by the major in its new
 | `TERM_SEARCH` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `SCORING` | – | – | – | ✓ | ✓ |
 | `DOC_VALUES_SEARCH` | – | – | – | ✓⁶ | ✓ |
-| `STANDARD_SEARCH` | – | – | – | ✓⁷ | ✓ |
+| `STANDARD_SEARCH` | – | – | – | ✓ | ✓ |
 | `MORE_LIKE_THIS` | – | – | – | ✓ | ✓ |
 | `EXPLAIN` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `HIGHLIGHT` | – | – | – | ✓ | ✓ |
@@ -54,7 +54,6 @@ The first index of a path decides which Lucene opens it, by the major in its new
 4. With `KNN_VECTORS`, `CLASSIC_SEARCH` takes a KNN query too, approximate or exact, with a filter (ADR 0049 §6).
 5. A query filter takes no deleted documents: Lucene 3.6 doesn't read their postings, so `startFilter` refuses a query with `includeDeleted` (ADR 0056 §4). A pattern filter takes them.
 6. Reported without regard to the fields; the TUI offers doc values queries with `DOC_VALUES` too, which needs a field with doc values (ADR 0066).
-7. Without dates: range bounds stay text, as in the classic parser of a runtime; the date resolution, locale and time zone are ignored (step 2d of ADR 0065).
 
 `SEARCH` is every part of search; a runtime reports the parts it has, such as `CLASSIC_SEARCH`, `TERM_SEARCH`, `SCORING`, `DOC_VALUES_SEARCH`, `STANDARD_SEARCH` and `MORE_LIKE_THIS`, and the TUI offers a part with `SEARCH` or with that part (ADR 0058, ADR 0064, ADR 0066). `SCORING` is the similarity and sort of the queries a runtime has.
 
@@ -103,7 +102,12 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 | KNN search cancellation | – | – | – | through the searcher's `QueryTimeout` | through the searcher's `QueryTimeout` |
 | Highlight (ADR 0063) | – | – (no `UnifiedHighlighter`) | – (its `UnifiedHighlighter` differs; not yet) | ✓, with its search analyzers | ✓, with every analyzer of `startSearch` |
 | Highlight cancellation (ADR 0063) | – | – | – | before each field of each document | through `ExitableDirectoryReader` |
-| Standard parser (ADR 0066) | – | – | – | Lucene's processor of term ranges, without dates | leia-core's, which reads dates; without them on the runtime |
+| Standard parser (ADR 0066, ADR 0069) | – | – | – | with dates, through a copy of leia-core's processor of term ranges | leia-core's, with dates |
+| Classic dates (ADR 0026, ADR 0069) | ✓, in a zone the parser holds itself (3.6 has none); without a resolution, a date becomes a `DateField` term, as 3.6 does | ✓ | ✓ | ✓ | ✓ |
+| Fuzzy terms (ADR 0069) | a minimum similarity of 0.5; the edits are ignored | the edits | the edits | the edits | the edits |
+| Split on whitespace (ADR 0069) | always | always | as chosen | as chosen | as chosen |
+| Segment blocks (ADR 0069) | – | – | – | recorded from 9.9 | recorded |
+| Directory class in the stats (ADR 0069) | ✓; `fs` gives `NIOFSDirectory`, as 3.6 can't unmap | ✓ | ✓ | ✓ | ✓ |
 | More-Like-This (ADR 0066) | – | – | – | built from the reader before the rewrite, its terms worked out as leia-core does | leia-core's |
 | More-Like-This cancellation | – | – | – | between fields while the terms are counted, then through the searcher's `QueryTimeout` | through `ExitableDirectoryReader` |
 | Doc values queries (ADR 0066) | – | – | – | Lucene's slow queries, and leia-core's for `BINARY`, copied | leia-core's |

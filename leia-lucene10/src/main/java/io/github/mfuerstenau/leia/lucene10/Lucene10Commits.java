@@ -103,6 +103,7 @@ final class Lucene10Commits implements Commits {
                 segment.docValuesGen(),
                 segment.softDelCount(),
                 segment.minVersion().map(Version::toString),
-                segment.indexSort());
+                segment.indexSort(),
+                segment.hasBlocks());
     }
 }

@@ -80,6 +80,8 @@ public interface Commits {
      *     if it isn't known
      * @param indexSort how its documents are sorted, as Lucene's {@code Sort} describes it; empty if
      *     they aren't, as always before Lucene 6.2
+     * @param hasBlocks whether it has document blocks, as Lucene records from 9.9 on (ADR 0069);
+     *     false before
      */
     record Segment(
             String name,
@@ -101,7 +103,54 @@ public interface Commits {
             OptionalLong docValuesGen,
             int softDelCount,
             Optional<String> minLuceneVersion,
-            Optional<String> indexSort) {
+            Optional<String> indexSort,
+            boolean hasBlocks) {
+
+        /** A segment of Lucene 6.x to 9.8, which didn't record document blocks. */
+        public Segment(
+                String name,
+                int maxDoc,
+                int docBase,
+                int delCount,
+                OptionalLong delGen,
+                String luceneVersion,
+                boolean compound,
+                OptionalLong sizeInBytes,
+                Map<String, String> diagnostics,
+                Map<String, String> attributes,
+                Optional<String> id,
+                Optional<String> codec,
+                Optional<Formats> formats,
+                List<FieldFormats> fieldFormats,
+                Optional<String> fieldInfosError,
+                OptionalLong fieldInfosGen,
+                OptionalLong docValuesGen,
+                int softDelCount,
+                Optional<String> minLuceneVersion,
+                Optional<String> indexSort) {
+            this(
+                    name,
+                    maxDoc,
+                    docBase,
+                    delCount,
+                    delGen,
+                    luceneVersion,
+                    compound,
+                    sizeInBytes,
+                    diagnostics,
+                    attributes,
+                    id,
+                    codec,
+                    formats,
+                    fieldFormats,
+                    fieldInfosError,
+                    fieldInfosGen,
+                    docValuesGen,
+                    softDelCount,
+                    minLuceneVersion,
+                    indexSort,
+                    false);
+        }
 
         /** A segment of Lucene 4.x or 5.x: no soft deletes, no minimum version, no index sort. */
         public Segment(

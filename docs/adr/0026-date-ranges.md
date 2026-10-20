@@ -1,6 +1,6 @@
 # ADR 0026 — Date ranges: resolution, locale and time zone
 
-- **Status:** Accepted, amended by ADR 0035 (a resolution per field)
+- **Status:** Accepted, amended by ADR 0035 (a resolution per field) and ADR 0069 (dates on the runtimes)
 - **Date:** 2026-10-07
 
 ## Context

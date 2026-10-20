@@ -21,7 +21,6 @@ import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesRange;
-import io.github.mfuerstenau.leia.protocol.search.FieldDateResolution;
 import io.github.mfuerstenau.leia.protocol.search.FieldSort;
 import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
 import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
@@ -38,10 +37,8 @@ import io.github.mfuerstenau.leia.server.analysis.AnalyzerSpecs;
 import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.time.DateTimeException;
 import java.time.ZoneId;
 import java.util.ArrayList;
-import java.util.IllformedLocaleException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -87,7 +84,8 @@ public final class SearchQueries {
      *
      * @throws RpcException {@code INVALID_PARAMS} unless exactly one alternative is present, for a
      *     parser option or More-Like-This setting out of range, a field whose date resolution is
-     *     listed twice, a point type that doesn't fit its
+     *     listed twice, a locale or time zone that
+     *     doesn't exist, a point type that doesn't fit its
      *     field, a More-Like-This field that isn't indexed, a binary term that is not hex, or doc
      *     values that don't fit the field or its number encoding, or a KNN target or k that doesn't
      *     fit (ADR 0040); {@code FIELD_NOT_FOUND} for an unknown default, date resolution, term, point,
@@ -215,13 +213,9 @@ public final class SearchQueries {
     private static Query classic(ReadOnlyIndex index, ClassicQuery classic) throws RpcException, InvalidQueryException {
         checkField(index, classic.defaultField());
         ParserOptions options = options(index, classic.defaultOperator(), classic.options());
-        ClassicOptions classicOptions;
-        try {
-            classicOptions = new ClassicOptions(
-                    classic.fuzzyMaxEdits(), classic.splitOnWhitespace(), classic.autoGeneratePhraseQueries());
-        } catch (IllegalArgumentException e) {
-            throw invalidParams(e);
-        }
+        ParserChecks.classic(classic.fuzzyMaxEdits(), classic.splitOnWhitespace(), classic.autoGeneratePhraseQueries());
+        ClassicOptions classicOptions = new ClassicOptions(
+                classic.fuzzyMaxEdits(), classic.splitOnWhitespace(), classic.autoGeneratePhraseQueries());
         try (Analyzer analyzer = AnalyzerSpecs.build(classic.analyzer())) {
             return Queries.classic(classic.expression(), classic.defaultField(), options, classicOptions, analyzer);
         }
@@ -438,17 +432,15 @@ public final class SearchQueries {
             io.github.mfuerstenau.leia.protocol.search.ParserOptions options)
             throws RpcException {
         Map<String, DateTools.Resolution> fieldDateResolutions = new LinkedHashMap<>();
-        for (FieldDateResolution field : options.fieldDateResolutions()) {
-            checkField(index, field.field());
-            if (fieldDateResolutions.put(
-                            field.field(),
-                            DateTools.Resolution.valueOf(field.resolution().name()))
-                    != null) {
-                throw new RpcException(
-                        ErrorCode.INVALID_PARAMS,
-                        "Invalid params: the field '" + field.field() + "' has its date resolution listed twice");
-            }
-        }
+        ParserChecks.fieldDateResolutions(options.fieldDateResolutions(), field -> checkField(index, field))
+                .forEach((field, resolution) ->
+                        fieldDateResolutions.put(field, DateTools.Resolution.valueOf(resolution.name())));
+        Optional<Locale> locale = options.locale().isPresent()
+                ? Optional.of(ParserChecks.locale(options.locale().get()))
+                : Optional.empty();
+        Optional<ZoneId> timeZone = options.timeZone().isPresent()
+                ? Optional.of(ParserChecks.timeZone(options.timeZone().get()))
+                : Optional.empty();
         try {
             return new ParserOptions(
                     switch (operator) {
@@ -461,36 +453,10 @@ public final class SearchQueries {
                     options.enablePositionIncrements(),
                     options.dateResolution().map(resolution -> DateTools.Resolution.valueOf(resolution.name())),
                     fieldDateResolutions,
-                    options.locale().map(SearchQueries::locale),
-                    options.timeZone().map(SearchQueries::timeZone));
+                    locale,
+                    timeZone);
         } catch (IllegalArgumentException e) {
             throw invalidParams(e);
-        }
-    }
-
-    /** @throws IllegalArgumentException if {@code tag} is not a BCP 47 language tag */
-    private static Locale locale(String tag) {
-        try {
-            if (tag.isBlank()) {
-                throw new IllformedLocaleException("blank");
-            }
-            return new Locale.Builder().setLanguageTag(tag).build();
-        } catch (IllformedLocaleException e) {
-            throw new IllegalArgumentException("'" + tag + "' is not a BCP 47 language tag, such as en-US", e);
-        }
-    }
-
-    /**
-     * Not {@code TimeZone.getTimeZone(String)}, which takes an unknown id for GMT.
-     *
-     * @throws IllegalArgumentException if {@code id} is not a time zone
-     */
-    private static ZoneId timeZone(String id) {
-        try {
-            return ZoneId.of(id);
-        } catch (DateTimeException e) {
-            throw new IllegalArgumentException(
-                    "'" + id + "' is not a time zone, such as UTC, Europe/Berlin or +02:00", e);
         }
     }
 

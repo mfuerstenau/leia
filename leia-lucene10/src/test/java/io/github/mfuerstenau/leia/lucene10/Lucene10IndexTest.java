@@ -26,9 +26,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -37,6 +39,14 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CancellationException;
 import java.util.stream.Stream;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.document.StringField;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.FSDirectory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -544,5 +554,95 @@ class Lucene10IndexTest {
                     .isInstanceOf(IllegalArgumentException.class)
                     .hasMessage("the field 'category' has SORTED doc values, which hold bytes, not numbers");
         }
+    }
+
+    @Test
+    void namesTheDirectoryClass() throws IOException {
+        try (RuntimeIndex mmap = new Lucene10Runtime().open(List.of(testIndex("lucene9")), DirectoryKind.MMAP);
+                RuntimeIndex nio = new Lucene10Runtime().open(List.of(testIndex("lucene9")), DirectoryKind.NIO)) {
+            assertThat(mmap.stats().directoryClass()).isEqualTo("MMapDirectory");
+            assertThat(nio.stats().directoryClass()).isEqualTo("NIOFSDirectory");
+        }
+    }
+
+    /** Options of the classic parser with these fuzzy edits, split and dates. */
+    private static Search.ParserOptions parserOptions(
+            int fuzzyMaxEdits, boolean splitOnWhitespace, boolean autoGeneratePhraseQueries, Search.Dates dates) {
+        return new Search.ParserOptions(
+                "body", false, false, 0, 0, true, autoGeneratePhraseQueries, fuzzyMaxEdits, splitOnWhitespace, dates);
+    }
+
+    @Test
+    void readsRangeBoundsAsDates() throws Exception {
+        Search.Dates dates = new Search.Dates(
+                Optional.of(Search.DateResolution.YEAR),
+                Map.of("published", Search.DateResolution.MILLISECOND),
+                Optional.of(Locale.GERMANY),
+                Optional.of(ZoneId.of("Europe/Berlin")));
+        try (RuntimeIndex index = open("lucene9")) {
+            Search.ParsedQuery query = index.search()
+                    .orElseThrow()
+                    .parse(
+                            "published:[15.01.26 TO 31.01.26] other:{15.01.26 TO 31.01.26}",
+                            parserOptions(2, true, false, dates),
+                            new Search.AnalyzerSpec.Standard());
+
+            // The field's own resolution, and the default one for the other field; the short dates of the
+            // locale, read in the zone; an inclusive upper bound takes the whole day.
+            assertThat(query).hasToString("published:[20260114230000000 TO 20260131225959999] other:{2026 TO 2026}");
+        }
+    }
+
+    @Test
+    void takesTheFuzzyEdits() throws Exception {
+        try (RuntimeIndex index = open("lucene9")) {
+            Search.ParsedQuery query = index.search()
+                    .orElseThrow()
+                    .parse(
+                            "word~",
+                            parserOptions(1, true, false, Search.Dates.NONE),
+                            new Search.AnalyzerSpec.Standard());
+
+            assertThat(query).hasToString("body:word~1");
+        }
+    }
+
+    @Test
+    void generatesPhraseQueriesWhileSplittingOnWhitespace() throws Exception {
+        try (RuntimeIndex index = open("lucene9")) {
+            Search search = index.search().orElseThrow();
+            Search.AnalyzerSpec standard = new Search.AnalyzerSpec.Standard();
+
+            assertThat(search.parse("wi-fi", parserOptions(2, true, true, Search.Dates.NONE), standard))
+                    .hasToString("body:\"wi fi\"");
+            assertThat(search.parse("wi-fi", parserOptions(2, false, false, Search.Dates.NONE), standard))
+                    .hasToString("body:wi body:fi");
+        }
+    }
+
+    /** A segment written with a block of documents says so, from Lucene 9.9 on. */
+    @Test
+    void readsTheSegmentsBlocks(@TempDir Path dir) throws IOException {
+        try (Directory directory = FSDirectory.open(dir);
+                IndexWriter writer = new IndexWriter(directory, new IndexWriterConfig(new StandardAnalyzer()))) {
+            Document child = new Document();
+            child.add(new StringField("type", "child", Field.Store.YES));
+            Document parent = new Document();
+            parent.add(new StringField("type", "parent", Field.Store.YES));
+            writer.addDocuments(List.of(child, parent));
+            writer.commit();
+            writer.addDocument(parent);
+        }
+        // Gone once the writer is closed: the test reads the index as leia does.
+        Files.deleteIfExists(dir.resolve("write.lock"));
+
+        Commits commits = new Lucene10Runtime().commits().orElseThrow();
+        long generation =
+                commits.commits(dir, DirectoryKind.FS).commits().getFirst().generation();
+        assertThat(commits.commit(dir, DirectoryKind.FS, generation)
+                        .orElseThrow()
+                        .segments())
+                .extracting(Commits.Segment::hasBlocks)
+                .containsExactly(true, false);
     }
 }

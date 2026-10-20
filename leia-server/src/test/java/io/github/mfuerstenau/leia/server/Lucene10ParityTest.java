@@ -51,6 +51,7 @@ import io.github.mfuerstenau.leia.protocol.search.DocSort;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesRange;
+import io.github.mfuerstenau.leia.protocol.search.FieldDateResolution;
 import io.github.mfuerstenau.leia.protocol.search.FieldSort;
 import io.github.mfuerstenau.leia.protocol.search.HighlightOptions;
 import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
@@ -103,8 +104,8 @@ import org.junit.jupiter.params.provider.ValueSource;
  * 0065): two backends on the same index, one routing as leia does, the other sending indexes of
  * Lucene 9 and 10 to the runtime, make the same calls, and their results are compared. Timings are
  * left out. Each call whose results differ must be in {@link #EXPECTED}, with the reason; the list is
- * what the runtime interface lacks (step 2 of ADR 0065), so a call that no longer differs must leave
- * it.
+ * what is left until step 3 of ADR 0065, now that the runtime interface carries what leia-core has (ADR
+ * 0069), so a call that no longer differs must leave it.
  *
  * <p>{@code addJars} and {@code getJars} aren't compared: loading jars is global to the JVM, so the
  * second backend's {@code addJars} would find the jars loaded already. {@code JarsBackendTest} calls
@@ -113,21 +114,10 @@ import org.junit.jupiter.params.provider.ValueSource;
 class Lucene10ParityTest {
 
     /** The calls whose results differ, and why. */
-    private static final Map<String, String> EXPECTED = Map.ofEntries(
-            Map.entry(
-                    "openIndex",
-                    "the features: SEARCH needs the parser's dates and fuzzy edits, which the interface lacks"
-                            + " (step 2d); DOC_VALUES only where a field has doc values, as for"
-                            + " every runtime, while leia-core names it always (until step 3)"),
-            Map.entry(
-                    "getIndexStats",
-                    "the Directory class: RuntimeIndex.Stats doesn't name it, so the kind it was opened through"
-                            + " stands in for it"),
-            Map.entry(
-                    "startSearch fuzzyMaxEdits", "Search.ParserOptions has no fuzzy edits: a runtime always allows 2"),
-            Map.entry(
-                    "startSearch dates",
-                    "Search.ParserOptions has no date resolution, locale or time zone (ADR 0026)"));
+    private static final Map<String, String> EXPECTED = Map.ofEntries(Map.entry(
+            "openIndex",
+            "the features: only leia-core names SEARCH, and DOC_VALUES only where a field has doc values,"
+                    + " as for every runtime, while leia-core names it always (both until step 3)"));
 
     /** The prefix of the calls that fail with leia-core, with {@code INVALID_ANALYZER}, as they must with the runtime. */
     private static final String INVALID = "startSearch invalid ";
@@ -477,9 +467,6 @@ class Lucene10ParityTest {
                         calls.stream().filter(call -> !call.startsWith(INVALID)).toList())
                 .noneMatch(call -> call.startsWith(INVALID));
         Set<String> expected = new HashSet<>(EXPECTED.keySet());
-        if (index.dates().isEmpty()) {
-            expected.remove("startSearch dates");
-        }
         assertThat(differences.keySet())
                 .as("differences, of which only those of EXPECTED may be:%n%s", report())
                 .containsExactlyInAnyOrderElementsOf(expected);
@@ -497,15 +484,6 @@ class Lucene10ParityTest {
 
     /** Searches with what {@code classic} doesn't vary: the parser's other options, analyzers, other queries. */
     private static Map<String, SearchQuery> searches(String word, Index index, Path dir) throws IOException {
-        ParserOptions days = new ParserOptions(
-                false,
-                0,
-                0,
-                true,
-                Optional.of(DateResolution.DAY),
-                List.of(),
-                Optional.of("en-US"),
-                Optional.of("UTC"));
         Analyzer custom = analyzer(
                 Optional.empty(),
                 Optional.of(new CustomAnalyzer(
@@ -684,11 +662,39 @@ class Lucene10ParityTest {
         searches.put(
                 "startSearch splitOnWhitespace",
                 classicWith("\"" + word + " x\" " + word, "body", 2, true, STANDARD, DEFAULTS));
-        index.dates()
-                .ifPresent(field -> searches.put(
-                        "startSearch dates",
-                        // Dates in the short format of the locale, which the resolution turns into terms.
-                        classicWith("[1/1/26 TO 3/1/26]", field, 2, false, STANDARD, days)));
+        // Without splitting, the shingles analyzer sees both words and makes a shingle of them.
+        searches.put("startSearch shingles two words", classicWith(word + " x", "body", 2, false, shingles, DEFAULTS));
+        searches.put(
+                "startSearch splitOnWhitespace shingles",
+                classicWith(word + " x", "body", 2, true, shingles, DEFAULTS));
+        searches.put(
+                "startSearch autoGeneratePhraseQueries",
+                query(
+                        Optional.of(new ClassicQuery(
+                                word + "-x " + word, "body", QueryOperator.OR, DEFAULTS, 2, true, true, STANDARD)),
+                        Optional.empty(),
+                        Optional.empty()));
+        index.dates().ifPresent(field -> {
+            // The field's resolution wins over the default one.
+            ParserOptions days = new ParserOptions(
+                    false,
+                    0,
+                    0,
+                    true,
+                    Optional.of(DateResolution.YEAR),
+                    List.of(new FieldDateResolution(field, DateResolution.DAY)),
+                    Optional.of("en-US"),
+                    Optional.of("UTC"));
+            // Dates in the short format of the locale, which the resolution turns into terms.
+            searches.put("startSearch dates", classicWith("[1/1/26 TO 3/1/26]", field, 2, false, STANDARD, days));
+            searches.put(
+                    "startSearch standard dates",
+                    other(
+                            Optional.of(new StandardQuery(
+                                    "[1/1/26 TO 1/31/26]", field, QueryOperator.OR, days, List.of(), STANDARD)),
+                            Optional.empty(),
+                            Optional.empty()));
+        });
         searches.put("startSearch custom analyzer", classicWith(word, "body", 2, false, custom, DEFAULTS));
         searches.put("startSearch shingles", classicWith(word, "body", 2, false, shingles, DEFAULTS));
         searches.put("startSearch consumeAllTokens", classicWith(word + " x", "body", 2, false, consumeAll, DEFAULTS));

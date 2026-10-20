@@ -323,7 +323,12 @@ final class Lucene9Index
                     segments(part.reader())));
             docBase += part.reader().maxDoc();
         }
-        return new Stats(reader.numDocs(), reader.maxDoc(), List.copyOf(indexes), fields());
+        return new Stats(
+                reader.numDocs(),
+                reader.maxDoc(),
+                List.copyOf(indexes),
+                fields(),
+                parts.getFirst().directory().getClass().getSimpleName());
     }
 
     /** The reader's segments, in document order (ADR 0051). */
@@ -766,12 +771,15 @@ final class Lucene9Index
             throws InvalidQueryException, UnsupportedAnalyzerException, InvalidAnalyzerException {
         Analyzer analyzer = Lucene9Analyzers.analyzer(spec);
         try {
-            QueryParser parser = new QueryParser(options.defaultField(), analyzer);
+            QueryParser parser = new Lucene9DateRangeQueryParser(options.defaultField(), analyzer, options.dates());
             parser.setDefaultOperator(options.defaultAnd() ? QueryParser.Operator.AND : QueryParser.Operator.OR);
             parser.setAllowLeadingWildcard(options.allowLeadingWildcard());
             parser.setPhraseSlop(options.phraseSlop());
             parser.setFuzzyPrefixLength(options.fuzzyPrefixLength());
             parser.setEnablePositionIncrements(options.enablePositionIncrements());
+            parser.setFuzzyMinSim(options.fuzzyMaxEdits());
+            // In this order: the parser refuses auto-generated phrases while it doesn't split.
+            parser.setSplitOnWhitespace(options.splitOnWhitespace());
             parser.setAutoGeneratePhraseQueries(options.autoGeneratePhraseQueries());
             return new Lucene9Query(parser.parse(expression));
         } catch (ParseException | RuntimeException e) {

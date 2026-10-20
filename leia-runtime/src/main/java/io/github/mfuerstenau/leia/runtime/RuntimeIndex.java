@@ -176,8 +176,10 @@ public interface RuntimeIndex extends Closeable {
      * @param numDocs live documents of all directories
      * @param maxDoc documents of all directories, deleted ones included
      * @param indexes each directory that opened, in document order
+     * @param directoryClass the simple class name of the first directory's Lucene {@code Directory},
+     *     such as {@code MMapDirectory} (ADR 0069)
      */
-    record Stats(int numDocs, int maxDoc, List<IndexStats> indexes, List<Field> fields) {}
+    record Stats(int numDocs, int maxDoc, List<IndexStats> indexes, List<Field> fields, String directoryClass) {}
 
     /**
      * A segment of the open reader (ADR 0051).

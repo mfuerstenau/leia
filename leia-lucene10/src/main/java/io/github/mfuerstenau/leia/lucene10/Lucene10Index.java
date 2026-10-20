@@ -48,6 +48,7 @@ import java.util.OptionalInt;
 import java.util.Set;
 import java.util.function.LongConsumer;
 import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.document.DateTools;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FilterLeafReader;
 import org.apache.lucene.index.LeafReaderContext;
@@ -245,7 +246,7 @@ final class Lucene10Index
                     Map.copyOf(commit.userData()),
                     List.copyOf(segments)));
         }
-        return new Stats(stats.numDocs(), stats.maxDoc(), List.copyOf(indexes), fields);
+        return new Stats(stats.numDocs(), stats.maxDoc(), List.copyOf(indexes), fields, stats.directoryImpl());
     }
 
     /** The Lucene version that wrote each segment of the reader, by the segment's docBase in the index. */
@@ -522,8 +523,7 @@ final class Lucene10Index
     }
 
     /**
-     * {@inheritDoc} With leia-core's classic parser, which reads date ranges (ADR 0026), and fuzzy terms
-     * of up to 2 edits; it splits on whitespace only to generate phrase queries, which needs it.
+     * {@inheritDoc} With leia-core's classic parser, which reads date ranges (ADR 0026).
      */
     @Override
     public ParsedQuery parse(String expression, ParserOptions options, AnalyzerSpec spec)
@@ -533,16 +533,15 @@ final class Lucene10Index
             return new Lucene10Query(Queries.classic(
                     expression,
                     options.defaultField(),
-                    new io.github.mfuerstenau.leia.core.ParserOptions(
-                            options.defaultAnd() ? Queries.Operator.AND : Queries.Operator.OR,
+                    parserOptions(
+                            options.defaultAnd(),
                             options.allowLeadingWildcard(),
                             options.phraseSlop(),
                             options.fuzzyPrefixLength(),
-                            options.enablePositionIncrements()),
+                            options.enablePositionIncrements(),
+                            options.dates()),
                     new ClassicOptions(
-                            ClassicOptions.MAX_FUZZY_EDITS,
-                            options.autoGeneratePhraseQueries(),
-                            options.autoGeneratePhraseQueries()),
+                            options.fuzzyMaxEdits(), options.splitOnWhitespace(), options.autoGeneratePhraseQueries()),
                     analyzer));
         } catch (io.github.mfuerstenau.leia.core.InvalidQueryException e) {
             throw new InvalidQueryException(e.getMessage(), e);
@@ -592,13 +591,39 @@ final class Lucene10Index
         };
     }
 
+    /** The options of leia-core's parsers, with the dates as {@link DateTools} has them. */
+    private static io.github.mfuerstenau.leia.core.ParserOptions parserOptions(
+            boolean defaultAnd,
+            boolean allowLeadingWildcard,
+            int phraseSlop,
+            int fuzzyPrefixLength,
+            boolean enablePositionIncrements,
+            Dates dates) {
+        Map<String, DateTools.Resolution> fields = new LinkedHashMap<>();
+        dates.fields().forEach((field, resolution) -> fields.put(field, resolution(resolution)));
+        return new io.github.mfuerstenau.leia.core.ParserOptions(
+                defaultAnd ? Queries.Operator.AND : Queries.Operator.OR,
+                allowLeadingWildcard,
+                phraseSlop,
+                fuzzyPrefixLength,
+                enablePositionIncrements,
+                dates.resolution().map(Lucene10Index::resolution),
+                fields,
+                dates.locale(),
+                dates.timeZone());
+    }
+
+    private static DateTools.Resolution resolution(DateResolution resolution) {
+        return DateTools.Resolution.valueOf(resolution.name());
+    }
+
     /** @throws IllegalArgumentException if the index has no field {@code field} */
     private FieldInfo fieldInfo(String field) {
         return index.fieldInfo(field)
                 .orElseThrow(() -> new IllegalArgumentException("No field '" + field + "' in the index"));
     }
 
-    /** {@inheritDoc} With leia-core's standard parser, without dates. */
+    /** {@inheritDoc} With leia-core's standard parser, which reads date ranges (ADR 0026). */
     @Override
     public ParsedQuery parse(
             String expression,
@@ -613,12 +638,13 @@ final class Lucene10Index
             return new Lucene10Query(Queries.standard(
                     expression,
                     options.defaultField(),
-                    new io.github.mfuerstenau.leia.core.ParserOptions(
-                            options.defaultAnd() ? Queries.Operator.AND : Queries.Operator.OR,
+                    parserOptions(
+                            options.defaultAnd(),
                             options.allowLeadingWildcard(),
                             options.phraseSlop(),
                             options.fuzzyPrefixLength(),
-                            options.enablePositionIncrements()),
+                            options.enablePositionIncrements(),
+                            options.dates()),
                     types,
                     analyzer));
         } catch (io.github.mfuerstenau.leia.core.InvalidQueryException e) {

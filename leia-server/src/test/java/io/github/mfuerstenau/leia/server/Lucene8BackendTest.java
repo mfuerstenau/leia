@@ -52,15 +52,18 @@ import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeResult;
 import io.github.mfuerstenau.leia.protocol.points.PointSegment;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
+import io.github.mfuerstenau.leia.protocol.search.DateResolution;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesRange;
 import io.github.mfuerstenau.leia.protocol.search.Explanation;
+import io.github.mfuerstenau.leia.protocol.search.FieldDateResolution;
 import io.github.mfuerstenau.leia.protocol.search.HighlightOptions;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
 import io.github.mfuerstenau.leia.protocol.search.LikeTerm;
 import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
+import io.github.mfuerstenau.leia.protocol.search.ParserOptions;
 import io.github.mfuerstenau.leia.protocol.search.PointField;
 import io.github.mfuerstenau.leia.protocol.search.PointType;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
@@ -68,6 +71,7 @@ import io.github.mfuerstenau.leia.protocol.search.ScoreSort;
 import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
 import io.github.mfuerstenau.leia.protocol.search.SearchResults;
 import io.github.mfuerstenau.leia.protocol.search.SortKey;
+import io.github.mfuerstenau.leia.protocol.search.StandardQuery;
 import io.github.mfuerstenau.leia.protocol.search.StartHighlightParams;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import java.nio.file.Files;
@@ -622,6 +626,119 @@ class Lucene8BackendTest {
                 params(RealBackend.standard("body:(", QueryOperator.OR, List.of())),
                 ErrorCode.INVALID_QUERY);
         assertThat(syntax).hasMessage("Invalid query: Cannot parse 'body:(': Encountered \"<EOF>\" at column 6.");
+    }
+
+    /**
+     * The parsers' fuzzy edits, split, auto-generated phrases and dates, on 9.12 (ADR 0069), checked
+     * as for Lucene 10.
+     */
+    @Test
+    void searchesWithTheParsersOptions() throws Exception {
+        open(testIndex("lucene8"));
+        ParserOptions days = new ParserOptions(
+                false,
+                0,
+                0,
+                true,
+                Optional.of(DateResolution.YEAR),
+                List.of(new FieldDateResolution("body", DateResolution.DAY)),
+                Optional.of("en-US"),
+                Optional.of("UTC"));
+        assertThat(backend.search(classic("[1/15/26 TO 1/31/26]", days, 2, false, false), 10)
+                        .query())
+                .isEqualTo("body:[20260115 TO 20260131]");
+        assertThat(backend.search(
+                                new SearchQuery(
+                                        Optional.empty(),
+                                        Optional.of(new StandardQuery(
+                                                "[1/15/26 TO 1/31/26]",
+                                                "body",
+                                                QueryOperator.OR,
+                                                days,
+                                                List.of(),
+                                                STANDARD)),
+                                        Optional.empty(),
+                                        Optional.empty(),
+                                        Optional.empty(),
+                                        Optional.empty()),
+                                10)
+                        .query())
+                .isEqualTo("body:[20260115 TO 20260131]");
+        assertThat(backend.search(classic("gamma~", RealBackend.DEFAULTS, 1, false, false), 10)
+                        .query())
+                .isEqualTo("body:gamma~1");
+        // 9.12 refused auto-generated phrases while it didn't split (ADR 0069).
+        assertThat(backend.search(classic("wi-fi", RealBackend.DEFAULTS, 2, true, true), 10)
+                        .query())
+                .isEqualTo("body:\"wi fi\"");
+
+        assertThat(backend.fails(
+                        Methods.START_SEARCH,
+                        params(classic("x", RealBackend.DEFAULTS, 3, false, false)),
+                        ErrorCode.INVALID_PARAMS))
+                .hasMessage("Invalid params: fuzzyMaxEdits must be 0 to 2, not 3");
+        assertThat(backend.fails(
+                        Methods.START_SEARCH,
+                        params(classic("x", RealBackend.DEFAULTS, 2, false, true)),
+                        ErrorCode.INVALID_PARAMS))
+                .hasMessage("Invalid params: autoGeneratePhraseQueries needs splitOnWhitespace");
+        assertThat(backend.fails(
+                        Methods.START_SEARCH,
+                        params(classic("x", dates(List.of(), Optional.of("en_US"), Optional.empty()), 2, false, false)),
+                        ErrorCode.INVALID_PARAMS))
+                .hasMessage("Invalid params: 'en_US' is not a BCP 47 language tag, such as en-US");
+        assertThat(backend.fails(
+                        Methods.START_SEARCH,
+                        params(classic("x", dates(List.of(), Optional.empty(), Optional.of("Mars")), 2, false, false)),
+                        ErrorCode.INVALID_PARAMS))
+                .hasMessage("Invalid params: 'Mars' is not a time zone, such as UTC, Europe/Berlin or +02:00");
+        FieldDateResolution body = new FieldDateResolution("body", DateResolution.DAY);
+        assertThat(backend.fails(
+                        Methods.START_SEARCH,
+                        params(classic(
+                                "x", dates(List.of(body, body), Optional.empty(), Optional.empty()), 2, false, false)),
+                        ErrorCode.INVALID_PARAMS))
+                .hasMessage("Invalid params: the field 'body' has its date resolution listed twice");
+        backend.fails(
+                Methods.START_SEARCH,
+                params(classic(
+                        "x",
+                        dates(
+                                List.of(new FieldDateResolution("nothing", DateResolution.DAY)),
+                                Optional.empty(),
+                                Optional.empty()),
+                        2,
+                        false,
+                        false)),
+                ErrorCode.FIELD_NOT_FOUND);
+    }
+
+    private static SearchQuery classic(
+            String expression,
+            ParserOptions options,
+            int fuzzyMaxEdits,
+            boolean splitOnWhitespace,
+            boolean autoGeneratePhraseQueries) {
+        return new SearchQuery(
+                Optional.of(new ClassicQuery(
+                        expression,
+                        "body",
+                        QueryOperator.OR,
+                        options,
+                        fuzzyMaxEdits,
+                        splitOnWhitespace,
+                        autoGeneratePhraseQueries,
+                        STANDARD)),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty());
+    }
+
+    private static ParserOptions dates(
+            List<FieldDateResolution> fields, Optional<String> locale, Optional<String> timeZone) {
+        return new ParserOptions(false, 0, 0, true, Optional.empty(), fields, locale, timeZone);
     }
 
     /** More-Like-This, by a document and by a text, with the terms it chose (ADR 0066). */

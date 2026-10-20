@@ -66,6 +66,8 @@ That only pays off if Lucene 10 is a runtime too. Lucene 10 is about 12 MB of th
 
    The interface also has nothing for `getAnalysisComponents`, `analyze`, `addJars` and `getJars`. Their handlers are core-only today, so the test doesn't route them (2b, 2c).
 
+   *Amended (ADR 0069):* the 2d rows are done, `splitOnWhitespace` and `hasBlocks` with them; only the `openIndex` features differ until step 3.
+
 ## Alternatives considered
 
 - **Relocate Lucene 10 too,** as the other runtimes are. The jars of `--jar` link against `org.apache.lucene`, so they would stop working. Rejected.

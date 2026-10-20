@@ -1,5 +1,6 @@
 package io.github.mfuerstenau.leia.lucene9;
 
+import io.github.mfuerstenau.leia.runtime.Search.Dates;
 import io.github.mfuerstenau.leia.runtime.Search.InvalidQueryException;
 import io.github.mfuerstenau.leia.runtime.StandardSearch.Options;
 import io.github.mfuerstenau.leia.runtime.StandardSearch.PointType;
@@ -7,20 +8,23 @@ import java.text.NumberFormat;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TimeZone;
 import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.document.DateTools;
 import org.apache.lucene.queryparser.flexible.core.QueryNodeException;
+import org.apache.lucene.queryparser.flexible.core.processors.QueryNodeProcessorPipeline;
 import org.apache.lucene.queryparser.flexible.standard.StandardQueryParser;
 import org.apache.lucene.queryparser.flexible.standard.config.PointsConfig;
 import org.apache.lucene.queryparser.flexible.standard.config.StandardQueryConfigHandler;
 import org.apache.lucene.queryparser.flexible.standard.parser.ParseException;
+import org.apache.lucene.queryparser.flexible.standard.processors.TermRangeQueryNodeProcessor;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
 
 /**
  * Lucene 9.12's {@link StandardQueryParser}, set up as leia-core's {@code Queries.standard} sets up
- * Lucene 10's (ADR 0011, ADR 0066), with the same messages: a copy, as the facades are (ADR 0050 §1).
- * It has no dates: without a date resolution, Lucene's own processor of term ranges leaves the bounds
- * text, as leia-core's does.
+ * Lucene 10's (ADR 0011, ADR 0066), with the same messages and the same dates (ADR 0026, ADR 0069): a
+ * copy, as the facades are (ADR 0050 §1).
  */
 final class Lucene9StandardParser {
 
@@ -37,6 +41,7 @@ final class Lucene9StandardParser {
             throws InvalidQueryException {
         try {
             StandardQueryParser parser = new StandardQueryParser(analyzer);
+            readDatesInTheParsersZone(parser);
             parser.setDefaultOperator(
                     options.defaultAnd()
                             ? StandardQueryConfigHandler.Operator.AND
@@ -45,6 +50,15 @@ final class Lucene9StandardParser {
             parser.setPhraseSlop(options.phraseSlop());
             parser.setFuzzyPrefixLength(options.fuzzyPrefixLength());
             parser.setEnablePositionIncrements(options.enablePositionIncrements());
+            Dates dates = options.dates();
+            dates.resolution().map(Lucene9DateRangeQueryParser::resolution).ifPresent(parser::setDateResolution);
+            Map<CharSequence, DateTools.Resolution> resolutions = new HashMap<>();
+            dates.fields()
+                    .forEach((field, resolution) ->
+                            resolutions.put(field, Lucene9DateRangeQueryParser.resolution(resolution)));
+            parser.setDateResolutionMap(resolutions);
+            dates.locale().ifPresent(parser::setLocale);
+            dates.timeZone().map(TimeZone::getTimeZone).ifPresent(parser::setTimeZone);
             Map<String, PointsConfig> configs = new HashMap<>();
             points.forEach((field, type) -> configs.put(field, new PointsConfig(numberFormat(type), type(type))));
             parser.setPointsConfigMap(configs);
@@ -56,6 +70,23 @@ final class Lucene9StandardParser {
         } catch (IndexSearcher.TooManyClauses e) {
             throw new InvalidQueryException(e.getMessage(), e);
         }
+    }
+
+    /**
+     * Replaces the parser's processor of term ranges with one that reads dates in the parser's time
+     * zone (ADR 0026), as leia-core does.
+     *
+     * @throws IllegalStateException if the parser has no such processor
+     */
+    private static void readDatesInTheParsersZone(StandardQueryParser parser) {
+        var pipeline = (QueryNodeProcessorPipeline) parser.getQueryNodeProcessor();
+        for (int i = 0; i < pipeline.size(); i++) {
+            if (pipeline.get(i).getClass() == TermRangeQueryNodeProcessor.class) {
+                pipeline.set(i, new Lucene9DateRangeQueryNodeProcessor());
+                return;
+            }
+        }
+        throw new IllegalStateException("The standard query parser has no TermRangeQueryNodeProcessor");
     }
 
     private static Class<? extends Number> type(PointType type) {

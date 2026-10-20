@@ -300,7 +300,12 @@ final class Lucene5Index implements RuntimeIndex, Documents, Terms, Search {
                     segments(part.reader())));
             docBase += part.reader().maxDoc();
         }
-        return new Stats(reader.numDocs(), reader.maxDoc(), List.copyOf(indexes), fields());
+        return new Stats(
+                reader.numDocs(),
+                reader.maxDoc(),
+                List.copyOf(indexes),
+                fields(),
+                parts.getFirst().directory().getClass().getSimpleName());
     }
 
     /** The reader's segments, in document order (ADR 0051). */
@@ -686,12 +691,14 @@ final class Lucene5Index implements RuntimeIndex, Documents, Terms, Search {
             throws InvalidQueryException, UnsupportedAnalyzerException, InvalidAnalyzerException {
         Analyzer analyzer = Lucene5Analyzers.analyzer(spec);
         try {
-            QueryParser parser = new QueryParser(options.defaultField(), analyzer);
+            QueryParser parser = new Lucene5DateRangeQueryParser(options.defaultField(), analyzer, options.dates());
             parser.setDefaultOperator(options.defaultAnd() ? QueryParser.Operator.AND : QueryParser.Operator.OR);
             parser.setAllowLeadingWildcard(options.allowLeadingWildcard());
             parser.setPhraseSlop(options.phraseSlop());
             parser.setFuzzyPrefixLength(options.fuzzyPrefixLength());
             parser.setEnablePositionIncrements(options.enablePositionIncrements());
+            parser.setFuzzyMinSim(options.fuzzyMaxEdits());
+            // 5.5 always splits on whitespace (ADR 0069).
             parser.setAutoGeneratePhraseQueries(options.autoGeneratePhraseQueries());
             return new Lucene5Query(parser.parse(expression));
         } catch (ParseException | RuntimeException e) {

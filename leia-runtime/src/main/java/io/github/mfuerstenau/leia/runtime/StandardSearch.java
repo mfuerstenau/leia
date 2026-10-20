@@ -1,10 +1,11 @@
 package io.github.mfuerstenau.leia.runtime;
 
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Lucene's standard (flexible) query parser, as leia-core's {@code Queries.standard} runs it on
- * Lucene 10 (ADR 0011, ADR 0066), without dates: range bounds stay text, as in {@link Search#parse}.
+ * Lucene 10 (ADR 0011, ADR 0066), with the dates of range bounds (ADR 0069).
  */
 public interface StandardSearch {
 
@@ -23,14 +24,43 @@ public interface StandardSearch {
             String expression, Options options, Map<String, PointType> points, Search.AnalyzerSpec analyzer)
             throws Search.InvalidQueryException, Search.UnsupportedAnalyzerException, Search.InvalidAnalyzerException;
 
-    /** The standard query parser's options: those of the classic one but auto-generated phrases. */
+    /**
+     * The standard query parser's options: those of the classic one but auto-generated phrases, fuzzy
+     * edits and splitting on whitespace.
+     *
+     * @param dates how range bounds on fields that aren't in {@code points} are read as dates (ADR 0069)
+     */
     record Options(
             String defaultField,
             boolean defaultAnd,
             boolean allowLeadingWildcard,
             int phraseSlop,
             int fuzzyPrefixLength,
-            boolean enablePositionIncrements) {}
+            boolean enablePositionIncrements,
+            Search.Dates dates) {
+
+        public Options {
+            Objects.requireNonNull(dates);
+        }
+
+        /** Options without dates. */
+        public Options(
+                String defaultField,
+                boolean defaultAnd,
+                boolean allowLeadingWildcard,
+                int phraseSlop,
+                int fuzzyPrefixLength,
+                boolean enablePositionIncrements) {
+            this(
+                    defaultField,
+                    defaultAnd,
+                    allowLeadingWildcard,
+                    phraseSlop,
+                    fuzzyPrefixLength,
+                    enablePositionIncrements,
+                    Search.Dates.NONE);
+        }
+    }
 
     /** The type of a point field's values, which the index doesn't record. */
     enum PointType {

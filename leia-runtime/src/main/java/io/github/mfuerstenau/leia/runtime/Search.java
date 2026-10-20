@@ -2,8 +2,10 @@ package io.github.mfuerstenau.leia.runtime;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.ZoneId;
 import java.util.BitSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -70,7 +72,17 @@ public interface Search {
      */
     interface ParsedQuery {}
 
-    /** The classic query parser's options. */
+    /**
+     * The classic query parser's options (ADR 0069).
+     *
+     * @param fuzzyMaxEdits the edit distance of fuzzy terms that give none, 0 to 2; a Lucene without
+     *     edit distances, as 3.6, ignores it
+     * @param splitOnWhitespace whether whitespace splits the text before it is analyzed; a Lucene that
+     *     always splits, as 3.6 and 5.5, ignores it
+     * @param autoGeneratePhraseQueries whether text that analyzes to several terms becomes a phrase;
+     *     leia passes it only with {@code splitOnWhitespace}
+     * @param dates how range bounds are read as dates
+     */
     record ParserOptions(
             String defaultField,
             boolean defaultAnd,
@@ -78,7 +90,82 @@ public interface Search {
             int phraseSlop,
             int fuzzyPrefixLength,
             boolean enablePositionIncrements,
-            boolean autoGeneratePhraseQueries) {}
+            boolean autoGeneratePhraseQueries,
+            int fuzzyMaxEdits,
+            boolean splitOnWhitespace,
+            Dates dates) {
+
+        public ParserOptions {
+            Objects.requireNonNull(dates);
+        }
+
+        /** Options with 2 fuzzy edits, split on whitespace only for auto-generated phrases, and no dates. */
+        public ParserOptions(
+                String defaultField,
+                boolean defaultAnd,
+                boolean allowLeadingWildcard,
+                int phraseSlop,
+                int fuzzyPrefixLength,
+                boolean enablePositionIncrements,
+                boolean autoGeneratePhraseQueries) {
+            this(
+                    defaultField,
+                    defaultAnd,
+                    allowLeadingWildcard,
+                    phraseSlop,
+                    fuzzyPrefixLength,
+                    enablePositionIncrements,
+                    autoGeneratePhraseQueries,
+                    2,
+                    autoGeneratePhraseQueries,
+                    Dates.NONE);
+        }
+    }
+
+    /** The resolution that a date in a range bound is turned into a term with, as Lucene's {@code DateTools.Resolution}. */
+    enum DateResolution {
+        YEAR,
+        MONTH,
+        DAY,
+        HOUR,
+        MINUTE,
+        SECOND,
+        MILLISECOND
+    }
+
+    /**
+     * How a query parser reads range bounds as dates (ADR 0026, ADR 0069): in the short date format
+     * of {@code locale}, in {@code timeZone}, turned into terms with a resolution. A bound that isn't
+     * a date, or on a field without a resolution, stays text. An inclusive upper bound includes the
+     * whole day.
+     *
+     * @param resolution the resolution of the fields without one of their own; empty, the bounds on
+     *     those fields stay text
+     * @param fields the resolutions of single fields, by field name, which win over {@code resolution}
+     * @param locale the locale of the date format; empty, the JVM's default
+     * @param timeZone the time zone the dates are read in; empty, the JVM's default
+     */
+    record Dates(
+            Optional<DateResolution> resolution,
+            Map<String, DateResolution> fields,
+            Optional<Locale> locale,
+            Optional<ZoneId> timeZone) {
+
+        /** No resolutions: every bound stays text. */
+        public static final Dates NONE = new Dates(Optional.empty(), Map.of(), Optional.empty(), Optional.empty());
+
+        public Dates {
+            Objects.requireNonNull(resolution);
+            fields = Map.copyOf(fields);
+            Objects.requireNonNull(locale);
+            Objects.requireNonNull(timeZone);
+        }
+
+        /** The resolution of {@code field}: its own, or else the default one. */
+        public Optional<DateResolution> resolution(String field) {
+            return Optional.ofNullable(fields.get(field)).or(() -> resolution);
+        }
+    }
 
     /**
      * An analyzer of the runtime's Lucene, as leia-core's {@code AnalyzerSpec} has it (ADR 0045, ADR
