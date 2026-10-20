@@ -1,6 +1,5 @@
 package io.github.mfuerstenau.leia.server.filter;
 
-import io.github.mfuerstenau.leia.core.DocFilter;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
 import io.github.mfuerstenau.leia.protocol.filter.FilterResult;

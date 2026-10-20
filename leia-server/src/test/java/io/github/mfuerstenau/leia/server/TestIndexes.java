@@ -1,12 +1,11 @@
 package io.github.mfuerstenau.leia.server;
 
-import io.github.mfuerstenau.leia.core.IndexFinder;
-import io.github.mfuerstenau.leia.core.IndexOpenException;
 import io.github.mfuerstenau.leia.lucene10.Lucene10Runtime;
 import io.github.mfuerstenau.leia.protocol.index.Feature;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
+import io.github.mfuerstenau.leia.server.index.IndexFinder;
 import io.github.mfuerstenau.leia.server.runtime.OpenDirectories;
 import io.github.mfuerstenau.leia.server.runtime.OpenRuntime;
 import java.io.IOException;
@@ -26,7 +25,7 @@ public final class TestIndexes {
     private TestIndexes() {}
 
     /** The indexes at or below {@code path}, with a reader, through {@link DirectoryKind#FS}. */
-    public static OpenRuntime open(Path path) throws IndexOpenException, IOException {
+    public static OpenRuntime open(Path path) throws RpcException, IOException {
         Path root = IndexFinder.root(path);
         List<Path> dirs = IndexFinder.find(root);
         RuntimeIndex index = LUCENE_10.open(dirs, DirectoryKind.FS);
@@ -34,7 +33,7 @@ public final class TestIndexes {
     }
 
     /** The indexes at or below {@code path}, without a reader. */
-    public static OpenDirectories withoutReader(Path path, DirectoryKind kind) throws IndexOpenException {
+    public static OpenDirectories withoutReader(Path path, DirectoryKind kind) throws RpcException {
         Path root = IndexFinder.root(path);
         return new OpenDirectories(root, IndexFinder.find(root), kind);
     }

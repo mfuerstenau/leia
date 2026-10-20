@@ -1,5 +1,6 @@
-package io.github.mfuerstenau.leia.core;
+package io.github.mfuerstenau.leia.server.terms;
 
+import io.github.mfuerstenau.leia.server.job.ScanProgress;
 import java.io.BufferedOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -76,20 +77,6 @@ public final class TermExport {
 
         /** Passes every term to {@code sink}, in term order. */
         void forEachTerm(TermSink sink) throws IOException;
-    }
-
-    /**
-     * The terms of {@code field} of {@code index}, document frequencies including deleted documents.
-     * A field without postings has none.
-     *
-     * @throws IllegalArgumentException if the index has no such field
-     */
-    public static TermSource terms(ReadOnlyIndex index, String field) {
-        if (!index.hasField(field)) {
-            throw new IllegalArgumentException("No field '" + field + "' in the index");
-        }
-        return sink ->
-                index.forEachTerm(field, (term, docFreq) -> sink.term(term.bytes, term.offset, term.length, docFreq));
     }
 
     /** The file can't be written: where it is, what is there, or an I/O error while writing. */

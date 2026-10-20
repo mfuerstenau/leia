@@ -3,7 +3,6 @@ package io.github.mfuerstenau.leia.server.analysis;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
-import io.github.mfuerstenau.leia.protocol.analysis.AutoStopWords;
 import io.github.mfuerstenau.leia.protocol.analysis.FieldStopWords;
 import io.github.mfuerstenau.leia.protocol.analysis.StartAutoStopWordsParams;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
@@ -38,12 +37,11 @@ public final class StartAutoStopWordsHandler implements MethodHandler<StartAutoS
 
     @Override
     public JobStarted handle(StartAutoStopWordsParams params) throws RpcException {
-        io.github.mfuerstenau.leia.core.AutoStopWords.Threshold threshold = threshold(params);
+        AutoStopWords.Threshold threshold = threshold(params);
         return RuntimeResults.startAutoStopWords(currentIndex.runtime(), params.fields(), threshold, jobs);
     }
 
-    private static io.github.mfuerstenau.leia.core.AutoStopWords.Threshold threshold(StartAutoStopWordsParams params)
-            throws RpcException {
+    private static AutoStopWords.Threshold threshold(StartAutoStopWordsParams params) throws RpcException {
         if (params.maxDocFreq().isPresent() == params.maxPercentDocs().isPresent()) {
             throw invalid("give exactly one of maxDocFreq and maxPercentDocs");
         }
@@ -52,13 +50,13 @@ public final class StartAutoStopWordsHandler implements MethodHandler<StartAutoS
             if (maxDocFreq < 0) {
                 throw invalid("maxDocFreq must be at least 0, not " + maxDocFreq);
             }
-            return new io.github.mfuerstenau.leia.core.AutoStopWords.Threshold.MaxDocFreq(maxDocFreq);
+            return new AutoStopWords.Threshold.MaxDocFreq(maxDocFreq);
         }
         double fraction = params.maxPercentDocs().getAsDouble();
         if (!(fraction >= 0 && fraction <= 1)) {
             throw invalid("maxPercentDocs must be from 0 to 1, not " + fraction);
         }
-        return new io.github.mfuerstenau.leia.core.AutoStopWords.Threshold.MaxPercentDocs(fraction);
+        return new AutoStopWords.Threshold.MaxPercentDocs(fraction);
     }
 
     private static RpcException invalid(String message) {
@@ -69,8 +67,7 @@ public final class StartAutoStopWordsHandler implements MethodHandler<StartAutoS
     @FunctionalInterface
     public interface Scan {
 
-        io.github.mfuerstenau.leia.core.AutoStopWords find()
-                throws IOException, io.github.mfuerstenau.leia.core.AutoStopWords.TooManyWordsException;
+        AutoStopWords find() throws IOException, AutoStopWords.TooManyWordsException;
     }
 
     /**
@@ -79,15 +76,15 @@ public final class StartAutoStopWordsHandler implements MethodHandler<StartAutoS
      * @throws RpcException {@code INVALID_PARAMS} for too many words, {@code INDEX_NOT_READABLE} if
      *     the terms can't be read
      */
-    public static AutoStopWords found(Scan scan) throws RpcException {
+    public static io.github.mfuerstenau.leia.protocol.analysis.AutoStopWords found(Scan scan) throws RpcException {
         try {
-            io.github.mfuerstenau.leia.core.AutoStopWords found = scan.find();
-            return new AutoStopWords(
+            AutoStopWords found = scan.find();
+            return new io.github.mfuerstenau.leia.protocol.analysis.AutoStopWords(
                     found.maxDocFreq(),
                     found.words().entrySet().stream()
                             .map(entry -> new FieldStopWords(entry.getKey(), entry.getValue()))
                             .toList());
-        } catch (io.github.mfuerstenau.leia.core.AutoStopWords.TooManyWordsException e) {
+        } catch (AutoStopWords.TooManyWordsException e) {
             throw invalid(e.getMessage());
         } catch (IOException e) {
             throw new RpcException(

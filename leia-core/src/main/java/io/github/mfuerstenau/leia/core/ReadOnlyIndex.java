@@ -10,11 +10,9 @@ import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
@@ -22,7 +20,6 @@ import java.util.TreeMap;
 import java.util.concurrent.CancellationException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import java.util.regex.Pattern;
 import java.util.stream.StreamSupport;
 import org.apache.lucene.index.CorruptIndexException;
 import org.apache.lucene.index.DirectoryReader;
@@ -616,38 +613,6 @@ public final class ReadOnlyIndex implements OpenedIndex {
         return new FieldTerms(field, scanned, List.of(topTerms));
     }
 
-    /**
-     * The stop words of fields as Lucene's {@code QueryAutoStopWordAnalyzer} finds them (ADR 0039):
-     * every term of a field in more than the threshold's documents, deleted ones included, as
-     * Lucene counts them. A field without postings has none.
-     *
-     * <p>{@code progress} gets the number of terms scanned over all fields every {@value
-     * #PROGRESS_INTERVAL} terms and at the end, as for {@link #fieldTerms}.
-     *
-     * @param fields the indexed fields to scan; empty for every indexed field, as in Lucene
-     * @param maxWords the most words of one field
-     * @throws IllegalArgumentException if a field is missing or not indexed, or the threshold is out
-     *     of range
-     * @throws AutoStopWords.TooManyWordsException if a field has more than {@code maxWords} words
-     * @throws IOException if reading the terms fails
-     */
-    public AutoStopWords autoStopWords(
-            List<String> fields, AutoStopWords.Threshold threshold, int maxWords, ScanProgress progress)
-            throws IOException, AutoStopWords.TooManyWordsException {
-        for (String field : fields) {
-            FieldInfo info = fieldInfos.fieldInfo(field);
-            if (info == null || info.getIndexOptions() == IndexOptions.NONE) {
-                throw new IllegalArgumentException("No indexed field '" + field + "' in the index");
-            }
-        }
-        int maxDocFreq = threshold.maxDocFreq(reader.numDocs());
-        Map<String, TermExport.TermSource> sources = new TreeMap<>();
-        for (String field : fields.isEmpty() ? FieldInfos.getIndexedFields(reader) : fields) {
-            sources.put(field, TermExport.terms(this, field));
-        }
-        return AutoStopWords.find(sources, maxDocFreq, maxWords, progress);
-    }
-
     /** Whether {@code docId} is a document id of the index, deleted or not: from 0 to maxDoc - 1. */
     public boolean hasDocId(int docId) {
         return docId >= 0 && docId < reader.maxDoc();
@@ -979,67 +944,6 @@ public final class ReadOnlyIndex implements OpenedIndex {
             throws IOException, InvalidQueryException {
         checkDocId(docId);
         return Searcher.explain(directoryReaders(), query, similarity, docId, progress);
-    }
-
-    /**
-     * Looks for {@code pattern} in the stored values of every document (ADR 0027), in document id
-     * order, and passes the values in which it was found to {@code listener}. {@code progress}
-     * receives the document ids gone through and can stop the scan by throwing a {@link
-     * CancellationException}.
-     *
-     * @param fields the stored fields to scan; empty for all of them
-     * @param includeDeleted whether to scan deleted documents too
-     * @param maxHits how many hits to pass on; later matches are only counted
-     * @param valueTimeLimit how long matching one value may take before it is skipped
-     * @throws IllegalArgumentException if a field doesn't exist, or {@code maxHits} is negative
-     * @throws IOException if reading a document fails
-     */
-    public StoredScan.Summary storedScan(
-            Pattern pattern,
-            Optional<Set<String>> fields,
-            boolean includeDeleted,
-            int maxHits,
-            Duration valueTimeLimit,
-            StoredScan.Listener listener,
-            ScanProgress progress)
-            throws IOException {
-        if (fields.isPresent()) {
-            fields.get().forEach(this::checkField);
-        }
-        if (maxHits < 0) {
-            throw new IllegalArgumentException("maxHits must not be negative: " + maxHits);
-        }
-        return StoredScan.scan(
-                StoredScan.source(reader, fields, includeDeleted),
-                pattern,
-                maxHits,
-                valueTimeLimit,
-                listener,
-                progress);
-    }
-
-    /**
-     * Finds every document with a stored value in which {@code pattern} is found (ADR 0032), as
-     * {@link #storedScan} looks for it, and keeps them as a filter. Values that take longer than
-     * {@code valueTimeLimit} are skipped and counted. {@code progress} receives the document ids gone
-     * through and can stop the scan by throwing a {@link CancellationException}.
-     *
-     * @param fields the stored fields to scan; empty for all of them
-     * @param includeDeleted whether deleted documents can match too
-     * @throws IllegalArgumentException if a field doesn't exist
-     * @throws IOException if reading a document fails
-     */
-    public DocFilter storedScanMatches(
-            Pattern pattern,
-            Optional<Set<String>> fields,
-            boolean includeDeleted,
-            Duration valueTimeLimit,
-            ScanProgress progress)
-            throws IOException {
-        if (fields.isPresent()) {
-            fields.get().forEach(this::checkField);
-        }
-        return StoredScan.matches(StoredScan.source(reader, fields, includeDeleted), pattern, valueTimeLimit, progress);
     }
 
     /**

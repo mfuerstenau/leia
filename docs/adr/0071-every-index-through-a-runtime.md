@@ -28,7 +28,16 @@ Step 4 is to ship `leia.jar` without Lucene. That needs a server that reaches ev
 6. **`Feature.SEARCH` is removed.** It stood for "every part of search" on leia-core. The TUI checks the parts (`CLASSIC_SEARCH`, `TERM_SEARCH`, `SCORING`, `DOC_VALUES_SEARCH`, `STANDARD_SEARCH`, `MORE_LIKE_THIS`) alone. `DOC_VALUES`, `POINTS` and `KNN_VECTORS` follow the index's data on Lucene 9 and 10 too, as on every runtime. The tab line names the Lucene that reads an index unless it is the newest one, Lucene 10 (`App.NEWEST_LUCENE_MAJOR`), as it named every runtime before.
 7. **Analysis.** `getAnalysisComponents` and `analyze` always go to the first runtime with an `Analysis` (ADR 0067). Without one, they are `NOT_SUPPORTED`, and the analysis tab says "No loaded runtime has analysis" in normal text, not as an error; so does the analyzer form's picker. There is no protocol change.
 8. **Extension jars.** `JarChain` reloads the lists of every runtime's `Extensions` (ADR 0068), without the rule of ADR 0068 §5 that skipped the runtime of Lucene 10's indexes; `CoreExtensions` is gone.
-9. **leia-server still compiles against leia-core** for the algorithms the runtimes' results go through (the stored scan, the highlighter's text, auto stop words, the term export, the filters). Moving them into the server, so that leia-server compiles without leia-core and Lucene, is the next commit (step 3c).
+9. **leia-server compiles without leia-core and Lucene** (step 3c). What the runtimes' results go through needs only the JDK, so it moved into the server, with JDK types:
+   - `ScanProgress` → `server.job`;
+   - the stored scan's matcher (`StoredScan`, with its `Document`, `StoredSource`, `Span` and `Listener`), and the JDK half of `Highlights` with `TextHighlighter`, `DocumentHighlight`, `FieldHighlight` and `OffsetSource` → `server.search`; both read the runtime's `RuntimeIndex.StoredValue`;
+   - `AutoStopWords` → `server.analysis`, `TermExport` → `server.terms`;
+   - `DocFilter`, on a `java.util.BitSet`, and `PostingsFilter` → `server.filter`;
+   - `IndexFinder` → `server.index`, failing with the `RpcException` of its error code.
+
+   `ByteStrings`, `TermParams`, `PointMapper`, `RuntimeQueries` and `RuntimeScoring` work on `byte[]`. leia-server's `build.gradle.kts` has `noLuceneCheck`, part of `check`, which fails if its compile classpath resolves leia-core or an `org.apache.lucene` artifact. The tests take leia-core for the indexes they write.
+
+   In leia-core, what only the server used goes: `AutoStopWords`, `TermExport`, `ReadOnlyIndex.autoStopWords`, `storedScan` and `storedScanMatches`, and the scan half of `StoredScan`, whose source of stored values and UTF-8 offsets leia-lucene10 and the highlights still use. Its tests moved to the server with the code. `DocFilter`, `IndexFinder`, `ScanProgress` and `Highlights` stay too: leia-core's own reader and search use them, and leia-lucene10 reaches them through it.
 
 ## Alternatives considered
 
@@ -43,3 +52,4 @@ Step 4 is to ship `leia.jar` without Lucene. That needs a server that reaches ev
 - The handler tests open an index through `TestIndexes`, with `Lucene10Runtime`.
 - `docs/runtimes.md`: the 10.5.2 column is leia-lucene10, without `SEARCH`, with the data-gated features footnoted.
 - An index of 4.x to 8.x opened without a reader and without its runtime no longer lists its commits as unreadable with Lucene 10: `getCommits` says which runtime jar is missing.
+- Hard rule 6 holds by the build: leia-server can't compile against Lucene, which ADR 0034 claimed for the TUI only. Step 4 can drop Lucene from `leia.jar` by moving leia-lucene10 into `runtimes/`.

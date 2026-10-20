@@ -1,12 +1,12 @@
 package io.github.mfuerstenau.leia.server.document;
 
-import io.github.mfuerstenau.leia.core.IndexDocument;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
 import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
+import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
@@ -14,7 +14,6 @@ import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
 import jakarta.inject.Inject;
 import java.util.OptionalLong;
-import org.apache.lucene.util.BytesRef;
 
 /** {@code getDocument}: what a document of the {@link CurrentIndex} holds, field by field. */
 public final class GetDocumentHandler implements MethodHandler<GetDocumentParams, GetDocumentResult> {
@@ -37,7 +36,7 @@ public final class GetDocumentHandler implements MethodHandler<GetDocumentParams
     }
 
     /** The whole {@code value}, as {@code getStoredValue} sends it. */
-    static StoredValue storedValue(IndexDocument.StoredValue value) {
+    static StoredValue storedValue(RuntimeIndex.StoredValue value) {
         return storedValue(value, Integer.MAX_VALUE);
     }
 
@@ -45,10 +44,10 @@ public final class GetDocumentHandler implements MethodHandler<GetDocumentParams
      * {@code value} as it goes into the result, with text and bytes cut to at most {@code maxLength} bytes
      * (ADR 0008). Text is cut between two characters, so the cut text is still valid UTF-8.
      */
-    public static StoredValue storedValue(IndexDocument.StoredValue value, int maxLength) {
+    public static StoredValue storedValue(RuntimeIndex.StoredValue value, int maxLength) {
         return switch (value) {
-            case IndexDocument.StoredValue.Text(String text) -> text(StoredType.STRING, text, maxLength);
-            case IndexDocument.StoredValue.Binary(BytesRef bytes) -> {
+            case RuntimeIndex.StoredValue.Text(String text) -> text(StoredType.STRING, text, maxLength);
+            case RuntimeIndex.StoredValue.Binary(byte[] bytes) -> {
                 ByteStrings.Encoded encoded = ByteStrings.encode(bytes);
                 if (!encoded.binary()) {
                     yield text(StoredType.BINARY, encoded.value(), maxLength);
@@ -58,18 +57,19 @@ public final class GetDocumentHandler implements MethodHandler<GetDocumentParams
                         ? new StoredValue(StoredType.BINARY, encoded.value(), true)
                         : new StoredValue(
                                 StoredType.BINARY,
-                                ByteStrings.hex(new BytesRef(bytes.bytes, bytes.offset, maxLength)),
+                                ByteStrings.hex(bytes, maxLength),
                                 true,
                                 OptionalLong.of(bytes.length));
             }
-            case IndexDocument.StoredValue.IntValue(int number) ->
+            case RuntimeIndex.StoredValue.Numeric(Integer number) ->
                 new StoredValue(StoredType.INT, Integer.toString(number), false);
-            case IndexDocument.StoredValue.LongValue(long number) ->
+            case RuntimeIndex.StoredValue.Numeric(Long number) ->
                 new StoredValue(StoredType.LONG, Long.toString(number), false);
-            case IndexDocument.StoredValue.FloatValue(float number) ->
+            case RuntimeIndex.StoredValue.Numeric(Float number) ->
                 new StoredValue(StoredType.FLOAT, Float.toString(number), false);
-            case IndexDocument.StoredValue.DoubleValue(double number) ->
-                new StoredValue(StoredType.DOUBLE, Double.toString(number), false);
+            // A double, or a number of a type that a runtime's Lucene has and Lucene 10 hasn't.
+            case RuntimeIndex.StoredValue.Numeric(Number number) ->
+                new StoredValue(StoredType.DOUBLE, Double.toString(number.doubleValue()), false);
         };
     }
 

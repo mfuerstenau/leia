@@ -4,11 +4,10 @@ plugins {
 }
 
 dependencies {
-    // api: the protocol records are LeiaBackend's API; implementation keeps core and Lucene out of
-    // the UI's compile classpath (AGENTS.md, hard rule 6). leia-core only for the algorithms that the
-    // runtimes' results go through, until they move into the server (ADR 0071).
+    // api: the protocol records are LeiaBackend's API. Neither leia-core nor Lucene is on the compile
+    // classpath: every index is read through a runtime (ADR 0071, AGENTS.md, hard rule 6), which
+    // noLuceneCheck below makes sure of.
     api(project(":leia-protocol"))
-    implementation(project(":leia-core"))
     // The interface to the runtimes for indexes that Lucene 10 can't read (ADR 0044).
     implementation(project(":leia-runtime"))
     // Lucene 3.6, 5.5, 7.7 and 9.12, relocated, for indexes created by Lucene 2.x to 8.x: found through
@@ -24,7 +23,9 @@ dependencies {
     // interface, and the plain jar, which brings leia-core and Lucene 10 with it. The tests open
     // indexes through Lucene10Runtime directly.
     runtimeOnly(project(":leia-lucene10"))
+    // leia-core and Lucene 10 come with it, for the tests that write indexes.
     testImplementation(project(":leia-lucene10"))
+    testImplementation(project(":leia-core"))
     implementation(libs.dagger)
     annotationProcessor(libs.dagger.compiler)
 }
@@ -132,8 +133,36 @@ val jarsTest = tasks.register<Test>("jarsTest") {
     )
 }
 
+// Hard rule 6 of AGENTS.md: the server reaches Lucene only through the runtime interface (ADR 0071),
+// so neither leia-core nor a Lucene artifact may be on its compile classpath.
+val noLuceneCheck = tasks.register("noLuceneCheck") {
+    description = "Checks that leia-core and Lucene are not on the compile classpath."
+    group = "verification"
+    val compileClasspath = configurations.compileClasspath
+    val resolved = compileClasspath.flatMap { it.incoming.resolutionResult.rootComponent }
+    inputs.files(compileClasspath)
+    doLast {
+        val found = mutableListOf<String>()
+        fun walk(component: org.gradle.api.artifacts.result.ResolvedComponentResult, seen: MutableSet<Any>) {
+            if (!seen.add(component.id)) return
+            val id = component.id
+            val name = when (id) {
+                is org.gradle.api.artifacts.component.ProjectComponentIdentifier -> id.projectPath
+                is org.gradle.api.artifacts.component.ModuleComponentIdentifier -> "${id.group}:${id.module}"
+                else -> id.displayName
+            }
+            if (name == ":leia-core" || name.startsWith("org.apache.lucene:")) found += name
+            component.dependencies
+                .filterIsInstance<org.gradle.api.artifacts.result.ResolvedDependencyResult>()
+                .forEach { walk(it.selected, seen) }
+        }
+        walk(resolved.get(), mutableSetOf())
+        check(found.isEmpty()) { "leia-server's compile classpath has $found (AGENTS.md, hard rule 6)" }
+    }
+}
+
 tasks.check {
-    dependsOn(jarsTest)
+    dependsOn(jarsTest, noLuceneCheck)
 }
 
 // Version and build of leia, read at runtime by BuildInfo. The commit time (not the

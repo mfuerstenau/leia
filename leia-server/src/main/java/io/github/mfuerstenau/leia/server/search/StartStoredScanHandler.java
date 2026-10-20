@@ -1,7 +1,5 @@
 package io.github.mfuerstenau.leia.server.search;
 
-import io.github.mfuerstenau.leia.core.ScanProgress;
-import io.github.mfuerstenau.leia.core.StoredScan;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
@@ -13,6 +11,7 @@ import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
+import io.github.mfuerstenau.leia.server.job.ScanProgress;
 import io.github.mfuerstenau.leia.server.runtime.OpenRuntime;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
 import jakarta.inject.Inject;

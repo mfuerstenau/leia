@@ -13,7 +13,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import org.apache.lucene.util.BytesRef;
 
 /**
  * The similarity and sort of {@code startSearch} and {@code startExplain} on a runtime with a {@link
@@ -115,8 +114,7 @@ final class RuntimeScoring {
     /** {@code value} as the protocol carries it, as {@code StartSearchHandler} carries core's. */
     static SortValue sortValue(Scoring.SortValue value) {
         return new SortValue(
-                value.number().map(Number::toString),
-                value.term().map(term -> ByteStrings.bytesValue(new BytesRef(term))));
+                value.number().map(Number::toString), value.term().map(term -> ByteStrings.bytesValue(term)));
     }
 
     /**

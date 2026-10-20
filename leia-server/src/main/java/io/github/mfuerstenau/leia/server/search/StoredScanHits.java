@@ -1,6 +1,5 @@
 package io.github.mfuerstenau.leia.server.search;
 
-import io.github.mfuerstenau.leia.core.StoredScan;
 import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
 import io.github.mfuerstenau.leia.protocol.search.Snippet;
 import io.github.mfuerstenau.leia.protocol.search.StoredScanHit;

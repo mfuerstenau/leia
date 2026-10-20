@@ -1,6 +1,5 @@
 package io.github.mfuerstenau.leia.server.terms;
 
-import io.github.mfuerstenau.leia.core.PostingsPage;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsParams;
@@ -8,6 +7,7 @@ import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.filter.Filters;
+import io.github.mfuerstenau.leia.server.filter.PostingsFilter;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
 import jakarta.inject.Inject;
@@ -35,9 +35,9 @@ public final class GetPostingsHandler implements MethodHandler<GetPostingsParams
 
     @Override
     public GetPostingsResult handle(GetPostingsParams params) throws RpcException {
-        Optional<PostingsPage.Filter> filter = Optional.empty();
+        Optional<PostingsFilter> filter = Optional.empty();
         if (params.filter().isPresent()) {
-            filter = Optional.of(new PostingsPage.Filter(
+            filter = Optional.of(new PostingsFilter(
                     filters.get(params.filter().get().filterId()),
                     params.filter().get().onlyMatches()));
         }

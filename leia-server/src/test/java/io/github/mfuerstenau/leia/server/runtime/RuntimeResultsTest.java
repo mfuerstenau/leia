@@ -2,12 +2,11 @@ package io.github.mfuerstenau.leia.server.runtime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import io.github.mfuerstenau.leia.core.DocFilter;
-import io.github.mfuerstenau.leia.core.IndexDocument;
-import io.github.mfuerstenau.leia.core.StoredScan;
 import io.github.mfuerstenau.leia.runtime.Documents;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Terms;
+import io.github.mfuerstenau.leia.server.filter.DocFilter;
+import io.github.mfuerstenau.leia.server.search.StoredScan;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -18,7 +17,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.function.LongConsumer;
-import org.apache.lucene.util.BytesRef;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -52,35 +50,17 @@ class RuntimeResultsTest {
     }
 
     @Test
-    void storedValuesKeepTheirOrderAndNumbersTheirType() {
+    void aStoredDocumentKeepsTheRuntimesValues() {
         Map<String, List<RuntimeIndex.StoredValue>> values = new LinkedHashMap<>();
-        values.put(
-                "z",
-                List.of(
-                        new RuntimeIndex.StoredValue.Numeric(1),
-                        new RuntimeIndex.StoredValue.Numeric(2L),
-                        new RuntimeIndex.StoredValue.Numeric(3f),
-                        new RuntimeIndex.StoredValue.Numeric(4d)));
-        values.put(
-                "a",
-                List.of(new RuntimeIndex.StoredValue.Text("text"), new RuntimeIndex.StoredValue.Binary(new byte[] {1, 2
-                })));
+        values.put("z", List.of(new RuntimeIndex.StoredValue.Numeric(1), new RuntimeIndex.StoredValue.Numeric(2L)));
+        values.put("a", List.of(new RuntimeIndex.StoredValue.Text("text")));
 
         StoredScan.Document document = RuntimeResults.storedDocument(new Documents.StoredDocument(5, true, values));
 
         assertThat(document.docId()).isEqualTo(5);
         assertThat(document.deleted()).isTrue();
+        assertThat(document.values()).isEqualTo(values);
         assertThat(document.values().keySet()).containsExactly("z", "a");
-        assertThat(document.values().get("z"))
-                .containsExactly(
-                        new IndexDocument.StoredValue.IntValue(1),
-                        new IndexDocument.StoredValue.LongValue(2L),
-                        new IndexDocument.StoredValue.FloatValue(3f),
-                        new IndexDocument.StoredValue.DoubleValue(4d));
-        assertThat(document.values().get("a"))
-                .containsExactly(
-                        new IndexDocument.StoredValue.Text("text"),
-                        new IndexDocument.StoredValue.Binary(new BytesRef(new byte[] {1, 2})));
     }
 
     @Test

@@ -1,7 +1,5 @@
 package io.github.mfuerstenau.leia.server.index;
 
-import io.github.mfuerstenau.leia.core.IndexFinder;
-import io.github.mfuerstenau.leia.core.IndexOpenException;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
@@ -71,14 +69,8 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
                 .map(DirectoryKind::valueOf)
                 .orElse(DirectoryKind.FS);
         OpenMode mode = params.mode().orElse(OpenMode.READER);
-        Path root;
-        List<Path> dirs;
-        try {
-            root = IndexFinder.root(path);
-            dirs = IndexFinder.find(root);
-        } catch (IndexOpenException e) {
-            throw new RpcException(errorCode(e.reason()), e.getMessage(), e);
-        }
+        Path root = IndexFinder.root(path);
+        List<Path> dirs = IndexFinder.find(root);
         // Routed by the version of the first index found, which decides for all (ADR 0044 §3, ADR 0045).
         Optional<IndexVersion> version = SegmentsHeader.read(dirs.getFirst());
         Optional<LuceneRuntime> runtime = switch (directories.route(version)) {
@@ -166,16 +158,5 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
                 List.of(),
                 features,
                 runtime.map(LuceneRuntime::luceneVersion).orElse(""));
-    }
-
-    static ErrorCode errorCode(IndexOpenException.Reason reason) {
-        return switch (reason) {
-            case NOT_FOUND -> ErrorCode.INDEX_NOT_FOUND;
-            case NOT_AN_INDEX -> ErrorCode.NOT_AN_INDEX;
-            case UNSUPPORTED_FORMAT -> ErrorCode.UNSUPPORTED_INDEX_FORMAT;
-            case CORRUPT -> ErrorCode.CORRUPT_INDEX;
-            case NOT_READABLE -> ErrorCode.INDEX_NOT_READABLE;
-            case MISSING_CODEC -> ErrorCode.MISSING_CODEC;
-        };
     }
 }

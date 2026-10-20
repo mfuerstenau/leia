@@ -1,13 +1,5 @@
 package io.github.mfuerstenau.leia.server.runtime;
 
-import io.github.mfuerstenau.leia.core.AutoStopWords;
-import io.github.mfuerstenau.leia.core.DocFilter;
-import io.github.mfuerstenau.leia.core.IndexDocument;
-import io.github.mfuerstenau.leia.core.PostingsPage;
-import io.github.mfuerstenau.leia.core.ScanProgress;
-import io.github.mfuerstenau.leia.core.SearchResults.FieldHighlight;
-import io.github.mfuerstenau.leia.core.StoredScan;
-import io.github.mfuerstenau.leia.core.TermExport;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.analysis.StartAutoStopWordsParams;
 import io.github.mfuerstenau.leia.protocol.check.IndexCheck;
@@ -106,23 +98,29 @@ import io.github.mfuerstenau.leia.runtime.StandardSearch;
 import io.github.mfuerstenau.leia.runtime.Terms;
 import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.analysis.AutoStopWords;
 import io.github.mfuerstenau.leia.server.analysis.StartAutoStopWordsHandler;
 import io.github.mfuerstenau.leia.server.document.GetDocumentHandler;
 import io.github.mfuerstenau.leia.server.document.StartReconstructHandler;
+import io.github.mfuerstenau.leia.server.filter.DocFilter;
+import io.github.mfuerstenau.leia.server.filter.PostingsFilter;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.index.IndexDirectories;
 import io.github.mfuerstenau.leia.server.job.Jobs;
+import io.github.mfuerstenau.leia.server.job.ScanProgress;
 import io.github.mfuerstenau.leia.server.points.PointMapper;
+import io.github.mfuerstenau.leia.server.search.FieldHighlight;
 import io.github.mfuerstenau.leia.server.search.Highlighting;
 import io.github.mfuerstenau.leia.server.search.KnnChecks;
 import io.github.mfuerstenau.leia.server.search.ParserChecks;
 import io.github.mfuerstenau.leia.server.search.StartStoredScanHandler;
+import io.github.mfuerstenau.leia.server.search.StoredScan;
+import io.github.mfuerstenau.leia.server.terms.TermExport;
 import io.github.mfuerstenau.leia.server.terms.TermParams;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
@@ -136,8 +134,6 @@ import java.util.function.Consumer;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
-import org.apache.lucene.search.DocIdSetIterator;
-import org.apache.lucene.util.BytesRef;
 
 /**
  * The methods that work on an index with a reader, which a runtime of {@code leia-runtime} reads
@@ -636,7 +632,7 @@ public final class RuntimeResults {
     }
 
     private static TermVectorTerm termVectorTerm(Documents.VectorTerm term) {
-        ByteStrings.Encoded encoded = ByteStrings.encode(new BytesRef(term.term()));
+        ByteStrings.Encoded encoded = ByteStrings.encode(term.term());
         return new TermVectorTerm(
                 encoded.value(),
                 encoded.binary(),
@@ -656,7 +652,7 @@ public final class RuntimeResults {
             return new GetTermsResult(
                     page.terms().stream()
                             .map(term -> {
-                                ByteStrings.Encoded encoded = ByteStrings.encode(new BytesRef(term.term()));
+                                ByteStrings.Encoded encoded = ByteStrings.encode(term.term());
                                 return new TermEntry(
                                         encoded.value(), encoded.binary(), term.docFreq(), term.totalTermFreq());
                             })
@@ -676,7 +672,7 @@ public final class RuntimeResults {
      * {@code docFreq} counts them.
      */
     public static GetPostingsResult postings(
-            OpenRuntime open, GetPostingsParams params, Optional<PostingsPage.Filter> filter) throws RpcException {
+            OpenRuntime open, GetPostingsParams params, Optional<PostingsFilter> filter) throws RpcException {
         Terms terms = open.index().terms().orElseThrow(open::notSupported);
         TermParams.checkLimit(params.limit(), GetPostingsParams.MAX_LIMIT);
         if (params.fromDoc() < 0) {
@@ -731,7 +727,7 @@ public final class RuntimeResults {
             Terms terms, String field, byte[] term, int fromDoc, int limit, DocFilter filter) throws IOException {
         List<Terms.Posting> shown = new ArrayList<>();
         int first = filter.next(fromDoc);
-        boolean any = first != DocIdSetIterator.NO_MORE_DOCS;
+        boolean any = first != DocFilter.NO_MORE_DOCS;
         // Read even if the filter has no match left, for the term's statistics.
         Terms.PostingsPage page = terms.postings(field, term, any ? first : fromDoc, any ? limit + 1 : 0);
         int docFreq = page.docFreq();
@@ -746,7 +742,7 @@ public final class RuntimeResults {
                 break;
             }
             int from = filter.next(page.nextDoc().getAsInt());
-            if (from == DocIdSetIterator.NO_MORE_DOCS) {
+            if (from == DocFilter.NO_MORE_DOCS) {
                 break;
             }
             page = terms.postings(field, term, from, limit + 1 - shown.size());
@@ -789,7 +785,7 @@ public final class RuntimeResults {
                 position.position(),
                 position.startOffset(),
                 position.endOffset(),
-                position.payload().map(payload -> ByteStrings.hex(new BytesRef(payload))));
+                position.payload().map(payload -> ByteStrings.hex(payload)));
     }
 
     /** {@code getPointTree}: a point field's BKD tree, segment by segment (ADR 0041, ADR 0048). */
@@ -1308,7 +1304,7 @@ public final class RuntimeResults {
                                 scanned.uniqueTerms(),
                                 scanned.topTerms().stream()
                                         .map(term -> {
-                                            ByteStrings.Encoded encoded = ByteStrings.encode(new BytesRef(term.term()));
+                                            ByteStrings.Encoded encoded = ByteStrings.encode(term.term());
                                             return new TopTerm(
                                                     encoded.value(),
                                                     encoded.binary(),
@@ -1418,12 +1414,7 @@ public final class RuntimeResults {
 
     /** A runtime's stored document as {@link StoredScan} reads it. */
     static StoredScan.Document storedDocument(Documents.StoredDocument document) {
-        Map<String, List<IndexDocument.StoredValue>> values = new LinkedHashMap<>();
-        document.values()
-                .forEach((field, fieldValues) -> values.put(
-                        field,
-                        fieldValues.stream().map(RuntimeResults::coreValue).toList()));
-        return new StoredScan.Document(document.docId(), document.deleted(), values);
+        return new StoredScan.Document(document.docId(), document.deleted(), document.values());
     }
 
     /**
@@ -1534,31 +1525,16 @@ public final class RuntimeResults {
 
     /** {@code value} as the protocol carries it, cut as {@link GetDocumentHandler#storedValue} cuts. */
     private static StoredValue storedValue(RuntimeIndex.StoredValue value, int maxLength) {
-        return GetDocumentHandler.storedValue(coreValue(value), maxLength);
-    }
-
-    /** {@code value} as core has it: a number by its type. */
-    static IndexDocument.StoredValue coreValue(RuntimeIndex.StoredValue value) {
-        return switch (value) {
-            case RuntimeIndex.StoredValue.Text(String text) -> new IndexDocument.StoredValue.Text(text);
-            case RuntimeIndex.StoredValue.Binary(byte[] bytes) ->
-                new IndexDocument.StoredValue.Binary(new BytesRef(bytes));
-            case RuntimeIndex.StoredValue.Numeric(Integer number) -> new IndexDocument.StoredValue.IntValue(number);
-            case RuntimeIndex.StoredValue.Numeric(Long number) -> new IndexDocument.StoredValue.LongValue(number);
-            case RuntimeIndex.StoredValue.Numeric(Float number) -> new IndexDocument.StoredValue.FloatValue(number);
-            case RuntimeIndex.StoredValue.Numeric(Number number) ->
-                new IndexDocument.StoredValue.DoubleValue(number.doubleValue());
-        };
+        return GetDocumentHandler.storedValue(value, maxLength);
     }
 
     /** A term of the params as the runtimes take it. */
     private static byte[] bytes(BytesValue term) throws RpcException {
-        BytesRef bytes = TermParams.term(term);
-        return Arrays.copyOfRange(bytes.bytes, bytes.offset, bytes.offset + bytes.length);
+        return TermParams.term(term);
     }
 
     private static BytesValue bytesValue(byte[] bytes) {
-        return ByteStrings.bytesValue(new BytesRef(bytes));
+        return ByteStrings.bytesValue(bytes);
     }
 
     static void checkDocId(RuntimeIndex index, int docId) throws RpcException {

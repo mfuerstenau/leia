@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
-import io.github.mfuerstenau.leia.core.IndexOpenException;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.Feature;
@@ -25,7 +24,6 @@ import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -204,14 +202,6 @@ class OpenIndexHandlerTest {
         assertThatThrownBy(() -> handler.handle(new OpenIndexParams("bad\0path")))
                 .isInstanceOfSatisfying(
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.INVALID_PARAMS));
-    }
-
-    /** Each reason has an error code of its own. */
-    @Test
-    void everyReasonHasAnErrorCodeOfItsOwn() {
-        assertThat(Arrays.stream(IndexOpenException.Reason.values()).map(OpenIndexHandler::errorCode))
-                .doesNotHaveDuplicates()
-                .hasSize(IndexOpenException.Reason.values().length);
     }
 
     private static Path writeIndex(Path dir, int docs) throws IOException {

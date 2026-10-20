@@ -3,7 +3,6 @@ package io.github.mfuerstenau.leia.server.document;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import io.github.mfuerstenau.leia.core.IndexDocument;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.DocValues;
@@ -19,11 +18,13 @@ import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.document.TermPosition;
 import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
+import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.TestIndexes;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
@@ -141,18 +142,18 @@ class DocumentHandlersTest {
     void cutsTextBetweenCharacters() {
         // A surrogate pair is 4 bytes of UTF-8 and is never split.
         String text = "ab\uD83D\uDE00c";
-        assertThat(GetDocumentHandler.storedValue(new IndexDocument.StoredValue.Text(text), 5))
+        assertThat(GetDocumentHandler.storedValue(new RuntimeIndex.StoredValue.Text(text), 5))
                 .isEqualTo(new StoredValue(StoredType.STRING, "ab", false, OptionalLong.of(7)));
-        assertThat(GetDocumentHandler.storedValue(new IndexDocument.StoredValue.Text(text), 6))
+        assertThat(GetDocumentHandler.storedValue(new RuntimeIndex.StoredValue.Text(text), 6))
                 .isEqualTo(new StoredValue(StoredType.STRING, "ab\uD83D\uDE00", false, OptionalLong.of(7)));
-        assertThat(GetDocumentHandler.storedValue(new IndexDocument.StoredValue.Text(text), 7))
+        assertThat(GetDocumentHandler.storedValue(new RuntimeIndex.StoredValue.Text(text), 7))
                 .isEqualTo(new StoredValue(StoredType.STRING, text, false));
         // Bytes that are not UTF-8 stay hex when cut, even if the cut bytes would be valid UTF-8.
         assertThat(GetDocumentHandler.storedValue(
-                        new IndexDocument.StoredValue.Binary(new BytesRef(new byte[] {0x61, 0x62, (byte) 0xff})), 2))
+                        new RuntimeIndex.StoredValue.Binary(new byte[] {0x61, 0x62, (byte) 0xff}), 2))
                 .isEqualTo(new StoredValue(StoredType.BINARY, "6162", true, OptionalLong.of(3)));
         // Numbers are never cut.
-        assertThat(GetDocumentHandler.storedValue(new IndexDocument.StoredValue.LongValue(-123456), 2))
+        assertThat(GetDocumentHandler.storedValue(new RuntimeIndex.StoredValue.Numeric(-123456L), 2))
                 .isEqualTo(new StoredValue(StoredType.LONG, "-123456", false));
     }
 
@@ -203,20 +204,20 @@ class DocumentHandlersTest {
 
     @Test
     void sendsStoredValuesAsText() {
-        assertThat(GetDocumentHandler.storedValue(new IndexDocument.StoredValue.IntValue(-7)))
+        assertThat(GetDocumentHandler.storedValue(new RuntimeIndex.StoredValue.Numeric(-7)))
                 .isEqualTo(new StoredValue(StoredType.INT, "-7", false));
-        assertThat(GetDocumentHandler.storedValue(new IndexDocument.StoredValue.LongValue(Long.MAX_VALUE)))
+        assertThat(GetDocumentHandler.storedValue(new RuntimeIndex.StoredValue.Numeric(Long.MAX_VALUE)))
                 .isEqualTo(new StoredValue(StoredType.LONG, "9223372036854775807", false));
-        assertThat(GetDocumentHandler.storedValue(new IndexDocument.StoredValue.FloatValue(0.1f)))
+        assertThat(GetDocumentHandler.storedValue(new RuntimeIndex.StoredValue.Numeric(0.1f)))
                 .isEqualTo(new StoredValue(StoredType.FLOAT, "0.1", false));
-        assertThat(GetDocumentHandler.storedValue(new IndexDocument.StoredValue.DoubleValue(1e10)))
+        assertThat(GetDocumentHandler.storedValue(new RuntimeIndex.StoredValue.Numeric(1e10)))
                 .isEqualTo(new StoredValue(StoredType.DOUBLE, "1.0E10", false));
-        assertThat(GetDocumentHandler.storedValue(new IndexDocument.StoredValue.DoubleValue(Double.NEGATIVE_INFINITY)))
+        assertThat(GetDocumentHandler.storedValue(new RuntimeIndex.StoredValue.Numeric(Double.NEGATIVE_INFINITY)))
                 .isEqualTo(new StoredValue(StoredType.DOUBLE, "-Infinity", false));
-        assertThat(GetDocumentHandler.storedValue(new IndexDocument.StoredValue.Binary(new BytesRef("grüße"))))
-                .isEqualTo(new StoredValue(StoredType.BINARY, "grüße", false));
         assertThat(GetDocumentHandler.storedValue(
-                        new IndexDocument.StoredValue.Binary(new BytesRef(new byte[] {0x61, (byte) 0xff, 0}, 1, 2))))
+                        new RuntimeIndex.StoredValue.Binary("grüße".getBytes(StandardCharsets.UTF_8))))
+                .isEqualTo(new StoredValue(StoredType.BINARY, "grüße", false));
+        assertThat(GetDocumentHandler.storedValue(new RuntimeIndex.StoredValue.Binary(new byte[] {(byte) 0xff, 0})))
                 .isEqualTo(new StoredValue(StoredType.BINARY, "ff00", true));
     }
 

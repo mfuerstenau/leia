@@ -20,14 +20,12 @@ import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.search.ParserChecks;
 import java.nio.charset.StandardCharsets;
 import java.time.ZoneId;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
-import org.apache.lucene.util.BytesRef;
 
 /**
  * The standard, More-Like-This and doc values queries of {@code startSearch}, {@code startFilter},
@@ -229,13 +227,11 @@ final class RuntimeQueries {
 
     /** @throws IllegalArgumentException if {@code value} is binary and not hex */
     private static byte[] bytes(BytesValue value) {
-        BytesRef bytes;
         try {
-            bytes = ByteStrings.decode(value.value(), value.binary());
+            return ByteStrings.decode(value.value(), value.binary());
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException("the binary value '" + value.value() + "' is not hex", e);
         }
-        return Arrays.copyOfRange(bytes.bytes, bytes.offset, bytes.offset + bytes.length);
     }
 
     /** @throws IllegalArgumentException if {@code convert} does, or there are no values */

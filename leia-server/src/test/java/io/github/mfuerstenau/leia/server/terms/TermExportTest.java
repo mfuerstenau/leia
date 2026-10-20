@@ -1,10 +1,16 @@
-package io.github.mfuerstenau.leia.core;
+package io.github.mfuerstenau.leia.server.terms;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import io.github.mfuerstenau.leia.core.TermExport.Delimiter;
-import io.github.mfuerstenau.leia.core.TermExport.OutputException;
+import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
+import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.TestIndexes;
+import io.github.mfuerstenau.leia.server.job.ScanProgress;
+import io.github.mfuerstenau.leia.server.runtime.OpenRuntime;
+import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
+import io.github.mfuerstenau.leia.server.terms.TermExport.Delimiter;
+import io.github.mfuerstenau.leia.server.terms.TermExport.OutputException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -35,7 +41,7 @@ class TermExportTest {
         Path dir = writeIndex(tmp.resolve("index"));
         Path file = tmp.resolve("terms.out");
 
-        try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
+        try (OpenRuntime index = TestIndexes.open(dir)) {
             TermExport.Result result = export(index, "tag", file, Delimiter.TAB, false, ScanProgress.NONE);
 
             assertThat(result.path()).isEqualTo(file);
@@ -51,7 +57,7 @@ class TermExportTest {
         Path comma = tmp.resolve("comma.out");
         Path space = tmp.resolve("space.out");
 
-        try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
+        try (OpenRuntime index = TestIndexes.open(dir)) {
             export(index, "tag", comma, Delimiter.COMMA, false, ScanProgress.NONE);
             export(index, "tag", space, Delimiter.SPACE, false, ScanProgress.NONE);
         }
@@ -64,7 +70,7 @@ class TermExportTest {
         Path dir = writeIndex(tmp.resolve("index"));
         Path file = tmp.resolve("raw.out");
 
-        try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
+        try (OpenRuntime index = TestIndexes.open(dir)) {
             export(index, "raw", file, Delimiter.TAB, false, ScanProgress.NONE);
         }
         assertThat(Files.readString(file, StandardCharsets.US_ASCII)).isEqualTo("00ff\t1\n");
@@ -75,7 +81,7 @@ class TermExportTest {
         Path dir = writeIndex(tmp.resolve("index"));
         Path file = tmp.resolve("rank.out");
 
-        try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
+        try (OpenRuntime index = TestIndexes.open(dir)) {
             TermExport.Result result = export(index, "rank", file, Delimiter.TAB, false, ScanProgress.NONE);
 
             assertThat(result.terms()).isZero();
@@ -88,7 +94,7 @@ class TermExportTest {
         Path dir = writeIndex(tmp.resolve("index"));
         Path file = tmp.resolve("terms.out");
 
-        try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
+        try (OpenRuntime index = TestIndexes.open(dir)) {
             assertThatThrownBy(() -> export(index, "tag", file, Delimiter.TAB, false, _ -> {
                         throw new CancellationException("cancelled");
                     }))
@@ -103,7 +109,7 @@ class TermExportTest {
         Path below = Files.createDirectories(dir.resolve("sub"));
         Path link = Files.createSymbolicLink(tmp.resolve("link"), dir);
 
-        try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
+        try (OpenRuntime index = TestIndexes.open(dir)) {
             for (Path file : new Path[] {dir.resolve("terms.out"), below.resolve("terms.out"), link.resolve("t.out")}) {
                 assertThatThrownBy(() -> export(index, "tag", file, Delimiter.TAB, true, ScanProgress.NONE))
                         .isInstanceOf(OutputException.class)
@@ -119,8 +125,8 @@ class TermExportTest {
         Path b = Files.createDirectories(tmp.resolve("indexes/b"));
         Files.writeString(b.resolve("segments_1"), "broken");
 
-        try (ReadOnlyIndex index = ReadOnlyIndex.open(tmp.resolve("indexes"))) {
-            assertThat(index.skippedDirectories()).containsExactly(b);
+        try (OpenRuntime index = TestIndexes.open(tmp.resolve("indexes"))) {
+            assertThat(index.skipped()).extracting(RuntimeIndex.Skipped::path).containsExactly(b);
             assertThatThrownBy(() -> TermExport.checkTarget(directories(index), b.resolve("terms.out"), false))
                     .isInstanceOf(OutputException.class)
                     .hasMessageContaining("Not writing into the index directory " + b);
@@ -133,7 +139,7 @@ class TermExportTest {
         Path dir = writeIndex(tmp.resolve("index"));
         Path file = Files.writeString(tmp.resolve("terms.out"), "old");
 
-        try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
+        try (OpenRuntime index = TestIndexes.open(dir)) {
             assertThatThrownBy(() -> export(index, "tag", file, Delimiter.TAB, false, ScanProgress.NONE))
                     .isInstanceOf(OutputException.class)
                     .hasMessage("File exists: " + file);
@@ -150,7 +156,7 @@ class TermExportTest {
         Path target = Files.writeString(tmp.resolve("target"), "keep");
         Path link = Files.createSymbolicLink(tmp.resolve("link.out"), target);
 
-        try (ReadOnlyIndex index = ReadOnlyIndex.open(dir)) {
+        try (OpenRuntime index = TestIndexes.open(dir)) {
             assertThatThrownBy(
                             () -> TermExport.checkTarget(directories(index), tmp.resolve("missing/terms.out"), false))
                     .isInstanceOf(OutputException.class)
@@ -165,7 +171,7 @@ class TermExportTest {
                     .isInstanceOf(IllegalArgumentException.class);
             assertThatThrownBy(
                             () -> export(index, "nope", tmp.resolve("x.out"), Delimiter.TAB, false, ScanProgress.NONE))
-                    .isInstanceOf(IllegalArgumentException.class);
+                    .isInstanceOf(RpcException.class);
         }
         assertThat(target).hasContent("keep");
         assertThat(tmp.resolve("x.out")).doesNotExist();
@@ -188,16 +194,16 @@ class TermExportTest {
     }
 
     private static TermExport.Result export(
-            ReadOnlyIndex index, String field, Path file, Delimiter delimiter, boolean overwrite, ScanProgress progress)
-            throws IOException {
+            OpenRuntime index, String field, Path file, Delimiter delimiter, boolean overwrite, ScanProgress progress)
+            throws Exception {
         return TermExport.export(
-                directories(index), TermExport.terms(index, field), file, delimiter, overwrite, progress);
+                directories(index), RuntimeResults.exportTerms(index, field), file, delimiter, overwrite, progress);
     }
 
     /** The opened and the skipped index directories, as the server passes them. */
-    private static List<Path> directories(OpenedIndex index) {
-        List<Path> directories = new ArrayList<>(index.directories());
-        directories.addAll(index.skippedDirectories());
+    private static List<Path> directories(OpenRuntime index) {
+        List<Path> directories = new ArrayList<>(index.index().directories());
+        index.skipped().stream().map(RuntimeIndex.Skipped::path).forEach(directories::add);
         return directories;
     }
 

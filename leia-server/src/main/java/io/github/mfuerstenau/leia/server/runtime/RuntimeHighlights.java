@@ -1,11 +1,5 @@
 package io.github.mfuerstenau.leia.server.runtime;
 
-import io.github.mfuerstenau.leia.core.DocumentHighlight;
-import io.github.mfuerstenau.leia.core.Highlights;
-import io.github.mfuerstenau.leia.core.IndexDocument;
-import io.github.mfuerstenau.leia.core.OffsetSource;
-import io.github.mfuerstenau.leia.core.SearchResults.FieldHighlight;
-import io.github.mfuerstenau.leia.core.TextHighlighter;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
 import io.github.mfuerstenau.leia.protocol.search.HighlightOptions;
@@ -17,10 +11,14 @@ import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.job.Jobs;
+import io.github.mfuerstenau.leia.server.search.DocumentHighlight;
+import io.github.mfuerstenau.leia.server.search.FieldHighlight;
 import io.github.mfuerstenau.leia.server.search.Highlighting;
+import io.github.mfuerstenau.leia.server.search.Highlights;
+import io.github.mfuerstenau.leia.server.search.OffsetSource;
+import io.github.mfuerstenau.leia.server.search.TextHighlighter;
 import java.io.IOException;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -73,7 +71,7 @@ public final class RuntimeHighlights {
                         // A deleted document is highlighted too, as on Lucene 10.
                         List<Documents.StoredDocument> stored =
                                 documents.storedValues(docId, docId + 1, field.map(Set::of), true);
-                        Map<String, List<IndexDocument.StoredValue>> values = stored.isEmpty()
+                        Map<String, List<RuntimeIndex.StoredValue>> values = stored.isEmpty()
                                 ? Map.of()
                                 : RuntimeResults.storedDocument(stored.getFirst())
                                         .values();
@@ -111,18 +109,8 @@ public final class RuntimeHighlights {
             LongConsumer progress)
             throws IOException, RpcException {
         int[] docIds = results.hits().stream().mapToInt(Search.Hit::docId).toArray();
-        List<Map<String, List<IndexDocument.StoredValue>>> stored = results.hits().stream()
-                .map(hit -> {
-                    Map<String, List<IndexDocument.StoredValue>> values = new LinkedHashMap<>();
-                    hit.fields()
-                            .forEach((field, fieldValues) -> values.put(
-                                    field,
-                                    fieldValues.stream()
-                                            .map(RuntimeResults::coreValue)
-                                            .toList()));
-                    return values;
-                })
-                .toList();
+        List<Map<String, List<RuntimeIndex.StoredValue>>> stored =
+                results.hits().stream().map(Search.Hit::fields).toList();
         try {
             return Highlights.passages(
                     textHighlighter(highlight, query, options.requireFieldMatch(), analyzer, progress),

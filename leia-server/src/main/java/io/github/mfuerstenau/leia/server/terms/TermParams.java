@@ -4,7 +4,6 @@ import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.RpcException;
-import org.apache.lucene.util.BytesRef;
 
 /** Checks of the params that the term and postings methods share. */
 public final class TermParams {
@@ -18,7 +17,7 @@ public final class TermParams {
         }
     }
 
-    public static BytesRef term(BytesValue term) throws RpcException {
+    public static byte[] term(BytesValue term) throws RpcException {
         try {
             return ByteStrings.decode(term.value(), term.binary());
         } catch (IllegalArgumentException e) {

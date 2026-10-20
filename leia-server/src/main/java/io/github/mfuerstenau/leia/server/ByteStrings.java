@@ -5,7 +5,6 @@ import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
-import org.apache.lucene.util.BytesRef;
 
 /**
  * Byte strings in the records (ADR 0006): as text if the bytes are valid UTF-8, otherwise as lowercase
@@ -23,12 +22,12 @@ public final class ByteStrings {
 
     private ByteStrings() {}
 
-    public static Encoded encode(BytesRef bytes) {
+    public static Encoded encode(byte[] bytes) {
         try {
             return new Encoded(
                     StandardCharsets.UTF_8
                             .newDecoder()
-                            .decode(ByteBuffer.wrap(bytes.bytes, bytes.offset, bytes.length))
+                            .decode(ByteBuffer.wrap(bytes))
                             .toString(),
                     false);
         } catch (CharacterCodingException e) {
@@ -37,7 +36,7 @@ public final class ByteStrings {
     }
 
     /** A byte string as {@link BytesValue}. */
-    public static BytesValue bytesValue(BytesRef bytes) {
+    public static BytesValue bytesValue(byte[] bytes) {
         Encoded encoded = encode(bytes);
         return new BytesValue(encoded.value(), encoded.binary());
     }
@@ -47,12 +46,17 @@ public final class ByteStrings {
      *
      * @throws IllegalArgumentException if {@code binary} and {@code value} is not valid hex
      */
-    public static BytesRef decode(String value, boolean binary) {
-        return binary ? new BytesRef(HexFormat.of().parseHex(value)) : new BytesRef(value);
+    public static byte[] decode(String value, boolean binary) {
+        return binary ? HexFormat.of().parseHex(value) : value.getBytes(StandardCharsets.UTF_8);
     }
 
     /** The bytes in lowercase hex. */
-    public static String hex(BytesRef bytes) {
-        return HexFormat.of().formatHex(bytes.bytes, bytes.offset, bytes.offset + bytes.length);
+    public static String hex(byte[] bytes) {
+        return HexFormat.of().formatHex(bytes);
+    }
+
+    /** The first {@code length} bytes in lowercase hex. */
+    public static String hex(byte[] bytes, int length) {
+        return HexFormat.of().formatHex(bytes, 0, length);
     }
 }

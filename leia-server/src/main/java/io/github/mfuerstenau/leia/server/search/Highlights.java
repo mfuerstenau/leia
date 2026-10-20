@@ -1,0 +1,278 @@
+package io.github.mfuerstenau.leia.server.search;
+
+import io.github.mfuerstenau.leia.runtime.RuntimeIndex.StoredValue;
+import io.github.mfuerstenau.leia.server.search.DocumentHighlight.FieldMatches;
+import io.github.mfuerstenau.leia.server.search.DocumentHighlight.ValueHighlight;
+import io.github.mfuerstenau.leia.server.search.FieldHighlight.Passage;
+import io.github.mfuerstenau.leia.server.search.StoredScan.Span;
+import io.github.mfuerstenau.leia.server.search.StoredScan.Utf8Offsets;
+import io.github.mfuerstenau.leia.server.search.TextHighlighter.FoundPassage;
+import io.github.mfuerstenau.leia.server.search.TextHighlighter.FoundText;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+
+/**
+ * Turns what a runtime's highlighter finds (ADR 0042, ADR 0063) into the best passages of the hits of
+ * a search, or every match in the fields of a document.
+ *
+ * <p>The highlighter joins a field's text values with one separator character, and keeps each
+ * passage inside one value. A passage's value is found by counting the separators before it, and
+ * its positions become UTF-8 byte offsets into that value, as in ADR 0027. Only text values are
+ * highlighted, so the n-th text value is mapped back to its index among all the field's stored
+ * values.
+ */
+public final class Highlights {
+
+    /** The most characters of a passage's text. */
+    static final int MAX_PASSAGE_CHARS = 300;
+
+    /** How many characters before its first match a cut passage starts. */
+    static final int PASSAGE_BEFORE = 60;
+
+    /** How many characters of a field the passages of a hit are found in. */
+    public static final int MAX_HIT_CHARS = 100_000;
+
+    /** How many characters of a field the matches of one document are found in. */
+    public static final int MAX_DOCUMENT_CHARS = 1 << 20;
+
+    /** The highlighter's separator between the values of a field. */
+    private static final char SEPARATOR = 0;
+
+    private Highlights() {}
+
+    /**
+     * The best passages of each hit, per field, in the order of each hit's {@code stored} fields.
+     *
+     * @param highlighter finds the passages of the search's query
+     * @param maxPassages the most passages per field and hit
+     * @param docIds the hits' document ids
+     * @param stored per hit, its stored values by field: the fields to highlight
+     */
+    public static List<List<FieldHighlight>> passages(
+            TextHighlighter highlighter, int maxPassages, int[] docIds, List<Map<String, List<StoredValue>>> stored)
+            throws IOException {
+        Set<String> fields = new LinkedHashSet<>();
+        for (Map<String, List<StoredValue>> values : stored) {
+            values.forEach((field, fieldValues) -> {
+                if (!textIndexes(fieldValues).isEmpty()) {
+                    fields.add(field);
+                }
+            });
+        }
+        List<List<FieldHighlight>> highlights = new ArrayList<>(docIds.length);
+        if (fields.isEmpty()) {
+            for (int i = 0; i < docIds.length; i++) {
+                highlights.add(List.of());
+            }
+            return List.copyOf(highlights);
+        }
+        int[] max = new int[fields.size()];
+        Arrays.fill(max, maxPassages);
+        Map<String, List<Optional<FoundText>>> byField = highlighter
+                .highlight(List.copyOf(fields), docIds, max, TextHighlighter.Mode.PASSAGES)
+                .found();
+        for (int i = 0; i < docIds.length; i++) {
+            List<FieldHighlight> hit = new ArrayList<>();
+            for (Map.Entry<String, List<StoredValue>> entry : stored.get(i).entrySet()) {
+                List<Optional<FoundText>> perDoc = byField.get(entry.getKey());
+                if (perDoc != null && perDoc.get(i).isPresent()) {
+                    FoundText found = perDoc.get(i).get();
+                    List<Passage> passages = passages(found, textIndexes(entry.getValue()));
+                    if (!passages.isEmpty()) {
+                        hit.add(new FieldHighlight(entry.getKey(), found.source(), passages));
+                    }
+                }
+            }
+            highlights.add(List.copyOf(hit));
+        }
+        return List.copyOf(highlights);
+    }
+
+    /**
+     * Every match in the text values of each field of {@code stored} of a document, up to {@code
+     * maxSpans} per value. Fields without a text value are left out.
+     *
+     * @param highlighter finds the matches of the query
+     * @param stored the document's stored values by field, in stored order: the fields to highlight
+     */
+    public static DocumentHighlight document(
+            TextHighlighter highlighter, int docId, Map<String, List<StoredValue>> stored, int maxSpans)
+            throws IOException {
+        List<String> fields = new ArrayList<>();
+        List<List<Integer>> textIndexes = new ArrayList<>();
+        stored.forEach((field, values) -> {
+            List<Integer> indexes = textIndexes(values);
+            if (!indexes.isEmpty()) {
+                fields.add(field);
+                textIndexes.add(indexes);
+            }
+        });
+        if (fields.isEmpty()) {
+            return new DocumentHighlight(List.of());
+        }
+        // One passage per value: the whole value.
+        int[] maxPassages = textIndexes.stream().mapToInt(List::size).toArray();
+        TextHighlighter.Highlighted highlighted =
+                highlighter.highlight(List.copyOf(fields), new int[] {docId}, maxPassages, TextHighlighter.Mode.VALUES);
+        List<FieldMatches> matches = new ArrayList<>(fields.size());
+        for (int f = 0; f < fields.size(); f++) {
+            String field = fields.get(f);
+            List<Integer> indexes = textIndexes.get(f);
+            List<StoredValue> values = stored.get(field);
+            long chars = indexes.size() - 1;
+            for (int index : indexes) {
+                chars += ((StoredValue.Text) values.get(index)).text().length();
+            }
+            OffsetSource source = highlighted.sources().getOrDefault(field, OffsetSource.NONE);
+            List<ValueHighlight> valueHighlights = List.of();
+            List<Optional<FoundText>> perDoc = highlighted.found().get(field);
+            if (perDoc != null && perDoc.getFirst().isPresent()) {
+                FoundText found = perDoc.getFirst().get();
+                source = found.source();
+                valueHighlights = valueHighlights(found, indexes, maxSpans);
+            }
+            matches.add(new FieldMatches(field, source, valueHighlights, chars > MAX_DOCUMENT_CHARS));
+        }
+        return new DocumentHighlight(List.copyOf(matches));
+    }
+
+    /** Every match in each value of a field, up to {@code maxSpans} per value, with UTF-8 offsets. */
+    private static List<ValueHighlight> valueHighlights(FoundText raw, List<Integer> textIndexes, int maxSpans) {
+        List<ValueHighlight> valueHighlights = new ArrayList<>();
+        for (FoundPassage passage : raw.passages()) {
+            Value value = Value.of(raw.content(), passage.start());
+            if (value.ordinal() >= textIndexes.size()) {
+                continue;
+            }
+            List<int[]> matches = matches(passage, value.start(), value.end());
+            if (matches.isEmpty()) {
+                continue;
+            }
+            Utf8Offsets offsets = new Utf8Offsets(raw.content().substring(value.start(), value.end()));
+            List<Span> spans = new ArrayList<>(Math.min(matches.size(), maxSpans));
+            for (int[] match : matches.subList(0, Math.min(matches.size(), maxSpans))) {
+                spans.add(new Span(offsets.at(match[0] - value.start()), offsets.at(match[1] - value.start())));
+            }
+            valueHighlights.add(
+                    new ValueHighlight(textIndexes.get(value.ordinal()), matches.size(), List.copyOf(spans)));
+        }
+        return List.copyOf(valueHighlights);
+    }
+
+    /** The passages of a field of a hit, cut around their first match, with UTF-8 offsets. */
+    private static List<Passage> passages(FoundText raw, List<Integer> textIndexes) {
+        String content = raw.content();
+        List<Passage> passages = new ArrayList<>(raw.passages().size());
+        for (FoundPassage passage : raw.passages()) {
+            Value value = Value.of(content, passage.start());
+            if (value.ordinal() >= textIndexes.size()) {
+                continue;
+            }
+            List<int[]> matches = matches(passage, value.start(), value.end());
+            if (matches.isEmpty()) {
+                continue;
+            }
+            int first = matches.getFirst()[0];
+            int last = matches.getLast()[1];
+            int start = Math.max(passage.start(), value.start());
+            int end = Math.min(passage.end(), value.end());
+            if (end - start > MAX_PASSAGE_CHARS) {
+                int from = Math.max(start, first - PASSAGE_BEFORE);
+                int to = Math.min(end, from + MAX_PASSAGE_CHARS);
+                start = Math.max(start, to - MAX_PASSAGE_CHARS);
+                end = to;
+            }
+            while (start < first && Character.isWhitespace(content.charAt(start))) {
+                start++;
+            }
+            while (end > last && Character.isWhitespace(content.charAt(end - 1))) {
+                end--;
+            }
+            start = characterStart(content, start);
+            end = characterStart(content, end);
+            Utf8Offsets offsets = new Utf8Offsets(content.substring(value.start(), value.end()));
+            int byteStart = offsets.at(start - value.start());
+            List<Span> spans = new ArrayList<>(matches.size());
+            for (int[] match : matches) {
+                if (match[0] >= start && match[1] <= end) {
+                    spans.add(new Span(offsets.at(match[0] - value.start()), offsets.at(match[1] - value.start())));
+                }
+            }
+            passages.add(new Passage(
+                    textIndexes.get(value.ordinal()),
+                    byteStart,
+                    content.substring(start, end),
+                    List.copyOf(spans),
+                    passage.score()));
+        }
+        return List.copyOf(passages);
+    }
+
+    /** {@code at}, or the position before it if it falls between the halves of a surrogate pair. */
+    private static int characterStart(String text, int at) {
+        return at > 0 && at < text.length() && Character.isLowSurrogate(text.charAt(at)) ? at - 1 : at;
+    }
+
+    /** The positions of the {@code STRING} values among {@code values}, the ones the highlighter reads. */
+    private static List<Integer> textIndexes(List<StoredValue> values) {
+        List<Integer> indexes = new ArrayList<>();
+        for (int i = 0; i < values.size(); i++) {
+            if (values.get(i) instanceof StoredValue.Text) {
+                indexes.add(i);
+            }
+        }
+        return indexes;
+    }
+
+    /**
+     * The value of the highlighter's content that {@code position} is in.
+     *
+     * @param ordinal how many values come before it
+     * @param start where it starts in the content
+     * @param end where it ends in the content
+     */
+    private record Value(int ordinal, int start, int end) {
+
+        static Value of(String content, int position) {
+            int start = content.lastIndexOf(SEPARATOR, position - 1) + 1;
+            int ordinal = 0;
+            for (int i = content.indexOf(SEPARATOR); i >= 0 && i < start; i = content.indexOf(SEPARATOR, i + 1)) {
+                ordinal++;
+            }
+            int end = content.indexOf(SEPARATOR, start);
+            return new Value(ordinal, start, end < 0 ? content.length() : end);
+        }
+    }
+
+    /** The matches of {@code passage} inside {@code from} to {@code to}, in order, overlapping ones merged. */
+    private static List<int[]> matches(FoundPassage passage, int from, int to) {
+        int[] matchStarts = passage.matchStarts();
+        int[] matchEnds = passage.matchEnds();
+        List<int[]> matches = new ArrayList<>(matchStarts.length);
+        for (int i = 0; i < matchStarts.length; i++) {
+            int start = Math.max(matchStarts[i], from);
+            int end = Math.min(matchEnds[i], to);
+            if (start < end) {
+                matches.add(new int[] {start, end});
+            }
+        }
+        matches.sort(Comparator.comparingInt(match -> match[0]));
+        List<int[]> merged = new ArrayList<>(matches.size());
+        for (int[] match : matches) {
+            int[] previous = merged.isEmpty() ? null : merged.getLast();
+            if (previous != null && match[0] < previous[1]) {
+                previous[1] = Math.max(previous[1], match[1]);
+            } else {
+                merged.add(match);
+            }
+        }
+        return merged;
+    }
+}

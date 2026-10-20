@@ -1,6 +1,5 @@
 package io.github.mfuerstenau.leia.server.filter;
 
-import io.github.mfuerstenau.leia.core.DocFilter;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.server.RpcException;
 import jakarta.inject.Inject;

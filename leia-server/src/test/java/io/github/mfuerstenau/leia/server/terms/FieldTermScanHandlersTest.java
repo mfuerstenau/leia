@@ -16,6 +16,7 @@ import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -27,7 +28,6 @@ import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.store.FSDirectory;
-import org.apache.lucene.util.BytesRef;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -103,11 +103,10 @@ class FieldTermScanHandlersTest {
 
     @Test
     void sendsBinaryTermsAsHex() {
-        // An offset into a larger array, which the hex must respect.
-        BytesRef bytes = new BytesRef(new byte[] {0x61, (byte) 0xff, 0x00, 0x41, 0x62}, 1, 3);
-
-        assertThat(ByteStrings.encode(bytes)).isEqualTo(new ByteStrings.Encoded("ff0041", true));
-        assertThat(ByteStrings.encode(new BytesRef("grüße"))).isEqualTo(new ByteStrings.Encoded("grüße", false));
+        assertThat(ByteStrings.encode(new byte[] {(byte) 0xff, 0x00, 0x41}))
+                .isEqualTo(new ByteStrings.Encoded("ff0041", true));
+        assertThat(ByteStrings.encode("grüße".getBytes(StandardCharsets.UTF_8)))
+                .isEqualTo(new ByteStrings.Encoded("grüße", false));
     }
 
     /** One segment: "red blue red" and "red green". */

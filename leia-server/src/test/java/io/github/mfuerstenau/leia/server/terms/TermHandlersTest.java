@@ -3,7 +3,6 @@ package io.github.mfuerstenau.leia.server.terms;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import io.github.mfuerstenau.leia.core.DocFilter;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.TermPosition;
@@ -18,6 +17,7 @@ import io.github.mfuerstenau.leia.protocol.terms.PostingsFilter;
 import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.TestIndexes;
+import io.github.mfuerstenau.leia.server.filter.DocFilter;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;

@@ -1,14 +1,16 @@
-package io.github.mfuerstenau.leia.core;
+package io.github.mfuerstenau.leia.server.analysis;
 
+import io.github.mfuerstenau.leia.server.job.ScanProgress;
+import io.github.mfuerstenau.leia.server.terms.TermExport;
 import java.io.IOException;
 import java.io.Serial;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeMap;
-import org.apache.lucene.util.BytesRef;
 
 /**
  * The stop words of fields, as Lucene's {@code QueryAutoStopWordAnalyzer} finds them (ADR 0039):
@@ -30,7 +32,7 @@ public record AutoStopWords(int maxDocFreq, Map<String, List<String>> words) {
     /**
      * Finds the stop words of {@code fields}, scanned in the order of their names: the terms in more
      * than {@code maxDocFreq} documents, by the document frequency each source gives (ADR 0039, ADR
-     * 0061). Lucene 10 and the runtimes both scan through this.
+     * 0061). Every runtime scans through this.
      *
      * <p>{@code progress} gets the number of terms scanned every {@value #PROGRESS_INTERVAL} terms and
      * at the end; it can stop the scan by throwing a {@link java.util.concurrent.CancellationException}.
@@ -53,7 +55,7 @@ public record AutoStopWords(int maxDocFreq, Map<String, List<String>> words) {
                         if (fieldWords.size() == maxWords) {
                             throw new TooManyWords(new TooManyWordsException(field, maxWords));
                         }
-                        fieldWords.add(new BytesRef(bytes, offset, length).utf8ToString());
+                        fieldWords.add(new String(bytes, offset, length, StandardCharsets.UTF_8));
                     }
                     if (terms[0] % PROGRESS_INTERVAL == 0) {
                         progress.scanned(terms[0]);

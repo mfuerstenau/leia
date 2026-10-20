@@ -1,8 +1,5 @@
 package io.github.mfuerstenau.leia.server.search;
 
-import io.github.mfuerstenau.leia.core.DocumentHighlight;
-import io.github.mfuerstenau.leia.core.SearchResults.FieldHighlight;
-import io.github.mfuerstenau.leia.core.StoredScan;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.search.FieldMatches;
 import io.github.mfuerstenau.leia.protocol.search.HighlightOptions;
@@ -83,7 +80,7 @@ public final class Highlighting {
                 .toList();
     }
 
-    private static OffsetSource toSource(io.github.mfuerstenau.leia.core.OffsetSource source) {
+    private static OffsetSource toSource(io.github.mfuerstenau.leia.server.search.OffsetSource source) {
         return OffsetSource.valueOf(source.name());
     }
 }
