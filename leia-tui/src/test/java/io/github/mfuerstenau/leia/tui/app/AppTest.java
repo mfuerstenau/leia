@@ -49,7 +49,9 @@ import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsResult;
+import io.github.mfuerstenau.leia.protocol.jars.GetRuntimesResult;
 import io.github.mfuerstenau.leia.protocol.jars.JarComponents;
+import io.github.mfuerstenau.leia.protocol.jars.RuntimeJar;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeResult;
 import io.github.mfuerstenau.leia.protocol.points.PointSegment;
 import io.github.mfuerstenau.leia.protocol.points.PointValue;
@@ -91,6 +93,7 @@ import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.documents.DocumentExport.DocumentData;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
 import io.github.mfuerstenau.leia.tui.jars.DefaultJars;
+import io.github.mfuerstenau.leia.tui.jars.RuntimeJars;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import java.nio.file.Path;
 import java.util.Arrays;
@@ -619,6 +622,35 @@ class AppTest {
         assertThat(app.directory()).isEqualTo(DirectoryImpl.MMAP);
         app.handleKey(key('o'));
         assertThat(render(app)).contains("directory: MMap");
+    }
+
+    @Test
+    void theAboutScreenNamesTheLoadedRuntimesAndTheMissingJars() {
+        App app = app().withRuntimeJars(RuntimeJars.find(Optional.of(Path.of("/opt/leia/runtimes"))));
+        app.runtimesLoaded(new GetRuntimesResult(List.of(
+                new RuntimeJar("leia-lucene10.jar", List.of(9, 10), Optional.of("10.5.2")),
+                new RuntimeJar("leia-lucene9.jar", List.of(8), Optional.empty()),
+                new RuntimeJar("leia-lucene3.jar", List.of(2, 3), Optional.of("3.6.2")))));
+
+        assertThat(TestScreens.render(app::render, 200, 30))
+                .contains(
+                        "Runtimes: Lucene 10.5.2 (9–10), 3.6.2 (2–3)",
+                        "Missing leia-lucene9.jar (Lucene 8): put them into /opt/leia/runtimes")
+                .doesNotContain("Without runtimes");
+    }
+
+    @Test
+    void theAboutScreenSaysWhatWorksWithoutRuntimes() {
+        App app = app();
+        app.runtimesLoaded(new GetRuntimesResult(List.of(
+                new RuntimeJar("leia-lucene10.jar", List.of(9, 10), Optional.empty()),
+                new RuntimeJar("leia-lucene9.jar", List.of(8), Optional.empty()))));
+
+        assertThat(TestScreens.render(app::render, 200, 30))
+                .contains(
+                        "Runtimes: none",
+                        "Missing leia-lucene10.jar (Lucene 9–10), leia-lucene9.jar (Lucene 8): (not run from leia.jar)",
+                        "Without runtimes, indexes open only without a reader, and the analysis tab is off.");
     }
 
     @Test

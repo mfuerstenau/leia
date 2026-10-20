@@ -1,5 +1,6 @@
-// Lucene 10 behind the runtime interface (ADR 0065), through leia-core: the runtime that is to read
-// indexes of Lucene 9 and 10 once leia.jar holds no Lucene. Not yet routed to, nor packaged.
+// Lucene 10 behind the runtime interface (ADR 0065), through leia-core: the runtime that reads
+// indexes of Lucene 9 and 10 and those of an unknown version (ADR 0071). Its shadow jar goes into
+// runtimes/ beside leia.jar, which holds no Lucene (ADR 0072).
 //
 // Unlike the other runtimes, Lucene is not relocated: the jars of --jar link against
 // org.apache.lucene (ADR 0016, ADR 0018). So this module doesn't take

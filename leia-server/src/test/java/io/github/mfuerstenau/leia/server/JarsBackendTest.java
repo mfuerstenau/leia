@@ -33,7 +33,9 @@ import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsResult;
 import io.github.mfuerstenau.leia.protocol.jars.GetJarsParams;
+import io.github.mfuerstenau.leia.protocol.jars.GetRuntimesParams;
 import io.github.mfuerstenau.leia.protocol.jars.JarComponents;
+import io.github.mfuerstenau.leia.protocol.jars.RuntimeJar;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.server.runtime.FutureRuntime;
@@ -54,7 +56,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Jars loaded at the start and added while leia runs, through {@link LeiaBackend} (ADR 0016, ADR
- * 0018, ADR 0024, ADR 0038, ADR 0044, ADR 0068). Loading a jar changes Lucene's global lists for the whole JVM, and a loaded jar
+ * 0018, ADR 0024, ADR 0038, ADR 0044, ADR 0068, ADR 0072). Loading a jar changes Lucene's global lists for the whole JVM, and a loaded jar
  * that is gone stops every later load, so this is one flow, in jarsTest's JVM of its own.
  */
 @Tag("jars")
@@ -69,8 +71,39 @@ class JarsBackendTest {
 
     @Test
     void loadsTheJarsThatTheIndexesNeedAndStopsWhenALoadedOneIsGone() throws Exception {
+        // Not on jarsTest's classpath, nor Lucene 10 itself: loaded as leia loads runtimes/ (ADR 0044,
+        // ADR 0072).
+        Path lucene10Jar = testFile("leia.test.runtime.lucene10");
+
+        // Without runtimes, the indexes of Lucene 9 and 10 open only without a reader, and there is no
+        // analysis tab (ADR 0071, ADR 0072).
+        try (RealBackend bare = RealBackend.start()) {
+            for (String name : List.of("lucene9", "demo")) {
+                String index = testIndex(name).toString();
+                RpcException missing =
+                        bare.fails(Methods.OPEN_INDEX, new OpenIndexParams(index), ErrorCode.MISSING_RUNTIME);
+                assertThat(missing.getMessage()).as(name).contains("leia-lucene10.jar", index);
+            }
+            assertThat(bare.call(
+                                    Methods.OPEN_INDEX,
+                                    new OpenIndexParams(
+                                            testIndex("demo").toString(),
+                                            Optional.empty(),
+                                            Optional.of(OpenMode.DIRECTORY_ONLY)))
+                            .mode())
+                    .isEqualTo(OpenMode.DIRECTORY_ONLY);
+            assertThat(bare.call(Methods.GET_RUNTIMES, new GetRuntimesParams()).runtimes())
+                    .containsExactly(
+                            new RuntimeJar("leia-lucene10.jar", List.of(9, 10), Optional.empty()),
+                            new RuntimeJar("leia-lucene9.jar", List.of(8), Optional.empty()),
+                            new RuntimeJar("leia-lucene7.jar", List.of(6, 7), Optional.empty()),
+                            new RuntimeJar("leia-lucene5.jar", List.of(4, 5), Optional.empty()),
+                            new RuntimeJar("leia-lucene3.jar", List.of(2, 3), Optional.empty()));
+            bare.fails(Methods.GET_ANALYSIS_COMPONENTS, new GetAnalysisComponentsParams(), ErrorCode.NOT_SUPPORTED);
+        }
+
         // A jar without its dependencies loads nothing, and nothing starts.
-        assertThatThrownBy(() -> RealBackend.start(List.of(phoneticJarAlone())))
+        assertThatThrownBy(() -> RealBackend.start(List.of(lucene10Jar, phoneticJarAlone())))
                 .isInstanceOfSatisfying(RpcException.class, e -> {
                     assertThat(e.code()).isEqualTo(ErrorCode.INVALID_JAR);
                     assertThat(e.getMessage())
@@ -79,14 +112,33 @@ class JarsBackendTest {
                 });
 
         Path codecJar = Files.copy(testFile("leia.test.codec.jar"), tmp.resolve("leia-test-codec.jar"));
-        // Not on jarsTest's classpath: loaded as leia loads runtimes/ (ADR 0044).
         Path lucene3Jar = testFile("leia.test.runtime.lucene3");
         Path lucene5Jar = testFile("leia.test.runtime.lucene5");
         Path lucene7Jar = testFile("leia.test.runtime.lucene7");
-        try (RealBackend backend = RealBackend.start(List.of(codecJar, lucene3Jar, lucene5Jar, lucene7Jar))) {
+        // leia-lucene10.jar first, as leia loads runtimes/ before the other jars, which link against
+        // its Lucene (ADR 0065, ADR 0072).
+        try (RealBackend backend =
+                RealBackend.start(List.of(lucene10Jar, codecJar, lucene3Jar, lucene5Jar, lucene7Jar))) {
             assertThat(backend.call(Methods.GET_JARS, new GetJarsParams()).jars())
                     .containsExactly(
-                            codecJar.toString(), lucene3Jar.toString(), lucene5Jar.toString(), lucene7Jar.toString());
+                            lucene10Jar.toString(),
+                            codecJar.toString(),
+                            lucene3Jar.toString(),
+                            lucene5Jar.toString(),
+                            lucene7Jar.toString());
+            for (String name : List.of("lucene9", "demo")) {
+                assertThat(backend.call(
+                                        Methods.OPEN_INDEX,
+                                        new OpenIndexParams(testIndex(name).toString()))
+                                .luceneRuntime())
+                        .as(name)
+                        .startsWith("10.");
+            }
+            assertThat(backend.call(Methods.GET_RUNTIMES, new GetRuntimesParams())
+                            .runtimes())
+                    .filteredOn(runtime -> runtime.luceneVersion().isEmpty())
+                    .extracting(RuntimeJar::jar)
+                    .containsExactly("leia-lucene9.jar");
 
             // An index created by 8.x needs leia-lucene9.jar: without it, it opens only without a
             // reader, whose commits say that it is missing (ADR 0071); once the jar is added, with its
@@ -104,6 +156,9 @@ class JarsBackendTest {
             backend.fails(Methods.GET_COMMITS, new GetCommitsParams(OptionalInt.empty()), ErrorCode.MISSING_RUNTIME);
             Path lucene9Jar = testFile("leia.test.runtime.lucene9");
             backend.call(Methods.ADD_JARS, new AddJarsParams(List.of(lucene9Jar.toString())));
+            assertThat(backend.call(Methods.GET_RUNTIMES, new GetRuntimesParams())
+                            .runtimes())
+                    .allSatisfy(runtime -> assertThat(runtime.luceneVersion()).isPresent());
             for (String name : List.of("lucene8", "lucene8to9")) {
                 assertThat(backend.call(
                                         Methods.OPEN_INDEX,

@@ -8,7 +8,7 @@ dependencies {
     // classpath: every index is read through a runtime (ADR 0071, AGENTS.md, hard rule 6), which
     // noLuceneCheck below makes sure of.
     api(project(":leia-protocol"))
-    // The interface to the runtimes for indexes that Lucene 10 can't read (ADR 0044).
+    // The interface to the runtimes, which read every index (ADR 0044, ADR 0071).
     implementation(project(":leia-runtime"))
     // Lucene 3.6, 5.5, 7.7 and 9.12, relocated, for indexes created by Lucene 2.x to 8.x: found through
     // ServiceLoader, and the shadow jars only, so an unrelocated old Lucene never meets Lucene 10 on
@@ -19,11 +19,9 @@ dependencies {
     testRuntimeOnly(project(mapOf("path" to ":leia-lucene7", "configuration" to "shadowRuntimeElements")))
     testRuntimeOnly(project(mapOf("path" to ":leia-lucene9", "configuration" to "shadowRuntimeElements")))
     // Lucene 10 behind the runtime interface, which reads the indexes of Lucene 9 and 10 and those of
-    // an unknown version (ADR 0071): at run time only, so the server reaches it only through the
-    // interface, and the plain jar, which brings leia-core and Lucene 10 with it. The tests open
-    // indexes through Lucene10Runtime directly.
-    runtimeOnly(project(":leia-lucene10"))
-    // leia-core and Lucene 10 come with it, for the tests that write indexes.
+    // an unknown version (ADR 0071): for the tests only, like the other runtimes, since leia loads
+    // leia-lucene10.jar from runtimes/ (ADR 0072). The plain jar, with leia-core and Lucene 10, for
+    // the tests that open indexes through Lucene10Runtime directly and those that write indexes.
     testImplementation(project(":leia-lucene10"))
     testImplementation(project(":leia-core"))
     implementation(libs.dagger)
@@ -75,6 +73,9 @@ val testIndexFiles = mapOf(
     "lucene8to9" to lucene9TestFiles("lucene8to9TestIndex", "lucene8to9TestIndexElements"),
 )
 val jarsTestIndexFiles = mapOf(
+    // Opened through the loaded leia-lucene10.jar, and before it is loaded, not at all (ADR 0072).
+    "lucene9" to testIndexFiles.getValue("lucene9"),
+    "demo" to testIndexFiles.getValue("demo"),
     "custom-codec" to testIndexFiles.getValue("custom-codec"),
     "custom-formats" to coreTestFiles("customFormatsIndex", "customFormatsIndexElements"),
     "lucene24" to testIndexFiles.getValue("lucene24"),
@@ -93,6 +94,13 @@ val lucene3RuntimeJar = lucene3TestFiles("lucene3RuntimeJar", "shadowRuntimeElem
 val lucene5RuntimeJar = lucene5TestFiles("lucene5RuntimeJar", "shadowRuntimeElements").apply { isTransitive = false }
 val lucene7RuntimeJar = lucene7TestFiles("lucene7RuntimeJar", "shadowRuntimeElements").apply { isTransitive = false }
 val lucene9RuntimeJar = lucene9TestFiles("lucene9RuntimeJar", "shadowRuntimeElements").apply { isTransitive = false }
+val lucene10RuntimeJar =
+    runtimeTestFiles("leia-lucene10", "lucene10RuntimeJar", "shadowRuntimeElements").apply { isTransitive = false }
+// The plain leia-lucene10 jar with leia-core and Lucene 10, which jarsTest leaves out of its
+// classpath, so that Lucene 10 comes only from the loaded leia-lucene10.jar, as in leia (ADR 0072).
+val lucene10World = configurations.create("lucene10World") { isCanBeConsumed = false }.also {
+    dependencies.add(it.name, dependencies.project(mapOf("path" to ":leia-lucene10")))
+}
 
 /** Passes each file as a system property, relative to the test's working directory (this project). */
 fun Test.testFiles(properties: Map<String, FileCollection>) {
@@ -118,7 +126,9 @@ val jarsTest = tasks.register<Test>("jarsTest") {
     group = "verification"
     testClassesDirs = sourceSets.test.get().output.classesDirs
     classpath = sourceSets.test.get().runtimeClasspath - lucene3RuntimeJar - lucene5RuntimeJar - lucene7RuntimeJar -
-        lucene9RuntimeJar
+        lucene9RuntimeJar - lucene10World
+    // The other test classes name Lucene types, which this classpath doesn't have.
+    include("**/JarsBackendTest.class")
     useJUnitPlatform { includeTags("jars") }
     testFiles(
         jarsTestIndexFiles.mapKeys { "leia.test.index.${it.key}" } +
@@ -129,21 +139,28 @@ val jarsTest = tasks.register<Test>("jarsTest") {
                 "leia.test.runtime.lucene5" to lucene5RuntimeJar,
                 "leia.test.runtime.lucene7" to lucene7RuntimeJar,
                 "leia.test.runtime.lucene9" to lucene9RuntimeJar,
+                "leia.test.runtime.lucene10" to lucene10RuntimeJar,
             ),
     )
 }
 
 // Hard rule 6 of AGENTS.md: the server reaches Lucene only through the runtime interface (ADR 0071),
-// so neither leia-core nor a Lucene artifact may be on its compile classpath.
+// so neither leia-core nor a Lucene artifact may be on its compile classpath; nor on its runtime
+// classpath, since leia.jar takes Lucene 10 from runtimes/ (ADR 0072).
 val noLuceneCheck = tasks.register("noLuceneCheck") {
-    description = "Checks that leia-core and Lucene are not on the compile classpath."
+    description = "Checks that leia-core and Lucene are on neither the compile nor the runtime classpath."
     group = "verification"
-    val compileClasspath = configurations.compileClasspath
-    val resolved = compileClasspath.flatMap { it.incoming.resolutionResult.rootComponent }
-    inputs.files(compileClasspath)
+    val classpaths = listOf(configurations.compileClasspath, configurations.runtimeClasspath)
+    val resolved = classpaths.map { classpath ->
+        classpath.name to classpath.flatMap { it.incoming.resolutionResult.rootComponent }
+    }
+    classpaths.forEach { inputs.files(it) }
     doLast {
-        val found = mutableListOf<String>()
-        fun walk(component: org.gradle.api.artifacts.result.ResolvedComponentResult, seen: MutableSet<Any>) {
+        fun walk(
+            component: org.gradle.api.artifacts.result.ResolvedComponentResult,
+            seen: MutableSet<Any>,
+            found: MutableList<String>,
+        ) {
             if (!seen.add(component.id)) return
             val id = component.id
             val name = when (id) {
@@ -151,13 +168,18 @@ val noLuceneCheck = tasks.register("noLuceneCheck") {
                 is org.gradle.api.artifacts.component.ModuleComponentIdentifier -> "${id.group}:${id.module}"
                 else -> id.displayName
             }
-            if (name == ":leia-core" || name.startsWith("org.apache.lucene:")) found += name
+            if (name == ":leia-core" || name == ":leia-lucene10" || name.startsWith("org.apache.lucene:")) {
+                found += name
+            }
             component.dependencies
                 .filterIsInstance<org.gradle.api.artifacts.result.ResolvedDependencyResult>()
-                .forEach { walk(it.selected, seen) }
+                .forEach { walk(it.selected, seen, found) }
         }
-        walk(resolved.get(), mutableSetOf())
-        check(found.isEmpty()) { "leia-server's compile classpath has $found (AGENTS.md, hard rule 6)" }
+        for ((classpath, root) in resolved) {
+            val found = mutableListOf<String>()
+            walk(root.get(), mutableSetOf(), found)
+            check(found.isEmpty()) { "leia-server's $classpath has $found (AGENTS.md, hard rule 6)" }
+        }
     }
 }
 
@@ -199,7 +221,7 @@ val analysisModuleJars = analysisModules.associateWith { module ->
     configurations.create("${module}AnalysisModule") {
         isCanBeConsumed = false
         dependencies.add(project.dependencies.create("org.apache.lucene:lucene-analysis-$module:${libs.versions.lucene.get()}"))
-        // In leia.jar already.
+        // In runtimes/leia-lucene10.jar already (ADR 0072).
         exclude(group = "org.apache.lucene", module = "lucene-core")
         exclude(group = "org.apache.lucene", module = "lucene-analysis-common")
     }

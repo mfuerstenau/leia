@@ -151,23 +151,53 @@ public final class Runtimes {
         return Optional.empty();
     }
 
+    /**
+     * A runtime jar that leia knows (ADR 0044, ADR 0072).
+     *
+     * @param jar its file name in {@code runtimes/}
+     * @param indexMajors the majors of the indexes it reads, oldest first
+     */
+    public record KnownJar(String jar, List<Integer> indexMajors) {}
+
+    /** Every runtime jar leia knows, newest first. A new runtime is one more entry here. */
+    public static final List<KnownJar> KNOWN_JARS = List.of(
+            new KnownJar("leia-lucene10.jar", List.of(9, 10)),
+            new KnownJar("leia-lucene9.jar", List.of(8)),
+            new KnownJar("leia-lucene7.jar", List.of(6, 7)),
+            new KnownJar("leia-lucene5.jar", List.of(4, 5)),
+            new KnownJar("leia-lucene3.jar", List.of(2, 3)));
+
     /** The runtime jar that reads the newest indexes, and those whose version can't be detected (ADR 0071). */
-    public static final String LATEST_JAR = "leia-lucene10.jar";
+    public static final String LATEST_JAR = KNOWN_JARS.getFirst().jar();
 
     /**
      * The runtime jar that reads indexes of {@code major} (ADR 0044, ADR 0071), such as {@code
      * leia-lucene3.jar} for 2 and 3, or empty for a major that none reads.
      */
     public static Optional<String> jarFor(int major) {
-        return switch (major) {
-            case 2, 3 -> Optional.of("leia-lucene3.jar");
-            case 4, 5 -> Optional.of("leia-lucene5.jar");
-            case 6, 7 -> Optional.of("leia-lucene7.jar");
-            case 8 -> Optional.of("leia-lucene9.jar");
-            case 9, 10 -> Optional.of(LATEST_JAR);
-            default -> Optional.empty();
-        };
+        return KNOWN_JARS.stream()
+                .filter(known -> known.indexMajors().contains(major))
+                .map(KnownJar::jar)
+                .findFirst();
     }
+
+    /**
+     * Every runtime jar leia knows, newest first, with the Lucene version of the loaded runtime that
+     * reads its indexes, or empty if none is loaded (ADR 0072).
+     */
+    public List<JarState> known() {
+        return KNOWN_JARS.stream()
+                .map(known -> new JarState(
+                        known, forMajor(known.indexMajors().getFirst()).map(LuceneRuntime::luceneVersion)))
+                .toList();
+    }
+
+    /**
+     * A runtime jar that leia knows, and whether it is loaded.
+     *
+     * @param luceneVersion the Lucene version of the loaded runtime that reads its indexes, or empty
+     */
+    public record JarState(KnownJar known, Optional<String> luceneVersion) {}
 
     /** The refusals not reported before, for {@code addJars}. */
     public List<String> newlyRefused() {

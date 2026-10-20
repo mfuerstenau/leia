@@ -1,3 +1,5 @@
+import io.github.mfuerstenau.leia.buildlogic.ExcludedPackagesCheck
+
 plugins {
     id("leia.java-conventions")
     application
@@ -16,7 +18,8 @@ tasks.named<JavaCompile>(launcher.compileJavaTaskName) {
 }
 
 dependencies {
-    // The backend, called in-process (ADR 0034); core and Lucene are only on the runtime classpath.
+    // The backend, called in-process (ADR 0034). Neither core nor Lucene is on the classpath: Lucene
+    // 10 comes from runtimes/leia-lucene10.jar like every other runtime (ADR 0072).
     implementation(project(":leia-server"))
     implementation(project(":leia-protocol"))
     // The viewer checks JSON with it, and the document export writes it (ADR 0034 §10).
@@ -35,6 +38,9 @@ dependencies {
     testRuntimeOnly(project(path = ":leia-lucene5", configuration = "shadowRuntimeElements"))
     testRuntimeOnly(project(path = ":leia-lucene7", configuration = "shadowRuntimeElements"))
     testRuntimeOnly(project(path = ":leia-lucene9", configuration = "shadowRuntimeElements"))
+    // Lucene 10 for the other indexes, the plain jar with leia-core and Lucene, as leia-server's tests
+    // have it.
+    testRuntimeOnly(project(":leia-lucene10"))
     // The Pilot tests write the indexes they open, as leia-server's tests do.
     testImplementation(libs.lucene.core)
     testImplementation(platform(libs.tamboui.bom))
@@ -127,8 +133,8 @@ tasks.jar {
 tasks.shadowJar {
     archiveFileName = "leia.jar"
     from(launcher.output)
-    // The backends are found through ServiceLoader, and each backend jar ships the same services
-    // file. Shadow only merges duplicates it gets to see, which needs INCLUDE (as in leia-server).
+    // TamboUI's backends are found through ServiceLoader, and each backend jar ships the same
+    // services file. Shadow only merges duplicates it gets to see, which needs INCLUDE.
     duplicatesStrategy = DuplicatesStrategy.INCLUDE
     mergeServiceFiles()
     filesMatching(listOf("META-INF/LICENSE*", "META-INF/NOTICE*", "module-info.class")) {
@@ -143,8 +149,9 @@ tasks.shadowJar {
     }
 }
 
-// The runtimes for indexes that Lucene 10 can't read, each a jar of its own in runtimes/ beside
-// leia.jar, which leia loads at startup (ADR 0044). A new runtime is one more line here.
+// The runtimes, which read every index, each a jar of its own in runtimes/ beside leia.jar, which
+// leia loads at startup (ADR 0044, ADR 0072). A new runtime is one more line here, and one more
+// entry in Runtimes.KNOWN_JARS of leia-server.
 val runtimeJars = configurations.create("runtimeJars") {
     isCanBeConsumed = false
     isTransitive = false
@@ -155,6 +162,31 @@ dependencies {
     runtimeJars(project(path = ":leia-lucene5", configuration = "shadowRuntimeElements"))
     runtimeJars(project(path = ":leia-lucene7", configuration = "shadowRuntimeElements"))
     runtimeJars(project(path = ":leia-lucene9", configuration = "shadowRuntimeElements"))
+    runtimeJars(project(path = ":leia-lucene10", configuration = "shadowRuntimeElements"))
+}
+
+// Under Gradle there is no runtimes/ folder, so the runtime jars go on the classpath instead. They are
+// shadow jars, the old Lucenes relocated, and nothing else brings Lucene 10, so nothing clashes.
+tasks.named<JavaExec>("run") {
+    classpath += runtimeJars
+}
+
+// leia.jar holds neither Lucene nor leia-core nor the Lucene 10 runtime: they come from
+// runtimes/leia-lucene10.jar (ADR 0072).
+val noLuceneInJarCheck = tasks.register<ExcludedPackagesCheck>("noLuceneInJarCheck") {
+    description = "Checks that leia.jar holds neither Lucene, leia-core nor the Lucene 10 runtime."
+    group = "verification"
+    jar = tasks.shadowJar.flatMap { it.archiveFile }
+    excludedPackages.addAll(
+        "org/apache/lucene/",
+        "io/github/mfuerstenau/leia/core/",
+        "io/github/mfuerstenau/leia/lucene10/",
+    )
+    report = layout.buildDirectory.file("reports/no-lucene-in-jar-check.txt")
+}
+
+tasks.check {
+    dependsOn(noLuceneInJarCheck)
 }
 
 // The folder leia runs from: leia.jar, the scripts that start it (ADR 0034 §8) and runtimes/.

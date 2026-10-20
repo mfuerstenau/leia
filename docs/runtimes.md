@@ -1,6 +1,6 @@
 # Runtimes: features and differences
 
-leia reads every index through a runtime (ADR 0071): indexes of Lucene 9 and 10, and those whose version it can't detect, with Lucene 10.5.2 of `leia-lucene10`, which `leia.jar` holds; older ones with a relocated Lucene, a runtime jar in `runtimes/` beside `leia.jar` (ADR 0044):
+leia reads every index through a runtime (ADR 0071), a jar in `runtimes/` beside `leia.jar`, which holds no Lucene itself (ADR 0044, ADR 0072): indexes of Lucene 9 and 10, and those whose version it can't detect, with Lucene 10.5.2, unrelocated; older ones with a relocated Lucene. Without its jar, an index opens only without a reader, and the about screen lists the missing jars:
 
 | Runtime | Jar | Reads indexes of |
 |---|---|---|
@@ -8,7 +8,7 @@ leia reads every index through a runtime (ADR 0071): indexes of Lucene 9 and 10,
 | 5.5.5 | `leia-lucene5.jar` | 4.x, 5.x |
 | 7.7.3 | `leia-lucene7.jar` | 6.x, 7.x |
 | 9.12.3 | `leia-lucene9.jar` | 8.x, also once 9.x wrote to them |
-| 10.5.2 | `leia.jar` (leia-lucene10) | 9.x, 10.x, and an unknown version |
+| 10.5.2 | `leia-lucene10.jar` | 9.x, 10.x, and an unknown version |
 
 The first index of a path decides which Lucene opens it, by the major in its newest `segments_N` (`SegmentsHeader`, ADR 0044 §3, ADR 0045 §3). `openIndex` reports that Lucene as `luceneRuntime`, and what works on the index as `features`. A runtime has the features of the groups it implements (`RuntimeResults.features`), and some only if a field of the index has the data; 10.5.2 has every group.
 

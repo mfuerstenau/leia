@@ -47,6 +47,8 @@ import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsResult;
+import io.github.mfuerstenau.leia.protocol.jars.GetRuntimesResult;
+import io.github.mfuerstenau.leia.protocol.jars.RuntimeJar;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellResult;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeResult;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
@@ -223,6 +225,9 @@ public final class App {
 
     private RuntimeJars runtimeJars = RuntimeJars.none();
 
+    /** The runtime jars leia knows and which of them are loaded (ADR 0072); null until they are known. */
+    private GetRuntimesResult runtimes;
+
     /** The jars popup, while it is open; or null. */
     private JarsPopup jars;
 
@@ -293,6 +298,11 @@ public final class App {
     public App withRuntimeJars(RuntimeJars runtimeJars) {
         this.runtimeJars = runtimeJars;
         return this;
+    }
+
+    /** The about screen says which runtimes are loaded and which jars are missing (ADR 0072). */
+    public void runtimesLoaded(GetRuntimesResult runtimes) {
+        this.runtimes = runtimes;
     }
 
     /** The {@code Directory} the next open uses. */
@@ -2196,6 +2206,7 @@ public final class App {
         lines.add(Line.from("Java " + version.java().version() + " ("
                 + version.java().vendor() + ") in " + version.java().home()));
         lines.add(Line.empty());
+        lines.addAll(runtimesLines());
         lines.add(Line.from("No index open. Press o to open one, 6 to try an analyzer, or X to add jars."));
         Block block = bordered(" leia ");
         Rect inner = block.inner(body);
@@ -2206,6 +2217,59 @@ public final class App {
         } else {
             frame.renderWidget(wrapped(lines, null, inner), inner);
         }
+    }
+
+    /**
+     * The loaded runtimes and the missing runtime jars, with where to put them (ADR 0072), and an
+     * empty line after them; none until they are known.
+     */
+    private List<Line> runtimesLines() {
+        if (runtimes == null) {
+            return List.of();
+        }
+        List<RuntimeJar> loaded = runtimes.runtimes().stream()
+                .filter(runtime -> runtime.luceneVersion().isPresent())
+                .toList();
+        List<RuntimeJar> missing = runtimes.runtimes().stream()
+                .filter(runtime -> runtime.luceneVersion().isEmpty())
+                .toList();
+        List<Line> lines = new ArrayList<>();
+        lines.add(Line.from("Runtimes: "
+                + (loaded.isEmpty()
+                        ? "none"
+                        : "Lucene "
+                                + String.join(
+                                        ", ",
+                                        loaded.stream()
+                                                .map(runtime -> runtime.luceneVersion()
+                                                                .orElseThrow() + " (" + majors(runtime) + ")")
+                                                .toList()))));
+        if (!missing.isEmpty()) {
+            String where = runtimeJars.dir().map(dir -> "put them into " + dir).orElse("(not run from leia.jar)");
+            Style warning = Style.EMPTY.yellow();
+            lines.add(Line.styled(
+                    "Missing "
+                            + String.join(
+                                    ", ",
+                                    missing.stream()
+                                            .map(runtime -> runtime.jar() + " (Lucene " + majors(runtime) + ")")
+                                            .toList())
+                            + ": " + where,
+                    warning));
+            if (loaded.isEmpty()) {
+                lines.add(Line.styled(
+                        "Without runtimes, indexes open only without a reader, and the analysis tab is off.", warning));
+            }
+        }
+        lines.add(Line.empty());
+        return lines;
+    }
+
+    /** The majors of the indexes a runtime jar reads, such as {@code 9–10} or {@code 8}. */
+    private static String majors(RuntimeJar runtime) {
+        int first = runtime.indexMajors().getFirst();
+        int last = runtime.indexMajors().getLast();
+        return first == last ? Integer.toString(first) : first + "–" + last;
     }
 
     /**

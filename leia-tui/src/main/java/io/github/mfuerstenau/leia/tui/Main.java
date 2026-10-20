@@ -4,6 +4,7 @@ import dev.tamboui.tui.TuiConfig;
 import dev.tamboui.tui.TuiRunner;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
+import io.github.mfuerstenau.leia.protocol.jars.GetRuntimesParams;
 import io.github.mfuerstenau.leia.protocol.version.JavaRuntime;
 import io.github.mfuerstenau.leia.protocol.version.VersionParams;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
@@ -159,6 +160,8 @@ public final class Main {
                 .withCwd(Path.of("").toAbsolutePath())
                 .withDefaultJars(defaultJars)
                 .withRuntimeJars(runtimeJars);
+        app.runtimesLoaded(
+                backend.call(Methods.GET_RUNTIMES, new GetRuntimesParams()).get());
         Session session = new Session(app, backend);
         OpenMode mode = cli.noReader() ? OpenMode.DIRECTORY_ONLY : OpenMode.READER;
         // The first frame shows the path being opened.

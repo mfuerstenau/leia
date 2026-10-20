@@ -39,6 +39,8 @@ import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsResult;
 import io.github.mfuerstenau.leia.protocol.jars.GetJarsParams;
 import io.github.mfuerstenau.leia.protocol.jars.GetJarsResult;
+import io.github.mfuerstenau.leia.protocol.jars.GetRuntimesParams;
+import io.github.mfuerstenau.leia.protocol.jars.GetRuntimesResult;
 import io.github.mfuerstenau.leia.protocol.job.CancelJobResult;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
@@ -419,6 +421,13 @@ public final class Methods {
     public static final RpcMethod<GetJarsParams, GetJarsResult> GET_JARS =
             new RpcMethod<>("getJars", GetJarsParams.class, GetJarsResult.class);
 
+    /**
+     * Every runtime jar leia knows, newest first, with the version of Lucene of the loaded runtime
+     * that reads its indexes, or none if it is missing (ADR 0072). Needs no open index.
+     */
+    public static final RpcMethod<GetRuntimesParams, GetRuntimesResult> GET_RUNTIMES =
+            new RpcMethod<>("getRuntimes", GetRuntimesParams.class, GetRuntimesResult.class);
+
     public static final List<RpcMethod<?, ?>> ALL = List.of(
             VERSION,
             OPEN_INDEX,
@@ -461,7 +470,8 @@ public final class Methods {
             START_EXPORT_TERMS,
             GET_EXPORT_TERMS,
             ADD_JARS,
-            GET_JARS);
+            GET_JARS,
+            GET_RUNTIMES);
 
     private Methods() {}
 

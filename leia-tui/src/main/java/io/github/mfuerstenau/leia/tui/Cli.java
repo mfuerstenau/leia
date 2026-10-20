@@ -52,9 +52,10 @@ record Cli(
                   --no-default-jars
                       Don't load the jars of the default folder: $XDG_CONFIG_HOME/leia/jars
                       (~/.config/leia/jars) on Linux, %APPDATA%\\leia\\jars on Windows. Without this
-                      flag, they are loaded after those of --jar. The runtimes for indexes of
-                      Lucene 2 and 3, in the folder runtimes beside leia.jar, are loaded always,
-                      before all others
+                      flag, they are loaded after those of --jar. The runtimes, a jar for each
+                      Lucene from 3.6 to 10 in the folder runtimes beside leia.jar, are loaded
+                      always, before all others; without them, an index opens only without a
+                      reader
                   --directory <IMPL>
                       The Lucene Directory to read indexes through: fs lets Lucene choose
                       (MMapDirectory on 64-bit), mmap is MMapDirectory, nio is NIOFSDirectory.

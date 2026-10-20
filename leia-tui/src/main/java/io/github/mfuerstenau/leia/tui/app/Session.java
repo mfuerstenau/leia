@@ -29,6 +29,7 @@ import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexParams;
 import io.github.mfuerstenau.leia.protocol.jars.GetJarsParams;
+import io.github.mfuerstenau.leia.protocol.jars.GetRuntimesParams;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellParams;
@@ -611,6 +612,8 @@ public final class Session {
                 backend.call(Methods.ADD_JARS, add.params()).whenComplete((result, error) -> {
                     if (error == null) {
                         reply(runner, app -> app.jarsAdded(result));
+                        // The jars may hold a runtime (ADR 0072).
+                        loadRuntimes(runner);
                         return;
                     }
                     RpcException rpc = rpcException(error, runner);
@@ -633,6 +636,23 @@ public final class Session {
                 }
             }
         }
+    }
+
+    /** Hands the app the runtime jars that are loaded and missing now, for the about screen. */
+    private void loadRuntimes(TuiRunner runner) {
+        backend.call(Methods.GET_RUNTIMES, new GetRuntimesParams()).whenComplete((result, error) -> {
+            if (error == null) {
+                reply(runner, app -> {
+                    app.runtimesLoaded(result);
+                    return Optional.empty();
+                });
+            } else {
+                RpcException rpc = rpcException(error, runner);
+                if (rpc != null) {
+                    LOG.log(Level.WARNING, "Cannot list the runtimes", rpc);
+                }
+            }
+        });
     }
 
     /**

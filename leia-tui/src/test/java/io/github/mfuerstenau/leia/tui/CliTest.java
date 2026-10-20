@@ -102,4 +102,11 @@ class CliTest {
                         "leia.log",
                         "LEIA_OPTS");
     }
+
+    @Test
+    void helpSaysWhatTheRuntimesAreFor() {
+        assertThat(Cli.HELP.replaceAll("\\s+", " "))
+                .contains("a jar for each Lucene from 3.6 to 10 in the folder runtimes beside leia.jar")
+                .contains("without them, an index opens only without a reader");
+    }
 }
