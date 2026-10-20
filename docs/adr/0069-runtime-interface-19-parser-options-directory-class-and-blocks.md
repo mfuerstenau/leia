@@ -42,7 +42,7 @@ On the way, a bug turned up: 7.7 and 9.12 refused every query with `autoGenerate
 
    `SearchQueries` maps the result to `DateTools` and `ClassicOptions` as before. On a runtime, `RuntimeResults.parse` and `RuntimeQueries.standard` check through it too; before, they didn't check at all. A refused option is `INVALID_PARAMS`, an unknown field of a date resolution `FIELD_NOT_FOUND`, on both paths.
 5. **The server passes them on.** `RuntimeResults.parse` passes the fuzzy edits, split and dates, `RuntimeQueries.standard` the dates, `indexStats` reports `stats.directoryClass()`, and the segments of `getCommit` carry `hasBlocks`.
-6. **No change to `features()`.** Only leia-core reports `SEARCH`; whether it is still needed is a question for step 3. The TUI already gates each part on `SEARCH ||` that part.
+6. **No change to `features()`.** Only leia-core reports `SEARCH`; whether it is still needed is a question for step 3. The TUI already gates each part on `SEARCH ||` that part. *Amended (ADR 0071):* step 3 removed `SEARCH`; the TUI gates on the parts alone.
 
 ## Alternatives considered
 

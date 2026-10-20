@@ -1,6 +1,5 @@
 package io.github.mfuerstenau.leia.server.terms;
 
-import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.core.ScanProgress;
 import io.github.mfuerstenau.leia.core.TermExport;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
@@ -49,17 +48,9 @@ public final class StartExportTermsHandler implements MethodHandler<StartExportT
     @Override
     public JobStarted handle(StartExportTermsParams params) throws RpcException {
         String field = params.field();
-        TermExport.TermSource terms;
-        String lucene = "";
-        if (currentIndex.runtime().isPresent()) {
-            OpenRuntime open = currentIndex.runtime().get();
-            terms = RuntimeResults.exportTerms(open, field);
-            lucene = " with Lucene " + open.runtime().luceneVersion();
-        } else {
-            ReadOnlyIndex index = currentIndex.readable();
-            TermParams.checkField(index, field);
-            terms = TermExport.terms(index, field);
-        }
+        OpenRuntime open = currentIndex.runtime();
+        TermExport.TermSource terms = RuntimeResults.exportTerms(open, field);
+        String lucene = " with Lucene " + open.runtime().luceneVersion();
         Path file = path(params.path());
         boolean overwrite = params.overwrite().orElse(false);
         List<Path> directories = indexDirectories.all().stream()

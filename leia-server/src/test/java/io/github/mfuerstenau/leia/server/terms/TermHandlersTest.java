@@ -4,8 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.mfuerstenau.leia.core.DocFilter;
-import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
-import io.github.mfuerstenau.leia.core.ScanProgress;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.TermPosition;
@@ -19,10 +17,13 @@ import io.github.mfuerstenau.leia.protocol.terms.Posting;
 import io.github.mfuerstenau.leia.protocol.terms.PostingsFilter;
 import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.TestIndexes;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import java.nio.file.Path;
+import java.time.Duration;
+import java.util.BitSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -36,7 +37,6 @@ import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.index.NoMergePolicy;
 import org.apache.lucene.index.Term;
-import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
@@ -109,8 +109,10 @@ class TermHandlersTest {
     @Test
     void marksThePostingsInTheFilterOrReadsOnlyThose() throws Exception {
         openIndex();
-        DocFilter filter =
-                currentIndex.readable().matches(new TermQuery(new Term("id", "3")), false, ScanProgress.NONE);
+        // The document with id 3.
+        BitSet docs = new BitSet();
+        docs.set(2);
+        DocFilter filter = DocFilter.of(docs, currentIndex.runtime().index().maxDoc(), "id:3", "id:3", Duration.ZERO);
         filters.put(7, filter);
 
         assertThat(getPostings
@@ -230,7 +232,7 @@ class TermHandlersTest {
             writer.commit();
             writer.deleteDocuments(new Term("id", "2"));
         }
-        currentIndex.replace(ReadOnlyIndex.open(dir));
+        currentIndex.replace(TestIndexes.open(dir));
     }
 
     private static void assertFails(ThrowingCallable call, ErrorCode code) {

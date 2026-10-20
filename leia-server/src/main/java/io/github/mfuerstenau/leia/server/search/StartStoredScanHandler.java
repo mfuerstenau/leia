@@ -1,6 +1,5 @@
 package io.github.mfuerstenau.leia.server.search;
 
-import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.core.ScanProgress;
 import io.github.mfuerstenau.leia.core.StoredScan;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
@@ -52,21 +51,9 @@ public final class StartStoredScanHandler implements MethodHandler<StartStoredSc
     public JobStarted handle(StartStoredScanParams params) throws RpcException {
         Optional<Set<String>> fields = params.fields().map(Set::copyOf);
         boolean includeDeleted = params.includeDeleted();
-        StoredScan.StoredSource source;
-        String lucene = "";
-        if (currentIndex.runtime().isPresent()) {
-            OpenRuntime open = currentIndex.runtime().get();
-            source = RuntimeResults.storedSource(open, fields, includeDeleted);
-            lucene = " with Lucene " + open.runtime().luceneVersion();
-        } else {
-            ReadOnlyIndex index = currentIndex.readable();
-            if (fields.isPresent()) {
-                for (String field : fields.get()) {
-                    SearchQueries.checkField(index, field);
-                }
-            }
-            source = index.storedValues(fields, includeDeleted);
-        }
+        OpenRuntime open = currentIndex.runtime();
+        StoredScan.StoredSource source = RuntimeResults.storedSource(open, fields, includeDeleted);
+        String lucene = " with Lucene " + open.runtime().luceneVersion();
         Pattern pattern = pattern(params.pattern(), params.caseInsensitive());
         StoredScanHits hits = new StoredScanHits();
         long jobId = jobs.start(

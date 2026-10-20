@@ -27,15 +27,12 @@ import org.apache.lucene.document.Field;
 import org.apache.lucene.document.NumericDocValuesField;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
-import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.Version;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.EnumSource;
 
 class GetIndexStatsHandlerTest {
 
@@ -48,7 +45,8 @@ class GetIndexStatsHandlerTest {
     @Test
     void reportsTheOpenIndex() throws Exception {
         Path dir = writeIndex(tmp.resolve("index"));
-        new OpenIndexHandler(currentIndex, new Runtimes(), Routing.DEFAULT).handle(new OpenIndexParams(dir.toString()));
+        new OpenIndexHandler(currentIndex, new IndexDirectories(currentIndex, new Runtimes()))
+                .handle(new OpenIndexParams(dir.toString()));
 
         GetIndexStatsResult result = handler.handle(new GetIndexStatsParams());
 
@@ -64,7 +62,13 @@ class GetIndexStatsHandlerTest {
                                 0,
                                 "segments_1",
                                 1,
-                                ((DirectoryReader) currentIndex.readable().reader()).getVersion(),
+                                currentIndex
+                                        .runtime()
+                                        .index()
+                                        .stats()
+                                        .indexes()
+                                        .getFirst()
+                                        .version(),
                                 1,
                                 2,
                                 2,
@@ -124,18 +128,6 @@ class GetIndexStatsHandlerTest {
                 .isInstanceOfSatisfying(
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.NO_INDEX_OPEN))
                 .hasMessage("No index is open");
-    }
-
-    @ParameterizedTest
-    @EnumSource(org.apache.lucene.index.IndexOptions.class)
-    void mapsEveryIndexOptionsByName(org.apache.lucene.index.IndexOptions options) {
-        assertThat(GetIndexStatsHandler.indexOptions(options).name()).isEqualTo(options.name());
-    }
-
-    @ParameterizedTest
-    @EnumSource(org.apache.lucene.index.DocValuesType.class)
-    void mapsEveryDocValuesTypeByName(org.apache.lucene.index.DocValuesType type) {
-        assertThat(GetIndexStatsHandler.docValuesType(type).name()).isEqualTo(type.name());
     }
 
     /** Two documents in one segment: "id" (a keyword), "body" (2 terms each), "rank" (doc values). */

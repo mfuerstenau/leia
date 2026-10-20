@@ -1,12 +1,8 @@
 package io.github.mfuerstenau.leia.server.index;
 
-import io.github.mfuerstenau.leia.core.IndexOpenException;
-import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
-import io.github.mfuerstenau.leia.protocol.index.Feature;
-import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
 import io.github.mfuerstenau.leia.runtime.IndexReadException;
@@ -20,7 +16,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.logging.Logger;
 
 /**
@@ -45,24 +40,7 @@ public final class ReopenIndexHandler implements MethodHandler<ReopenIndexParams
 
     @Override
     public ReopenIndexResult handle(ReopenIndexParams params) throws RpcException {
-        Optional<OpenRuntime> runtime = currentIndex.runtime();
-        if (runtime.isPresent()) {
-            return reopenRuntime(runtime.get());
-        }
-        ReadOnlyIndex index = currentIndex.readable();
-        Optional<ReadOnlyIndex> reopened;
-        try {
-            reopened = index.reopen();
-        } catch (IndexOpenException e) {
-            throw new RpcException(OpenIndexHandler.errorCode(e.reason()), e.getMessage(), e);
-        }
-        if (reopened.isEmpty()) {
-            LOG.fine(() -> "Unchanged " + index.path() + " (" + OpenIndexHandler.describe(index) + ")");
-            return toResult(false, index);
-        }
-        currentIndex.replace(reopened.get());
-        LOG.info(() -> "Reopened " + index.path() + " (" + OpenIndexHandler.describe(reopened.get()) + ")");
-        return toResult(true, reopened.get());
+        return reopenRuntime(currentIndex.runtime());
     }
 
     /**
@@ -96,17 +74,5 @@ public final class ReopenIndexHandler implements MethodHandler<ReopenIndexParams
         currentIndex.replace(newOpen);
         LOG.info(() -> "Reopened " + open.path() + " (" + RuntimeResults.describe(newOpen) + ")");
         return RuntimeResults.reopened(true, newOpen);
-    }
-
-    private static ReopenIndexResult toResult(boolean changed, ReadOnlyIndex index) {
-        return new ReopenIndexResult(
-                changed,
-                index.path().toString(),
-                OpenMode.READER,
-                OptionalInt.of(index.numDocs()),
-                OptionalInt.of(index.maxDoc()),
-                OpenIndexHandler.entries(index),
-                OpenIndexHandler.skipped(index),
-                Feature.all());
     }
 }

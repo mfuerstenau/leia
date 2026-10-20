@@ -1,6 +1,5 @@
 package io.github.mfuerstenau.leia.server.analysis;
 
-import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
@@ -15,9 +14,6 @@ import io.github.mfuerstenau.leia.server.job.Jobs;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
 import jakarta.inject.Inject;
 import java.io.IOException;
-import java.util.List;
-import org.apache.lucene.index.FieldInfo;
-import org.apache.lucene.index.IndexOptions;
 
 /**
  * {@code startAutoStopWords}: checks the params at once, then finds the stop words of fields of the
@@ -43,23 +39,7 @@ public final class StartAutoStopWordsHandler implements MethodHandler<StartAutoS
     @Override
     public JobStarted handle(StartAutoStopWordsParams params) throws RpcException {
         io.github.mfuerstenau.leia.core.AutoStopWords.Threshold threshold = threshold(params);
-        if (currentIndex.runtime().isPresent()) {
-            return RuntimeResults.startAutoStopWords(currentIndex.runtime().get(), params.fields(), threshold, jobs);
-        }
-        ReadOnlyIndex index = currentIndex.readable();
-        for (String field : params.fields()) {
-            FieldInfo info = index.fieldInfo(field).orElse(null);
-            if (info == null || info.getIndexOptions() == IndexOptions.NONE) {
-                throw new RpcException(ErrorCode.FIELD_NOT_FOUND, "No indexed field '" + field + "' in the index");
-            }
-        }
-        List<String> fields = List.copyOf(params.fields());
-        long jobId = jobs.start(
-                "auto stop words of " + (fields.isEmpty() ? "every indexed field" : "fields " + fields),
-                AutoStopWords.class,
-                progress -> found(
-                        () -> index.autoStopWords(fields, threshold, StartAutoStopWordsParams.MAX_WORDS, progress)));
-        return new JobStarted(jobId);
+        return RuntimeResults.startAutoStopWords(currentIndex.runtime(), params.fields(), threshold, jobs);
     }
 
     private static io.github.mfuerstenau.leia.core.AutoStopWords.Threshold threshold(StartAutoStopWordsParams params)

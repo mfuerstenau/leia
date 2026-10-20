@@ -5,7 +5,8 @@ plugins {
 
 dependencies {
     // api: the protocol records are LeiaBackend's API; implementation keeps core and Lucene out of
-    // the UI's compile classpath (AGENTS.md, hard rule 6).
+    // the UI's compile classpath (AGENTS.md, hard rule 6). leia-core only for the algorithms that the
+    // runtimes' results go through, until they move into the server (ADR 0071).
     api(project(":leia-protocol"))
     implementation(project(":leia-core"))
     // The interface to the runtimes for indexes that Lucene 10 can't read (ADR 0044).
@@ -18,9 +19,12 @@ dependencies {
     testRuntimeOnly(project(mapOf("path" to ":leia-lucene5", "configuration" to "shadowRuntimeElements")))
     testRuntimeOnly(project(mapOf("path" to ":leia-lucene7", "configuration" to "shadowRuntimeElements")))
     testRuntimeOnly(project(mapOf("path" to ":leia-lucene9", "configuration" to "shadowRuntimeElements")))
-    // Lucene 10 behind the runtime interface, for Lucene10ParityTest (ADR 0065): not the shadow jar, as
-    // Lucene 10 is on the test classpath already.
-    testRuntimeOnly(project(":leia-lucene10"))
+    // Lucene 10 behind the runtime interface, which reads the indexes of Lucene 9 and 10 and those of
+    // an unknown version (ADR 0071): at run time only, so the server reaches it only through the
+    // interface, and the plain jar, which brings leia-core and Lucene 10 with it. The tests open
+    // indexes through Lucene10Runtime directly.
+    runtimeOnly(project(":leia-lucene10"))
+    testImplementation(project(":leia-lucene10"))
     implementation(libs.dagger)
     annotationProcessor(libs.dagger.compiler)
 }

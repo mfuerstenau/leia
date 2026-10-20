@@ -3,9 +3,6 @@ package io.github.mfuerstenau.leia.server.filter;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import io.github.mfuerstenau.leia.core.DirectoryImpl;
-import io.github.mfuerstenau.leia.core.DirectoryOnlyIndex;
-import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.StandardAnalyzer;
@@ -24,7 +21,9 @@ import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
 import io.github.mfuerstenau.leia.protocol.search.ParserOptions;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
 import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
+import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.TestIndexes;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import java.nio.file.Path;
@@ -231,7 +230,7 @@ class FilterHandlersTest {
         long first = start.handle(byQuery(classic("red"), false)).jobId();
         await(first);
 
-        currentIndex.replace(ReadOnlyIndex.open(tmp.resolve("index")));
+        currentIndex.replace(TestIndexes.open(tmp.resolve("index")));
 
         assertFails(() -> step(first, 0, true), ErrorCode.FILTER_NOT_FOUND);
 
@@ -250,7 +249,7 @@ class FilterHandlersTest {
         assertFails(() -> start.handle(byQuery(classic("title:(lamp"), false)), ErrorCode.INVALID_QUERY);
         assertFails(() -> start.handle(byQuery(classic("red", "missing"), false)), ErrorCode.FIELD_NOT_FOUND);
 
-        currentIndex.replace(DirectoryOnlyIndex.open(tmp.resolve("index"), DirectoryImpl.FS));
+        currentIndex.replace(TestIndexes.withoutReader(tmp.resolve("index"), DirectoryKind.FS));
 
         assertFails(() -> start.handle(byQuery(classic("red"), false)), ErrorCode.NO_READER);
     }
@@ -322,7 +321,7 @@ class FilterHandlersTest {
             }
             writer.deleteDocuments(new Term("id", "3"));
         }
-        currentIndex.replace(ReadOnlyIndex.open(dir));
+        currentIndex.replace(TestIndexes.open(dir));
     }
 
     private static void assertFails(ThrowingCallable call, ErrorCode code) {

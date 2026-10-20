@@ -4,20 +4,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
-import io.github.mfuerstenau.leia.core.DirectoryImpl;
-import io.github.mfuerstenau.leia.core.DirectoryOnlyIndex;
-import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.check.CheckIndexResult;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexParams;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexResult;
 import io.github.mfuerstenau.leia.protocol.check.IndexCheck;
 import io.github.mfuerstenau.leia.protocol.check.StartCheckIndexParams;
+import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.TestIndexes;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.index.IndexDirectories;
-import io.github.mfuerstenau.leia.server.index.Routing;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import java.io.IOException;
@@ -50,14 +48,14 @@ class CheckIndexHandlersTest {
 
     private final Jobs jobs = new Jobs();
     private final CurrentIndex currentIndex = new CurrentIndex(jobs, new Filters());
-    private final StartCheckIndexHandler start = new StartCheckIndexHandler(
-            currentIndex, new IndexDirectories(currentIndex, new Runtimes(), Routing.DEFAULT), jobs);
+    private final StartCheckIndexHandler start =
+            new StartCheckIndexHandler(currentIndex, new IndexDirectories(currentIndex, new Runtimes()), jobs);
     private final GetCheckIndexHandler get = new GetCheckIndexHandler(jobs);
 
     @Test
     void checksTheIndexAndStreamsTheOutput() throws Exception {
         Path dir = writeIndex(tmp.resolve("index"));
-        currentIndex.replace(ReadOnlyIndex.open(dir));
+        currentIndex.replace(TestIndexes.open(dir));
 
         long jobId = start.handle(new StartCheckIndexParams(OptionalInt.of(2))).jobId();
         List<String> lines = new ArrayList<>();
@@ -80,7 +78,7 @@ class CheckIndexHandlersTest {
     void checksTheSkippedIndexesToo() throws Exception {
         Path a = writeIndex(tmp.resolve("indexes/a"));
         Path b = corrupt(writeIndex(tmp.resolve("indexes/b")));
-        currentIndex.replace(ReadOnlyIndex.open(tmp.resolve("indexes")));
+        currentIndex.replace(TestIndexes.open(tmp.resolve("indexes")));
 
         long jobId = start.handle(new StartCheckIndexParams()).jobId();
         List<String> lines = new ArrayList<>();
@@ -95,7 +93,7 @@ class CheckIndexHandlersTest {
     @Test
     void checksAnIndexOpenedWithoutAReader() throws Exception {
         Path dir = corrupt(writeIndex(tmp.resolve("index")));
-        currentIndex.replace(DirectoryOnlyIndex.open(dir, DirectoryImpl.NIO));
+        currentIndex.replace(TestIndexes.withoutReader(dir, DirectoryKind.NIO));
 
         long jobId = start.handle(new StartCheckIndexParams()).jobId();
         CheckIndexResult result = awaitDone(jobId, new ArrayList<>());
@@ -108,7 +106,7 @@ class CheckIndexHandlersTest {
 
     @Test
     void returnsTheLinesFromTheGivenOne() throws Exception {
-        currentIndex.replace(ReadOnlyIndex.open(writeIndex(tmp.resolve("index"))));
+        currentIndex.replace(TestIndexes.open(writeIndex(tmp.resolve("index"))));
 
         GetCheckIndexResult fromThree =
                 awaitOutcome(start.handle(new StartCheckIndexParams()).jobId(), 3);
@@ -122,7 +120,7 @@ class CheckIndexHandlersTest {
 
     @Test
     void cancellingStopsTheCheck() throws Exception {
-        currentIndex.replace(ReadOnlyIndex.open(writeIndex(tmp.resolve("index"))));
+        currentIndex.replace(TestIndexes.open(writeIndex(tmp.resolve("index"))));
         long jobId = start.handle(new StartCheckIndexParams(OptionalInt.of(3))).jobId();
 
         jobs.cancel(jobId);
@@ -138,14 +136,14 @@ class CheckIndexHandlersTest {
     @ParameterizedTest
     @ValueSource(ints = {0, 4})
     void rejectsALevelOutOfRange(int level) throws Exception {
-        currentIndex.replace(ReadOnlyIndex.open(writeIndex(tmp.resolve("index"))));
+        currentIndex.replace(TestIndexes.open(writeIndex(tmp.resolve("index"))));
 
         assertFails(() -> start.handle(new StartCheckIndexParams(OptionalInt.of(level))), ErrorCode.INVALID_PARAMS);
     }
 
     @Test
     void rejectsANegativeLine() throws Exception {
-        currentIndex.replace(ReadOnlyIndex.open(writeIndex(tmp.resolve("index"))));
+        currentIndex.replace(TestIndexes.open(writeIndex(tmp.resolve("index"))));
         long jobId = start.handle(new StartCheckIndexParams()).jobId();
 
         assertFails(() -> get.handle(new GetCheckIndexParams(jobId, -1)), ErrorCode.INVALID_PARAMS);

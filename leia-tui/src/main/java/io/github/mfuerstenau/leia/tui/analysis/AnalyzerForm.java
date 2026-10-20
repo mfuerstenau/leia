@@ -252,6 +252,9 @@ public final class AnalyzerForm {
     /** Why the draft was refused, until the next change; or null. */
     private String error;
 
+    /** Whether no loaded runtime has analysis (ADR 0071). */
+    private boolean noAnalysis;
+
     public AnalyzerForm(AnalyzerSettings settings, Optional<GetAnalysisComponentsResult> components) {
         this.draft = settings.copy();
         this.components = components;
@@ -264,6 +267,13 @@ public final class AnalyzerForm {
 
     public void setComponents(GetAnalysisComponentsResult components) {
         this.components = Optional.of(components);
+        this.noAnalysis = false;
+    }
+
+    /** No loaded runtime has analysis (ADR 0071): the picker says so instead of listing components. */
+    public void setNoAnalysis() {
+        this.components = Optional.empty();
+        this.noAnalysis = true;
     }
 
     /** The draft, for the tests. */
@@ -1289,7 +1299,9 @@ public final class AnalyzerForm {
         lines.add(Line.from("Filter: " + open.filter.text()));
         lines.add(Line.empty());
         String typed = open.pick.preset() ? "class name" : "name";
-        if (components.isEmpty()) {
+        if (noAnalysis) {
+            lines.add(Line.from(Analysis.NO_ANALYSIS + "."));
+        } else if (components.isEmpty()) {
             lines.add(Line.styled("The components are not loaded; Enter takes the typed " + typed + ".", Form.dim()));
         } else if (matches.isEmpty()) {
             lines.add(Line.styled("No match; Enter takes the typed " + typed + ".", Form.dim()));

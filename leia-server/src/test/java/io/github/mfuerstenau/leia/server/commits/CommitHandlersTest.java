@@ -4,9 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
-import io.github.mfuerstenau.leia.core.DirectoryImpl;
-import io.github.mfuerstenau.leia.core.DirectoryOnlyIndex;
-import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.commits.Commit;
 import io.github.mfuerstenau.leia.protocol.commits.CommitFile;
@@ -16,11 +13,12 @@ import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.commits.Segment;
+import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.TestIndexes;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.index.IndexDirectories;
-import io.github.mfuerstenau.leia.server.index.Routing;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import java.nio.file.Files;
@@ -50,9 +48,9 @@ class CommitHandlersTest {
     Path tmp;
 
     private final CurrentIndex currentIndex = new CurrentIndex(new Jobs(), new Filters());
-    private final IndexDirectories directories = new IndexDirectories(currentIndex, new Runtimes(), Routing.DEFAULT);
-    private final GetCommitsHandler getCommits = new GetCommitsHandler(currentIndex, directories);
-    private final GetCommitHandler getCommit = new GetCommitHandler(currentIndex, directories);
+    private final IndexDirectories directories = new IndexDirectories(currentIndex, new Runtimes());
+    private final GetCommitsHandler getCommits = new GetCommitsHandler(directories);
+    private final GetCommitHandler getCommit = new GetCommitHandler(directories);
 
     @Test
     void listsTheCommitsNewestFirst() throws Exception {
@@ -137,7 +135,7 @@ class CommitHandlersTest {
             writer.addDocument(doc("9"));
             writer.commit();
         }
-        currentIndex.replace(ReadOnlyIndex.open(tmp));
+        currentIndex.replace(TestIndexes.open(tmp));
 
         assertThat(getCommits.handle(new GetCommitsParams(OptionalInt.of(0))).commits())
                 .extracting(Commit::generation)
@@ -150,7 +148,7 @@ class CommitHandlersTest {
                         .commit()
                         .maxDoc())
                 .isEqualTo(1);
-        assertThat(currentIndex.opened().directories()).containsExactly(dir, second);
+        assertThat(currentIndex.runtime().index().directories()).containsExactly(dir, second);
         assertThatThrownBy(() -> getCommits.handle(new GetCommitsParams(OptionalInt.of(2))))
                 .isInstanceOfSatisfying(
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.INVALID_PARAMS))
@@ -161,7 +159,7 @@ class CommitHandlersTest {
     @Test
     void readsTheCommitsWithoutAReader() throws Exception {
         Path dir = openIndex();
-        currentIndex.replace(DirectoryOnlyIndex.open(dir, DirectoryImpl.FS));
+        currentIndex.replace(TestIndexes.withoutReader(dir, DirectoryKind.FS));
 
         assertThat(getCommits.handle(new GetCommitsParams()).commits())
                 .extracting(Commit::generation, Commit::current)
@@ -178,7 +176,7 @@ class CommitHandlersTest {
                 Files.delete(si);
             }
         }
-        currentIndex.replace(DirectoryOnlyIndex.open(dir, DirectoryImpl.FS));
+        currentIndex.replace(TestIndexes.withoutReader(dir, DirectoryKind.FS));
 
         GetCommitsResult result = getCommits.handle(new GetCommitsParams());
 
@@ -218,7 +216,7 @@ class CommitHandlersTest {
             writer.setLiveCommitData(Map.of("step", "two").entrySet());
             writer.commit();
         }
-        currentIndex.replace(ReadOnlyIndex.open(dir));
+        currentIndex.replace(TestIndexes.open(dir));
         return dir;
     }
 

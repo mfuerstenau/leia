@@ -864,9 +864,9 @@ public final class Terms {
         return features.contains(needed) ? Optional.empty() : Optional.of(what);
     }
 
-    /** Whether the index can search a term: with all of search, or term queries alone (ADR 0058). */
+    /** Whether the index can search a term (ADR 0058). */
     private boolean searchesTerms() {
-        return features.contains(Feature.SEARCH) || features.contains(Feature.TERM_SEARCH);
+        return features.contains(Feature.TERM_SEARCH);
     }
 
     /**

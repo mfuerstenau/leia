@@ -1,29 +1,18 @@
 package io.github.mfuerstenau.leia.server.document;
 
 import io.github.mfuerstenau.leia.core.IndexDocument;
-import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
-import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
-import io.github.mfuerstenau.leia.protocol.document.BytesValue;
-import io.github.mfuerstenau.leia.protocol.document.DocValues;
-import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
-import io.github.mfuerstenau.leia.protocol.document.KnnVector;
 import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
-import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
-import io.github.mfuerstenau.leia.server.index.GetIndexStatsHandler;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
 import jakarta.inject.Inject;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.OptionalLong;
 import org.apache.lucene.util.BytesRef;
 
@@ -44,64 +33,7 @@ public final class GetDocumentHandler implements MethodHandler<GetDocumentParams
 
     @Override
     public GetDocumentResult handle(GetDocumentParams params) throws RpcException {
-        if (currentIndex.runtime().isPresent()) {
-            return RuntimeResults.document(currentIndex.runtime().get(), params);
-        }
-        ReadOnlyIndex index = currentIndex.readable();
-        int docId = params.docId();
-        checkDocId(index, docId);
-        try {
-            return toResult(index.document(docId));
-        } catch (IOException e) {
-            throw new RpcException(
-                    ErrorCode.INDEX_NOT_READABLE, "Cannot read document " + docId + ": " + e.getMessage(), e);
-        }
-    }
-
-    public static void checkDocId(ReadOnlyIndex index, int docId) throws RpcException {
-        if (!index.hasDocId(docId)) {
-            throw new RpcException(
-                    ErrorCode.DOC_NOT_FOUND, "No document " + docId + " in the index: maxDoc is " + index.maxDoc());
-        }
-    }
-
-    private static GetDocumentResult toResult(IndexDocument doc) {
-        return new GetDocumentResult(
-                doc.docId(),
-                doc.deleted(),
-                doc.fields().stream().map(GetDocumentHandler::toField).toList());
-    }
-
-    private static DocumentField toField(IndexDocument.Field field) {
-        return new DocumentField(
-                field.name(),
-                field.norm(),
-                field.stored().stream()
-                        .map(value -> storedValue(value, GetDocumentResult.MAX_VALUE_LENGTH))
-                        .toList(),
-                field.docValues().map(GetDocumentHandler::docValues),
-                field.hasTermVector(),
-                field.vector().map(GetDocumentHandler::vector));
-    }
-
-    /** A vector as the protocol carries it (ADR 0040). */
-    public static KnnVector vector(io.github.mfuerstenau.leia.core.KnnVector vector) {
-        return switch (vector) {
-            case io.github.mfuerstenau.leia.core.KnnVector.Floats floats -> {
-                List<Float> values = new ArrayList<>(floats.values().length);
-                for (float value : floats.values()) {
-                    values.add(value);
-                }
-                yield new KnnVector(VectorEncoding.FLOAT32, List.copyOf(values), List.of());
-            }
-            case io.github.mfuerstenau.leia.core.KnnVector.Bytes bytes -> {
-                List<Byte> values = new ArrayList<>(bytes.values().length);
-                for (byte value : bytes.values()) {
-                    values.add(value);
-                }
-                yield new KnnVector(VectorEncoding.BYTE, List.of(), List.copyOf(values));
-            }
-        };
+        return RuntimeResults.document(currentIndex.runtime(), params);
     }
 
     /** The whole {@code value}, as {@code getStoredValue} sends it. */
@@ -161,15 +93,5 @@ public final class GetDocumentHandler implements MethodHandler<GetDocumentParams
         return end < 0
                 ? new StoredValue(type, text, false)
                 : new StoredValue(type, text.substring(0, end), false, OptionalLong.of(length));
-    }
-
-    private static DocValues docValues(IndexDocument.DocValues values) {
-        return new DocValues(
-                GetIndexStatsHandler.docValuesType(values.type()),
-                values.numbers(),
-                values.values().stream()
-                        .map(ByteStrings::encode)
-                        .map(encoded -> new BytesValue(encoded.value(), encoded.binary()))
-                        .toList());
     }
 }

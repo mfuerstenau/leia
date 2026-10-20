@@ -1,6 +1,6 @@
 # ADR 0065 — Lucene 10 as a runtime
 
-- **Status:** Accepted (step 1 landed: `leia-lucene10` and the parity test)
+- **Status:** Accepted (steps 1 to 3 landed: `leia-lucene10` and the parity test; the interface, ADR 0066 to ADR 0070; the switch, ADR 0071, which ended the parity test)
 - **Date:** 2026-10-14
 - **Will amend:** ADR 0044 (the runtimes read majors below 9 only; then every major), ADR 0034 (the contents of `leia.jar`) and AGENTS.md's hard rules 2, 5 and 6, at steps 3 and 4
 

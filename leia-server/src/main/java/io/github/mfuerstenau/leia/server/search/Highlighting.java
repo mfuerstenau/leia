@@ -1,7 +1,6 @@
 package io.github.mfuerstenau.leia.server.search;
 
 import io.github.mfuerstenau.leia.core.DocumentHighlight;
-import io.github.mfuerstenau.leia.core.HighlightSpec;
 import io.github.mfuerstenau.leia.core.SearchResults.FieldHighlight;
 import io.github.mfuerstenau.leia.core.StoredScan;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
@@ -15,9 +14,7 @@ import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
 import io.github.mfuerstenau.leia.protocol.search.Snippet;
 import io.github.mfuerstenau.leia.protocol.search.ValueHighlight;
 import io.github.mfuerstenau.leia.server.RpcException;
-import io.github.mfuerstenau.leia.server.analysis.AnalyzerSpecs;
 import java.util.List;
-import org.apache.lucene.analysis.Analyzer;
 
 /**
  * Turns the highlight options of {@code startSearch} and {@code startHighlight} into core's, and back
@@ -48,20 +45,6 @@ public final class Highlighting {
                     "Invalid params: maxPassages must be between 1 and " + HighlightOptions.MAX_PASSAGES + ", not "
                             + maxPassages);
         }
-    }
-
-    /**
-     * The analyzer of {@code options}, which the caller closes.
-     *
-     * @throws RpcException as {@link AnalyzerSpecs#build} does
-     */
-    static Analyzer analyzer(HighlightOptions options) throws RpcException {
-        return AnalyzerSpecs.build(options.analyzer());
-    }
-
-    /** Core's spec for {@code options}, with a {@code maxPassages} of at least 1. */
-    static HighlightSpec spec(HighlightOptions options, Analyzer analyzer) {
-        return new HighlightSpec(Math.max(options.maxPassages(), 1), options.requireFieldMatch(), analyzer);
     }
 
     public static HitHighlight toHighlight(FieldHighlight highlight) {

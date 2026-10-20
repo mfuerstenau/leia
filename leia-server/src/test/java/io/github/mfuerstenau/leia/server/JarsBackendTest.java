@@ -36,7 +36,6 @@ import io.github.mfuerstenau.leia.protocol.jars.GetJarsParams;
 import io.github.mfuerstenau.leia.protocol.jars.JarComponents;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
-import io.github.mfuerstenau.leia.server.index.Routing;
 import io.github.mfuerstenau.leia.server.runtime.FutureRuntime;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -90,7 +89,8 @@ class JarsBackendTest {
                             codecJar.toString(), lucene3Jar.toString(), lucene5Jar.toString(), lucene7Jar.toString());
 
             // An index created by 8.x needs leia-lucene9.jar: without it, it opens only without a
-            // reader, with Lucene 10; once the jar is added, with its runtime (ADR 0049).
+            // reader, whose commits say that it is missing (ADR 0071); once the jar is added, with its
+            // runtime (ADR 0049).
             String lucene8 = testIndex("lucene8").toString();
             RpcException missing =
                     backend.fails(Methods.OPEN_INDEX, new OpenIndexParams(lucene8), ErrorCode.MISSING_RUNTIME);
@@ -101,6 +101,7 @@ class JarsBackendTest {
                                             lucene8, Optional.empty(), Optional.of(OpenMode.DIRECTORY_ONLY)))
                             .mode())
                     .isEqualTo(OpenMode.DIRECTORY_ONLY);
+            backend.fails(Methods.GET_COMMITS, new GetCommitsParams(OptionalInt.empty()), ErrorCode.MISSING_RUNTIME);
             Path lucene9Jar = testFile("leia.test.runtime.lucene9");
             backend.call(Methods.ADD_JARS, new AddJarsParams(List.of(lucene9Jar.toString())));
             for (String name : List.of("lucene8", "lucene8to9")) {
@@ -184,10 +185,10 @@ class JarsBackendTest {
                     icuCollation(new Collation("de", Optional.of(CollationStrength.QUATERNARY), Optional.empty()));
             assertThat(bytes(backend, quaternary, "Äpfel")).isNotEqualTo(bytes(backend, quaternary, "apfel"));
 
-            // Through the Extensions of leia-lucene10's runtime (ADR 0068): a directory's jars in name
-            // order, the names they add, and a jar that is loaded already isn't loaded again. Before
+            // Through the Extensions of leia-lucene10's runtime (ADR 0068, ADR 0071): a directory's jars
+            // in name order, the names they add, and a jar that is loaded already isn't loaded again. Before
             // the refused runtime below, which a new backend would refuse to start with.
-            try (RealBackend runtime = RealBackend.start(new Routing(true))) {
+            try (RealBackend runtime = RealBackend.start()) {
                 AddJarsResult phonetic = runtime.call(
                         Methods.ADD_JARS,
                         new AddJarsParams(

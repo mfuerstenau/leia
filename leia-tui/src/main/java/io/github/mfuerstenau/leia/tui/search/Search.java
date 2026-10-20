@@ -528,9 +528,9 @@ public final class Search {
         return features.containsAll(List.of(needed));
     }
 
-    /** Whether the similarity and sort apply: with every part of search, or with them (ADR 0064). */
+    /** Whether the similarity and sort apply (ADR 0064). */
     private boolean scores() {
-        return supports(Feature.SEARCH) || supports(Feature.SCORING);
+        return supports(Feature.SCORING);
     }
 
     /** The modes the index has the features for, in the order {@code m} cycles through them. */
@@ -538,16 +538,13 @@ public final class Search {
         List<Mode> modes = new ArrayList<>();
         for (Mode each : MODE_CYCLE) {
             boolean available = switch (each) {
-                case CLASSIC -> supports(Feature.SEARCH) || supports(Feature.CLASSIC_SEARCH);
-                case TERM -> supports(Feature.SEARCH) || supports(Feature.TERM_SEARCH);
-                // A runtime has each of them as a part of search (ADR 0066).
-                case STANDARD -> supports(Feature.SEARCH) || supports(Feature.STANDARD_SEARCH);
-                case LIKE, LIKE_TEXT -> supports(Feature.SEARCH) || supports(Feature.MORE_LIKE_THIS);
-                case DOC_VALUES ->
-                    (supports(Feature.SEARCH) || supports(Feature.DOC_VALUES_SEARCH)) && supports(Feature.DOC_VALUES);
+                case CLASSIC -> supports(Feature.CLASSIC_SEARCH);
+                case TERM -> supports(Feature.TERM_SEARCH);
+                case STANDARD -> supports(Feature.STANDARD_SEARCH);
+                case LIKE, LIKE_TEXT -> supports(Feature.MORE_LIKE_THIS);
+                case DOC_VALUES -> supports(Feature.DOC_VALUES_SEARCH) && supports(Feature.DOC_VALUES);
                 // A runtime searches KNN vectors with its classic search (ADR 0049).
-                case KNN ->
-                    supports(Feature.KNN_VECTORS) && (supports(Feature.SEARCH) || supports(Feature.CLASSIC_SEARCH));
+                case KNN -> supports(Feature.KNN_VECTORS) && supports(Feature.CLASSIC_SEARCH);
                 case REGEX -> supports(Feature.STORED_SCAN);
             };
             if (available) {

@@ -1,6 +1,6 @@
 # Runtimes: features and differences
 
-leia reads indexes of Lucene 9 and 10 with Lucene 10.5.2 itself, and older ones with a relocated Lucene, a runtime jar in `runtimes/` beside `leia.jar` (ADR 0044):
+leia reads every index through a runtime (ADR 0071): indexes of Lucene 9 and 10, and those whose version it can't detect, with Lucene 10.5.2 of `leia-lucene10`, which `leia.jar` holds; older ones with a relocated Lucene, a runtime jar in `runtimes/` beside `leia.jar` (ADR 0044):
 
 | Runtime | Jar | Reads indexes of |
 |---|---|---|
@@ -8,9 +8,9 @@ leia reads indexes of Lucene 9 and 10 with Lucene 10.5.2 itself, and older ones 
 | 5.5.5 | `leia-lucene5.jar` | 4.x, 5.x |
 | 7.7.3 | `leia-lucene7.jar` | 6.x, 7.x |
 | 9.12.3 | `leia-lucene9.jar` | 8.x, also once 9.x wrote to them |
-| 10.5.2 | `leia.jar` | 9.x, 10.x |
+| 10.5.2 | `leia.jar` (leia-lucene10) | 9.x, 10.x, and an unknown version |
 
-The first index of a path decides which Lucene opens it, by the major in its newest `segments_N` (`SegmentsHeader`, ADR 0044 §3, ADR 0045 §3). `openIndex` reports that Lucene as `luceneRuntime`, and what works on the index as `features`. Lucene 10 has every feature; a runtime has those of the groups it implements (`RuntimeResults.features`), and some only if a field of the index has the data.
+The first index of a path decides which Lucene opens it, by the major in its newest `segments_N` (`SegmentsHeader`, ADR 0044 §3, ADR 0045 §3). `openIndex` reports that Lucene as `luceneRuntime`, and what works on the index as `features`. A runtime has the features of the groups it implements (`RuntimeResults.features`), and some only if a field of the index has the data; 10.5.2 has every group.
 
 ## Features
 
@@ -28,11 +28,10 @@ The first index of a path decides which Lucene opens it, by the major in its new
 | `FILTER` | ✓⁵ | ✓ | ✓ | ✓ | ✓ |
 | `TERMS` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `POSTINGS` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `POINTS` | – | – | ✓² | ✓² | ✓ |
-| `DOC_VALUES` | – | ✓¹ | ✓¹ | ✓¹ | ✓ |
-| `KNN_VECTORS` | – | – | – | ✓³ | ✓ |
+| `POINTS` | – | – | ✓² | ✓² | ✓² |
+| `DOC_VALUES` | – | ✓¹ | ✓¹ | ✓¹ | ✓¹ |
+| `KNN_VECTORS` | – | – | – | ✓³ | ✓³ |
 | `COMMITS` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `SEARCH` | – | – | – | – | ✓ |
 | `CLASSIC_SEARCH` | ✓ | ✓ | ✓ | ✓⁴ | ✓ |
 | `TERM_SEARCH` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `SCORING` | – | – | – | ✓ | ✓ |
@@ -50,16 +49,16 @@ The first index of a path decides which Lucene opens it, by the major in its new
 
 1. Only if a field has doc values (ADR 0046 §6).
 2. Only if a field has points (ADR 0048 §3).
-3. Only if a field has KNN vectors, which no 8.x segment has: only the 9.x segments of an index created by 8.x (ADR 0049 §6).
+3. Only if a field has KNN vectors. On 9.12.3, no 8.x segment has them: only the 9.x segments of an index created by 8.x (ADR 0049 §6).
 4. With `KNN_VECTORS`, `CLASSIC_SEARCH` takes a KNN query too, approximate or exact, with a filter (ADR 0049 §6).
 5. A query filter takes no deleted documents: Lucene 3.6 doesn't read their postings, so `startFilter` refuses a query with `includeDeleted` (ADR 0056 §4). A pattern filter takes them.
 6. Reported without regard to the fields; the TUI offers doc values queries with `DOC_VALUES` too, which needs a field with doc values (ADR 0066).
 
-`SEARCH` is every part of search; a runtime reports the parts it has, such as `CLASSIC_SEARCH`, `TERM_SEARCH`, `SCORING`, `DOC_VALUES_SEARCH`, `STANDARD_SEARCH` and `MORE_LIKE_THIS`, and the TUI offers a part with `SEARCH` or with that part (ADR 0058, ADR 0064, ADR 0066). `SCORING` is the similarity and sort of the queries a runtime has.
+A runtime reports the parts of search it has, such as `CLASSIC_SEARCH`, `TERM_SEARCH`, `SCORING`, `DOC_VALUES_SEARCH`, `STANDARD_SEARCH` and `MORE_LIKE_THIS`, and the TUI offers a part with that feature (ADR 0058, ADR 0064, ADR 0066, ADR 0071). `SCORING` is the similarity and sort of the queries a runtime has.
 
 Every runtime reports the open reader's segments in `getIndexStats`, from runtime interface 6 on (ADR 0051), so the documents screen shows and pins segments on every index with a reader.
 
-**Without a reader** (ADR 0021), an index has `COMMITS` and `CHECK_INDEX`, and `CHECK_LEVELS` too unless its first index goes to a runtime without levels, which is 3.6.2 for 2.x and 3.x (ADR 0045 §4, ADR 0046 §6). Indexes of 4.x to 8.x go to Lucene 10 then, which lists their commits as unreadable.
+**Without a reader** (ADR 0021), an index has `COMMITS` and `CHECK_INDEX`, and `CHECK_LEVELS` too if its first index goes to a runtime with levels, which 3.6.2 for 2.x and 3.x isn't (ADR 0045 §4, ADR 0046 §6). An index whose runtime isn't loaded opens too; its commits and check then say which runtime jar is missing (ADR 0071).
 
 ## Differences
 
@@ -96,8 +95,8 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 | Custom analyzers, shingles (ADR 0067) | – | – | – | ✓, with 9.12's own components; one only Lucene 10 has is `NOT_SUPPORTED` | ✓ |
 | Preset options (ADR 0067) | stop words, from a file too, and the longest token | as 3.6.2 | as 3.6.2 | all but Kuromoji's, Nori's and ICU's, checked as on Lucene 10 | all |
 | Token limit | `consumeAllTokens` ignored (it changes no token) | ✓ | ✓ | ✓ | ✓ |
-| Analysis tab (ADR 0067) | – | – | – | – | ✓, `Analysis` of leia-lucene10 when routed to it |
-| Extension jars (ADR 0068) | – (relocated service files) | – | – | – | ✓, `Extensions` of leia-lucene10; leia-core's lists until step 3 |
+| Analysis tab (ADR 0067) | – | – | – | – | ✓, `Analysis` of leia-lucene10; without a runtime that has one, the tab says so (ADR 0071) |
+| Extension jars (ADR 0068) | – (relocated service files) | – | – | – | ✓, `Extensions` of leia-lucene10 (ADR 0071) |
 | Failure reasons (ADR 0070) | corrupt and unsupported format; no codecs to miss | corrupt, unsupported format, missing codec | as 5.5.5 | as 5.5.5 | leia-core's, unreadable included |
 | Hit count without an exact count (ADR 0070) | every hit counted | every hit counted | every hit counted | stops after 1000 | stops after 1000 |
 | Unmapping | never (no `sun.misc.Cleaner`) | only with `-Dsun.misc.unsafe.memory.access=allow` | as 5.5.5 | memory segments | memory segments |

@@ -4,9 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
-import io.github.mfuerstenau.leia.core.DirectoryOnlyIndex;
 import io.github.mfuerstenau.leia.core.IndexOpenException;
-import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.Feature;
@@ -18,8 +16,11 @@ import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexParams;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.TestIndexes;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.job.Jobs;
+import io.github.mfuerstenau.leia.server.runtime.OpenDirectories;
+import io.github.mfuerstenau.leia.server.runtime.OpenRuntime;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -47,7 +48,8 @@ class OpenIndexHandlerTest {
     Path tmp;
 
     private final CurrentIndex currentIndex = new CurrentIndex(new Jobs(), new Filters());
-    private final OpenIndexHandler handler = new OpenIndexHandler(currentIndex, new Runtimes(), Routing.DEFAULT);
+    private final OpenIndexHandler handler =
+            new OpenIndexHandler(currentIndex, new IndexDirectories(currentIndex, new Runtimes()));
 
     @Test
     void opensIndexAndMakesItCurrent() throws Exception {
@@ -71,7 +73,7 @@ class OpenIndexHandlerTest {
                                         Version.LATEST.major,
                                         Optional.of(Version.LATEST.toString()))))),
                         List.of(),
-                        Feature.all(),
+                        TestIndexes.featuresWithoutData(),
                         Version.LATEST.toString()));
         assertThat(currentIndex.get())
                 .hasValueSatisfying(index -> assertThat(index.path()).isEqualTo(dir));
@@ -84,24 +86,24 @@ class OpenIndexHandlerTest {
 
         handler.handle(new OpenIndexParams(dir.toString(), Optional.of(directoryImpl), Optional.empty()));
 
-        assertThat(currentIndex.readable().stats().directoryImpl()).isEqualTo(className);
+        assertThat(currentIndex.runtime().index().stats().directoryClass()).isEqualTo(className);
     }
 
     @Test
     void replacesAndClosesThePreviousIndex() throws Exception {
         handler.handle(new OpenIndexParams(writeIndex(tmp.resolve("first"), 1).toString()));
-        ReadOnlyIndex first = currentIndex.readable();
+        OpenRuntime first = currentIndex.runtime();
 
         handler.handle(new OpenIndexParams(writeIndex(tmp.resolve("second"), 2).toString()));
 
-        assertThat(currentIndex.readable().numDocs()).isEqualTo(2);
-        assertThat(first.reader().tryIncRef()).as("first reader is closed").isFalse();
+        assertThat(currentIndex.runtime().index().stats().numDocs()).isEqualTo(2);
+        assertThat(TestIndexes.readable(first)).as("first reader is closed").isFalse();
     }
 
     @Test
     void keepsThePreviousIndexOpenWhenOpeningFails() throws Exception {
         handler.handle(new OpenIndexParams(writeIndex(tmp.resolve("index"), 1).toString()));
-        ReadOnlyIndex open = currentIndex.readable();
+        OpenRuntime open = currentIndex.runtime();
 
         assertThatThrownBy(() -> handler.handle(
                         new OpenIndexParams(tmp.resolve("missing").toString())))
@@ -109,7 +111,7 @@ class OpenIndexHandlerTest {
                         RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.INDEX_NOT_FOUND));
 
         assertThat(currentIndex.get()).containsSame(open);
-        assertThat(open.reader().numDocs()).isEqualTo(1);
+        assertThat(open.index().stats().numDocs()).isEqualTo(1);
     }
 
     @Test
@@ -147,7 +149,7 @@ class OpenIndexHandlerTest {
             assertThat(skipped.path()).isEqualTo(broken.toString());
             assertThat(skipped.message()).startsWith("Corrupt index, missing file");
         });
-        assertThat(currentIndex.readable().maxDoc()).isEqualTo(5);
+        assertThat(currentIndex.runtime().index().maxDoc()).isEqualTo(5);
     }
 
     @Test
@@ -167,11 +169,11 @@ class OpenIndexHandlerTest {
                         List.of(),
                         Feature.withoutReader(),
                         Version.LATEST.toString()));
-        assertThat(currentIndex.opened()).isInstanceOf(DirectoryOnlyIndex.class);
+        assertThat(currentIndex.opened()).isInstanceOf(OpenDirectories.class);
         for (ThrowingCallable call : List.<ThrowingCallable>of(
                 () -> new GetIndexStatsHandler(currentIndex).handle(new GetIndexStatsParams()),
                 () -> new ReopenIndexHandler(currentIndex).handle(new ReopenIndexParams()),
-                currentIndex::readable)) {
+                currentIndex::runtime)) {
             assertThatThrownBy(call)
                     .isInstanceOfSatisfying(
                             RpcException.class, e -> assertThat(e.code()).isEqualTo(ErrorCode.NO_READER))

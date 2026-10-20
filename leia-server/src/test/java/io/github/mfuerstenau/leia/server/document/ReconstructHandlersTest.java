@@ -3,9 +3,6 @@ package io.github.mfuerstenau.leia.server.document;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import io.github.mfuerstenau.leia.core.DirectoryImpl;
-import io.github.mfuerstenau.leia.core.DirectoryOnlyIndex;
-import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.document.GetReconstructResult;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructSource;
@@ -16,7 +13,9 @@ import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.points.PointValue;
+import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.TestIndexes;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
@@ -57,7 +56,7 @@ class ReconstructHandlersTest {
 
     @Test
     void rebuildsTheGivenFields() throws Exception {
-        currentIndex.replace(ReadOnlyIndex.open(writeIndex()));
+        currentIndex.replace(TestIndexes.open(writeIndex()));
 
         long jobId = start.handle(new StartReconstructParams(0, Optional.of(List.of("title", "id"))))
                 .jobId();
@@ -85,7 +84,7 @@ class ReconstructHandlersTest {
 
     @Test
     void rebuildsThePointsOfAPointField() throws Exception {
-        currentIndex.replace(ReadOnlyIndex.open(writeIndex()));
+        currentIndex.replace(TestIndexes.open(writeIndex()));
 
         long jobId = start.handle(new StartReconstructParams(1, Optional.of(List.of("location", "id"))))
                 .jobId();
@@ -103,7 +102,7 @@ class ReconstructHandlersTest {
 
     @Test
     void rebuildsEveryFieldWithTermsOrPointsWithoutFields() throws Exception {
-        currentIndex.replace(ReadOnlyIndex.open(writeIndex()));
+        currentIndex.replace(TestIndexes.open(writeIndex()));
 
         long jobId =
                 start.handle(new StartReconstructParams(1, Optional.empty())).jobId();
@@ -116,7 +115,7 @@ class ReconstructHandlersTest {
     @Test
     void aCancelledJobIsGone() throws Exception {
         String words = IntStream.range(0, 200_000).mapToObj(i -> "w" + i).collect(Collectors.joining(" "));
-        currentIndex.replace(ReadOnlyIndex.open(writeIndex(words)));
+        currentIndex.replace(TestIndexes.open(writeIndex(words)));
 
         long jobId = start.handle(new StartReconstructParams(0, Optional.of(List.of("title"))))
                 .jobId();
@@ -127,7 +126,7 @@ class ReconstructHandlersTest {
 
     @Test
     void checksTheParamsAtOnce() throws Exception {
-        currentIndex.replace(ReadOnlyIndex.open(writeIndex()));
+        currentIndex.replace(TestIndexes.open(writeIndex()));
 
         assertFails(() -> start.handle(new StartReconstructParams(2, Optional.empty())), ErrorCode.DOC_NOT_FOUND);
         assertThatThrownBy(() -> start.handle(new StartReconstructParams(0, Optional.of(List.of("nope")))))
@@ -142,7 +141,7 @@ class ReconstructHandlersTest {
 
     @Test
     void needsAReader() throws Exception {
-        currentIndex.replace(DirectoryOnlyIndex.open(writeIndex(), DirectoryImpl.FS));
+        currentIndex.replace(TestIndexes.withoutReader(writeIndex(), DirectoryKind.FS));
 
         assertFails(() -> start.handle(new StartReconstructParams(0, Optional.empty())), ErrorCode.NO_READER);
     }

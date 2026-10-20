@@ -1,15 +1,12 @@
 package io.github.mfuerstenau.leia.server.index;
 
-import io.github.mfuerstenau.leia.core.DirectoryOnlyIndex;
-import io.github.mfuerstenau.leia.core.IndexSummary;
-import io.github.mfuerstenau.leia.core.OpenedIndex;
-import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.runtime.IndexVersion;
+import io.github.mfuerstenau.leia.server.runtime.OpenDirectories;
 import io.github.mfuerstenau.leia.server.runtime.OpenRuntime;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import io.github.mfuerstenau.leia.server.runtime.SegmentsHeader;
@@ -21,25 +18,21 @@ import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
-import org.apache.lucene.index.SegmentInfos;
-import org.apache.lucene.util.Version;
 
 /**
- * The index directories of the open path, of either kind of open index, and the Lucene that reads
- * each (ADR 0045): the one place that lists them for the commits and the check, which read a
- * directory anew, without the open reader.
+ * The index directories of the open path, with or without a reader, and the runtime that reads
+ * each (ADR 0045, ADR 0071): the one place that lists them for the commits and the check, which read
+ * a directory anew, without the open reader.
  */
 public final class IndexDirectories {
 
     private final CurrentIndex currentIndex;
     private final Runtimes runtimes;
-    private final Routing routing;
 
     @Inject
-    public IndexDirectories(CurrentIndex currentIndex, Runtimes runtimes, Routing routing) {
+    public IndexDirectories(CurrentIndex currentIndex, Runtimes runtimes) {
         this.currentIndex = currentIndex;
         this.runtimes = runtimes;
-        this.routing = routing;
     }
 
     /**
@@ -57,17 +50,22 @@ public final class IndexDirectories {
         }
     }
 
-    /** Which Lucene reads an index directory. */
+    /** Which runtime reads an index directory. */
     public sealed interface Route {
-
-        /** Lucene 10, through leia-core. */
-        record Core() implements Route {}
 
         /** A runtime of {@code leia-runtime} (ADR 0044). */
         record Runtime(LuceneRuntime runtime) implements Route {}
 
-        /** A runtime that isn't loaded. */
-        record Missing(IndexVersion version) implements Route {
+        /**
+         * A runtime that isn't loaded.
+         *
+         * @param version the index's version; empty if it can't be detected
+         */
+        record Missing(Optional<IndexVersion> version) implements Route {
+
+            public Missing(IndexVersion version) {
+                this(Optional.of(version));
+            }
 
             /** The error of a method that needs the runtime, naming its jar. */
             public RpcException error(Path dir) {
@@ -75,8 +73,10 @@ public final class IndexDirectories {
             }
 
             public String message(Path dir) {
-                return "The index was written by Lucene " + version.writtenBy() + "; reading it needs the runtime "
-                        + Runtimes.jarFor(version.major()).orElse("for Lucene " + version.major())
+                return version.map(found -> "The index was written by Lucene " + found.writtenBy()
+                                        + "; reading it needs the runtime "
+                                        + Runtimes.jarFor(found.major()).orElse("for Lucene " + found.major()))
+                                .orElse("Reading the index needs the runtime " + Runtimes.LATEST_JAR)
                         + ", which isn't loaded: " + dir;
             }
         }
@@ -89,41 +89,40 @@ public final class IndexDirectories {
      */
     public List<IndexDirectory> all() throws RpcException {
         List<IndexDirectory> all = new ArrayList<>();
-        if (currentIndex.runtime().isPresent()) {
-            OpenRuntime open = currentIndex.runtime().get();
-            RuntimeIndex index = open.index();
-            List<RuntimeIndex.IndexStats> stats;
-            try {
-                stats = index.stats().indexes();
-            } catch (IOException e) {
-                throw new RpcException(
-                        ErrorCode.INDEX_NOT_READABLE, "Cannot read the index statistics: " + e.getMessage(), e);
+        switch (currentIndex.opened()) {
+            case OpenRuntime open -> {
+                RuntimeIndex index = open.index();
+                List<RuntimeIndex.IndexStats> stats;
+                try {
+                    stats = index.stats().indexes();
+                } catch (IOException e) {
+                    throw new RpcException(
+                            ErrorCode.INDEX_NOT_READABLE, "Cannot read the index statistics: " + e.getMessage(), e);
+                }
+                for (int i = 0; i < stats.size(); i++) {
+                    all.add(new IndexDirectory(
+                            stats.get(i).path(),
+                            index.directory(),
+                            OptionalInt.of(i),
+                            OptionalLong.of(stats.get(i).generation()),
+                            new Route.Runtime(open.runtime())));
+                }
+                for (RuntimeIndex.Skipped skipped : open.skipped()) {
+                    all.add(new IndexDirectory(
+                            skipped.path(),
+                            index.directory(),
+                            OptionalInt.empty(),
+                            OptionalLong.empty(),
+                            route(skipped.path())));
+                }
             }
-            for (int i = 0; i < stats.size(); i++) {
-                all.add(new IndexDirectory(
-                        stats.get(i).path(),
-                        index.directory(),
-                        OptionalInt.of(i),
-                        OptionalLong.of(stats.get(i).generation()),
-                        new Route.Runtime(open.runtime())));
+            case OpenDirectories open -> {
+                List<Path> dirs = open.directories();
+                for (int i = 0; i < dirs.size(); i++) {
+                    all.add(new IndexDirectory(
+                            dirs.get(i), open.kind(), OptionalInt.of(i), OptionalLong.empty(), route(dirs.get(i))));
+                }
             }
-            for (RuntimeIndex.Skipped skipped : open.skipped()) {
-                all.add(skipped(skipped.path(), index.directory()));
-            }
-            return List.copyOf(all);
-        }
-        OpenedIndex opened = currentIndex.opened();
-        DirectoryKind kind = DirectoryKind.valueOf(opened.directoryImpl().name());
-        List<Path> dirs = opened.directories();
-        for (int i = 0; i < dirs.size(); i++) {
-            OptionalLong generation = switch (opened) {
-                case ReadOnlyIndex readOnly -> generation(readOnly.indexes().get(i));
-                case DirectoryOnlyIndex _ -> OptionalLong.empty();
-            };
-            all.add(new IndexDirectory(dirs.get(i), kind, OptionalInt.of(i), generation, route(dirs.get(i))));
-        }
-        for (Path dir : opened.skippedDirectories()) {
-            all.add(skipped(dir, kind));
         }
         return List.copyOf(all);
     }
@@ -144,29 +143,23 @@ public final class IndexDirectories {
         return opened.get(position);
     }
 
-    private IndexDirectory skipped(Path dir, DirectoryKind kind) {
-        return new IndexDirectory(dir, kind, OptionalInt.empty(), OptionalLong.empty(), route(dir));
-    }
-
-    private static OptionalLong generation(IndexSummary summary) {
-        return OptionalLong.of(SegmentInfos.generationFromSegmentsFileName(summary.segmentsFile()));
-    }
-
     /**
-     * The Lucene that reads {@code dir}, by the version of its newest {@code segments_N} (ADR 0044
-     * §3): an old one that a loaded runtime reads goes to it, one before 4.0 without a runtime is
-     * missing it, and every other one goes to Lucene 10, as 4.x to 8.x do without a reader. With
-     * {@link Routing#lucene10Runtime()}, one of Lucene 9 or 10 goes to a runtime too, if one reads it.
+     * The runtime that reads {@code dir}, by the version of its newest {@code segments_N} (ADR 0044
+     * §3, ADR 0071): the one for its major; for a major newer than any runtime reads, or a version that
+     * can't be detected, the one for the newest indexes ({@link Runtimes#latest()}), which then reports
+     * the format error itself.
      */
     public Route route(Path dir) {
-        Optional<IndexVersion> version = SegmentsHeader.read(dir);
-        if (version.isEmpty() || routing.core(version.get().major(), Version.MIN_SUPPORTED_MAJOR)) {
-            return new Route.Core();
+        return route(SegmentsHeader.read(dir));
+    }
+
+    /** As {@link #route(Path)}, for the version of a directory. */
+    public Route route(Optional<IndexVersion> version) {
+        if (version.isPresent() && !runtimes.newerThanAll(version.get().major())) {
+            return runtimes.forMajor(version.get().major())
+                    .<Route>map(Route.Runtime::new)
+                    .orElseGet(() -> new Route.Missing(version));
         }
-        Optional<LuceneRuntime> runtime = runtimes.forMajor(version.get().major());
-        if (runtime.isPresent()) {
-            return new Route.Runtime(runtime.get());
-        }
-        return version.get().major() < 4 ? new Route.Missing(version.get()) : new Route.Core();
+        return runtimes.latest().<Route>map(Route.Runtime::new).orElseGet(() -> new Route.Missing(version));
     }
 }

@@ -4,7 +4,6 @@ import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.server.RpcException;
-import java.io.Closeable;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
@@ -18,7 +17,7 @@ import java.util.stream.Collectors;
  *     found: those the runtime failed to open and those it doesn't read
  */
 public record OpenRuntime(Path path, LuceneRuntime runtime, RuntimeIndex index, List<RuntimeIndex.Skipped> skipped)
-        implements Closeable {
+        implements OpenIndex {
 
     public OpenRuntime {
         skipped = List.copyOf(skipped);

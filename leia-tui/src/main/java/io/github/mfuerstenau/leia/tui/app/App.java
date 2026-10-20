@@ -110,6 +110,9 @@ import java.util.Set;
  */
 public final class App {
 
+    /** The major of the Lucene that reads the newest indexes, leia-lucene10's (ADR 0071). */
+    static final int NEWEST_LUCENE_MAJOR = 10;
+
     private final VersionResult version;
 
     /** The directory that {@code ~} stands for in the prompt. */
@@ -345,7 +348,7 @@ public final class App {
                 stats.indexes().stream().map(IndexCommitStats::path).toList(),
                 skipped.stream().map(SkippedIndex::path).toList(),
                 features,
-                features.containsAll(Feature.all())
+                readByTheNewestLucene(luceneRuntime)
                         ? Optional.empty()
                         : Optional.of("Lucene " + stats.indexes().getFirst().createdVersionMajor() + ".x, read with "
                                 + luceneRuntime));
@@ -659,6 +662,12 @@ public final class App {
     public void componentsFailed(String error) {
         analysisCalls--;
         analysis.componentsFailed(error);
+    }
+
+    /** No loaded runtime has analysis (ADR 0071): {@code getAnalysisComponents} is {@code NOT_SUPPORTED}. */
+    public void noAnalysis() {
+        analysisCalls--;
+        analysis.noAnalysis();
     }
 
     /** Whether the analysis screen waits for a reply. */
@@ -1894,18 +1903,25 @@ public final class App {
             case DOCUMENTS -> opened.supports(Feature.DOCUMENTS);
             case TERMS -> opened.supports(Feature.TERMS);
             case COMMITS -> opened.supports(Feature.COMMITS);
-            case SEARCH ->
-                opened.supports(Feature.SEARCH)
-                        || opened.supports(Feature.CLASSIC_SEARCH)
-                        || opened.supports(Feature.TERM_SEARCH);
+            case SEARCH -> opened.supports(Feature.CLASSIC_SEARCH) || opened.supports(Feature.TERM_SEARCH);
             case ANALYSIS -> true;
             case CHECK -> opened.supports(Feature.CHECK_INDEX);
         };
     }
 
-    /** Whether the open index can search a term: with all of search, or term queries alone (ADR 0058). */
+    /** Whether the open index can search a term (ADR 0058). */
     private boolean searchesTerms() {
-        return opened.supports(Feature.SEARCH) || opened.supports(Feature.TERM_SEARCH);
+        return opened.supports(Feature.TERM_SEARCH);
+    }
+
+    /**
+     * Whether {@code luceneRuntime}, such as {@code 10.5.2}, is the Lucene that reads the newest
+     * indexes, of {@link #NEWEST_LUCENE_MAJOR}; an empty version, as from {@link
+     * #opened(GetIndexStatsResult, List)}, stands for it too. Then the tab line says nothing about it;
+     * an older one it names, since it explains what the index lacks.
+     */
+    private static boolean readByTheNewestLucene(String luceneRuntime) {
+        return luceneRuntime.isEmpty() || luceneRuntime.startsWith(NEWEST_LUCENE_MAJOR + ".");
     }
 
     /**

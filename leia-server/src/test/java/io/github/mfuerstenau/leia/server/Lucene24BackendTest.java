@@ -96,17 +96,21 @@ class Lucene24BackendTest {
                         Feature.CHECK_INDEX,
                         Feature.REOPEN,
                         Feature.RECONSTRUCT)
-                .doesNotContain(Feature.SEARCH, Feature.POINTS, Feature.CHECK_LEVELS);
+                .doesNotContain(Feature.SCORING, Feature.POINTS, Feature.CHECK_LEVELS);
         ReaderInfo reader = opened.indexes().getFirst().reader().orElseThrow();
         assertThat(reader.createdVersionMajor()).isEqualTo(2);
         assertThat(reader.minSegmentLuceneVersion()).contains("2.x");
     }
 
     @Test
-    void aLucene10IndexHasEveryFeature() throws Exception {
+    void aLucene9IndexHasEveryFeatureItsDataAllows() throws Exception {
         OpenIndexResult lucene9 = backend.call(
                 Methods.OPEN_INDEX, new OpenIndexParams(testIndex("lucene9").toString()));
-        assertThat(lucene9.features()).containsExactlyInAnyOrderElementsOf(Feature.all());
+        // It has no field with doc values (ADR 0071).
+        assertThat(lucene9.features())
+                .containsExactlyInAnyOrderElementsOf(Feature.all().stream()
+                        .filter(feature -> feature != Feature.DOC_VALUES)
+                        .toList());
         assertThat(lucene9.luceneRuntime()).startsWith("10.");
     }
 

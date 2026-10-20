@@ -275,7 +275,12 @@ public final class Session {
                                 return;
                             }
                             RpcException rpc = rpcException(error, runner);
-                            if (rpc != null) {
+                            if (rpc != null && rpc.code() == ErrorCode.NOT_SUPPORTED) {
+                                reply(runner, app -> {
+                                    app.noAnalysis();
+                                    return Optional.empty();
+                                });
+                            } else if (rpc != null) {
                                 String message = describe(rpc);
                                 reply(runner, app -> {
                                     app.componentsFailed(message);

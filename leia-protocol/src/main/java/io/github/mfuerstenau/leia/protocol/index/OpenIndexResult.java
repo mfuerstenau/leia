@@ -17,7 +17,8 @@ import java.util.Set;
  * @param features what works on the opened index; other methods give {@code NOT_SUPPORTED} or
  *     {@code NO_READER} (ADR 0044)
  * @param luceneRuntime the version of the Lucene that reads the index, such as {@code 10.5.2}, or
- *     {@code 3.6.2} for an index written by Lucene 2.x or 3.x (ADR 0044)
+ *     {@code 3.6.2} for an index written by Lucene 2.x or 3.x (ADR 0044); empty for one opened without
+ *     a reader whose runtime isn't loaded (ADR 0071)
  */
 public record OpenIndexResult(
         String path,

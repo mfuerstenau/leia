@@ -477,19 +477,19 @@ public final class Documents {
         return features.containsAll(List.of(needed));
     }
 
-    /** Whether {@code N} can search the nearest vectors: with any search, as a runtime has (ADR 0049). */
+    /** Whether {@code N} can search the nearest vectors, with the classic search (ADR 0049). */
     private boolean nearest() {
-        return supports(Feature.KNN_VECTORS) && (supports(Feature.SEARCH) || supports(Feature.CLASSIC_SEARCH));
+        return supports(Feature.KNN_VECTORS) && supports(Feature.CLASSIC_SEARCH);
     }
 
-    /** Whether {@code s} can search a doc value: with all of search, or doc values queries (ADR 0066). */
+    /** Whether {@code s} can search a doc value (ADR 0066). */
     private boolean searchesValues() {
-        return supports(Feature.DOC_VALUES) && (supports(Feature.SEARCH) || supports(Feature.DOC_VALUES_SEARCH));
+        return supports(Feature.DOC_VALUES) && supports(Feature.DOC_VALUES_SEARCH);
     }
 
-    /** Whether {@code m} can find similar documents: with all of search, or More-Like-This (ADR 0066). */
+    /** Whether {@code m} can find similar documents (ADR 0066). */
     private boolean findsSimilar() {
-        return supports(Feature.SEARCH) || supports(Feature.MORE_LIKE_THIS);
+        return supports(Feature.MORE_LIKE_THIS);
     }
 
     /** What the index says about the field {@code name}; empty if it doesn't know it. */

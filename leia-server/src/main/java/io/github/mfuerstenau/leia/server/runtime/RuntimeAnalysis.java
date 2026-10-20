@@ -1,5 +1,6 @@
 package io.github.mfuerstenau.leia.server.runtime;
 
+import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeParams;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeResult;
 import io.github.mfuerstenau.leia.protocol.analysis.AvailableAnalyzer;
@@ -20,11 +21,16 @@ import java.util.List;
 
 /**
  * The analysis tab of a runtime (ADR 0067), mapped to the protocol's records as {@code
- * GetAnalysisComponentsHandler} and {@code AnalyzeHandler} map leia-core's.
+ * GetAnalysisComponentsHandler} and {@code AnalyzeHandler} return them.
  *
  * @param runtime the runtime that {@code analysis} belongs to
  */
 public record RuntimeAnalysis(LuceneRuntime runtime, Analysis analysis) {
+
+    /** What the analysis tab's methods fail with when no loaded runtime has one (ADR 0071). */
+    public static RpcException notSupported() {
+        return new RpcException(ErrorCode.NOT_SUPPORTED, "No loaded runtime has analysis");
+    }
 
     /** {@code getAnalysisComponents}. */
     public GetAnalysisComponentsResult components() {

@@ -3,20 +3,18 @@ package io.github.mfuerstenau.leia.server.terms;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import io.github.mfuerstenau.leia.core.DirectoryImpl;
-import io.github.mfuerstenau.leia.core.DirectoryOnlyIndex;
-import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.terms.ExportTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetExportTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.StartExportTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.TermDelimiter;
+import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.TestIndexes;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.index.IndexDirectories;
-import io.github.mfuerstenau.leia.server.index.Routing;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import java.nio.file.Files;
@@ -44,8 +42,8 @@ class ExportTermsHandlersTest {
 
     private final Jobs jobs = new Jobs();
     private final CurrentIndex currentIndex = new CurrentIndex(jobs, new Filters());
-    private final StartExportTermsHandler start = new StartExportTermsHandler(
-            currentIndex, new IndexDirectories(currentIndex, new Runtimes(), Routing.DEFAULT), jobs);
+    private final StartExportTermsHandler start =
+            new StartExportTermsHandler(currentIndex, new IndexDirectories(currentIndex, new Runtimes()), jobs);
     private final GetExportTermsHandler get = new GetExportTermsHandler(jobs);
 
     @Test
@@ -119,7 +117,7 @@ class ExportTermsHandlersTest {
     @Test
     void needsAReader() throws Exception {
         Path dir = openIndex();
-        currentIndex.replace(DirectoryOnlyIndex.open(dir, DirectoryImpl.FS));
+        currentIndex.replace(TestIndexes.withoutReader(dir, DirectoryKind.FS));
 
         assertFails(
                 () -> start.handle(
@@ -146,7 +144,7 @@ class ExportTermsHandlersTest {
                 writer.addDocument(doc);
             }
         }
-        currentIndex.replace(ReadOnlyIndex.open(dir));
+        currentIndex.replace(TestIndexes.open(dir));
         return dir;
     }
 

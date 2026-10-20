@@ -9,7 +9,6 @@ import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.Scoring;
 import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.RpcException;
-import io.github.mfuerstenau.leia.server.search.SearchQueries;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -19,21 +18,27 @@ import org.apache.lucene.util.BytesRef;
 /**
  * The similarity and sort of {@code startSearch} and {@code startExplain} on a runtime with a {@link
  * Scoring} group (ADR 0064). They are checked here, with the errors and messages that Lucene 10 gives
- * ({@link SearchQueries}, leia-core's {@code SortType}), before the runtime gets them.
+ * (Lucene's {@code BM25Similarity}, leia-core's {@code SortType}), before the runtime gets them.
  */
 final class RuntimeScoring {
 
     private RuntimeScoring() {}
 
     /**
-     * The runtime's similarity for {@code similarity}.
+     * The runtime's similarity for {@code similarity}, checked as Lucene 10 checks it.
      *
      * @throws RpcException {@code INVALID_PARAMS} unless exactly one alternative is present, or for
      *     BM25 parameters out of range
      */
     static Scoring.Similarity similarity(Similarity similarity) throws RpcException {
-        // Checks it as Lucene 10 does.
-        SearchQueries.similarity(similarity);
+        long present = Stream.of(similarity.bm25(), similarity.classic(), similarity.booleanSimilarity())
+                .filter(alternative -> alternative.isPresent())
+                .count();
+        if (present != 1) {
+            throw new RpcException(
+                    ErrorCode.INVALID_PARAMS,
+                    "Invalid params: the similarity needs exactly one of bm25, classic and boolean");
+        }
         if (similarity.classic().isPresent()) {
             return new Scoring.Similarity.Classic();
         }
@@ -41,12 +46,27 @@ final class RuntimeScoring {
             return new Scoring.Similarity.Bool();
         }
         var bm25 = similarity.bm25().orElseThrow();
+        // In the words of Lucene's BM25Similarity.
+        if (!Float.isFinite(bm25.k1()) || bm25.k1() < 0) {
+            throw new RpcException(
+                    ErrorCode.INVALID_PARAMS,
+                    "Invalid params: illegal k1 value: " + bm25.k1() + ", must be a non-negative finite value");
+        }
+        if (Float.isNaN(bm25.b()) || bm25.b() < 0 || bm25.b() > 1) {
+            throw new RpcException(
+                    ErrorCode.INVALID_PARAMS,
+                    "Invalid params: illegal b value: " + bm25.b() + ", must be between 0 and 1");
+        }
         return new Scoring.Similarity.Bm25(bm25.k1(), bm25.b());
     }
 
-    /** How a job names {@code similarity}, as Lucene 10's {@code toString} does. */
+    /** How a job names {@code similarity}, as Lucene's {@code toString} does. */
     static String describe(Similarity similarity) throws RpcException {
-        return SearchQueries.similarity(similarity).toString();
+        return switch (similarity(similarity)) {
+            case Scoring.Similarity.Bm25 bm25 -> "BM25(k1=" + bm25.k1() + ",b=" + bm25.b() + ")";
+            case Scoring.Similarity.Classic _ -> "ClassicSimilarity";
+            case Scoring.Similarity.Bool _ -> "BooleanSimilarity";
+        };
     }
 
     /**

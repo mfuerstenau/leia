@@ -36,7 +36,7 @@ class RuntimeFeaturesTest {
             "5.5.5", "lucene5",
             "7.7.3", "lucene7",
             "9.12.3", "lucene8to9",
-            "10.5.2", "lucene9");
+            "10.5.2", "demo");
 
     /** The table: its features in their order, and each column's features. */
     private record Table(List<Feature> rows, Map<String, Set<Feature>> columns) {}

@@ -4,9 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
-import io.github.mfuerstenau.leia.core.DirectoryImpl;
-import io.github.mfuerstenau.leia.core.DirectoryOnlyIndex;
-import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanResult;
@@ -15,7 +12,9 @@ import io.github.mfuerstenau.leia.protocol.search.Snippet;
 import io.github.mfuerstenau.leia.protocol.search.StartStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.search.StoredScanHit;
 import io.github.mfuerstenau.leia.protocol.search.StoredScanResult;
+import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.TestIndexes;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
@@ -55,7 +54,7 @@ class StoredScanHandlersTest {
 
     @Test
     void scansTheStoredValuesAndStreamsTheHits() throws Exception {
-        currentIndex.replace(ReadOnlyIndex.open(writeIndex()));
+        currentIndex.replace(TestIndexes.open(writeIndex()));
 
         long jobId = start.handle(params("RED", true, Optional.empty(), false)).jobId();
         List<StoredScanHit> hits = new ArrayList<>();
@@ -78,7 +77,7 @@ class StoredScanHandlersTest {
 
     @Test
     void scansTheGivenFieldsCaseSensitivelyAndDeletedDocumentsWhenAsked() throws Exception {
-        currentIndex.replace(ReadOnlyIndex.open(writeIndex()));
+        currentIndex.replace(TestIndexes.open(writeIndex()));
 
         List<StoredScanHit> hits = new ArrayList<>();
         awaitDone(
@@ -94,7 +93,7 @@ class StoredScanHandlersTest {
 
     @Test
     void returnsTheHitsFromTheGivenOne() throws Exception {
-        currentIndex.replace(ReadOnlyIndex.open(writeIndex()));
+        currentIndex.replace(TestIndexes.open(writeIndex()));
 
         GetStoredScanResult fromOne = awaitOutcome(
                 start.handle(params("red", true, Optional.empty(), false)).jobId(), 1);
@@ -111,7 +110,7 @@ class StoredScanHandlersTest {
 
     @Test
     void rejectsAPatternThatDoesNotCompile() throws Exception {
-        currentIndex.replace(ReadOnlyIndex.open(writeIndex()));
+        currentIndex.replace(TestIndexes.open(writeIndex()));
 
         assertThatThrownBy(() -> start.handle(params("(red|", false, Optional.empty(), false)))
                 .isInstanceOfSatisfying(RpcException.class, e -> {
@@ -122,7 +121,7 @@ class StoredScanHandlersTest {
 
     @Test
     void rejectsAnUnknownField() throws Exception {
-        currentIndex.replace(ReadOnlyIndex.open(writeIndex()));
+        currentIndex.replace(TestIndexes.open(writeIndex()));
 
         assertFails(
                 () -> start.handle(params("red", false, Optional.of(List.of("titel")), false)),
@@ -131,7 +130,7 @@ class StoredScanHandlersTest {
 
     @Test
     void needsAReader() throws Exception {
-        currentIndex.replace(DirectoryOnlyIndex.open(writeIndex(), DirectoryImpl.FS));
+        currentIndex.replace(TestIndexes.withoutReader(writeIndex(), DirectoryKind.FS));
 
         assertFails(() -> start.handle(params("red", false, Optional.empty(), false)), ErrorCode.NO_READER);
     }
@@ -143,7 +142,7 @@ class StoredScanHandlersTest {
 
     @Test
     void rejectsANegativeHit() throws Exception {
-        currentIndex.replace(ReadOnlyIndex.open(writeIndex()));
+        currentIndex.replace(TestIndexes.open(writeIndex()));
         long jobId = start.handle(params("red", false, Optional.empty(), false)).jobId();
 
         assertFails(() -> get.handle(new GetStoredScanParams(jobId, -1)), ErrorCode.INVALID_PARAMS);

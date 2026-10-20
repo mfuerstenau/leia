@@ -1,38 +1,28 @@
 package io.github.mfuerstenau.leia.server.analysis;
 
-import io.github.mfuerstenau.leia.core.AnalysisComponents;
-import io.github.mfuerstenau.leia.core.Analyzers;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
-import io.github.mfuerstenau.leia.protocol.analysis.AvailableAnalyzer;
-import io.github.mfuerstenau.leia.protocol.analysis.AvailableComponent;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsParams;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsResult;
-import io.github.mfuerstenau.leia.protocol.analysis.PresetOption;
-import io.github.mfuerstenau.leia.protocol.analysis.WordSetSupport;
 import io.github.mfuerstenau.leia.server.MethodHandler;
-import io.github.mfuerstenau.leia.server.index.Routing;
+import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeAnalysis;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import jakarta.inject.Inject;
-import java.util.List;
-import java.util.Optional;
 
 /**
  * {@code getAnalysisComponents}: the preset analyzers, and the word sets and options they take (ADR
- * 0015, ADR 0017, ADR 0023), and what a custom analyzer can be built from (ADR 0014). With {@link
- * Routing#lucene10Runtime()}, those of the first runtime with an analysis tab (ADR 0067).
+ * 0015, ADR 0017, ADR 0023), and what a custom analyzer can be built from (ADR 0014): those of the
+ * first runtime with an analysis tab (ADR 0067); without one, it is {@code NOT_SUPPORTED} (ADR 0071).
  */
 public final class GetAnalysisComponentsHandler
         implements MethodHandler<GetAnalysisComponentsParams, GetAnalysisComponentsResult> {
 
     private final Runtimes runtimes;
-    private final Routing routing;
 
     @Inject
-    GetAnalysisComponentsHandler(Runtimes runtimes, Routing routing) {
+    GetAnalysisComponentsHandler(Runtimes runtimes) {
         this.runtimes = runtimes;
-        this.routing = routing;
     }
 
     @Override
@@ -41,50 +31,7 @@ public final class GetAnalysisComponentsHandler
     }
 
     @Override
-    public GetAnalysisComponentsResult handle(GetAnalysisComponentsParams params) {
-        Optional<RuntimeAnalysis> analysis = routing.lucene10Runtime() ? runtimes.analysis() : Optional.empty();
-        if (analysis.isPresent()) {
-            return analysis.get().components();
-        }
-        AnalysisComponents components = Analyzers.components();
-        return new GetAnalysisComponentsResult(
-                components.analyzers().stream()
-                        .map(analyzer -> new AvailableAnalyzer(
-                                analyzer.name(),
-                                analyzer.className(),
-                                support(analyzer.stopwords()),
-                                support(analyzer.stemExclusion()),
-                                analyzer.options().stream()
-                                        .map(GetAnalysisComponentsHandler::option)
-                                        .toList()))
-                        .toList(),
-                available(components.charFilters()),
-                available(components.tokenizers()),
-                available(components.tokenFilters()));
-    }
-
-    private static WordSetSupport support(io.github.mfuerstenau.leia.core.WordSetSupport support) {
-        return switch (support) {
-            case NONE -> WordSetSupport.NONE;
-            case OPTIONAL -> WordSetSupport.OPTIONAL;
-            case REQUIRED -> WordSetSupport.REQUIRED;
-        };
-    }
-
-    private static PresetOption option(io.github.mfuerstenau.leia.core.PresetOption option) {
-        return switch (option) {
-            case MAX_TOKEN_LENGTH -> PresetOption.MAX_TOKEN_LENGTH;
-            case STEM_OVERRIDE -> PresetOption.STEM_OVERRIDE;
-            case JAPANESE -> PresetOption.JAPANESE;
-            case KOREAN -> PresetOption.KOREAN;
-            case COLLATION -> PresetOption.COLLATION;
-            case JAPANESE_COMPLETION -> PresetOption.JAPANESE_COMPLETION;
-        };
-    }
-
-    private static List<AvailableComponent> available(List<AnalysisComponents.Available> components) {
-        return components.stream()
-                .map(component -> new AvailableComponent(component.name(), component.className()))
-                .toList();
+    public GetAnalysisComponentsResult handle(GetAnalysisComponentsParams params) throws RpcException {
+        return runtimes.analysis().orElseThrow(RuntimeAnalysis::notSupported).components();
     }
 }

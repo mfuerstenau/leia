@@ -73,9 +73,10 @@ class RuntimesTest {
         assertThat(Runtimes.jarFor(6)).contains("leia-lucene7.jar");
         assertThat(Runtimes.jarFor(7)).contains("leia-lucene7.jar");
         assertThat(Runtimes.jarFor(8)).contains("leia-lucene9.jar");
+        assertThat(Runtimes.jarFor(9)).contains("leia-lucene10.jar");
+        assertThat(Runtimes.jarFor(10)).contains("leia-lucene10.jar");
         assertThat(Runtimes.jarFor(1)).isEmpty();
-        assertThat(Runtimes.jarFor(9)).isEmpty();
-        assertThat(Runtimes.jarFor(10)).isEmpty();
+        assertThat(Runtimes.jarFor(11)).isEmpty();
     }
 
     @Test

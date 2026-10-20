@@ -861,7 +861,9 @@ class SessionPilotTest {
     void aRegexScanFindsValuesAndViewsOne() throws Exception {
         openAtStart(writeBodies(tmp.resolve("index"), "red fox", "blue fox", "red lamp"), OpenMode.READER);
         pilot.press('5');
-        for (int i = 0; i < 7; i++) {
+        // Classic, standard, term, like, like text, regex: without doc values or vectors, their
+        // modes aren't offered (ADR 0071).
+        for (int i = 0; i < 5; i++) {
             pilot.press('m');
         }
         pilot.press('/');

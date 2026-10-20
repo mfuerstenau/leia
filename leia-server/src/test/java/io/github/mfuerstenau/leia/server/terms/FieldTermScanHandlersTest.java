@@ -3,14 +3,15 @@ package io.github.mfuerstenau.leia.server.terms;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.terms.FieldTerms;
 import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
 import io.github.mfuerstenau.leia.protocol.terms.StartFieldTermScanParams;
 import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
+import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.TestIndexes;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
@@ -105,12 +106,8 @@ class FieldTermScanHandlersTest {
         // An offset into a larger array, which the hex must respect.
         BytesRef bytes = new BytesRef(new byte[] {0x61, (byte) 0xff, 0x00, 0x41, 0x62}, 1, 3);
 
-        assertThat(StartFieldTermScanHandler.topTerm(
-                        new io.github.mfuerstenau.leia.core.FieldTerms.TopTerm(bytes, 2, 5)))
-                .isEqualTo(new TopTerm("ff0041", true, 2, 5));
-        assertThat(StartFieldTermScanHandler.topTerm(
-                        new io.github.mfuerstenau.leia.core.FieldTerms.TopTerm(new BytesRef("grüße"), 1, 1)))
-                .isEqualTo(new TopTerm("grüße", false, 1, 1));
+        assertThat(ByteStrings.encode(bytes)).isEqualTo(new ByteStrings.Encoded("ff0041", true));
+        assertThat(ByteStrings.encode(new BytesRef("grüße"))).isEqualTo(new ByteStrings.Encoded("grüße", false));
     }
 
     /** One segment: "red blue red" and "red green". */
@@ -126,7 +123,7 @@ class FieldTermScanHandlersTest {
                 writer.addDocument(doc);
             }
         }
-        currentIndex.replace(ReadOnlyIndex.open(dir));
+        currentIndex.replace(TestIndexes.open(dir));
     }
 
     private GetFieldTermScanResult awaitDone(long jobId) throws Exception {

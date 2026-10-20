@@ -3,16 +3,15 @@ package io.github.mfuerstenau.leia.server.analysis;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import io.github.mfuerstenau.leia.core.DirectoryImpl;
-import io.github.mfuerstenau.leia.core.DirectoryOnlyIndex;
-import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.analysis.AutoStopWords;
 import io.github.mfuerstenau.leia.protocol.analysis.FieldStopWords;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAutoStopWordsResult;
 import io.github.mfuerstenau.leia.protocol.analysis.StartAutoStopWordsParams;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
+import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.TestIndexes;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
@@ -48,7 +47,7 @@ class AutoStopWordsHandlersTest {
 
     @Test
     void findsTheWordsOfEveryIndexedField() throws Exception {
-        currentIndex.replace(ReadOnlyIndex.open(writeIndex()));
+        currentIndex.replace(TestIndexes.open(writeIndex()));
 
         // 4 documents: 40 % is 1, so a word in 2 or more.
         GetAutoStopWordsResult result =
@@ -66,7 +65,7 @@ class AutoStopWordsHandlersTest {
 
     @Test
     void findsTheWordsOfTheGivenFields() throws Exception {
-        currentIndex.replace(ReadOnlyIndex.open(writeIndex()));
+        currentIndex.replace(TestIndexes.open(writeIndex()));
 
         GetAutoStopWordsResult result = awaitDone(
                 start.handle(new StartAutoStopWordsParams(List.of("body"), OptionalInt.of(2), OptionalDouble.empty()))
@@ -78,7 +77,7 @@ class AutoStopWordsHandlersTest {
 
     @Test
     void checksTheThresholdAndTheFields() throws Exception {
-        currentIndex.replace(ReadOnlyIndex.open(writeIndex()));
+        currentIndex.replace(TestIndexes.open(writeIndex()));
 
         for (StartAutoStopWordsParams params : List.of(
                 new StartAutoStopWordsParams(List.of(), OptionalInt.empty(), OptionalDouble.empty()),
@@ -109,7 +108,7 @@ class AutoStopWordsHandlersTest {
             doc.add(new TextField("body", body.toString(), Field.Store.NO));
             writer.addDocument(doc);
         }
-        currentIndex.replace(ReadOnlyIndex.open(dir));
+        currentIndex.replace(TestIndexes.open(dir));
 
         long jobId = start.handle(new StartAutoStopWordsParams(List.of(), OptionalInt.of(0), OptionalDouble.empty()))
                 .jobId();
@@ -123,7 +122,7 @@ class AutoStopWordsHandlersTest {
     @Test
     void needsAReader() throws Exception {
         assertFails(() -> start.handle(percent(List.of(), 0.4)), ErrorCode.NO_INDEX_OPEN);
-        currentIndex.replace(DirectoryOnlyIndex.open(writeIndex(), DirectoryImpl.FS));
+        currentIndex.replace(TestIndexes.withoutReader(writeIndex(), DirectoryKind.FS));
         assertFails(() -> start.handle(percent(List.of(), 0.4)), ErrorCode.NO_READER);
     }
 

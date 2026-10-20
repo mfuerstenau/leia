@@ -9,7 +9,6 @@ import io.github.mfuerstenau.leia.protocol.jars.JarComponents;
 import io.github.mfuerstenau.leia.runtime.Extensions;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
-import io.github.mfuerstenau.leia.server.index.Routing;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import jakarta.inject.Inject;
 import java.nio.file.InvalidPathException;
@@ -27,12 +26,10 @@ public final class AddJarsHandler implements MethodHandler<AddJarsParams, AddJar
     private static final Logger LOG = Logger.getLogger(AddJarsHandler.class.getName());
 
     private final Runtimes runtimes;
-    private final Routing routing;
 
     @Inject
-    AddJarsHandler(Runtimes runtimes, Routing routing) {
+    AddJarsHandler(Runtimes runtimes) {
         this.runtimes = runtimes;
-        this.routing = routing;
     }
 
     @Override
@@ -55,7 +52,7 @@ public final class AddJarsHandler implements MethodHandler<AddJarsParams, AddJar
         }
         AddedJars added;
         try {
-            added = JarChain.add(paths, routing);
+            added = JarChain.add(paths);
         } catch (JarException e) {
             throw new RpcException(ErrorCode.INVALID_JAR, "Cannot add the jars: " + e.getMessage(), e);
         }

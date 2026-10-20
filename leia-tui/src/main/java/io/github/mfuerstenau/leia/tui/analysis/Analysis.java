@@ -121,8 +121,14 @@ public final class Analysis {
     /** The components, once fetched; null before. */
     private GetAnalysisComponentsResult components;
 
+    /** What the tab and the analyzer form say when no loaded runtime has analysis (ADR 0071). */
+    static final String NO_ANALYSIS = "No loaded runtime has analysis";
+
     /** Why the components could not be fetched; null otherwise. */
     private String componentsError;
+
+    /** Whether no loaded runtime has analysis (ADR 0071): then there are no components to list. */
+    private boolean noAnalysis;
 
     private final LineInput input = new LineInput("");
     private Origin origin;
@@ -219,7 +225,7 @@ public final class Analysis {
 
     /** Whether the components were fetched, or failed to be. */
     public boolean hasComponents() {
-        return components != null || componentsError != null;
+        return components != null || componentsError != null || noAnalysis;
     }
 
     public void componentsLoaded(GetAnalysisComponentsResult result) {
@@ -228,11 +234,23 @@ public final class Analysis {
         }
         components = result;
         componentsError = null;
+        noAnalysis = false;
     }
 
     public void componentsFailed(String error) {
         components = null;
         componentsError = error;
+        noAnalysis = false;
+    }
+
+    /** No loaded runtime has analysis (ADR 0071), which isn't an error: the tab says so. */
+    public void noAnalysis() {
+        components = null;
+        componentsError = null;
+        noAnalysis = true;
+        if (form != null) {
+            form.setNoAnalysis();
+        }
     }
 
     /**
@@ -337,6 +355,9 @@ public final class Analysis {
         if (key.isChar('b')) {
             // A field's first analyzer starts from the default one.
             form = new AnalyzerForm(settings.analyzer(field), Optional.ofNullable(components));
+            if (noAnalysis) {
+                form.setNoAnalysis();
+            }
             return Optional.empty();
         }
         if (key.isChar('r')) {
@@ -573,6 +594,9 @@ public final class Analysis {
         }
         if (componentsError != null) {
             lines.add(Line.styled("Cannot list the components: " + componentsError, Style.EMPTY.red()));
+        }
+        if (noAnalysis) {
+            lines.add(Line.from(NO_ANALYSIS));
         }
         return lines;
     }

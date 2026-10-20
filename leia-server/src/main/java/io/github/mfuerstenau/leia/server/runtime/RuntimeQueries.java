@@ -18,7 +18,6 @@ import io.github.mfuerstenau.leia.runtime.StandardSearch;
 import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.search.ParserChecks;
-import io.github.mfuerstenau.leia.server.search.SearchQueries;
 import java.nio.charset.StandardCharsets;
 import java.time.ZoneId;
 import java.util.Arrays;
@@ -33,7 +32,7 @@ import org.apache.lucene.util.BytesRef;
 /**
  * The standard, More-Like-This and doc values queries of {@code startSearch}, {@code startFilter},
  * {@code startExplain} and {@code startHighlight} on a runtime with their groups (ADR 0066). They are
- * checked here, with the errors and messages that Lucene 10 gives ({@link SearchQueries}), before the
+ * checked here, with the errors and messages that Lucene 10 gives, before the
  * runtime gets them.
  */
 final class RuntimeQueries {
@@ -52,6 +51,7 @@ final class RuntimeQueries {
     static Search.ParsedQuery standard(OpenRuntime open, Search search, StandardSearch group, StandardQuery standard)
             throws RpcException {
         RuntimeResults.checkField(open.index(), standard.defaultField());
+        ParserChecks.numbers(standard.options());
         Map<String, StandardSearch.PointType> points = new LinkedHashMap<>();
         for (PointField point : standard.points()) {
             RuntimeIndex.Field field = field(open.index(), point.field());
@@ -92,7 +92,7 @@ final class RuntimeQueries {
     }
 
     /**
-     * The dates of {@code options}, checked as {@code SearchQueries} checks them for Lucene 10
+     * The dates of {@code options}, checked as Lucene 10 checks them
      * ({@link ParserChecks}).
      *
      * @throws RpcException {@code FIELD_NOT_FOUND} for an unknown field of a date resolution; {@code

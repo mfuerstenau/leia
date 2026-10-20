@@ -7,6 +7,7 @@ import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import java.security.CodeSource;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -17,7 +18,7 @@ import java.util.Set;
 import java.util.logging.Logger;
 
 /**
- * The runtimes for indexes that Lucene 10 can't read (ADR 0044), found with {@link ServiceLoader}
+ * The runtimes that read the indexes (ADR 0044, ADR 0071), found with {@link ServiceLoader}
  * through the loader of the jars, {@link JarChain#classLoader()}. A runtime built for another
  * version of the interface, or one that can't be loaded, is refused and never used.
  *
@@ -118,6 +119,26 @@ public final class Runtimes {
     }
 
     /**
+     * The runtime that reads the newest indexes: the one with the highest major in {@link
+     * LuceneRuntime#indexMajors()}, the first one found of those. It gets the indexes whose version
+     * can't be detected or is newer than any runtime reads, and reports the format error itself (ADR
+     * 0071).
+     */
+    public Optional<LuceneRuntime> latest() {
+        // On a tie, max keeps the first.
+        return current().runtimes().stream().max(Comparator.comparingInt(Runtimes::newestMajor));
+    }
+
+    private static int newestMajor(LuceneRuntime runtime) {
+        return runtime.indexMajors().stream().mapToInt(Integer::intValue).max().orElse(Integer.MIN_VALUE);
+    }
+
+    /** Whether {@code major} is newer than any runtime reads. */
+    public boolean newerThanAll(int major) {
+        return current().runtimes().stream().allMatch(runtime -> newestMajor(runtime) < major);
+    }
+
+    /**
      * The analysis tab of the first runtime that has one (ADR 0067), with the runtime it belongs to.
      */
     public Optional<RuntimeAnalysis> analysis() {
@@ -130,9 +151,12 @@ public final class Runtimes {
         return Optional.empty();
     }
 
+    /** The runtime jar that reads the newest indexes, and those whose version can't be detected (ADR 0071). */
+    public static final String LATEST_JAR = "leia-lucene10.jar";
+
     /**
-     * The runtime jar that reads indexes of {@code major} (ADR 0044), such as {@code leia-lucene3.jar}
-     * for 2 and 3, or empty for a major that Lucene 10 reads itself or none reads.
+     * The runtime jar that reads indexes of {@code major} (ADR 0044, ADR 0071), such as {@code
+     * leia-lucene3.jar} for 2 and 3, or empty for a major that none reads.
      */
     public static Optional<String> jarFor(int major) {
         return switch (major) {
@@ -140,6 +164,7 @@ public final class Runtimes {
             case 4, 5 -> Optional.of("leia-lucene5.jar");
             case 6, 7 -> Optional.of("leia-lucene7.jar");
             case 8 -> Optional.of("leia-lucene9.jar");
+            case 9, 10 -> Optional.of(LATEST_JAR);
             default -> Optional.empty();
         };
     }

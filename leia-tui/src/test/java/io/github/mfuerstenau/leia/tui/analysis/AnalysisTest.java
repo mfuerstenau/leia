@@ -78,6 +78,17 @@ class AnalysisTest {
         assertThat(render(analysis, 100)).contains("Cannot list the components: down");
     }
 
+    /** Without a loaded runtime that has analysis, the tab says so, and it is no error (ADR 0071). */
+    @Test
+    void saysWhenNoRuntimeHasAnalysis() {
+        Analysis analysis = new Analysis();
+        analysis.noAnalysis();
+        assertThat(analysis.initialRequest()).isEmpty();
+        assertThat(render(analysis, 100))
+                .contains("No loaded runtime has analysis")
+                .doesNotContain("Cannot list the components");
+    }
+
     @Test
     void analyzesTheTypedTextWithTheCurrentAnalyzer() {
         Analysis analysis = new Analysis();

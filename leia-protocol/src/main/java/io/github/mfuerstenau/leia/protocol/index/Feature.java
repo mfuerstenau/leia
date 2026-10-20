@@ -4,10 +4,9 @@ import java.util.EnumSet;
 import java.util.Set;
 
 /**
- * What can be done with an opened index (ADR 0044). An index opened with Lucene 10 has every feature,
- * one opened without a reader only {@link #COMMITS}, {@link #CHECK_INDEX} and, if Lucene 10 checks its
- * first index, {@link #CHECK_LEVELS}, and one written by an old Lucene what the Lucene that reads it
- * supports (ADR 0045).
+ * What can be done with an opened index (ADR 0044): what the runtime that reads it supports (ADR
+ * 0045, ADR 0071). One opened without a reader has only {@link #COMMITS}, {@link #CHECK_INDEX} and,
+ * if the runtime of its first index checks at levels, {@link #CHECK_LEVELS}.
  */
 public enum Feature {
     /** {@code getIndexStats}. */
@@ -38,13 +37,6 @@ public enum Feature {
     KNN_VECTORS,
     /** {@code getCommits} and {@code getCommit}. */
     COMMITS,
-    /**
-     * {@code startSearch}, with every kind of query, similarity and sort: every part of search. A
-     * runtime reports the parts it has instead, such as {@link #CLASSIC_SEARCH}, {@link
-     * #TERM_SEARCH}, {@link #SCORING}, {@link #DOC_VALUES_SEARCH}, {@link #STANDARD_SEARCH} and {@link
-     * #MORE_LIKE_THIS} (ADR 0058, ADR 0066).
-     */
-    SEARCH,
     /**
      * {@code startSearch} with a classic query only, or with {@link #KNN_VECTORS} a KNN query too
      * (ADR 0049); best score first, without highlighting, unless with {@link #SCORING}.
@@ -92,12 +84,12 @@ public enum Feature {
     /** {@code startAutoStopWords}. */
     AUTO_STOP_WORDS;
 
-    /** Every feature: an index that Lucene 10 opens with a reader. */
+    /** Every feature: an index whose runtime has every group, with every kind of data. */
     public static Set<Feature> all() {
         return EnumSet.allOf(Feature.class);
     }
 
-    /** An index opened without a reader (ADR 0021) whose first index Lucene 10 checks. */
+    /** An index opened without a reader (ADR 0021) whose first index's runtime checks at levels. */
     public static Set<Feature> withoutReader() {
         return EnumSet.of(COMMITS, CHECK_INDEX, CHECK_LEVELS);
     }

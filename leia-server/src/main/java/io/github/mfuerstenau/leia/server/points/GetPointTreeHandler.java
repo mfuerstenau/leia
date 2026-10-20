@@ -1,20 +1,14 @@
 package io.github.mfuerstenau.leia.server.points;
 
-import io.github.mfuerstenau.leia.core.IndexSummary;
-import io.github.mfuerstenau.leia.core.Points;
-import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeResult;
-import io.github.mfuerstenau.leia.protocol.points.PointSegment;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
 import jakarta.inject.Inject;
-import java.io.IOException;
-import java.util.List;
 
 /** {@code getPointTree}: a point field's BKD tree in the {@link CurrentIndex}, segment by segment (ADR 0041). */
 public final class GetPointTreeHandler implements MethodHandler<GetPointTreeParams, GetPointTreeResult> {
@@ -33,40 +27,6 @@ public final class GetPointTreeHandler implements MethodHandler<GetPointTreePara
 
     @Override
     public GetPointTreeResult handle(GetPointTreeParams params) throws RpcException {
-        if (currentIndex.runtime().isPresent()) {
-            return RuntimeResults.pointTree(currentIndex.runtime().get(), params);
-        }
-        ReadOnlyIndex index = currentIndex.readable();
-        String field = params.field();
-        int bytes = PointMapper.checkPointField(index, field);
-        Points.Tree tree;
-        try {
-            tree = index.pointTree(field);
-        } catch (IOException e) {
-            throw PointMapper.notReadable(field, e);
-        }
-        List<Integer> docBases =
-                index.indexes().stream().map(IndexSummary::docBase).toList();
-        return new GetPointTreeResult(
-                tree.field(),
-                tree.dimensions(),
-                tree.indexDimensions(),
-                tree.bytesPerDimension(),
-                tree.size(),
-                tree.docCount(),
-                tree.min().map(min -> PointMapper.pointValue(min, bytes)),
-                tree.max().map(max -> PointMapper.pointValue(max, bytes)),
-                tree.segments().stream()
-                        .map(segment -> new PointSegment(
-                                segment.segment(),
-                                PointMapper.indexOf(docBases, segment.docBase()),
-                                segment.name(),
-                                segment.docBase(),
-                                segment.maxDoc(),
-                                segment.size(),
-                                segment.docCount(),
-                                PointMapper.pointValue(segment.min(), bytes),
-                                PointMapper.pointValue(segment.max(), bytes)))
-                        .toList());
+        return RuntimeResults.pointTree(currentIndex.runtime(), params);
     }
 }

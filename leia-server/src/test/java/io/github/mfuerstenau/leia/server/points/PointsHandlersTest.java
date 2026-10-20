@@ -3,9 +3,6 @@ package io.github.mfuerstenau.leia.server.points;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import io.github.mfuerstenau.leia.core.DirectoryImpl;
-import io.github.mfuerstenau.leia.core.DirectoryOnlyIndex;
-import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellParams;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellResult;
@@ -15,7 +12,9 @@ import io.github.mfuerstenau.leia.protocol.points.LeafPoint;
 import io.github.mfuerstenau.leia.protocol.points.PointCell;
 import io.github.mfuerstenau.leia.protocol.points.PointSegment;
 import io.github.mfuerstenau.leia.protocol.points.PointValue;
+import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.TestIndexes;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
@@ -46,7 +45,7 @@ class PointsHandlersTest {
 
     @Test
     void describesTheTreeAndALeafAsHexPerDimension() throws Exception {
-        currentIndex.replace(ReadOnlyIndex.open(writeIndex()));
+        currentIndex.replace(TestIndexes.open(writeIndex()));
 
         GetPointTreeResult result = tree.handle(new GetPointTreeParams("xy"));
 
@@ -75,7 +74,7 @@ class PointsHandlersTest {
 
     @Test
     void checksTheFieldSegmentAndPath() throws Exception {
-        currentIndex.replace(ReadOnlyIndex.open(writeIndex()));
+        currentIndex.replace(TestIndexes.open(writeIndex()));
 
         assertFails(
                 () -> tree.handle(new GetPointTreeParams("nope")),
@@ -101,7 +100,7 @@ class PointsHandlersTest {
 
     @Test
     void needsAReader() throws Exception {
-        currentIndex.replace(DirectoryOnlyIndex.open(writeIndex(), DirectoryImpl.FS));
+        currentIndex.replace(TestIndexes.withoutReader(writeIndex(), DirectoryKind.FS));
 
         assertFails(() -> tree.handle(new GetPointTreeParams("xy")), ErrorCode.NO_READER, null);
         assertFails(() -> cell.handle(new GetPointCellParams("xy", 0, List.of())), ErrorCode.NO_READER, null);

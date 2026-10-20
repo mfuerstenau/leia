@@ -7,7 +7,6 @@ import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
 import io.github.mfuerstenau.leia.protocol.jars.GetJarsParams;
 import io.github.mfuerstenau.leia.server.RpcException;
-import io.github.mfuerstenau.leia.server.index.Routing;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -24,7 +23,7 @@ class JarsHandlersTest {
     @TempDir
     Path tmp;
 
-    private final AddJarsHandler addJars = new AddJarsHandler(new Runtimes(), Routing.DEFAULT);
+    private final AddJarsHandler addJars = new AddJarsHandler(new Runtimes());
 
     @Test
     void noPathsAreInvalidParams() {

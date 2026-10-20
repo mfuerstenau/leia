@@ -135,14 +135,15 @@ import java.util.Set;
 import java.util.function.Consumer;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.util.BytesRef;
 
 /**
- * The methods that work on an index that a runtime of {@code leia-runtime} reads, such as one written
- * by Lucene 2.x or 3.x (ADR 0044): each maps the runtime's records to the protocol's. The handlers of
- * these methods call them when {@link CurrentIndex#runtime()} is present; every other method refuses
- * with {@code NOT_SUPPORTED}, and so do these when the runtime lacks their group.
+ * The methods that work on an index with a reader, which a runtime of {@code leia-runtime} reads
+ * (ADR 0044, ADR 0071): each maps the runtime's records to the protocol's. The handlers call them with
+ * {@link CurrentIndex#runtime()}; each refuses with {@code NOT_SUPPORTED} when the runtime lacks its
+ * group.
  */
 public final class RuntimeResults {
 
@@ -684,6 +685,10 @@ public final class RuntimeResults {
         }
         checkField(open.index(), params.field());
         String term = TermParams.text(params.term());
+        // A field of documents only has no frequencies, as leia-core shows them; Lucene says 1.
+        boolean freqs = open.index().fields().stream()
+                .filter(field -> field.name().equals(params.field()))
+                .noneMatch(field -> field.indexOptions() == RuntimeIndex.IndexOptions.DOCS);
         try {
             Terms.PostingsPage page = filter.isPresent() && filter.get().onlyMatches()
                     ? matchingPostings(
@@ -705,7 +710,7 @@ public final class RuntimeResults {
                             .map(posting -> new Posting(
                                     posting.docId(),
                                     posting.deleted(),
-                                    OptionalInt.of(posting.freq()),
+                                    freqs ? OptionalInt.of(posting.freq()) : OptionalInt.empty(),
                                     filter.map(through -> through.filter().contains(posting.docId()))))
                             .toList(),
                     page.nextDoc());
@@ -973,6 +978,21 @@ public final class RuntimeResults {
      * groups ({@link RuntimeQueries}, ADR 0066). Another query is not supported.
      */
     static Search.ParsedQuery parsedQuery(OpenRuntime open, Search search, SearchQuery query) throws RpcException {
+        long present = Stream.of(
+                        query.classic(),
+                        query.standard(),
+                        query.term(),
+                        query.moreLikeThis(),
+                        query.docValues(),
+                        query.knn())
+                .filter(Optional::isPresent)
+                .count();
+        if (present != 1) {
+            throw new RpcException(
+                    ErrorCode.INVALID_PARAMS,
+                    "Invalid params: the query needs exactly one of classic, standard, term, moreLikeThis,"
+                            + " docValues and knn");
+        }
         if (query.classic().isPresent()) {
             return parse(open, search, query.classic().get());
         }
@@ -1192,6 +1212,8 @@ public final class RuntimeResults {
 
     /** {@code classic}, parsed by the runtime. */
     private static Search.ParsedQuery parse(OpenRuntime open, Search search, ClassicQuery classic) throws RpcException {
+        checkField(open.index(), classic.defaultField());
+        ParserChecks.numbers(classic.options());
         Search.Dates dates = RuntimeQueries.dates(open.index(), classic.options());
         ParserChecks.classic(classic.fuzzyMaxEdits(), classic.splitOnWhitespace(), classic.autoGeneratePhraseQueries());
         Search.AnalyzerSpec analyzer = RuntimeAnalyzers.spec(classic.analyzer());
@@ -1218,7 +1240,7 @@ public final class RuntimeResults {
     }
 
     /**
-     * {@code knn}, checked as {@code SearchQueries} checks it for Lucene 10 ({@link KnnChecks}), and
+     * {@code knn}, checked as Lucene 10 checks it ({@link KnnChecks}), and
      * built by the runtime's {@link Knn}; its filter is parsed by the runtime.
      */
     private static Search.ParsedQuery knn(OpenRuntime open, Search search, KnnQuery knn) throws RpcException {

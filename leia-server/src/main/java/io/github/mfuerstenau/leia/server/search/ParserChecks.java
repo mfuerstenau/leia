@@ -3,6 +3,7 @@ package io.github.mfuerstenau.leia.server.search;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.search.DateResolution;
 import io.github.mfuerstenau.leia.protocol.search.FieldDateResolution;
+import io.github.mfuerstenau.leia.protocol.search.ParserOptions;
 import io.github.mfuerstenau.leia.server.RpcException;
 import java.time.DateTimeException;
 import java.time.ZoneId;
@@ -30,6 +31,22 @@ public final class ParserChecks {
 
         /** @throws RpcException {@code FIELD_NOT_FOUND} for an unknown field */
         void check(String field) throws RpcException;
+    }
+
+    /**
+     * Checks the numbers of the options that both parsers take, in the words of leia-core's {@code
+     * ParserOptions}.
+     *
+     * @throws RpcException {@code INVALID_PARAMS} for a negative {@code phraseSlop} or {@code
+     *     fuzzyPrefixLength}
+     */
+    public static void numbers(ParserOptions options) throws RpcException {
+        if (options.phraseSlop() < 0) {
+            throw invalidParams("phraseSlop must be 0 or more, not " + options.phraseSlop());
+        }
+        if (options.fuzzyPrefixLength() < 0) {
+            throw invalidParams("fuzzyPrefixLength must be 0 or more, not " + options.fuzzyPrefixLength());
+        }
     }
 
     /**

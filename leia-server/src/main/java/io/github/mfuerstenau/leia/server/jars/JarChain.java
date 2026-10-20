@@ -2,7 +2,6 @@ package io.github.mfuerstenau.leia.server.jars;
 
 import io.github.mfuerstenau.leia.runtime.Extensions;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
-import io.github.mfuerstenau.leia.server.index.Routing;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import java.io.IOException;
 import java.net.MalformedURLException;
@@ -21,7 +20,6 @@ import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Stream;
-import org.apache.lucene.util.Version;
 
 /**
  * The jars with analysis components, codecs or formats of their own (ADR 0016, ADR 0018), loaded at
@@ -50,15 +48,14 @@ public final class JarChain {
      * and has the runtimes reload their lists from it. A directory stands for the jars directly in
      * it. A jar that is already loaded isn't loaded again.
      *
-     * @param routing which runtimes reload their lists (ADR 0065)
      * @return the jars that were loaded, as absolute paths, in the order they were given, a
      *     directory's sorted by name
      * @throws JarException if a path is neither a jar nor a directory with one, or the factories,
      *     codecs or formats can't be loaded; nothing is loaded then
      */
-    public static synchronized List<Path> load(List<Path> paths, Routing routing) throws JarException {
+    public static synchronized List<Path> load(List<Path> paths) throws JarException {
         List<Path> fresh = split(paths).fresh();
-        install(fresh, routing);
+        install(fresh);
         return fresh;
     }
 
@@ -68,9 +65,9 @@ public final class JarChain {
      *
      * @throws JarException as {@link #load} does; nothing is loaded then
      */
-    public static synchronized AddedJars add(List<Path> paths, Routing routing) throws JarException {
+    public static synchronized AddedJars add(List<Path> paths) throws JarException {
         Split split = split(paths);
-        Extensions.Added added = install(split.fresh(), routing);
+        Extensions.Added added = install(split.fresh());
         return new AddedJars(split.fresh(), split.alreadyLoaded(), added);
     }
 
@@ -102,7 +99,7 @@ public final class JarChain {
      * Loads {@code fresh} through a new child loader. The runtimes reload their lists only once each
      * could build private copies of them from the loader, so a jar that fails leaves no names behind.
      */
-    private static Extensions.Added install(List<Path> fresh, Routing routing) throws JarException {
+    private static Extensions.Added install(List<Path> fresh) throws JarException {
         if (fresh.isEmpty()) {
             return Extensions.Added.NONE;
         }
@@ -115,7 +112,7 @@ public final class JarChain {
             }
         }
         URLClassLoader loader = new URLClassLoader(urls, classLoader);
-        List<Extensions> extensions = extensions(loader, routing);
+        List<Extensions> extensions = extensions(loader);
         try {
             for (Extensions extension : extensions) {
                 extension.check(loader);
@@ -149,18 +146,12 @@ public final class JarChain {
 
     /**
      * The lists that {@code loader} reloads: those of the runtimes it finds, a runtime of these very
-     * jars included. Until the server routes every index to a runtime (ADR 0065), leia-core's lists
-     * stand for those of a runtime that reads Lucene 10's indexes, unless {@code routing} says so.
+     * jars included (ADR 0071).
      */
-    private static List<Extensions> extensions(ClassLoader loader, Routing routing) {
+    private static List<Extensions> extensions(ClassLoader loader) {
         List<Extensions> extensions = new ArrayList<>();
-        if (!routing.lucene10Runtime()) {
-            extensions.add(new CoreExtensions());
-        }
         for (LuceneRuntime runtime : Runtimes.load(loader).runtimes()) {
-            if (routing.lucene10Runtime() || !runtime.indexMajors().contains(Version.LATEST.major)) {
-                runtime.extensions().ifPresent(extensions::add);
-            }
+            runtime.extensions().ifPresent(extensions::add);
         }
         return extensions;
     }

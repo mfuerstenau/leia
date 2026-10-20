@@ -40,7 +40,6 @@ import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.StartStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.search.StoredScanHit;
 import io.github.mfuerstenau.leia.protocol.search.StoredScanResult;
-import io.github.mfuerstenau.leia.server.index.Routing;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -86,11 +85,6 @@ final class RealBackend implements AutoCloseable {
 
     static RealBackend start(List<Path> jars) throws RpcException {
         return new RealBackend(LeiaBackend.start(jars));
-    }
-
-    /** A backend that routes indexes to the runtimes as {@code routing} says (ADR 0065). */
-    static RealBackend start(Routing routing) throws RpcException {
-        return new RealBackend(LeiaBackend.start(List.of(), routing));
     }
 
     /** A test index that leia-core's build writes, given by the system property {@code leia.test.index.<name>}. */

@@ -1,6 +1,5 @@
 package io.github.mfuerstenau.leia.server.terms;
 
-import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.server.ByteStrings;
@@ -11,12 +10,6 @@ import org.apache.lucene.util.BytesRef;
 public final class TermParams {
 
     private TermParams() {}
-
-    static void checkField(ReadOnlyIndex index, String field) throws RpcException {
-        if (!index.hasField(field)) {
-            throw new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + field + "' in the index");
-        }
-    }
 
     public static void checkLimit(int limit, int max) throws RpcException {
         if (limit < 1 || limit > max) {

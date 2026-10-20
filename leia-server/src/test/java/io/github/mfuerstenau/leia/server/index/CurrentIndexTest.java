@@ -2,9 +2,10 @@ package io.github.mfuerstenau.leia.server.index;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
+import io.github.mfuerstenau.leia.server.TestIndexes;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.job.Jobs;
+import io.github.mfuerstenau.leia.server.runtime.OpenRuntime;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.concurrent.CountDownLatch;
@@ -27,7 +28,7 @@ class CurrentIndexTest {
 
     @Test
     void closingStopsTheJobsFirst() throws Exception {
-        ReadOnlyIndex index = ReadOnlyIndex.open(writeEmptyIndex(tmp.resolve("index")));
+        OpenRuntime index = TestIndexes.open(writeEmptyIndex(tmp.resolve("index")));
         currentIndex.replace(index);
         AtomicBoolean readerOpenWhenStopped = new AtomicBoolean();
         long jobId = startEndlessJob(index, readerOpenWhenStopped);
@@ -40,21 +41,21 @@ class CurrentIndexTest {
 
     @Test
     void replacingStopsTheJobsOfThePreviousIndex() throws Exception {
-        ReadOnlyIndex first = ReadOnlyIndex.open(writeEmptyIndex(tmp.resolve("first")));
+        OpenRuntime first = TestIndexes.open(writeEmptyIndex(tmp.resolve("first")));
         currentIndex.replace(first);
         AtomicBoolean readerOpenWhenStopped = new AtomicBoolean();
         long jobId = startEndlessJob(first, readerOpenWhenStopped);
 
-        currentIndex.replace(ReadOnlyIndex.open(writeEmptyIndex(tmp.resolve("second"))));
+        currentIndex.replace(TestIndexes.open(writeEmptyIndex(tmp.resolve("second"))));
 
         assertThat(readerOpenWhenStopped).isTrue();
         assertThat(jobs.cancel(jobId)).isFalse();
-        assertThat(first.reader().tryIncRef()).as("previous reader is closed").isFalse();
+        assertThat(TestIndexes.readable(first)).as("previous reader is closed").isFalse();
         currentIndex.close();
     }
 
     /** Reports progress until cancelled, then records whether the reader was still open. */
-    private long startEndlessJob(ReadOnlyIndex index, AtomicBoolean readerOpenWhenStopped) throws InterruptedException {
+    private long startEndlessJob(OpenRuntime index, AtomicBoolean readerOpenWhenStopped) throws InterruptedException {
         CountDownLatch started = new CountDownLatch(1);
         long id = jobs.start("endless", String.class, progress -> {
             started.countDown();
@@ -63,7 +64,7 @@ class CurrentIndexTest {
                     progress.scanned(scanned);
                 }
             } finally {
-                readerOpenWhenStopped.set(index.reader().getRefCount() > 0);
+                readerOpenWhenStopped.set(TestIndexes.readable(index));
             }
         });
         assertThat(started.await(5, TimeUnit.SECONDS)).isTrue();

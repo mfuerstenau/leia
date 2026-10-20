@@ -1,13 +1,10 @@
 package io.github.mfuerstenau.leia.server.check;
 
-import io.github.mfuerstenau.leia.core.DirectoryImpl;
-import io.github.mfuerstenau.leia.core.IndexCheck;
 import io.github.mfuerstenau.leia.core.ScanProgress;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
 import io.github.mfuerstenau.leia.protocol.check.CheckIndexResult;
-import io.github.mfuerstenau.leia.protocol.check.SegmentCheck;
 import io.github.mfuerstenau.leia.protocol.check.StartCheckIndexParams;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
 import io.github.mfuerstenau.leia.runtime.Check;
@@ -17,7 +14,6 @@ import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.index.IndexDirectories;
 import io.github.mfuerstenau.leia.server.job.Jobs;
-import io.github.mfuerstenau.leia.server.runtime.OpenRuntime;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
 import jakarta.inject.Inject;
 import java.nio.file.Path;
@@ -57,10 +53,7 @@ public final class StartCheckIndexHandler implements MethodHandler<StartCheckInd
                             + StartCheckIndexParams.MAX_LEVEL + ", not " + level);
         }
         List<IndexDirectories.IndexDirectory> targets = directories.all();
-        Path path = currentIndex
-                .runtime()
-                .map(OpenRuntime::path)
-                .orElseGet(() -> currentIndex.get().orElseThrow().path());
+        Path path = currentIndex.opened().path();
         CheckLog log = new CheckLog();
         long jobId = jobs.start(
                 "check index of " + path + " at level " + level,
@@ -71,7 +64,7 @@ public final class StartCheckIndexHandler implements MethodHandler<StartCheckInd
     }
 
     /**
-     * Checks each of {@code targets} with the Lucene that reads it (ADR 0045): Lucene 10 and a runtime
+     * Checks each of {@code targets} with the runtime that reads it (ADR 0045, ADR 0071): a runtime
      * with levels at {@code level}, a runtime without at its one level (ADR 0046).
      */
     private static CheckIndexResult check(
@@ -86,15 +79,6 @@ public final class StartCheckIndexHandler implements MethodHandler<StartCheckInd
                             : "Checking index " + (i + 1) + " of " + targets.size() + ": " + target.path());
             checks.add(
                     switch (target.route()) {
-                        case IndexDirectories.Route.Core() ->
-                            indexCheck(
-                                    IndexCheck.check(
-                                            target.path(),
-                                            DirectoryImpl.valueOf(target.kind().name()),
-                                            level,
-                                            log::add,
-                                            progress),
-                                    target.skipped());
                         case IndexDirectories.Route.Runtime(LuceneRuntime runtime) -> {
                             boolean levels =
                                     runtime.check().map(Check::hasLevels).orElse(false);
@@ -111,32 +95,5 @@ public final class StartCheckIndexHandler implements MethodHandler<StartCheckInd
                     });
         }
         return new CheckIndexResult(List.copyOf(checks), (System.nanoTime() - start) / 1_000_000);
-    }
-
-    static io.github.mfuerstenau.leia.protocol.check.IndexCheck indexCheck(IndexCheck.Result result, boolean skipped) {
-        return new io.github.mfuerstenau.leia.protocol.check.IndexCheck(
-                result.path().toString(),
-                skipped,
-                result.clean(),
-                result.error(),
-                result.segmentsFile(),
-                result.missingSegments(),
-                result.toolOutOfDate(),
-                result.segmentCount(),
-                result.badSegments(),
-                result.lostDocs(),
-                result.validCounter(),
-                result.segments().stream()
-                        .map(segment -> new SegmentCheck(
-                                segment.name(),
-                                segment.maxDoc(),
-                                segment.codec(),
-                                segment.compound(),
-                                segment.files(),
-                                segment.sizeBytes(),
-                                segment.hasDeletions(),
-                                segment.openReaderPassed(),
-                                segment.error()))
-                        .toList());
     }
 }
