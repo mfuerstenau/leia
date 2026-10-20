@@ -204,6 +204,13 @@ class Lucene5BackendTest {
         RuntimeSearches.refusesTheQueriesOf912(backend);
     }
 
+    @Test
+    void searchesWithAStopWordsFile() throws Exception {
+        open(testIndex("lucene5"));
+
+        RuntimeSearches.searchesWithTheAnalyzersOfAnOldRuntime(backend, "5.5.5", tmp);
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"lucene4", "lucene5"})
     void searchesATerm(String name) throws Exception {

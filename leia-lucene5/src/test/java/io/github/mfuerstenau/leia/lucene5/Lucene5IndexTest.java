@@ -478,7 +478,7 @@ class Lucene5IndexTest {
     }
 
     private static Search.AnalyzerSpec named(String name) {
-        return new Search.AnalyzerSpec.Named(name, Optional.empty(), OptionalInt.empty());
+        return new Search.AnalyzerSpec.Preset(name);
     }
 
     @Test
@@ -499,28 +499,30 @@ class Lucene5IndexTest {
     void parsesWithTheAnalyzersOf55() throws Exception {
         try (RuntimeIndex index = open("lucene5")) {
             Search search = index.search().orElseThrow();
-            assertThat(search.analyzers())
-                    .contains("StandardAnalyzer", "EnglishAnalyzer", "GermanAnalyzer", "UAX29URLEmailAnalyzer")
-                    .hasSize(41);
             assertThat(search.parse("Alpha the", BODY, named("StandardAnalyzer")))
                     .hasToString("body:alpha");
             assertThat(search.parse("Häuser", BODY, named("GermanAnalyzer"))).hasToString("body:haus");
             assertThat(search.parse(
                             "Alpha beta",
                             BODY,
-                            new Search.AnalyzerSpec.Named(
-                                    "EnglishAnalyzer", Optional.of(List.of("alpha")), OptionalInt.empty())))
+                            new Search.AnalyzerSpec.Preset(
+                                    "EnglishAnalyzer",
+                                    Optional.of(new Search.AnalyzerSpec.WordSet.Words(List.of("alpha"))),
+                                    OptionalInt.empty())))
                     .hasToString("body:beta");
             assertThat(search.parse(
                             "abcdef",
                             BODY,
-                            new Search.AnalyzerSpec.Named("StandardAnalyzer", Optional.empty(), OptionalInt.of(3))))
+                            new Search.AnalyzerSpec.Preset("StandardAnalyzer", Optional.empty(), OptionalInt.of(3))))
                     .hasToString("body:abc body:def");
             assertThat(search.parse(
                             "\"Alpha beta\" id:\"A b\"",
                             BODY,
                             new Search.AnalyzerSpec.PerField(
-                                    new Search.AnalyzerSpec.LimitTokenCount(named("SimpleAnalyzer"), 1),
+                                    new Search.AnalyzerSpec.Wrapped(
+                                            named("SimpleAnalyzer"),
+                                            Optional.empty(),
+                                            Optional.of(new Search.AnalyzerSpec.LimitTokenCount(1, false))),
                                     Map.of("id", named("KeywordAnalyzer")))))
                     .hasToString("body:alpha id:A b");
             assertThatThrownBy(() -> search.parse("alpha", BODY, named("SmartChineseAnalyzer")))
@@ -530,14 +532,16 @@ class Lucene5IndexTest {
             assertThatThrownBy(() -> search.parse(
                             "alpha",
                             BODY,
-                            new Search.AnalyzerSpec.Named(
-                                    "WhitespaceAnalyzer", Optional.of(List.of("a")), OptionalInt.empty())))
+                            new Search.AnalyzerSpec.Preset(
+                                    "WhitespaceAnalyzer",
+                                    Optional.of(new Search.AnalyzerSpec.WordSet.Words(List.of("a"))),
+                                    OptionalInt.empty())))
                     .isInstanceOf(Search.UnsupportedAnalyzerException.class)
                     .hasMessageContaining("takes no stop words");
             assertThatThrownBy(() -> search.parse(
                             "alpha",
                             BODY,
-                            new Search.AnalyzerSpec.Named("EnglishAnalyzer", Optional.empty(), OptionalInt.of(3))))
+                            new Search.AnalyzerSpec.Preset("EnglishAnalyzer", Optional.empty(), OptionalInt.of(3))))
                     .isInstanceOf(Search.UnsupportedAnalyzerException.class)
                     .hasMessageContaining("takes no longest token");
         }

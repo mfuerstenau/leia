@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.server.runtime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.mfuerstenau.leia.runtime.Analysis;
 import io.github.mfuerstenau.leia.runtime.Check;
 import io.github.mfuerstenau.leia.runtime.Commits;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
@@ -108,6 +109,11 @@ class RuntimesTest {
 
             @Override
             public Optional<Check> check() {
+                return Optional.empty();
+            }
+
+            @Override
+            public Optional<Analysis> analysis() {
                 return Optional.empty();
             }
         };

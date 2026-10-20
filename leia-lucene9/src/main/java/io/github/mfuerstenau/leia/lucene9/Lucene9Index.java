@@ -762,13 +762,8 @@ final class Lucene9Index
     }
 
     @Override
-    public Set<String> analyzers() {
-        return Lucene9Analyzers.NAMES;
-    }
-
-    @Override
     public ParsedQuery parse(String expression, ParserOptions options, AnalyzerSpec spec)
-            throws InvalidQueryException, UnsupportedAnalyzerException {
+            throws InvalidQueryException, UnsupportedAnalyzerException, InvalidAnalyzerException {
         Analyzer analyzer = Lucene9Analyzers.analyzer(spec);
         try {
             QueryParser parser = new QueryParser(options.defaultField(), analyzer);
@@ -821,7 +816,7 @@ final class Lucene9Index
             StandardSearch.Options options,
             Map<String, StandardSearch.PointType> points,
             AnalyzerSpec spec)
-            throws InvalidQueryException, UnsupportedAnalyzerException {
+            throws InvalidQueryException, UnsupportedAnalyzerException, InvalidAnalyzerException {
         try (Analyzer analyzer = Lucene9Analyzers.analyzer(spec)) {
             return new Lucene9Query(Lucene9StandardParser.parse(expression, options, points, analyzer));
         } catch (RuntimeException e) {
@@ -832,7 +827,7 @@ final class Lucene9Index
     /** {@inheritDoc} The query is built in each search, from the reader searched (ADR 0013). */
     @Override
     public ParsedQuery like(Source source, MoreLikeThisSearch.Options options, AnalyzerSpec spec)
-            throws UnsupportedAnalyzerException {
+            throws UnsupportedAnalyzerException, InvalidAnalyzerException {
         Lucene9Analyzers.analyzer(spec).close();
         return new Lucene9Query(new Lucene9MoreLikeQuery(source, options, spec));
     }
@@ -847,7 +842,7 @@ final class Lucene9Index
         }
         try {
             return Lucene9Analyzers.analyzer(like.analyzer());
-        } catch (UnsupportedAnalyzerException e) {
+        } catch (UnsupportedAnalyzerException | InvalidAnalyzerException e) {
             // MoreLikeThisSearch.like built it before.
             throw new IllegalStateException(e.getMessage(), e);
         }

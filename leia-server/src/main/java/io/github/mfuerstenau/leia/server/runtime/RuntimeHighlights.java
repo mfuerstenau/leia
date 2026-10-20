@@ -63,7 +63,7 @@ public final class RuntimeHighlights {
                     io.github.mfuerstenau.leia.protocol.search.DocumentHighlight.class,
                     _ -> new io.github.mfuerstenau.leia.protocol.search.DocumentHighlight(List.of())));
         }
-        Search.AnalyzerSpec analyzer = RuntimeAnalyzers.spec(params.options().analyzer(), open.runtime(), search);
+        Search.AnalyzerSpec analyzer = RuntimeAnalyzers.spec(params.options().analyzer());
         boolean requireFieldMatch = params.options().requireFieldMatch();
         long jobId = jobs.start(
                 description + " for " + query + " with Lucene " + open.runtime().luceneVersion(),
@@ -83,8 +83,8 @@ public final class RuntimeHighlights {
                                 values,
                                 StartStoredScanParams.MAX_SPANS);
                         return Highlighting.toHighlight(found);
-                    } catch (UnsupportedAnalyzer e) {
-                        throw notSupported(open, e.getCause());
+                    } catch (AnalyzerFailed e) {
+                        throw RuntimeAnalyzers.failed(open.runtime(), e.getCause());
                     } catch (IOException e) {
                         throw new RpcException(
                                 ErrorCode.INDEX_NOT_READABLE, "Cannot highlight " + what + ": " + e.getMessage(), e);
@@ -98,7 +98,8 @@ public final class RuntimeHighlights {
      * fields, as {@code startSearch} on Lucene 10 finds them.
      *
      * @param analyzer the analyzer of {@code options}, as the runtime builds it
-     * @throws RpcException {@code NOT_SUPPORTED} if the runtime can't build the analyzer
+     * @throws RpcException {@code NOT_SUPPORTED} if the runtime can't build the analyzer, {@code
+     *     INVALID_ANALYZER} if it is wrong
      */
     static List<List<FieldHighlight>> passages(
             OpenRuntime open,
@@ -128,14 +129,14 @@ public final class RuntimeHighlights {
                     options.maxPassages(),
                     docIds,
                     stored);
-        } catch (UnsupportedAnalyzer e) {
-            throw notSupported(open, e.getCause());
+        } catch (AnalyzerFailed e) {
+            throw RuntimeAnalyzers.failed(open.runtime(), e.getCause());
         }
     }
 
     /**
      * The runtime's {@code highlight} as leia-core's {@link TextHighlighter}. An analyzer the runtime
-     * can't build is thrown as {@link UnsupportedAnalyzer}.
+     * can't build is thrown as {@link AnalyzerFailed}.
      */
     static TextHighlighter textHighlighter(
             Highlight highlight,
@@ -153,8 +154,8 @@ public final class RuntimeHighlights {
             Highlight.Highlighted highlighted;
             try {
                 highlighted = highlight.highlight(query, options, fields, docIds, maxPassages, progress);
-            } catch (Search.UnsupportedAnalyzerException e) {
-                throw new UnsupportedAnalyzer(e);
+            } catch (Search.UnsupportedAnalyzerException | Search.InvalidAnalyzerException e) {
+                throw new AnalyzerFailed(e);
             }
             Map<String, OffsetSource> sources = new HashMap<>();
             highlighted.sources().forEach((field, source) -> sources.put(field, offsetSource(source)));
@@ -194,24 +195,20 @@ public final class RuntimeHighlights {
         };
     }
 
-    private static RpcException notSupported(OpenRuntime open, Search.UnsupportedAnalyzerException e) {
-        return new RpcException(
-                ErrorCode.NOT_SUPPORTED,
-                "Not supported with Lucene " + open.runtime().luceneVersion() + ": " + e.getMessage(),
-                e);
-    }
-
-    /** An analyzer the runtime can't build, passed through core's {@link TextHighlighter}. */
-    private static final class UnsupportedAnalyzer extends RuntimeException {
+    /**
+     * An analyzer the runtime can't build, unsupported or invalid, passed through core's {@link
+     * TextHighlighter}.
+     */
+    private static final class AnalyzerFailed extends RuntimeException {
         private static final long serialVersionUID = 1L;
 
-        UnsupportedAnalyzer(Search.UnsupportedAnalyzerException cause) {
+        AnalyzerFailed(Exception cause) {
             super(cause);
         }
 
         @Override
-        public synchronized Search.UnsupportedAnalyzerException getCause() {
-            return (Search.UnsupportedAnalyzerException) super.getCause();
+        public synchronized Exception getCause() {
+            return (Exception) super.getCause();
         }
     }
 }

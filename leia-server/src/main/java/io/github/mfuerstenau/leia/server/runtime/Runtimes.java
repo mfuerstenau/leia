@@ -1,6 +1,7 @@
 package io.github.mfuerstenau.leia.server.runtime;
 
 import io.github.mfuerstenau.leia.core.ExtensionJars;
+import io.github.mfuerstenau.leia.runtime.Analysis;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
@@ -114,6 +115,19 @@ public final class Runtimes {
         return current().runtimes().stream()
                 .filter(runtime -> runtime.indexMajors().contains(major))
                 .findFirst();
+    }
+
+    /**
+     * The analysis tab of the first runtime that has one (ADR 0067), with the runtime it belongs to.
+     */
+    public Optional<RuntimeAnalysis> analysis() {
+        for (LuceneRuntime runtime : current().runtimes()) {
+            Optional<Analysis> analysis = runtime.analysis();
+            if (analysis.isPresent()) {
+                return Optional.of(new RuntimeAnalysis(runtime, analysis.get()));
+            }
+        }
+        return Optional.empty();
     }
 
     /**

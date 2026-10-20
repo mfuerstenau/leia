@@ -690,13 +690,8 @@ final class Lucene7Index implements RuntimeIndex, Documents, Terms, Search {
     }
 
     @Override
-    public Set<String> analyzers() {
-        return Lucene7Analyzers.NAMES;
-    }
-
-    @Override
     public ParsedQuery parse(String expression, ParserOptions options, AnalyzerSpec spec)
-            throws InvalidQueryException, UnsupportedAnalyzerException {
+            throws InvalidQueryException, UnsupportedAnalyzerException, InvalidAnalyzerException {
         Analyzer analyzer = Lucene7Analyzers.analyzer(spec);
         try {
             QueryParser parser = new QueryParser(options.defaultField(), analyzer);

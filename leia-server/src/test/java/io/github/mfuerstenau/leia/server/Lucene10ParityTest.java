@@ -6,17 +6,25 @@ import static io.github.mfuerstenau.leia.server.RealBackend.STANDARD;
 import static io.github.mfuerstenau.leia.server.RealBackend.classic;
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalysisComponent;
+import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeParams;
 import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.Collation;
+import io.github.mfuerstenau.leia.protocol.analysis.CollationStrength;
 import io.github.mfuerstenau.leia.protocol.analysis.CustomAnalyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.FieldAnalyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.FieldStopWords;
+import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsParams;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAutoStopWordsResult;
 import io.github.mfuerstenau.leia.protocol.analysis.LimitTokenCount;
 import io.github.mfuerstenau.leia.protocol.analysis.PresetAnalyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.Shingles;
 import io.github.mfuerstenau.leia.protocol.analysis.StandardAnalyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.StartAutoStopWordsParams;
+import io.github.mfuerstenau.leia.protocol.analysis.StemDictionary;
 import io.github.mfuerstenau.leia.protocol.analysis.WordSet;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexParams;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexResult;
@@ -73,6 +81,7 @@ import io.github.mfuerstenau.leia.protocol.terms.StartExportTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.StartFieldTermScanParams;
 import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
 import io.github.mfuerstenau.leia.server.index.Routing;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashSet;
@@ -103,8 +112,8 @@ class Lucene10ParityTest {
     private static final Map<String, String> EXPECTED = Map.ofEntries(
             Map.entry(
                     "openIndex",
-                    "the features: SEARCH needs the parser's dates and fuzzy edits and every analyzer, which the"
-                            + " interface lacks (steps 2b and 2d); DOC_VALUES only where a field has doc values, as for"
+                    "the features: SEARCH needs the parser's dates and fuzzy edits, which the interface lacks"
+                            + " (step 2d); DOC_VALUES only where a field has doc values, as for"
                             + " every runtime, while leia-core names it always (until step 3)"),
             Map.entry(
                     "getIndexStats",
@@ -113,12 +122,11 @@ class Lucene10ParityTest {
             Map.entry(
                     "startSearch fuzzyMaxEdits", "Search.ParserOptions has no fuzzy edits: a runtime always allows 2"),
             Map.entry(
-                    "startSearch dates", "Search.ParserOptions has no date resolution, locale or time zone (ADR 0026)"),
-            Map.entry("startSearch custom analyzer", "AnalyzerSpec has no custom analyzer (step 2b)"),
-            Map.entry("startSearch shingles", "AnalyzerSpec has no shingles (step 2b)"),
-            Map.entry(
-                    "startSearch preset stem exclusion",
-                    "AnalyzerSpec.Named has stop words and the longest token only (step 2b)"));
+                    "startSearch dates",
+                    "Search.ParserOptions has no date resolution, locale or time zone (ADR 0026)"));
+
+    /** The prefix of the calls that fail with leia-core, with {@code INVALID_ANALYZER}, as they must with the runtime. */
+    private static final String INVALID = "startSearch invalid ";
 
     /**
      * What the calls on an index use.
@@ -315,7 +323,8 @@ class Lucene10ParityTest {
                                 Optional.of(List.of("body")),
                                 Optional.empty()));
             }
-            for (Map.Entry<String, SearchQuery> query : searches(word, index).entrySet()) {
+            for (Map.Entry<String, SearchQuery> query :
+                    searches(word, index, dir).entrySet()) {
                 same(
                         query.getKey(),
                         core,
@@ -325,7 +334,8 @@ class Lucene10ParityTest {
             }
             HighlightOptions highlight = new HighlightOptions(3, false, STANDARD);
             // The queries of ADR 0066 in each job that takes a query.
-            for (Map.Entry<String, SearchQuery> query : searches(word, index).entrySet()) {
+            for (Map.Entry<String, SearchQuery> query :
+                    searches(word, index, dir).entrySet()) {
                 String kind = query.getKey().substring("startSearch ".length());
                 if (!OTHER_QUERIES.contains(kind)) {
                     continue;
@@ -433,6 +443,16 @@ class Lucene10ParityTest {
                     Methods.GET_AUTO_STOP_WORDS,
                     GetAutoStopWordsResult::stopWords);
 
+            same(
+                    "getAnalysisComponents",
+                    core,
+                    runtime,
+                    Methods.GET_ANALYSIS_COMPONENTS,
+                    new GetAnalysisComponentsParams());
+            for (Map.Entry<String, AnalyzeParams> analyze : analyses(word, dir).entrySet()) {
+                same(analyze.getKey(), core, runtime, Methods.ANALYZE, analyze.getValue());
+            }
+
             same("getCommits", core, runtime, Methods.GET_COMMITS, new GetCommitsParams(OptionalInt.empty()));
             for (Commit commit : core.call(Methods.GET_COMMITS, new GetCommitsParams(OptionalInt.empty()))
                     .commits()) {
@@ -447,7 +467,11 @@ class Lucene10ParityTest {
                 same("startCheckIndex", check(core, level), check(runtime, level));
             }
         }
-        assertThat(succeeded).as("the calls that succeeded with leia-core").containsAll(calls);
+        assertThat(succeeded)
+                .as("the calls that succeeded with leia-core")
+                .containsAll(
+                        calls.stream().filter(call -> !call.startsWith(INVALID)).toList())
+                .noneMatch(call -> call.startsWith(INVALID));
         Set<String> expected = new HashSet<>(EXPECTED.keySet());
         if (index.dates().isEmpty()) {
             expected.remove("startSearch dates");
@@ -468,7 +492,7 @@ class Lucene10ParityTest {
             "docValues range");
 
     /** Searches with what {@code classic} doesn't vary: the parser's other options, analyzers, other queries. */
-    private static Map<String, SearchQuery> searches(String word, Index index) {
+    private static Map<String, SearchQuery> searches(String word, Index index, Path dir) throws IOException {
         ParserOptions days = new ParserOptions(
                 false,
                 0,
@@ -526,7 +550,129 @@ class Lucene10ParityTest {
                 Optional.empty(),
                 Optional.empty());
         Map<String, SearchQuery> searches = new LinkedHashMap<>();
+        // A '#' line is a word too, as Lucene 10's WordlistLoader reads it.
+        Path stopwords = Files.writeString(dir.resolve("stopwords.txt"), "# not a comment\n  and \n\n" + word + "\n");
+        Path config = Files.createDirectories(dir.resolve("config"));
+        Files.writeString(config.resolve("mapping.txt"), "\"chairs\" => \"" + word + "\"\n");
+        Files.writeString(config.resolve("stop.txt"), word + "\n");
         searches.put("startSearch preset", classicWith(word + " chairs", "body", 2, false, english, DEFAULTS));
+        searches.put(
+                "startSearch preset stop words file",
+                classicWith(
+                        word + " and chairs",
+                        "body",
+                        2,
+                        false,
+                        preset(
+                                "org.apache.lucene.analysis.en.EnglishAnalyzer",
+                                Optional.of(new WordSet(Optional.empty(), Optional.of(stopwords.toString()))),
+                                Optional.empty(),
+                                Optional.empty()),
+                        DEFAULTS));
+        searches.put(
+                "startSearch preset stem override",
+                classicWith(
+                        word + " fietsen",
+                        "body",
+                        2,
+                        false,
+                        preset(
+                                "org.apache.lucene.analysis.nl.DutchAnalyzer",
+                                Optional.empty(),
+                                Optional.of(new StemDictionary(Optional.of(Map.of(word, "chair")), Optional.empty())),
+                                Optional.empty()),
+                        DEFAULTS));
+        searches.put(
+                "startSearch preset collation",
+                classicWith(
+                        word,
+                        "body",
+                        2,
+                        false,
+                        preset(
+                                "org.apache.lucene.collation.CollationKeyAnalyzer",
+                                Optional.empty(),
+                                Optional.empty(),
+                                Optional.of(
+                                        new Collation("de", Optional.of(CollationStrength.PRIMARY), Optional.empty()))),
+                        DEFAULTS));
+        searches.put(
+                "startSearch custom analyzer config",
+                classicWith(
+                        word + " chairs",
+                        "body",
+                        2,
+                        false,
+                        analyzer(
+                                Optional.empty(),
+                                Optional.of(new CustomAnalyzer(
+                                        List.of(new AnalysisComponent("mapping", Map.of("mapping", "mapping.txt"))),
+                                        new AnalysisComponent("standard", Map.of()),
+                                        List.of(
+                                                new AnalysisComponent("lowercase", Map.of()),
+                                                new AnalysisComponent("stop", Map.of("words", "stop.txt"))),
+                                        Optional.of(config.toString()))),
+                                Optional.empty(),
+                                Optional.empty()),
+                        DEFAULTS));
+        searches.put(
+                "startSearch shingles limited",
+                classicWith(
+                        "\"" + word + " chairs x\"",
+                        "body",
+                        2,
+                        false,
+                        analyzer(
+                                Optional.of(new StandardAnalyzer()),
+                                Optional.empty(),
+                                Optional.of(new Shingles(2, 3, "_", false, true, "-")),
+                                Optional.of(new LimitTokenCount(3, false))),
+                        DEFAULTS));
+        searches.put(
+                INVALID + "unknown filter",
+                classicWith(
+                        word,
+                        "body",
+                        2,
+                        false,
+                        analyzer(
+                                Optional.empty(),
+                                Optional.of(new CustomAnalyzer(
+                                        List.of(),
+                                        new AnalysisComponent("standard", Map.of()),
+                                        List.of(new AnalysisComponent("noSuchFilter", Map.of())),
+                                        Optional.empty())),
+                                Optional.empty(),
+                                Optional.empty()),
+                        DEFAULTS));
+        searches.put(
+                INVALID + "shingle size",
+                classicWith(
+                        word,
+                        "body",
+                        2,
+                        false,
+                        analyzer(
+                                Optional.of(new StandardAnalyzer()),
+                                Optional.empty(),
+                                Optional.of(new Shingles(1, 2, " ", true, true, "_")),
+                                Optional.empty()),
+                        DEFAULTS));
+        searches.put(
+                INVALID + "stop words file",
+                classicWith(
+                        word,
+                        "body",
+                        2,
+                        false,
+                        preset(
+                                "org.apache.lucene.analysis.en.EnglishAnalyzer",
+                                Optional.of(new WordSet(
+                                        Optional.empty(),
+                                        Optional.of(dir.resolve("none.txt").toString()))),
+                                Optional.empty(),
+                                Optional.empty()),
+                        DEFAULTS));
         searches.put(
                 "startSearch preset stem exclusion",
                 classicWith(word + " chairs", "body", 2, false, excluded, DEFAULTS));
@@ -640,6 +786,74 @@ class Lucene10ParityTest {
                                         Optional.empty(),
                                         Optional.of(new BytesValue("a", false)))))));
         return searches;
+    }
+
+    /**
+     * The calls of the analysis tab: each kind of analyzer, and a field's own analyzer and auto stop
+     * words.
+     */
+    private static Map<String, AnalyzeParams> analyses(String word, Path dir) throws IOException {
+        Path config = Files.createDirectories(dir.resolve("analysis"));
+        Files.writeString(config.resolve("mapping.txt"), "\"ß\" => \"ss\"\n");
+        String text = "Die Straße and the " + word + " chairs";
+        Analyzer custom = analyzer(
+                Optional.empty(),
+                Optional.of(new CustomAnalyzer(
+                        List.of(
+                                new AnalysisComponent("mapping", Map.of("mapping", "mapping.txt")),
+                                new AnalysisComponent("htmlStrip", Map.of())),
+                        new AnalysisComponent("whitespace", Map.of()),
+                        List.of(
+                                new AnalysisComponent("lowercase", Map.of()),
+                                new AnalysisComponent("porterStem", Map.of())),
+                        Optional.of(config.toString()))),
+                Optional.empty(),
+                Optional.empty());
+        Analyzer wrapped = analyzer(
+                Optional.of(new StandardAnalyzer()),
+                Optional.empty(),
+                Optional.of(new Shingles(2, 2, " ", true, true, "_")),
+                Optional.of(new LimitTokenCount(4, true)));
+        Analyzer english = preset(
+                "org.apache.lucene.analysis.en.EnglishAnalyzer", Optional.empty(), Optional.empty(), Optional.empty());
+        Analyzer perField = new Analyzer(
+                Optional.of(new StandardAnalyzer()),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                List.of(new FieldAnalyzer("title", english)),
+                List.of(new FieldStopWords("title", List.of("chair")), new FieldStopWords("body", List.of(word))));
+        Map<String, AnalyzeParams> analyses = new LinkedHashMap<>();
+        analyses.put("analyze standard", new AnalyzeParams(STANDARD, text, Optional.empty()));
+        analyses.put("analyze preset", new AnalyzeParams(english, text, Optional.empty()));
+        analyses.put("analyze custom", new AnalyzeParams(custom, "<b>" + text + "</b>", Optional.empty()));
+        analyses.put("analyze wrapped", new AnalyzeParams(wrapped, text, Optional.empty()));
+        analyses.put("analyze per field", new AnalyzeParams(perField, text, Optional.of("title")));
+        analyses.put("analyze per field default", new AnalyzeParams(perField, text, Optional.of("body")));
+        return analyses;
+    }
+
+    /** A preset with these word sets and options, and no others. */
+    private static Analyzer preset(
+            String className,
+            Optional<WordSet> stopwords,
+            Optional<StemDictionary> stemOverride,
+            Optional<Collation> collation) {
+        return analyzer(
+                Optional.of(new PresetAnalyzer(
+                        className,
+                        stopwords,
+                        Optional.empty(),
+                        OptionalInt.empty(),
+                        stemOverride,
+                        Optional.empty(),
+                        Optional.empty(),
+                        collation,
+                        Optional.empty())),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty());
     }
 
     /** An analyzer of {@code base}: a {@link StandardAnalyzer} or a {@link PresetAnalyzer}, or empty. */
@@ -772,6 +986,9 @@ class Lucene10ParityTest {
         calls.add(call);
         if (!(core instanceof String text && text.startsWith(FAILS))) {
             succeeded.add(call);
+        }
+        if (call.startsWith(INVALID)) {
+            assertThat(core).as(call).asString().startsWith(FAILS + ErrorCode.INVALID_ANALYZER);
         }
         try {
             // Swapped, since an unsorted map of the runtime must equal a sorted one of leia-core: the

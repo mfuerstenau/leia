@@ -62,7 +62,7 @@ final class RuntimeQueries {
                         "Invalid params: the point field '" + point.field() + "' is listed twice");
             }
         }
-        Search.AnalyzerSpec analyzer = RuntimeAnalyzers.spec(standard.analyzer(), open.runtime(), search);
+        Search.AnalyzerSpec analyzer = RuntimeAnalyzers.spec(standard.analyzer());
         try {
             return group.parse(
                     standard.expression(),
@@ -77,8 +77,8 @@ final class RuntimeQueries {
                     analyzer);
         } catch (Search.InvalidQueryException e) {
             throw new RpcException(ErrorCode.INVALID_QUERY, "Invalid query: " + e.getMessage(), e);
-        } catch (Search.UnsupportedAnalyzerException e) {
-            throw unsupported(open, e);
+        } catch (Search.UnsupportedAnalyzerException | Search.InvalidAnalyzerException e) {
+            throw RuntimeAnalyzers.failed(open.runtime(), e);
         }
     }
 
@@ -138,14 +138,14 @@ final class RuntimeQueries {
         } catch (IllegalArgumentException e) {
             throw invalidParams(e);
         }
-        Search.AnalyzerSpec analyzer = RuntimeAnalyzers.spec(like.analyzer(), open.runtime(), search);
+        Search.AnalyzerSpec analyzer = RuntimeAnalyzers.spec(like.analyzer());
         MoreLikeThisSearch.Source source = like.docId().isPresent()
                 ? new MoreLikeThisSearch.Source.Doc(like.docId().getAsInt())
                 : new MoreLikeThisSearch.Source.Text(like.text().orElseThrow());
         try {
             return group.like(source, options, analyzer);
-        } catch (Search.UnsupportedAnalyzerException e) {
-            throw unsupported(open, e);
+        } catch (Search.UnsupportedAnalyzerException | Search.InvalidAnalyzerException e) {
+            throw RuntimeAnalyzers.failed(open.runtime(), e);
         }
     }
 
@@ -221,13 +221,6 @@ final class RuntimeQueries {
                 .filter(field -> field.name().equals(name))
                 .findFirst()
                 .orElseThrow(() -> new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + name + "' in the index"));
-    }
-
-    private static RpcException unsupported(OpenRuntime open, Search.UnsupportedAnalyzerException e) {
-        return new RpcException(
-                ErrorCode.NOT_SUPPORTED,
-                "Not supported with Lucene " + open.runtime().luceneVersion() + ": " + e.getMessage(),
-                e);
     }
 
     private static RpcException invalidParams(IllegalArgumentException e) {

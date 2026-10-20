@@ -33,6 +33,8 @@ import io.github.mfuerstenau.leia.protocol.analysis.TokenStage;
 import io.github.mfuerstenau.leia.protocol.analysis.WordSet;
 import io.github.mfuerstenau.leia.protocol.analysis.WordSetSupport;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.index.Routing;
+import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -58,8 +60,9 @@ class AnalysisHandlersTest {
     @TempDir
     Path tmp;
 
-    private final GetAnalysisComponentsHandler getComponents = new GetAnalysisComponentsHandler();
-    private final AnalyzeHandler analyze = new AnalyzeHandler();
+    private final GetAnalysisComponentsHandler getComponents =
+            new GetAnalysisComponentsHandler(new Runtimes(), Routing.DEFAULT);
+    private final AnalyzeHandler analyze = new AnalyzeHandler(new Runtimes(), Routing.DEFAULT);
 
     @Test
     void listsTheComponents() {

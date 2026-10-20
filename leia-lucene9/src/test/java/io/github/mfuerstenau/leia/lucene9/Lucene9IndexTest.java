@@ -657,7 +657,7 @@ class Lucene9IndexTest {
     }
 
     private static Search.AnalyzerSpec named(String name) {
-        return new Search.AnalyzerSpec.Named(name, Optional.empty(), OptionalInt.empty());
+        return new Search.AnalyzerSpec.Preset(name);
     }
 
     @Test
@@ -678,23 +678,25 @@ class Lucene9IndexTest {
     void parsesWithTheAnalyzersOf912() throws Exception {
         try (RuntimeIndex index = open("lucene8")) {
             Search search = index.search().orElseThrow();
-            assertThat(search.analyzers())
-                    .contains(
-                            "StandardAnalyzer",
-                            "ClassicAnalyzer",
-                            "UAX29URLEmailAnalyzer",
-                            "EstonianAnalyzer",
-                            "TeluguAnalyzer")
-                    .hasSize(47);
             assertThat(search.parse("Alpha the", BODY, named("StandardAnalyzer")))
                     .hasToString("body:alpha body:the");
-            // 9.x's StopAnalyzer has no default stop words; leia gives it 7.7's.
-            assertThat(search.parse("Alpha the", BODY, named("StopAnalyzer"))).hasToString("body:alpha");
+            // 9.x's StopAnalyzer has no default stop words, as on Lucene 10 (ADR 0067).
+            assertThat(search.parse(
+                            "Alpha the",
+                            BODY,
+                            new Search.AnalyzerSpec.Preset(
+                                    "StopAnalyzer",
+                                    Optional.of(new Search.AnalyzerSpec.WordSet.Words(List.of("the"))),
+                                    OptionalInt.empty())))
+                    .hasToString("body:alpha");
+            assertThatThrownBy(() -> search.parse("alpha", BODY, named("StopAnalyzer")))
+                    .isInstanceOf(Search.InvalidAnalyzerException.class)
+                    .hasMessage("StopAnalyzer needs stop words");
             assertThat(search.parse("Häuser", BODY, named("GermanAnalyzer"))).hasToString("body:haus");
             assertThat(search.parse(
                             "abcdef",
                             BODY,
-                            new Search.AnalyzerSpec.Named("StandardAnalyzer", Optional.empty(), OptionalInt.of(3))))
+                            new Search.AnalyzerSpec.Preset("StandardAnalyzer", Optional.empty(), OptionalInt.of(3))))
                     .hasToString("body:abc body:def");
             assertThatThrownBy(() -> search.parse("alpha", BODY, named("SmartChineseAnalyzer")))
                     .isInstanceOf(Search.UnsupportedAnalyzerException.class)

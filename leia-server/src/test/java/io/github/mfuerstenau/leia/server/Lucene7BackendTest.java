@@ -188,6 +188,13 @@ class Lucene7BackendTest {
         RuntimeSearches.refusesTheQueriesOf912(backend);
     }
 
+    @Test
+    void searchesWithAStopWordsFile() throws Exception {
+        open(testIndex("lucene7"));
+
+        RuntimeSearches.searchesWithTheAnalyzersOfAnOldRuntime(backend, "7.7.3", tmp);
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"lucene6", "lucene7"})
     void searchesATerm(String name) throws Exception {

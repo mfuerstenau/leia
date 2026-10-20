@@ -26,9 +26,10 @@ public interface MoreLikeThisSearch {
      *
      * @param analyzer analyzes the text, or the stored strings of fields without a term vector
      * @throws Search.UnsupportedAnalyzerException if the runtime can't build {@code analyzer}
+     * @throws Search.InvalidAnalyzerException if {@code analyzer} is wrong
      */
     Search.ParsedQuery like(Source source, Options options, Search.AnalyzerSpec analyzer)
-            throws Search.UnsupportedAnalyzerException;
+            throws Search.UnsupportedAnalyzerException, Search.InvalidAnalyzerException;
 
     /** Where the terms come from. */
     sealed interface Source {

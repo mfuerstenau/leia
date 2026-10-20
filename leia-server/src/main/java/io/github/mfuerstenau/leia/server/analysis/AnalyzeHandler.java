@@ -13,18 +13,29 @@ import io.github.mfuerstenau.leia.protocol.analysis.TokenAttribute;
 import io.github.mfuerstenau.leia.protocol.analysis.TokenStage;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.index.Routing;
+import io.github.mfuerstenau.leia.server.runtime.RuntimeAnalysis;
+import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import jakarta.inject.Inject;
 import java.io.IOException;
+import java.util.Optional;
 import org.apache.lucene.analysis.Analyzer;
 
 /**
  * {@code analyze}: builds the analyzer and shows what it makes of the text, step by step (ADR
- * 0014), for a field if one is given (ADR 0039). The text is short, so this is no job.
+ * 0014), for a field if one is given (ADR 0039). The text is short, so this is no job. With {@link
+ * Routing#lucene10Runtime()}, the first runtime with an analysis tab does it (ADR 0067).
  */
 public final class AnalyzeHandler implements MethodHandler<AnalyzeParams, AnalyzeResult> {
 
+    private final Runtimes runtimes;
+    private final Routing routing;
+
     @Inject
-    AnalyzeHandler() {}
+    AnalyzeHandler(Runtimes runtimes, Routing routing) {
+        this.runtimes = runtimes;
+        this.routing = routing;
+    }
 
     @Override
     public RpcMethod<AnalyzeParams, AnalyzeResult> method() {
@@ -40,13 +51,25 @@ public final class AnalyzeHandler implements MethodHandler<AnalyzeParams, Analyz
                     "Invalid params: the text must be at most " + AnalyzeParams.MAX_TEXT_LENGTH
                             + " characters long, not " + length);
         }
+        Optional<RuntimeAnalysis> analysis = routing.lucene10Runtime() ? runtimes.analysis() : Optional.empty();
+        if (analysis.isPresent()) {
+            try {
+                return analysis.get().analyze(params);
+            } catch (IOException | IllegalArgumentException | IllegalStateException e) {
+                throw cannotAnalyze(e);
+            }
+        }
         try (Analyzer analyzer = AnalyzerSpecs.build(params.analyzer())) {
             return toResult(
                     Analyzers.analyze(analyzer, params.field().orElse(""), params.text(), AnalyzeResult.MAX_TOKENS));
         } catch (IOException | IllegalArgumentException | IllegalStateException e) {
-            // A component that fails on this text, such as one that breaks the token stream contract.
-            throw new RpcException(ErrorCode.INVALID_ANALYZER, "Cannot analyze the text: " + e.getMessage(), e);
+            throw cannotAnalyze(e);
         }
+    }
+
+    /** A component that fails on this text, such as one that breaks the token stream contract. */
+    private static RpcException cannotAnalyze(Exception e) {
+        return new RpcException(ErrorCode.INVALID_ANALYZER, "Cannot analyze the text: " + e.getMessage(), e);
     }
 
     private static AnalyzeResult toResult(TextAnalysis analysis) {

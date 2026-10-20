@@ -6,8 +6,8 @@ import io.github.mfuerstenau.leia.core.Queries;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.core.TextHighlighter;
 import io.github.mfuerstenau.leia.runtime.Highlight;
+import io.github.mfuerstenau.leia.runtime.Search.InvalidAnalyzerException;
 import io.github.mfuerstenau.leia.runtime.Search.ParsedQuery;
-import io.github.mfuerstenau.leia.runtime.Search.UnsupportedAnalyzerException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -46,7 +46,7 @@ final class Lucene10Highlight implements Highlight {
             int[] docIds,
             int[] maxPassages,
             LongConsumer progress)
-            throws IOException, UnsupportedAnalyzerException {
+            throws IOException, InvalidAnalyzerException {
         TextHighlighter.Mode mode = options.wholeValues() ? TextHighlighter.Mode.VALUES : TextHighlighter.Mode.PASSAGES;
         int maxLength = options.wholeValues() ? Highlights.MAX_DOCUMENT_CHARS : Highlights.MAX_HIT_CHARS;
         if (options.maxLength() != maxLength) {

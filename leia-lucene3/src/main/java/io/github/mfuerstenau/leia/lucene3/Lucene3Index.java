@@ -607,13 +607,8 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
     }
 
     @Override
-    public Set<String> analyzers() {
-        return Lucene3Analyzers.NAMES;
-    }
-
-    @Override
     public ParsedQuery parse(String expression, ParserOptions options, AnalyzerSpec spec)
-            throws InvalidQueryException, UnsupportedAnalyzerException {
+            throws InvalidQueryException, UnsupportedAnalyzerException, InvalidAnalyzerException {
         Analyzer analyzer = Lucene3Analyzers.analyzer(spec);
         try {
             QueryParser parser = new QueryParser(Version.LUCENE_36, options.defaultField(), analyzer);

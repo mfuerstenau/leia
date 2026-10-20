@@ -1,7 +1,9 @@
 package io.github.mfuerstenau.leia.lucene3;
 
 import io.github.mfuerstenau.leia.runtime.Search.AnalyzerSpec;
+import io.github.mfuerstenau.leia.runtime.Search.InvalidAnalyzerException;
 import io.github.mfuerstenau.leia.runtime.Search.UnsupportedAnalyzerException;
+import io.github.mfuerstenau.leia.runtime.support.WordFiles;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -28,7 +30,7 @@ import org.apache.lucene.util.Version;
  */
 final class Lucene3Analyzers {
 
-    static final Set<String> NAMES = Set.of(
+    private static final Set<String> NAMES = Set.of(
             "StandardAnalyzer",
             "ClassicAnalyzer",
             "WhitespaceAnalyzer",
@@ -38,10 +40,52 @@ final class Lucene3Analyzers {
 
     private Lucene3Analyzers() {}
 
-    /** Builds {@code spec}. */
-    static Analyzer analyzer(AnalyzerSpec spec) throws UnsupportedAnalyzerException {
+    /**
+     * Builds {@code spec}: the standard analyzer, a preset of {@link #NAMES} by its simple name with
+     * stop words and the longest token, a token limit, analyzers per field and auto stop words (ADR
+     * 0067). 3.6's token limit always stops reading at the limit: {@code consumeAllTokens} changes no
+     * token.
+     *
+     * @throws UnsupportedAnalyzerException for anything else
+     * @throws InvalidAnalyzerException for a stop words file that can't be read, or a token limit
+     *     below 1
+     */
+    static Analyzer analyzer(AnalyzerSpec spec) throws UnsupportedAnalyzerException, InvalidAnalyzerException {
         return switch (spec) {
-            case AnalyzerSpec.Named named -> named(named.name(), named.stopwords(), named.maxTokenLength());
+            case AnalyzerSpec.Standard _ -> named("StandardAnalyzer", Optional.empty(), OptionalInt.empty());
+            case AnalyzerSpec.Preset preset -> {
+                String name = preset.simpleName();
+                if (NAMES.contains(name)
+                        && (preset.stemExclusion().isPresent()
+                                || preset.stemOverride().isPresent()
+                                || preset.japanese().isPresent()
+                                || preset.korean().isPresent()
+                                || preset.collation().isPresent()
+                                || preset.japaneseCompletion().isPresent())) {
+                    throw new UnsupportedAnalyzerException(
+                            "options of " + name + " other than stop words and the longest token");
+                }
+                Optional<List<String>> stopwords = preset.stopwords().isPresent()
+                        ? Optional.of(
+                                WordFiles.words("stop words", preset.stopwords().get()))
+                        : Optional.empty();
+                yield named(name, stopwords, preset.maxTokenLength());
+            }
+            case AnalyzerSpec.Custom _ -> throw new UnsupportedAnalyzerException("custom analyzers");
+            case AnalyzerSpec.Wrapped wrapped -> {
+                if (wrapped.shingles().isPresent()) {
+                    throw new UnsupportedAnalyzerException("shingles");
+                }
+                if (wrapped.limitTokenCount().isEmpty()) {
+                    yield analyzer(wrapped.analyzer());
+                }
+                int maxTokenCount = wrapped.limitTokenCount().get().maxTokenCount();
+                if (maxTokenCount < 1) {
+                    throw new InvalidAnalyzerException(
+                            "token limit: the maximum token count must be at least 1, not " + maxTokenCount, null);
+                }
+                yield new LimitTokenCountAnalyzer(analyzer(wrapped.analyzer()), maxTokenCount);
+            }
             case AnalyzerSpec.PerField(AnalyzerSpec fallback, Map<String, AnalyzerSpec> fields) -> {
                 Map<String, Analyzer> analyzers = new HashMap<>();
                 for (Map.Entry<String, AnalyzerSpec> field : fields.entrySet()) {
@@ -49,8 +93,6 @@ final class Lucene3Analyzers {
                 }
                 yield new PerFieldAnalyzerWrapper(analyzer(fallback), analyzers);
             }
-            case AnalyzerSpec.LimitTokenCount(AnalyzerSpec analyzer, int maxTokenCount) ->
-                new LimitTokenCountAnalyzer(analyzer(analyzer), maxTokenCount);
             case AnalyzerSpec.AutoStopWords(AnalyzerSpec analyzer, Map<String, List<String>> words) ->
                 new Lucene3AutoStopWordsAnalyzer(analyzer(analyzer), words);
         };

@@ -52,8 +52,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 class Lucene10IndexTest {
 
     private static final Search.ParserOptions BODY = new Search.ParserOptions("body", false, false, 0, 0, true, false);
-    private static final Search.AnalyzerSpec STANDARD =
-            new Search.AnalyzerSpec.Named("StandardAnalyzer", Optional.empty(), OptionalInt.empty());
+    private static final Search.AnalyzerSpec STANDARD = new Search.AnalyzerSpec.Standard();
 
     private static Path testIndex(String name) {
         String dir = System.getProperty("leia.test.index." + name);
@@ -177,7 +176,6 @@ class Lucene10IndexTest {
     void searchesScoresAndExplains() throws Exception {
         try (RuntimeIndex index = open("lucene9")) {
             Search search = index.search().orElseThrow();
-            assertThat(search.analyzers()).contains("StandardAnalyzer", "EnglishAnalyzer");
             Search.ParsedQuery query = search.parse("number", BODY, STANDARD);
             assertThat(query).hasToString("body:number");
 
@@ -227,11 +225,10 @@ class Lucene10IndexTest {
                     .isFalse();
             assertThatThrownBy(() -> search.parse("body:(number", BODY, STANDARD))
                     .isInstanceOf(Search.InvalidQueryException.class);
-            assertThatThrownBy(() -> search.parse(
-                            "number",
-                            BODY,
-                            new Search.AnalyzerSpec.Named("NoSuchAnalyzer", Optional.empty(), OptionalInt.empty())))
-                    .isInstanceOf(Search.UnsupportedAnalyzerException.class);
+            assertThatThrownBy(() ->
+                            search.parse("number", BODY, new Search.AnalyzerSpec.Preset("org.example.NoSuchAnalyzer")))
+                    .isInstanceOf(Search.InvalidAnalyzerException.class)
+                    .hasMessage("no preset analyzer 'org.example.NoSuchAnalyzer'");
         }
     }
 

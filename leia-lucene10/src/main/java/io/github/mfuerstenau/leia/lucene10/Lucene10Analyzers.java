@@ -1,88 +1,124 @@
 package io.github.mfuerstenau.leia.lucene10;
 
-import io.github.mfuerstenau.leia.core.AnalysisComponents.AvailableAnalyzer;
+import io.github.mfuerstenau.leia.core.AnalyzerSpec;
 import io.github.mfuerstenau.leia.core.Analyzers;
-import io.github.mfuerstenau.leia.core.InvalidAnalyzerException;
-import io.github.mfuerstenau.leia.runtime.Search.AnalyzerSpec;
-import io.github.mfuerstenau.leia.runtime.Search.UnsupportedAnalyzerException;
+import io.github.mfuerstenau.leia.runtime.Search;
+import io.github.mfuerstenau.leia.runtime.Search.InvalidAnalyzerException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
 import org.apache.lucene.analysis.Analyzer;
 
 /**
- * The analyzers of a search, built by leia-core's {@link Analyzers} (ADR 0065): a named one is
- * leia-core's preset of that simple class name (ADR 0015), the presets of the extension jars
- * included.
+ * The analyzers of a search and of the analysis tab, built by leia-core's {@link Analyzers} (ADR 0065,
+ * ADR 0067): the runtime's spec is leia-core's, one to one, so a preset is leia-core's of that class
+ * name, the presets of the extension jars included, and every failure is leia-core's.
  */
 final class Lucene10Analyzers {
 
     private Lucene10Analyzers() {}
 
-    /** The presets by simple class name; of two with the same name, the first. */
-    private static Map<String, String> presets() {
-        Map<String, String> presets = new LinkedHashMap<>();
-        for (AvailableAnalyzer analyzer : Analyzers.components().analyzers()) {
-            presets.putIfAbsent(analyzer.name(), analyzer.className());
-        }
-        return presets;
-    }
-
-    static Set<String> names() {
-        return Set.copyOf(presets().keySet());
-    }
-
     /** Builds {@code spec}; the caller closes it. */
-    static Analyzer analyzer(AnalyzerSpec spec) throws UnsupportedAnalyzerException {
+    static Analyzer analyzer(Search.AnalyzerSpec spec) throws InvalidAnalyzerException {
         try {
-            return Analyzers.build(coreSpec(spec, presets()));
-        } catch (InvalidAnalyzerException e) {
-            throw new UnsupportedAnalyzerException(e.getMessage());
+            return Analyzers.build(coreSpec(spec));
+        } catch (io.github.mfuerstenau.leia.core.InvalidAnalyzerException e) {
+            throw new InvalidAnalyzerException(e.getMessage(), e);
         }
     }
 
-    private static io.github.mfuerstenau.leia.core.AnalyzerSpec coreSpec(AnalyzerSpec spec, Map<String, String> presets)
-            throws UnsupportedAnalyzerException {
+    static AnalyzerSpec coreSpec(Search.AnalyzerSpec spec) {
         return switch (spec) {
-            case AnalyzerSpec.Named named -> {
-                if (named.name().equals("StandardAnalyzer")
-                        && named.stopwords().isEmpty()
-                        && named.maxTokenLength().isEmpty()) {
-                    yield new io.github.mfuerstenau.leia.core.AnalyzerSpec.Standard();
-                }
-                String className = presets.get(named.name());
-                if (className == null) {
-                    throw new UnsupportedAnalyzerException("no analyzer " + named.name());
-                }
-                yield new io.github.mfuerstenau.leia.core.AnalyzerSpec.Preset(
-                        className,
-                        named.stopwords().map(io.github.mfuerstenau.leia.core.AnalyzerSpec.WordSet.Words::new),
-                        Optional.empty(),
-                        named.maxTokenLength(),
-                        Optional.empty(),
-                        Optional.empty(),
-                        Optional.empty(),
-                        Optional.empty(),
-                        Optional.empty());
+            case Search.AnalyzerSpec.Standard _ -> new AnalyzerSpec.Standard();
+            case Search.AnalyzerSpec.Preset preset ->
+                new AnalyzerSpec.Preset(
+                        preset.className(),
+                        preset.stopwords().map(Lucene10Analyzers::wordSet),
+                        preset.stemExclusion().map(Lucene10Analyzers::wordSet),
+                        preset.maxTokenLength(),
+                        preset.stemOverride().map(Lucene10Analyzers::stemDictionary),
+                        preset.japanese()
+                                .map(japanese -> new AnalyzerSpec.Japanese(
+                                        japanese.userDictionary(),
+                                        japanese.mode().map(mode -> AnalyzerSpec.JapaneseMode.valueOf(mode.name())),
+                                        japanese.stopTags().map(Lucene10Analyzers::wordSet))),
+                        preset.korean()
+                                .map(korean -> new AnalyzerSpec.Korean(
+                                        korean.userDictionary(),
+                                        korean.decompoundMode()
+                                                .map(mode -> AnalyzerSpec.KoreanDecompoundMode.valueOf(mode.name())),
+                                        korean.stopTags().map(Lucene10Analyzers::wordSet),
+                                        korean.outputUnknownUnigrams())),
+                        preset.collation()
+                                .map(collation -> new AnalyzerSpec.Collation(
+                                        collation.locale(),
+                                        collation
+                                                .strength()
+                                                .map(strength ->
+                                                        AnalyzerSpec.CollationStrength.valueOf(strength.name())),
+                                        collation
+                                                .decomposition()
+                                                .map(decomposition -> AnalyzerSpec.CollationDecomposition.valueOf(
+                                                        decomposition.name())))),
+                        preset.japaneseCompletion()
+                                .map(completion -> new AnalyzerSpec.JapaneseCompletion(
+                                        completion.userDictionary(),
+                                        completion
+                                                .mode()
+                                                .map(mode ->
+                                                        AnalyzerSpec.JapaneseCompletionMode.valueOf(mode.name())))));
+            case Search.AnalyzerSpec.Custom custom ->
+                new AnalyzerSpec.Custom(
+                        components(custom.charFilters()),
+                        component(custom.tokenizer()),
+                        components(custom.tokenFilters()),
+                        custom.configDir());
+            case Search.AnalyzerSpec.Wrapped wrapped ->
+                new AnalyzerSpec.Wrapped(
+                        coreSpec(wrapped.analyzer()),
+                        wrapped.shingles()
+                                .map(shingles -> new AnalyzerSpec.Shingles(
+                                        shingles.minShingleSize(),
+                                        shingles.maxShingleSize(),
+                                        shingles.tokenSeparator(),
+                                        shingles.outputUnigrams(),
+                                        shingles.outputUnigramsIfNoShingles(),
+                                        shingles.fillerToken())),
+                        wrapped.limitTokenCount()
+                                .map(limit -> new AnalyzerSpec.LimitTokenCount(
+                                        limit.maxTokenCount(), limit.consumeAllTokens())));
+            case Search.AnalyzerSpec.PerField(
+                    Search.AnalyzerSpec fallback,
+                    Map<String, Search.AnalyzerSpec> fields) -> {
+                Map<String, AnalyzerSpec> coreFields = new LinkedHashMap<>();
+                fields.forEach((field, analyzer) -> coreFields.put(field, coreSpec(analyzer)));
+                yield new AnalyzerSpec.PerField(coreSpec(fallback), coreFields);
             }
-            case AnalyzerSpec.PerField(AnalyzerSpec fallback, Map<String, AnalyzerSpec> fields) -> {
-                Map<String, io.github.mfuerstenau.leia.core.AnalyzerSpec> coreFields = new LinkedHashMap<>();
-                for (Map.Entry<String, AnalyzerSpec> field : fields.entrySet()) {
-                    coreFields.put(field.getKey(), coreSpec(field.getValue(), presets));
-                }
-                yield new io.github.mfuerstenau.leia.core.AnalyzerSpec.PerField(
-                        coreSpec(fallback, presets), coreFields);
-            }
-            case AnalyzerSpec.LimitTokenCount(AnalyzerSpec analyzer, int maxTokenCount) ->
-                new io.github.mfuerstenau.leia.core.AnalyzerSpec.Wrapped(
-                        coreSpec(analyzer, presets),
-                        Optional.empty(),
-                        Optional.of(new io.github.mfuerstenau.leia.core.AnalyzerSpec.LimitTokenCount(
-                                maxTokenCount, false)));
-            case AnalyzerSpec.AutoStopWords(AnalyzerSpec analyzer, Map<String, List<String>> words) ->
-                new io.github.mfuerstenau.leia.core.AnalyzerSpec.AutoStopWords(coreSpec(analyzer, presets), words);
+            case Search.AnalyzerSpec.AutoStopWords(Search.AnalyzerSpec analyzer, Map<String, List<String>> words) ->
+                new AnalyzerSpec.AutoStopWords(coreSpec(analyzer), words);
         };
+    }
+
+    private static AnalyzerSpec.WordSet wordSet(Search.AnalyzerSpec.WordSet set) {
+        return switch (set) {
+            case Search.AnalyzerSpec.WordSet.Words words -> new AnalyzerSpec.WordSet.Words(words.words());
+            case Search.AnalyzerSpec.WordSet.File file -> new AnalyzerSpec.WordSet.File(file.path());
+        };
+    }
+
+    private static AnalyzerSpec.StemDictionary stemDictionary(Search.AnalyzerSpec.StemDictionary dictionary) {
+        return switch (dictionary) {
+            case Search.AnalyzerSpec.StemDictionary.Entries entries ->
+                new AnalyzerSpec.StemDictionary.Entries(entries.entries());
+            case Search.AnalyzerSpec.StemDictionary.File file -> new AnalyzerSpec.StemDictionary.File(file.path());
+        };
+    }
+
+    private static List<AnalyzerSpec.Component> components(List<Search.AnalyzerSpec.Component> components) {
+        return components.stream().map(Lucene10Analyzers::component).toList();
+    }
+
+    private static AnalyzerSpec.Component component(Search.AnalyzerSpec.Component component) {
+        return new AnalyzerSpec.Component(component.name(), component.params());
     }
 }

@@ -29,6 +29,7 @@ public interface Highlight {
      *     of each document; it may throw to stop the highlight
      * @throws Search.UnsupportedAnalyzerException if the runtime can't build the analyzer of {@code
      *     options}
+     * @throws Search.InvalidAnalyzerException if the analyzer of {@code options} is wrong
      */
     Highlighted highlight(
             Search.ParsedQuery query,
@@ -37,7 +38,7 @@ public interface Highlight {
             int[] docIds,
             int[] maxPassages,
             LongConsumer progress)
-            throws IOException, Search.UnsupportedAnalyzerException;
+            throws IOException, Search.UnsupportedAnalyzerException, Search.InvalidAnalyzerException;
 
     /**
      * How to highlight.

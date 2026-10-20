@@ -512,7 +512,7 @@ final class Lucene10Index
         Analyzer analyzer;
         try {
             analyzer = Lucene10Analyzers.analyzer(like.spec());
-        } catch (UnsupportedAnalyzerException e) {
+        } catch (InvalidAnalyzerException e) {
             // MoreLikeThisSearch.like built it before.
             throw new IllegalStateException(e.getMessage(), e);
         }
@@ -521,18 +521,13 @@ final class Lucene10Index
         }
     }
 
-    @Override
-    public Set<String> analyzers() {
-        return Lucene10Analyzers.names();
-    }
-
     /**
      * {@inheritDoc} With leia-core's classic parser, which reads date ranges (ADR 0026), and fuzzy terms
      * of up to 2 edits; it splits on whitespace only to generate phrase queries, which needs it.
      */
     @Override
     public ParsedQuery parse(String expression, ParserOptions options, AnalyzerSpec spec)
-            throws InvalidQueryException, UnsupportedAnalyzerException {
+            throws InvalidQueryException, InvalidAnalyzerException {
         Analyzer analyzer = Lucene10Analyzers.analyzer(spec);
         try {
             return new Lucene10Query(Queries.classic(
@@ -610,7 +605,7 @@ final class Lucene10Index
             StandardSearch.Options options,
             Map<String, StandardSearch.PointType> points,
             AnalyzerSpec spec)
-            throws InvalidQueryException, UnsupportedAnalyzerException {
+            throws InvalidQueryException, InvalidAnalyzerException {
         Map<String, io.github.mfuerstenau.leia.core.PointType> types = new LinkedHashMap<>();
         points.forEach(
                 (field, type) -> types.put(field, io.github.mfuerstenau.leia.core.PointType.valueOf(type.name())));
@@ -636,7 +631,7 @@ final class Lucene10Index
     /** {@inheritDoc} leia-core's query is built in each search, from the reader searched (ADR 0013). */
     @Override
     public ParsedQuery like(Source source, MoreLikeThisSearch.Options options, AnalyzerSpec spec)
-            throws UnsupportedAnalyzerException {
+            throws InvalidAnalyzerException {
         MoreLikeThisOptions coreOptions = new MoreLikeThisOptions(
                 options.fields(),
                 options.minTermFreq(),

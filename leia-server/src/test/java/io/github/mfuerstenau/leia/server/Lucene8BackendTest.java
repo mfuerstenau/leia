@@ -9,6 +9,18 @@ import static org.assertj.core.api.Assertions.tuple;
 
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
+import io.github.mfuerstenau.leia.protocol.analysis.AnalysisComponent;
+import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.Collation;
+import io.github.mfuerstenau.leia.protocol.analysis.CollationStrength;
+import io.github.mfuerstenau.leia.protocol.analysis.CustomAnalyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.JapaneseOptions;
+import io.github.mfuerstenau.leia.protocol.analysis.LimitTokenCount;
+import io.github.mfuerstenau.leia.protocol.analysis.PresetAnalyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.Shingles;
+import io.github.mfuerstenau.leia.protocol.analysis.StandardAnalyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.StemDictionary;
+import io.github.mfuerstenau.leia.protocol.analysis.WordSet;
 import io.github.mfuerstenau.leia.protocol.check.CheckIndexResult;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexParams;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexResult;
@@ -58,10 +70,12 @@ import io.github.mfuerstenau.leia.protocol.search.SearchResults;
 import io.github.mfuerstenau.leia.protocol.search.SortKey;
 import io.github.mfuerstenau.leia.protocol.search.StartHighlightParams;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import org.junit.jupiter.api.AfterEach;
@@ -650,6 +664,156 @@ class Lucene8BackendTest {
         RpcException stored = backend.fails(Methods.START_SEARCH, params(like("price")), ErrorCode.INVALID_PARAMS);
         assertThat(stored)
                 .hasMessage("Invalid params: the field 'price' is not indexed, so it has no terms to search for");
+    }
+
+    /**
+     * Custom analyzers, shingles and the options of presets, which 9.12 builds as Lucene 10 does (ADR
+     * 0067); a component that only Lucene 10 has and the options of Kuromoji aren't supported.
+     */
+    @Test
+    void searchesWithTheAnalyzersOf912(@TempDir Path tmp) throws Exception {
+        open(testIndex("lucene8"));
+        Files.writeString(tmp.resolve("stop.txt"), "the\n");
+        Analyzer custom = analyzer(new CustomAnalyzer(
+                List.of(),
+                new AnalysisComponent("whitespace", Map.of()),
+                List.of(
+                        new AnalysisComponent("lowercase", Map.of()),
+                        new AnalysisComponent("stop", Map.of("words", "stop.txt")),
+                        new AnalysisComponent("porterStem", Map.of())),
+                Optional.of(tmp.toString())));
+        assertThat(parsed("Documents The beta", custom)).isEqualTo("body:document body:beta");
+        Analyzer shingles = new Analyzer(
+                Optional.of(new StandardAnalyzer()),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(new Shingles(2, 2, "_", false, false, "-")),
+                Optional.of(new LimitTokenCount(1, true)),
+                List.of(),
+                List.of());
+        assertThat(parsed("alpha document gamma", shingles)).isEqualTo("body:alpha_document");
+        WordSet documents = new WordSet(Optional.of(List.of("documents")), Optional.empty());
+        assertThat(parsed("documents", preset(ENGLISH, Optional.empty(), Optional.empty(), Optional.empty())))
+                .isEqualTo("body:document");
+        assertThat(parsed("documents", preset(ENGLISH, Optional.of(documents), Optional.empty(), Optional.empty())))
+                .isEqualTo("body:documents");
+        StemDictionary gamma = new StemDictionary(Optional.of(Map.of("alpha", "gamma")), Optional.empty());
+        assertThat(parsed(
+                        "alpha",
+                        preset(
+                                "org.apache.lucene.analysis.nl.DutchAnalyzer",
+                                Optional.empty(),
+                                Optional.of(gamma),
+                                Optional.empty())))
+                .isEqualTo("body:gamma");
+        Analyzer collation = preset(
+                "org.apache.lucene.collation.CollationKeyAnalyzer",
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(new Collation("de", Optional.of(CollationStrength.PRIMARY), Optional.empty())));
+        assertThat(parsed("Alpha", collation)).isEqualTo(parsed("alpha", collation));
+
+        RpcException romanian = backend.fails(
+                Methods.START_SEARCH,
+                params(RealBackend.classic(
+                        "alpha",
+                        analyzer(new CustomAnalyzer(
+                                List.of(),
+                                new AnalysisComponent("standard", Map.of()),
+                                List.of(new AnalysisComponent("romanianNormalization", Map.of())),
+                                Optional.empty())))),
+                ErrorCode.NOT_SUPPORTED);
+        assertThat(romanian)
+                .hasMessage(
+                        "Not supported with Lucene 9.12.3: Lucene 9.12.3 has no token filter 'romanianNormalization'");
+        RpcException japanese = backend.fails(
+                Methods.START_SEARCH,
+                params(RealBackend.classic(
+                        "alpha",
+                        analyzer(new PresetAnalyzer(
+                                "org.apache.lucene.analysis.ja.JapaneseAnalyzer",
+                                Optional.empty(),
+                                Optional.empty(),
+                                OptionalInt.empty(),
+                                Optional.empty(),
+                                Optional.of(new JapaneseOptions(Optional.empty(), Optional.empty(), Optional.empty())),
+                                Optional.empty(),
+                                Optional.empty(),
+                                Optional.empty())))),
+                ErrorCode.NOT_SUPPORTED);
+        assertThat(japanese).hasMessageContaining("Lucene 9.12.3 has no analyzer JapaneseAnalyzer");
+        RpcException size = backend.fails(
+                Methods.START_SEARCH,
+                params(RealBackend.classic(
+                        "alpha",
+                        new Analyzer(
+                                Optional.of(new StandardAnalyzer()),
+                                Optional.empty(),
+                                Optional.empty(),
+                                Optional.of(new Shingles(1, 2, " ", true, true, "_")),
+                                Optional.empty(),
+                                List.of(),
+                                List.of()))),
+                ErrorCode.INVALID_ANALYZER);
+        assertThat(size).hasMessage("Invalid analyzer: shingles: the minimum size must be at least 2, not 1");
+        RpcException exclusions = backend.fails(
+                Methods.START_SEARCH,
+                params(RealBackend.classic(
+                        "alpha",
+                        preset(
+                                "org.apache.lucene.analysis.core.KeywordAnalyzer",
+                                Optional.of(documents),
+                                Optional.empty(),
+                                Optional.empty()))),
+                ErrorCode.INVALID_ANALYZER);
+        assertThat(exclusions).hasMessage("Invalid analyzer: KeywordAnalyzer takes no stem exclusions");
+    }
+
+    private static final String ENGLISH = "org.apache.lucene.analysis.en.EnglishAnalyzer";
+
+    /** The query that a classic search of {@code expression} in {@code body} parses to. */
+    private String parsed(String expression, Analyzer analyzer) throws Exception {
+        return backend.search(RealBackend.classic(expression, analyzer), 10).query();
+    }
+
+    private static Analyzer analyzer(CustomAnalyzer custom) {
+        return new Analyzer(
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(custom),
+                Optional.empty(),
+                Optional.empty(),
+                List.of(),
+                List.of());
+    }
+
+    private static Analyzer analyzer(PresetAnalyzer preset) {
+        return new Analyzer(
+                Optional.empty(),
+                Optional.of(preset),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                List.of(),
+                List.of());
+    }
+
+    /** A preset with these stem exclusions, stem overrides and collation, and no other options. */
+    private static Analyzer preset(
+            String className,
+            Optional<WordSet> stemExclusion,
+            Optional<StemDictionary> stemOverride,
+            Optional<Collation> collation) {
+        return analyzer(new PresetAnalyzer(
+                className,
+                Optional.empty(),
+                stemExclusion,
+                OptionalInt.empty(),
+                stemOverride,
+                Optional.empty(),
+                Optional.empty(),
+                collation,
+                Optional.empty()));
     }
 
     /** More-Like-This by text from {@code field}. */

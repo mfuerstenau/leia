@@ -17,10 +17,11 @@ public interface StandardSearch {
      * @throws Search.InvalidQueryException if the expression doesn't parse, or a point value is not a
      *     number; the message says where, as the classic parser's does
      * @throws Search.UnsupportedAnalyzerException if the runtime can't build {@code analyzer}
+     * @throws Search.InvalidAnalyzerException if {@code analyzer} is wrong
      */
     Search.ParsedQuery parse(
             String expression, Options options, Map<String, PointType> points, Search.AnalyzerSpec analyzer)
-            throws Search.InvalidQueryException, Search.UnsupportedAnalyzerException;
+            throws Search.InvalidQueryException, Search.UnsupportedAnalyzerException, Search.InvalidAnalyzerException;
 
     /** The standard query parser's options: those of the classic one but auto-generated phrases. */
     record Options(

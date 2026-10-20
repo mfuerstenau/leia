@@ -11,18 +11,29 @@ import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsResult;
 import io.github.mfuerstenau.leia.protocol.analysis.PresetOption;
 import io.github.mfuerstenau.leia.protocol.analysis.WordSetSupport;
 import io.github.mfuerstenau.leia.server.MethodHandler;
+import io.github.mfuerstenau.leia.server.index.Routing;
+import io.github.mfuerstenau.leia.server.runtime.RuntimeAnalysis;
+import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import jakarta.inject.Inject;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * {@code getAnalysisComponents}: the preset analyzers, and the word sets and options they take (ADR
- * 0015, ADR 0017, ADR 0023), and what a custom analyzer can be built from (ADR 0014).
+ * 0015, ADR 0017, ADR 0023), and what a custom analyzer can be built from (ADR 0014). With {@link
+ * Routing#lucene10Runtime()}, those of the first runtime with an analysis tab (ADR 0067).
  */
 public final class GetAnalysisComponentsHandler
         implements MethodHandler<GetAnalysisComponentsParams, GetAnalysisComponentsResult> {
 
+    private final Runtimes runtimes;
+    private final Routing routing;
+
     @Inject
-    GetAnalysisComponentsHandler() {}
+    GetAnalysisComponentsHandler(Runtimes runtimes, Routing routing) {
+        this.runtimes = runtimes;
+        this.routing = routing;
+    }
 
     @Override
     public RpcMethod<GetAnalysisComponentsParams, GetAnalysisComponentsResult> method() {
@@ -31,6 +42,10 @@ public final class GetAnalysisComponentsHandler
 
     @Override
     public GetAnalysisComponentsResult handle(GetAnalysisComponentsParams params) {
+        Optional<RuntimeAnalysis> analysis = routing.lucene10Runtime() ? runtimes.analysis() : Optional.empty();
+        if (analysis.isPresent()) {
+            return analysis.get().components();
+        }
         AnalysisComponents components = Analyzers.components();
         return new GetAnalysisComponentsResult(
                 components.analyzers().stream()

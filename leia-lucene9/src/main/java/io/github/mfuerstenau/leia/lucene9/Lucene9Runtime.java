@@ -1,5 +1,6 @@
 package io.github.mfuerstenau.leia.lucene9;
 
+import io.github.mfuerstenau.leia.runtime.Analysis;
 import io.github.mfuerstenau.leia.runtime.Check;
 import io.github.mfuerstenau.leia.runtime.Commits;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
@@ -43,5 +44,10 @@ public final class Lucene9Runtime implements LuceneRuntime {
     @Override
     public Optional<Check> check() {
         return Optional.of(new Lucene9Check());
+    }
+
+    @Override
+    public Optional<Analysis> analysis() {
+        return Optional.empty();
     }
 }

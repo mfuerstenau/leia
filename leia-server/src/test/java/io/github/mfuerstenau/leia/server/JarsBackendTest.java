@@ -7,14 +7,17 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
+import io.github.mfuerstenau.leia.protocol.analysis.AnalysisComponent;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeParams;
 import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.AvailableAnalyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.Collation;
 import io.github.mfuerstenau.leia.protocol.analysis.CollationStrength;
+import io.github.mfuerstenau.leia.protocol.analysis.CustomAnalyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsParams;
 import io.github.mfuerstenau.leia.protocol.analysis.PresetAnalyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.PresetOption;
+import io.github.mfuerstenau.leia.protocol.analysis.Shingles;
 import io.github.mfuerstenau.leia.protocol.analysis.WordSetSupport;
 import io.github.mfuerstenau.leia.protocol.check.CheckIndexResult;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexParams;
@@ -36,6 +39,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.jar.JarEntry;
@@ -118,6 +122,24 @@ class JarsBackendTest {
                     .filteredOn(field -> field.name().equals("embedding"))
                     .singleElement()
                     .satisfies(embedding -> assertThat(embedding.vector()).isPresent());
+            // A custom analyzer in shingles, through the relocated factories of the loaded jar (ADR 0067).
+            Analyzer custom = new Analyzer(
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.of(new CustomAnalyzer(
+                            List.of(),
+                            new AnalysisComponent("whitespace", Map.of()),
+                            List.of(
+                                    new AnalysisComponent("lowercase", Map.of()),
+                                    new AnalysisComponent("porterStem", Map.of())),
+                            Optional.empty())),
+                    Optional.of(new Shingles(2, 2, "_", true, false, "-")),
+                    Optional.empty(),
+                    List.of(),
+                    List.of());
+            assertThat(backend.search(RealBackend.classic("Alpha Documents", custom), 10)
+                            .query())
+                    .isEqualTo("((+body:alpha +body:document) body:alpha_document)");
 
             // The codec, and Lucene's codec with the jar's postings, doc values and KNN vectors formats.
             for (String name : List.of("custom-codec", "custom-formats")) {

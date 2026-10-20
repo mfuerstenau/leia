@@ -280,6 +280,13 @@ class Lucene3BackendTest {
     }
 
     @Test
+    void searchesWithAStopWordsFile() throws Exception {
+        open(Path.of(PATH));
+
+        RuntimeSearches.searchesWithTheAnalyzersOfAnOldRuntime(backend, "3.6.2", tmp);
+    }
+
+    @Test
     void searchesATerm() throws Exception {
         OpenIndexResult opened = open(Path.of(PATH));
 

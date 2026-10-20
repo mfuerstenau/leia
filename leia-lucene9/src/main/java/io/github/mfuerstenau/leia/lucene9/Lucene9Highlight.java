@@ -1,6 +1,7 @@
 package io.github.mfuerstenau.leia.lucene9;
 
 import io.github.mfuerstenau.leia.runtime.Highlight;
+import io.github.mfuerstenau.leia.runtime.Search.InvalidAnalyzerException;
 import io.github.mfuerstenau.leia.runtime.Search.ParsedQuery;
 import io.github.mfuerstenau.leia.runtime.Search.UnsupportedAnalyzerException;
 import java.io.IOException;
@@ -51,7 +52,7 @@ final class Lucene9Highlight implements Highlight {
             int[] docIds,
             int[] maxPassages,
             LongConsumer progress)
-            throws IOException, UnsupportedAnalyzerException {
+            throws IOException, UnsupportedAnalyzerException, InvalidAnalyzerException {
         Query query = Lucene9Index.query(parsed);
         IndexSearcher searcher = new IndexSearcher(reader);
         // No cache: a query is run once.

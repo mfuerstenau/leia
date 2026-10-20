@@ -894,7 +894,7 @@ public final class RuntimeResults {
         }
         Search.ParsedQuery query = parsedQuery(open, search, params.query());
         Optional<Search.AnalyzerSpec> analyzer = options.isPresent()
-                ? Optional.of(RuntimeAnalyzers.spec(options.get().analyzer(), open.runtime(), search))
+                ? Optional.of(RuntimeAnalyzers.spec(options.get().analyzer()))
                 : Optional.empty();
         Optional<List<String>> fields = params.fields().map(List::copyOf);
         int maxDoc = open.index().maxDoc();
@@ -1162,7 +1162,7 @@ public final class RuntimeResults {
 
     /** {@code classic}, parsed by the runtime. */
     private static Search.ParsedQuery parse(OpenRuntime open, Search search, ClassicQuery classic) throws RpcException {
-        Search.AnalyzerSpec analyzer = RuntimeAnalyzers.spec(classic.analyzer(), open.runtime(), search);
+        Search.AnalyzerSpec analyzer = RuntimeAnalyzers.spec(classic.analyzer());
         try {
             return search.parse(
                     classic.expression(),
@@ -1177,11 +1177,8 @@ public final class RuntimeResults {
                     analyzer);
         } catch (Search.InvalidQueryException e) {
             throw new RpcException(ErrorCode.INVALID_QUERY, "Invalid query: " + e.getMessage(), e);
-        } catch (Search.UnsupportedAnalyzerException e) {
-            throw new RpcException(
-                    ErrorCode.NOT_SUPPORTED,
-                    "Not supported with Lucene " + open.runtime().luceneVersion() + ": " + e.getMessage(),
-                    e);
+        } catch (Search.UnsupportedAnalyzerException | Search.InvalidAnalyzerException e) {
+            throw RuntimeAnalyzers.failed(open.runtime(), e);
         }
     }
 
