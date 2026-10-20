@@ -14,9 +14,9 @@ import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
 
 /**
- * Checks that a jar holds no class in [excludedPackages]: leia-lucene10's jar must bring Lucene 10
- * and leia-core, but neither the runtime interface, which `leia.jar` brings, nor the server (ADR
- * 0065).
+ * Checks that a jar holds no class in [excludedPackages], and no entry whose name matches one of
+ * [excludedEntries]: `leia.jar` must hold no Lucene, neither as classes nor as a nested jar (ADR
+ * 0072, ADR 0073).
  */
 @CacheableTask
 abstract class ExcludedPackagesCheck : DefaultTask() {
@@ -30,6 +30,10 @@ abstract class ExcludedPackagesCheck : DefaultTask() {
     @get:Input
     abstract val excludedPackages: ListProperty<String>
 
+    /** Regular expressions for whole entry names, such as one for nested Lucene jars. */
+    @get:Input
+    abstract val excludedEntries: ListProperty<String>
+
     /** Written when the check passes, so that the task can be up to date. */
     @get:OutputFile
     abstract val report: RegularFileProperty
@@ -37,15 +41,20 @@ abstract class ExcludedPackagesCheck : DefaultTask() {
     @TaskAction
     fun check() {
         val excluded = excludedPackages.get()
+        val entries = excludedEntries.get().map { Regex(it) }
         val problems = ZipFile(jar.get().asFile).use { zip ->
             zip.entries().asSequence()
-                .map { it.name.replace(Regex("^META-INF/versions/\\d+/"), "") }
-                .filter { name -> name.endsWith(".class") && excluded.any { name.startsWith(it) } }
+                .map { it.name }
+                .filter { name ->
+                    val className = name.replace(Regex("^META-INF/versions/\\d+/"), "")
+                    (className.endsWith(".class") && excluded.any { className.startsWith(it) }) ||
+                        entries.any { it.matches(name) }
+                }
                 .toList()
         }
         if (problems.isNotEmpty()) {
             throw GradleException(
-                "${jar.get().asFile.name} must hold nothing in $excluded:\n" +
+                "${jar.get().asFile.name} must hold nothing in $excluded, nor ${excludedEntries.get()}:\n" +
                     problems.take(MAX_LISTED).joinToString("\n") { "  $it" } +
                     (if (problems.size > MAX_LISTED) "\n  ... and ${problems.size - MAX_LISTED} more" else ""))
         }

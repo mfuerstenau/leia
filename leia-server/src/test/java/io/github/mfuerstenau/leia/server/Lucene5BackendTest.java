@@ -77,7 +77,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /**
- * Lucene 4.x and 5.x indexes read through {@link LeiaBackend} with the relocated Lucene 5.5 (ADR 0046):
+ * Lucene 4.x and 5.x indexes read through {@link LeiaBackend} with Lucene 5.5 in a class loader of its own (ADR 0046):
  * doc values, binary terms, deleted postings, positions with offsets and payloads, commits with codecs,
  * the check at its levels, and old indexes of several versions under one path. The indexes, from
  * leia-lucene5's writers, have two commits; the latest holds documents 1 to 7, with id 2 deleted, in

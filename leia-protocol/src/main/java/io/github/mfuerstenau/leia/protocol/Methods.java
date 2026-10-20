@@ -81,8 +81,8 @@ public final class Methods {
     /**
      * Opens the latest commit of an index, read-only, and makes it the open index. An index that was
      * open before is closed, and its jobs stopped, once the new one has opened; if opening fails, it
-     * stays open. An index written by a Lucene before 9 opens through a runtime jar (ADR 0044); with no
-     * such jar loaded, it fails with {@code MISSING_RUNTIME}.
+     * stays open. An index opens through the runtime that reads its version (ADR 0044, ADR 0071); with
+     * none loaded, it fails with {@code MISSING_RUNTIME}.
      */
     public static final RpcMethod<OpenIndexParams, OpenIndexResult> OPEN_INDEX =
             new RpcMethod<>("openIndex", OpenIndexParams.class, OpenIndexResult.class);
@@ -422,8 +422,9 @@ public final class Methods {
             new RpcMethod<>("getJars", GetJarsParams.class, GetJarsResult.class);
 
     /**
-     * Every runtime jar leia knows, newest first, with the version of Lucene of the loaded runtime
-     * that reads its indexes, or none if it is missing (ADR 0072). Needs no open index.
+     * Every runtime leia knows, newest first, with the version of Lucene of the loaded runtime that
+     * reads its indexes, or why none is loaded: its folder in {@code runtimes/} missing, incomplete or
+     * refused (ADR 0072, ADR 0073). Needs no open index.
      */
     public static final RpcMethod<GetRuntimesParams, GetRuntimesResult> GET_RUNTIMES =
             new RpcMethod<>("getRuntimes", GetRuntimesParams.class, GetRuntimesResult.class);

@@ -70,7 +70,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * A Lucene 3.x index read through {@link LeiaBackend} with the relocated Lucene 3.6 (ADR 0045): its
+ * A Lucene 3.x index read through {@link LeiaBackend} with Lucene 3.6 in a class loader of its own (ADR 0045): its
  * commits, the check, top terms, several old indexes as one, and the analyzers of 3.6. The index, from
  * leia-lucene3's {@code Lucene3IndexWriter}, has two commits; the latest holds documents 1 to 7, with
  * id 2 deleted, in the segments {@code _0} (plain) and {@code _1} (compound).

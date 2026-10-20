@@ -80,7 +80,7 @@ import org.apache.lucene.util.BytesRef;
  * An index written by Lucene 4.x or 5.x, read with Lucene 5.5 (ADR 0046). Lucene 10 can't read such
  * an index: it reads the formats of 9 and 10 only.
  *
- * <p>Lucene is relocated in this module's jar, and leia reaches it only through {@link
+ * <p>Lucene is in this runtime's class loader (ADR 0073), and leia reaches it only through {@link
  * Lucene5Runtime} and the interfaces of {@code leia-runtime}. It is read-only like the rest of leia: it
  * opens readers, never an {@code IndexWriter}, through directories without locks. Several directories
  * open as one, in a {@link MultiReader} (ADR 0045). A reader of Lucene 5 can be used from several

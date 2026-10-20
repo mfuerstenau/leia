@@ -2,6 +2,7 @@
 
 - **Status:** Accepted, amended by ADR 0034 (one `leia.jar` with the scripts `leia` and `leia.cmd`, and no Rust build; still Linux and Windows on x86_64, and no bundled Java)
 - **Date:** 2026-10-05
+- **Amended by:** ADR 0073 (the release folders hold `leia.jar`, `leia` and `leia.cmd` only; `leia --download-runtimes` fills `runtimes/` on the first run, which needs the network once)
 
 ## Context
 

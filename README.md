@@ -6,8 +6,8 @@ A **read-only Lucene index inspector** for the terminal, as an alternative to
 leia never opens an `IndexWriter`, never takes the write lock and never changes a file in the index
 directory, so it is safe to point at a live index.
 
-It opens indexes written by Lucene 10 and Lucene 9. Indexes from Lucene 8 and older are rejected,
-because Lucene 10 can't read them.
+It opens indexes written by Lucene 2.4 to 10, each with the Lucene that reads it: 3.6, 5.5, 7.7,
+9.12 or 10, the official jars, each in a class loader of its own (see [Install](#install)).
 
 ## What it shows
 
@@ -57,6 +57,25 @@ The rest of Luke's read-only features are still to come (see
 - Linux or Windows. The release folders are built for x86_64, but `leia.jar` is plain Java. macOS
   may work through the `leia` script, but isn't tested or supported.
 
+## Install
+
+Unpack the release folder for your platform, then install the runtimes once:
+
+```sh
+leia --download-runtimes
+```
+
+This fills the folder `runtimes` beside `leia.jar` with a folder per Lucene (`lucene3`, `lucene5`,
+`lucene7`, `lucene9`, `lucene10`): leia's own jars come from `leia.jar`, Lucene's from Maven Central
+(`https://repo1.maven.org/maven2/`), each checked against the SHA-256 that the build recorded. It
+needs the network once, about 32 MB in all. Running it again keeps what matches, replaces what
+doesn't and removes jars that no longer belong there, such as those of an older Lucene after an
+update of leia. Behind a proxy, run it as `LEIA_OPTS=-Djava.net.useSystemProxies=true leia
+--download-runtimes`.
+
+Without `runtimes`, leia starts all the same: indexes open only without a reader, and the about
+screen lists what is missing.
+
 ## Usage
 
 ```
@@ -72,6 +91,7 @@ leia [OPTIONS] [INDEX_PATH]
 | `--no-default-jars` | don't load the jars of the default folder (see [Jars](#jars)) |
 | `--directory <IMPL>` | the Lucene `Directory` to read indexes through: `fs` (default) lets Lucene choose, which is `MMapDirectory` on 64-bit; `mmap` is `MMapDirectory`, `nio` is `NIOFSDirectory`. `Ctrl+D` in the open prompt changes it |
 | `--no-reader` | open `INDEX_PATH` without a reader, for an index that a reader can't open (see [Without a reader](#without-a-reader)); `Ctrl+N` in the open prompt does the same |
+| `--download-runtimes` | install the runtimes into `runtimes` beside `leia.jar`, then exit (see [Install](#install)); takes no other option |
 
 `leia` (or `leia.cmd` on Windows) is a script that finds the JVM and runs the `leia.jar` next to
 it. `leia` resolves symlinks, so a link to it in `~/bin` works; on Windows, put the folder on

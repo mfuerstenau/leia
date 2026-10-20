@@ -1,7 +1,16 @@
-// Lucene 3.6.2, relocated, for indexes that Lucene 10 can't read: those written by Lucene 2.x and
-// 3.x (ADR 0044). The relocation, the shadow jar and the relocation check come from the convention.
+// Lucene 3.6.2 for indexes that Lucene 10 can't read: those written by Lucene 2.x and 3.x (ADR 0044),
+// in a class loader of its own (ADR 0073). The adapter jar, its list and its check come from the
+// convention.
+import io.github.mfuerstenau.leia.buildlogic.AdapterJarCheck
+
 plugins {
     id("leia.lucene-runtime-conventions")
+}
+
+// RawPostings lives in Lucene's package to reach 3.6's raw postings (ADR 0062); lucene-core 3.6.2
+// isn't sealed, so it shares the package from the adapter jar.
+tasks.named<AdapterJarCheck>("adapterJarCheck") {
+    allowedPackages.add("org/apache/lucene/index/RawPostings")
 }
 
 dependencies {
@@ -17,7 +26,7 @@ luceneRuntime {
             options.compilerArgs.add("-Xlint:-rawtypes")
         }
     }
-    // The Lucene 3.x test index, written by Lucene3IndexWriter on the unrelocated lucene-core 3.6.2:
+    // The Lucene 3.x test index, written by Lucene3IndexWriter on lucene-core 3.6.2:
     // two commits, a compound and a plain segment, a deletion, a NumericField, term vectors
     // and a field with payloads, which its term vectors don't cover.
     testIndex("lucene3", "io.github.mfuerstenau.leia.lucene3.Lucene3IndexWriter", libs.lucene3.core)

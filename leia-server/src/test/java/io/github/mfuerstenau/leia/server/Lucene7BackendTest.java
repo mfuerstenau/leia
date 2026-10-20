@@ -51,7 +51,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /**
- * Lucene 6.x and 7.x indexes read through {@link LeiaBackend} with the relocated Lucene 7.7 (ADR 0048):
+ * Lucene 6.x and 7.x indexes read through {@link LeiaBackend} with Lucene 7.7 in a class loader of its own (ADR 0048):
  * the created major, points, soft deletes, an index sort, the minimum versions of segments and the
  * check at its levels. The indexes, from leia-lucene7's writers, have two commits; the latest holds
  * documents 1 to 7, with id 2 deleted, in the segments {@code _0} (plain) and {@code _1} (compound).

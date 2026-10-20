@@ -1133,12 +1133,13 @@ public final class Session {
 
     /**
      * A codec or format that isn't loaded can come from a jar that X adds or leia is started with
-     * (ADR 0018, ADR 0024), and so can a runtime for an old index, which the message names (ADR 0044).
+     * (ADR 0018, ADR 0024). A runtime, which the message names, comes from its folder in {@code
+     * runtimes/}, which {@code leia --download-runtimes} installs (ADR 0073).
      */
     static RpcException withJarHint(RpcException error) {
         String hint = switch (error.code()) {
             case MISSING_CODEC -> "; add a jar that has it with X, or start leia with --jar";
-            case MISSING_RUNTIME -> "; add it with X, or start leia with --jar";
+            case MISSING_RUNTIME -> "; install it with leia --download-runtimes";
             default -> null;
         };
         if (hint == null) {

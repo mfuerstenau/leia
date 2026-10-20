@@ -86,7 +86,7 @@ import org.apache.lucene.util.Version;
  * setMaxTokenLength(int)} sets the longest token, and {@link CollationKeyAnalyzer} takes the JDK's
  * collator. 9.12 has no Kuromoji, Nori or ICU.
  *
- * <p>The analyzers are a table of class literals, which the relocation rewrites.
+ * <p>The analyzers are a table of class literals of this runtime's Lucene.
  */
 final class Lucene9Presets {
 

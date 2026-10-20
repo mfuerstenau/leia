@@ -18,8 +18,8 @@ import org.apache.lucene.util.Version;
 
 /**
  * Lucene 10, through leia-core, for indexes created by Lucene 9.x and 10.x (ADR 0065). Unlike the other
- * runtimes, its Lucene is not relocated: the jars of {@code --jar} link against {@code
- * org.apache.lucene}.
+ * runtimes, it is loaded into the jar chain, not a class loader of its own: the jars of {@code --jar}
+ * link against its {@code org.apache.lucene} (ADR 0073).
  */
 public final class Lucene10Runtime implements LuceneRuntime {
 

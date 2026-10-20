@@ -1,6 +1,5 @@
 package io.github.mfuerstenau.leia.buildlogic
 
-import java.util.jar.Manifest
 import java.util.zip.ZipFile
 import org.gradle.api.DefaultTask
 import org.gradle.api.GradleException
@@ -15,20 +14,23 @@ import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.TaskAction
 
 /**
- * Checks that a runtime's shadow jar holds no class outside [allowedPackages], and no services file
- * that names or registers one: an unrelocated Lucene must never reach leia's classpath (hard rule 5,
- * ADR 0044). A jar with classes in `META-INF/versions/` must say `Multi-Release: true`, or Lucene 9's
- * `MMapDirectory` fails at runtime, not at build time (ADR 0049).
+ * Checks that a runtime's adapter jar holds leia's code only: no class outside [allowedPackages],
+ * and no services file but the runtime's own. Its Lucene comes as the official jars beside it, in
+ * the runtime's folder, and is loaded by a class loader of the runtime's own (ADR 0073); a Lucene
+ * class in the adapter would meet them there twice.
  */
 @CacheableTask
-abstract class RelocationCheck : DefaultTask() {
+abstract class AdapterJarCheck : DefaultTask() {
 
     /** The jar to check. */
     @get:InputFile
     @get:PathSensitive(PathSensitivity.NONE)
     abstract val jar: RegularFileProperty
 
-    /** Package prefixes in path form, such as `io/github/mfuerstenau/leia/lucene3/`. */
+    /**
+     * Prefixes of class files in path form, such as `io/github/mfuerstenau/leia/lucene3/` or, for one
+     * class and its nested ones, `org/apache/lucene/index/RawPostings`.
+     */
     @get:Input
     abstract val allowedPackages: ListProperty<String>
 
@@ -42,48 +44,37 @@ abstract class RelocationCheck : DefaultTask() {
         val allowedNames = allowed.map { it.replace('/', '.') }
         val problems = mutableListOf<String>()
         ZipFile(jar.get().asFile).use { zip ->
-            val versioned = zip.entries().asSequence().any { it.name.startsWith(VERSIONS) && it.name.endsWith(".class") }
-            if (versioned && !multiRelease(zip)) {
-                problems += "$MANIFEST doesn't say Multi-Release: true, though the jar has classes in $VERSIONS"
-            }
             for (entry in zip.entries()) {
                 if (entry.isDirectory) continue
                 val name = entry.name
                 if (name.endsWith(".class")) {
-                    val className = name.replace(Regex("^META-INF/versions/\\d+/"), "")
-                    if (allowed.none { className.startsWith(it) }) problems += "$name is not relocated"
+                    if (allowed.none { name.startsWith(it) }) problems += "$name is not leia's"
                 } else if (name.startsWith(SERVICES)) {
                     val service = name.removePrefix(SERVICES)
-                    if (service != LUCENE_RUNTIME && allowedNames.none { service.startsWith(it) }) {
-                        problems += "$name names a service that is not relocated"
+                    if (service != LUCENE_RUNTIME) {
+                        problems += "$name registers a service other than the runtime"
                     }
                     zip.getInputStream(entry).bufferedReader().useLines { lines ->
                         lines.map { it.substringBefore('#').trim() }
                             .filter { it.isNotEmpty() }
                             .filter { line -> allowedNames.none { line.startsWith(it) } }
-                            .forEach { problems += "$name registers $it, which is not relocated" }
+                            .forEach { problems += "$name registers $it, which is not leia's" }
                     }
+                } else if (!name.startsWith("META-INF/")) {
+                    problems += "$name is neither a class nor in META-INF/"
                 }
             }
         }
         if (problems.isNotEmpty()) {
             throw GradleException(
-                "${jar.get().asFile.name} must hold nothing outside $allowed:\n" +
+                "${jar.get().asFile.name} must hold nothing outside $allowed and META-INF/:\n" +
                     problems.take(MAX_LISTED).joinToString("\n") { "  $it" } +
                     (if (problems.size > MAX_LISTED) "\n  ... and ${problems.size - MAX_LISTED} more" else ""))
         }
         report.get().asFile.writeText("OK\n")
     }
 
-    private fun multiRelease(zip: ZipFile): Boolean {
-        val manifest = zip.getEntry(MANIFEST) ?: return false
-        return zip.getInputStream(manifest).use { Manifest(it) }
-            .mainAttributes.getValue("Multi-Release").equals("true", ignoreCase = true)
-    }
-
     private companion object {
-        const val MANIFEST = "META-INF/MANIFEST.MF"
-        const val VERSIONS = "META-INF/versions/"
         const val SERVICES = "META-INF/services/"
         const val MAX_LISTED = 20
         const val LUCENE_RUNTIME = "io.github.mfuerstenau.leia.runtime.LuceneRuntime"

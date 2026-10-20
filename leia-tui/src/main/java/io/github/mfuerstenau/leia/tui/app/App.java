@@ -48,7 +48,8 @@ import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsResult;
 import io.github.mfuerstenau.leia.protocol.jars.GetRuntimesResult;
-import io.github.mfuerstenau.leia.protocol.jars.RuntimeJar;
+import io.github.mfuerstenau.leia.protocol.jars.RuntimeFolder;
+import io.github.mfuerstenau.leia.protocol.jars.RuntimeState;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellResult;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeResult;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
@@ -70,7 +71,7 @@ import io.github.mfuerstenau.leia.tui.documents.DocumentExport.DocumentData;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
 import io.github.mfuerstenau.leia.tui.jars.DefaultJars;
 import io.github.mfuerstenau.leia.tui.jars.JarsPopup;
-import io.github.mfuerstenau.leia.tui.jars.RuntimeJars;
+import io.github.mfuerstenau.leia.tui.jars.RuntimeFolders;
 import io.github.mfuerstenau.leia.tui.overview.FieldScan;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.points.PointFormats;
@@ -223,7 +224,7 @@ public final class App {
     /** The default folder of jars, and whether its jars were loaded (ADR 0024). */
     private DefaultJars defaultJars = DefaultJars.none();
 
-    private RuntimeJars runtimeJars = RuntimeJars.none();
+    private RuntimeFolders runtimeFolders = RuntimeFolders.none();
 
     /** The runtime jars leia knows and which of them are loaded (ADR 0072); null until they are known. */
     private GetRuntimesResult runtimes;
@@ -295,12 +296,12 @@ public final class App {
     }
 
     /** The jars popup shows the folder of runtimes (ADR 0044), and marks the jars that came from it. */
-    public App withRuntimeJars(RuntimeJars runtimeJars) {
-        this.runtimeJars = runtimeJars;
+    public App withRuntimeFolders(RuntimeFolders runtimeFolders) {
+        this.runtimeFolders = runtimeFolders;
         return this;
     }
 
-    /** The about screen says which runtimes are loaded and which jars are missing (ADR 0072). */
+    /** The about screen says which runtimes are loaded, and why the others aren't (ADR 0072, ADR 0073). */
     public void runtimesLoaded(GetRuntimesResult runtimes) {
         this.runtimes = runtimes;
     }
@@ -1841,7 +1842,7 @@ public final class App {
                 prompt = pathPrompt(path);
             }
             case 'X' -> {
-                jars = new JarsPopup(defaultJars, runtimeJars, home);
+                jars = new JarsPopup(defaultJars, runtimeFolders, home);
                 return Optional.of(new Action.LoadJars());
             }
             case 'c' -> {
@@ -2220,18 +2221,18 @@ public final class App {
     }
 
     /**
-     * The loaded runtimes and the missing runtime jars, with where to put them (ADR 0072), and an
-     * empty line after them; none until they are known.
+     * The loaded runtimes, the missing ones with where to put them, the incomplete and refused ones
+     * with why (ADR 0072, ADR 0073), and an empty line after them; none until they are known.
      */
     private List<Line> runtimesLines() {
         if (runtimes == null) {
             return List.of();
         }
-        List<RuntimeJar> loaded = runtimes.runtimes().stream()
-                .filter(runtime -> runtime.luceneVersion().isPresent())
+        List<RuntimeFolder> loaded = runtimes.runtimes().stream()
+                .filter(runtime -> runtime.state() == RuntimeState.LOADED)
                 .toList();
-        List<RuntimeJar> missing = runtimes.runtimes().stream()
-                .filter(runtime -> runtime.luceneVersion().isEmpty())
+        List<RuntimeFolder> missing = runtimes.runtimes().stream()
+                .filter(runtime -> runtime.state() == RuntimeState.MISSING)
                 .toList();
         List<Line> lines = new ArrayList<>();
         lines.add(Line.from("Runtimes: "
@@ -2244,29 +2245,45 @@ public final class App {
                                                 .map(runtime -> runtime.luceneVersion()
                                                                 .orElseThrow() + " (" + majors(runtime) + ")")
                                                 .toList()))));
+        Style warning = Style.EMPTY.yellow();
         if (!missing.isEmpty()) {
-            String where = runtimeJars.dir().map(dir -> "put them into " + dir).orElse("(not run from leia.jar)");
-            Style warning = Style.EMPTY.yellow();
+            String where = runtimeFolders
+                    .dir()
+                    .map(dir -> "install them into " + dir + " with leia --download-runtimes")
+                    .orElse("(not run from leia.jar)");
             lines.add(Line.styled(
                     "Missing "
                             + String.join(
                                     ", ",
                                     missing.stream()
-                                            .map(runtime -> runtime.jar() + " (Lucene " + majors(runtime) + ")")
+                                            .map(runtime -> runtime.folder() + " (Lucene " + majors(runtime) + ")")
                                             .toList())
                             + ": " + where,
                     warning));
-            if (loaded.isEmpty()) {
-                lines.add(Line.styled(
-                        "Without runtimes, indexes open only without a reader, and the analysis tab is off.", warning));
+        }
+        for (RuntimeFolder runtime : runtimes.runtimes()) {
+            String problem = runtime.problem().orElse("");
+            switch (runtime.state()) {
+                case INCOMPLETE ->
+                    lines.add(Line.styled(
+                            "Incomplete runtimes/" + runtime.folder() + ": " + problem
+                                    + " is missing; leia --download-runtimes installs it",
+                            warning));
+                case REFUSED ->
+                    lines.add(Line.styled("Refused runtimes/" + runtime.folder() + ": " + problem, warning));
+                case LOADED, MISSING -> {}
             }
+        }
+        if (loaded.isEmpty()) {
+            lines.add(Line.styled(
+                    "Without runtimes, indexes open only without a reader, and the analysis tab is off.", warning));
         }
         lines.add(Line.empty());
         return lines;
     }
 
-    /** The majors of the indexes a runtime jar reads, such as {@code 9–10} or {@code 8}. */
-    private static String majors(RuntimeJar runtime) {
+    /** The majors of the indexes a runtime reads, such as {@code 9–10} or {@code 8}. */
+    private static String majors(RuntimeFolder runtime) {
         int first = runtime.indexMajors().getFirst();
         int last = runtime.indexMajors().getLast();
         return first == last ? Integer.toString(first) : first + "–" + last;

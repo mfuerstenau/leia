@@ -1,14 +1,14 @@
 # Runtimes: features and differences
 
-leia reads every index through a runtime (ADR 0071), a jar in `runtimes/` beside `leia.jar`, which holds no Lucene itself (ADR 0044, ADR 0072): indexes of Lucene 9 and 10, and those whose version it can't detect, with Lucene 10.5.2, unrelocated; older ones with a relocated Lucene. Without its jar, an index opens only without a reader, and the about screen lists the missing jars:
+leia reads every index through a runtime (ADR 0071), a folder in `runtimes/` beside `leia.jar`, which holds no Lucene itself (ADR 0044, ADR 0072): indexes of Lucene 9 and 10, and those whose version it can't detect, with Lucene 10.5.2 in the jar chain; older ones with an older Lucene in a class loader of its own. Each folder has the runtime's adapter jar and the official Lucene jars it lists, which `leia --download-runtimes` installs (ADR 0073). Without its folder, an index opens only without a reader, and the about screen says what is missing:
 
-| Runtime | Jar | Reads indexes of |
+| Runtime | Folder | Reads indexes of |
 |---|---|---|
-| 3.6.2 | `leia-lucene3.jar` | 2.1 – 3.6 |
-| 5.5.5 | `leia-lucene5.jar` | 4.x, 5.x |
-| 7.7.3 | `leia-lucene7.jar` | 6.x, 7.x |
-| 9.12.3 | `leia-lucene9.jar` | 8.x, also once 9.x wrote to them |
-| 10.5.2 | `leia-lucene10.jar` | 9.x, 10.x, and an unknown version |
+| 3.6.2 | `runtimes/lucene3` | 2.1 – 3.6 |
+| 5.5.5 | `runtimes/lucene5` | 4.x, 5.x |
+| 7.7.3 | `runtimes/lucene7` | 6.x, 7.x |
+| 9.12.3 | `runtimes/lucene9` | 8.x, also once 9.x wrote to them |
+| 10.5.2 | `runtimes/lucene10` | 9.x, 10.x, and an unknown version |
 
 The first index of a path decides which Lucene opens it, by the major in its newest `segments_N` (`SegmentsHeader`, ADR 0044 §3, ADR 0045 §3). `openIndex` reports that Lucene as `luceneRuntime`, and what works on the index as `features`. A runtime has the features of the groups it implements (`RuntimeResults.features`), and some only if a field of the index has the data; 10.5.2 has every group.
 
@@ -96,7 +96,7 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 | Preset options (ADR 0067) | stop words, from a file too, and the longest token | as 3.6.2 | as 3.6.2 | all but Kuromoji's, Nori's and ICU's, checked as on Lucene 10 | all |
 | Token limit | `consumeAllTokens` ignored (it changes no token) | ✓ | ✓ | ✓ | ✓ |
 | Analysis tab (ADR 0067) | – | – | – | – | ✓, `Analysis` of leia-lucene10; without a runtime that has one, the tab says so (ADR 0071) |
-| Extension jars (ADR 0068) | – (relocated service files) | – | – | – | ✓, `Extensions` of leia-lucene10 (ADR 0071) |
+| Extension jars (ADR 0068) | – (a class loader of its own, ADR 0073) | – | – | – | ✓, `Extensions` of leia-lucene10 (ADR 0071) |
 | Failure reasons (ADR 0070) | corrupt and unsupported format; no codecs to miss | corrupt, unsupported format, missing codec | as 5.5.5 | as 5.5.5 | leia-core's, unreadable included |
 | Hit count without an exact count (ADR 0070) | every hit counted | every hit counted | every hit counted | stops after 1000 | stops after 1000 |
 | Unmapping | never (no `sun.misc.Cleaner`) | only with `-Dsun.misc.unsafe.memory.access=allow` | as 5.5.5 | memory segments | memory segments |

@@ -20,15 +20,15 @@ class SessionTest {
     }
 
     @Test
-    void aMissingRuntimeHintsAtJar() {
+    void aMissingRuntimeHintsAtTheDownload() {
         RpcException error = Session.withJarHint(new RpcException(
                 ErrorCode.MISSING_RUNTIME,
-                "The index was written by Lucene 8.11.4; reading it needs the runtime leia-lucene9.jar, which isn't"
+                "The index was written by Lucene 8.11.4; reading it needs the runtime runtimes/lucene9, which isn't"
                         + " loaded: /i"));
 
         assertThat(Session.describe(error))
-                .isEqualTo("The index was written by Lucene 8.11.4; reading it needs the runtime leia-lucene9.jar,"
-                        + " which isn't loaded: /i; add it with X, or start leia with --jar (MISSING_RUNTIME -32020)");
+                .isEqualTo("The index was written by Lucene 8.11.4; reading it needs the runtime runtimes/lucene9,"
+                        + " which isn't loaded: /i; install it with leia --download-runtimes (MISSING_RUNTIME -32020)");
     }
 
     @Test

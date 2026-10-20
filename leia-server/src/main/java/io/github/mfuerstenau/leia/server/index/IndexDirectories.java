@@ -8,6 +8,7 @@ import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.runtime.IndexVersion;
 import io.github.mfuerstenau.leia.server.runtime.OpenDirectories;
 import io.github.mfuerstenau.leia.server.runtime.OpenRuntime;
+import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import io.github.mfuerstenau.leia.server.runtime.SegmentsHeader;
 import jakarta.inject.Inject;
@@ -67,7 +68,7 @@ public final class IndexDirectories {
                 this(Optional.of(version));
             }
 
-            /** The error of a method that needs the runtime, naming its jar. */
+            /** The error of a method that needs the runtime, naming its folder. */
             public RpcException error(Path dir) {
                 return new RpcException(ErrorCode.MISSING_RUNTIME, message(dir));
             }
@@ -75,11 +76,18 @@ public final class IndexDirectories {
             public String message(Path dir) {
                 return version.map(found -> "The index was written by Lucene " + found.writtenBy()
                                         + "; reading it needs the runtime "
-                                        + Runtimes.jarFor(found.major()).orElse("for Lucene " + found.major()))
-                                .orElse("Reading the index needs the runtime " + Runtimes.LATEST_JAR)
+                                        + RuntimeFolders.forMajor(found.major())
+                                                .map(IndexDirectories::folder)
+                                                .orElse("for Lucene " + found.major()))
+                                .orElse("Reading the index needs the runtime " + folder(RuntimeFolders.LATEST))
                         + ", which isn't loaded: " + dir;
             }
         }
+    }
+
+    /** How a message names a runtime: its folder, such as {@code runtimes/lucene9}. */
+    static String folder(RuntimeFolders.Known known) {
+        return "runtimes/" + known.folder();
     }
 
     /**

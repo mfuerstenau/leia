@@ -14,7 +14,7 @@ import java.util.Optional;
 import java.util.Set;
 import org.apache.lucene.util.Constants;
 
-/** Lucene 3.6, relocated, for indexes written by Lucene 2.x and 3.x (ADR 0044). */
+/** Lucene 3.6, in a class loader of its own, for indexes written by Lucene 2.x and 3.x (ADR 0044, ADR 0073). */
 public final class Lucene3Runtime implements LuceneRuntime {
 
     @Override
@@ -54,7 +54,7 @@ public final class Lucene3Runtime implements LuceneRuntime {
 
     @Override
     public Optional<Extensions> extensions() {
-        // Its service files are relocated too, so a jar compiled against org.apache.lucene adds nothing (ADR 0068).
+        // Its class loader sees no jar of --jar (ADR 0068, ADR 0073).
         return Optional.empty();
     }
 }

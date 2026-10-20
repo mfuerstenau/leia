@@ -15,7 +15,8 @@ import io.github.mfuerstenau.leia.tui.app.App;
 import io.github.mfuerstenau.leia.tui.app.History;
 import io.github.mfuerstenau.leia.tui.app.Session;
 import io.github.mfuerstenau.leia.tui.jars.DefaultJars;
-import io.github.mfuerstenau.leia.tui.jars.RuntimeJars;
+import io.github.mfuerstenau.leia.tui.jars.RuntimeFolders;
+import io.github.mfuerstenau.leia.tui.runtimes.RuntimeInstall;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -23,6 +24,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -77,32 +79,30 @@ public final class Main {
         if (cli.version()) {
             return printVersion(out, err);
         }
+        if (cli.downloadRuntimes()) {
+            return downloadRuntimes(platform, out, err);
+        }
         for (Path jar : cli.jars()) {
             if (!Files.exists(jar)) {
                 err.println("leia: --jar " + jar + ": no such jar or directory");
                 return 1;
             }
         }
-        // The runtimes beside leia.jar come first (ADR 0044); the default folder's jars come after
-        // those of --jar, which win a clash of names (ADR 0024).
-        RuntimeJars runtimeJars = RuntimeJars.find(platform.runtimesDir());
+        // The runtimes beside leia.jar come first (ADR 0044, ADR 0073); the default folder's jars come
+        // after those of --jar, which win a clash of names (ADR 0024).
+        RuntimeFolders runtimeFolders = new RuntimeFolders(platform.runtimesDir());
         DefaultJars defaultJars = DefaultJars.find(platform.defaultJarsDir(), cli.noDefaultJars());
-        List<Path> jars = new ArrayList<>();
-        runtimeJars.loadedDir().ifPresent(jars::add);
-        jars.addAll(cli.jars());
+        List<Path> jars = new ArrayList<>(cli.jars());
         defaultJars.loadedDir().ifPresent(jars::add);
 
         try (PrintStream log = LeiaLog.toFile(platform.logFile())) {
             LOG.info(() -> "leia started with " + List.of(args));
             LeiaBackend backend;
             try {
-                backend = LeiaBackend.start(jars);
+                backend = LeiaBackend.start(runtimeFolders.dir(), jars);
             } catch (RpcException e) {
                 LOG.log(Level.SEVERE, "Cannot start", e);
                 err.println("leia: " + e.getMessage());
-                runtimeJars
-                        .loadedDir()
-                        .ifPresent(dir -> err.println("The runtimes of " + dir + " beside leia.jar are loaded too."));
                 defaultJars
                         .loadedDir()
                         .ifPresent(dir -> err.println("The jars of the default folder " + dir
@@ -110,7 +110,7 @@ public final class Main {
                 return 1;
             }
             try (backend) {
-                return runTui(cli, platform, runtimeJars, defaultJars, backend, log, out, err, started);
+                return runTui(cli, platform, runtimeFolders, defaultJars, backend, log, out, err, started);
             }
         }
     }
@@ -122,7 +122,7 @@ public final class Main {
     private static int printVersion(PrintStream out, PrintStream err) throws InterruptedException {
         // Not into leia.log, which would lose the last session's log; only problems show.
         LeiaLog.toStderr(Level.WARNING);
-        try (LeiaBackend backend = LeiaBackend.start(List.of())) {
+        try (LeiaBackend backend = LeiaBackend.start(Optional.empty(), List.of())) {
             VersionResult version =
                     backend.call(Methods.VERSION, new VersionParams()).get();
             out.println("leia " + version.version() + " (" + version.commit() + ", " + version.commitTime() + ")");
@@ -136,6 +136,23 @@ public final class Main {
     }
 
     /**
+     * {@code --download-runtimes} (ADR 0073): before any jar is loaded, so that none of the runtimes'
+     * jars is open, which Windows wouldn't let it replace, and with the terminal still leia's.
+     */
+    private static int downloadRuntimes(Platform platform, PrintStream out, PrintStream err) {
+        // Not into leia.log, which would lose the last session's log; only problems show.
+        LeiaLog.toStderr(Level.WARNING);
+        Optional<Path> runtimesDir = platform.runtimesDir();
+        if (runtimesDir.isEmpty()) {
+            err.println("leia: --download-runtimes installs into the folder runtimes beside leia.jar, but leia doesn't"
+                    + " run from leia.jar");
+            return 1;
+        }
+        return new RuntimeInstall(runtimesDir.get(), RuntimeInstall.base(), Main.class.getClassLoader(), out, err)
+                .run();
+    }
+
+    /**
      * Runs the TUI until the user quits. Opens {@code cli}'s index path, if any, once the first frame
      * is on the screen.
      *
@@ -144,7 +161,7 @@ public final class Main {
     private static int runTui(
             Cli cli,
             Platform platform,
-            RuntimeJars runtimeJars,
+            RuntimeFolders runtimeFolders,
             DefaultJars defaultJars,
             LeiaBackend backend,
             PrintStream log,
@@ -159,7 +176,7 @@ public final class Main {
         App app = new App(version, platform.home(), history, cli.directory())
                 .withCwd(Path.of("").toAbsolutePath())
                 .withDefaultJars(defaultJars)
-                .withRuntimeJars(runtimeJars);
+                .withRuntimeFolders(runtimeFolders);
         app.runtimesLoaded(
                 backend.call(Methods.GET_RUNTIMES, new GetRuntimesParams()).get());
         Session session = new Session(app, backend);

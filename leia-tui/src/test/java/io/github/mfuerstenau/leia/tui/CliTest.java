@@ -18,8 +18,8 @@ class CliTest {
         Cli cli = Cli.parse();
 
         assertThat(cli)
-                .isEqualTo(
-                        new Cli(false, false, java.util.List.of(), false, DirectoryImpl.FS, false, Optional.empty()));
+                .isEqualTo(new Cli(
+                        false, false, java.util.List.of(), false, DirectoryImpl.FS, false, Optional.empty(), false));
     }
 
     @Test
@@ -41,6 +41,12 @@ class CliTest {
         assertThat(cli.indexPath()).hasValue("/data/index");
         assertThat(cli.help()).isFalse();
         assertThat(cli.version()).isFalse();
+    }
+
+    @Test
+    void parsesTheDownloadOfTheRuntimes() throws Exception {
+        assertThat(Cli.parse("--download-runtimes").downloadRuntimes()).isTrue();
+        assertThat(Cli.parse().downloadRuntimes()).isFalse();
     }
 
     @ParameterizedTest
@@ -78,6 +84,12 @@ class CliTest {
             --directory ram             | invalid value 'ram' for --directory <IMPL>
             --no-reader=yes             | --no-reader takes no value
             /a /b                       | unexpected argument '/b'
+            --download-runtimes=yes     | --download-runtimes takes no value
+            --download-runtimes /a      | --download-runtimes takes no INDEX_PATH
+            --download-runtimes --jar a | --download-runtimes takes no INDEX_PATH and none of --jar
+            --no-reader --download-runtimes | --download-runtimes takes no INDEX_PATH
+            --download-runtimes --directory nio | --download-runtimes takes no INDEX_PATH
+            --download-runtimes --no-default-jars | --download-runtimes takes no INDEX_PATH
             -j /opt/jdk                 | -j is taken by the leia script
             --java=/opt/jdk             | --java is taken by the leia script
             """)
@@ -96,6 +108,10 @@ class CliTest {
                         "--no-default-jars",
                         "--directory <IMPL>",
                         "--no-reader",
+                        "--download-runtimes",
+                        "repo1.maven.org",
+                        "SHA-256",
+                        "-Djava.net.useSystemProxies=true",
                         "--version",
                         "--help",
                         "[INDEX_PATH]",
@@ -106,7 +122,7 @@ class CliTest {
     @Test
     void helpSaysWhatTheRuntimesAreFor() {
         assertThat(Cli.HELP.replaceAll("\\s+", " "))
-                .contains("a jar for each Lucene from 3.6 to 10 in the folder runtimes beside leia.jar")
-                .contains("without them, an index opens only without a reader");
+                .contains("a folder for each Lucene from 3.6 to 10 in the folder runtimes beside leia.jar")
+                .contains("without them, an index opens only without a reader. --download-runtimes installs them");
     }
 }

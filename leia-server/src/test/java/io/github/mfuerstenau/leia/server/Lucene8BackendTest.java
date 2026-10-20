@@ -90,7 +90,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /**
- * Indexes created by Lucene 8.x read through {@link LeiaBackend} with the relocated Lucene 9.12 (ADR
+ * Indexes created by Lucene 8.x read through {@link LeiaBackend} with Lucene 9.12 in a class loader of its own (ADR
  * 0049). {@code lucene8}, from leia-lucene9's writer on 8.11, has documents 1 to 7 and the soft update
  * of id 3 (document 4, by the index sort) with id 2 deleted; {@code lucene8to9} is a copy to which
  * 9.12 added ids 9 to 11 (documents 8 to 10) with the KNN vectors {@code embedding} (4 floats, cosine:

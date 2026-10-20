@@ -95,7 +95,7 @@ import org.apache.lucene.util.BytesRef;
  * index, even once 9.x has written to it: it reads indexes created by 9 and 10 only. The segments of
  * 9.x can have KNN vectors.
  *
- * <p>Lucene is relocated in this module's jar, and leia reaches it only through {@link
+ * <p>Lucene is in this runtime's class loader (ADR 0073), and leia reaches it only through {@link
  * Lucene9Runtime} and the interfaces of {@code leia-runtime}. It is read-only like the rest of leia: it
  * opens readers, never an {@code IndexWriter}, through directories without locks. Several directories
  * open as one, in a {@link MultiReader} (ADR 0045). A reader of Lucene 9 can be used from several

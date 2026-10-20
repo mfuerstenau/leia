@@ -1,5 +1,5 @@
-// Lucene 9.12.3, relocated, for indexes that Lucene 10 can't read: those created by Lucene 8.x
-// (ADR 0049). The relocation, the shadow jar and the relocation check come from the convention.
+// Lucene 9.12.3 for indexes that Lucene 10 can't read (ADR 0049), in a class loader of its own (ADR
+// 0073). The adapter jar, its list and its check come from the convention.
 plugins {
     id("leia.lucene-runtime-conventions")
 }

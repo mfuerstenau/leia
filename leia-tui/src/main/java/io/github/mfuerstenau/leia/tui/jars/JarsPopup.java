@@ -29,7 +29,7 @@ import java.util.Optional;
 
 /**
  * The jars popup (ADR 0024): lists the loaded jars, the default folder and the folder of runtimes
- * (ADR 0044), and adds more jars while leia runs. The backend loads them; the popup only asks for a path.
+ * (ADR 0044, ADR 0073), and adds more jars while leia runs. The backend loads them; the popup only asks for a path.
  */
 public final class JarsPopup {
 
@@ -52,7 +52,7 @@ public final class JarsPopup {
     public record Close() implements Event {}
 
     private final DefaultJars defaultJars;
-    private final RuntimeJars runtimeJars;
+    private final RuntimeFolders runtimeFolders;
 
     /** The directory that {@code ~} stands for. */
     private final Optional<Path> home;
@@ -86,9 +86,9 @@ public final class JarsPopup {
     /** How many jars the list showed when it was last drawn. */
     private int page = 1;
 
-    public JarsPopup(DefaultJars defaultJars, RuntimeJars runtimeJars, Optional<Path> home) {
+    public JarsPopup(DefaultJars defaultJars, RuntimeFolders runtimeFolders, Optional<Path> home) {
         this.defaultJars = defaultJars;
-        this.runtimeJars = runtimeJars;
+        this.runtimeFolders = runtimeFolders;
         this.home = home;
     }
 
@@ -272,15 +272,15 @@ public final class JarsPopup {
     }
 
     private Line runtimesLine() {
-        if (runtimeJars.dir().isEmpty()) {
+        if (runtimeFolders.dir().isEmpty()) {
             return Line.from(
                     Span.raw("Runtimes: "),
                     Span.raw("none (not run from leia.jar)").dim());
         }
-        String note = runtimeJars.state() == RuntimeJars.State.LOADED ? "" : "  (no jars in it)";
+        String note = runtimeFolders.exists() ? "" : "  (missing)";
         return Line.from(
                 Span.raw("Runtimes: "),
-                Span.raw(shorten(runtimeJars.dir().get())),
+                Span.raw(shorten(runtimeFolders.dir().get())),
                 Span.raw(note).dim());
     }
 
@@ -304,7 +304,6 @@ public final class JarsPopup {
             return List.of();
         }
         Optional<Path> defaultDir = defaultJars.loadedDir();
-        Optional<Path> runtimesDir = runtimeJars.loadedDir();
         List<Line> lines = new ArrayList<>();
         for (String jar : jars) {
             String name = jar;
@@ -315,14 +314,13 @@ public final class JarsPopup {
                     name = path.getFileName().toString();
                 }
                 Path parent = path.getParent();
-                if (parent != null) {
-                    if (defaultDir.isPresent() && defaultDir.get().equals(parent)) {
-                        place = "default folder";
-                    } else if (runtimesDir.isPresent() && runtimesDir.get().equals(parent)) {
-                        place = "runtimes";
-                    } else {
-                        place = shorten(parent);
-                    }
+                Optional<String> runtime = runtimeFolders.folderOf(path);
+                if (runtime.isPresent()) {
+                    place = runtime.get();
+                } else if (parent != null) {
+                    place = defaultDir.isPresent() && defaultDir.get().equals(parent)
+                            ? "default folder"
+                            : shorten(parent);
                 }
             } catch (InvalidPathException e) {
                 // Shown as it came.

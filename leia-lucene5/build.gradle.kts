@@ -1,5 +1,5 @@
-// Lucene 5.5.5, relocated, for indexes that Lucene 10 can't read: those written by Lucene 4.x and
-// 5.x (ADR 0046). The relocation, the shadow jar and the relocation check come from the convention.
+// Lucene 5.5.5 for indexes that Lucene 10 can't read (ADR 0046), in a class loader of its own (ADR
+// 0073). The adapter jar, its list and its check come from the convention.
 plugins {
     id("leia.lucene-runtime-conventions")
 }

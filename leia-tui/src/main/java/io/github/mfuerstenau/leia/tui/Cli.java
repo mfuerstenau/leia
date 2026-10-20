@@ -20,6 +20,8 @@ import java.util.Optional;
  * @param directory {@code --directory}, {@link DirectoryImpl#FS} without it
  * @param noReader {@code --no-reader}
  * @param indexPath {@code INDEX_PATH}
+ * @param downloadRuntimes {@code --download-runtimes}, which takes no other option and no {@code
+ *     INDEX_PATH}
  */
 record Cli(
         boolean help,
@@ -28,7 +30,8 @@ record Cli(
         boolean noDefaultJars,
         DirectoryImpl directory,
         boolean noReader,
-        Optional<String> indexPath) {
+        Optional<String> indexPath,
+        boolean downloadRuntimes) {
 
     static final String USAGE = "Usage: leia [OPTIONS] [INDEX_PATH]";
 
@@ -52,10 +55,10 @@ record Cli(
                   --no-default-jars
                       Don't load the jars of the default folder: $XDG_CONFIG_HOME/leia/jars
                       (~/.config/leia/jars) on Linux, %APPDATA%\\leia\\jars on Windows. Without this
-                      flag, they are loaded after those of --jar. The runtimes, a jar for each
+                      flag, they are loaded after those of --jar. The runtimes, a folder for each
                       Lucene from 3.6 to 10 in the folder runtimes beside leia.jar, are loaded
                       always, before all others; without them, an index opens only without a
-                      reader
+                      reader. --download-runtimes installs them
                   --directory <IMPL>
                       The Lucene Directory to read indexes through: fs lets Lucene choose
                       (MMapDirectory on 64-bit), mmap is MMapDirectory, nio is NIOFSDirectory.
@@ -64,6 +67,12 @@ record Cli(
                   --no-reader
                       Open INDEX_PATH without a reader, for an index that a reader can't open: only
                       its commits can be read. Ctrl+N in the open prompt does the same
+                  --download-runtimes
+                      Install the runtimes into the folder runtimes beside leia.jar, then exit:
+                      leia's own jars from leia.jar, Lucene's from Maven Central
+                      (https://repo1.maven.org/maven2/), each checked against its SHA-256. A jar
+                      that is there and matches is kept. Behind a proxy, start it with
+                      LEIA_OPTS=-Djava.net.useSystemProxies=true. Takes no other option
               -V, --version
                       Print the version and build of leia, and the Java version in use
               -h, --help
@@ -101,6 +110,8 @@ record Cli(
         DirectoryImpl directory = DirectoryImpl.FS;
         boolean noReader = false;
         Optional<String> indexPath = Optional.empty();
+        boolean downloadRuntimes = false;
+        boolean directoryGiven = false;
         boolean options = true;
         for (int i = 0; i < args.length; i++) {
             String arg = args[i];
@@ -115,6 +126,7 @@ record Cli(
                     case "-V", "--version" -> version = flag(name, inline);
                     case "--no-default-jars" -> noDefaultJars = flag(name, inline);
                     case "--no-reader" -> noReader = flag(name, inline);
+                    case "--download-runtimes" -> downloadRuntimes = flag(name, inline);
                     case "--jar" -> {
                         String value = inline.isPresent() ? inline.get() : next(args, ++i, name, "<PATH>");
                         jars.add(path(name, value));
@@ -122,6 +134,7 @@ record Cli(
                     case "--directory" -> {
                         String value = inline.isPresent() ? inline.get() : next(args, ++i, name, "<IMPL>");
                         directory = directory(value);
+                        directoryGiven = true;
                     }
                     case "-j", "--java" ->
                         throw new UsageException(
@@ -134,7 +147,13 @@ record Cli(
                 indexPath = Optional.of(arg);
             }
         }
-        return new Cli(help, version, jars, noDefaultJars, directory, noReader, indexPath);
+        if (downloadRuntimes
+                && (indexPath.isPresent() || !jars.isEmpty() || noDefaultJars || directoryGiven || noReader)) {
+            throw new UsageException(
+                    "--download-runtimes takes no INDEX_PATH and none of --jar, --no-default-jars, --directory,"
+                            + " --no-reader");
+        }
+        return new Cli(help, version, jars, noDefaultJars, directory, noReader, indexPath, downloadRuntimes);
     }
 
     private static boolean flag(String name, Optional<String> inline) throws UsageException {

@@ -1,45 +1,14 @@
 // Lucene 10 behind the runtime interface (ADR 0065), through leia-core: the runtime that reads
-// indexes of Lucene 9 and 10 and those of an unknown version (ADR 0071). Its shadow jar goes into
-// runtimes/ beside leia.jar, which holds no Lucene (ADR 0072).
-//
-// Unlike the other runtimes, Lucene is not relocated: the jars of --jar link against
-// org.apache.lucene (ADR 0016, ADR 0018). So this module doesn't take
-// leia.lucene-runtime-conventions, which relocates; the shadow jar is set up as there otherwise.
-import io.github.mfuerstenau.leia.buildlogic.ExcludedPackagesCheck
-
+// indexes of Lucene 9 and 10 and those of an unknown version (ADR 0071). Its folder runtimes/lucene10
+// beside leia.jar, which holds no Lucene (ADR 0072), has the adapter jar, leia-core's jar and the
+// official Lucene jars (ADR 0073); leia loads them as the first link of the jar chain, since the jars
+// of --jar link against org.apache.lucene (ADR 0016, ADR 0018, ADR 0065).
 plugins {
-    id("leia.java-library-conventions")
-    id("com.gradleup.shadow")
+    id("leia.runtime-folder-conventions")
 }
 
 dependencies {
     implementation(project(":leia-core"))
-    // compileOnly: the interface is leia's, so it stays out of the shadow jar.
-    compileOnly(project(":leia-runtime"))
-    testImplementation(project(":leia-runtime"))
-}
-
-tasks.shadowJar {
-    archiveClassifier = ""
-    archiveFileName = "${project.name}.jar"
-    // Lucene finds its codecs, formats and analysis factories through META-INF/services. Shadow drops
-    // a path it has seen before the merge sees it, unless duplicates are included.
-    mergeServiceFiles()
-    filesMatching("META-INF/services/**") {
-        duplicatesStrategy = DuplicatesStrategy.INCLUDE
-    }
-    // Lucene 10 is a JPMS module; this jar is not.
-    exclude("module-info.class", "META-INF/versions/*/module-info.class")
-    // Lucene's core is a multi-release jar: the class loader sees its classes of META-INF/versions
-    // only with the attribute.
-    manifest {
-        attributes("Multi-Release" to "true")
-    }
-}
-
-// The plain jar would be the shadow jar's name otherwise.
-tasks.jar {
-    archiveClassifier = "plain"
 }
 
 // The test indexes of leia-core: one written by Lucene 9.12 and the demo index of Lucene 10.
@@ -63,18 +32,4 @@ tasks.test {
     jvmArgumentProviders.add(CommandLineArgumentProvider {
         indexes.map { (name, files) -> "-Dleia.test.index.$name=" + projectPath.relativize(files.singleFile.toPath()) }
     })
-}
-
-// The jar brings Lucene 10 and leia-core, but neither the runtime interface, which leia.jar brings,
-// nor the server.
-val excludedPackagesCheck = tasks.register<ExcludedPackagesCheck>("excludedPackagesCheck") {
-    description = "Checks that the shadow jar holds neither the runtime interface nor the server."
-    group = "verification"
-    jar = tasks.shadowJar.flatMap { it.archiveFile }
-    excludedPackages.addAll("io/github/mfuerstenau/leia/runtime/", "io/github/mfuerstenau/leia/server/")
-    report = layout.buildDirectory.file("reports/excluded-packages-check.txt")
-}
-
-tasks.named("check") {
-    dependsOn(excludedPackagesCheck)
 }

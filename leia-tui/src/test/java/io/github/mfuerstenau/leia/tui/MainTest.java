@@ -77,6 +77,21 @@ class MainTest {
     }
 
     @Test
+    void downloadsTheRuntimesOnlyFromLeiaJar() throws Exception {
+        assertThat(run("--download-runtimes")).isEqualTo(1);
+
+        assertThat(err()).contains("leia: --download-runtimes installs into the folder runtimes beside leia.jar");
+        assertThat(logFile).doesNotExist();
+    }
+
+    @Test
+    void refusesTheDownloadWithAnIndexPath() throws Exception {
+        assertThat(run("--download-runtimes", "/data/index")).isEqualTo(2);
+
+        assertThat(err()).contains("--download-runtimes takes no INDEX_PATH");
+    }
+
+    @Test
     void reportsAJarThatDoesNotExist() throws Exception {
         Path missing = tmp.resolve("missing.jar");
 
@@ -103,18 +118,6 @@ class MainTest {
         assertThat(run()).isEqualTo(1);
 
         assertThat(err()).contains("leia: Cannot load the jars: ", jarsDir.toString(), "--no-default-jars");
-    }
-
-    @Test
-    void namesTheRuntimesFolderIfItsJarsCantBeLoaded() throws Exception {
-        Path runtimesDir = Files.createDirectories(tmp.resolve("leia/runtimes"));
-        brokenJar(runtimesDir.resolve("leia-broken.jar"));
-        platform = new Platform(
-                platform.env(), platform.home(), platform.windows(), Optional.of(tmp.resolve("leia/leia.jar")));
-
-        assertThat(run()).isEqualTo(1);
-
-        assertThat(err()).contains("leia: Cannot load the jars: ", "The runtimes of " + runtimesDir);
     }
 
     private int run(String... args) throws Exception {

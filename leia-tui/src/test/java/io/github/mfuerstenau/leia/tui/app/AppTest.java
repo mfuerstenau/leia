@@ -51,7 +51,8 @@ import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsResult;
 import io.github.mfuerstenau.leia.protocol.jars.GetRuntimesResult;
 import io.github.mfuerstenau.leia.protocol.jars.JarComponents;
-import io.github.mfuerstenau.leia.protocol.jars.RuntimeJar;
+import io.github.mfuerstenau.leia.protocol.jars.RuntimeFolder;
+import io.github.mfuerstenau.leia.protocol.jars.RuntimeState;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeResult;
 import io.github.mfuerstenau.leia.protocol.points.PointSegment;
 import io.github.mfuerstenau.leia.protocol.points.PointValue;
@@ -93,7 +94,7 @@ import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.documents.DocumentExport.DocumentData;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
 import io.github.mfuerstenau.leia.tui.jars.DefaultJars;
-import io.github.mfuerstenau.leia.tui.jars.RuntimeJars;
+import io.github.mfuerstenau.leia.tui.jars.RuntimeFolders;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import java.nio.file.Path;
 import java.util.Arrays;
@@ -625,17 +626,29 @@ class AppTest {
     }
 
     @Test
-    void theAboutScreenNamesTheLoadedRuntimesAndTheMissingJars() {
-        App app = app().withRuntimeJars(RuntimeJars.find(Optional.of(Path.of("/opt/leia/runtimes"))));
+    void theAboutScreenNamesTheLoadedRuntimesAndWhyTheOthersAreNot() {
+        App app = app().withRuntimeFolders(new RuntimeFolders(Optional.of(Path.of("/opt/leia/runtimes"))));
         app.runtimesLoaded(new GetRuntimesResult(List.of(
-                new RuntimeJar("leia-lucene10.jar", List.of(9, 10), Optional.of("10.5.2")),
-                new RuntimeJar("leia-lucene9.jar", List.of(8), Optional.empty()),
-                new RuntimeJar("leia-lucene3.jar", List.of(2, 3), Optional.of("3.6.2")))));
+                new RuntimeFolder(
+                        "lucene10", List.of(9, 10), RuntimeState.LOADED, Optional.of("10.5.2"), Optional.empty()),
+                new RuntimeFolder("lucene9", List.of(8), RuntimeState.MISSING, Optional.empty(), Optional.empty()),
+                new RuntimeFolder(
+                        "lucene7",
+                        List.of(6, 7),
+                        RuntimeState.INCOMPLETE,
+                        Optional.empty(),
+                        Optional.of("lucene-core-7.7.3.jar")),
+                new RuntimeFolder(
+                        "lucene5", List.of(4, 5), RuntimeState.REFUSED, Optional.empty(), Optional.of("too new")),
+                new RuntimeFolder(
+                        "lucene3", List.of(2, 3), RuntimeState.LOADED, Optional.of("3.6.2"), Optional.empty()))));
 
         assertThat(TestScreens.render(app::render, 200, 30))
                 .contains(
                         "Runtimes: Lucene 10.5.2 (9–10), 3.6.2 (2–3)",
-                        "Missing leia-lucene9.jar (Lucene 8): put them into /opt/leia/runtimes")
+                        "Missing lucene9 (Lucene 8): install them into /opt/leia/runtimes with leia --download-runtimes",
+                        "Incomplete runtimes/lucene7: lucene-core-7.7.3.jar is missing; leia --download-runtimes installs it",
+                        "Refused runtimes/lucene5: too new")
                 .doesNotContain("Without runtimes");
     }
 
@@ -643,13 +656,13 @@ class AppTest {
     void theAboutScreenSaysWhatWorksWithoutRuntimes() {
         App app = app();
         app.runtimesLoaded(new GetRuntimesResult(List.of(
-                new RuntimeJar("leia-lucene10.jar", List.of(9, 10), Optional.empty()),
-                new RuntimeJar("leia-lucene9.jar", List.of(8), Optional.empty()))));
+                new RuntimeFolder("lucene10", List.of(9, 10), RuntimeState.MISSING, Optional.empty(), Optional.empty()),
+                new RuntimeFolder("lucene9", List.of(8), RuntimeState.MISSING, Optional.empty(), Optional.empty()))));
 
         assertThat(TestScreens.render(app::render, 200, 30))
                 .contains(
                         "Runtimes: none",
-                        "Missing leia-lucene10.jar (Lucene 9–10), leia-lucene9.jar (Lucene 8): (not run from leia.jar)",
+                        "Missing lucene10 (Lucene 9–10), lucene9 (Lucene 8): (not run from leia.jar)",
                         "Without runtimes, indexes open only without a reader, and the analysis tab is off.");
     }
 

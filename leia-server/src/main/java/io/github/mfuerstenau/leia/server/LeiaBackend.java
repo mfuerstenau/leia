@@ -4,11 +4,13 @@ import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
 import io.github.mfuerstenau.leia.server.jars.JarChain;
 import io.github.mfuerstenau.leia.server.jars.JarException;
+import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -50,14 +52,19 @@ public final class LeiaBackend implements AutoCloseable {
     }
 
     /**
-     * Loads the jars with analysis components, codecs or formats of their own (ADR 0016, ADR 0018),
-     * and starts the backend thread.
+     * Loads the runtimes of {@code runtimesDir} (ADR 0073) and the jars with analysis components,
+     * codecs or formats of their own (ADR 0016, ADR 0018), and starts the backend thread.
      *
+     * @param runtimesDir the folder {@code runtimes/} beside {@code leia.jar}, if there is one; a
+     *     runtime in it that is missing, incomplete or refused is not fatal, but {@code getRuntimes}
+     *     reports it
      * @param jars jars, or directories of jars
      * @throws RpcException {@code INVALID_JAR} if the jars can't be loaded, or bring a runtime that
      *     leia refuses (ADR 0044); nothing is started then
      */
-    public static LeiaBackend start(List<Path> jars) throws RpcException {
+    public static LeiaBackend start(Optional<Path> runtimesDir, List<Path> jars) throws RpcException {
+        // Lucene 10's folder first: the jars link against its Lucene (ADR 0065).
+        runtimesDir.ifPresent(RuntimeFolders::load);
         try {
             List<Path> loaded = JarChain.load(jars);
             if (!loaded.isEmpty()) {
@@ -66,7 +73,9 @@ public final class LeiaBackend implements AutoCloseable {
         } catch (JarException e) {
             throw new RpcException(ErrorCode.INVALID_JAR, "Cannot load the jars: " + e.getMessage(), e);
         }
-        List<String> refused = Runtimes.load(JarChain.classLoader()).refused();
+        List<String> refused = Runtimes.load(JarChain.classLoader()).refused().stream()
+                .filter(refusal -> !RuntimeFolders.chainRefusals().contains(refusal))
+                .toList();
         if (!refused.isEmpty()) {
             throw new RpcException(ErrorCode.INVALID_JAR, "Cannot load the jars: " + String.join("; ", refused));
         }

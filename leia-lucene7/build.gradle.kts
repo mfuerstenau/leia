@@ -1,5 +1,5 @@
-// Lucene 7.7.3, relocated, for indexes that Lucene 10 can't read: those written by Lucene 6.x and
-// 7.x (ADR 0048). The relocation, the shadow jar and the relocation check come from the convention.
+// Lucene 7.7.3 for indexes that Lucene 10 can't read (ADR 0048), in a class loader of its own (ADR
+// 0073). The adapter jar, its list and its check come from the convention.
 plugins {
     id("leia.lucene-runtime-conventions")
 }

@@ -1,4 +1,8 @@
 // A library for leia-tui, which calls the methods in-process through LeiaBackend (ADR 0034).
+import io.github.mfuerstenau.leia.buildlogic.RUNTIME_MODULES
+import io.github.mfuerstenau.leia.buildlogic.runtimeFolder
+import io.github.mfuerstenau.leia.buildlogic.runtimeFolderJars
+
 plugins {
     id("leia.java-library-conventions")
 }
@@ -10,18 +14,11 @@ dependencies {
     api(project(":leia-protocol"))
     // The interface to the runtimes, which read every index (ADR 0044, ADR 0071).
     implementation(project(":leia-runtime"))
-    // Lucene 3.6, 5.5, 7.7 and 9.12, relocated, for indexes created by Lucene 2.x to 8.x: found through
-    // ServiceLoader, and the shadow jars only, so an unrelocated old Lucene never meets Lucene 10 on
-    // the classpath. For the tests only: test reaches them through the classpath, jarsTest as loaded
-    // jars, and leia through runtimes/ beside leia.jar, where leia-tui puts them (ADR 0044).
-    testRuntimeOnly(project(mapOf("path" to ":leia-lucene3", "configuration" to "shadowRuntimeElements")))
-    testRuntimeOnly(project(mapOf("path" to ":leia-lucene5", "configuration" to "shadowRuntimeElements")))
-    testRuntimeOnly(project(mapOf("path" to ":leia-lucene7", "configuration" to "shadowRuntimeElements")))
-    testRuntimeOnly(project(mapOf("path" to ":leia-lucene9", "configuration" to "shadowRuntimeElements")))
     // Lucene 10 behind the runtime interface, which reads the indexes of Lucene 9 and 10 and those of
-    // an unknown version (ADR 0071): for the tests only, like the other runtimes, since leia loads
-    // leia-lucene10.jar from runtimes/ (ADR 0072). The plain jar, with leia-core and Lucene 10, for
-    // the tests that open indexes through Lucene10Runtime directly and those that write indexes.
+    // an unknown version (ADR 0071): for the tests only, since leia loads runtimes/lucene10 (ADR 0072,
+    // ADR 0073). On the test classpath, for the tests that open indexes through Lucene10Runtime
+    // directly and those that write indexes. The old runtimes are never on it: the tests load their
+    // folders as leia does (testRuntimes below).
     testImplementation(project(":leia-lucene10"))
     testImplementation(project(":leia-core"))
     implementation(libs.dagger)
@@ -58,22 +55,22 @@ val testIndexFiles = mapOf(
     "demo" to coreTestFiles("demoIndex", "demoIndexElements"),
     // Without its jar, for the parity of a missing codec (ADR 0070).
     "custom-codec" to coreTestFiles("testCodecIndex", "testCodecIndexElements"),
-    // Written by leia-lucene3's build, read with the relocated Lucene 3.6 (ADR 0044).
+    // Written by leia-lucene3's build, read with its Lucene 3.6 (ADR 0044).
     "lucene24" to lucene3TestFiles("lucene24TestIndex", "lucene24TestIndexElements"),
     "lucene3" to lucene3TestFiles("lucene3TestIndex", "lucene3TestIndexElements"),
-    // Written by leia-lucene5's build, read with the relocated Lucene 5.5 (ADR 0046).
+    // Written by leia-lucene5's build, read with its Lucene 5.5 (ADR 0046).
     "lucene4" to lucene5TestFiles("lucene4TestIndex", "lucene4TestIndexElements"),
     "lucene5" to lucene5TestFiles("lucene5TestIndex", "lucene5TestIndexElements"),
-    // Written by leia-lucene7's build, read with the relocated Lucene 7.7 (ADR 0048).
+    // Written by leia-lucene7's build, read with its Lucene 7.7 (ADR 0048).
     "lucene6" to lucene7TestFiles("lucene6TestIndex", "lucene6TestIndexElements"),
     "lucene7" to lucene7TestFiles("lucene7TestIndex", "lucene7TestIndexElements"),
-    // Written by leia-lucene9's build, read with the relocated Lucene 9.12 (ADR 0049); leia-core's
+    // Written by leia-lucene9's build, read with its Lucene 9.12 (ADR 0049); leia-core's
     // own lucene8 stays for its tests that Lucene 10 refuses it.
     "lucene8" to lucene9TestFiles("lucene8TestIndex", "lucene8TestIndexElements"),
     "lucene8to9" to lucene9TestFiles("lucene8to9TestIndex", "lucene8to9TestIndexElements"),
 )
 val jarsTestIndexFiles = mapOf(
-    // Opened through the loaded leia-lucene10.jar, and before it is loaded, not at all (ADR 0072).
+    // Opened through the loaded runtimes/lucene10, and before it is loaded, not at all (ADR 0072).
     "lucene9" to testIndexFiles.getValue("lucene9"),
     "demo" to testIndexFiles.getValue("demo"),
     "custom-codec" to testIndexFiles.getValue("custom-codec"),
@@ -89,15 +86,24 @@ val jarsTestIndexFiles = mapOf(
 )
 val testCodecJar = coreTestFiles("testCodecJar", "testCodecJarElements")
 val testAnalysisJars = coreTestFiles("testAnalysisJars", "testAnalysisJarsElements")
-// The runtime jars, which jarsTest loads as leia loads runtimes/, instead of from the classpath.
-val lucene3RuntimeJar = lucene3TestFiles("lucene3RuntimeJar", "shadowRuntimeElements").apply { isTransitive = false }
-val lucene5RuntimeJar = lucene5TestFiles("lucene5RuntimeJar", "shadowRuntimeElements").apply { isTransitive = false }
-val lucene7RuntimeJar = lucene7TestFiles("lucene7RuntimeJar", "shadowRuntimeElements").apply { isTransitive = false }
-val lucene9RuntimeJar = lucene9TestFiles("lucene9RuntimeJar", "shadowRuntimeElements").apply { isTransitive = false }
-val lucene10RuntimeJar =
-    runtimeTestFiles("leia-lucene10", "lucene10RuntimeJar", "shadowRuntimeElements").apply { isTransitive = false }
-// The plain leia-lucene10 jar with leia-core and Lucene 10, which jarsTest leaves out of its
-// classpath, so that Lucene 10 comes only from the loaded leia-lucene10.jar, as in leia (ADR 0072).
+
+// The runtimes' folders, as leia-tui puts them into runtimes/ beside leia.jar (ADR 0073): those of
+// the old runtimes for test, whose classpath has Lucene 10, and all five for jarsTest, whose
+// classpath has none.
+val runtimeFolders = RUNTIME_MODULES.associateWith { runtimeFolderJars(it) }
+
+fun runtimesSync(name: String, modules: List<String>) = tasks.register<Sync>(name) {
+    description = "Puts the runtimes' folders together for the tests."
+    into(layout.buildDirectory.dir(name))
+    for (module in modules) {
+        from(runtimeFolders.getValue(module)) { into(runtimeFolder(module)) }
+    }
+}
+
+val testRuntimes = runtimesSync("testRuntimes", RUNTIME_MODULES - "leia-lucene10")
+val jarsTestRuntimes = runtimesSync("jarsTestRuntimes", RUNTIME_MODULES)
+// The leia-lucene10 jar with leia-core and Lucene 10, which jarsTest leaves out of its classpath, so
+// that Lucene 10 comes only from the loaded runtimes/lucene10, as in leia (ADR 0072).
 val lucene10World = configurations.create("lucene10World") { isCanBeConsumed = false }.also {
     dependencies.add(it.name, dependencies.project(mapOf("path" to ":leia-lucene10")))
 }
@@ -117,7 +123,10 @@ tasks.test {
     // docs/runtimes.md, whose feature table RuntimeFeaturesTest checks against the runtimes.
     testFiles(
         testIndexFiles.mapKeys { "leia.test.index.${it.key}" } +
-            mapOf("leia.test.doc.runtimes" to files(rootProject.file("docs/runtimes.md"))),
+            mapOf(
+                "leia.test.doc.runtimes" to files(rootProject.file("docs/runtimes.md")),
+                "leia.test.runtimes" to files(testRuntimes),
+            ),
     )
 }
 
@@ -125,8 +134,7 @@ val jarsTest = tasks.register<Test>("jarsTest") {
     description = "Runs the tests that load jars, in a JVM of their own."
     group = "verification"
     testClassesDirs = sourceSets.test.get().output.classesDirs
-    classpath = sourceSets.test.get().runtimeClasspath - lucene3RuntimeJar - lucene5RuntimeJar - lucene7RuntimeJar -
-        lucene9RuntimeJar - lucene10World
+    classpath = sourceSets.test.get().runtimeClasspath - lucene10World
     // The other test classes name Lucene types, which this classpath doesn't have.
     include("**/JarsBackendTest.class")
     useJUnitPlatform { includeTags("jars") }
@@ -135,18 +143,14 @@ val jarsTest = tasks.register<Test>("jarsTest") {
             mapOf(
                 "leia.test.codec.jar" to testCodecJar,
                 "leia.test.analysis.jars" to testAnalysisJars,
-                "leia.test.runtime.lucene3" to lucene3RuntimeJar,
-                "leia.test.runtime.lucene5" to lucene5RuntimeJar,
-                "leia.test.runtime.lucene7" to lucene7RuntimeJar,
-                "leia.test.runtime.lucene9" to lucene9RuntimeJar,
-                "leia.test.runtime.lucene10" to lucene10RuntimeJar,
+                "leia.test.runtimes" to files(jarsTestRuntimes),
             ),
     )
 }
 
 // Hard rule 6 of AGENTS.md: the server reaches Lucene only through the runtime interface (ADR 0071),
 // so neither leia-core nor a Lucene artifact may be on its compile classpath; nor on its runtime
-// classpath, since leia.jar takes Lucene 10 from runtimes/ (ADR 0072).
+// classpath, since leia.jar takes every Lucene from runtimes/ (ADR 0072, ADR 0073).
 val noLuceneCheck = tasks.register("noLuceneCheck") {
     description = "Checks that leia-core and Lucene are on neither the compile nor the runtime classpath."
     group = "verification"
@@ -221,7 +225,7 @@ val analysisModuleJars = analysisModules.associateWith { module ->
     configurations.create("${module}AnalysisModule") {
         isCanBeConsumed = false
         dependencies.add(project.dependencies.create("org.apache.lucene:lucene-analysis-$module:${libs.versions.lucene.get()}"))
-        // In runtimes/leia-lucene10.jar already (ADR 0072).
+        // In runtimes/lucene10 already (ADR 0072, ADR 0073).
         exclude(group = "org.apache.lucene", module = "lucene-core")
         exclude(group = "org.apache.lucene", module = "lucene-analysis-common")
     }

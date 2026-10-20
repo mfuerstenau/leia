@@ -53,7 +53,7 @@ public interface LuceneRuntime {
 
     /**
      * Its lists of factories, codecs and formats, reloaded with the jars of {@code --jar} (ADR 0068);
-     * empty if no such jar can add to them, as when its Lucene is relocated.
+     * empty if no such jar can add to them, as when its Lucene is in a class loader of its own (ADR 0073).
      */
     Optional<Extensions> extensions();
 }

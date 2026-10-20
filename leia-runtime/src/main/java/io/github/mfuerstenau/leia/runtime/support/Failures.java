@@ -20,7 +20,7 @@ public final class Failures {
 
     /**
      * Lucene's {@code NamedSPILoader.lookup} says so, from 4.0 on, in an {@link
-     * IllegalArgumentException}; the type is relocated with the runtime's Lucene.
+     * IllegalArgumentException}; the type is the runtime's Lucene's own.
      */
     private static final Pattern SPI_MESSAGE =
             Pattern.compile("An SPI class of type (?:\\S+\\.)?(\\w+) with name '([^']*)' does not exist");

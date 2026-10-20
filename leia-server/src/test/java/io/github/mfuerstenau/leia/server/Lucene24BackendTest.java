@@ -50,7 +50,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * A Lucene 2.4 index read through {@link LeiaBackend} with the relocated Lucene 3.6, next to Lucene
+ * A Lucene 2.4 index read through {@link LeiaBackend} with Lucene 3.6 in a class loader of its own, next to Lucene
  * 10 in one JVM (ADR 0044). The index, from leia-lucene3's {@code Lucene24IndexWriter}, holds
  * "document number N of the old index" for N = 1..3 in {@code body}, with N as the {@code id} and
  * "bytesN" in the binary {@code raw}; document 1 (id 2) is deleted.

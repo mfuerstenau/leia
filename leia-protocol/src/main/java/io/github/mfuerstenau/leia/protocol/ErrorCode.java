@@ -64,8 +64,8 @@ public enum ErrorCode {
      */
     NOT_SUPPORTED(-32019),
     /**
-     * The index was written by a Lucene version that only a runtime jar reads, and none that reads it
-     * is loaded (ADR 0044).
+     * The index was written by a Lucene version that no loaded runtime reads: the runtime's folder in
+     * {@code runtimes/} is missing, incomplete or refused (ADR 0044, ADR 0073).
      */
     MISSING_RUNTIME(-32020);
 

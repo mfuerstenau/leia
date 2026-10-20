@@ -22,7 +22,7 @@ import org.apache.lucene.util.Version;
 
 /**
  * The custom analyzers of Lucene 9.12 (ADR 0067), built as leia-core's {@code Analyzers} builds them
- * on Lucene 10, with its messages: the factories are 9.12's own, found through the relocated SPI, and
+ * on Lucene 10, with its messages: the factories are 9.12's own, found through the SPI of its own class loader, and
  * resource files are read from the config directory, then through the runtime's own class loader. The
  * extension jars of {@code --jar} link against Lucene 10, so their factories are not 9.12's.
  */

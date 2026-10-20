@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-14
+- **Amended by:** ADR 0073 (§2: the old runtimes, each in a class loader of its own, see no jars of `--jar`)
 - **Amends:** ADR 0016, ADR 0018 and ADR 0024 (where the jars are loaded); ADR 0065 §6 (the interface now has a part for `addJars` and `getJars`)
 
 ## Context

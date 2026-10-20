@@ -78,7 +78,8 @@ class SessionPilotTest {
 
     @BeforeEach
     void start() throws Exception {
-        backend = LeiaBackend.start(List.of());
+        // The old runtimes' folders that the build puts together (ADR 0073); Lucene 10 is on the classpath.
+        backend = LeiaBackend.start(Optional.of(Path.of(System.getProperty("leia.test.runtimes"))), List.of());
         VersionResult version =
                 backend.call(Methods.VERSION, new VersionParams()).get();
         historyFile = tmp.resolve("state").resolve("history");
@@ -185,7 +186,7 @@ class SessionPilotTest {
         assertThat(Files.readAllLines(historyFile)).containsExactly(index.toString());
     }
 
-    /** An index written by Lucene 2.4, which the relocated Lucene 3.6 reads (ADR 0044). */
+    /** An index written by Lucene 2.4, which Lucene 3.6 reads (ADR 0044). */
     @Test
     void opensALucene24IndexWithTheScreensItHas() throws Exception {
         Path index = Path.of(System.getProperty("leia.test.index.lucene24")).toAbsolutePath();
@@ -236,7 +237,7 @@ class SessionPilotTest {
         assertThat(screen()).contains("Term · field", "1 hit").doesNotContain("not for");
     }
 
-    /** An index written by Lucene 5.5, which the relocated Lucene 5.5 reads (ADR 0046). */
+    /** An index written by Lucene 5.5, which Lucene 5.5 reads (ADR 0046). */
     @Test
     void opensALucene5IndexWithDocValuesAndCheckLevels() throws Exception {
         Path index = Path.of(System.getProperty("leia.test.index.lucene5")).toAbsolutePath();
@@ -260,7 +261,7 @@ class SessionPilotTest {
         assertThat(screen()).contains("OK: no problems found in 1 index");
     }
 
-    /** An index written by Lucene 7.7, which the relocated Lucene 7.7 reads with its points (ADR 0048). */
+    /** An index written by Lucene 7.7, which Lucene 7.7 reads with its points (ADR 0048). */
     @Test
     void opensALucene7IndexAndWalksItsPointTree() throws Exception {
         Path index = Path.of(System.getProperty("leia.test.index.lucene7")).toAbsolutePath();
@@ -292,7 +293,7 @@ class SessionPilotTest {
     }
 
     /**
-     * An index created by Lucene 8.x and written to by 9.x, which the relocated Lucene 9.12 reads with
+     * An index created by Lucene 8.x and written to by 9.x, which Lucene 9.12 reads with
      * the KNN vectors of its 9.x segment (ADR 0049).
      */
     @Test

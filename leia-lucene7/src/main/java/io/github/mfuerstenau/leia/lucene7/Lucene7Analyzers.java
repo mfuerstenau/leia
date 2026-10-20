@@ -68,7 +68,7 @@ import org.apache.lucene.util.Version;
  * analyzers-common. Stop words and the longest token apply where 7.7 takes them; anything else is
  * refused.
  *
- * <p>The analyzers are a table of class literals, which the relocation rewrites, built through their
+ * <p>The analyzers are a table of class literals of this runtime's Lucene, built through their
  * no-arg and {@code (CharArraySet)} constructors.
  */
 final class Lucene7Analyzers {

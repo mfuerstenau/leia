@@ -50,8 +50,15 @@ record Platform(Function<String, String> env, Optional<Path> home, boolean windo
         }
     }
 
-    /** The runtimes for indexes that Lucene 10 can't read, {@code runtimes} beside {@code leia.jar}. */
+    /**
+     * The folder of runtimes, {@code runtimes} beside {@code leia.jar} (ADR 0044, ADR 0073), or the
+     * folder that {@code -Dleia.runtimes} names, as under Gradle.
+     */
     Optional<Path> runtimesDir() {
+        String property = System.getProperty("leia.runtimes", "");
+        if (!property.isEmpty()) {
+            return Optional.of(Path.of(property).toAbsolutePath());
+        }
         return leiaJar.map(jar -> jar.resolveSibling("runtimes"));
     }
 

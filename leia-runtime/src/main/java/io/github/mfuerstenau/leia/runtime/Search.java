@@ -199,9 +199,8 @@ public interface Search {
          * An analyzer created by class name, with its default settings and, if given, stop words and
          * stem exclusions of its own, and the options it takes.
          *
-         * @param className Lucene's class name, unrelocated, such as {@code
-         *     org.apache.lucene.analysis.en.EnglishAnalyzer}; a relocated runtime matches its simple
-         *     name
+         * @param className Lucene's class name, such as {@code
+         *     org.apache.lucene.analysis.en.EnglishAnalyzer}; a runtime matches its simple name
          * @param stopwords the stop words; empty for the analyzer's default ones
          * @param stemExclusion the words kept from stemming; empty for none
          * @param maxTokenLength the longest token; empty for the analyzer's default

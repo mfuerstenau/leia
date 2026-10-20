@@ -2,15 +2,6 @@
 
 The work queue for leia. Check items off (`[x]`) as they land, and keep it aligned with the "Remaining / next" section of the latest entry in `docs/SESSION-SUMMARIES.md`. Finished items move to `docs/tasklist-done.md`.
 
-## Distribution
-
-Goal: an option of `leia.jar` downloads the runtime jars from Maven Central into `runtimes/` beside it, checked against SHA-256s that the build bakes in, and the release folders ship without `runtimes/`. That pays off only once Lucene 10 is a runtime too, so the lane starts there (ADR 0065). Each step is a commit; steps 4 to 7 get their own plan when reached. Step 2, the interface for what only Lucene 10 had (ADR 0066 to ADR 0069), step 3, every index through a runtime (ADR 0070, ADR 0071), and step 4, `leia.jar` without Lucene (ADR 0072), are done.
-
-- [x] 1. `leia-lucene10`: Lucene 10 behind today's runtime interface, through leia-core, and `Lucene10ParityTest`, which lists what the interface lacks (ADR 0065 §6). Nothing is routed to it yet.
-- [ ] 5. Publishing setup: `maven-publish` and `signing` for the five runtime shadow jars as `io.github.mfuerstenau.leia:leia-luceneN:<version>`, with POM metadata and sources/javadoc jars; a Central Portal bundle task; reproducible jars. The upload is the user's.
-- [ ] 6. `--download-runtimes` in `leia.jar`: the baked-in SHA-256s, `repo1.maven.org` with a base URL for tests, a temp file moved into place, a jar with the right hash skipped, refused for a SNAPSHOT build, exit 1 with a message if `runtimes/` isn't writable or a download fails; listed in `--help`, tested against the JDK's `HttpServer`.
-- [ ] 7. Slim dist: `build-dist.sh` leaves `runtimes/` out; the `MISSING_RUNTIME` hint and the startup message point to `leia --download-runtimes`; amend ADR 0004 and ADR 0044.
-
 ## Lucene 9.12 beyond classic search
 
 Goal: an index created by Lucene 8.x (read with `leia-lucene9`, ADR 0049) gets the features that are greyed out for it today. 9.12 has the APIs that leia-core uses for them on Lucene 10, so most are ports. What needs no runtime change goes to every runtime at once. The others need runtime interface 7 (one ADR for the interface, amending ADR 0049 §4). They land in 9.12 first, and in 5.5 and 7.7 where the copy is the same (ADR 0050). Each item adds its feature in `RuntimeResults.features`, a `runtime()` branch in its handlers, and its row in `docs/runtimes.md` (checked by `RuntimeFeaturesTest`). The TUI already gates on the features.

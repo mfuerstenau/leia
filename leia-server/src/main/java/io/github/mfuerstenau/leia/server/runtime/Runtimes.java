@@ -18,9 +18,10 @@ import java.util.Set;
 import java.util.logging.Logger;
 
 /**
- * The runtimes that read the indexes (ADR 0044, ADR 0071), found with {@link ServiceLoader}
- * through the loader of the jars, {@link JarChain#classLoader()}. A runtime built for another
- * version of the interface, or one that can't be loaded, is refused and never used.
+ * The runtimes that read the indexes (ADR 0044, ADR 0071): those of the {@link RuntimeFolders}, each
+ * in a class loader of its own (ADR 0073), and those found with {@link ServiceLoader} through the
+ * loader of the jars, {@link JarChain#classLoader()}, such as Lucene 10's. A runtime built for
+ * another version of the interface, or one that can't be loaded, is refused and never used.
  *
  * <p>It is used on the backend thread only, so it needs no locking.
  */
@@ -34,14 +35,22 @@ public final class Runtimes {
 
     private ClassLoader loader;
     private Loaded loaded;
+    private List<LuceneRuntime> all;
     private final Set<String> reported;
 
     @Inject
     public Runtimes() {
         loader = JarChain.classLoader();
         loaded = load(loader);
-        // LeiaBackend.start refused these already.
+        all = all(loaded);
+        // LeiaBackend.start refused these already, or RuntimeFolders reports them.
         reported = new HashSet<>(loaded.refused());
+    }
+
+    private static List<LuceneRuntime> all(Loaded chain) {
+        List<LuceneRuntime> all = new ArrayList<>(RuntimeFolders.runtimes());
+        all.addAll(chain.runtimes());
+        return List.copyOf(all);
     }
 
     /**
@@ -101,19 +110,26 @@ public final class Runtimes {
                 : source.getLocation().toString();
     }
 
-    /** The runtimes of the jars now, loaded again if jars were added since. */
-    private Loaded current() {
+    /** The runtimes of the jar chain now, loaded again if jars were added since. */
+    private Loaded chain() {
         ClassLoader now = JarChain.classLoader();
         if (now != loader) {
             loader = now;
             loaded = load(now);
+            all = all(loaded);
         }
         return loaded;
     }
 
+    /** Every runtime: those of the folders, then those of the jar chain. */
+    private List<LuceneRuntime> current() {
+        chain();
+        return all;
+    }
+
     /** A runtime that reads indexes of {@code major}, the first one found. */
     public Optional<LuceneRuntime> forMajor(int major) {
-        return current().runtimes().stream()
+        return current().stream()
                 .filter(runtime -> runtime.indexMajors().contains(major))
                 .findFirst();
     }
@@ -126,7 +142,7 @@ public final class Runtimes {
      */
     public Optional<LuceneRuntime> latest() {
         // On a tie, max keeps the first.
-        return current().runtimes().stream().max(Comparator.comparingInt(Runtimes::newestMajor));
+        return current().stream().max(Comparator.comparingInt(Runtimes::newestMajor));
     }
 
     private static int newestMajor(LuceneRuntime runtime) {
@@ -135,14 +151,14 @@ public final class Runtimes {
 
     /** Whether {@code major} is newer than any runtime reads. */
     public boolean newerThanAll(int major) {
-        return current().runtimes().stream().allMatch(runtime -> newestMajor(runtime) < major);
+        return current().stream().allMatch(runtime -> newestMajor(runtime) < major);
     }
 
     /**
      * The analysis tab of the first runtime that has one (ADR 0067), with the runtime it belongs to.
      */
     public Optional<RuntimeAnalysis> analysis() {
-        for (LuceneRuntime runtime : current().runtimes()) {
+        for (LuceneRuntime runtime : current()) {
             Optional<Analysis> analysis = runtime.analysis();
             if (analysis.isPresent()) {
                 return Optional.of(new RuntimeAnalysis(runtime, analysis.get()));
@@ -152,56 +168,29 @@ public final class Runtimes {
     }
 
     /**
-     * A runtime jar that leia knows (ADR 0044, ADR 0072).
-     *
-     * @param jar its file name in {@code runtimes/}
-     * @param indexMajors the majors of the indexes it reads, oldest first
+     * Every runtime leia knows, newest first, with the Lucene version of the loaded runtime that reads
+     * its indexes, or empty if none is loaded, and how its folder was found (ADR 0072, ADR 0073).
      */
-    public record KnownJar(String jar, List<Integer> indexMajors) {}
-
-    /** Every runtime jar leia knows, newest first. A new runtime is one more entry here. */
-    public static final List<KnownJar> KNOWN_JARS = List.of(
-            new KnownJar("leia-lucene10.jar", List.of(9, 10)),
-            new KnownJar("leia-lucene9.jar", List.of(8)),
-            new KnownJar("leia-lucene7.jar", List.of(6, 7)),
-            new KnownJar("leia-lucene5.jar", List.of(4, 5)),
-            new KnownJar("leia-lucene3.jar", List.of(2, 3)));
-
-    /** The runtime jar that reads the newest indexes, and those whose version can't be detected (ADR 0071). */
-    public static final String LATEST_JAR = KNOWN_JARS.getFirst().jar();
-
-    /**
-     * The runtime jar that reads indexes of {@code major} (ADR 0044, ADR 0071), such as {@code
-     * leia-lucene3.jar} for 2 and 3, or empty for a major that none reads.
-     */
-    public static Optional<String> jarFor(int major) {
-        return KNOWN_JARS.stream()
-                .filter(known -> known.indexMajors().contains(major))
-                .map(KnownJar::jar)
-                .findFirst();
-    }
-
-    /**
-     * Every runtime jar leia knows, newest first, with the Lucene version of the loaded runtime that
-     * reads its indexes, or empty if none is loaded (ADR 0072).
-     */
-    public List<JarState> known() {
-        return KNOWN_JARS.stream()
-                .map(known -> new JarState(
-                        known, forMajor(known.indexMajors().getFirst()).map(LuceneRuntime::luceneVersion)))
+    public List<KnownState> known() {
+        return RuntimeFolders.KNOWN.stream()
+                .map(known -> new KnownState(
+                        known,
+                        forMajor(known.indexMajors().getFirst()).map(LuceneRuntime::luceneVersion),
+                        RuntimeFolders.state(known)))
                 .toList();
     }
 
     /**
-     * A runtime jar that leia knows, and whether it is loaded.
+     * A runtime that leia knows, and whether it is loaded.
      *
      * @param luceneVersion the Lucene version of the loaded runtime that reads its indexes, or empty
+     * @param folder how its folder was found; a runtime can be loaded without one, through the jars
      */
-    public record JarState(KnownJar known, Optional<String> luceneVersion) {}
+    public record KnownState(RuntimeFolders.Known known, Optional<String> luceneVersion, RuntimeFolders.State folder) {}
 
     /** The refusals not reported before, for {@code addJars}. */
     public List<String> newlyRefused() {
-        List<String> fresh = current().refused().stream()
+        List<String> fresh = chain().refused().stream()
                 .filter(refusal -> !reported.contains(refusal))
                 .toList();
         reported.addAll(fresh);

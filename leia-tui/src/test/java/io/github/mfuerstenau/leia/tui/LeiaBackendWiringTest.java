@@ -11,6 +11,7 @@ import io.github.mfuerstenau.leia.server.RpcException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
@@ -28,7 +29,8 @@ class LeiaBackendWiringTest {
 
     @BeforeEach
     void start() throws RpcException {
-        backend = LeiaBackend.start(List.of());
+        // The old runtimes' folders that the build puts together (ADR 0073); Lucene 10 is on the classpath.
+        backend = LeiaBackend.start(Optional.of(Path.of(System.getProperty("leia.test.runtimes"))), List.of());
     }
 
     @AfterEach
