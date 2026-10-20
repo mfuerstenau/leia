@@ -31,15 +31,18 @@ final class Lucene10Commits implements Commits {
     @Override
     public Optional<CommitDetails> commit(Path dir, DirectoryKind kind, long generation) throws IOException {
         try (DirectoryOnlyIndex index = open(dir, kind)) {
-            return index.commit(0, generation)
-                    .map(details -> new CommitDetails(
-                            commit(details.commit()),
-                            details.segments().stream()
-                                    .map(Lucene10Commits::segment)
-                                    .toList(),
-                            details.files().stream()
-                                    .map(file -> new CommitFile(file.name(), file.segment(), file.size()))
-                                    .toList()));
+            Optional<io.github.mfuerstenau.leia.core.CommitDetails> read;
+            try {
+                read = index.commit(0, generation);
+            } catch (IOException e) {
+                throw Lucene10Failures.reading(e);
+            }
+            return read.map(details -> new CommitDetails(
+                    commit(details.commit()),
+                    details.segments().stream().map(Lucene10Commits::segment).toList(),
+                    details.files().stream()
+                            .map(file -> new CommitFile(file.name(), file.segment(), file.size()))
+                            .toList()));
         }
     }
 
@@ -47,7 +50,7 @@ final class Lucene10Commits implements Commits {
         try {
             return DirectoryOnlyIndex.open(dir, Lucene10Index.directoryImpl(kind));
         } catch (IndexOpenException e) {
-            throw new IOException(e.getMessage(), e);
+            throw Lucene10Failures.opening(e);
         }
     }
 

@@ -53,6 +53,8 @@ fun coreTestFiles(name: String, configuration: String) =
 val testIndexFiles = mapOf(
     "lucene9" to coreTestFiles("lucene9TestIndex", "lucene9TestIndexElements"),
     "demo" to coreTestFiles("demoIndex", "demoIndexElements"),
+    // Without its jar, for the parity of a missing codec (ADR 0070).
+    "custom-codec" to coreTestFiles("testCodecIndex", "testCodecIndexElements"),
     // Written by leia-lucene3's build, read with the relocated Lucene 3.6 (ADR 0044).
     "lucene24" to lucene3TestFiles("lucene24TestIndex", "lucene24TestIndexElements"),
     "lucene3" to lucene3TestFiles("lucene3TestIndex", "lucene3TestIndexElements"),
@@ -68,7 +70,7 @@ val testIndexFiles = mapOf(
     "lucene8to9" to lucene9TestFiles("lucene8to9TestIndex", "lucene8to9TestIndexElements"),
 )
 val jarsTestIndexFiles = mapOf(
-    "custom-codec" to coreTestFiles("testCodecIndex", "testCodecIndexElements"),
+    "custom-codec" to testIndexFiles.getValue("custom-codec"),
     "custom-formats" to coreTestFiles("customFormatsIndex", "customFormatsIndexElements"),
     "lucene24" to testIndexFiles.getValue("lucene24"),
     "lucene3" to testIndexFiles.getValue("lucene3"),

@@ -98,6 +98,8 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 | Token limit | `consumeAllTokens` ignored (it changes no token) | ✓ | ✓ | ✓ | ✓ |
 | Analysis tab (ADR 0067) | – | – | – | – | ✓, `Analysis` of leia-lucene10 when routed to it |
 | Extension jars (ADR 0068) | – (relocated service files) | – | – | – | ✓, `Extensions` of leia-lucene10; leia-core's lists until step 3 |
+| Failure reasons (ADR 0070) | corrupt and unsupported format; no codecs to miss | corrupt, unsupported format, missing codec | as 5.5.5 | as 5.5.5 | leia-core's, unreadable included |
+| Hit count without an exact count (ADR 0070) | every hit counted | every hit counted | every hit counted | stops after 1000 | stops after 1000 |
 | Unmapping | never (no `sun.misc.Cleaner`) | only with `-Dsun.misc.unsafe.memory.access=allow` | as 5.5.5 | memory segments | memory segments |
 | KNN search cancellation | – | – | – | through the searcher's `QueryTimeout` | through the searcher's `QueryTimeout` |
 | Highlight (ADR 0063) | – | – (no `UnifiedHighlighter`) | – (its `UnifiedHighlighter` differs; not yet) | ✓, with its search analyzers | ✓, with every analyzer of `startSearch` |

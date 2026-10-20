@@ -17,7 +17,7 @@ import java.util.Set;
 public interface LuceneRuntime {
 
     /** The version of this interface. It changes with every change that breaks a runtime built before. */
-    int API_VERSION = 19;
+    int API_VERSION = 20;
 
     /**
      * The version of this interface the runtime was built against: {@code return API_VERSION;}, which
@@ -38,7 +38,7 @@ public interface LuceneRuntime {
      *
      * @param dirs the index directories, at least one
      * @throws IOException if none of them can be read: the error of the first, naming its directory
-     *     if there are several
+     *     if there are several; an {@link IndexReadException} if the runtime knows why (ADR 0070)
      */
     RuntimeIndex open(List<Path> dirs, DirectoryKind kind) throws IOException;
 

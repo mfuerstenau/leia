@@ -16,7 +16,8 @@ public interface Commits {
     /**
      * The commits of {@code dir}, newest first.
      *
-     * @throws IOException if {@code dir} can't be listed
+     * @throws IOException if {@code dir} can't be listed; an {@link IndexReadException} if the runtime
+     *     knows why (ADR 0070)
      */
     CommitList commits(Path dir, DirectoryKind kind) throws IOException;
 
@@ -24,7 +25,8 @@ public interface Commits {
      * One commit of {@code dir}, with its segments and files.
      *
      * @return empty if {@code dir} has no {@code segments_N} of that generation
-     * @throws IOException if the commit can't be read
+     * @throws IOException if the commit can't be read; an {@link IndexReadException} with Lucene's
+     *     message if the runtime knows why (ADR 0070)
      */
     Optional<CommitDetails> commit(Path dir, DirectoryKind kind, long generation) throws IOException;
 

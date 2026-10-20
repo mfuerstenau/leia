@@ -23,7 +23,8 @@ public final class IndexParts {
 
     /**
      * Opens each of {@code dirs}. A single directory that fails throws as it failed; of several, each
-     * one that fails is skipped, and if none opens, the first failure is thrown.
+     * one that fails is skipped, and if none opens, the first failure is thrown, named after its
+     * directory and with its reason if it has one ({@link Failures#named}).
      *
      * @throws IllegalArgumentException if {@code dirs} is empty
      */
@@ -43,7 +44,7 @@ public final class IndexParts {
                 }
                 skipped.add(new Skipped(dir, Failures.message(e)));
                 if (firstFailure == null) {
-                    firstFailure = new IOException(dir + ": " + Failures.message(e), e);
+                    firstFailure = Failures.named(dir, e);
                 }
             }
         }

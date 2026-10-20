@@ -14,11 +14,13 @@ public interface Scoring {
 
     /**
      * Searches with a query from {@link Search#parse}, {@link Search#term} or {@link Knn}, scored by
-     * {@code similarity} and ordered by {@code sort}. Every hit is counted. A field sort reads every
-     * match's doc value and never skips documents (ADR 0012). The hits of a field sort carry their
-     * scores too, and each hit carries its value of each sort key.
+     * {@code similarity} and ordered by {@code sort}. A field sort reads every match's doc value and
+     * never skips documents (ADR 0012), unless the hits aren't all counted. The hits of a field sort
+     * carry their scores too, and each hit carries its value of each sort key.
      *
      * @param sort the order of the hits; empty for the best score first
+     * @param exactTotalHits whether every hit is counted, as for {@link Search#search(Search.ParsedQuery,
+     *     int, int, boolean, Optional, LongConsumer)} (ADR 0070)
      * @param fields the stored fields to return per hit; empty for all of them
      * @param progress receives the documents searched so far, from time to time; it may throw to stop
      *     the search
@@ -31,9 +33,23 @@ public interface Scoring {
             List<SortKey> sort,
             int offset,
             int limit,
+            boolean exactTotalHits,
             Optional<List<String>> fields,
             LongConsumer progress)
             throws IOException;
+
+    /** Searches as {@link #search(Search.ParsedQuery, Similarity, List, int, int, boolean, Optional, LongConsumer)}, counting every hit. */
+    default Search.SearchResults search(
+            Search.ParsedQuery query,
+            Similarity similarity,
+            List<SortKey> sort,
+            int offset,
+            int limit,
+            Optional<List<String>> fields,
+            LongConsumer progress)
+            throws IOException {
+        return search(query, similarity, sort, offset, limit, true, fields, progress);
+    }
 
     /**
      * How a query scores document {@code docId} with {@code similarity}, as {@link #search} scores it.

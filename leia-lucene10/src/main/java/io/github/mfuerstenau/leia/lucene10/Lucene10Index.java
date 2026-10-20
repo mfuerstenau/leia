@@ -57,6 +57,7 @@ import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.Sort;
 import org.apache.lucene.search.SortField;
+import org.apache.lucene.search.TotalHits;
 import org.apache.lucene.util.BytesRef;
 
 /**
@@ -109,7 +110,7 @@ final class Lucene10Index
         try {
             index = ReadOnlyIndex.open(dirs, directoryImpl(kind));
         } catch (IndexOpenException e) {
-            throw new IOException(e.getMessage(), e);
+            throw Lucene10Failures.opening(e);
         }
         return new Lucene10Index(index, kind);
     }
@@ -210,7 +211,7 @@ final class Lucene10Index
         try {
             reopened = index.reopen();
         } catch (IndexOpenException e) {
-            throw new IOException(e.getMessage(), e);
+            throw Lucene10Failures.opening(e);
         }
         if (reopened.isEmpty()) {
             return Optional.empty();
@@ -687,9 +688,14 @@ final class Lucene10Index
     /** {@inheritDoc} It scores with Lucene 10's default, BM25 with k1 1.2 and b 0.75. */
     @Override
     public SearchResults search(
-            ParsedQuery parsed, int offset, int limit, Optional<List<String>> fields, LongConsumer progress)
+            ParsedQuery parsed,
+            int offset,
+            int limit,
+            boolean exactTotalHits,
+            Optional<List<String>> fields,
+            LongConsumer progress)
             throws IOException {
-        return search(parsed, DEFAULT_SIMILARITY, List.of(), offset, limit, fields, progress);
+        return search(parsed, DEFAULT_SIMILARITY, List.of(), offset, limit, exactTotalHits, fields, progress);
     }
 
     /**
@@ -705,6 +711,7 @@ final class Lucene10Index
             List<SortKey> sortKeys,
             int offset,
             int limit,
+            boolean exactTotalHits,
             Optional<List<String>> fields,
             LongConsumer progress)
             throws IOException {
@@ -719,7 +726,7 @@ final class Lucene10Index
                             sort,
                             offset,
                             limit,
-                            true,
+                            exactTotalHits,
                             fields.map(Set::copyOf),
                             progress::accept));
         } catch (io.github.mfuerstenau.leia.core.InvalidQueryException e) {
@@ -746,6 +753,7 @@ final class Lucene10Index
                 results.query(),
                 results.rewrittenQuery(),
                 results.totalHits().value(),
+                results.totalHits().relation() == TotalHits.Relation.EQUAL_TO,
                 List.copyOf(hits),
                 results.took().toMillis(),
                 results.moreLikeThisTerms()

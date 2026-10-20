@@ -33,12 +33,28 @@ public interface Search {
     /**
      * Searches with a query from {@link #parse}, best score first.
      *
+     * @param exactTotalHits whether every hit is counted; otherwise the runtime may stop counting
+     *     after a thousand, as Luke does, and says so in {@link SearchResults#totalHitsExact()} (ADR
+     *     0070). A runtime whose Lucene always counts them all ignores it.
      * @param fields the stored fields to return per hit; empty for all of them
      * @param progress receives the documents searched so far, from time to time; it may throw to stop
      *     the search
      */
-    SearchResults search(ParsedQuery query, int offset, int limit, Optional<List<String>> fields, LongConsumer progress)
+    SearchResults search(
+            ParsedQuery query,
+            int offset,
+            int limit,
+            boolean exactTotalHits,
+            Optional<List<String>> fields,
+            LongConsumer progress)
             throws IOException;
+
+    /** Searches as {@link #search(ParsedQuery, int, int, boolean, Optional, LongConsumer)}, counting every hit. */
+    default SearchResults search(
+            ParsedQuery query, int offset, int limit, Optional<List<String>> fields, LongConsumer progress)
+            throws IOException {
+        return search(query, offset, limit, true, fields, progress);
+    }
 
     /**
      * Every document that matches a query from {@link #parse}, unscored, for a filter (ADR 0056):
@@ -572,6 +588,8 @@ public interface Search {
     /**
      * What a search found.
      *
+     * @param totalHitsExact whether {@code totalHits} counts every hit; otherwise there are at least
+     *     that many (ADR 0070)
      * @param likeTerms for a query of {@link MoreLikeThisSearch}, the terms it chose, best first (ADR
      *     0066); empty for any other query
      */
@@ -579,11 +597,23 @@ public interface Search {
             String query,
             String rewrittenQuery,
             long totalHits,
+            boolean totalHitsExact,
             List<Hit> hits,
             long tookMillis,
             Optional<List<MoreLikeThisSearch.LikeTerm>> likeTerms) {
 
-        /** What a search with a query other than More-Like-This found. */
+        /** What a search found, every hit counted. */
+        public SearchResults(
+                String query,
+                String rewrittenQuery,
+                long totalHits,
+                List<Hit> hits,
+                long tookMillis,
+                Optional<List<MoreLikeThisSearch.LikeTerm>> likeTerms) {
+            this(query, rewrittenQuery, totalHits, true, hits, tookMillis, likeTerms);
+        }
+
+        /** What a search with a query other than More-Like-This found, every hit counted. */
         public SearchResults(String query, String rewrittenQuery, long totalHits, List<Hit> hits, long tookMillis) {
             this(query, rewrittenQuery, totalHits, hits, tookMillis, Optional.empty());
         }

@@ -4,6 +4,7 @@ import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.DocValuesSearch;
 import io.github.mfuerstenau.leia.runtime.Documents;
 import io.github.mfuerstenau.leia.runtime.Highlight;
+import io.github.mfuerstenau.leia.runtime.IndexReadException;
 import io.github.mfuerstenau.leia.runtime.Knn;
 import io.github.mfuerstenau.leia.runtime.MoreLikeThisSearch;
 import io.github.mfuerstenau.leia.runtime.Points;
@@ -84,6 +85,7 @@ import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.search.TopDocsCollector;
 import org.apache.lucene.search.TopFieldCollector;
 import org.apache.lucene.search.TopScoreDocCollector;
+import org.apache.lucene.search.TotalHits;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
@@ -113,6 +115,9 @@ final class Lucene9Index
 
     /** 9.12's default similarity, which {@link Search} scores with. */
     private static final Similarity DEFAULT_SIMILARITY = new Similarity.Bm25(1.2f, 0.75f);
+
+    /** Without an exact count, counting stops after this many hits, as in Luke and leia-core. */
+    static final int TOTAL_HITS_THRESHOLD = 1000;
 
     /** How many terms {@link #topTerms} scans between two reports of its progress. */
     static final int PROGRESS_INTERVAL = 1024;
@@ -172,6 +177,10 @@ final class Lucene9Index
             return new Part(dir, directory, DirectoryReader.open(directory));
         } catch (IOException | RuntimeException e) {
             directory.close();
+            Optional<IndexReadException> failure = Lucene9Failures.classify(e);
+            if (failure.isPresent()) {
+                throw Failures.opening(failure.get());
+            }
             throw e;
         }
     }
@@ -271,8 +280,14 @@ final class Lucene9Index
                 }
             } catch (IOException | RuntimeException e) {
                 IndexParts.closeAll(e, reopened.stream().map(Part::reader).toList());
+                Optional<IndexReadException> failure = Lucene9Failures.classify(e);
                 if (parts.size() > 1) {
-                    throw new IOException(part.dir() + ": " + Failures.message(e), e);
+                    throw Failures.named(
+                            part.dir(),
+                            failure.<Throwable>map(Failures::opening).orElse(e));
+                }
+                if (failure.isPresent()) {
+                    throw Failures.opening(failure.get());
                 }
                 throw e;
             }
@@ -867,9 +882,14 @@ final class Lucene9Index
     /** {@inheritDoc} It scores with 9.12's default, BM25 with k1 1.2 and b 0.75. */
     @Override
     public SearchResults search(
-            ParsedQuery parsed, int offset, int limit, Optional<List<String>> fields, LongConsumer progress)
+            ParsedQuery parsed,
+            int offset,
+            int limit,
+            boolean exactTotalHits,
+            Optional<List<String>> fields,
+            LongConsumer progress)
             throws IOException {
-        return search(parsed, DEFAULT_SIMILARITY, List.of(), offset, limit, fields, progress);
+        return search(parsed, DEFAULT_SIMILARITY, List.of(), offset, limit, exactTotalHits, fields, progress);
     }
 
     /**
@@ -884,6 +904,7 @@ final class Lucene9Index
             List<SortKey> sortKeys,
             int offset,
             int limit,
+            boolean exactTotalHits,
             Optional<List<String>> fields,
             LongConsumer progress)
             throws IOException {
@@ -904,10 +925,12 @@ final class Lucene9Index
             }
             rewritten = searcher.rewrite(built);
         }
-        // Every hit counted, as 7.7 counts them; that also keeps an index sort from ending the search early.
+        // Every hit counted, unless not asked to, as leia-core counts them; that also keeps an index
+        // sort from ending the search early.
+        int threshold = exactTotalHits ? Integer.MAX_VALUE : TOTAL_HITS_THRESHOLD;
         TopDocsCollector<?> top = sort.isPresent()
-                ? TopFieldCollector.create(sort.get(), offset + limit, Integer.MAX_VALUE)
-                : TopScoreDocCollector.create(offset + limit, Integer.MAX_VALUE);
+                ? TopFieldCollector.create(sort.get(), offset + limit, threshold)
+                : TopScoreDocCollector.create(offset + limit, threshold);
         searcher.search(rewritten, new ProgressCollector(top, searchProgress));
         TopDocs docs = top.topDocs(offset, limit);
         if (sort.isPresent()) {
@@ -939,6 +962,7 @@ final class Lucene9Index
                 query.toString(),
                 rewritten.toString(),
                 docs.totalHits.value,
+                docs.totalHits.relation == TotalHits.Relation.EQUAL_TO,
                 List.copyOf(hits),
                 (System.nanoTime() - start) / 1_000_000,
                 likeTerms);

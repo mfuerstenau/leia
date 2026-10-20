@@ -9,6 +9,7 @@ import io.github.mfuerstenau.leia.protocol.index.Feature;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
+import io.github.mfuerstenau.leia.runtime.IndexReadException;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
@@ -78,6 +79,8 @@ public final class ReopenIndexHandler implements MethodHandler<ReopenIndexParams
         Optional<RuntimeIndex> reopened;
         try {
             reopened = index.reopen();
+        } catch (IndexReadException e) {
+            throw RuntimeResults.readFailure(e);
         } catch (IOException | RuntimeException e) {
             throw new RpcException(
                     ErrorCode.INDEX_NOT_READABLE,

@@ -4,6 +4,7 @@ import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.DocValuesSearch;
 import io.github.mfuerstenau.leia.runtime.Documents;
 import io.github.mfuerstenau.leia.runtime.Highlight;
+import io.github.mfuerstenau.leia.runtime.IndexReadException;
 import io.github.mfuerstenau.leia.runtime.Knn;
 import io.github.mfuerstenau.leia.runtime.MoreLikeThisSearch;
 import io.github.mfuerstenau.leia.runtime.Points;
@@ -135,6 +136,10 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
             return new Part(dir, directory, IndexReader.open(directory, true));
         } catch (IOException | RuntimeException e) {
             directory.close();
+            Optional<IndexReadException> failure = Lucene3Failures.classify(e);
+            if (failure.isPresent()) {
+                throw Failures.opening(failure.get());
+            }
             throw e;
         }
     }
@@ -241,8 +246,14 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
                 }
             } catch (IOException | RuntimeException e) {
                 IndexParts.closeAll(e, reopened.stream().map(Part::reader).toList());
+                Optional<IndexReadException> failure = Lucene3Failures.classify(e);
                 if (parts.size() > 1) {
-                    throw new IOException(part.dir() + ": " + Failures.message(e), e);
+                    throw Failures.named(
+                            part.dir(),
+                            failure.<Throwable>map(Failures::opening).orElse(e));
+                }
+                if (failure.isPresent()) {
+                    throw Failures.opening(failure.get());
                 }
                 throw e;
             }
@@ -638,10 +649,18 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
         return new Lucene3Query(new TermQuery(new Term(field, text(term))));
     }
 
-    /** {@inheritDoc} The progress is reported once per segment. */
+    /**
+     * {@inheritDoc} Every hit is counted, as 3.6 always counts them. The progress is reported once per
+     * segment.
+     */
     @Override
     public SearchResults search(
-            ParsedQuery parsed, int offset, int limit, Optional<List<String>> fields, LongConsumer progress)
+            ParsedQuery parsed,
+            int offset,
+            int limit,
+            boolean exactTotalHits,
+            Optional<List<String>> fields,
+            LongConsumer progress)
             throws IOException {
         if (!(parsed instanceof Lucene3Query lucene3)) {
             throw new IllegalArgumentException("Not a query of this index: " + parsed);

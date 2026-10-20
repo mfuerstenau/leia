@@ -73,7 +73,8 @@ public interface RuntimeIndex extends Closeable {
      * nor the skipped ones change.
      *
      * @return the new index; empty if every latest commit is the opened one
-     * @throws IOException if a latest commit can't be read; this index is unaffected
+     * @throws IOException if a latest commit can't be read; this index is unaffected. An {@link
+     *     IndexReadException} if the runtime knows why, worded as by {@link LuceneRuntime#open} (ADR 0070)
      * @throws IllegalStateException if this index was reopened before
      */
     Optional<RuntimeIndex> reopen() throws IOException;

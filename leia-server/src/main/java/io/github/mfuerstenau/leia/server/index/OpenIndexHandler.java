@@ -19,6 +19,7 @@ import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
 import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.runtime.Check;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
+import io.github.mfuerstenau.leia.runtime.IndexReadException;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.server.MethodHandler;
@@ -180,6 +181,8 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
         RuntimeIndex index;
         try {
             index = runtime.open(readable, DirectoryKind.valueOf(directoryImpl.name()));
+        } catch (IndexReadException e) {
+            throw RuntimeResults.readFailure(e);
         } catch (IOException | RuntimeException e) {
             throw new RpcException(
                     ErrorCode.INDEX_NOT_READABLE,

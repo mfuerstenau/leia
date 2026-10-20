@@ -40,6 +40,7 @@ import io.github.mfuerstenau.leia.protocol.filter.FilterPattern;
 import io.github.mfuerstenau.leia.protocol.filter.StartFilterParams;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
+import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellParams;
@@ -73,6 +74,7 @@ import io.github.mfuerstenau.leia.protocol.search.StartHighlightParams;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.StartStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.search.TermQuery;
+import io.github.mfuerstenau.leia.protocol.search.TotalHitsRelation;
 import io.github.mfuerstenau.leia.protocol.terms.GetExportTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetPositionsParams;
@@ -95,6 +97,15 @@ import java.util.OptionalDouble;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.stream.Stream;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.document.TextField;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.FSDirectory;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -864,6 +875,92 @@ class Lucene10ParityTest {
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty());
+    }
+
+    /**
+     * A search that stops counting after a thousand hits (ADR 0070), on an index written here: the
+     * test indexes have fewer documents.
+     */
+    @Test
+    void countsAsLeiaCoreDoes(@TempDir Path dir) throws Exception {
+        try (Directory directory = FSDirectory.open(dir);
+                IndexWriter writer = new IndexWriter(
+                        directory, new IndexWriterConfig(new org.apache.lucene.analysis.standard.StandardAnalyzer()))) {
+            for (int i = 0; i < 3000; i++) {
+                Document doc = new Document();
+                doc.add(new TextField("body", i % 2 == 0 ? "fox" : "fox cat", Field.Store.YES));
+                writer.addDocument(doc);
+            }
+        }
+        Files.deleteIfExists(dir.resolve("write.lock"));
+        try (RealBackend core = RealBackend.start();
+                RealBackend runtime = RealBackend.start(new Routing(true))) {
+            same("openIndex", core, runtime, Methods.OPEN_INDEX, new OpenIndexParams(dir.toString()));
+            for (boolean exact : List.of(true, false)) {
+                StartSearchParams params = new StartSearchParams(
+                        classicWith("fox OR cat", "body", 2, false, STANDARD, DEFAULTS),
+                        BM25,
+                        List.of(),
+                        0,
+                        10,
+                        exact,
+                        Optional.empty(),
+                        Optional.empty());
+                same("startSearch exact " + exact, core, runtime, params);
+                assertThat(runtime.search(params).totalHitsRelation())
+                        .isEqualTo(exact ? TotalHitsRelation.EQUAL_TO : TotalHitsRelation.GREATER_THAN_OR_EQUAL_TO);
+            }
+        }
+        assertThat(differences.keySet()).containsOnly("openIndex");
+    }
+
+    /**
+     * The failures that a runtime tells apart (ADR 0070): a truncated copy of a test index, with and
+     * without a reader, and an index whose codec isn't loaded, as the jar of {@code JarsBackendTest}
+     * isn't here.
+     */
+    @Test
+    void failsAsLeiaCoreDoes(@TempDir Path dir) throws Exception {
+        Path source = RealBackend.testIndex("lucene9");
+        long generation = 0;
+        try (Stream<Path> files = Files.list(source)) {
+            for (Path file : files.toList()) {
+                String name = file.getFileName().toString();
+                if (name.startsWith("segments_")) {
+                    Files.copy(file, dir.resolve(name));
+                    generation = Long.parseLong(name.substring("segments_".length()), Character.MAX_RADIX);
+                } else if (!name.equals("write.lock")) {
+                    // Every other file is there, but empty.
+                    Files.createFile(dir.resolve(name));
+                }
+            }
+        }
+        try (RealBackend core = RealBackend.start();
+                RealBackend runtime = RealBackend.start(new Routing(true))) {
+            OpenIndexParams truncated = new OpenIndexParams(dir.toString());
+            same("openIndex truncated", core, runtime, Methods.OPEN_INDEX, truncated);
+            assertThat(outcome(() -> runtime.call(Methods.OPEN_INDEX, truncated)))
+                    .asString()
+                    .startsWith(FAILS + ErrorCode.CORRUPT_INDEX);
+
+            OpenIndexParams withoutReader =
+                    new OpenIndexParams(dir.toString(), Optional.empty(), Optional.of(OpenMode.DIRECTORY_ONLY));
+            core.call(Methods.OPEN_INDEX, withoutReader);
+            runtime.call(Methods.OPEN_INDEX, withoutReader);
+            GetCommitParams commit = new GetCommitParams(generation, OptionalInt.empty());
+            same("getCommit truncated", core, runtime, Methods.GET_COMMIT, commit);
+            assertThat(outcome(() -> runtime.call(Methods.GET_COMMIT, commit)))
+                    .asString()
+                    .startsWith(FAILS + ErrorCode.CORRUPT_INDEX);
+
+            OpenIndexParams customCodec =
+                    new OpenIndexParams(RealBackend.testIndex("custom-codec").toString());
+            same("openIndex custom codec", core, runtime, Methods.OPEN_INDEX, customCodec);
+            assertThat(outcome(() -> runtime.call(Methods.OPEN_INDEX, customCodec)))
+                    .asString()
+                    .startsWith(FAILS + ErrorCode.MISSING_CODEC);
+        }
+        assertThat(differences).isEmpty();
     }
 
     /** An analyzer of {@code base}: a {@link StandardAnalyzer} or a {@link PresetAnalyzer}, or empty. */

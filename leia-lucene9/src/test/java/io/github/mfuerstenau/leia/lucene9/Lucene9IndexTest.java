@@ -950,6 +950,34 @@ class Lucene9IndexTest {
         }
     }
 
+    /** Without an exact count, 9.12 may stop counting after a thousand hits, as leia-core does (ADR 0070). */
+    @Test
+    void countsTheHitsExactlyOnlyIfAsked(@TempDir Path dir) throws Exception {
+        try (Directory directory = FSDirectory.open(dir);
+                IndexWriter writer = new IndexWriter(directory, new IndexWriterConfig(new StandardAnalyzer()))) {
+            for (int i = 0; i < 3000; i++) {
+                Document doc = new Document();
+                doc.add(new TextField("text", i % 2 == 0 ? "fox" : "fox cat", Field.Store.NO));
+                writer.addDocument(doc);
+            }
+        }
+        Files.deleteIfExists(dir.resolve("write.lock"));
+        try (RuntimeIndex index = new Lucene9Runtime().open(List.of(dir), DirectoryKind.FS)) {
+            Search search = index.search().orElseThrow();
+            Search.ParserOptions text = new Search.ParserOptions("text", false, false, 0, 0, true, false);
+            Search.ParsedQuery query = search.parse("fox OR cat", text, named("StandardAnalyzer"));
+
+            Search.SearchResults exact = search.search(query, 0, 10, true, Optional.empty(), _ -> {});
+            assertThat(exact.totalHits()).isEqualTo(3000);
+            assertThat(exact.totalHitsExact()).isTrue();
+
+            Search.SearchResults approximate = search.search(query, 0, 10, false, Optional.empty(), _ -> {});
+            assertThat(approximate.totalHitsExact()).isFalse();
+            assertThat(approximate.totalHits()).isBetween(1000L, 3000L);
+            assertThat(approximate.hits()).hasSize(10);
+        }
+    }
+
     /** Writes one document with the values of {@code text} in {@code dir}, with Lucene 9.12. */
     private static void writeIndex(Path dir, FieldType type, String... values) throws IOException {
         try (Directory directory = FSDirectory.open(dir);

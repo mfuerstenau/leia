@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.lucene9;
 
 import io.github.mfuerstenau.leia.runtime.Commits;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
+import io.github.mfuerstenau.leia.runtime.IndexReadException;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.runtime.support.Failures;
 import java.io.IOException;
@@ -70,6 +71,19 @@ final class Lucene9Commits implements Commits {
 
     @Override
     public Optional<CommitDetails> commit(Path dir, DirectoryKind kind, long generation) throws IOException {
+        try {
+            return readCommit(dir, kind, generation);
+        } catch (IOException | RuntimeException e) {
+            Optional<IndexReadException> failure = Lucene9Failures.classify(e);
+            if (failure.isPresent()) {
+                throw failure.get();
+            }
+            throw e;
+        }
+    }
+
+    private static Optional<CommitDetails> readCommit(Path dir, DirectoryKind kind, long generation)
+            throws IOException {
         try (Directory directory = Directories.open(dir, kind)) {
             if (generation <= 0) {
                 return Optional.empty();

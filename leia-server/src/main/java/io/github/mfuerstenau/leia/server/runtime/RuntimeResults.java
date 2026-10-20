@@ -93,6 +93,7 @@ import io.github.mfuerstenau.leia.runtime.Commits;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.runtime.DocValuesSearch;
 import io.github.mfuerstenau.leia.runtime.Documents;
+import io.github.mfuerstenau.leia.runtime.IndexReadException;
 import io.github.mfuerstenau.leia.runtime.Knn;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.runtime.MoreLikeThisSearch;
@@ -356,6 +357,21 @@ public final class RuntimeResults {
                         .toList());
     }
 
+    /** A runtime's failure to open or reopen an index, whose message says why (ADR 0070). */
+    public static RpcException readFailure(IndexReadException e) {
+        return new RpcException(errorCode(e.reason()), e.getMessage(), e);
+    }
+
+    /** The code of what a runtime can't read, as leia-core's (ADR 0070). */
+    static ErrorCode errorCode(IndexReadException.Reason reason) {
+        return switch (reason) {
+            case CORRUPT -> ErrorCode.CORRUPT_INDEX;
+            case UNSUPPORTED_FORMAT -> ErrorCode.UNSUPPORTED_INDEX_FORMAT;
+            case MISSING_CODEC -> ErrorCode.MISSING_CODEC;
+            case NOT_READABLE -> ErrorCode.INDEX_NOT_READABLE;
+        };
+    }
+
     /** {@code getCommit} of a directory that {@code runtime} reads, read anew (ADR 0045). */
     public static GetCommitResult commit(LuceneRuntime runtime, IndexDirectories.IndexDirectory dir, long generation)
             throws RpcException {
@@ -365,6 +381,17 @@ public final class RuntimeResults {
             details = commits.commit(dir.path(), dir.kind(), generation)
                     .orElseThrow(() -> new RpcException(
                             ErrorCode.COMMIT_NOT_FOUND, "No commit of generation " + generation + " in the index"));
+        } catch (IndexReadException e) {
+            // In leia-core's words.
+            throw new RpcException(
+                    errorCode(e.reason()),
+                    switch (e.reason()) {
+                                case UNSUPPORTED_FORMAT -> "Unsupported format of the commit of generation ";
+                                case CORRUPT -> "Corrupt commit of generation ";
+                                case MISSING_CODEC, NOT_READABLE -> "Cannot read the commit of generation ";
+                            }
+                            + generation + ": " + e.getMessage(),
+                    e);
         } catch (IOException | RuntimeException e) {
             throw new RpcException(
                     ErrorCode.INDEX_NOT_READABLE,
@@ -914,9 +941,11 @@ public final class RuntimeResults {
                                                 sort,
                                                 offset,
                                                 limit,
+                                                params.exactTotalHits(),
                                                 fields,
                                                 progress::scanned)
-                                : search.search(query, offset, limit, fields, progress::scanned);
+                                : search.search(
+                                        query, offset, limit, params.exactTotalHits(), fields, progress::scanned);
                         List<List<FieldHighlight>> highlights = List.of();
                         if (options.isPresent()) {
                             // The search is done: the count stays at maxDoc.
@@ -1456,7 +1485,7 @@ public final class RuntimeResults {
                 results.query(),
                 results.rewrittenQuery(),
                 results.totalHits(),
-                TotalHitsRelation.EQUAL_TO,
+                results.totalHitsExact() ? TotalHitsRelation.EQUAL_TO : TotalHitsRelation.GREATER_THAN_OR_EQUAL_TO,
                 List.copyOf(hits),
                 results.tookMillis(),
                 results.likeTerms()
