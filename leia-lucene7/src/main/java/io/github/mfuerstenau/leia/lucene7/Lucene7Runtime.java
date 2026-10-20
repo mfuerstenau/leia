@@ -4,6 +4,7 @@ import io.github.mfuerstenau.leia.runtime.Analysis;
 import io.github.mfuerstenau.leia.runtime.Check;
 import io.github.mfuerstenau.leia.runtime.Commits;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
+import io.github.mfuerstenau.leia.runtime.Extensions;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import java.io.IOException;
@@ -48,6 +49,12 @@ public final class Lucene7Runtime implements LuceneRuntime {
 
     @Override
     public Optional<Analysis> analysis() {
+        return Optional.empty();
+    }
+
+    @Override
+    public Optional<Extensions> extensions() {
+        // Its service files are relocated too, so a jar compiled against org.apache.lucene adds nothing (ADR 0068).
         return Optional.empty();
     }
 }

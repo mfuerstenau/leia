@@ -17,7 +17,7 @@ import java.util.Set;
 public interface LuceneRuntime {
 
     /** The version of this interface. It changes with every change that breaks a runtime built before. */
-    int API_VERSION = 17;
+    int API_VERSION = 18;
 
     /**
      * The version of this interface the runtime was built against: {@code return API_VERSION;}, which
@@ -50,4 +50,10 @@ public interface LuceneRuntime {
 
     /** What analyzers are built from and what they make of a text (ADR 0067); empty if the runtime has none. */
     Optional<Analysis> analysis();
+
+    /**
+     * Its lists of factories, codecs and formats, reloaded with the jars of {@code --jar} (ADR 0068);
+     * empty if no such jar can add to them, as when its Lucene is relocated.
+     */
+    Optional<Extensions> extensions();
 }

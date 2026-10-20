@@ -42,7 +42,7 @@ class KuromojiNoriTest {
 
     @BeforeAll
     static void loadTheModules() throws Exception {
-        ExtensionJars.load(List.of(JARS.resolve("kuromoji"), JARS.resolve("nori")));
+        TestJars.load(List.of(JARS.resolve("kuromoji"), JARS.resolve("nori")));
     }
 
     @Test

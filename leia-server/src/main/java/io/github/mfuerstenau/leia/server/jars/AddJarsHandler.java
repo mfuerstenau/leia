@@ -1,16 +1,15 @@
 package io.github.mfuerstenau.leia.server.jars;
 
-import io.github.mfuerstenau.leia.core.AddedJars;
-import io.github.mfuerstenau.leia.core.ExtensionJarException;
-import io.github.mfuerstenau.leia.core.ExtensionJars;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsResult;
 import io.github.mfuerstenau.leia.protocol.jars.JarComponents;
+import io.github.mfuerstenau.leia.runtime.Extensions;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.index.Routing;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import jakarta.inject.Inject;
 import java.nio.file.InvalidPathException;
@@ -28,10 +27,12 @@ public final class AddJarsHandler implements MethodHandler<AddJarsParams, AddJar
     private static final Logger LOG = Logger.getLogger(AddJarsHandler.class.getName());
 
     private final Runtimes runtimes;
+    private final Routing routing;
 
     @Inject
-    AddJarsHandler(Runtimes runtimes) {
+    AddJarsHandler(Runtimes runtimes, Routing routing) {
         this.runtimes = runtimes;
+        this.routing = routing;
     }
 
     @Override
@@ -54,14 +55,14 @@ public final class AddJarsHandler implements MethodHandler<AddJarsParams, AddJar
         }
         AddedJars added;
         try {
-            added = ExtensionJars.add(paths);
-        } catch (ExtensionJarException e) {
+            added = JarChain.add(paths, routing);
+        } catch (JarException e) {
             throw new RpcException(ErrorCode.INVALID_JAR, "Cannot add the jars: " + e.getMessage(), e);
         }
         if (!added.jars().isEmpty()) {
             LOG.info(() -> "Added the jars " + added.jars());
             // Job threads are started from this thread, and inherit its loader (as in LeiaBackend.start).
-            Thread.currentThread().setContextClassLoader(ExtensionJars.classLoader());
+            Thread.currentThread().setContextClassLoader(JarChain.classLoader());
             // A loader can't be unloaded, so the jar stays, but its runtime is never used (ADR 0044).
             List<String> refused = runtimes.newlyRefused();
             if (!refused.isEmpty()) {
@@ -71,7 +72,7 @@ public final class AddJarsHandler implements MethodHandler<AddJarsParams, AddJar
                                 + "; the jars stay loaded, but leia doesn't use the runtime");
             }
         }
-        io.github.mfuerstenau.leia.core.JarComponents components = added.added();
+        Extensions.Added components = added.added();
         return new AddJarsResult(
                 strings(added.jars()),
                 strings(added.alreadyLoaded()),

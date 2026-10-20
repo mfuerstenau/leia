@@ -1,8 +1,8 @@
 package io.github.mfuerstenau.leia.server.runtime;
 
-import io.github.mfuerstenau.leia.core.ExtensionJars;
 import io.github.mfuerstenau.leia.runtime.Analysis;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
+import io.github.mfuerstenau.leia.server.jars.JarChain;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import java.security.CodeSource;
@@ -18,7 +18,7 @@ import java.util.logging.Logger;
 
 /**
  * The runtimes for indexes that Lucene 10 can't read (ADR 0044), found with {@link ServiceLoader}
- * through the loader of the jars, {@link ExtensionJars#classLoader()}. A runtime built for another
+ * through the loader of the jars, {@link JarChain#classLoader()}. A runtime built for another
  * version of the interface, or one that can't be loaded, is refused and never used.
  *
  * <p>It is used on the backend thread only, so it needs no locking.
@@ -37,7 +37,7 @@ public final class Runtimes {
 
     @Inject
     public Runtimes() {
-        loader = ExtensionJars.classLoader();
+        loader = JarChain.classLoader();
         loaded = load(loader);
         // LeiaBackend.start refused these already.
         reported = new HashSet<>(loaded.refused());
@@ -102,7 +102,7 @@ public final class Runtimes {
 
     /** The runtimes of the jars now, loaded again if jars were added since. */
     private Loaded current() {
-        ClassLoader now = ExtensionJars.classLoader();
+        ClassLoader now = JarChain.classLoader();
         if (now != loader) {
             loader = now;
             loaded = load(now);

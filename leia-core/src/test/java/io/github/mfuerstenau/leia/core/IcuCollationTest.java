@@ -29,7 +29,7 @@ class IcuCollationTest {
 
     @BeforeAll
     static void loadTheModule() throws Exception {
-        ExtensionJars.load(List.of(JARS.resolve("icu")));
+        TestJars.load(List.of(JARS.resolve("icu")));
     }
 
     @Test

@@ -6,6 +6,7 @@ import io.github.mfuerstenau.leia.runtime.Analysis;
 import io.github.mfuerstenau.leia.runtime.Check;
 import io.github.mfuerstenau.leia.runtime.Commits;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
+import io.github.mfuerstenau.leia.runtime.Extensions;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import java.nio.file.Path;
@@ -52,6 +53,15 @@ class RuntimesTest {
         assertThat(runtimes.forMajor(10)).isPresent();
         assertThat(runtimes.forMajor(11)).isEmpty();
         assertThat(runtimes.newlyRefused()).isEmpty();
+    }
+
+    @Test
+    void onlyLucene10TakesExtensionJars() {
+        // The relocated runtimes' service files are relocated too (ADR 0068).
+        assertThat(Runtimes.load(RuntimesTest.class.getClassLoader()).runtimes())
+                .filteredOn(runtime -> runtime.extensions().isPresent())
+                .extracting(LuceneRuntime::luceneVersion)
+                .containsExactly(Version.LATEST.toString());
     }
 
     @Test
@@ -114,6 +124,11 @@ class RuntimesTest {
 
             @Override
             public Optional<Analysis> analysis() {
+                return Optional.empty();
+            }
+
+            @Override
+            public Optional<Extensions> extensions() {
                 return Optional.empty();
             }
         };

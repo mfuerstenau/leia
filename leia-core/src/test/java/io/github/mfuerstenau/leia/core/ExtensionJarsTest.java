@@ -29,7 +29,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Loads Lucene's phonetic and stempel modules as analysis jars (ADR 0016), the test codec jar
- * (ADR 0018) and jars made by the tests (ADR 0024). Lucene's lists of
+ * (ADR 0018) and jars made by the tests (ADR 0024) into Lucene's lists, through {@link TestJars} as
+ * leia-server loads them (ADR 0068). Lucene's lists of
  * factories, codecs and formats only grow, so this runs in a JVM of its own (the {@code jarsTest} task).
  */
 @Tag("jars")
@@ -49,7 +50,7 @@ class ExtensionJarsTest {
 
     @Test
     void aJarAddsItsCodecsAndFormats() throws Exception {
-        ExtensionJars.load(List.of(CODEC_JAR));
+        TestJars.load(List.of(CODEC_JAR));
 
         try (ReadOnlyIndex index = ReadOnlyIndex.open(testIndex("custom-codec"))) {
             assertThat(index.indexes().getFirst().maxDoc()).isEqualTo(3);
@@ -67,14 +68,9 @@ class ExtensionJarsTest {
 
     @Test
     void aDirectoryAddsTheFactoriesOfItsJars() throws Exception {
-        List<Path> loaded = ExtensionJars.load(List.of(JARS.resolve("phonetic")));
+        JarComponents added = TestJars.load(List.of(JARS.resolve("phonetic")));
 
-        assertThat(loaded)
-                .extracting(jar -> jar.getFileName().toString())
-                .satisfiesExactly(
-                        codec -> assertThat(codec).startsWith("commons-codec-"),
-                        phonetic -> assertThat(phonetic).startsWith("lucene-analysis-phonetic-"));
-        assertThat(loaded).allMatch(Path::isAbsolute);
+        assertThat(added.tokenFilters()).contains("doubleMetaphone");
         assertThat(Analyzers.components().tokenFilters())
                 .contains(new Available(
                         "doubleMetaphone", "org.apache.lucene.analysis.phonetic.DoubleMetaphoneFilterFactory"));
@@ -90,7 +86,7 @@ class ExtensionJarsTest {
 
     @Test
     void aJarAddsItsAnalyzersAsPresets() throws Exception {
-        ExtensionJars.load(List.of(stempelJar()));
+        TestJars.load(List.of(stempelJar()));
 
         assertThat(Analyzers.components().analyzers())
                 .contains(new AvailableAnalyzer(
@@ -109,7 +105,7 @@ class ExtensionJarsTest {
 
     @Test
     void aCustomAnalyzerReadsResourceFilesFromTheJars() throws Exception {
-        ExtensionJars.load(List.of(stempelJar()));
+        TestJars.load(List.of(stempelJar()));
 
         TextAnalysis analysis = analyze(
                 new AnalyzerSpec.Custom(
@@ -131,32 +127,10 @@ class ExtensionJarsTest {
                     .orElseThrow();
         }
 
-        assertThatThrownBy(() -> ExtensionJars.load(List.of(phonetic)))
+        assertThatThrownBy(() -> TestJars.load(List.of(phonetic)))
                 .isInstanceOf(ExtensionJarException.class)
                 .hasMessageStartingWith("cannot load the analysis factories: java.lang.NoClassDefFoundError: ")
                 .hasMessageContaining("org/apache/commons/codec/");
-    }
-
-    @Test
-    void aPathMustBeAJarOrADirectoryWithJars() throws IOException {
-        Path text = Files.writeString(tmp.resolve("notes.txt"), "not a jar");
-        Path empty = Files.createDirectory(tmp.resolve("empty"));
-        Path missing = tmp.resolve("missing.jar");
-
-        assertThatThrownBy(() -> ExtensionJars.load(List.of(text)))
-                .isInstanceOf(ExtensionJarException.class)
-                .hasMessage("not a jar: " + text);
-        assertThatThrownBy(() -> ExtensionJars.load(List.of(empty)))
-                .isInstanceOf(ExtensionJarException.class)
-                .hasMessage("no jars in " + empty);
-        assertThatThrownBy(() -> ExtensionJars.load(List.of(missing)))
-                .isInstanceOf(ExtensionJarException.class)
-                .hasMessage("no such jar or directory: " + missing);
-    }
-
-    @Test
-    void noPathsLoadNothing() throws Exception {
-        assertThat(ExtensionJars.load(List.of())).isEmpty();
     }
 
     @Test
@@ -170,7 +144,7 @@ class ExtensionJarsTest {
                         "META-INF/services/org.apache.lucene.codecs.Codec",
                         "does.not.Exist\n".getBytes(StandardCharsets.UTF_8)));
 
-        assertThatThrownBy(() -> ExtensionJars.add(List.of(broken)))
+        assertThatThrownBy(() -> TestJars.load(List.of(broken)))
                 .isInstanceOf(ExtensionJarException.class)
                 .hasMessageStartingWith("cannot load the codecs and formats: ")
                 .hasMessageContaining("does.not.Exist");
@@ -180,7 +154,7 @@ class ExtensionJarsTest {
     }
 
     @Test
-    void addingSaysWhatTheJarsAddedAndLoadsAJarOnce() throws Exception {
+    void reloadingSaysWhatTheJarsAdded() throws Exception {
         Path jar = jar(
                 "added.jar",
                 Map.of(
@@ -189,11 +163,9 @@ class ExtensionJarsTest {
                         JarTestAnalyzer.class.getName().replace('.', '/') + ".class",
                         classFile(JarTestAnalyzer.class)));
 
-        AddedJars added = ExtensionJars.add(List.of(jar, jar.getParent()));
+        JarComponents added = TestJars.load(List.of(jar));
 
-        assertThat(added.jars()).containsExactly(jar);
-        assertThat(added.alreadyLoaded()).isEmpty();
-        assertThat(added.added())
+        assertThat(added)
                 .isEqualTo(new JarComponents(
                         List.of(JarTestAnalyzer.class.getName()),
                         List.of(),
@@ -205,10 +177,6 @@ class ExtensionJarsTest {
                         List.of()));
         assertThat(ExtensionJars.jars()).endsWith(jar);
         assertThat(TokenFilterFactory.lookupClass(JarTestFilterFactory.NAME)).isEqualTo(JarTestFilterFactory.class);
-
-        AddedJars again = ExtensionJars.add(List.of(jar.getParent().resolve(".").resolve("added.jar")));
-
-        assertThat(again).isEqualTo(new AddedJars(List.of(), List.of(jar), JarComponents.NONE));
     }
 
     /**

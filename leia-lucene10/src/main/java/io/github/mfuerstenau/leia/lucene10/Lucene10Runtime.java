@@ -4,6 +4,7 @@ import io.github.mfuerstenau.leia.runtime.Analysis;
 import io.github.mfuerstenau.leia.runtime.Check;
 import io.github.mfuerstenau.leia.runtime.Commits;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
+import io.github.mfuerstenau.leia.runtime.Extensions;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import java.io.IOException;
@@ -57,5 +58,10 @@ public final class Lucene10Runtime implements LuceneRuntime {
     @Override
     public Optional<Analysis> analysis() {
         return Optional.of(new Lucene10Analysis());
+    }
+
+    @Override
+    public Optional<Extensions> extensions() {
+        return Optional.of(new Lucene10Extensions());
     }
 }

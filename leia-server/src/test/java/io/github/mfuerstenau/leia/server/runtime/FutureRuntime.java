@@ -4,6 +4,7 @@ import io.github.mfuerstenau.leia.runtime.Analysis;
 import io.github.mfuerstenau.leia.runtime.Check;
 import io.github.mfuerstenau.leia.runtime.Commits;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
+import io.github.mfuerstenau.leia.runtime.Extensions;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import java.nio.file.Path;
@@ -49,6 +50,11 @@ public final class FutureRuntime implements LuceneRuntime {
 
     @Override
     public Optional<Analysis> analysis() {
+        throw new AssertionError("A refused runtime is never used");
+    }
+
+    @Override
+    public Optional<Extensions> extensions() {
         throw new AssertionError("A refused runtime is never used");
     }
 }

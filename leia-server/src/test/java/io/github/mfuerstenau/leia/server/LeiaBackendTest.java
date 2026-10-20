@@ -3,7 +3,6 @@ package io.github.mfuerstenau.leia.server;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import io.github.mfuerstenau.leia.core.ExtensionJars;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
@@ -14,6 +13,7 @@ import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
 import io.github.mfuerstenau.leia.protocol.terms.StartFieldTermScanParams;
 import io.github.mfuerstenau.leia.protocol.version.VersionParams;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
+import io.github.mfuerstenau.leia.server.jars.JarChain;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -60,7 +60,7 @@ class LeiaBackendTest {
         assertThat(threads).hasSize(3).allSatisfy(thread -> {
             assertThat(thread.getName()).isEqualTo("leia-backend");
             assertThat(thread).isSameAs(threads.getFirst());
-            assertThat(thread.getContextClassLoader()).isSameAs(ExtensionJars.classLoader());
+            assertThat(thread.getContextClassLoader()).isSameAs(JarChain.classLoader());
         });
     }
 

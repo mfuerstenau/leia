@@ -1,6 +1,5 @@
 package io.github.mfuerstenau.leia.server.jars;
 
-import io.github.mfuerstenau.leia.core.ExtensionJars;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
 import io.github.mfuerstenau.leia.protocol.jars.GetJarsParams;
@@ -21,6 +20,6 @@ public final class GetJarsHandler implements MethodHandler<GetJarsParams, GetJar
 
     @Override
     public GetJarsResult handle(GetJarsParams params) {
-        return new GetJarsResult(AddJarsHandler.strings(ExtensionJars.jars()));
+        return new GetJarsResult(AddJarsHandler.strings(JarChain.jars()));
     }
 }

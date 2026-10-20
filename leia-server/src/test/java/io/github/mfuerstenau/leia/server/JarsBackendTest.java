@@ -11,6 +11,7 @@ import io.github.mfuerstenau.leia.protocol.analysis.AnalysisComponent;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeParams;
 import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.AvailableAnalyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.AvailableComponent;
 import io.github.mfuerstenau.leia.protocol.analysis.Collation;
 import io.github.mfuerstenau.leia.protocol.analysis.CollationStrength;
 import io.github.mfuerstenau.leia.protocol.analysis.CustomAnalyzer;
@@ -30,9 +31,12 @@ import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
+import io.github.mfuerstenau.leia.protocol.jars.AddJarsResult;
 import io.github.mfuerstenau.leia.protocol.jars.GetJarsParams;
+import io.github.mfuerstenau.leia.protocol.jars.JarComponents;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
+import io.github.mfuerstenau.leia.server.index.Routing;
 import io.github.mfuerstenau.leia.server.runtime.FutureRuntime;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -51,7 +55,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 /**
  * Jars loaded at the start and added while leia runs, through {@link LeiaBackend} (ADR 0016, ADR
- * 0018, ADR 0024, ADR 0038, ADR 0044). Loading a jar changes Lucene's global lists for the whole JVM, and a loaded jar
+ * 0018, ADR 0024, ADR 0038, ADR 0044, ADR 0068). Loading a jar changes Lucene's global lists for the whole JVM, and a loaded jar
  * that is gone stops every later load, so this is one flow, in jarsTest's JVM of its own.
  */
 @Tag("jars")
@@ -179,6 +183,39 @@ class JarsBackendTest {
             var quaternary =
                     icuCollation(new Collation("de", Optional.of(CollationStrength.QUATERNARY), Optional.empty()));
             assertThat(bytes(backend, quaternary, "Äpfel")).isNotEqualTo(bytes(backend, quaternary, "apfel"));
+
+            // Through the Extensions of leia-lucene10's runtime (ADR 0068): a directory's jars in name
+            // order, the names they add, and a jar that is loaded already isn't loaded again. Before
+            // the refused runtime below, which a new backend would refuse to start with.
+            try (RealBackend runtime = RealBackend.start(new Routing(true))) {
+                AddJarsResult phonetic = runtime.call(
+                        Methods.ADD_JARS,
+                        new AddJarsParams(
+                                List.of(ANALYSIS_JARS.resolve("phonetic").toString())));
+                assertThat(phonetic.jars())
+                        .extracting(jar -> Path.of(jar).getFileName().toString())
+                        .satisfiesExactly(
+                                codec -> assertThat(codec).startsWith("commons-codec-"),
+                                jar -> assertThat(jar).startsWith("lucene-analysis-phonetic-"));
+                assertThat(phonetic.alreadyLoaded()).isEmpty();
+                assertThat(phonetic.added().tokenFilters()).contains("doubleMetaphone", "phonetic");
+                assertThat(phonetic.added().analyzers()).isEmpty();
+                assertThat(runtime.call(Methods.GET_ANALYSIS_COMPONENTS, new GetAnalysisComponentsParams())
+                                .tokenFilters())
+                        .contains(new AvailableComponent(
+                                "doubleMetaphone", "org.apache.lucene.analysis.phonetic.DoubleMetaphoneFilterFactory"));
+                assertThat(runtime.call(
+                                Methods.ADD_JARS,
+                                new AddJarsParams(List.of(phonetic.jars().getLast()))))
+                        .isEqualTo(new AddJarsResult(
+                                List.of(),
+                                List.of(phonetic.jars().getLast()),
+                                new JarComponents(
+                                        List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
+                                        List.of())));
+                assertThat(runtime.call(Methods.GET_JARS, new GetJarsParams()).jars())
+                        .endsWith(phonetic.jars().toArray(String[]::new));
+            }
 
             // A runtime built for another runtime interface is refused, and never used; the loaded
             // one reads the Lucene 2.4 index (ADR 0044).

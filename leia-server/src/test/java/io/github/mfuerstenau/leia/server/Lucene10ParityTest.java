@@ -105,6 +105,10 @@ import org.junit.jupiter.params.provider.ValueSource;
  * left out. Each call whose results differ must be in {@link #EXPECTED}, with the reason; the list is
  * what the runtime interface lacks (step 2 of ADR 0065), so a call that no longer differs must leave
  * it.
+ *
+ * <p>{@code addJars} and {@code getJars} aren't compared: loading jars is global to the JVM, so the
+ * second backend's {@code addJars} would find the jars loaded already. {@code JarsBackendTest} calls
+ * them with the routing to the runtime (ADR 0068).
  */
 class Lucene10ParityTest {
 

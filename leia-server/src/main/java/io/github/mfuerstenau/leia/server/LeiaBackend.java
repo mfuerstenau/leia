@@ -1,10 +1,10 @@
 package io.github.mfuerstenau.leia.server;
 
-import io.github.mfuerstenau.leia.core.ExtensionJarException;
-import io.github.mfuerstenau.leia.core.ExtensionJars;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.RpcMethod;
 import io.github.mfuerstenau.leia.server.index.Routing;
+import io.github.mfuerstenau.leia.server.jars.JarChain;
+import io.github.mfuerstenau.leia.server.jars.JarException;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -47,7 +47,7 @@ public final class LeiaBackend implements AutoCloseable {
         this(newExecutor(), handlers, onClose);
         // As start() does, so that tests see the same thread.
         await(CompletableFuture.runAsync(
-                () -> Thread.currentThread().setContextClassLoader(ExtensionJars.classLoader()), executor));
+                () -> Thread.currentThread().setContextClassLoader(JarChain.classLoader()), executor));
     }
 
     /**
@@ -65,14 +65,14 @@ public final class LeiaBackend implements AutoCloseable {
     /** As {@link #start(List)}, routing indexes to the runtimes as {@code routing} says (ADR 0065). */
     static LeiaBackend start(List<Path> jars, Routing routing) throws RpcException {
         try {
-            List<Path> loaded = ExtensionJars.load(jars);
+            List<Path> loaded = JarChain.load(jars, routing);
             if (!loaded.isEmpty()) {
                 LOG.info(() -> "Loaded the jars " + loaded);
             }
-        } catch (ExtensionJarException e) {
+        } catch (JarException e) {
             throw new RpcException(ErrorCode.INVALID_JAR, "Cannot load the jars: " + e.getMessage(), e);
         }
-        List<String> refused = Runtimes.load(ExtensionJars.classLoader()).refused();
+        List<String> refused = Runtimes.load(JarChain.classLoader()).refused();
         if (!refused.isEmpty()) {
             throw new RpcException(ErrorCode.INVALID_JAR, "Cannot load the jars: " + String.join("; ", refused));
         }
@@ -81,7 +81,7 @@ public final class LeiaBackend implements AutoCloseable {
                 () -> {
                     // For libraries in the jars that load through the context class loader; the job
                     // threads, started from this thread, inherit it. addJars sets it again (ADR 0024).
-                    Thread.currentThread().setContextClassLoader(ExtensionJars.classLoader());
+                    Thread.currentThread().setContextClassLoader(JarChain.classLoader());
                     return DaggerServerComponent.factory().create(routing);
                 },
                 executor));
