@@ -2,6 +2,12 @@
 
 The work queue for leia. Check items off (`[x]`) as they land, and keep it aligned with the "Remaining / next" section of the latest entry in `docs/SESSION-SUMMARIES.md`. Finished items move to `docs/tasklist-done.md`.
 
+## Runtime download: opt-in
+
+Goal: `leia --download-runtimes` (ADR 0073) fetches nothing until the user agrees to it, having seen what will be fetched.
+
+- [ ] Before downloading, list every runtime jar to fetch with its URL and its SHA-256 (and size), from the lists in `leia.jar` (`RuntimeInstall`). Say that these are the official Lucene jars from Maven Central, unchanged, and that leia's own jars come from `leia.jar` and aren't downloaded. Download only after the user opts in, for example by confirming a prompt. Without an answer (no terminal, or anything other than yes), download nothing and exit with a clear message. A flag such as `--yes` could allow scripted installs. Update `Cli.HELP`, the README and ADR 0073 (or a new ADR), and test the prompt, the refusal and the listing.
+
 ## Lucene 9.12 beyond classic search
 
 Goal: an index created by Lucene 8.x (read with `leia-lucene9`, ADR 0049) gets the features that are greyed out for it today. 9.12 has the APIs that leia-core uses for them on Lucene 10, so most are ports. What needs no runtime change goes to every runtime at once. The others need runtime interface 7 (one ADR for the interface, amending ADR 0049 §4). They land in 9.12 first, and in 5.5 and 7.7 where the copy is the same (ADR 0050). Each item adds its feature in `RuntimeResults.features`, a `runtime()` branch in its handlers, and its row in `docs/runtimes.md` (checked by `RuntimeFeaturesTest`). The TUI already gates on the features.
