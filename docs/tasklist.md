@@ -2,6 +2,14 @@
 
 The work queue for leia. Check items off (`[x]`) as they land, and keep it aligned with the "Remaining / next" section of the latest entry in `docs/SESSION-SUMMARIES.md`. Finished items move to `docs/tasklist-done.md`.
 
+## Runtime download: a TamboUI dialogue
+
+Goal: `leia --download-runtimes` (ADR 0073, ADR 0077) lets the user choose which runtimes to install in a TamboUI dialogue, not a `[y/N]` line, and the runtimes come from a catalog instead of code.
+
+- [ ] A TamboUI dialogue for `--download-runtimes`: a checkbox per runtime (`lucene3` … `lucene10`), not per file, with **none selected by default**, plus "select all" and "select none". Each runtime still shows its details: the jars it would download, each with its URL, SHA-256 and size, and what is already there and matching. Only the checked runtimes are installed; nothing checked means nothing downloaded. Keep `--yes` (all runtimes, no dialogue) and the refusal without a terminal (ADR 0077 §3, §4); decide whether `--yes` should take a list of runtimes. A new ADR amending ADR 0077.
+- [ ] A spinner while downloading, in the dialogue: per jar and overall progress (bytes of the total), and what failed. The download runs off the UI thread, as a job does (hard rule 7), and can be cancelled.
+- [ ] The runtimes in a JSON catalog in `leia.jar`'s resources instead of hardcoded in `RuntimeFolders.KNOWN`: folder, adapter jar, the index versions it reads (`List.of(9, 10)` today) and a display name. `RuntimeFolders` (server) and `RuntimeInstall` (TUI) read it; a build check keeps it in line with the runtime projects. leia-server reads it without Jackson (it is only in `leia-tui`), or the parsing lives in the TUI and the server gets the records; decide in the ADR.
+
 ## Lucene 9.12 beyond classic search
 
 Goal: an index created by Lucene 8.x (read with `leia-lucene9`, ADR 0049) gets the features that are greyed out for it today. 9.12 has the APIs that leia-core uses for them on Lucene 10, so most are ports. What needs no runtime change goes to every runtime at once. The others need runtime interface 7 (one ADR for the interface, amending ADR 0049 §4). They land in 9.12 first, and in 5.5 and 7.7 where the copy is the same (ADR 0050). Each item adds its feature in `RuntimeResults.features`, a `runtime()` branch in its handlers, and its row in `docs/runtimes.md` (checked by `RuntimeFeaturesTest`). The TUI already gates on the features.
