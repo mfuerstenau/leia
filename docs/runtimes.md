@@ -34,7 +34,7 @@ The first index of a path decides which Lucene opens it, by the major in its new
 | `COMMITS` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `CLASSIC_SEARCH` | ✓ | ✓ | ✓ | ✓⁴ | ✓ |
 | `TERM_SEARCH` | ✓ | ✓ | ✓ | ✓ | ✓ |
-| `SCORING` | – | – | – | ✓ | ✓ |
+| `SCORING` | – | ✓ | ✓ | ✓ | ✓ |
 | `DOC_VALUES_SEARCH` | – | ✓⁶ | ✓⁶ | ✓⁶ | ✓ |
 | `STANDARD_SEARCH` | – | ✓ | ✓ | ✓ | ✓ |
 | `MORE_LIKE_THIS` | – | ✓ | ✓ | ✓ | ✓ |
@@ -71,11 +71,11 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 | Query filter with deleted documents (ADR 0056) | refused | ✓, through leaves without deletions | as 5.5.5 | as 5.5.5 | ✓, through readers without deletions |
 | Filter cancellation | per segment and every 1024 matches | per segment and every 1024 matches | as 5.5.5 | through the searcher's `QueryTimeout` | through `ExitableDirectoryReader` |
 | Term query (ADR 0058) | the bytes decoded as UTF-8 | the bytes | the bytes | the bytes | the bytes |
-| Explain similarity (ADR 0057) | the runtime's default, classic TF-IDF | as 3.6.2 | the runtime's default, BM25 | the one chosen (ADR 0064) | the one chosen |
-| Similarity and sort (ADR 0064) | the runtime's default, best score first | as 3.6.2 | as 3.6.2 | the ones chosen | the ones chosen |
+| Explain similarity (ADR 0057) | the runtime's default, classic TF-IDF | the one chosen (ADR 0076); the TUI's default is BM25, not 5.5's TF-IDF | the one chosen (ADR 0076) | the one chosen (ADR 0064) | the one chosen |
+| Similarity and sort (ADR 0064, ADR 0076) | the runtime's default, best score first | the ones chosen, with a port of 6.4's `BooleanSimilarity`; the TUI's default is BM25, not 5.5's TF-IDF | the ones chosen | the ones chosen | the ones chosen |
 | Explain cancellation | before and after | before and after | before and after | through the searcher's `QueryTimeout` | through `ExitableDirectoryReader` |
 | Explanation of a deleted document | no match, by the facade | no match, by Lucene | no match, by Lucene | no match, by Lucene | no match, by Lucene |
-| Explained value against the score | the same | the same | BM25 may differ in the last bits | the same | the same |
+| Explained value against the score | the same | BM25 may differ in the last bits | BM25 may differ in the last bits | the same | the same |
 | `totalTermFreq` | counted from the live postings | recorded | recorded | recorded | recorded |
 | Export terms | reads every posting, as its term pages count `totalTermFreq` from them | the term dictionary only | the term dictionary only | the term dictionary only | the term dictionary only |
 | Auto stop words scan (ADR 0061) | reads every posting, as export terms does | the term dictionary only | the term dictionary only | the term dictionary only | the term dictionary only |

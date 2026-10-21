@@ -137,6 +137,7 @@ class Lucene5BackendTest {
                         Feature.TERM_SEARCH,
                         Feature.FILTER,
                         Feature.EXPLAIN,
+                        Feature.SCORING,
                         Feature.DOC_VALUES_SEARCH,
                         Feature.STANDARD_SEARCH,
                         Feature.MORE_LIKE_THIS,
@@ -183,10 +184,17 @@ class Lucene5BackendTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"lucene4", "lucene5"})
+    void sortsAndScores(String name) throws Exception {
+        open(testIndex(name));
+        RuntimeScorings.sortsAndScores(backend);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene4", "lucene5"})
     void explainsAHit(String name) throws Exception {
         OpenIndexResult opened = open(testIndex(name));
 
-        RuntimeExplains.explainsAHit(backend, opened.maxDoc().orElseThrow(), true);
+        RuntimeExplains.explainsAHit(backend, opened.maxDoc().orElseThrow(), false);
     }
 
     @ParameterizedTest

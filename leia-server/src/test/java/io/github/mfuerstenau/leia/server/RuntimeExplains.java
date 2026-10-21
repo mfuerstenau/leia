@@ -28,7 +28,8 @@ final class RuntimeExplains {
      * and a document the query doesn't match; a document id out of range and an invalid query fail.
      *
      * @param exact whether the values are the scores to the bit; Lucene 7.7's BM25 explanation
-     *     computes them in another order than its scorer, so they may differ in the last bits
+     *     computes them in another order than its scorer, as 5.5's does, so they may differ in the
+     *     last bits
      */
     static void explainsAHit(RealBackend backend, int maxDoc, boolean exact) throws Exception {
         List<Hit> alpha = backend.search(classic("alpha"), maxDoc).hits();

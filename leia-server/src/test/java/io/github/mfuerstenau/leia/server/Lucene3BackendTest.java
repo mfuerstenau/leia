@@ -259,6 +259,13 @@ class Lucene3BackendTest {
         RuntimeFilters.filtersTheDocuments(backend, false);
     }
 
+    /** 3.6 doesn't sort (ADR 0064, ADR 0076). */
+    @Test
+    void doesNotSort() throws Exception {
+        open(Path.of(PATH));
+        RuntimeScorings.doesNotSort(backend);
+    }
+
     @Test
     void explainsAHit() throws Exception {
         OpenIndexResult opened = open(Path.of(PATH));

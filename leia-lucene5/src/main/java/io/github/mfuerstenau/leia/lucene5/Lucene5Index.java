@@ -64,13 +64,18 @@ import org.apache.lucene.queryparser.classic.ParseException;
 import org.apache.lucene.queryparser.classic.QueryParser;
 import org.apache.lucene.search.Collector;
 import org.apache.lucene.search.DocIdSetIterator;
+import org.apache.lucene.search.FieldDoc;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.LeafCollector;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.ScoreDoc;
 import org.apache.lucene.search.Scorer;
+import org.apache.lucene.search.Sort;
+import org.apache.lucene.search.SortField;
 import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.search.TopDocsCollector;
+import org.apache.lucene.search.TopFieldCollector;
 import org.apache.lucene.search.TopScoreDocCollector;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.util.Bits;
@@ -87,7 +92,17 @@ import org.apache.lucene.util.BytesRef;
  * threads, so jobs can read it.
  */
 final class Lucene5Index
-        implements RuntimeIndex, Documents, Terms, Search, DocValuesSearch, StandardSearch, MoreLikeThisSearch {
+        implements RuntimeIndex,
+                Documents,
+                Terms,
+                Search,
+                Scoring,
+                DocValuesSearch,
+                StandardSearch,
+                MoreLikeThisSearch {
+
+    /** 5.5's default similarity, TF-IDF, which {@link Search} scores with. */
+    private static final Similarity DEFAULT_SIMILARITY = new Similarity.Classic();
 
     /** How many terms {@link #topTerms} scans between two reports of its progress. */
     static final int PROGRESS_INTERVAL = 1024;
@@ -208,10 +223,13 @@ final class Lucene5Index
         return Optional.empty();
     }
 
-    /** {@inheritDoc} Not yet: 5.5 has no {@code BooleanSimilarity} (ADR 0064). */
+    /**
+     * {@inheritDoc} Similarity and sort as on 9.12, with a port of 6.4's {@code BooleanSimilarity}
+     * (ADR 0076).
+     */
     @Override
     public Optional<Scoring> scoring() {
-        return Optional.empty();
+        return Optional.of(this);
     }
 
     @Override
@@ -795,13 +813,28 @@ final class Lucene5Index
         return query instanceof Lucene5MoreLikeQuery like ? like.build(searcher.getIndexReader(), analyzer) : query;
     }
 
+    /** {@inheritDoc} It scores with 5.5's default, TF-IDF. */
+    @Override
+    public SearchResults search(
+            ParsedQuery parsed,
+            int offset,
+            int limit,
+            boolean exactTotalHits,
+            Optional<List<String>> fields,
+            LongConsumer progress)
+            throws IOException {
+        return search(parsed, DEFAULT_SIMILARITY, List.of(), offset, limit, exactTotalHits, fields, progress);
+    }
+
     /**
      * {@inheritDoc} Every hit is counted, as 5.5 always counts them. The progress is reported once per
-     * segment.
+     * segment. A field sort keeps the scores of the hits it collects.
      */
     @Override
     public SearchResults search(
             ParsedQuery parsed,
+            Similarity similarity,
+            List<SortKey> sortKeys,
             int offset,
             int limit,
             boolean exactTotalHits,
@@ -812,10 +845,10 @@ final class Lucene5Index
             throw new IllegalArgumentException("Not a query of this index: " + parsed);
         }
         Query query = lucene5.query;
+        Optional<Sort> sort =
+                sortKeys.isEmpty() ? Optional.empty() : Optional.of(Lucene5Sorts.sort(fieldInfos, sortKeys));
         long start = System.nanoTime();
-        IndexSearcher searcher = new IndexSearcher(reader);
-        // No cache: a query is run once.
-        searcher.setQueryCache(null);
+        IndexSearcher searcher = searcher(similarity);
         Optional<List<MoreLikeThisSearch.LikeTerm>> likeTerms = Optional.empty();
         Query rewritten;
         try (Analyzer analyzer = likeAnalyzer(query)) {
@@ -826,10 +859,14 @@ final class Lucene5Index
             }
             rewritten = searcher.rewrite(built);
         }
-        TopScoreDocCollector top = TopScoreDocCollector.create(offset + limit);
+        // The field values filled in, with the scores.
+        TopDocsCollector<?> top = sort.isPresent()
+                ? TopFieldCollector.create(sort.get(), offset + limit, true, true, false)
+                : TopScoreDocCollector.create(offset + limit);
         searcher.search(rewritten, new ProgressCollector(top, progress));
         progress.accept(reader.maxDoc());
         TopDocs docs = top.topDocs(offset, limit);
+        SortField[] sortFields = sort.map(Sort::getSort).orElse(new SortField[0]);
         List<Hit> hits = new ArrayList<>();
         for (ScoreDoc scoreDoc : docs.scoreDocs) {
             Map<String, List<StoredValue>> values = new LinkedHashMap<>();
@@ -838,7 +875,16 @@ final class Lucene5Index
                     values.computeIfAbsent(field.name(), _ -> new ArrayList<>()).add(storedValue(field));
                 }
             }
-            hits.add(new Hit(scoreDoc.doc, scoreDoc.score, values));
+            List<SortValue> sortValues = new ArrayList<>(sortFields.length);
+            if (scoreDoc instanceof FieldDoc fieldDoc) {
+                for (int i = 0; i < sortFields.length; i++) {
+                    sortValues.add(
+                            Lucene5Sorts.numeric(sortFields[i]) && !hasNumber(sortFields[i].getField(), scoreDoc.doc)
+                                    ? new SortValue(Optional.empty(), Optional.empty())
+                                    : sortValue(fieldDoc.fields[i]));
+                }
+            }
+            hits.add(new Hit(scoreDoc.doc, scoreDoc.score, List.copyOf(sortValues), values));
         }
         return new SearchResults(
                 query.toString(),
@@ -847,6 +893,36 @@ final class Lucene5Index
                 List.copyOf(hits),
                 (System.nanoTime() - start) / 1_000_000,
                 likeTerms);
+    }
+
+    /** A searcher of the whole index that scores with {@code similarity}. */
+    private IndexSearcher searcher(Similarity similarity) {
+        IndexSearcher searcher = new IndexSearcher(reader);
+        searcher.setSimilarity(Lucene5Sorts.similarity(similarity));
+        // No cache: a query is run once.
+        searcher.setQueryCache(null);
+        return searcher;
+    }
+
+    /** A value of {@link FieldDoc#fields}: a number, a term, or null for a missing string. */
+    private static SortValue sortValue(Object value) {
+        return switch (value) {
+            case Number number -> new SortValue(Optional.of(number), Optional.empty());
+            case BytesRef term -> new SortValue(Optional.empty(), Optional.of(BytesRef.deepCopyOf(term).bytes));
+            case null, default -> new SortValue(Optional.empty(), Optional.empty());
+        };
+    }
+
+    /**
+     * Whether the document has a value in the numeric or sorted numeric doc values of {@code field},
+     * so that its sort value is not the missing value that Lucene put in its place (ADR 0025). 5.5
+     * gives numeric doc values with the documents that have them as sorted numeric ones.
+     */
+    private boolean hasNumber(String field, int docId) throws IOException {
+        LeafReaderContext leaf = leaf(docId);
+        SortedNumericDocValues values = org.apache.lucene.index.DocValues.getSortedNumeric(leaf.reader(), field);
+        values.setDocument(docId - leaf.docBase);
+        return values.count() > 0;
     }
 
     /** Passes the hits on, and reports the documents searched at the start of each segment. */
@@ -893,19 +969,24 @@ final class Lucene5Index
         return true;
     }
 
+    /** {@inheritDoc} It scores with 5.5's default, TF-IDF. */
+    @Override
+    public Explanation explain(ParsedQuery parsed, int docId, LongConsumer progress) throws IOException {
+        return explain(parsed, DEFAULT_SIMILARITY, docId, progress);
+    }
+
     /**
      * {@inheritDoc} Lucene 5.5 has no way to ask the progress while it explains: it is reported
      * before and after.
      */
     @Override
-    public Explanation explain(ParsedQuery parsed, int docId, LongConsumer progress) throws IOException {
+    public Explanation explain(ParsedQuery parsed, Similarity similarity, int docId, LongConsumer progress)
+            throws IOException {
         if (!(parsed instanceof Lucene5Query lucene5)) {
             throw new IllegalArgumentException("Not a query of this index: " + parsed);
         }
         progress.accept(0);
-        IndexSearcher searcher = new IndexSearcher(reader);
-        // No cache: a query is run once.
-        searcher.setQueryCache(null);
+        IndexSearcher searcher = searcher(similarity);
         Query query = lucene5.query;
         Explanation explanation;
         try (Analyzer analyzer = likeAnalyzer(query)) {

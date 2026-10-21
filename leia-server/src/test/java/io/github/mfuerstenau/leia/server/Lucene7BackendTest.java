@@ -107,6 +107,7 @@ class Lucene7BackendTest {
                         Feature.TERM_SEARCH,
                         Feature.FILTER,
                         Feature.EXPLAIN,
+                        Feature.SCORING,
                         Feature.DOC_VALUES_SEARCH,
                         Feature.STANDARD_SEARCH,
                         Feature.MORE_LIKE_THIS,
@@ -144,11 +145,11 @@ class Lucene7BackendTest {
         RuntimeFilters.filtersTheDocuments(backend, true);
     }
 
-    /** 7.7 doesn't sort (ADR 0064). */
-    @Test
-    void doesNotSort() throws Exception {
-        open(testIndex("lucene7"));
-        RuntimeScorings.doesNotSort(backend);
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene6", "lucene7"})
+    void sortsAndScores(String name) throws Exception {
+        open(testIndex(name));
+        RuntimeScorings.sortsAndScores(backend);
     }
 
     /** 7.7 doesn't highlight (ADR 0063). */

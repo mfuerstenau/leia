@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-13
 - **Amends:** ADR 0049 §4 (the runtime interface); ADR 0057 §4 (the runtime's similarity in explain); ADR 0058 §4–5 (the parts of search, and the similarity and sort of a term query)
+- **Amended by:** ADR 0076 (§2 and the consequence on 2.x to 7.x: 7.7 and 5.5 have similarity and sort)
 
 ## Context
 
@@ -22,6 +23,8 @@ Lucene 9.12.3 has everything leia-core uses for this on Lucene 10: `BM25Similari
 2. **9.12 only.** `Lucene9Index` implements `Scoring`. Its `Search.search` and `Search.explain` call the `Scoring` methods with 9.12's default, `Bm25(1.2, 0.75)`, so their scores don't change. The one search path sets the searcher's similarity and collects with `TopScoreDocCollector` without a sort, and with `TopFieldCollector` and then `populateScores` for the page's hits with one. Every hit is counted either way, which also keeps the index sort of `lucene8` from ending a sorted search early. `Lucene9Sorts` is a copy of core's `SortType.sortField`, `SortSelector` and `Similarities`, with the same messages (ADR 0050 §1). 3.6, 5.5 and 7.7 return an empty group:
    - 7.7 has the same API apart from `Pruning`. It is left for later, as the user asked for one runtime per step.
    - 5.5 has no `BooleanSimilarity`.
+
+   *Amended by ADR 0076:* 7.7 and 5.5 implement `Scoring` too, 5.5 with a port of 6.4's `BooleanSimilarity`; only 3.6 returns an empty group.
 3. **A sort never prunes.** As in core (ADR 0012), each sort field's comparator is asked for with `Pruning.NONE`: Lucene would otherwise skip documents through the points or terms of the field, assuming they hold the values in the type sorted by, while that type is the user's guess.
 4. **A missing number is reported missing.** Lucene puts the missing value in a numeric sort field's place. As core does (ADR 0025), a numeric sort value is empty when the document has no sorted-numeric value in the field.
 5. **The server checks first, with Lucene 10's errors.** `server.runtime.RuntimeScoring`:
@@ -43,7 +46,7 @@ Lucene 9.12.3 has everything leia-core uses for this on Lucene 10: `BM25Similari
 
 - On `lucene8` and `lucene8to9`, `s` opens the popup in the classic, term and KNN modes; the hit list shows the sort column, and `x` gives the hit's score with Classic or Boolean too.
 - A sorted search on 9.12 reads every match's doc value, as on Lucene 10.
-- Indexes of 2.x to 7.x keep the runtime's default similarity and the best score first.
+- Indexes of 2.x to 7.x keep the runtime's default similarity and the best score first. *Amended by ADR 0076:* only those of 2.x and 3.x do.
 - `runtimes/leia-lucene9.jar` grows by a few kilobytes: no new dependency.
 - A fix to the sort belongs in core's `SortType`, `Lucene9Sorts` and `RuntimeScoring`.
 - `docs/runtimes.md` has a `SCORING` row, and its differences show the similarity and sort per runtime.

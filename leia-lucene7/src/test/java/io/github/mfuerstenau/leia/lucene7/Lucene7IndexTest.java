@@ -15,6 +15,7 @@ import io.github.mfuerstenau.leia.runtime.MoreLikeThisSearch;
 import io.github.mfuerstenau.leia.runtime.Points;
 import io.github.mfuerstenau.leia.runtime.Rebuild;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
+import io.github.mfuerstenau.leia.runtime.Scoring;
 import io.github.mfuerstenau.leia.runtime.Search;
 import io.github.mfuerstenau.leia.runtime.StandardSearch;
 import io.github.mfuerstenau.leia.runtime.Terms;
@@ -547,6 +548,181 @@ class Lucene7IndexTest {
                         throw stop;
                     }))
                     .isSameAs(stop);
+        }
+    }
+
+    private static final Scoring.Similarity BM25 = new Scoring.Similarity.Bm25(1.2f, 0.75f);
+
+    /** The document ids of a search for {@code alpha}, which every live document has, by {@code sort}. */
+    private static Search.SearchResults sorted(RuntimeIndex index, Scoring.SortKey... sort) throws Exception {
+        Search.ParsedQuery alpha = index.search().orElseThrow().parse("alpha", BODY, named("StandardAnalyzer"));
+        return index.scoring()
+                .orElseThrow()
+                .search(alpha, BM25, List.of(sort), 0, 10, Optional.of(List.of("id")), _ -> {});
+    }
+
+    private static Scoring.SortKey.Field field(
+            String field, Scoring.SortType type, boolean reverse, Scoring.SortSelector selector) {
+        return new Scoring.SortKey.Field(field, type, reverse, selector, Scoring.SortMissing.DEFAULT);
+    }
+
+    private static List<Integer> docIds(Search.SearchResults results) {
+        return results.hits().stream().map(Search.Hit::docId).toList();
+    }
+
+    /** The number each hit was sorted by in its first key; null where it has none. */
+    private static List<Number> numbers(Search.SearchResults results) {
+        return results.hits().stream()
+                .map(hit -> hit.sortValues().getFirst().number().orElse(null))
+                .toList();
+    }
+
+    /**
+     * {@code dv_num}: documents 2 and 7 (id 3, the old one soft-deleted but live, and the new one) have none, document 3 (id 4) has 400, and
+     * document 1 is deleted.
+     */
+    @Test
+    void sortsByNumericDocValues() throws Exception {
+        try (RuntimeIndex index = open("lucene7")) {
+            Search.SearchResults byDefault =
+                    sorted(index, field("dv_num", Scoring.SortType.INT, false, Scoring.SortSelector.MIN));
+            // Lucene's default puts a missing value as 0; the hits still say it is missing.
+            assertThat(docIds(byDefault)).containsExactly(2, 7, 0, 4, 5, 6, 3);
+            assertThat(numbers(byDefault)).containsExactly(null, null, 1, 5, 6, 7, 400);
+            assertThat(byDefault.hits())
+                    .allSatisfy(hit -> assertThat(hit.score()).isPositive());
+            assertThat(byDefault.totalHits()).isEqualTo(7);
+
+            Scoring.SortKey.Field last = new Scoring.SortKey.Field(
+                    "dv_num", Scoring.SortType.LONG, false, Scoring.SortSelector.MIN, Scoring.SortMissing.LAST);
+            assertThat(docIds(sorted(index, last))).containsExactly(0, 4, 5, 6, 3, 2, 7);
+            Scoring.SortKey.Field reversedLast = new Scoring.SortKey.Field(
+                    "dv_num", Scoring.SortType.LONG, true, Scoring.SortSelector.MIN, Scoring.SortMissing.LAST);
+            Search.SearchResults reversed = sorted(index, reversedLast);
+            assertThat(docIds(reversed)).containsExactly(3, 6, 5, 4, 0, 2, 7);
+            assertThat(numbers(reversed)).containsExactly(400L, 7L, 6L, 5L, 1L, null, null);
+        }
+    }
+
+    @Test
+    void sortsBySortedNumericAndSortedSetDocValues() throws Exception {
+        try (RuntimeIndex index = open("lucene7")) {
+            Search.SearchResults max =
+                    sorted(index, field("dv_sorted_num", Scoring.SortType.LONG, false, Scoring.SortSelector.MAX));
+            assertThat(docIds(max)).containsExactly(0, 2, 7, 3, 4, 5, 6);
+            assertThat(numbers(max)).containsExactly(1L, 3L, 3L, 4L, 5L, 6L, 7L);
+            Search.SearchResults min =
+                    sorted(index, field("dv_sorted_num", Scoring.SortType.LONG, false, Scoring.SortSelector.MIN));
+            assertThat(numbers(min)).containsExactly(-7L, -6L, -5L, -4L, -3L, -3L, -1L);
+
+            Search.SearchResults set =
+                    sorted(index, field("dv_set", Scoring.SortType.STRING, false, Scoring.SortSelector.MIDDLE_MAX));
+            assertThat(docIds(set)).containsExactly(0, 2, 7, 3, 4, 5, 6);
+            assertThat(set.hits())
+                    .extracting(hit -> text(hit.sortValues().getFirst().term().orElseThrow()))
+                    .containsExactly("y1", "y3", "y3", "y4", "y5", "y6", "y7");
+
+            assertThatThrownBy(() ->
+                            sorted(index, field("dv_bin", Scoring.SortType.STRING, false, Scoring.SortSelector.MIN)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("the field 'dv_bin' has BINARY doc values, which can't be sorted by");
+            assertThatThrownBy(
+                            () -> sorted(index, field("dv_num", Scoring.SortType.INT, false, Scoring.SortSelector.MAX)))
+                    .isInstanceOf(IllegalArgumentException.class)
+                    .hasMessage("the field 'dv_num' has single-valued NUMERIC doc values, which can't select MAX");
+        }
+    }
+
+    @Test
+    void sortsByDocAndScore() throws Exception {
+        try (RuntimeIndex index = open("lucene7")) {
+            assertThat(docIds(sorted(index, new Scoring.SortKey.Doc(true)))).containsExactly(7, 6, 5, 4, 3, 2, 0);
+            Search.SearchResults docs = sorted(index, new Scoring.SortKey.Doc(false));
+            assertThat(numbers(docs)).containsExactly(0, 2, 3, 4, 5, 6, 7);
+
+            Search.SearchResults lowest = sorted(index, new Scoring.SortKey.Score(true));
+            List<Float> scores = lowest.hits().stream().map(Search.Hit::score).toList();
+            assertThat(scores).isSorted();
+            assertThat(scores.getFirst()).isLessThan(scores.getLast());
+            assertThat(numbers(lowest)).containsExactlyElementsOf(scores);
+
+            CancellationException stop = new CancellationException("stop");
+            Search.ParsedQuery alpha = index.search().orElseThrow().parse("alpha", BODY, named("StandardAnalyzer"));
+            assertThatThrownBy(() -> index.scoring()
+                            .orElseThrow()
+                            .search(
+                                    alpha,
+                                    BM25,
+                                    List.of(new Scoring.SortKey.Doc(false)),
+                                    0,
+                                    10,
+                                    Optional.empty(),
+                                    _ -> {
+                                        throw stop;
+                                    }))
+                    .isSameAs(stop);
+        }
+    }
+
+    @Test
+    void scoresWithTheSimilarityChosen() throws Exception {
+        try (RuntimeIndex index = open("lucene7")) {
+            Search search = index.search().orElseThrow();
+            Scoring scoring = index.scoring().orElseThrow();
+            Search.ParsedQuery query = search.parse("beta^2 gamma", BODY, named("StandardAnalyzer"));
+            // 7.7's default, BM25
+            Search.Hit byDefault =
+                    search.search(query, 0, 1, Optional.empty(), _ -> {}).hits().getFirst();
+            assertThat(scoring.search(query, BM25, List.of(), 0, 1, Optional.empty(), _ -> {})
+                            .hits())
+                    .singleElement()
+                    .satisfies(hit -> {
+                        assertThat(hit.docId()).isEqualTo(byDefault.docId());
+                        assertThat(hit.score()).isEqualTo(byDefault.score());
+                        assertThat(hit.sortValues()).isEmpty();
+                    });
+            for (Scoring.Similarity similarity :
+                    List.of(new Scoring.Similarity.Classic(), new Scoring.Similarity.Bool())) {
+                Search.Hit hit = scoring.search(query, similarity, List.of(), 0, 1, Optional.empty(), _ -> {})
+                        .hits()
+                        .getFirst();
+                assertThat(hit.score()).as("%s", similarity).isNotEqualTo(byDefault.score());
+                assertThat(scoring.explain(query, similarity, hit.docId(), _ -> {})
+                                .value()
+                                .floatValue())
+                        .as("%s", similarity)
+                        .isEqualTo(hit.score());
+            }
+            // Boolean: beta's boost 2 and gamma's 1.
+            assertThat(scoring.search(query, new Scoring.Similarity.Bool(), List.of(), 0, 1, Optional.empty(), _ -> {})
+                            .hits()
+                            .getFirst()
+                            .score())
+                    .isEqualTo(3.0f);
+        }
+    }
+
+    /**
+     * {@code lucene6} is sorted by {@code order}: a sort by it still counts every hit, where Lucene
+     * would end the search early without (ADR 0076).
+     */
+    @Test
+    void countsEveryHitOfTheIndexSort() throws Exception {
+        try (RuntimeIndex index = open("lucene6")) {
+            Search.ParsedQuery alpha = index.search().orElseThrow().parse("alpha", BODY, named("StandardAnalyzer"));
+            Search.SearchResults first = index.scoring()
+                    .orElseThrow()
+                    .search(
+                            alpha,
+                            BM25,
+                            List.of(field("order", Scoring.SortType.LONG, false, Scoring.SortSelector.MIN)),
+                            0,
+                            2,
+                            Optional.of(List.of("id")),
+                            _ -> {});
+            assertThat(first.totalHits()).isEqualTo(6);
+            assertThat(first.totalHitsExact()).isTrue();
+            assertThat(numbers(first)).containsExactly(1L, 3L);
         }
     }
 
