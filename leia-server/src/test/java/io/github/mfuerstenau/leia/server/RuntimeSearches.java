@@ -18,7 +18,11 @@ import io.github.mfuerstenau.leia.protocol.filter.FilterResult;
 import io.github.mfuerstenau.leia.protocol.filter.StartFilterParams;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
+import io.github.mfuerstenau.leia.protocol.search.DocValuesRange;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
+import io.github.mfuerstenau.leia.protocol.search.LikeTerm;
+import io.github.mfuerstenau.leia.protocol.search.PointField;
+import io.github.mfuerstenau.leia.protocol.search.PointType;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
 import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
 import io.github.mfuerstenau.leia.protocol.search.SearchResults;
@@ -84,8 +88,8 @@ final class RuntimeSearches {
     }
 
     /**
-     * Refuses the standard parser, More-Like-This and doc values queries, which only the runtimes of
-     * 9.12 and 10 have (ADR 0066), in a search, a filter and an explanation.
+     * Refuses the standard parser, More-Like-This and doc values queries, which 3.6 lacks (ADR 0066, ADR
+     * 0074), in a search, a filter and an explanation.
      */
     static void refusesTheQueriesOf912(RealBackend backend) {
         List<SearchQuery> queries = List.of(
@@ -106,6 +110,139 @@ final class RuntimeSearches {
                     ErrorCode.NOT_SUPPORTED);
             backend.fails(Methods.START_EXPLAIN, new StartExplainParams(query, BM25, 0), ErrorCode.NOT_SUPPORTED);
         }
+    }
+
+    /**
+     * The standard parser, More-Like-This and doc values queries on 5.5 and 7.7 (ADR 0074), on what
+     * their writers put in the indexes, where document {@code i} has the id {@code i - 1}: each in a
+     * search, a filter and an explanation of its first hit, which agree.
+     *
+     * @param points whether the index has points, which the standard parser then searches
+     */
+    static void searchesTheQueriesOf912(RealBackend backend, boolean points) throws Exception {
+        assertThat(searchFilterAndExplain(backend, RealBackend.standard("body:GAM*", QueryOperator.OR, List.of())))
+                .containsExactly(0);
+        assertThat(backend.search(RealBackend.standard("body:GAM*", QueryOperator.OR, List.of()), 10)
+                        .query())
+                .isEqualTo("body:gam*");
+        if (points) {
+            SearchQuery query = RealBackend.standard(
+                    "pt:[100 TO 114] OR amount:5000 OR gamma",
+                    QueryOperator.OR,
+                    List.of(new PointField("pt", PointType.INT), new PointField("amount", PointType.LONG)));
+            assertThat(searchFilterAndExplain(backend, query)).containsExactlyInAnyOrder(0, 4);
+            assertThat(backend.search(query, 10).query()).isEqualTo("pt:[100 TO 114] amount:[5000 TO 5000] body:gamma");
+        } else {
+            // No field has points.
+            backend.fails(
+                    Methods.START_SEARCH,
+                    params(
+                            RealBackend.standard(
+                                    "price:10", QueryOperator.OR, List.of(new PointField("price", PointType.INT))),
+                            10),
+                    ErrorCode.INVALID_PARAMS);
+        }
+        RpcException syntax = backend.fails(
+                Methods.START_SEARCH,
+                params(RealBackend.standard("body:(", QueryOperator.OR, List.of()), 10),
+                ErrorCode.INVALID_QUERY);
+        assertThat(syntax).hasMessage("Invalid query: Cannot parse 'body:(': Encountered \"<EOF>\" at column 6.");
+
+        SearchQuery byDoc = RealBackend.moreLikeThis(OptionalInt.of(0), Optional.empty());
+        assertThat(searchFilterAndExplain(backend, byDoc)).startsWith(0);
+        SearchResults results = backend.search(byDoc, 10);
+        assertThat(results.query())
+                .isEqualTo("like(doc 0, fields [body], minTermFreq 1, minDocFreq 1, maxQueryTerms 25)");
+        assertThat(results.moreLikeThisTerms().orElseThrow().getFirst())
+                .extracting(LikeTerm::term, LikeTerm::tf, LikeTerm::docFreq)
+                .containsExactly("gamma", 2, 1);
+        SearchQuery byText = RealBackend.moreLikeThis(OptionalInt.empty(), Optional.of("gamma"));
+        assertThat(searchFilterAndExplain(backend, byText)).containsExactly(0);
+        assertThat(backend.search(byText, 10).moreLikeThisTerms().orElseThrow())
+                .extracting(LikeTerm::term)
+                .containsExactly("gamma");
+        assertThat(backend.search(RealBackend.classic("gamma"), 10).moreLikeThisTerms())
+                .isEmpty();
+
+        // Queries that the 400 of document 4, which 4.x lacks, doesn't change.
+        Optional<DocValuesNumber> longs = Optional.of(DocValuesNumber.LONG);
+        assertThat(searchFilterAndExplain(
+                        backend,
+                        docValues("dv_num", longs, Optional.of(List.of(text("5"), text("6"))), Optional.empty())))
+                .containsExactlyInAnyOrder(4, 5);
+        assertThat(searchFilterAndExplain(
+                        backend,
+                        docValues(
+                                "dv_num",
+                                Optional.of(DocValuesNumber.SORTABLE_DOUBLE),
+                                Optional.empty(),
+                                Optional.of(new DocValuesRange(
+                                        Optional.of(text("0")), Optional.of(text("1")), true, true)))))
+                // As sortable bits, a small long is a tiny positive double.
+                .containsExactlyInAnyOrder(0, 3, 4, 5, 6);
+        assertThat(searchFilterAndExplain(
+                        backend,
+                        docValues(
+                                "dv_sorted_num",
+                                longs,
+                                Optional.of(List.of(text("-5"), text("-7"))),
+                                Optional.empty())))
+                .containsExactlyInAnyOrder(4, 6);
+        assertThat(searchFilterAndExplain(
+                        backend,
+                        docValues("dv_sorted", Optional.empty(), Optional.of(List.of(text("s2"))), Optional.empty())))
+                .containsExactly(4);
+        assertThat(searchFilterAndExplain(
+                        backend,
+                        RealBackend.docValues(new DocValuesQuery(
+                                "dv_set",
+                                Optional.empty(),
+                                Optional.empty(),
+                                Optional.empty(),
+                                Optional.of(text("y5"))))))
+                .containsExactly(4);
+        // dv_bin is b<i>: 62 is b, 35 to 37 are 5 to 7.
+        assertThat(searchFilterAndExplain(
+                        backend,
+                        docValues(
+                                "dv_bin",
+                                Optional.empty(),
+                                Optional.empty(),
+                                Optional.of(new DocValuesRange(
+                                        Optional.of(new BytesValue("6235", true)),
+                                        Optional.of(text("b7")),
+                                        true,
+                                        false)))))
+                .containsExactlyInAnyOrder(4, 5);
+        RpcException binary = backend.fails(
+                Methods.START_SEARCH,
+                params(docValues("dv_bin", longs, Optional.of(List.of(text("1"))), Optional.empty()), 10),
+                ErrorCode.INVALID_PARAMS);
+        assertThat(binary)
+                .hasMessage("Invalid params: the field 'dv_bin' has BINARY doc values, which hold bytes, not numbers");
+    }
+
+    /** The search, the filter and the explanation of the first hit agree; returns the hits' ids. */
+    private static List<Integer> searchFilterAndExplain(RealBackend backend, SearchQuery query) throws Exception {
+        SearchResults results = backend.search(query, 10);
+        assertThat(results.hits()).isNotEmpty();
+        FilterResult filter = backend.filter(new StartFilterParams(Optional.of(query), Optional.empty(), false));
+        assertThat(filter.matchCount()).isEqualTo(results.totalHits());
+        assertThat(filter.query()).isEqualTo(results.query());
+        RuntimeExplains.explainsTheHit(backend, query, results.hits().getFirst(), false);
+        return results.hits().stream().map(Hit::docId).toList();
+    }
+
+    private static SearchQuery docValues(
+            String field,
+            Optional<DocValuesNumber> number,
+            Optional<List<BytesValue>> values,
+            Optional<DocValuesRange> range) {
+        return RealBackend.docValues(new DocValuesQuery(field, number, values, range, Optional.empty()));
+    }
+
+    private static BytesValue text(String text) {
+        return new BytesValue(text, false);
     }
 
     /**

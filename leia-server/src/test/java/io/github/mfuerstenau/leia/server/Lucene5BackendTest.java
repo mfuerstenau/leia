@@ -137,6 +137,9 @@ class Lucene5BackendTest {
                         Feature.TERM_SEARCH,
                         Feature.FILTER,
                         Feature.EXPLAIN,
+                        Feature.DOC_VALUES_SEARCH,
+                        Feature.STANDARD_SEARCH,
+                        Feature.MORE_LIKE_THIS,
                         Feature.RECONSTRUCT,
                         Feature.COMMITS,
                         Feature.CHECK_INDEX,
@@ -195,13 +198,13 @@ class Lucene5BackendTest {
         RuntimeAutoStopWords.searchesWithoutTheWords(backend, opened.maxDoc().orElseThrow(), "body", "beta");
     }
 
-    /** Only 9.12 and 10 have the standard parser, More-Like-This and doc values queries (ADR 0066). */
+    /** The standard parser, More-Like-This and doc values queries (ADR 0074). */
     @ParameterizedTest
     @ValueSource(strings = {"lucene4", "lucene5"})
-    void refusesTheQueriesOf912(String name) throws Exception {
+    void searchesTheQueriesOf912(String name) throws Exception {
         open(testIndex(name));
 
-        RuntimeSearches.refusesTheQueriesOf912(backend);
+        RuntimeSearches.searchesTheQueriesOf912(backend, false);
     }
 
     @Test

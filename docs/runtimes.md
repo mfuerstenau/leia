@@ -35,9 +35,9 @@ The first index of a path decides which Lucene opens it, by the major in its new
 | `CLASSIC_SEARCH` | ✓ | ✓ | ✓ | ✓⁴ | ✓ |
 | `TERM_SEARCH` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `SCORING` | – | – | – | ✓ | ✓ |
-| `DOC_VALUES_SEARCH` | – | – | – | ✓⁶ | ✓ |
-| `STANDARD_SEARCH` | – | – | – | ✓ | ✓ |
-| `MORE_LIKE_THIS` | – | – | – | ✓ | ✓ |
+| `DOC_VALUES_SEARCH` | – | ✓⁶ | ✓⁶ | ✓⁶ | ✓ |
+| `STANDARD_SEARCH` | – | ✓ | ✓ | ✓ | ✓ |
+| `MORE_LIKE_THIS` | – | ✓ | ✓ | ✓ | ✓ |
 | `EXPLAIN` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `HIGHLIGHT` | – | – | – | ✓ | ✓ |
 | `STORED_SCAN` | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -103,12 +103,12 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 | KNN search cancellation | – | – | – | through the searcher's `QueryTimeout` | through the searcher's `QueryTimeout` |
 | Highlight (ADR 0063) | – | – (no `UnifiedHighlighter`) | – (its `UnifiedHighlighter` differs; not yet) | ✓, with its search analyzers | ✓, with every analyzer of `startSearch` |
 | Highlight cancellation (ADR 0063) | – | – | – | before each field of each document | through `ExitableDirectoryReader` |
-| Standard parser (ADR 0066, ADR 0069) | – | – | – | with dates, through a copy of leia-core's processor of term ranges | leia-core's, with dates |
+| Standard parser (ADR 0066, ADR 0069, ADR 0074) | – | with dates, through a copy of leia-core's processor of term ranges; no points, and Lucene's own lower-casing of expanded terms rather than the analyzer's | as 9.12.3 | with dates, through a copy of leia-core's processor of term ranges | leia-core's, with dates |
 | Classic dates (ADR 0026, ADR 0069) | ✓, in a zone the parser holds itself (3.6 has none); without a resolution, a date becomes a `DateField` term, as 3.6 does | ✓ | ✓ | ✓ | ✓ |
 | Fuzzy terms (ADR 0069) | a minimum similarity of 0.5; the edits are ignored | the edits | the edits | the edits | the edits |
 | Split on whitespace (ADR 0069) | always | always | as chosen | as chosen | as chosen |
 | Segment blocks (ADR 0069) | – | – | – | recorded from 9.9 | recorded |
 | Directory class in the stats (ADR 0069) | ✓; `fs` gives `NIOFSDirectory`, as 3.6 can't unmap | ✓ | ✓ | ✓ | ✓ |
-| More-Like-This (ADR 0066) | – | – | – | built from the reader before the rewrite, its terms worked out as leia-core does | leia-core's |
-| More-Like-This cancellation | – | – | – | between fields while the terms are counted, then through the searcher's `QueryTimeout` | through `ExitableDirectoryReader` |
-| Doc values queries (ADR 0066) | – | – | – | Lucene's slow queries, and leia-core's for `BINARY`, copied | leia-core's |
+| More-Like-This (ADR 0066, ADR 0074) | – | as 7.7.3, but one count of each term over all the fields, its clause in the first field with the most documents | as 9.12.3, but with the live documents for the idf and each token counted once | built from the reader before the rewrite, its terms worked out as leia-core does | leia-core's |
+| More-Like-This cancellation | – | between fields while the terms are counted, then per segment | as 5.5.5 | between fields while the terms are counted, then through the searcher's `QueryTimeout` | through `ExitableDirectoryReader` |
+| Doc values queries (ADR 0066, ADR 0074) | – | the sandbox's range, terms and numbers queries, and leia-core's for `BINARY`, copied | Lucene's slow queries and the sandbox's for sets, and leia-core's for `BINARY`, copied | Lucene's slow queries, and leia-core's for `BINARY`, copied | leia-core's |

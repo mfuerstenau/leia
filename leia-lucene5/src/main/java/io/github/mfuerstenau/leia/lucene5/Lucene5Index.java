@@ -86,7 +86,8 @@ import org.apache.lucene.util.BytesRef;
  * open as one, in a {@link MultiReader} (ADR 0045). A reader of Lucene 5 can be used from several
  * threads, so jobs can read it.
  */
-final class Lucene5Index implements RuntimeIndex, Documents, Terms, Search {
+final class Lucene5Index
+        implements RuntimeIndex, Documents, Terms, Search, DocValuesSearch, StandardSearch, MoreLikeThisSearch {
 
     /** How many terms {@link #topTerms} scans between two reports of its progress. */
     static final int PROGRESS_INTERVAL = 1024;
@@ -215,17 +216,17 @@ final class Lucene5Index implements RuntimeIndex, Documents, Terms, Search {
 
     @Override
     public Optional<DocValuesSearch> docValuesSearch() {
-        return Optional.empty();
+        return Optional.of(this);
     }
 
     @Override
     public Optional<StandardSearch> standardSearch() {
-        return Optional.empty();
+        return Optional.of(this);
     }
 
     @Override
     public Optional<MoreLikeThisSearch> moreLikeThisSearch() {
-        return Optional.empty();
+        return Optional.of(this);
     }
 
     /**
@@ -724,6 +725,76 @@ final class Lucene5Index implements RuntimeIndex, Documents, Terms, Search {
         return new Lucene5Query(new TermQuery(new Term(field, new BytesRef(term))));
     }
 
+    @Override
+    public ParsedQuery numbers(String field, NumberEncoding number, Match<String> match) {
+        return new Lucene5Query(Lucene5DocValuesQueries.numbers(fieldInfo(field), number, match));
+    }
+
+    @Override
+    public ParsedQuery bytes(String field, Match<byte[]> match) {
+        return new Lucene5Query(Lucene5DocValuesQueries.bytes(fieldInfo(field), match));
+    }
+
+    @Override
+    public ParsedQuery prefix(String field, byte[] prefix) {
+        return new Lucene5Query(Lucene5DocValuesQueries.prefix(fieldInfo(field), prefix));
+    }
+
+    /** @throws IllegalArgumentException if the index has no field {@code field} */
+    private FieldInfo fieldInfo(String field) {
+        FieldInfo info = fieldInfos.fieldInfo(field);
+        if (info == null) {
+            throw new IllegalArgumentException("No field '" + field + "' in the index");
+        }
+        return info;
+    }
+
+    @Override
+    public ParsedQuery parse(
+            String expression,
+            StandardSearch.Options options,
+            Map<String, StandardSearch.PointType> points,
+            AnalyzerSpec spec)
+            throws InvalidQueryException, UnsupportedAnalyzerException, InvalidAnalyzerException {
+        try (Analyzer analyzer = Lucene5Analyzers.analyzer(spec)) {
+            return new Lucene5Query(Lucene5StandardParser.parse(expression, options, points, analyzer));
+        } catch (RuntimeException e) {
+            throw new InvalidQueryException(e.getMessage(), e);
+        }
+    }
+
+    /** {@inheritDoc} The query is built in each search, from the reader searched (ADR 0013). */
+    @Override
+    public ParsedQuery like(Source source, MoreLikeThisSearch.Options options, AnalyzerSpec spec)
+            throws UnsupportedAnalyzerException, InvalidAnalyzerException {
+        Lucene5Analyzers.analyzer(spec).close();
+        return new Lucene5Query(new Lucene5MoreLikeQuery(source, options, spec));
+    }
+
+    /**
+     * The analyzer that a More-Like-This query analyzes with while it is built; null for any other
+     * query. The caller closes it.
+     */
+    static Analyzer likeAnalyzer(Query query) {
+        if (!(query instanceof Lucene5MoreLikeQuery like)) {
+            return null;
+        }
+        try {
+            return Lucene5Analyzers.analyzer(like.analyzer());
+        } catch (UnsupportedAnalyzerException | InvalidAnalyzerException e) {
+            // MoreLikeThisSearch.like built it before.
+            throw new IllegalStateException(e.getMessage(), e);
+        }
+    }
+
+    /**
+     * The query to rewrite: a More-Like-This query is built from the searcher's reader with {@code
+     * analyzer} from {@link #likeAnalyzer} first, as leia-core's {@code Searcher} builds it.
+     */
+    static Query built(IndexSearcher searcher, Query query, Analyzer analyzer) throws IOException {
+        return query instanceof Lucene5MoreLikeQuery like ? like.build(searcher.getIndexReader(), analyzer) : query;
+    }
+
     /**
      * {@inheritDoc} Every hit is counted, as 5.5 always counts them. The progress is reported once per
      * segment.
@@ -745,7 +816,16 @@ final class Lucene5Index implements RuntimeIndex, Documents, Terms, Search {
         IndexSearcher searcher = new IndexSearcher(reader);
         // No cache: a query is run once.
         searcher.setQueryCache(null);
-        Query rewritten = searcher.rewrite(query);
+        Optional<List<MoreLikeThisSearch.LikeTerm>> likeTerms = Optional.empty();
+        Query rewritten;
+        try (Analyzer analyzer = likeAnalyzer(query)) {
+            Query built = built(searcher, query, analyzer);
+            if (query instanceof Lucene5MoreLikeQuery like) {
+                // Explained before the rewrite merges a lone clause or drops a ^1.0.
+                likeTerms = Optional.of(Lucene5LikeTerms.of(reader, like, analyzer, built, () -> progress.accept(0)));
+            }
+            rewritten = searcher.rewrite(built);
+        }
         TopScoreDocCollector top = TopScoreDocCollector.create(offset + limit);
         searcher.search(rewritten, new ProgressCollector(top, progress));
         progress.accept(reader.maxDoc());
@@ -765,7 +845,8 @@ final class Lucene5Index implements RuntimeIndex, Documents, Terms, Search {
                 rewritten.toString(),
                 docs.totalHits,
                 List.copyOf(hits),
-                (System.nanoTime() - start) / 1_000_000);
+                (System.nanoTime() - start) / 1_000_000,
+                likeTerms);
     }
 
     /** Passes the hits on, and reports the documents searched at the start of each segment. */
@@ -797,7 +878,10 @@ final class Lucene5Index implements RuntimeIndex, Documents, Terms, Search {
         IndexSearcher searcher = new IndexSearcher(includeDeleted ? undeleted(reader) : reader);
         // No cache: a query is run once.
         searcher.setQueryCache(null);
-        Query rewritten = searcher.rewrite(query);
+        Query rewritten;
+        try (Analyzer analyzer = likeAnalyzer(query)) {
+            rewritten = searcher.rewrite(built(searcher, query, analyzer));
+        }
         BitSet docs = new BitSet(reader.maxDoc());
         searcher.search(rewritten, new MatchCollector(docs, progress));
         progress.accept(reader.maxDoc());
@@ -822,7 +906,11 @@ final class Lucene5Index implements RuntimeIndex, Documents, Terms, Search {
         IndexSearcher searcher = new IndexSearcher(reader);
         // No cache: a query is run once.
         searcher.setQueryCache(null);
-        Explanation explanation = explanation(searcher.explain(lucene5.query, docId));
+        Query query = lucene5.query;
+        Explanation explanation;
+        try (Analyzer analyzer = likeAnalyzer(query)) {
+            explanation = explanation(searcher.explain(built(searcher, query, analyzer), docId));
+        }
         progress.accept(reader.maxDoc());
         return explanation;
     }
