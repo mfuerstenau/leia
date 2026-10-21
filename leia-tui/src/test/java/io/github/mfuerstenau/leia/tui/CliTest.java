@@ -19,7 +19,15 @@ class CliTest {
 
         assertThat(cli)
                 .isEqualTo(new Cli(
-                        false, false, java.util.List.of(), false, DirectoryImpl.FS, false, Optional.empty(), false));
+                        false,
+                        false,
+                        java.util.List.of(),
+                        false,
+                        DirectoryImpl.FS,
+                        false,
+                        Optional.empty(),
+                        false,
+                        false));
     }
 
     @Test
@@ -47,6 +55,8 @@ class CliTest {
     void parsesTheDownloadOfTheRuntimes() throws Exception {
         assertThat(Cli.parse("--download-runtimes").downloadRuntimes()).isTrue();
         assertThat(Cli.parse().downloadRuntimes()).isFalse();
+        assertThat(Cli.parse("--download-runtimes").yes()).isFalse();
+        assertThat(Cli.parse("--download-runtimes", "--yes").yes()).isTrue();
     }
 
     @ParameterizedTest
@@ -90,6 +100,8 @@ class CliTest {
             --no-reader --download-runtimes | --download-runtimes takes no INDEX_PATH
             --download-runtimes --directory nio | --download-runtimes takes no INDEX_PATH
             --download-runtimes --no-default-jars | --download-runtimes takes no INDEX_PATH
+            --yes                       | --yes goes only with --download-runtimes
+            --download-runtimes --yes=1 | --yes takes no value
             -j /opt/jdk                 | -j is taken by the leia script
             --java=/opt/jdk             | --java is taken by the leia script
             """)
@@ -109,6 +121,7 @@ class CliTest {
                         "--directory <IMPL>",
                         "--no-reader",
                         "--download-runtimes",
+                        "--yes",
                         "repo1.maven.org",
                         "SHA-256",
                         "-Djava.net.useSystemProxies=true",

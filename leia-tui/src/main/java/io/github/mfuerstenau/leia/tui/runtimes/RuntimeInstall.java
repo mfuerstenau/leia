@@ -38,6 +38,10 @@ import java.util.jar.JarInputStream;
  * {@code leia.jar}, which embeds them under {@value #RESOURCES}; Lucene's come from Maven Central,
  * as the adapter's list names them, each checked against the list's SHA-256 and size.
  *
+ * <p>Before it writes anything, it lists the Lucene jars it would download, each with its URL,
+ * SHA-256 and size, and downloads them only once the user says yes, or with {@code --yes} (ADR
+ * 0077). With nothing to download, it asks nothing.
+ *
  * <p>A jar that is there and matches is kept; one that doesn't is replaced. A download goes to a
  * temporary file in the folder first, and moves into place only once it matches. Jars in a folder
  * that its list doesn't name, such as those of an older Lucene, are removed.
@@ -61,6 +65,7 @@ public final class RuntimeInstall {
     private final ClassLoader resources;
     private final PrintStream out;
     private final PrintStream err;
+    private final Prompt prompt;
 
     /**
      * @param runtimesDir the folder {@code runtimes} beside {@code leia.jar}
@@ -68,13 +73,16 @@ public final class RuntimeInstall {
      * @param resources the class loader that sees {@value #RESOURCES}
      * @param out gets a line per jar
      * @param err gets what failed
+     * @param prompt asks whether to download
      */
-    public RuntimeInstall(Path runtimesDir, URI base, ClassLoader resources, PrintStream out, PrintStream err) {
+    public RuntimeInstall(
+            Path runtimesDir, URI base, ClassLoader resources, PrintStream out, PrintStream err, Prompt prompt) {
         this.runtimesDir = runtimesDir;
         this.base = base.toString().endsWith("/") ? base : URI.create(base + "/");
         this.resources = resources;
         this.out = out;
         this.err = err;
+        this.prompt = prompt;
     }
 
     /** A failure that ends the install, with what to say about it. */
@@ -88,12 +96,74 @@ public final class RuntimeInstall {
         }
     }
 
+    /** Asks the user a question; empty if there is no one to ask, such as without a terminal. */
+    @FunctionalInterface
+    public interface Prompt {
+
+        /**
+         * @param question what to ask, ending in a space
+         * @return the answer, or empty if there is no one to ask or no answer came
+         */
+        Optional<String> ask(String question);
+    }
+
     /**
-     * Installs every runtime leia knows.
-     *
-     * @return the exit status: 0, or 1 if a runtime couldn't be installed
+     * A runtime's folder as {@code leia.jar} has it, and the Lucene jars of it that need
+     * downloading.
      */
-    public int run() {
+    private record Planned(
+            RuntimeFolders.Known known, byte[] adapter, List<RuntimeFolders.ListedJar> listed, Set<String> missing) {}
+
+    /** A Lucene jar to download. */
+    private record Download(String folder, RuntimeFolders.ListedJar jar, URI uri) {}
+
+    /**
+     * Installs every runtime leia knows. First it lists the Lucene jars that aren't there or don't
+     * match, and asks before it downloads them, unless {@code yes} (ADR 0077).
+     *
+     * @param yes download without asking ({@code --yes})
+     * @return the exit status: 0, or 1 if a runtime couldn't be installed or the download wasn't
+     *     agreed to
+     */
+    public int run(boolean yes) {
+        List<Planned> plan = new ArrayList<>();
+        List<Download> downloads = new ArrayList<>();
+        try {
+            for (RuntimeFolders.Known known : RuntimeFolders.KNOWN) {
+                plan.add(plan(known, downloads));
+            }
+        } catch (InstallException e) {
+            err.println("leia: " + e.getMessage());
+            return 1;
+        }
+        long lucene = plan.stream()
+                .flatMap(planned -> planned.listed().stream())
+                .filter(jar -> jar.mavenPath().isPresent())
+                .count();
+        int kept = (int) lucene - downloads.size();
+        if (downloads.isEmpty()) {
+            out.println("Every Lucene jar is there and matches; nothing to download.");
+        } else {
+            printDownloads(downloads, kept);
+            if (yes) {
+                out.println("--yes given; downloading.");
+            } else {
+                long total = downloads.stream().mapToLong(d -> d.jar().size()).sum();
+                out.flush();
+                Optional<String> answer = prompt.ask(
+                        "Download " + jars(downloads.size()) + ", " + TextFormat.size(total) + " in all? [y/N] ");
+                if (answer.isEmpty()) {
+                    err.println("leia: nothing downloaded: --download-runtimes asks before it downloads, and there is"
+                            + " no terminal to ask on; --yes downloads without asking");
+                    return 1;
+                }
+                String said = answer.get().strip().toLowerCase(Locale.ROOT);
+                if (!said.equals("y") && !said.equals("yes")) {
+                    err.println("leia: nothing downloaded");
+                    return 1;
+                }
+            }
+        }
         HttpClient.Builder builder =
                 HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).followRedirects(HttpClient.Redirect.NORMAL);
         // -Djava.net.useSystemProxies=true makes it the system's.
@@ -102,8 +172,8 @@ public final class RuntimeInstall {
             builder.proxy(proxies);
         }
         try (HttpClient client = builder.build()) {
-            for (RuntimeFolders.Known known : RuntimeFolders.KNOWN) {
-                install(client, known);
+            for (Planned planned : plan) {
+                install(client, planned);
             }
         } catch (InstallException e) {
             err.println("leia: " + e.getMessage());
@@ -113,10 +183,60 @@ public final class RuntimeInstall {
         return 0;
     }
 
-    private void install(HttpClient client, RuntimeFolders.Known known) throws InstallException {
+    /**
+     * Reads the folder of {@code known} from {@code leia.jar}, and adds the Lucene jars that aren't
+     * there or don't match to {@code downloads}. Reads and writes nothing else.
+     */
+    private Planned plan(RuntimeFolders.Known known, List<Download> downloads) throws InstallException {
         String folderName = known.folder();
         byte[] adapter = resource(folderName, known.adapterJar());
         List<RuntimeFolders.ListedJar> listed = list(folderName, known.adapterJar(), adapter);
+        Path folder = runtimesDir.resolve(folderName);
+        Set<String> missing = new HashSet<>();
+        for (RuntimeFolders.ListedJar jar : listed) {
+            if (jar.mavenPath().isEmpty()) {
+                continue;
+            }
+            Path target = folder.resolve(jar.name());
+            if (!Files.isRegularFile(target) || !sha256(target).equals(jar.sha256())) {
+                missing.add(jar.name());
+                downloads.add(new Download(
+                        folderName, jar, base.resolve(jar.mavenPath().get())));
+            }
+        }
+        return new Planned(known, adapter, listed, missing);
+    }
+
+    /** What will be downloaded, with where from and what each jar is checked against. */
+    private void printDownloads(List<Download> downloads, int kept) {
+        if (base.equals(CENTRAL)) {
+            out.println("leia downloads these official Lucene jars from Maven Central (" + CENTRAL + "), unchanged,");
+        } else {
+            out.println("leia downloads these official Lucene jars of Maven Central, unchanged, from " + base
+                    + " (-Dleia.download.url),");
+        }
+        out.println("and checks each against the SHA-256 and size that leia's build recorded:");
+        out.println();
+        for (Download download : downloads) {
+            out.println("  " + download.folder() + "/" + download.jar().name() + ", "
+                    + TextFormat.size(download.jar().size()));
+            out.println("    " + download.uri());
+            out.println("    SHA-256 " + download.jar().sha256());
+        }
+        out.println();
+        out.println("leia's own jars, the adapters and leia-core, come from leia.jar and aren't downloaded.");
+        if (kept > 0) {
+            out.println(jars(kept) + " already there and matching " + (kept == 1 ? "is" : "are") + " kept.");
+        }
+    }
+
+    private static String jars(int count) {
+        return count + (count == 1 ? " jar" : " jars");
+    }
+
+    private void install(HttpClient client, Planned planned) throws InstallException {
+        RuntimeFolders.Known known = planned.known();
+        String folderName = known.folder();
         Path folder = runtimesDir.resolve(folderName);
         try {
             Files.createDirectories(folder);
@@ -125,13 +245,15 @@ public final class RuntimeInstall {
         }
         Set<String> names = new HashSet<>();
         names.add(known.adapterJar());
-        writeOwn(folder, known.adapterJar(), adapter);
-        for (RuntimeFolders.ListedJar jar : listed) {
+        writeOwn(folder, known.adapterJar(), planned.adapter());
+        for (RuntimeFolders.ListedJar jar : planned.listed()) {
             names.add(jar.name());
-            if (jar.mavenPath().isPresent()) {
-                download(client, folder, jar, jar.mavenPath().get());
-            } else {
+            if (jar.mavenPath().isEmpty()) {
                 writeOwn(folder, jar.name(), resource(folderName, jar.name()));
+            } else if (planned.missing().contains(jar.name())) {
+                download(client, folder, jar, base.resolve(jar.mavenPath().get()));
+            } else {
+                out.println(folderName + "/" + jar.name() + ": kept");
             }
         }
         removeStale(folder, names);
@@ -186,16 +308,11 @@ public final class RuntimeInstall {
         out.println(label + ": written, " + TextFormat.size(content.length));
     }
 
-    /** Downloads a Lucene jar, unless it is there already and matches. */
-    private void download(HttpClient client, Path folder, RuntimeFolders.ListedJar jar, String mavenPath)
+    /** Downloads a Lucene jar from {@code uri}, and moves it into place once it matches. */
+    private void download(HttpClient client, Path folder, RuntimeFolders.ListedJar jar, URI uri)
             throws InstallException {
         Path target = folder.resolve(jar.name());
         String label = folder.getFileName() + "/" + jar.name();
-        if (Files.isRegularFile(target) && sha256(target).equals(jar.sha256())) {
-            out.println(label + ": kept");
-            return;
-        }
-        URI uri = base.resolve(mavenPath);
         Path part = null;
         try {
             part = Files.createTempFile(folder, jar.name(), PART);

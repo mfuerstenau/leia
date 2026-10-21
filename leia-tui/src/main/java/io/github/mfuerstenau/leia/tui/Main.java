@@ -17,6 +17,7 @@ import io.github.mfuerstenau.leia.tui.app.Session;
 import io.github.mfuerstenau.leia.tui.jars.DefaultJars;
 import io.github.mfuerstenau.leia.tui.jars.RuntimeFolders;
 import io.github.mfuerstenau.leia.tui.runtimes.RuntimeInstall;
+import java.io.Console;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -80,7 +81,7 @@ public final class Main {
             return printVersion(out, err);
         }
         if (cli.downloadRuntimes()) {
-            return downloadRuntimes(platform, out, err);
+            return downloadRuntimes(platform, cli.yes(), out, err);
         }
         for (Path jar : cli.jars()) {
             if (!Files.exists(jar)) {
@@ -137,9 +138,10 @@ public final class Main {
 
     /**
      * {@code --download-runtimes} (ADR 0073): before any jar is loaded, so that none of the runtimes'
-     * jars is open, which Windows wouldn't let it replace, and with the terminal still leia's.
+     * jars is open, which Windows wouldn't let it replace, and with the terminal still leia's. It
+     * asks on the terminal before it downloads, unless {@code yes} (ADR 0077).
      */
-    private static int downloadRuntimes(Platform platform, PrintStream out, PrintStream err) {
+    private static int downloadRuntimes(Platform platform, boolean yes, PrintStream out, PrintStream err) {
         // Not into leia.log, which would lose the last session's log; only problems show.
         LeiaLog.toStderr(Level.WARNING);
         Optional<Path> runtimesDir = platform.runtimesDir();
@@ -148,8 +150,13 @@ public final class Main {
                     + " run from leia.jar");
             return 1;
         }
-        return new RuntimeInstall(runtimesDir.get(), RuntimeInstall.base(), Main.class.getClassLoader(), out, err)
-                .run();
+        Console console = System.console();
+        RuntimeInstall.Prompt prompt = console != null && console.isTerminal()
+                ? question -> Optional.ofNullable(console.readLine("%s", question))
+                : question -> Optional.empty();
+        return new RuntimeInstall(
+                        runtimesDir.get(), RuntimeInstall.base(), Main.class.getClassLoader(), out, err, prompt)
+                .run(yes);
     }
 
     /**

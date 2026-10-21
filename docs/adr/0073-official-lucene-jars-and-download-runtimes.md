@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-14
 - **Supersedes:** ADR 0044 §1 (relocation, and its rejected alternative of separate class loaders)
+- **Amended by:** ADR 0077 (`--download-runtimes` lists the jars and asks first; `--yes`)
 - **Amends:** ADR 0004 (release folders without `runtimes/`); ADR 0065 §4 (step 5 dropped, steps 6 and 7 as built here); ADR 0068 §2 (old runtimes see no `--jar` jars); ADR 0072 (the layout of `runtimes/`); AGENTS.md hard rule 5, the architecture and the CLI contract
 
 ## Context

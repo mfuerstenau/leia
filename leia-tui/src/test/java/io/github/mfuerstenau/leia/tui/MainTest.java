@@ -92,6 +92,13 @@ class MainTest {
     }
 
     @Test
+    void refusesYesWithoutTheDownload() throws Exception {
+        assertThat(run("--yes")).isEqualTo(2);
+
+        assertThat(err()).contains("leia: --yes goes only with --download-runtimes");
+    }
+
+    @Test
     void reportsAJarThatDoesNotExist() throws Exception {
         Path missing = tmp.resolve("missing.jar");
 

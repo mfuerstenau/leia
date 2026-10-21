@@ -15,9 +15,12 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.jar.JarEntry;
 import java.util.jar.JarInputStream;
 import java.util.stream.Stream;
@@ -41,6 +44,8 @@ class RuntimeInstallTest {
     private HttpServer server;
     /** What the repository serves by Maven path; missing paths are 404. */
     private final Map<String, byte[]> served = new ConcurrentHashMap<>();
+    /** How many requests the repository got. */
+    private final AtomicInteger requests = new AtomicInteger();
 
     private final ByteArrayOutputStream out = new ByteArrayOutputStream();
     private final ByteArrayOutputStream err = new ByteArrayOutputStream();
@@ -56,6 +61,7 @@ class RuntimeInstallTest {
         }
         server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
         server.createContext("/maven2/", exchange -> {
+            requests.incrementAndGet();
             String path = exchange.getRequestURI().getPath().substring("/maven2/".length());
             byte[] body = served.get(path);
             if (body == null) {
@@ -173,14 +179,115 @@ class RuntimeInstallTest {
         }
     }
 
+    @Test
+    void listsTheJarsAndDownloadsNothingWhenTheAnswerIsNo() throws Exception {
+        Path runtimes = tmp.resolve("runtimes");
+        RuntimeFolders.ListedJar core = listed(lucene9()).stream()
+                .filter(jar -> jar.name().equals("lucene-core-9.12.3.jar"))
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(run(runtimes, false, question -> Optional.of("n"))).isEqualTo(1);
+
+        assertThat(error()).contains("leia: nothing downloaded");
+        assertThat(requests).hasValue(0);
+        assertThat(runtimes).doesNotExist();
+        assertThat(output())
+                .contains(base() + core.mavenPath().orElseThrow())
+                .contains("SHA-256 " + core.sha256())
+                .contains("unchanged", "Maven Central", "come from leia.jar")
+                .doesNotContain("kept");
+    }
+
+    @Test
+    void refusesWithoutATerminal() throws Exception {
+        Path runtimes = tmp.resolve("runtimes");
+
+        assertThat(run(runtimes, false, question -> Optional.empty())).isEqualTo(1);
+
+        assertThat(error()).contains("leia: nothing downloaded", "no terminal", "--yes downloads without asking");
+        assertThat(requests).hasValue(0);
+        assertThat(runtimes).doesNotExist();
+    }
+
+    @Test
+    void downloadsAfterAYes() throws Exception {
+        List<String> questions = new ArrayList<>();
+        long count = 0;
+        for (RuntimeFolders.Known known : RuntimeFolders.KNOWN) {
+            count += listed(known).stream()
+                    .filter(jar -> jar.mavenPath().isPresent())
+                    .count();
+        }
+
+        assertThat(run(tmp.resolve("runtimes"), false, question -> {
+                    questions.add(question);
+                    return Optional.of(" YES ");
+                }))
+                .isZero();
+
+        assertThat(questions)
+                .singleElement()
+                .asString()
+                .startsWith("Download " + count + " jars, ")
+                .endsWith("[y/N] ");
+        assertThat(requests).hasValue((int) count);
+    }
+
+    @Test
+    void asksNothingWhenEveryJarMatches() throws Exception {
+        Path runtimes = tmp.resolve("runtimes");
+        assertThat(install(runtimes)).isZero();
+        out.reset();
+        requests.set(0);
+
+        assertThat(run(runtimes, false, question -> {
+                    throw new AssertionError("asked " + question);
+                }))
+                .isZero();
+
+        assertThat(output()).contains("nothing to download", "lucene9/lucene-core-9.12.3.jar: kept");
+        assertThat(requests).hasValue(0);
+    }
+
+    @Test
+    void listsOnlyWhatIsMissing() throws Exception {
+        Path runtimes = tmp.resolve("runtimes");
+        assertThat(install(runtimes)).isZero();
+        Files.writeString(runtimes.resolve("lucene9/lucene-core-9.12.3.jar"), "corrupt");
+        out.reset();
+
+        assertThat(run(runtimes, false, question -> Optional.of("no"))).isEqualTo(1);
+
+        assertThat(output())
+                .contains("  lucene9/lucene-core-9.12.3.jar, ")
+                .doesNotContain("lucene7/lucene-core-7.7.3.jar")
+                .contains("already there and matching are kept");
+        assertThat(runtimes.resolve("lucene9/lucene-core-9.12.3.jar")).hasContent("corrupt");
+    }
+
     private int install(Path runtimes) {
+        return run(runtimes, true, question -> {
+            throw new AssertionError("asked " + question);
+        });
+    }
+
+    private int run(Path runtimes, boolean yes, RuntimeInstall.Prompt prompt) {
         return new RuntimeInstall(
                         runtimes,
                         base(),
                         RuntimeInstallTest.class.getClassLoader(),
                         new PrintStream(out, true, StandardCharsets.UTF_8),
-                        new PrintStream(err, true, StandardCharsets.UTF_8))
-                .run();
+                        new PrintStream(err, true, StandardCharsets.UTF_8),
+                        prompt)
+                .run(yes);
+    }
+
+    private static RuntimeFolders.Known lucene9() {
+        return RuntimeFolders.KNOWN.stream()
+                .filter(known -> known.folder().equals("lucene9"))
+                .findFirst()
+                .orElseThrow();
     }
 
     private URI base() {
