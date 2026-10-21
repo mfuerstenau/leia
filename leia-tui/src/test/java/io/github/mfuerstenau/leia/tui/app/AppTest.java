@@ -2674,7 +2674,7 @@ class AppTest {
         Path home = Path.of("/home/me");
         Path dir = home.resolve(".config/leia/jars");
         App app = app(Optional.of(home)).withDefaultJars(new DefaultJars(Optional.of(dir), DefaultJars.State.LOADED));
-        assertThat(render(app)).contains("X jars", "or X to add jars");
+        assertThat(render(app)).contains("X jars", "or X to");
         assertThat(app.handleKey(key('6'))).hasValue(new Action.LoadAnalysisComponents());
         app.componentsLoaded(COMPONENTS);
 

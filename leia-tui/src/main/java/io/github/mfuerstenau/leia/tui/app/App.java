@@ -185,6 +185,12 @@ public final class App {
     /** How many jumps Backspace can retrace at most (ADR 0052). */
     private static final int BACK_DEPTH = 16;
 
+    /** Rows above the logo on the about screen. */
+    private static final int ABOUT_PADDING_TOP = 1;
+
+    /** Columns left of the logo on the about screen. */
+    private static final int ABOUT_PADDING_LEFT = 2;
+
     /**
      * The screens that the jumps to the shown one came from, the last one first (ADR 0052), with
      * where the jumps left them (ADR 0053). A number key, an open and a close forget them.
@@ -2212,9 +2218,15 @@ public final class App {
         Block block = bordered(" leia ");
         Rect inner = block.inner(body);
         frame.renderWidget(block, body);
-        // The logo only where it leaves room for the text.
-        if (inner.height() >= Logo.HEIGHT && inner.width() >= Logo.WIDTH + 2 + 40) {
-            Logo.renderBeside(frame, inner, lines);
+        // The logo only where it leaves room for the text, a row below the border and two columns
+        // right of it, which look about the same.
+        Rect padded = new Rect(
+                inner.x() + ABOUT_PADDING_LEFT,
+                inner.y() + ABOUT_PADDING_TOP,
+                Math.max(inner.width() - ABOUT_PADDING_LEFT, 0),
+                Math.max(inner.height() - ABOUT_PADDING_TOP, 0));
+        if (padded.height() >= Logo.HEIGHT && padded.width() >= Logo.WIDTH + 2 + 40) {
+            Logo.renderBeside(frame, padded, lines);
         } else {
             frame.renderWidget(wrapped(lines, null, inner), inner);
         }

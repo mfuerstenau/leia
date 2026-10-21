@@ -16,38 +16,37 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * leia's logo: the pixel art of {@code docs/leia2.png}, drawn with half blocks so that one terminal
- * cell holds two pixels, one above the other, which keeps the pixels about square. Next to it go
- * leia's name, version and build.
+ * leia's logo: pixel art in seven shades of grey and cream, drawn with half blocks so that one
+ * terminal cell holds two pixels, one above the other, which keeps the pixels about square. Next to
+ * it go leia's name, version and build.
  */
 public final class Logo {
 
     /**
-     * The pixels, one character each: {@code .} black, {@code #} white, {@code W} skin, {@code s}
-     * hair, {@code H} grey, {@code g} transparent.
+     * The pixels, one character each: the digits {@code 0} to {@code 6} from darkest to lightest,
+     * {@code g} transparent.
      */
     static final List<String> SPRITE = List.of(
-            "ggggssssggggggg",
-            "gsgssssssgsgggg",
-            "ssssssssssssggg",
-            "sssWWWWWWsssggg",
-            "sssWW.W.Wsssggg",
-            "sssWW.W.Wsssggg",
-            "gsgWWWWWWgsgggg",
-            "ggggWWWWggggggg",
-            "ggg######gggHHH",
-            "gg#########WHgg",
-            "gg#########WWgg",
-            "gg#WWHHHHgg#ggg",
-            "gggWW####gggggg",
-            "ggg#######ggggg",
-            "gg########ggggg");
+            "ggg023233323233233233200ggg",
+            "ggg000001111110111100000ggg",
+            "gg00464513445454331655400gg",
+            "g0055335401112121064333600g",
+            "105320006011211110500003510",
+            "053305500065150650305651350",
+            "053062551034031330355223250",
+            "053150340010110110053051250",
+            "055301450255555542055211340",
+            "g0543350012222222200533350g",
+            "gg06560g03333333320g06650gg",
+            "gg00000gg011111110gg00000gg",
+            "ggggggggg034555320ggggggggg",
+            "ggggggggg000000000ggggggggg");
 
     /** Columns the logo takes. */
-    public static final int WIDTH = 15;
+    public static final int WIDTH = 27;
 
     /** Rows the logo takes: two pixel rows each. */
-    public static final int HEIGHT = 8;
+    public static final int HEIGHT = 7;
 
     /** Columns between the logo and the text next to it. */
     static final int GAP = 2;
@@ -57,11 +56,13 @@ public final class Logo {
     /** The colour of a pixel; empty for a transparent one. */
     static Optional<Color> color(char pixel) {
         return switch (pixel) {
-            case '.' -> Optional.of(Color.rgb(0, 0, 0));
-            case '#' -> Optional.of(Color.rgb(255, 255, 255));
-            case 'W' -> Optional.of(Color.rgb(255, 232, 189));
-            case 's' -> Optional.of(Color.rgb(105, 53, 0));
-            case 'H' -> Optional.of(Color.rgb(126, 126, 126));
+            case '0' -> Optional.of(Color.rgb(0x3c, 0x3c, 0x3c));
+            case '1' -> Optional.of(Color.rgb(0x5d, 0x5b, 0x58));
+            case '2' -> Optional.of(Color.rgb(0xab, 0x9f, 0x90));
+            case '3' -> Optional.of(Color.rgb(0xcf, 0xc1, 0xac));
+            case '4' -> Optional.of(Color.rgb(0xf7, 0xeb, 0xd4));
+            case '5' -> Optional.of(Color.rgb(0xfc, 0xf7, 0xe6));
+            case '6' -> Optional.of(Color.rgb(0xfe, 0xfe, 0xfd));
             default -> Optional.empty();
         };
     }
@@ -98,7 +99,7 @@ public final class Logo {
 
     /**
      * leia's name and version, what the name stands for, then its build: {@code leia 0.1.0},
-     * {@code Lucene Explorer for Index Analysis}, {@code build 9229a55}, the commit time. leia and
+     * {@code Luke Evolved Index Analysis}, {@code build 9229a55}, the commit time. leia and
      * its backend are one build (ADR 0034), so the backend's version is leia's.
      */
     public static List<Line> aboutLines(VersionResult version) {
@@ -109,19 +110,15 @@ public final class Logo {
                 Line.from(version.commitTime()));
     }
 
-    /** {@code Lucene Explorer for Index Analysis}, with the letters of leia's name bold and the rest dim. */
+    /** {@code Luke Evolved Index Analysis}, with the letters of leia's name bold and the rest dim. */
     static Line acronym() {
         List<Span> spans = new ArrayList<>();
-        for (String word : List.of("Lucene", "Explorer", "for", "Index", "Analysis")) {
+        for (String word : List.of("Luke", "Evolved", "Index", "Analysis")) {
             if (!spans.isEmpty()) {
                 spans.add(Span.styled(" ", Style.EMPTY.dim()));
             }
-            if (word.equals("for")) {
-                spans.add(Span.styled(word, Style.EMPTY.dim()));
-            } else {
-                spans.add(Span.styled(word.substring(0, 1), Style.EMPTY.bold()));
-                spans.add(Span.styled(word.substring(1), Style.EMPTY.dim()));
-            }
+            spans.add(Span.styled(word.substring(0, 1), Style.EMPTY.bold()));
+            spans.add(Span.styled(word.substring(1), Style.EMPTY.dim()));
         }
         return Line.from(spans);
     }

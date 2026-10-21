@@ -29,23 +29,22 @@ class LogoTest {
         assertThat(lines).hasSize(Logo.HEIGHT);
         assertThat(lines).allMatch(line -> line.width() == Logo.WIDTH);
 
-        // The eyes: black above black.
-        Span eye = lines.get(2).spans().get(5);
-        assertThat(eye.content()).isEqualTo("▀");
-        assertThat(eye.style().fg()).hasValue(Color.rgb(0, 0, 0));
-        assertThat(eye.style().bg()).hasValue(Color.rgb(0, 0, 0));
-
         // Top left: transparent above transparent.
         assertThat(lines.getFirst().spans().getFirst()).isEqualTo(Span.raw(" "));
-        // The dress above nothing, in the last row, which has only one pixel row.
-        Span hem = lines.get(7).spans().get(2);
-        assertThat(hem.content()).isEqualTo("▀");
-        assertThat(hem.style().fg()).hasValue(Color.rgb(255, 255, 255));
-        assertThat(hem.style().bg()).isEmpty();
-        // Hair below nothing: the bun's top.
-        Span bun = lines.getFirst().spans().get(1);
-        assertThat(bun.content()).isEqualTo("▄");
-        assertThat(bun.style().fg()).hasValue(Color.rgb(105, 53, 0));
+        // Two colours in one cell.
+        Span both = lines.getFirst().spans().get(4);
+        assertThat(both.content()).isEqualTo("▀");
+        assertThat(both.style().fg()).hasValue(Color.rgb(0xab, 0x9f, 0x90));
+        assertThat(both.style().bg()).hasValue(Color.rgb(0x3c, 0x3c, 0x3c));
+        // Opaque below transparent.
+        Span below = lines.get(1).spans().get(1);
+        assertThat(below.content()).isEqualTo("▄");
+        assertThat(below.style().fg()).hasValue(Color.rgb(0x3c, 0x3c, 0x3c));
+        // Opaque above transparent.
+        Span above = lines.get(4).spans().getFirst();
+        assertThat(above.content()).isEqualTo("▀");
+        assertThat(above.style().fg()).hasValue(Color.rgb(0x3c, 0x3c, 0x3c));
+        assertThat(above.style().bg()).isEmpty();
     }
 
     @Test
@@ -54,7 +53,7 @@ class LogoTest {
 
         assertThat(Logo.aboutLines(version))
                 .extracting(Line::rawContent)
-                .containsExactly("leia 1", "Lucene Explorer for Index Analysis", "build abc", "t");
+                .containsExactly("leia 1", "Luke Evolved Index Analysis", "build abc", "t");
 
         StringBuilder bold = new StringBuilder();
         for (Span span : Logo.aboutLines(version).get(1).spans()) {

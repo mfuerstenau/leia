@@ -630,3 +630,8 @@ thread, so the UI never waits for Lucene; long scans run as jobs that the UI pol
 
 More detail for contributors: [`AGENTS.md`](AGENTS.md) (layout, rules, commands) and the
 architecture decisions in [`docs/adr/`](docs/adr/).
+
+## Name and disclaimer
+
+leia stands for **L**uke **E**volved **I**ndex **A**nalysis. leia is in no way affiliated with,
+endorsed by or connected to Disney, Lucasfilm or the Star Wars franchise.

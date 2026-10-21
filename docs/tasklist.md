@@ -2,14 +2,6 @@
 
 The work queue for leia. Check items off (`[x]`) as they land, and keep it aligned with the "Remaining / next" section of the latest entry in `docs/SESSION-SUMMARIES.md`. Finished items move to `docs/tasklist-done.md`.
 
-## Branding: copyright
-
-Goal: no Star Wars imagery in leia, because of copyright concerns. The name leia stays.
-
-- [ ] Replace the logo's pixel art. The new art is in `go-graphics` at the repository root: Go `fmt.Print` lines of ANSI half blocks `▄`, where the background colour (`48;2;r;g;b`) is the top pixel and the foreground (`38;2;r;g;b`) the bottom one. That gives 27 columns × 7 rows, 14 pixel rows, in the colours `3c3c3c`, `5d5b58`, `ab9f90`, `cfc1ac`, `f7ebd4`, `fcf7e6` and `fefefd`. `ff0000` is the transparent background. Convert it to `Logo.SPRITE` and `Logo.color` in `leia-tui/…/tui/widgets/Logo.java`, set `WIDTH` and `HEIGHT` to match, and check what assumes the 15 × 8 size (`LogoTest`, `OverviewTest`, `AppTest`, the overview's and the about screen's layout). Remove `docs/leia.png` and `docs/leia2.png`, and the Javadoc's reference to them, and then `go-graphics` itself.
-- [ ] The acronym becomes "**L**uke **E**volved **I**ndex **A**nalysis", instead of "Lucene Explorer for Index Analysis": `Logo.acronym()` and its Javadoc, `LogoTest`, `OverviewTest`, and the README if it names it.
-- [ ] A disclaimer in `README.md`: leia is in no way affiliated with, endorsed by or connected to Disney, Lucasfilm or the Star Wars franchise.
-
 ## Lucene 9.12 beyond classic search
 
 Goal: an index created by Lucene 8.x (read with `leia-lucene9`, ADR 0049) gets the features that are greyed out for it today. 9.12 has the APIs that leia-core uses for them on Lucene 10, so most are ports. What needs no runtime change goes to every runtime at once. The others need runtime interface 7 (one ADR for the interface, amending ADR 0049 §4). They land in 9.12 first, and in 5.5 and 7.7 where the copy is the same (ADR 0050). Each item adds its feature in `RuntimeResults.features`, a `runtime()` branch in its handlers, and its row in `docs/runtimes.md` (checked by `RuntimeFeaturesTest`). The TUI already gates on the features.
