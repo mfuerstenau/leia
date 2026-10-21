@@ -1,6 +1,7 @@
 # ADR 0067 — Runtime interface 17: analysis
 
 - **Status:** Accepted
+- **Amended by:** ADR 0075 (§7: 7.7 and 5.5 copy 9.12)
 - **Date:** 2026-10-14
 - **Amends:** ADR 0045 §8 (the analyzer of a runtime's search); ADR 0049 §4 (the runtime interface); ADR 0065 §3 (a named analyzer becomes a preset by class name) and §6 (the 2b rows of the parity table are done, and the row of two presets with the same simple name moves from 2d into 2b)
 
@@ -37,7 +38,7 @@ The analysis tab doesn't depend on an index, so it stays on Lucene 10. Only `lei
      - Japanese, Korean and Japanese-completion options are `UnsupportedAnalyzerException`, since 9.12 has no Kuromoji, Nori or ICU, and the `--jar` modules are Lucene 10's.
    - **`Lucene9CustomAnalyzers`** copies core's `custom`, `builder` and `add` against the relocated `CustomAnalyzer` and its SPI lists, which the convention's `mergeServiceFiles` relocates. Resources are read from the config directory, then through the runtime's own class loader, not `ExtensionJars`. A component name 9.12 doesn't have is `UnsupportedAnalyzerException` ("Lucene 9.12.3 has no token filter 'x'"), since the TUI offers Lucene 10's components.
    - **`Lucene9Analyzers`** is the dispatch, with core's checks and messages for the shingle sizes and the token limit, then `ShingleAnalyzerWrapper` and `LimitTokenCountAnalyzer(…, consumeAllTokens)`. A field's analyzer that is invalid says "field 'x': …", as in core.
-7. **3.6, 5.5 and 7.7 keep their reach.**
+7. **3.6 keeps its reach.** *Amended (ADR 0075):* 7.7 and 5.5 copy 9.12, as §6 says.
    - `Standard` and a `Preset` of their table take stop words (words or a file) and the longest token.
    - `Wrapped` with only a token limit works. 3.6 ignores `consumeAllTokens`, since it changes no token.
    - Anything else is `UnsupportedAnalyzerException`, worded as the server worded it before: "shingles", "custom analyzers", "options of X other than stop words and the longest token".
@@ -67,4 +68,4 @@ The analysis tab doesn't depend on an index, so it stays on Lucene 10. Only `lei
 - On `lucene8` and `lucene8to9`, the search screen's analyzer editor works with custom analyzers, shingles and the preset options. The analysis tab still runs on Lucene 10.
 - On a runtime, the analyzer of a highlight is built in the highlight's job, as before. One that is wrong fails that job with `INVALID_ANALYZER`, where leia-core fails `startSearch` or `startHighlight` at once. The parity test highlights with the standard analyzer only.
 - A fix to analyzer building belongs in core, its 9.12 copy and, for the spec, in `AnalyzerSpecs` and `RuntimeAnalyzers`.
-- 7.7 and 5.5 stay without custom analyzers, shingles and preset options; the tasklist has the item.
+- 7.7 and 5.5 stay without custom analyzers, shingles and preset options. *Amended (ADR 0075):* they have them now.

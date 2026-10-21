@@ -609,14 +609,71 @@ class Lucene7IndexTest {
                                     "WhitespaceAnalyzer",
                                     Optional.of(new Search.AnalyzerSpec.WordSet.Words(List.of("a"))),
                                     OptionalInt.empty())))
-                    .isInstanceOf(Search.UnsupportedAnalyzerException.class)
-                    .hasMessageContaining("takes no stop words");
+                    .isInstanceOf(Search.InvalidAnalyzerException.class)
+                    .hasMessage("WhitespaceAnalyzer takes no stop words");
             assertThatThrownBy(() -> search.parse(
                             "alpha",
                             BODY,
                             new Search.AnalyzerSpec.Preset("EnglishAnalyzer", Optional.empty(), OptionalInt.of(3))))
+                    .isInstanceOf(Search.InvalidAnalyzerException.class)
+                    .hasMessage("EnglishAnalyzer takes no max token length");
+            // Its StopAnalyzer has default stop words, unlike 9.12's (ADR 0075).
+            assertThat(search.parse("Alpha the", BODY, named("StopAnalyzer"))).hasToString("body:alpha");
+            assertThat(search.parse(
+                            "Alpha BETA",
+                            BODY,
+                            new Search.AnalyzerSpec.Custom(
+                                    List.of(),
+                                    new Search.AnalyzerSpec.Component("whitespace", Map.of()),
+                                    List.of(new Search.AnalyzerSpec.Component("lowercase", Map.of())),
+                                    Optional.empty())))
+                    .hasToString("body:alpha body:beta");
+            assertThat(search.parse(
+                            "\"alpha beta gamma\"",
+                            BODY,
+                            new Search.AnalyzerSpec.Wrapped(
+                                    named("StandardAnalyzer"),
+                                    Optional.of(new Search.AnalyzerSpec.Shingles(2, 2, "_", false, false, "-")),
+                                    Optional.empty())))
+                    .hasToString("body:\"alpha_beta beta_gamma\"");
+            Search.AnalyzerSpec collation = new Search.AnalyzerSpec.Preset(
+                    "CollationKeyAnalyzer",
+                    Optional.empty(),
+                    Optional.empty(),
+                    OptionalInt.empty(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.of(new Search.AnalyzerSpec.Collation(
+                            "de", Optional.of(Search.AnalyzerSpec.CollationStrength.PRIMARY), Optional.empty())),
+                    Optional.empty());
+            assertThat(search.parse("Alpha", BODY, collation).toString())
+                    .isEqualTo(search.parse("alpha", BODY, collation).toString());
+            assertThat(search.parse(
+                            "alpha",
+                            BODY,
+                            new Search.AnalyzerSpec.Preset(
+                                    "DutchAnalyzer",
+                                    Optional.empty(),
+                                    Optional.empty(),
+                                    OptionalInt.empty(),
+                                    Optional.of(
+                                            new Search.AnalyzerSpec.StemDictionary.Entries(Map.of("alpha", "gamma"))),
+                                    Optional.empty(),
+                                    Optional.empty(),
+                                    Optional.empty(),
+                                    Optional.empty())))
+                    .hasToString("body:gamma");
+            assertThatThrownBy(() -> search.parse(
+                            "alpha",
+                            BODY,
+                            new Search.AnalyzerSpec.Custom(
+                                    List.of(),
+                                    new Search.AnalyzerSpec.Component("standard", Map.of()),
+                                    List.of(new Search.AnalyzerSpec.Component("romanianNormalization", Map.of())),
+                                    Optional.empty())))
                     .isInstanceOf(Search.UnsupportedAnalyzerException.class)
-                    .hasMessageContaining("takes no longest token");
+                    .hasMessage("Lucene 7.7.3 has no token filter 'romanianNormalization'");
         }
     }
 

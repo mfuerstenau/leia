@@ -3,232 +3,103 @@ package io.github.mfuerstenau.leia.lucene7;
 import io.github.mfuerstenau.leia.runtime.Search.AnalyzerSpec;
 import io.github.mfuerstenau.leia.runtime.Search.InvalidAnalyzerException;
 import io.github.mfuerstenau.leia.runtime.Search.UnsupportedAnalyzerException;
-import io.github.mfuerstenau.leia.runtime.support.WordFiles;
-import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
-import java.util.OptionalInt;
-import java.util.Set;
-import java.util.TreeSet;
-import java.util.stream.Collectors;
+import java.util.TreeMap;
 import org.apache.lucene.analysis.Analyzer;
-import org.apache.lucene.analysis.CharArraySet;
-import org.apache.lucene.analysis.ar.ArabicAnalyzer;
-import org.apache.lucene.analysis.bg.BulgarianAnalyzer;
-import org.apache.lucene.analysis.bn.BengaliAnalyzer;
-import org.apache.lucene.analysis.br.BrazilianAnalyzer;
-import org.apache.lucene.analysis.ca.CatalanAnalyzer;
-import org.apache.lucene.analysis.cjk.CJKAnalyzer;
-import org.apache.lucene.analysis.ckb.SoraniAnalyzer;
-import org.apache.lucene.analysis.core.KeywordAnalyzer;
-import org.apache.lucene.analysis.core.SimpleAnalyzer;
-import org.apache.lucene.analysis.core.StopAnalyzer;
-import org.apache.lucene.analysis.core.UnicodeWhitespaceAnalyzer;
-import org.apache.lucene.analysis.core.WhitespaceAnalyzer;
-import org.apache.lucene.analysis.cz.CzechAnalyzer;
-import org.apache.lucene.analysis.da.DanishAnalyzer;
-import org.apache.lucene.analysis.de.GermanAnalyzer;
-import org.apache.lucene.analysis.el.GreekAnalyzer;
-import org.apache.lucene.analysis.en.EnglishAnalyzer;
-import org.apache.lucene.analysis.es.SpanishAnalyzer;
-import org.apache.lucene.analysis.eu.BasqueAnalyzer;
-import org.apache.lucene.analysis.fa.PersianAnalyzer;
-import org.apache.lucene.analysis.fi.FinnishAnalyzer;
-import org.apache.lucene.analysis.fr.FrenchAnalyzer;
-import org.apache.lucene.analysis.ga.IrishAnalyzer;
-import org.apache.lucene.analysis.gl.GalicianAnalyzer;
-import org.apache.lucene.analysis.hi.HindiAnalyzer;
-import org.apache.lucene.analysis.hu.HungarianAnalyzer;
-import org.apache.lucene.analysis.hy.ArmenianAnalyzer;
-import org.apache.lucene.analysis.id.IndonesianAnalyzer;
-import org.apache.lucene.analysis.it.ItalianAnalyzer;
-import org.apache.lucene.analysis.lt.LithuanianAnalyzer;
-import org.apache.lucene.analysis.lv.LatvianAnalyzer;
 import org.apache.lucene.analysis.miscellaneous.LimitTokenCountAnalyzer;
 import org.apache.lucene.analysis.miscellaneous.PerFieldAnalyzerWrapper;
-import org.apache.lucene.analysis.nl.DutchAnalyzer;
-import org.apache.lucene.analysis.no.NorwegianAnalyzer;
-import org.apache.lucene.analysis.pt.PortugueseAnalyzer;
-import org.apache.lucene.analysis.ro.RomanianAnalyzer;
-import org.apache.lucene.analysis.ru.RussianAnalyzer;
-import org.apache.lucene.analysis.standard.ClassicAnalyzer;
+import org.apache.lucene.analysis.shingle.ShingleAnalyzerWrapper;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
-import org.apache.lucene.analysis.standard.UAX29URLEmailAnalyzer;
-import org.apache.lucene.analysis.sv.SwedishAnalyzer;
-import org.apache.lucene.analysis.th.ThaiAnalyzer;
-import org.apache.lucene.analysis.tr.TurkishAnalyzer;
-import org.apache.lucene.util.Version;
 
 /**
- * The analyzers of Lucene 7.7 for the query parser (ADR 0048): the six of the core presets, {@code
- * UnicodeWhitespaceAnalyzer} and {@code UAX29URLEmailAnalyzer}, and the language analyzers of
- * analyzers-common. Stop words and the longest token apply where 7.7 takes them; anything else is
- * refused.
- *
- * <p>The analyzers are a table of class literals of this runtime's Lucene, built through their
- * no-arg and {@code (CharArraySet)} constructors.
+ * The analyzers of Lucene 7.7 for the query parsers, More-Like-This and highlighting (ADR 0048, ADR
+ * 0075), as leia-core builds them on Lucene 10: the standard analyzer, a preset ({@link
+ * Lucene7Presets}) or a custom analyzer ({@link Lucene7CustomAnalyzers}), each in shingles and a token
+ * limit, then analyzers per field and auto stop words.
  */
 final class Lucene7Analyzers {
-
-    private static final List<Class<? extends Analyzer>> TYPES = List.of(
-            StandardAnalyzer.class,
-            ClassicAnalyzer.class,
-            WhitespaceAnalyzer.class,
-            UnicodeWhitespaceAnalyzer.class,
-            SimpleAnalyzer.class,
-            StopAnalyzer.class,
-            KeywordAnalyzer.class,
-            UAX29URLEmailAnalyzer.class,
-            ArabicAnalyzer.class,
-            ArmenianAnalyzer.class,
-            BasqueAnalyzer.class,
-            BengaliAnalyzer.class,
-            BrazilianAnalyzer.class,
-            BulgarianAnalyzer.class,
-            CatalanAnalyzer.class,
-            CJKAnalyzer.class,
-            CzechAnalyzer.class,
-            DanishAnalyzer.class,
-            DutchAnalyzer.class,
-            EnglishAnalyzer.class,
-            FinnishAnalyzer.class,
-            FrenchAnalyzer.class,
-            GalicianAnalyzer.class,
-            GermanAnalyzer.class,
-            GreekAnalyzer.class,
-            HindiAnalyzer.class,
-            HungarianAnalyzer.class,
-            IndonesianAnalyzer.class,
-            IrishAnalyzer.class,
-            ItalianAnalyzer.class,
-            LatvianAnalyzer.class,
-            LithuanianAnalyzer.class,
-            NorwegianAnalyzer.class,
-            PersianAnalyzer.class,
-            PortugueseAnalyzer.class,
-            RomanianAnalyzer.class,
-            RussianAnalyzer.class,
-            SoraniAnalyzer.class,
-            SpanishAnalyzer.class,
-            SwedishAnalyzer.class,
-            ThaiAnalyzer.class,
-            TurkishAnalyzer.class);
-
-    private static final Map<String, Class<? extends Analyzer>> BY_NAME =
-            TYPES.stream().collect(Collectors.toUnmodifiableMap(Class::getSimpleName, type -> type));
-
-    /** The analyzers whose longest token can be set. */
-    private static final Set<Class<? extends Analyzer>> MAX_TOKEN_LENGTH =
-            Set.of(StandardAnalyzer.class, ClassicAnalyzer.class, UAX29URLEmailAnalyzer.class);
 
     private Lucene7Analyzers() {}
 
     /**
-     * Builds {@code spec}: the standard analyzer, a preset of the table by its simple name with stop
-     * words and the longest token, a token limit, analyzers per field and auto stop words (ADR 0067).
+     * Builds {@code spec}; the caller closes it.
      *
-     * @throws UnsupportedAnalyzerException for anything else
-     * @throws InvalidAnalyzerException for a stop words file that can't be read, or a token limit
-     *     below 1
+     * @throws UnsupportedAnalyzerException for what 7.7 doesn't have
+     * @throws InvalidAnalyzerException for what is wrong on Lucene 10 too, with leia-core's message
      */
     static Analyzer analyzer(AnalyzerSpec spec) throws UnsupportedAnalyzerException, InvalidAnalyzerException {
         return switch (spec) {
-            case AnalyzerSpec.Standard _ -> named("StandardAnalyzer", Optional.empty(), OptionalInt.empty());
-            case AnalyzerSpec.Preset preset -> {
-                String name = preset.simpleName();
-                if (BY_NAME.containsKey(name)
-                        && (preset.stemExclusion().isPresent()
-                                || preset.stemOverride().isPresent()
-                                || preset.japanese().isPresent()
-                                || preset.korean().isPresent()
-                                || preset.collation().isPresent()
-                                || preset.japaneseCompletion().isPresent())) {
-                    throw new UnsupportedAnalyzerException(
-                            "options of " + name + " other than stop words and the longest token");
-                }
-                Optional<List<String>> stopwords = preset.stopwords().isPresent()
-                        ? Optional.of(
-                                WordFiles.words("stop words", preset.stopwords().get()))
-                        : Optional.empty();
-                yield named(name, stopwords, preset.maxTokenLength());
-            }
-            case AnalyzerSpec.Custom _ -> throw new UnsupportedAnalyzerException("custom analyzers");
-            case AnalyzerSpec.Wrapped wrapped -> {
-                if (wrapped.shingles().isPresent()) {
-                    throw new UnsupportedAnalyzerException("shingles");
-                }
-                if (wrapped.limitTokenCount().isEmpty()) {
-                    yield analyzer(wrapped.analyzer());
-                }
-                AnalyzerSpec.LimitTokenCount limit = wrapped.limitTokenCount().get();
-                if (limit.maxTokenCount() < 1) {
-                    throw new InvalidAnalyzerException(
-                            "token limit: the maximum token count must be at least 1, not " + limit.maxTokenCount(),
-                            null);
-                }
-                yield new LimitTokenCountAnalyzer(
-                        analyzer(wrapped.analyzer()), limit.maxTokenCount(), limit.consumeAllTokens());
-            }
-            case AnalyzerSpec.PerField(AnalyzerSpec fallback, Map<String, AnalyzerSpec> fields) -> {
-                Map<String, Analyzer> analyzers = new HashMap<>();
-                for (Map.Entry<String, AnalyzerSpec> field : fields.entrySet()) {
-                    analyzers.put(field.getKey(), analyzer(field.getValue()));
-                }
-                yield new PerFieldAnalyzerWrapper(analyzer(fallback), analyzers);
-            }
+            case AnalyzerSpec.Standard _ -> new StandardAnalyzer();
+            case AnalyzerSpec.Preset preset -> Lucene7Presets.create(preset);
+            case AnalyzerSpec.Custom custom -> Lucene7CustomAnalyzers.create(custom);
+            case AnalyzerSpec.Wrapped wrapped -> wrapped(wrapped);
+            case AnalyzerSpec.PerField perField -> perField(perField);
             case AnalyzerSpec.AutoStopWords(AnalyzerSpec analyzer, Map<String, List<String>> words) ->
                 new Lucene7AutoStopWordsAnalyzer(analyzer(analyzer), words);
         };
     }
 
-    private static Analyzer named(String name, Optional<List<String>> stopwords, OptionalInt maxTokenLength)
-            throws UnsupportedAnalyzerException {
-        Class<? extends Analyzer> type = BY_NAME.get(name);
-        if (type == null) {
-            throw new UnsupportedAnalyzerException("Lucene " + Version.LATEST + " has no analyzer " + name + "; it has "
-                    + String.join(", ", new TreeSet<>(BY_NAME.keySet())));
-        }
-        Optional<Constructor<? extends Analyzer>> withStopwords = constructor(type, CharArraySet.class);
-        if (stopwords.isPresent() && withStopwords.isEmpty()) {
-            throw new UnsupportedAnalyzerException(
-                    "The " + name + " of Lucene " + Version.LATEST + " takes no stop words");
-        }
-        if (maxTokenLength.isPresent() && !MAX_TOKEN_LENGTH.contains(type)) {
-            throw new UnsupportedAnalyzerException(
-                    "The " + name + " of Lucene " + Version.LATEST + " takes no longest token");
-        }
-        Analyzer analyzer;
+    /** The default analyzer and each field's own; one that fails closes those built before. */
+    private static Analyzer perField(AnalyzerSpec.PerField spec)
+            throws UnsupportedAnalyzerException, InvalidAnalyzerException {
+        Analyzer fallback = analyzer(spec.fallback());
+        Map<String, Analyzer> fields = new TreeMap<>();
         try {
-            analyzer = stopwords.isPresent()
-                    ? withStopwords.orElseThrow().newInstance(new CharArraySet(stopwords.get(), false))
-                    : type.getConstructor().newInstance();
-        } catch (InvocationTargetException e) {
-            throw new IllegalStateException("Cannot build the " + name + ": " + e.getCause(), e.getCause());
-        } catch (ReflectiveOperationException e) {
-            throw new IllegalStateException("Cannot build the " + name + ": " + e, e);
-        }
-        if (maxTokenLength.isPresent()) {
-            int length = maxTokenLength.getAsInt();
-            switch (analyzer) {
-                case StandardAnalyzer standard -> standard.setMaxTokenLength(length);
-                case ClassicAnalyzer classic -> classic.setMaxTokenLength(length);
-                case UAX29URLEmailAnalyzer email -> email.setMaxTokenLength(length);
-                default -> throw new IllegalStateException("Not in MAX_TOKEN_LENGTH: " + name);
+            for (Map.Entry<String, AnalyzerSpec> field : new TreeMap<>(spec.fields()).entrySet()) {
+                try {
+                    fields.put(field.getKey(), analyzer(field.getValue()));
+                } catch (InvalidAnalyzerException e) {
+                    throw new InvalidAnalyzerException("field '" + field.getKey() + "': " + e.getMessage(), e);
+                }
             }
+        } catch (UnsupportedAnalyzerException | InvalidAnalyzerException | RuntimeException e) {
+            fields.values().forEach(Analyzer::close);
+            fallback.close();
+            throw e;
         }
-        return analyzer;
+        return new PerFieldAnalyzerWrapper(fallback, fields);
     }
 
-    /** The public constructor of {@code type} that takes a {@code parameter}; empty if it has none. */
-    private static Optional<Constructor<? extends Analyzer>> constructor(
-            Class<? extends Analyzer> type, Class<?> parameter) {
-        try {
-            return Optional.of(type.getConstructor(parameter));
-        } catch (NoSuchMethodException e) {
-            return Optional.empty();
+    /** The analyzer in Lucene's shingle wrapper, then in its token limit, checked first as leia-core checks them. */
+    private static Analyzer wrapped(AnalyzerSpec.Wrapped spec)
+            throws UnsupportedAnalyzerException, InvalidAnalyzerException {
+        if (spec.shingles().isPresent()) {
+            AnalyzerSpec.Shingles shingles = spec.shingles().orElseThrow();
+            if (shingles.minShingleSize() < 2) {
+                throw new InvalidAnalyzerException(
+                        "shingles: the minimum size must be at least 2, not " + shingles.minShingleSize(), null);
+            }
+            if (shingles.maxShingleSize() < shingles.minShingleSize()) {
+                throw new InvalidAnalyzerException(
+                        "shingles: the maximum size must be at least the minimum size, " + shingles.minShingleSize()
+                                + ", not " + shingles.maxShingleSize(),
+                        null);
+            }
         }
+        if (spec.limitTokenCount().isPresent()
+                && spec.limitTokenCount().orElseThrow().maxTokenCount() < 1) {
+            throw new InvalidAnalyzerException(
+                    "token limit: the maximum token count must be at least 1, not "
+                            + spec.limitTokenCount().orElseThrow().maxTokenCount(),
+                    null);
+        }
+        Analyzer wrapped = analyzer(spec.analyzer());
+        if (spec.shingles().isPresent()) {
+            AnalyzerSpec.Shingles shingles = spec.shingles().orElseThrow();
+            wrapped = new ShingleAnalyzerWrapper(
+                    wrapped,
+                    shingles.minShingleSize(),
+                    shingles.maxShingleSize(),
+                    shingles.tokenSeparator(),
+                    shingles.outputUnigrams(),
+                    shingles.outputUnigramsIfNoShingles(),
+                    shingles.fillerToken());
+        }
+        if (spec.limitTokenCount().isPresent()) {
+            AnalyzerSpec.LimitTokenCount limit = spec.limitTokenCount().orElseThrow();
+            wrapped = new LimitTokenCountAnalyzer(wrapped, limit.maxTokenCount(), limit.consumeAllTokens());
+        }
+        return wrapped;
     }
 }

@@ -191,11 +191,12 @@ class Lucene7BackendTest {
         RuntimeSearches.searchesTheQueriesOf912(backend, true);
     }
 
+    /** Custom analyzers, shingles and the options of presets (ADR 0075). */
     @Test
-    void searchesWithAStopWordsFile() throws Exception {
+    void searchesWithTheAnalyzersOf912() throws Exception {
         open(testIndex("lucene7"));
 
-        RuntimeSearches.searchesWithTheAnalyzersOfAnOldRuntime(backend, "7.7.3", tmp);
+        RuntimeSearches.searchesWithTheAnalyzersOf912(backend, "7.7.3", tmp);
     }
 
     @ParameterizedTest

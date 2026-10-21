@@ -8,10 +8,15 @@ import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalysisComponent;
 import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.Collation;
+import io.github.mfuerstenau.leia.protocol.analysis.CollationStrength;
 import io.github.mfuerstenau.leia.protocol.analysis.CustomAnalyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.JapaneseOptions;
+import io.github.mfuerstenau.leia.protocol.analysis.LimitTokenCount;
 import io.github.mfuerstenau.leia.protocol.analysis.PresetAnalyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.Shingles;
 import io.github.mfuerstenau.leia.protocol.analysis.StandardAnalyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.StemDictionary;
 import io.github.mfuerstenau.leia.protocol.analysis.WordSet;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.filter.FilterResult;
@@ -246,8 +251,170 @@ final class RuntimeSearches {
     }
 
     /**
-     * The analyzers of 3.6, 5.5 and 7.7 (ADR 0067): stop words from a file, which the runtime reads as
-     * Lucene 10 does; shingles, custom analyzers and the other options of a preset aren't supported.
+     * Custom analyzers, shingles and the options of presets, which 9.12, 7.7 and 5.5 build as Lucene 10
+     * does (ADR 0067, ADR 0075); a component that only Lucene 10 has and the options of Kuromoji aren't
+     * supported. The shingles are of a phrase, since 5.5 always splits on whitespace (ADR 0069).
+     */
+    static void searchesWithTheAnalyzersOf912(RealBackend backend, String lucene, Path tmp) throws Exception {
+        Files.writeString(tmp.resolve("stop.txt"), "the\n");
+        Analyzer custom = analyzer(new CustomAnalyzer(
+                List.of(),
+                new AnalysisComponent("whitespace", Map.of()),
+                List.of(
+                        new AnalysisComponent("lowercase", Map.of()),
+                        new AnalysisComponent("stop", Map.of("words", "stop.txt")),
+                        new AnalysisComponent("porterStem", Map.of())),
+                Optional.of(tmp.toString())));
+        assertThat(parsed(backend, "Documents The beta", custom)).isEqualTo("body:document body:beta");
+        Analyzer shingles = new Analyzer(
+                Optional.of(new StandardAnalyzer()),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(new Shingles(2, 2, "_", false, false, "-")),
+                Optional.of(new LimitTokenCount(1, true)),
+                List.of(),
+                List.of());
+        assertThat(parsed(backend, "\"alpha document gamma\"", shingles)).isEqualTo("body:alpha_document");
+        WordSet documents = new WordSet(Optional.of(List.of("documents")), Optional.empty());
+        assertThat(parsed(backend, "documents", preset(ENGLISH, Optional.empty(), Optional.empty(), Optional.empty())))
+                .isEqualTo("body:document");
+        assertThat(parsed(
+                        backend,
+                        "documents",
+                        preset(ENGLISH, Optional.of(documents), Optional.empty(), Optional.empty())))
+                .isEqualTo("body:documents");
+        StemDictionary gamma = new StemDictionary(Optional.of(Map.of("alpha", "gamma")), Optional.empty());
+        assertThat(parsed(
+                        backend,
+                        "alpha",
+                        preset(
+                                "org.apache.lucene.analysis.nl.DutchAnalyzer",
+                                Optional.empty(),
+                                Optional.of(gamma),
+                                Optional.empty())))
+                .isEqualTo("body:gamma");
+        Analyzer collation = preset(
+                "org.apache.lucene.collation.CollationKeyAnalyzer",
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(new Collation("de", Optional.of(CollationStrength.PRIMARY), Optional.empty())));
+        assertThat(parsed(backend, "Alpha", collation)).isEqualTo(parsed(backend, "alpha", collation));
+
+        RpcException romanian = backend.fails(
+                Methods.START_SEARCH,
+                params(
+                        classic(
+                                "alpha",
+                                analyzer(new CustomAnalyzer(
+                                        List.of(),
+                                        new AnalysisComponent("standard", Map.of()),
+                                        List.of(new AnalysisComponent("romanianNormalization", Map.of())),
+                                        Optional.empty()))),
+                        10),
+                ErrorCode.NOT_SUPPORTED);
+        assertThat(romanian)
+                .hasMessage("Not supported with Lucene " + lucene + ": Lucene " + lucene
+                        + " has no token filter 'romanianNormalization'");
+        RpcException japanese = backend.fails(
+                Methods.START_SEARCH,
+                params(
+                        classic(
+                                "alpha",
+                                analyzer(new PresetAnalyzer(
+                                        "org.apache.lucene.analysis.ja.JapaneseAnalyzer",
+                                        Optional.empty(),
+                                        Optional.empty(),
+                                        OptionalInt.empty(),
+                                        Optional.empty(),
+                                        Optional.of(new JapaneseOptions(
+                                                Optional.empty(), Optional.empty(), Optional.empty())),
+                                        Optional.empty(),
+                                        Optional.empty(),
+                                        Optional.empty()))),
+                        10),
+                ErrorCode.NOT_SUPPORTED);
+        assertThat(japanese).hasMessageContaining("Lucene " + lucene + " has no analyzer JapaneseAnalyzer");
+        RpcException size = backend.fails(
+                Methods.START_SEARCH,
+                params(
+                        classic(
+                                "alpha",
+                                new Analyzer(
+                                        Optional.of(new StandardAnalyzer()),
+                                        Optional.empty(),
+                                        Optional.empty(),
+                                        Optional.of(new Shingles(1, 2, " ", true, true, "_")),
+                                        Optional.empty(),
+                                        List.of(),
+                                        List.of())),
+                        10),
+                ErrorCode.INVALID_ANALYZER);
+        assertThat(size).hasMessage("Invalid analyzer: shingles: the minimum size must be at least 2, not 1");
+        RpcException exclusions = backend.fails(
+                Methods.START_SEARCH,
+                params(
+                        classic(
+                                "alpha",
+                                preset(
+                                        "org.apache.lucene.analysis.core.KeywordAnalyzer",
+                                        Optional.of(documents),
+                                        Optional.empty(),
+                                        Optional.empty())),
+                        10),
+                ErrorCode.INVALID_ANALYZER);
+        assertThat(exclusions).hasMessage("Invalid analyzer: KeywordAnalyzer takes no stem exclusions");
+    }
+
+    private static final String ENGLISH = "org.apache.lucene.analysis.en.EnglishAnalyzer";
+
+    /** The query that a classic search of {@code expression} in {@code body} parses to. */
+    private static String parsed(RealBackend backend, String expression, Analyzer analyzer) throws Exception {
+        return backend.search(classic(expression, analyzer), 10).query();
+    }
+
+    private static Analyzer analyzer(CustomAnalyzer custom) {
+        return new Analyzer(
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(custom),
+                Optional.empty(),
+                Optional.empty(),
+                List.of(),
+                List.of());
+    }
+
+    private static Analyzer analyzer(PresetAnalyzer preset) {
+        return new Analyzer(
+                Optional.empty(),
+                Optional.of(preset),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                List.of(),
+                List.of());
+    }
+
+    /** A preset with these stem exclusions, stem overrides and collation, and no other options. */
+    private static Analyzer preset(
+            String className,
+            Optional<WordSet> stemExclusion,
+            Optional<StemDictionary> stemOverride,
+            Optional<Collation> collation) {
+        return analyzer(new PresetAnalyzer(
+                className,
+                Optional.empty(),
+                stemExclusion,
+                OptionalInt.empty(),
+                stemOverride,
+                Optional.empty(),
+                Optional.empty(),
+                collation,
+                Optional.empty()));
+    }
+
+    /**
+     * The analyzers of 3.6 (ADR 0067): stop words from a file, which the runtime reads as Lucene 10
+     * does; shingles, custom analyzers and the other options of a preset aren't supported.
      */
     static void searchesWithTheAnalyzersOfAnOldRuntime(RealBackend backend, String lucene, Path tmp) throws Exception {
         Path file = Files.writeString(tmp.resolve("stopwords.txt"), "\n  alpha  \n");

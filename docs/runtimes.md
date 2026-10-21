@@ -91,9 +91,9 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 | Norms, decoded by the created major (ADR 0047, ADR 0048 §3) | `floatToByte315(1/√length)` | `floatToByte315(1/√length)` | 6: `floatToByte315(1/√length)`, 7: the length | the length | the length |
 | Check levels | none | 1 checksums only, 2 default, 3 `crossCheckTermVectors` | as 5.5.5 | as 5.5.5, but 3 is `doSlowChecks`; one thread | Lucene's own `setLevel` |
 | `-fast` hint in the check | – | rewritten to leia's levels | not given | not given | – |
-| Search analyzers | 6 of lucene-core | 41 of analyzers-common | 42 (+ Bengali) | 48 (+ Estonian, Nepali, Serbian, Tamil, Telugu, `CollationKeyAnalyzer`) | every preset of `getAnalysisComponents`, the extension jars' included |
-| Custom analyzers, shingles (ADR 0067) | – | – | – | ✓, with 9.12's own components; one only Lucene 10 has is `NOT_SUPPORTED` | ✓ |
-| Preset options (ADR 0067) | stop words, from a file too, and the longest token | as 3.6.2 | as 3.6.2 | all but Kuromoji's, Nori's and ICU's, checked as on Lucene 10 | all |
+| Search analyzers | 6 of lucene-core | 42 of analyzers-common (+ `CollationKeyAnalyzer`) | 43 (+ Bengali, `CollationKeyAnalyzer`) | 48 (+ Estonian, Nepali, Serbian, Tamil, Telugu, `CollationKeyAnalyzer`) | every preset of `getAnalysisComponents`, the extension jars' included |
+| Custom analyzers, shingles (ADR 0067, ADR 0075) | – | ✓, with 5.5's own components; shingles only within a phrase | ✓, with 7.7's own components | ✓, with 9.12's own components; one only Lucene 10 has is `NOT_SUPPORTED` | ✓ |
+| Preset options (ADR 0067, ADR 0075) | stop words, from a file too, and the longest token | as 9.12.3; `StopAnalyzer` has default stop words | as 9.12.3; `StopAnalyzer` has default stop words | all but Kuromoji's, Nori's and ICU's, checked as on Lucene 10 | all |
 | Token limit | `consumeAllTokens` ignored (it changes no token) | ✓ | ✓ | ✓ | ✓ |
 | Analysis tab (ADR 0067) | – | – | – | – | ✓, `Analysis` of leia-lucene10; without a runtime that has one, the tab says so (ADR 0071) |
 | Extension jars (ADR 0068) | – (a class loader of its own, ADR 0073) | – | – | – | ✓, `Extensions` of leia-lucene10 (ADR 0071) |
