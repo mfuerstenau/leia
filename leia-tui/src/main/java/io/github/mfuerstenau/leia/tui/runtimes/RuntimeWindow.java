@@ -43,6 +43,11 @@ import java.util.function.BooleanSupplier;
  * download; {@link RuntimeInstall#install} refreshes the others it was planned for without asking.
  * Once the download is done, the backend loads the new runtimes, and the window says what came of it.
  *
+ * <p>The runtimes that are there already, loaded, to be loaded on a restart, or refused, are listed
+ * too, checked and greyed out, for their jars' URLs and SHA-256s (ADR 0081). They can't be chosen:
+ * their plans are kept apart from the install's {@link RuntimeInstall.Plan}, so that no install
+ * ever writes their folders, whose jars may be open.
+ *
  * <p>The plan and the install run on threads of their own; the install writes into a {@link
  * Progress} that the ticks draw. Everything else is touched on the UI thread only.
  */
@@ -56,6 +61,7 @@ public final class RuntimeWindow {
 
     private static final String CHOOSE_KEYS =
             "␣ check   a all   n none   ↑↓ move   [/] details   ⏎ download   Esc close";
+    private static final String VIEW_KEYS = "↑↓ move   [/] details   Esc close";
     private static final String NOTHING_CHECKED = "Nothing checked: Space checks a runtime; Esc closes";
     private static final String[] SPINNER = Spinner.dots().frames();
     private static final Style FAILED = Style.EMPTY.red();
@@ -93,11 +99,13 @@ public final class RuntimeWindow {
 
     private final Set<RuntimeFolders.Known> checked = new LinkedHashSet<>();
     private final AtomicBoolean cancelled = new AtomicBoolean();
+    private final Map<String, RuntimeFolder> states = new LinkedHashMap<>();
 
     private Phase phase = Phase.PLANNING;
     private RuntimeInstall install;
     private RuntimeInstall.Plan plan;
     private List<RuntimeInstall.RuntimePlan> offered = List.of();
+    private List<RuntimeInstall.RuntimePlan> present = List.of();
     private String planError;
     private int cursor;
     private int detailsScroll;
@@ -106,14 +114,20 @@ public final class RuntimeWindow {
     private List<Line> loadLines = List.of();
     private int ticks;
 
-    /** A window that waits for its plan. */
-    public RuntimeWindow() {}
+    /** A window that waits for its plan, with the runtimes' states as {@code getRuntimes} has them. */
+    public RuntimeWindow(List<RuntimeFolder> runtimes) {
+        runtimes.forEach(runtime -> states.put(runtime.folder(), runtime));
+    }
 
-    /** What {@code install} found: the window lets the user choose now. */
-    public void planned(RuntimeInstall install, RuntimeInstall.Plan plan) {
+    /**
+     * What {@code install} found: the window lets the user choose now. {@code present} are the plans
+     * of the runtimes that are there already, which are only shown.
+     */
+    public void planned(RuntimeInstall install, RuntimeInstall.Plan plan, List<RuntimeInstall.RuntimePlan> present) {
         this.install = install;
         this.plan = plan;
         this.offered = plan.needingDownload();
+        this.present = List.copyOf(present);
         phase = Phase.CHOOSE;
     }
 
@@ -227,11 +241,14 @@ public final class RuntimeWindow {
             }
             return start();
         }
-        if (key.isChar(' ') && !offered.isEmpty()) {
+        if (key.isChar(' ') && cursor < offered.size()) {
             RuntimeFolders.Known known = offered.get(cursor).known();
             if (!checked.remove(known)) {
                 checked.add(known);
             }
+        } else if (key.isChar(' ') && cursor < rowCount()) {
+            String folder = present.get(cursor - offered.size()).known().folder();
+            hint = Optional.of(folder + " is " + stateWord(folder) + "; there is nothing to download for it");
         } else if (key.isChar('a')) {
             offered.forEach(runtime -> checked.add(runtime.known()));
         } else if (key.isChar('n')) {
@@ -241,13 +258,31 @@ public final class RuntimeWindow {
         } else if (key.isChar('[') || (key.hasShift() && key.code() == KeyCode.UP)) {
             detailsScroll = Math.max(detailsScroll - 1, 0);
         } else {
-            OptionalInt moved = Selection.moved(cursor, offered.size(), key);
+            OptionalInt moved = Selection.moved(cursor, rowCount(), key);
             if (moved.isPresent() && moved.getAsInt() != cursor) {
                 cursor = moved.getAsInt();
                 detailsScroll = 0;
             }
         }
         return new Nothing();
+    }
+
+    /** The rows of the list: the offered runtimes, then the present ones. */
+    private int rowCount() {
+        return offered.size() + present.size();
+    }
+
+    /** How a present runtime's row and hint name its state. */
+    private String stateWord(String folder) {
+        RuntimeFolder state = states.get(folder);
+        if (state == null) {
+            return "complete";
+        }
+        return switch (state.state()) {
+            case LOADED -> "loaded";
+            case REFUSED -> "refused";
+            default -> "complete";
+        };
     }
 
     /** The planned runtimes that need no download, which every install refreshes. */
@@ -319,7 +354,8 @@ public final class RuntimeWindow {
                 }
                 footer = new ArrayList<>();
                 hint.ifPresent(text -> footer.add(Line.from(Span.styled(" " + text, WARNING))));
-                footer.addAll(KeyLegend.lines(plan.runtimes().isEmpty() ? "Esc close" : CHOOSE_KEYS, inner.width()));
+                String keys = !plan.runtimes().isEmpty() ? CHOOSE_KEYS : present.isEmpty() ? "Esc close" : VIEW_KEYS;
+                footer.addAll(KeyLegend.lines(keys, inner.width()));
             }
             case INSTALLING -> {
                 header.add(Line.from(Span.styled(
@@ -359,7 +395,7 @@ public final class RuntimeWindow {
                 .split(inner);
         frame.renderWidget(Paragraph.from(Text.from(wrappedHeader)), rows.get(0));
         if (phase == Phase.CHOOSE) {
-            if (!plan.runtimes().isEmpty()) {
+            if (!plan.runtimes().isEmpty() || !present.isEmpty()) {
                 renderChoose(frame, rows.get(2));
             }
         } else if (gaugeHeight > 0) {
@@ -389,7 +425,7 @@ public final class RuntimeWindow {
     }
 
     private void renderChoose(Frame frame, Rect area) {
-        Block listBlock = Panels.panel(" Runtimes to download ", true);
+        Block listBlock = Panels.panel(" Runtimes ", true);
         List<String> texts = new ArrayList<>();
         for (RuntimeInstall.RuntimePlan runtime : offered) {
             texts.add((checked.contains(runtime.known()) ? "[x] " : "[ ] ")
@@ -398,21 +434,28 @@ public final class RuntimeWindow {
                     + TextFormat.count(runtime.downloads().size(), "jar") + ", "
                     + TextFormat.size(runtime.downloadSize()));
         }
+        for (RuntimeInstall.RuntimePlan runtime : present) {
+            String folder = runtime.known().folder();
+            String state = states.containsKey(folder) && states.get(folder).state() == RuntimeState.RESTART
+                    ? "loads on restart"
+                    : stateWord(folder);
+            texts.add("[x] " + runtime.known().name() + " · indexes of "
+                    + majors(runtime.known().indexMajors()) + " · " + state);
+        }
         int listWidth = texts.stream().mapToInt(CharWidth::of).max().orElse(0) + 2;
         List<Rect> parts = area.width() >= WIDE
                 ? Layout.horizontal()
                         .constraints(Constraint.length(Math.min(listWidth, area.width() / 2)), Constraint.fill())
                         .split(area)
                 : Layout.vertical()
-                        .constraints(
-                                Constraint.length(Math.min(offered.size() + 2, area.height() / 2)), Constraint.fill())
+                        .constraints(Constraint.length(Math.min(rowCount() + 2, area.height() / 2)), Constraint.fill())
                         .split(area);
         List<Line> rows = new ArrayList<>();
         for (int i = 0; i < texts.size(); i++) {
-            rows.add(
-                    i == cursor
-                            ? Line.from(Span.styled(texts.get(i), Panels.highlight(true)))
-                            : Line.from(texts.get(i)));
+            // A present runtime's row is greyed out: it can't be chosen.
+            Style style = i < offered.size() ? Style.EMPTY : Style.EMPTY.dim();
+            rows.add(Line.from(Span.styled(
+                    texts.get(i), i == cursor ? Panels.highlight(true).patch(style) : style)));
         }
         Rect listInner = listBlock.inner(parts.get(0));
         int listTop = Math.max(cursor - Math.max(listInner.height() - 1, 0), 0);
@@ -422,14 +465,16 @@ public final class RuntimeWindow {
                         .block(listBlock)
                         .build(),
                 parts.get(0));
-        if (offered.isEmpty()) {
+        if (rowCount() == 0) {
             return;
         }
-        RuntimeInstall.RuntimePlan current = offered.get(cursor);
+        boolean isOffered = cursor < offered.size();
+        RuntimeInstall.RuntimePlan current = isOffered ? offered.get(cursor) : present.get(cursor - offered.size());
         Block detailsBlock = Panels.panel(
                 " " + current.known().name() + " · runtimes/" + current.known().folder() + " ", false);
         List<Line> details = Panels.wrap(
-                details(current), Math.max(detailsBlock.inner(parts.get(1)).width(), 1));
+                isOffered ? details(current) : presentDetails(current),
+                Math.max(detailsBlock.inner(parts.get(1)).width(), 1));
         int maxScroll =
                 Math.max(details.size() - detailsBlock.inner(parts.get(1)).height(), 0);
         detailsScroll = Math.min(detailsScroll, maxScroll);
@@ -459,10 +504,54 @@ public final class RuntimeWindow {
             lines.add(Line.from(Span.styled("Already there and matching:", Style.EMPTY.bold())));
             runtime.kept().forEach(jar -> lines.add(Line.from("  " + jar.name())));
         }
+        ownJars(runtime, lines);
+        return lines;
+    }
+
+    /**
+     * What a present runtime's folder holds: its state, each Lucene jar with where it comes from, and
+     * what comes from leia.jar.
+     */
+    private List<Line> presentDetails(RuntimeInstall.RuntimePlan runtime) {
+        String folder = runtime.known().folder();
+        RuntimeFolder state = states.get(folder);
+        List<Line> lines = new ArrayList<>();
+        if (state != null && state.state() == RuntimeState.LOADED) {
+            lines.add(Line.from("Loaded"
+                    + state.luceneVersion().map(v -> " (Lucene " + v + ")").orElse("")
+                    + ". Its jars are open, so the download leaves runtimes/" + folder + " alone."));
+        } else if (state != null && state.state() == RuntimeState.REFUSED) {
+            lines.add(Line.styled("Refused: " + state.problem().orElse("") + ".", FAILED));
+        } else {
+            lines.add(Line.from("Complete; restart leia to load it."));
+        }
+        lines.add(Line.empty());
+        lines.add(Line.from(Span.styled("Lucene jars in runtimes/" + folder + ":", Style.EMPTY.bold())));
+        Set<String> mismatched = new LinkedHashSet<>();
+        runtime.downloads().forEach(download -> mismatched.add(download.jar().name()));
+        for (RuntimeFolders.ListedJar jar : runtime.listed()) {
+            if (jar.mavenPath().isEmpty()) {
+                continue;
+            }
+            // Unindented, as in the details of an offered runtime.
+            lines.add(Line.from("• " + jar.name() + ", " + TextFormat.size(jar.size())));
+            if (mismatched.contains(jar.name())) {
+                lines.add(Line.styled(
+                        "Not there, or doesn't match the list; the loader checks only that it is there", WARNING));
+            }
+            lines.add(Line.from(
+                    install.repository().resolve(jar.mavenPath().get()).toString()));
+            lines.add(Line.from(Span.styled("SHA-256 " + jar.sha256(), Style.EMPTY.dim())));
+        }
+        ownJars(runtime, lines);
+        return lines;
+    }
+
+    /** Adds what of {@code runtime} comes from leia.jar to {@code lines}. */
+    private static void ownJars(RuntimeInstall.RuntimePlan runtime, List<Line> lines) {
         lines.add(Line.empty());
         lines.add(Line.from(Span.styled("From leia.jar:", Style.EMPTY.bold())));
         runtime.ownJars().forEach(jar -> lines.add(Line.from("  " + jar)));
-        return lines;
     }
 
     /** Such as {@code 8}, {@code 6 and 7}. */

@@ -389,3 +389,7 @@ Goal: the runtimes are downloaded from within leia's UI, and `--download-runtime
 - [x] `--download-runtimes` only for unattended downloads: it needs `--runtime` (repeatable) and downloads without asking. Without `--runtime` it exits 2 and points to the UI. `--yes` is gone: naming the runtimes is the consent (ADR 0080). Drop the standalone `RuntimeDialog` runner from `Main`.
 - [x] The download dialogue inside leia: a hotkey on the welcome (about) page opens it as a window, within leia's frame like the other popups (`jars`, `prompt`). Its list, details and progress (spinner, per-jar bytes, overall gauge) all stay inside that window's frame. Esc stops any ongoing download (cooperatively, no `.part` left), and Esc again or when idle closes the window.
 - [x] After the download, load the new runtimes into the running backend: `RuntimeFolders.load` loads only folders not yet loaded, and the about screen updates through `getRuntimes`. If loading in place is too hard (Windows file locks, a jar chain that is already built), say "restart leia to use the new runtimes" in the window instead. ADR 0080: the old runtimes load in place, Lucene 10's only while the jar chain is empty, else "restart leia to load it" (`RESTART`).
+
+## Runtime download window — done
+
+- [x] Show the runtimes that are already present in the download window (`RuntimeWindow`, ADR 0080), not only those that need downloads, checked and greyed out, with their jars' file names, URLs and SHA-256s in the details pane. They are planned apart from the install, which never writes them (ADR 0081).

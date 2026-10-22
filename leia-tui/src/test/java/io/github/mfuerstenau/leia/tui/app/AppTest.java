@@ -691,11 +691,15 @@ class AppTest {
 
         assertThat(action)
                 .hasValueSatisfying(plan -> assertThat(plan)
-                        .isInstanceOfSatisfying(
-                                Action.PlanRuntimes.class,
-                                planned -> assertThat(planned.runtimes())
-                                        .extracting(Known::folder)
-                                        .containsExactly("lucene9", "lucene7")));
+                        .isInstanceOfSatisfying(Action.PlanRuntimes.class, planned -> {
+                            assertThat(planned.runtimes())
+                                    .extracting(Known::folder)
+                                    .containsExactly("lucene9", "lucene7");
+                            // The others are planned only to be shown.
+                            assertThat(planned.present())
+                                    .extracting(Known::folder)
+                                    .containsExactly("lucene10", "lucene5", "lucene3");
+                        }));
         assertThat(TestScreens.render(app::render, 160, 40)).contains(" Download runtimes ", "Reading runtimes/…");
         assertThat(app.animating()).isTrue();
         // The window takes the keys: Esc closes it, and doesn't quit.

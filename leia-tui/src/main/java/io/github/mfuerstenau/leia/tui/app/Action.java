@@ -260,10 +260,11 @@ public sealed interface Action {
     record AddJars(AddJarsParams params) implements Action {}
 
     /**
-     * Find out on a thread of its own what these runtimes need downloaded, and report back with
-     * {@link App#runtimesPlanned} or {@link App#runtimesPlanFailed} (ADR 0080).
+     * Find out on a thread of its own what these runtimes need downloaded, and read the jars of the
+     * {@code present} ones, which are only shown and never installed, and report back with {@link
+     * App#runtimesPlanned} or {@link App#runtimesPlanFailed} (ADR 0080, ADR 0081).
      */
-    record PlanRuntimes(List<RuntimeFolders.Known> runtimes) implements Action {}
+    record PlanRuntimes(List<RuntimeFolders.Known> runtimes, List<RuntimeFolders.Known> present) implements Action {}
 
     /**
      * Install {@code chosen} of {@code plan} on a thread of its own, as {@link RuntimeWindow.Install}

@@ -57,8 +57,21 @@ class RuntimeWindowTest {
         deleteFolder("lucene9");
         deleteFolder("lucene5");
         repository.requests.set(0);
-        window = new RuntimeWindow();
+        window = new RuntimeWindow(STATES);
     }
+
+    /** As {@code getRuntimes} has them: lucene9 and lucene5 are missing, the others there. */
+    private static final List<RuntimeFolder> STATES = List.of(
+            new RuntimeFolder("lucene10", List.of(9, 10), RuntimeState.LOADED, Optional.of("10.3.1"), Optional.empty()),
+            new RuntimeFolder("lucene9", List.of(8), RuntimeState.MISSING, Optional.empty(), Optional.empty()),
+            new RuntimeFolder("lucene7", List.of(6, 7), RuntimeState.RESTART, Optional.empty(), Optional.empty()),
+            new RuntimeFolder("lucene5", List.of(4, 5), RuntimeState.MISSING, Optional.empty(), Optional.empty()),
+            new RuntimeFolder(
+                    "lucene3", List.of(2, 3), RuntimeState.REFUSED, Optional.empty(), Optional.of("its API is 0")));
+
+    private static final List<RuntimeFolders.Known> MISSING = List.of(known("lucene9"), known("lucene5"));
+    private static final List<RuntimeFolders.Known> PRESENT =
+            List.of(known("lucene10"), known("lucene7"), known("lucene3"));
 
     @AfterEach
     void stop() {
@@ -66,7 +79,12 @@ class RuntimeWindowTest {
     }
 
     private void plan(List<RuntimeFolders.Known> runtimes) throws Exception {
-        window.planned(install, install.plan(runtimes));
+        plan(runtimes, List.of());
+    }
+
+    /** As leia plans them: {@code present} only to be shown. */
+    private void plan(List<RuntimeFolders.Known> runtimes, List<RuntimeFolders.Known> present) throws Exception {
+        window.planned(install, install.plan(runtimes), install.plan(present).runtimes());
     }
 
     private String screen() {
@@ -132,6 +150,82 @@ class RuntimeWindowTest {
         assertThat(screen()).contains("Every runtime is loaded or complete; there is nothing to download.");
         assertThat(window.handleKey(key(KeyCode.ENTER))).isInstanceOf(RuntimeWindow.Nothing.class);
         assertThat(window.handleKey(key('q'))).isInstanceOf(RuntimeWindow.Close.class);
+    }
+
+    @Test
+    void showsPresentRuntimesCheckedAndGreyedOut() throws Exception {
+        plan(MISSING, PRESENT);
+
+        assertThat(screen())
+                .contains("[ ] Lucene 9 · indexes of 8 · ")
+                .contains("[ ] Lucene 5 · indexes of 4 and 5 · ")
+                .contains("[x] Lucene 10 · indexes of 9 and 10 · loaded")
+                .contains("[x] Lucene 7 · indexes of 6 and 7 · loads on restart")
+                .contains("[x] Lucene 3 · indexes of 2 and 3 · refused")
+                .contains("Checked: 0 runtimes, 0 jars, 0 B")
+                .doesNotContain("Need no download");
+    }
+
+    @Test
+    void cannotChooseAPresentRuntime() throws Exception {
+        plan(MISSING, PRESENT);
+        window.handleKey(key(KeyCode.DOWN));
+        window.handleKey(key(KeyCode.DOWN));
+
+        window.handleKey(key(' '));
+        assertThat(screen())
+                .contains("Checked: 0 runtimes")
+                .contains("lucene10 is loaded; there is nothing to download for it");
+
+        window.handleKey(key('a'));
+        assertThat(screen()).contains("Checked: 2 runtimes");
+
+        RuntimeWindow.Event event = window.handleKey(key(KeyCode.ENTER));
+        assertThat(event).isInstanceOfSatisfying(RuntimeWindow.Install.class, start -> {
+            assertThat(start.plan().runtimes())
+                    .extracting(RuntimeInstall.RuntimePlan::known)
+                    .containsExactlyElementsOf(MISSING);
+            assertThat(start.chosen()).containsExactlyInAnyOrderElementsOf(MISSING);
+        });
+    }
+
+    @Test
+    void showsTheJarsOfAPresentRuntime() throws Exception {
+        plan(MISSING, PRESENT);
+        RuntimeFolders.ListedJar jar = lucene(known("lucene7")).getFirst();
+
+        window.handleKey(key(KeyCode.DOWN));
+        window.handleKey(key(KeyCode.DOWN));
+        assertThat(screen())
+                .contains("Loaded (Lucene 10.3.1). Its jars are open")
+                .contains("Lucene jars in runtimes/lucene10:");
+
+        window.handleKey(key(KeyCode.DOWN));
+        String screen = screen();
+        assertThat(screen).contains("Complete; restart leia to load it.").contains("Lucene jars in runtimes/lucene7:");
+        String details = detailsColumn(screen, "Lucene 7 · runtimes/lucene7");
+        assertThat(details)
+                .contains(install.repository()
+                        .resolve(jar.mavenPath().orElseThrow())
+                        .toString())
+                .contains("SHA-256" + jar.sha256());
+
+        window.handleKey(key(KeyCode.DOWN));
+        assertThat(screen()).contains("Refused: its API is 0.");
+    }
+
+    @Test
+    void listsPresentRuntimesWhenNothingIsMissing() throws Exception {
+        plan(List.of(), PRESENT);
+
+        assertThat(screen())
+                .contains("Every runtime is loaded or complete; there is nothing to download.")
+                .contains("[x] Lucene 10 · indexes of 9 and 10 · loaded")
+                .contains("↑↓ move   [/] details   Esc close")
+                .doesNotContain("␣ check");
+        assertThat(window.handleKey(key(KeyCode.ENTER))).isInstanceOf(RuntimeWindow.Nothing.class);
+        assertThat(screen()).contains("Nothing to download; Esc closes");
+        assertThat(window.handleKey(key(KeyCode.ESCAPE))).isInstanceOf(RuntimeWindow.Close.class);
     }
 
     @Test

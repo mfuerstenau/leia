@@ -704,8 +704,11 @@ public final class Session {
         Thread.ofPlatform().daemon().name("leia-runtime-plan").start(() -> {
             try {
                 RuntimeInstall.Plan planned = install.plan(plan.runtimes());
+                // Only read: the present runtimes' plans never reach the install (ADR 0081).
+                List<RuntimeInstall.RuntimePlan> present =
+                        install.plan(plan.present()).runtimes();
                 reply(runner, app -> {
-                    app.runtimesPlanned(install, planned);
+                    app.runtimesPlanned(install, planned, present);
                     return Optional.empty();
                 });
             } catch (RuntimeInstall.InstallException | RuntimeException e) {

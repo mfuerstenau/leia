@@ -736,10 +736,14 @@ public final class App {
         return jars != null && jars.waiting();
     }
 
-    /** What {@code install} found for the runtimes of {@link Action.PlanRuntimes}. */
-    public void runtimesPlanned(RuntimeInstall install, RuntimeInstall.Plan plan) {
+    /**
+     * What {@code install} found for the runtimes of {@link Action.PlanRuntimes}: {@code plan} for
+     * those to offer, {@code present} for those that are only shown.
+     */
+    public void runtimesPlanned(
+            RuntimeInstall install, RuntimeInstall.Plan plan, List<RuntimeInstall.RuntimePlan> present) {
         if (runtimeWindow != null) {
-            runtimeWindow.planned(install, plan);
+            runtimeWindow.planned(install, plan, present);
         }
     }
 
@@ -792,25 +796,34 @@ public final class App {
     /**
      * {@code D} on the start screen: opens the window that downloads runtimes (ADR 0080), for the
      * runtimes that are missing or incomplete. Those are never loaded, so no jar that is open gets
-     * written; a loaded, refused or restart one is left alone.
+     * written. A loaded, refused or restart one is planned only to be shown, apart from the install's
+     * plan, so that the install never sees it (ADR 0081).
      */
     private Optional<Action> openRuntimeWindow() {
         if (runtimeFolders.dir().isEmpty()) {
             notice = new Notice.CannotDownload("leia doesn't run from leia.jar, so there is no runtimes/ beside it");
             return Optional.empty();
         }
-        List<String> needing = runtimes == null
-                ? List.of()
-                : runtimes.runtimes().stream()
-                        .filter(runtime ->
-                                runtime.state() == RuntimeState.MISSING || runtime.state() == RuntimeState.INCOMPLETE)
-                        .map(RuntimeFolder::folder)
-                        .toList();
+        List<RuntimeFolder> states = runtimes == null ? List.of() : runtimes.runtimes();
+        List<String> needing = states.stream()
+                .filter(runtime ->
+                        runtime.state() == RuntimeState.MISSING || runtime.state() == RuntimeState.INCOMPLETE)
+                .map(RuntimeFolder::folder)
+                .toList();
+        List<String> there = states.stream()
+                .filter(runtime -> runtime.state() == RuntimeState.LOADED
+                        || runtime.state() == RuntimeState.RESTART
+                        || runtime.state() == RuntimeState.REFUSED)
+                .map(RuntimeFolder::folder)
+                .toList();
         List<Known> known = io.github.mfuerstenau.leia.server.runtime.RuntimeFolders.KNOWN.stream()
                 .filter(runtime -> needing.contains(runtime.folder()))
                 .toList();
-        runtimeWindow = new RuntimeWindow();
-        return Optional.of(new Action.PlanRuntimes(known));
+        List<Known> present = io.github.mfuerstenau.leia.server.runtime.RuntimeFolders.KNOWN.stream()
+                .filter(runtime -> there.contains(runtime.folder()))
+                .toList();
+        runtimeWindow = new RuntimeWindow(states);
+        return Optional.of(new Action.PlanRuntimes(known, present));
     }
 
     /**

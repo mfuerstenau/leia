@@ -69,7 +69,9 @@ again. Behind a proxy, start leia as `LEIA_OPTS=-Djava.net.useSystemProxies=true
 
 The window that `D` opens offers the runtimes that are missing or incomplete, none of them checked.
 Space checks a runtime, `a` checks all and `n` none; beside the list, each runtime shows the Lucene
-jars it would fetch with their URLs, SHA-256s and sizes. Enter downloads the checked runtimes and
+jars it would fetch with their URLs, SHA-256s and sizes. Below them, the runtimes that are there
+already are listed checked and greyed out, so their jars' URLs and SHA-256s can be read too; the
+download never touches their folders. Enter downloads the checked runtimes and
 shows their progress, which Esc cancels; Esc closes the window before and after. Once downloaded,
 leia loads the new runtimes without a restart. Only Lucene 10's needs one when jars are loaded
 already (with `--jar`, from the default folder or with `X`); the window says so.
