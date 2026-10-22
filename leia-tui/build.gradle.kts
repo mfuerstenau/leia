@@ -236,6 +236,20 @@ tasks.assemble {
     dependsOn(leiaFolder)
 }
 
+// The distribution: leia.jar and the scripts in one folder leia-<version>/, packed as a zip for
+// Linux and Windows alike, without runtimes/ (ADR 0073, ADR 0082). build-dist.sh copies it to dist/.
+val leiaZip by tasks.registering(Zip::class) {
+    description = "Packs leia.jar and the scripts as leia-<version>.zip."
+    archiveFileName = "leia-${project.version}.zip"
+    destinationDirectory = layout.buildDirectory.dir("dist")
+    into("leia-${project.version}") {
+        from(tasks.shadowJar)
+        from("src/scripts") {
+            filesMatching("leia") { permissions { unix("rwxr-xr-x") } }
+        }
+    }
+}
+
 // Under Gradle there is no leia.jar to find runtimes/ beside, so -Dleia.runtimes names leiaFolder's.
 tasks.named<JavaExec>("run") {
     dependsOn(leiaFolder)

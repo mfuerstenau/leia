@@ -621,14 +621,15 @@ For an index to try things on, `./gradlew :leia-core:demoIndex` writes a demo in
 nearly everything leia shows to `leia-core/build/test-indexes/demo`; see
 [docs/demo-index.md](docs/demo-index.md).
 
-### Release folders
+### Release archive
 
 ```sh
 ./build-dist.sh
 ```
 
-This builds `dist/leia-<version>-linux-x86_64/` and `dist/leia-<version>-windows-x86_64/`. Each
-folder holds `leia.jar` and the scripts `leia` and `leia.cmd`, and can be copied anywhere.
+This builds `dist/leia-<version>.zip`, for Linux and Windows alike. It unpacks to the folder
+`leia-<version>/` with `leia.jar` and the scripts `leia` and `leia.cmd`, which can be copied
+anywhere.
 
 ## How it works
 

@@ -393,3 +393,7 @@ Goal: the runtimes are downloaded from within leia's UI, and `--download-runtime
 ## Runtime download window — done
 
 - [x] Show the runtimes that are already present in the download window (`RuntimeWindow`, ADR 0080), not only those that need downloads, checked and greyed out, with their jars' file names, URLs and SHA-256s in the details pane. They are planned apart from the install, which never writes them (ADR 0081).
+
+## One distribution
+
+- [x] Build one distribution instead of a folder per OS (`build-dist.sh`, ADR 0004 and ADR 0034 amended by ADR 0082). `leia.jar` doesn't depend on the platform, so one folder holds it with both start scripts, `leia` and `leia.cmd`, and is packed as `dist/leia-<version>.zip` (executable bit of `leia` kept). Gradle's `leiaZip` packs it; `build-dist.sh` copies it to `dist/`.
