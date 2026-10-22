@@ -27,7 +27,6 @@ class CliTest {
                         false,
                         Optional.empty(),
                         false,
-                        false,
                         java.util.List.of()));
     }
 
@@ -54,16 +53,11 @@ class CliTest {
 
     @Test
     void parsesTheDownloadOfTheRuntimes() throws Exception {
-        assertThat(Cli.parse("--download-runtimes").downloadRuntimes()).isTrue();
+        assertThat(Cli.parse("--download-runtimes", "--runtime", "lucene9")).satisfies(cli -> {
+            assertThat(cli.downloadRuntimes()).isTrue();
+            assertThat(cli.runtimes()).containsExactly("lucene9");
+        });
         assertThat(Cli.parse().downloadRuntimes()).isFalse();
-        assertThat(Cli.parse("--download-runtimes").yes()).isFalse();
-        assertThat(Cli.parse("--download-runtimes", "--yes").yes()).isTrue();
-        assertThat(Cli.parse("--download-runtimes").runtimes()).isEmpty();
-        assertThat(Cli.parse("--download-runtimes", "--runtime", "lucene9", "--yes"))
-                .satisfies(cli -> {
-                    assertThat(cli.runtimes()).containsExactly("lucene9");
-                    assertThat(cli.yes()).isTrue();
-                });
         assertThat(Cli.parse("--runtime=lucene5", "--download-runtimes", "--runtime", "lucene9", "--runtime", "lucene5")
                         .runtimes())
                 .containsExactly("lucene5", "lucene9");
@@ -105,13 +99,14 @@ class CliTest {
             --no-reader=yes             | --no-reader takes no value
             /a /b                       | unexpected argument '/b'
             --download-runtimes=yes     | --download-runtimes takes no value
+            --download-runtimes         | --download-runtimes needs --runtime <FOLDER>; to choose runtimes, start leia and press D on its start screen
             --download-runtimes /a      | --download-runtimes takes no INDEX_PATH
             --download-runtimes --jar a | --download-runtimes takes no INDEX_PATH and none of --jar
             --no-reader --download-runtimes | --download-runtimes takes no INDEX_PATH
             --download-runtimes --directory nio | --download-runtimes takes no INDEX_PATH
             --download-runtimes --no-default-jars | --download-runtimes takes no INDEX_PATH
-            --yes                       | --yes goes only with --download-runtimes
-            --download-runtimes --yes=1 | --yes takes no value
+            --yes                       | unknown option '--yes'
+            --download-runtimes --runtime lucene9 --yes | unknown option '--yes'
             --runtime lucene9           | --runtime goes only with --download-runtimes
             --download-runtimes --runtime lucene99 | invalid value 'lucene99' for --runtime <FOLDER>: possible values are lucene10, lucene9, lucene7, lucene5, lucene3
             --download-runtimes --runtime | --runtime needs a value <FOLDER>
@@ -134,7 +129,6 @@ class CliTest {
                         "--directory <IMPL>",
                         "--no-reader",
                         "--download-runtimes",
-                        "--yes",
                         "--runtime <FOLDER>",
                         "repo1.maven.org",
                         "SHA-256",
@@ -148,8 +142,10 @@ class CliTest {
 
     @Test
     void helpSaysWhatTheRuntimesAreFor() {
+        assertThat(Cli.HELP).doesNotContain("--yes");
         assertThat(Cli.HELP.replaceAll("\\s+", " "))
                 .contains("a folder for each Lucene from 3.6 to 10 in the folder runtimes beside leia.jar")
-                .contains("without them, an index opens only without a reader. --download-runtimes installs them");
+                .contains("without them, an index opens only without a reader. D on the start screen downloads them")
+                .contains("To choose runtimes instead, start leia and press D on its start screen");
     }
 }

@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-15
+- **Amended by:** ADR 0080 (§2–§3, §7–§9: a window inside leia replaces the dialogue; `--yes` and the terminal check are gone)
 - **Amends:** ADR 0077 §2–§4 (a dialogue instead of the `[y/N]` question; `--runtime`); ADR 0073 §7 (a runtime's failure doesn't stop the others; a download can be cancelled); AGENTS.md, the CLI contract
 
 ## Context

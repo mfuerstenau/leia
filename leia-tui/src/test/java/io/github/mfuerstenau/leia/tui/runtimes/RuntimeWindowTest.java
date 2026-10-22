@@ -1,18 +1,14 @@
 package io.github.mfuerstenau.leia.tui.runtimes;
 
+import static io.github.mfuerstenau.leia.tui.TestScreens.key;
 import static io.github.mfuerstenau.leia.tui.runtimes.FakeRepository.known;
 import static io.github.mfuerstenau.leia.tui.runtimes.FakeRepository.lucene;
-import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import dev.tamboui.layout.Size;
-import dev.tamboui.terminal.TestBackend;
-import dev.tamboui.tui.TuiConfig;
-import dev.tamboui.tui.TuiRunner;
-import dev.tamboui.tui.event.Event;
 import dev.tamboui.tui.event.KeyCode;
-import dev.tamboui.tui.pilot.Pilot;
-import dev.tamboui.tui.pilot.TuiTestRunner;
+import io.github.mfuerstenau.leia.protocol.jars.LoadRuntimesResult;
+import io.github.mfuerstenau.leia.protocol.jars.RuntimeFolder;
+import io.github.mfuerstenau.leia.protocol.jars.RuntimeState;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
 import io.github.mfuerstenau.leia.tui.TestScreens;
 import java.io.IOException;
@@ -22,7 +18,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
@@ -32,21 +28,14 @@ import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * The dialogue of {@code --download-runtimes} (ADR 0079) through TamboUI's Pilot, against a local
- * repository. Only lucene9 and lucene5 need downloads; the others are installed first.
+ * The window that downloads runtimes inside leia (ADR 0080), against a local repository. Only
+ * lucene9 and lucene5 need downloads; the others are installed first.
  */
 @Timeout(60)
-class RuntimeDialogTest {
+class RuntimeWindowTest {
 
-    private static final int WIDTH = 120;
-    private static final int HEIGHT = 30;
-
-    /** Handled after every event dispatched before it. */
-    private record Barrier(CountDownLatch handled) implements Event {
-        Barrier() {
-            this(new CountDownLatch(1));
-        }
-    }
+    private static final int WIDTH = 140;
+    private static final int HEIGHT = 34;
 
     @TempDir
     Path tmp;
@@ -54,15 +43,13 @@ class RuntimeDialogTest {
     private FakeRepository repository;
     private Path runtimes;
     private RuntimeInstall install;
-    private RuntimeDialog dialog;
-    private TuiTestRunner test;
-    private Pilot pilot;
+    private RuntimeWindow window;
 
     @BeforeEach
     void start() throws Exception {
         repository = new FakeRepository();
         runtimes = tmp.resolve("runtimes");
-        install = new RuntimeInstall(runtimes, repository.base(), RuntimeDialogTest.class.getClassLoader());
+        install = new RuntimeInstall(runtimes, repository.base(), RuntimeWindowTest.class.getClassLoader());
         RuntimeInstall.Plan all = install.plan(RuntimeFolders.KNOWN);
         assertThat(install.install(all, Set.copyOf(RuntimeFolders.KNOWN), new RuntimeInstall.Listener() {}, () -> false)
                         .status())
@@ -70,181 +57,228 @@ class RuntimeDialogTest {
         deleteFolder("lucene9");
         deleteFolder("lucene5");
         repository.requests.set(0);
-    }
-
-    private void open(Set<RuntimeFolders.Known> checked) throws Exception {
-        dialog = new RuntimeDialog(install, install.plan(RuntimeFolders.KNOWN), checked);
-        test = TuiTestRunner.runTest(
-                this::handle,
-                dialog::render,
-                new Size(WIDTH, HEIGHT),
-                TuiConfig.builder()
-                        .backend(new TestBackend(WIDTH, HEIGHT))
-                        .tickRate(Duration.ofMillis(100))
-                        .build());
-        pilot = test.pilot();
+        window = new RuntimeWindow();
     }
 
     @AfterEach
     void stop() {
-        if (test != null) {
-            test.close();
-        }
         repository.close();
     }
 
-    private boolean handle(Event event, TuiRunner runner) {
-        if (event instanceof Barrier barrier) {
-            barrier.handled().countDown();
-            return false;
-        }
-        return dialog.handle(event, runner);
-    }
-
-    private void settle() throws InterruptedException {
-        Barrier barrier = new Barrier();
-        test.runner().dispatch(barrier);
-        assertThat(barrier.handled().await(20, SECONDS)).isTrue();
-    }
-
-    /** Waits until {@code done}, settling between looks. */
-    private void await(BooleanSupplier done) throws InterruptedException {
-        long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
-        while (!done.getAsBoolean() && System.nanoTime() < deadline) {
-            Thread.sleep(20);
-            settle();
-        }
-        assertThat(done.getAsBoolean()).as("done in time").isTrue();
+    private void plan(List<RuntimeFolders.Known> runtimes) throws Exception {
+        window.planned(install, install.plan(runtimes));
     }
 
     private String screen() {
-        return TestScreens.render(dialog::render, WIDTH, HEIGHT);
+        return screen(WIDTH, HEIGHT);
+    }
+
+    private String screen(int width, int height) {
+        return TestScreens.render(frame -> window.render(frame, frame.area()), width, height);
+    }
+
+    /** Enter, and the install it starts, on a thread of its own as the session runs it. */
+    private CompletableFuture<RuntimeInstall.Outcome> enter() {
+        RuntimeWindow.Event event = window.handleKey(key(KeyCode.ENTER));
+        assertThat(event).isInstanceOf(RuntimeWindow.Install.class);
+        RuntimeWindow.Install start = (RuntimeWindow.Install) event;
+        return CompletableFuture.supplyAsync(
+                () -> start.install().install(start.plan(), start.chosen(), start.listener(), start.cancelled()));
+    }
+
+    @Test
+    void waitsForItsPlanInsideItsBorder() {
+        String screen = screen();
+
+        assertThat(screen).contains(" Download runtimes ", "Reading runtimes/…", "Esc close");
+        assertThat(window.animating()).isTrue();
+        // Inside the border: the first row and column belong to the screen behind the window.
+        List<String> rows = screen.lines().toList();
+        assertThat(rows.getFirst()).isBlank();
+        assertThat(rows)
+                .filteredOn(row -> row.contains("Reading runtimes/"))
+                .singleElement()
+                .satisfies(row -> assertThat(row.indexOf('│')).isBetween(1, row.indexOf("Reading") - 1));
+        assertThat(window.handleKey(key(KeyCode.ESCAPE))).isInstanceOf(RuntimeWindow.Close.class);
     }
 
     @Test
     void offersOnlyWhatNeedsDownloadsNoneChecked() throws Exception {
-        open(Set.of());
-        settle();
+        plan(RuntimeFolders.KNOWN);
 
-        String screen = screen();
-        assertThat(screen)
+        assertThat(screen())
                 .contains("[ ] Lucene 9 · indexes of 8 · ")
                 .contains("[ ] Lucene 5 · indexes of 4 and 5 · ")
-                .doesNotContain("Lucene 7", "Lucene 10 ·", "[x]")
+                .doesNotContain("[x]", "[ ] Lucene 7")
+                .contains("Need no download, and are installed from leia.jar with them: lucene10, lucene7, lucene3")
                 .contains("Checked: 0 runtimes, 0 jars, 0 B")
                 .contains("Maven Central");
+        assertThat(window.animating()).isFalse();
+    }
 
-        pilot.press(KeyCode.ENTER);
-        settle();
+    @Test
+    void asksForACheckWhenEveryPlannedRuntimeNeedsADownload() throws Exception {
+        plan(List.of(known("lucene9"), known("lucene5")));
 
-        assertThat(screen()).contains("Nothing checked: Space checks a runtime; Esc quits");
-        assertThat(test.runner().isRunning()).isTrue();
+        assertThat(window.handleKey(key(KeyCode.ENTER))).isInstanceOf(RuntimeWindow.Nothing.class);
+
+        assertThat(screen()).contains("Nothing checked: Space checks a runtime; Esc closes");
+    }
+
+    @Test
+    void saysSoWhenNothingIsMissing() throws Exception {
+        plan(List.of());
+
+        assertThat(screen()).contains("Every runtime is loaded or complete; there is nothing to download.");
+        assertThat(window.handleKey(key(KeyCode.ENTER))).isInstanceOf(RuntimeWindow.Nothing.class);
+        assertThat(window.handleKey(key('q'))).isInstanceOf(RuntimeWindow.Close.class);
     }
 
     @Test
     void checksAndCountsTheRuntimes() throws Exception {
-        open(Set.of());
+        plan(RuntimeFolders.KNOWN);
         int lucene9 = lucene(known("lucene9")).size();
         int lucene5 = lucene(known("lucene5")).size();
 
-        pilot.press(' ');
-        settle();
+        window.handleKey(key(' '));
         assertThat(screen())
                 .contains("[x] Lucene 9")
                 .contains("[ ] Lucene 5")
                 .contains("Checked: 1 runtime, " + lucene9 + " jars, ");
 
-        pilot.press('a');
-        settle();
+        window.handleKey(key('a'));
         assertThat(screen()).contains("[x] Lucene 5").contains("Checked: 2 runtimes, " + (lucene9 + lucene5) + " jars");
 
-        pilot.press('n');
-        settle();
+        window.handleKey(key('n'));
         assertThat(screen()).doesNotContain("[x]").contains("Checked: 0 runtimes");
     }
 
     @Test
     void showsTheDetailsOfTheHighlightedRuntime() throws Exception {
-        open(Set.of());
+        plan(RuntimeFolders.KNOWN);
         RuntimeInstall.Download first = install.plan(List.of(known("lucene5")))
                 .runtimes()
                 .getFirst()
                 .downloads()
                 .getFirst();
 
-        pilot.press(KeyCode.DOWN);
-        settle();
+        window.handleKey(key(KeyCode.DOWN));
 
-        // Wide enough for a URL and a SHA-256 on a line.
-        assertThat(TestScreens.render(dialog::render, 200, HEIGHT))
+        String screen = screen();
+        assertThat(screen)
                 .contains("Lucene 5 · runtimes/lucene5")
                 .contains("To download into runtimes/lucene5:")
-                .contains(first.jar().name())
+                .contains(first.jar().name());
+        // The window is narrower than a URL and a SHA-256 on a line: they wrap in the details panel.
+        String details = detailsColumn(screen, "Lucene 5 · runtimes/lucene5");
+        assertThat(details)
                 .contains(first.uri().toString())
-                .contains("SHA-256 " + first.jar().sha256());
+                .contains("SHA-256" + first.jar().sha256());
+    }
+
+    /** The text of the panel titled {@code title}, its rows joined, without spaces or borders. */
+    private static String detailsColumn(String screen, String title) {
+        List<String> rows = screen.lines().toList();
+        int top = indexOf(rows, title);
+        // The title follows the corner and a space; the text starts right of the border.
+        int column = rows.get(top).indexOf(title) - 1;
+        StringBuilder text = new StringBuilder();
+        for (String row : rows.subList(top + 1, rows.size())) {
+            if (row.length() > column) {
+                text.append(row.substring(column).replaceAll("[\\s│┃]", ""));
+            }
+        }
+        return text.toString();
     }
 
     @Test
-    void installsTheCheckedRuntimesOnly() throws Exception {
-        open(Set.of(known("lucene9")));
-        settle();
-        assertThat(screen()).contains("[x] Lucene 9", "[ ] Lucene 5");
+    void installsTheCheckedRuntimesThenShowsWhatWasLoaded() throws Exception {
+        plan(RuntimeFolders.KNOWN);
+        window.handleKey(key(' '));
 
-        pilot.press(KeyCode.ENTER);
-        await(() -> screen().contains("Done: "));
+        RuntimeInstall.Outcome outcome = enter().get();
+        assertThat(window.installing()).isTrue();
+        assertThat(window.finished(outcome)).isTrue();
 
+        assertThat(outcome.status()).isZero();
         assertThat(screen())
                 .contains("lucene9: installed")
                 .doesNotContain("lucene5")
-                .contains("✓ lucene-core-9.12.3.jar");
-        pilot.press(KeyCode.ENTER);
-        Optional<RuntimeInstall.Outcome> outcome = dialog.awaitOutcome();
-        assertThat(outcome).hasValueSatisfying(done -> assertThat(done.status()).isZero());
+                .contains("✓ lucene-backward-codecs-9.12.3.jar")
+                .contains("Loading the new runtimes…");
+        assertThat(window.animating()).isTrue();
         assertThat(runtimes.resolve("lucene9/lucene-core-9.12.3.jar")).isRegularFile();
         assertThat(runtimes.resolve("lucene5")).doesNotExist();
+
+        window.loaded(new LoadRuntimesResult(
+                List.of("lucene9"),
+                List.of(
+                        new RuntimeFolder(
+                                "lucene10", List.of(9, 10), RuntimeState.RESTART, Optional.empty(), Optional.empty()),
+                        new RuntimeFolder(
+                                "lucene9", List.of(8), RuntimeState.LOADED, Optional.of("9.12.3"), Optional.empty()))));
+
+        assertThat(screen())
+                .contains("Loaded lucene9 (Lucene 9.12.3)")
+                .contains("lucene10: restart leia to load it")
+                .contains("Open the index again (o) to read it with the new runtime.")
+                .contains("⏎/Esc close");
+        assertThat(window.animating()).isFalse();
+        assertThat(window.handleKey(key(KeyCode.ENTER))).isInstanceOf(RuntimeWindow.Close.class);
     }
 
     @Test
-    void cancelsADownloadWithEscape() throws Exception {
-        open(Set.of(known("lucene9")));
+    void escapeCancelsADownloadAndClosesOnlyAfterIt() throws Exception {
+        plan(List.of(known("lucene9")));
+        window.handleKey(key(' '));
         repository.holdBack();
 
-        pilot.press(KeyCode.ENTER);
+        CompletableFuture<RuntimeInstall.Outcome> running = enter();
         await(() -> repository.requests.get() > 0);
         assertThat(screen()).contains("Downloading ", "of ");
-        pilot.press(KeyCode.ESCAPE);
-        settle();
+
+        assertThat(window.handleKey(key(KeyCode.ESCAPE))).isInstanceOf(RuntimeWindow.Nothing.class);
         assertThat(screen()).contains("Cancelling…");
         repository.release();
-        await(() -> screen().contains("Done: "));
+        RuntimeInstall.Outcome outcome = running.get();
 
-        assertThat(screen()).contains("lucene9: cancelled", "lucene7: installed");
-        assertThat(dialog.awaitOutcome())
-                .hasValueSatisfying(done -> assertThat(done.results())
-                        .containsEntry(known("lucene9"), new RuntimeInstall.Result.Cancelled()));
+        assertThat(window.finished(outcome)).isFalse();
+        assertThat(screen()).contains("lucene9: cancelled").doesNotContain("Loading");
+        assertThat(outcome.results()).containsEntry(known("lucene9"), new RuntimeInstall.Result.Cancelled());
         try (Stream<Path> files = Files.list(runtimes.resolve("lucene9"))) {
             assertThat(files).noneMatch(file -> file.getFileName().toString().endsWith(".part"));
         }
+        assertThat(window.handleKey(key(KeyCode.ESCAPE))).isInstanceOf(RuntimeWindow.Close.class);
     }
 
     @Test
-    void quitsWithoutDownloading() throws Exception {
-        open(Set.of(known("lucene9")));
+    void closesWithoutDownloading() throws Exception {
+        plan(RuntimeFolders.KNOWN);
+        window.handleKey(key(' '));
 
-        pilot.press(KeyCode.ESCAPE);
-        await(() -> !test.runner().isRunning());
+        assertThat(window.handleKey(key(KeyCode.ESCAPE))).isInstanceOf(RuntimeWindow.Close.class);
 
-        assertThat(dialog.awaitOutcome()).isEmpty();
         assertThat(repository.requests).hasValue(0);
         assertThat(runtimes.resolve("lucene9")).doesNotExist();
     }
 
     @Test
-    void fitsANarrowTerminal() throws Exception {
-        dialog = new RuntimeDialog(install, install.plan(RuntimeFolders.KNOWN), Set.of(known("lucene5")));
+    void saysWhyThePlanFailed() {
+        window.planFailed("leia.jar lacks runtimes/lucene9");
 
-        String narrow = TestScreens.render(dialog::render, 60, 24);
-        String wide = TestScreens.render(dialog::render, 120, 24);
+        assertThat(screen()).contains("Cannot plan the download: leia.jar lacks runtimes/lucene9");
+        assertThat(window.handleKey(key(KeyCode.ESCAPE))).isInstanceOf(RuntimeWindow.Close.class);
+    }
+
+    @Test
+    void fitsANarrowTerminal() throws Exception {
+        plan(RuntimeFolders.KNOWN);
+        window.handleKey(key(KeyCode.DOWN));
+        window.handleKey(key(' '));
+        window.handleKey(key(KeyCode.UP));
+
+        String narrow = screen(64, 28);
+        String wide = screen(130, 28);
 
         // The details go below the list on a narrow terminal, beside it on a wide one.
         List<String> rows = narrow.lines().toList();
@@ -254,7 +288,16 @@ class RuntimeDialogTest {
         List<String> wideRows = wide.lines().toList();
         assertThat(indexOf(wideRows, "To download into runtimes/lucene9:"))
                 .isLessThanOrEqualTo(indexOf(wideRows, "Lucene 5 ·"));
-        assertThat(narrow).contains("␣ check", "Esc/q quit");
+        assertThat(narrow).contains("␣ check", "Esc close");
+    }
+
+    /** Waits until {@code done}. */
+    private static void await(BooleanSupplier done) throws InterruptedException {
+        long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+        while (!done.getAsBoolean() && System.nanoTime() < deadline) {
+            Thread.sleep(20);
+        }
+        assertThat(done.getAsBoolean()).as("done in time").isTrue();
     }
 
     private static int indexOf(List<String> rows, String text) {

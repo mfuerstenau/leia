@@ -9,16 +9,17 @@ import dev.tamboui.text.CharWidth;
 import dev.tamboui.text.Line;
 import dev.tamboui.text.Span;
 import dev.tamboui.text.Text;
-import dev.tamboui.tui.TuiConfig;
-import dev.tamboui.tui.TuiRunner;
-import dev.tamboui.tui.event.Event;
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
-import dev.tamboui.tui.event.TickEvent;
+import dev.tamboui.widgets.Clear;
 import dev.tamboui.widgets.block.Block;
+import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.gauge.LineGauge;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import dev.tamboui.widgets.spinner.Spinner;
+import io.github.mfuerstenau.leia.protocol.jars.LoadRuntimesResult;
+import io.github.mfuerstenau.leia.protocol.jars.RuntimeFolder;
+import io.github.mfuerstenau.leia.protocol.jars.RuntimeState;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.widgets.KeyLegend;
@@ -33,147 +34,198 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 
 /**
- * The dialogue of {@code leia --download-runtimes} (ADR 0079): the user checks the runtimes to
- * download, none at first, sees what each one downloads from where, and watches the download, which
- * Esc cancels. It offers only the runtimes that need a download; {@link RuntimeInstall#install}
- * refreshes the others without asking.
+ * The window that downloads runtimes inside leia (ADR 0080), opened with {@code D} on the start
+ * screen: the user checks the runtimes to download, none at first, sees what each one downloads from
+ * where, and watches the download, which Esc cancels. It offers only the runtimes that need a
+ * download; {@link RuntimeInstall#install} refreshes the others it was planned for without asking.
+ * Once the download is done, the backend loads the new runtimes, and the window says what came of it.
  *
- * <p>The install runs on a thread of its own, which writes into a {@link Progress} that the ticks
- * draw, and ends with a {@link Finished} event. Everything else is touched on the UI thread only.
+ * <p>The plan and the install run on threads of their own; the install writes into a {@link
+ * Progress} that the ticks draw. Everything else is touched on the UI thread only.
  */
-public final class RuntimeDialog {
+public final class RuntimeWindow {
+
+    /** The window is at most this wide, borders included. */
+    private static final int MAX_WIDTH = 110;
 
     /** Below this width the details go below the list instead of beside it. */
     private static final int WIDE = 90;
 
     private static final String CHOOSE_KEYS =
-            "␣ check   a all   n none   ↑↓ move   [/] details   ⏎ download   Esc/q quit";
-    private static final String NOTHING_CHECKED = "Nothing checked: Space checks a runtime; Esc quits";
+            "␣ check   a all   n none   ↑↓ move   [/] details   ⏎ download   Esc close";
+    private static final String NOTHING_CHECKED = "Nothing checked: Space checks a runtime; Esc closes";
     private static final String[] SPINNER = Spinner.dots().frames();
     private static final Style FAILED = Style.EMPTY.red();
+    private static final Style WARNING = Style.EMPTY.yellow();
 
     private enum Phase {
+        PLANNING,
+        PLAN_FAILED,
         CHOOSE,
         INSTALLING,
+        LOADING,
         DONE
     }
 
-    /** The install has ended. */
-    record Finished(RuntimeInstall.Outcome outcome) implements Event {}
+    /** What a key did to the window. */
+    public sealed interface Event {}
 
-    private final RuntimeInstall install;
-    private final RuntimeInstall.Plan plan;
-    private final List<RuntimeInstall.RuntimePlan> offered;
+    /** Nothing for the caller to do. */
+    public record Nothing() implements Event {}
+
+    /**
+     * Enter: install {@code chosen} of {@code plan}, telling {@code listener} how it goes, until
+     * {@code cancelled}. The window shows the progress from now on.
+     */
+    public record Install(
+            RuntimeInstall install,
+            RuntimeInstall.Plan plan,
+            Set<RuntimeFolders.Known> chosen,
+            RuntimeInstall.Listener listener,
+            BooleanSupplier cancelled)
+            implements Event {}
+
+    /** Esc: close the window. */
+    public record Close() implements Event {}
+
     private final Set<RuntimeFolders.Known> checked = new LinkedHashSet<>();
     private final AtomicBoolean cancelled = new AtomicBoolean();
-    private final AtomicReference<RuntimeInstall.Outcome> finished = new AtomicReference<>();
 
-    private Phase phase = Phase.CHOOSE;
+    private Phase phase = Phase.PLANNING;
+    private RuntimeInstall install;
+    private RuntimeInstall.Plan plan;
+    private List<RuntimeInstall.RuntimePlan> offered = List.of();
+    private String planError;
     private int cursor;
     private int detailsScroll;
     private Optional<String> hint = Optional.empty();
     private Progress progress;
-    private Thread installer;
+    private List<Line> loadLines = List.of();
     private int ticks;
 
-    /**
-     * @param install installs the runtimes
-     * @param plan what {@code install} found
-     * @param initiallyChecked the runtimes checked at first, such as those of {@code --runtime}
-     */
-    public RuntimeDialog(RuntimeInstall install, RuntimeInstall.Plan plan, Set<RuntimeFolders.Known> initiallyChecked) {
+    /** A window that waits for its plan. */
+    public RuntimeWindow() {}
+
+    /** What {@code install} found: the window lets the user choose now. */
+    public void planned(RuntimeInstall install, RuntimeInstall.Plan plan) {
         this.install = install;
         this.plan = plan;
         this.offered = plan.needingDownload();
-        offered.stream()
-                .map(RuntimeInstall.RuntimePlan::known)
-                .filter(initiallyChecked::contains)
-                .forEach(checked::add);
+        phase = Phase.CHOOSE;
+    }
+
+    /** Why the runtimes couldn't be planned. */
+    public void planFailed(String message) {
+        planError = message;
+        phase = Phase.PLAN_FAILED;
     }
 
     /**
-     * Runs the dialogue on a terminal of {@code config}.
-     *
-     * @return how the install ended, or empty if the user downloaded nothing
+     * The install has ended. Returns whether a runtime was installed, so that the backend loads the
+     * new runtimes; the window waits for {@link #loaded} or {@link #loadFailed} then.
      */
-    public static Optional<RuntimeInstall.Outcome> run(
-            RuntimeInstall install,
-            RuntimeInstall.Plan plan,
-            Set<RuntimeFolders.Known> initiallyChecked,
-            TuiConfig config)
-            throws Exception {
-        RuntimeDialog dialog = new RuntimeDialog(install, plan, initiallyChecked);
-        try (TuiRunner runner = TuiRunner.create(config)) {
-            runner.run(dialog::handle, dialog::render);
+    public boolean finished(RuntimeInstall.Outcome outcome) {
+        if (phase != Phase.INSTALLING) {
+            return false;
         }
-        return dialog.awaitOutcome();
+        progress.finish(outcome);
+        boolean installed =
+                outcome.results().values().stream().anyMatch(RuntimeInstall.Result.Installed.class::isInstance);
+        phase = installed ? Phase.LOADING : Phase.DONE;
+        return installed;
     }
 
-    /**
-     * How the install ended, once the dialogue is closed; an install that still runs, such as after
-     * Ctrl+C, is cancelled and waited for. Empty if nothing was installed.
-     */
-    public Optional<RuntimeInstall.Outcome> awaitOutcome() throws InterruptedException {
-        if (installer == null) {
-            return Optional.empty();
+    /** What the backend made of the new runtimes; only while the window waits for it. */
+    public void loaded(LoadRuntimesResult result) {
+        if (phase != Phase.LOADING) {
+            return;
         }
-        cancelled.set(true);
-        installer.join();
-        return Optional.of(finished.get());
+        List<Line> lines = new ArrayList<>();
+        for (RuntimeFolder runtime : result.runtimes()) {
+            boolean fresh = result.loaded().contains(runtime.folder());
+            boolean taken = progress.outcome().results().keySet().stream()
+                    .anyMatch(known -> known.folder().equals(runtime.folder()));
+            if (fresh && runtime.state() == RuntimeState.LOADED) {
+                lines.add(Line.styled(
+                        "Loaded " + runtime.folder()
+                                + runtime.luceneVersion()
+                                        .map(v -> " (Lucene " + v + ")")
+                                        .orElse(""),
+                        Style.EMPTY.green()));
+            } else if (runtime.state() == RuntimeState.RESTART) {
+                lines.add(Line.styled(
+                        runtime.folder() + ": restart leia to load it, since jars are loaded already", WARNING));
+            } else if (taken && runtime.state() == RuntimeState.REFUSED) {
+                lines.add(Line.styled(
+                        "Refused " + runtime.folder() + ": " + runtime.problem().orElse(""), FAILED));
+            } else if (taken && runtime.state() == RuntimeState.INCOMPLETE) {
+                lines.add(Line.styled(
+                        runtime.folder() + " is still incomplete: "
+                                + runtime.problem().orElse("") + " is missing",
+                        FAILED));
+            }
+        }
+        if (!result.loaded().isEmpty()) {
+            lines.add(Line.from("Open the index again (o) to read it with the new runtime."));
+        }
+        loadLines = lines;
+        phase = Phase.DONE;
     }
 
-    /** Handles {@code event}; true if the screen needs drawing. */
-    public boolean handle(Event event, TuiRunner runner) {
-        return switch (event) {
-            case KeyEvent key -> {
-                handleKey(key, runner);
-                yield true;
+    /** Why the backend couldn't load the new runtimes. */
+    public void loadFailed(String message) {
+        if (phase != Phase.LOADING) {
+            return;
+        }
+        loadLines = List.of(Line.styled("Cannot load the runtimes: " + message, FAILED));
+        phase = Phase.DONE;
+    }
+
+    /** Whether the window shows something that moves: a spinner, or the download's progress. */
+    public boolean animating() {
+        return phase == Phase.PLANNING || phase == Phase.INSTALLING || phase == Phase.LOADING;
+    }
+
+    /** Whether a download runs, which closing the window would leave running. */
+    public boolean installing() {
+        return phase == Phase.INSTALLING;
+    }
+
+    /** A tick: the spinner moves on. */
+    public void tick() {
+        ticks++;
+    }
+
+    public Event handleKey(KeyEvent key) {
+        boolean close = key.code() == KeyCode.ESCAPE || key.isChar('q');
+        return switch (phase) {
+            case CHOOSE -> choose(key);
+            case INSTALLING -> {
+                // Closed once the install has ended, and the backend has loaded what it installed.
+                if (key.code() == KeyCode.ESCAPE) {
+                    cancelled.set(true);
+                }
+                yield new Nothing();
             }
-            case Finished done -> {
-                phase = Phase.DONE;
-                progress.finish(done.outcome());
-                yield true;
-            }
-            case TickEvent _ -> {
-                ticks++;
-                yield phase == Phase.INSTALLING;
-            }
-            default -> false;
+            case PLANNING, PLAN_FAILED, LOADING -> close ? new Close() : new Nothing();
+            case DONE -> close || key.code() == KeyCode.ENTER ? new Close() : new Nothing();
         };
     }
 
-    private void handleKey(KeyEvent key, TuiRunner runner) {
-        switch (phase) {
-            case CHOOSE -> choose(key, runner);
-            case INSTALLING -> {
-                if (key.code() == KeyCode.ESCAPE || key.isCtrlC()) {
-                    cancelled.set(true);
-                }
-            }
-            case DONE -> {
-                if (key.code() == KeyCode.ESCAPE || key.code() == KeyCode.ENTER || key.isChar('q') || key.isCtrlC()) {
-                    runner.quit();
-                }
-            }
-        }
-    }
-
-    private void choose(KeyEvent key, TuiRunner runner) {
+    private Event choose(KeyEvent key) {
         hint = Optional.empty();
-        if (key.code() == KeyCode.ESCAPE || key.isChar('q') || key.isCtrlC()) {
-            runner.quit();
-            return;
+        if (key.code() == KeyCode.ESCAPE || key.isChar('q')) {
+            return new Close();
         }
         if (key.code() == KeyCode.ENTER) {
-            if (checked.isEmpty()) {
-                hint = Optional.of(NOTHING_CHECKED);
-            } else {
-                start(runner);
+            if (checked.isEmpty() && refreshed().isEmpty()) {
+                hint = Optional.of(offered.isEmpty() ? "Nothing to download; Esc closes" : NOTHING_CHECKED);
+                return new Nothing();
             }
-            return;
+            return start();
         }
         if (key.isChar(' ') && !offered.isEmpty()) {
             RuntimeFolders.Known known = offered.get(cursor).known();
@@ -195,41 +247,79 @@ public final class RuntimeDialog {
                 detailsScroll = 0;
             }
         }
+        return new Nothing();
     }
 
-    /** Starts the install of the checked runtimes. */
-    private void start(TuiRunner runner) {
+    /** The planned runtimes that need no download, which every install refreshes. */
+    private List<RuntimeInstall.RuntimePlan> refreshed() {
+        return plan.runtimes().stream()
+                .filter(runtime -> !runtime.needsDownload())
+                .toList();
+    }
+
+    /** Starts the install of the checked runtimes, and of those that need no download. */
+    private Install start() {
         Set<RuntimeFolders.Known> chosen = Set.copyOf(checked);
-        progress = new Progress(offered.stream()
-                .filter(runtime -> chosen.contains(runtime.known()))
+        progress = new Progress(plan.runtimes().stream()
+                .filter(runtime -> !runtime.needsDownload() || chosen.contains(runtime.known()))
                 .toList());
         phase = Phase.INSTALLING;
-        installer = Thread.ofPlatform().daemon().name("leia-runtime-install").start(() -> {
-            RuntimeInstall.Outcome outcome;
-            try {
-                outcome = install.install(plan, chosen, progress, cancelled::get);
-            } catch (RuntimeException e) {
-                Map<RuntimeFolders.Known, RuntimeInstall.Result> failed = new LinkedHashMap<>();
-                chosen.forEach(known -> failed.put(known, new RuntimeInstall.Result.Failed(String.valueOf(e))));
-                outcome = new RuntimeInstall.Outcome(failed);
-            }
-            finished.set(outcome);
-            runner.dispatch(new Finished(outcome));
-        });
+        return new Install(install, plan, chosen, progress, cancelled::get);
     }
 
-    public void render(Frame frame) {
-        Rect area = frame.area();
+    /** How a failed install thread ends: every chosen runtime failed, for {@code error}. */
+    public static RuntimeInstall.Outcome failedOutcome(Set<RuntimeFolders.Known> chosen, RuntimeException error) {
+        Map<RuntimeFolders.Known, RuntimeInstall.Result> failed = new LinkedHashMap<>();
+        chosen.forEach(known -> failed.put(known, new RuntimeInstall.Result.Failed(String.valueOf(error))));
+        return new RuntimeInstall.Outcome(failed);
+    }
+
+    /** Draws the window, centred in {@code area}. */
+    public void render(Frame frame, Rect area) {
+        int width = Math.min(Math.max(area.width() - 4, 0), MAX_WIDTH);
+        int height = Math.max(area.height() - 2, 0);
+        Rect window = Panels.centered(area, width, height);
+        frame.renderWidget(Clear.INSTANCE, window);
+        Block block = Block.builder()
+                .borders(Borders.ALL)
+                .title(" Download runtimes ")
+                .build();
+        Rect inner = block.inner(window);
+        frame.renderWidget(block, window);
+        if (inner.width() <= 0 || inner.height() <= 0) {
+            return;
+        }
         List<Line> header = new ArrayList<>();
         List<Line> footer;
         switch (phase) {
+            case PLANNING -> {
+                header.add(Line.from(SPINNER[ticks % SPINNER.length] + " Reading runtimes/…"));
+                footer = KeyLegend.lines("Esc close", inner.width());
+            }
+            case PLAN_FAILED -> {
+                header.add(Line.styled("Cannot plan the download: " + planError, FAILED));
+                footer = KeyLegend.lines("Esc close", inner.width());
+            }
             case CHOOSE -> {
-                header.add(Line.from(install.source() + ", and checks each against the SHA-256 and size that leia's"
-                        + " build recorded."));
-                header.add(Line.from(Span.styled(checkedTotal(), Style.EMPTY.bold())));
+                if (plan.runtimes().isEmpty()) {
+                    header.add(Line.from("Every runtime is loaded or complete; there is nothing to download."));
+                } else {
+                    header.add(Line.from(install.source() + ", and checks each against the SHA-256 and size that"
+                            + " leia's build recorded."));
+                    List<RuntimeInstall.RuntimePlan> refreshed = refreshed();
+                    if (!refreshed.isEmpty()) {
+                        header.add(Line.from("Need no download, and are installed from leia.jar with them: "
+                                + String.join(
+                                        ", ",
+                                        refreshed.stream()
+                                                .map(runtime -> runtime.known().folder())
+                                                .toList())));
+                    }
+                    header.add(Line.from(Span.styled(checkedTotal(), Style.EMPTY.bold())));
+                }
                 footer = new ArrayList<>();
-                hint.ifPresent(text -> footer.add(Line.from(Span.styled(" " + text, Style.EMPTY.yellow()))));
-                footer.addAll(KeyLegend.lines(CHOOSE_KEYS, area.width()));
+                hint.ifPresent(text -> footer.add(Line.from(Span.styled(" " + text, WARNING))));
+                footer.addAll(KeyLegend.lines(plan.runtimes().isEmpty() ? "Esc close" : CHOOSE_KEYS, inner.width()));
             }
             case INSTALLING -> {
                 header.add(Line.from(Span.styled(
@@ -238,31 +328,41 @@ public final class RuntimeDialog {
                                 : "Downloading " + TextFormat.count(progress.jarCount(), "jar") + " into "
                                         + install.runtimesDir(),
                         Style.EMPTY.bold())));
-                footer = KeyLegend.lines("Esc cancel", area.width());
+                footer = KeyLegend.lines("Esc cancel", inner.width());
             }
             default -> {
                 header.add(Line.from(Span.styled("Done: " + install.runtimesDir(), Style.EMPTY.bold())));
                 for (String line : progress.outcome().summary()) {
                     header.add(line.contains(": failed: ") ? Line.from(Span.styled(line, FAILED)) : Line.from(line));
                 }
-                footer = KeyLegend.lines("⏎/Esc close", area.width());
+                if (phase == Phase.LOADING) {
+                    header.add(Line.from(SPINNER[ticks % SPINNER.length] + " Loading the new runtimes…"));
+                } else {
+                    header.addAll(loadLines);
+                }
+                footer = KeyLegend.lines("⏎/Esc close", inner.width());
             }
         }
-        List<Line> wrappedHeader = Panels.wrap(header, Math.max(area.width() - 1, 1));
-        int headerHeight = Math.min(wrappedHeader.size(), Math.max(area.height() / 3, 1));
-        int footerHeight = Math.min(footer.size(), Math.max(area.height() / 3, 1));
-        int gaugeHeight = phase == Phase.CHOOSE ? 0 : 1;
+        List<Line> wrappedHeader = Panels.wrap(header, Math.max(inner.width() - 1, 1));
+        // Below the header goes the list or the jars, but only once there is a plan.
+        int headerHeight = phase != Phase.PLANNING && phase != Phase.PLAN_FAILED
+                ? Math.min(wrappedHeader.size(), Math.max(inner.height() / 3, 1))
+                : Math.min(wrappedHeader.size(), inner.height());
+        int footerHeight = Math.min(footer.size(), Math.max(inner.height() / 3, 1));
+        int gaugeHeight = phase == Phase.INSTALLING || phase == Phase.LOADING || phase == Phase.DONE ? 1 : 0;
         List<Rect> rows = Layout.vertical()
                 .constraints(
                         Constraint.length(headerHeight),
                         Constraint.length(gaugeHeight),
                         Constraint.fill(),
                         Constraint.length(footerHeight))
-                .split(area);
+                .split(inner);
         frame.renderWidget(Paragraph.from(Text.from(wrappedHeader)), rows.get(0));
         if (phase == Phase.CHOOSE) {
-            renderChoose(frame, rows.get(2));
-        } else {
+            if (!plan.runtimes().isEmpty()) {
+                renderChoose(frame, rows.get(2));
+            }
+        } else if (gaugeHeight > 0) {
             frame.renderWidget(gauge(), rows.get(1));
             renderProgress(frame, rows.get(2));
         }

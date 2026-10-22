@@ -24,7 +24,7 @@ import java.util.jar.JarInputStream;
  * build puts together (ADR 0073). It can hold back every download after its first {@value #CHUNK}
  * bytes until it is {@link #release released}, for a cancel while a download runs.
  */
-final class FakeRepository implements AutoCloseable {
+public final class FakeRepository implements AutoCloseable {
 
     static final Path TEST_RUNTIMES = Path.of(System.getProperty("leia.test.runtimes"));
 
@@ -34,12 +34,12 @@ final class FakeRepository implements AutoCloseable {
     /** What the repository serves by Maven path; missing paths are 404. */
     final Map<String, byte[]> served = new ConcurrentHashMap<>();
     /** How many requests it got. */
-    final AtomicInteger requests = new AtomicInteger();
+    public final AtomicInteger requests = new AtomicInteger();
 
     private final HttpServer server;
     private volatile CountDownLatch gate = new CountDownLatch(0);
 
-    FakeRepository() throws IOException {
+    public FakeRepository() throws IOException {
         for (RuntimeFolders.Known known : RuntimeFolders.KNOWN) {
             for (RuntimeFolders.ListedJar jar : listed(known)) {
                 if (jar.mavenPath().isPresent()) {
@@ -88,7 +88,7 @@ final class FakeRepository implements AutoCloseable {
         gate.countDown();
     }
 
-    URI base() {
+    public URI base() {
         return URI.create("http://" + server.getAddress().getHostString() + ":"
                 + server.getAddress().getPort() + "/maven2/");
     }

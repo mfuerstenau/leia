@@ -9,5 +9,7 @@ public enum RuntimeState {
     /** Its folder lacks a jar that the adapter lists. */
     INCOMPLETE,
     /** Its folder is complete, but leia refuses the runtime, such as one built for another interface. */
-    REFUSED
+    REFUSED,
+    /** Its folder is complete, but leia has to restart to load it (ADR 0080). */
+    RESTART
 }

@@ -21,11 +21,10 @@ import java.util.Optional;
  * @param directory {@code --directory}, {@link DirectoryImpl#FS} without it
  * @param noReader {@code --no-reader}
  * @param indexPath {@code INDEX_PATH}
- * @param downloadRuntimes {@code --download-runtimes}, which takes no other option but {@code
- *     --yes} and {@code --runtime}, and no {@code INDEX_PATH}
- * @param yes {@code --yes}: with {@code --download-runtimes}, download without asking (ADR 0077)
+ * @param downloadRuntimes {@code --download-runtimes}, which needs {@code --runtime}, takes no other
+ *     option, and no {@code INDEX_PATH} (ADR 0080)
  * @param runtimes {@code --runtime}, in the order given: with {@code --download-runtimes}, the
- *     runtimes' folders to install, each one leia knows (ADR 0079)
+ *     runtimes' folders to install without asking, each one leia knows (ADR 0079, ADR 0080)
  */
 record Cli(
         boolean help,
@@ -36,7 +35,6 @@ record Cli(
         boolean noReader,
         Optional<String> indexPath,
         boolean downloadRuntimes,
-        boolean yes,
         List<String> runtimes) {
 
     static final String USAGE = "Usage: leia [OPTIONS] [INDEX_PATH]";
@@ -64,7 +62,7 @@ record Cli(
                       flag, they are loaded after those of --jar. The runtimes, a folder for each
                       Lucene from 3.6 to 10 in the folder runtimes beside leia.jar, are loaded
                       always, before all others; without them, an index opens only without a
-                      reader. --download-runtimes installs them
+                      reader. D on the start screen downloads them
                   --directory <IMPL>
                       The Lucene Directory to read indexes through: fs lets Lucene choose
                       (MMapDirectory on 64-bit), mmap is MMapDirectory, nio is NIOFSDirectory.
@@ -74,19 +72,17 @@ record Cli(
                       Open INDEX_PATH without a reader, for an index that a reader can't open: only
                       its commits can be read. Ctrl+N in the open prompt does the same
                   --download-runtimes
-                      Install the runtimes into the folder runtimes beside leia.jar, then exit:
-                      leia's own jars from leia.jar, Lucene's from Maven Central
-                      (https://repo1.maven.org/maven2/), each checked against its SHA-256. A dialog
-                      shows the runtimes that need downloads, with their URLs and SHA-256s; none is
-                      checked until you check it. A jar that is there and matches is kept. Behind a
-                      proxy, start it with LEIA_OPTS=-Djava.net.useSystemProxies=true. Takes no
-                      other option but --yes and --runtime
+                      Install the runtimes of --runtime into the folder runtimes beside leia.jar
+                      without asking, as for a script, then exit: leia's own jars from leia.jar,
+                      Lucene's from Maven Central (https://repo1.maven.org/maven2/), each checked
+                      against its SHA-256. It lists the Lucene jars with their URLs and SHA-256s,
+                      then downloads them; a jar that is there and matches is kept. Behind a proxy,
+                      start it with LEIA_OPTS=-Djava.net.useSystemProxies=true. Takes no other
+                      option but --runtime. To choose runtimes instead, start leia and press D on
+                      its start screen
                   --runtime <FOLDER>
-                      With --download-runtimes, only this runtime, checked in the dialog: lucene10,
-                      lucene9, lucene7, lucene5 or lucene3. Can be repeated
-                  --yes
-                      With --download-runtimes, download without asking, as for a script: it lists
-                      the Lucene jars with their URLs and SHA-256s, then downloads them
+                      With --download-runtimes, a runtime to install: lucene10, lucene9, lucene7,
+                      lucene5 or lucene3. Can be repeated
               -V, --version
                       Print the version and build of leia, and the Java version in use
               -h, --help
@@ -126,7 +122,6 @@ record Cli(
         boolean noReader = false;
         Optional<String> indexPath = Optional.empty();
         boolean downloadRuntimes = false;
-        boolean yes = false;
         List<String> runtimes = new ArrayList<>();
         boolean directoryGiven = false;
         boolean options = true;
@@ -144,7 +139,6 @@ record Cli(
                     case "--no-default-jars" -> noDefaultJars = flag(name, inline);
                     case "--no-reader" -> noReader = flag(name, inline);
                     case "--download-runtimes" -> downloadRuntimes = flag(name, inline);
-                    case "--yes" -> yes = flag(name, inline);
                     case "--jar" -> {
                         String value = inline.isPresent() ? inline.get() : next(args, ++i, name, "<PATH>");
                         jars.add(path(name, value));
@@ -175,11 +169,12 @@ record Cli(
                     "--download-runtimes takes no INDEX_PATH and none of --jar, --no-default-jars, --directory,"
                             + " --no-reader");
         }
-        if (yes && !downloadRuntimes) {
-            throw new UsageException("--yes goes only with --download-runtimes");
-        }
         if (!runtimes.isEmpty() && !downloadRuntimes) {
             throw new UsageException("--runtime goes only with --download-runtimes");
+        }
+        if (downloadRuntimes && runtimes.isEmpty() && !help && !version) {
+            throw new UsageException("--download-runtimes needs --runtime <FOLDER>; to choose runtimes, start leia"
+                    + " and press D on its start screen");
         }
         return new Cli(
                 help,
@@ -190,7 +185,6 @@ record Cli(
                 noReader,
                 indexPath,
                 downloadRuntimes,
-                yes,
                 runtimes.stream().distinct().toList());
     }
 

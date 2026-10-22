@@ -78,20 +78,23 @@ class MainTest {
 
     @Test
     void downloadsTheRuntimesOnlyFromLeiaJar() throws Exception {
-        assertThat(run("--download-runtimes")).isEqualTo(1);
+        assertThat(run("--download-runtimes", "--runtime", "lucene9")).isEqualTo(1);
 
         assertThat(err()).contains("leia: --download-runtimes installs into the folder runtimes beside leia.jar");
         assertThat(logFile).doesNotExist();
     }
 
     @Test
-    void downloadsNothingWithoutATerminal() throws Exception {
+    void downloadsOnlyTheRuntimesNamed() throws Exception {
         Path leiaJar = Files.writeString(tmp.resolve("leia.jar"), "");
         platform = new Platform(platform.env(), Optional.empty(), false, Optional.of(leiaJar));
 
-        assertThat(run("--download-runtimes", "--runtime", "lucene9")).isEqualTo(1);
+        assertThat(run("--download-runtimes")).isEqualTo(2);
 
-        assertThat(err()).contains("leia: nothing downloaded", "no terminal", "--yes");
+        assertThat(err())
+                .contains(
+                        "leia: --download-runtimes needs --runtime <FOLDER>; to choose runtimes, start leia and press D"
+                                + " on its start screen");
         assertThat(tmp.resolve("runtimes")).doesNotExist();
         assertThat(logFile).doesNotExist();
     }
@@ -104,10 +107,10 @@ class MainTest {
     }
 
     @Test
-    void refusesYesWithoutTheDownload() throws Exception {
-        assertThat(run("--yes")).isEqualTo(2);
+    void refusesYes() throws Exception {
+        assertThat(run("--download-runtimes", "--runtime", "lucene9", "--yes")).isEqualTo(2);
 
-        assertThat(err()).contains("leia: --yes goes only with --download-runtimes");
+        assertThat(err()).contains("leia: unknown option '--yes'");
     }
 
     @Test

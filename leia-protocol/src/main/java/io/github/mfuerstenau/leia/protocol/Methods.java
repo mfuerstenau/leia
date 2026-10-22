@@ -41,6 +41,8 @@ import io.github.mfuerstenau.leia.protocol.jars.GetJarsParams;
 import io.github.mfuerstenau.leia.protocol.jars.GetJarsResult;
 import io.github.mfuerstenau.leia.protocol.jars.GetRuntimesParams;
 import io.github.mfuerstenau.leia.protocol.jars.GetRuntimesResult;
+import io.github.mfuerstenau.leia.protocol.jars.LoadRuntimesParams;
+import io.github.mfuerstenau.leia.protocol.jars.LoadRuntimesResult;
 import io.github.mfuerstenau.leia.protocol.job.CancelJobResult;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
@@ -429,6 +431,15 @@ public final class Methods {
     public static final RpcMethod<GetRuntimesParams, GetRuntimesResult> GET_RUNTIMES =
             new RpcMethod<>("getRuntimes", GetRuntimesParams.class, GetRuntimesResult.class);
 
+    /**
+     * Loads the folders of {@code runtimes/} whose runtime isn't loaded yet, such as those just
+     * downloaded, and says which it loaded and every runtime's state afterwards (ADR 0080). Lucene 10's
+     * folder loads only while no jars are loaded; otherwise its state is {@code RESTART}. Needs no
+     * open index; an open index keeps the runtime it was opened with.
+     */
+    public static final RpcMethod<LoadRuntimesParams, LoadRuntimesResult> LOAD_RUNTIMES =
+            new RpcMethod<>("loadRuntimes", LoadRuntimesParams.class, LoadRuntimesResult.class);
+
     public static final List<RpcMethod<?, ?>> ALL = List.of(
             VERSION,
             OPEN_INDEX,
@@ -472,7 +483,8 @@ public final class Methods {
             GET_EXPORT_TERMS,
             ADD_JARS,
             GET_JARS,
-            GET_RUNTIMES);
+            GET_RUNTIMES,
+            LOAD_RUNTIMES);
 
     private Methods() {}
 

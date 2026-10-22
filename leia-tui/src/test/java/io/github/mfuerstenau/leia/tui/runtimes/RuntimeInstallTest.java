@@ -14,12 +14,10 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -111,7 +109,7 @@ class RuntimeInstallTest {
     }
 
     @Test
-    void listsWhereEachJarComesFromWithYes() throws Exception {
+    void listsWhereEachJarComesFrom() throws Exception {
         RuntimeFolders.ListedJar core = lucene(known("lucene9")).stream()
                 .filter(jar -> jar.name().equals("lucene-core-9.12.3.jar"))
                 .findFirst()
@@ -122,7 +120,7 @@ class RuntimeInstallTest {
         assertThat(output())
                 .contains(repository.base() + core.mavenPath().orElseThrow())
                 .contains("SHA-256 " + core.sha256())
-                .contains("unchanged", "Maven Central", "come from leia.jar", "--yes given; downloading.");
+                .contains("unchanged", "Maven Central", "come from leia.jar");
     }
 
     @Test
@@ -282,18 +280,8 @@ class RuntimeInstallTest {
     }
 
     @Test
-    void refusesWithoutATerminal() throws Exception {
-        assertThat(RuntimeDownload.run(install(), List.of(), false, false, noDialog(), print(out), print(err)))
-                .isEqualTo(1);
-
-        assertThat(error()).contains("leia: nothing downloaded", "no terminal", "--yes downloads without asking");
-        assertThat(repository.requests).hasValue(0);
-        assertThat(runtimes).doesNotExist();
-    }
-
-    @Test
-    void installsOnlyTheNamedRuntimesWithYes() throws Exception {
-        assertThat(RuntimeDownload.run(install(), List.of("lucene9"), true, false, noDialog(), print(out), print(err)))
+    void installsOnlyTheNamedRuntimes() throws Exception {
+        assertThat(RuntimeDownload.run(install(), List.of("lucene9"), print(out), print(err)))
                 .isZero();
 
         try (Stream<Path> folders = Files.list(runtimes)) {
@@ -302,50 +290,24 @@ class RuntimeInstallTest {
     }
 
     @Test
-    void asksTheDialogWithTheNamedRuntimesChecked() throws Exception {
-        Files.createDirectories(runtimes);
-        List<Set<RuntimeFolders.Known>> asked = new ArrayList<>();
-
-        assertThat(RuntimeDownload.run(
-                        install(),
-                        List.of("lucene9", "lucene5"),
-                        false,
-                        true,
-                        (install, plan, checked) -> {
-                            asked.add(checked);
-                            return Optional.empty();
-                        },
-                        print(out),
-                        print(err)))
-                .isEqualTo(1);
-
-        assertThat(asked).containsExactly(Set.of(known("lucene9"), known("lucene5")));
-        assertThat(error()).contains("leia: nothing downloaded");
-        try (Stream<Path> folders = Files.list(runtimes)) {
-            assertThat(folders).isEmpty();
-        }
-    }
-
-    @Test
-    void asksNothingWhenEveryJarMatches() throws Exception {
+    void downloadsNothingWhenEveryJarMatches() throws Exception {
         assertThat(yes()).isZero();
         out.reset();
+        int requests = repository.requests.get();
 
-        assertThat(RuntimeDownload.run(install(), List.of(), false, true, noDialog(), print(out), print(err)))
-                .isZero();
+        assertThat(yes()).isZero();
 
         assertThat(output()).contains("nothing to download", "lucene9/lucene-core-9.12.3.jar: kept");
+        assertThat(repository.requests).hasValue(requests);
     }
 
-    /** {@code --download-runtimes --yes}. */
-    private int yes() throws Exception {
-        return RuntimeDownload.run(install(), List.of(), true, false, noDialog(), print(out), print(err));
-    }
-
-    private static RuntimeDownload.Dialog noDialog() {
-        return (install, plan, checked) -> {
-            throw new AssertionError("asked");
-        };
+    /** {@code --download-runtimes} with every runtime named. */
+    private int yes() {
+        return RuntimeDownload.run(
+                install(),
+                RuntimeFolders.KNOWN.stream().map(RuntimeFolders.Known::folder).toList(),
+                print(out),
+                print(err));
     }
 
     private RuntimeInstall install() {

@@ -14,8 +14,10 @@ import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.StartStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.terms.PostingsFilter;
 import io.github.mfuerstenau.leia.protocol.terms.StartExportTermsParams;
+import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
 import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
+import io.github.mfuerstenau.leia.tui.runtimes.RuntimeWindow;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -256,4 +258,22 @@ public sealed interface Action {
      * popup shows "Loading…" until the outcome is reported.
      */
     record AddJars(AddJarsParams params) implements Action {}
+
+    /**
+     * Find out on a thread of its own what these runtimes need downloaded, and report back with
+     * {@link App#runtimesPlanned} or {@link App#runtimesPlanFailed} (ADR 0080).
+     */
+    record PlanRuntimes(List<RuntimeFolders.Known> runtimes) implements Action {}
+
+    /**
+     * Install {@code chosen} of {@code plan} on a thread of its own, as {@link RuntimeWindow.Install}
+     * says, and report back with {@link App#runtimesInstalled} (ADR 0080).
+     */
+    record InstallRuntimes(RuntimeWindow.Install install) implements Action {}
+
+    /**
+     * Load the folders of {@code runtimes/} that aren't loaded yet, and report back with {@link
+     * App#runtimesReloaded} or {@link App#reloadRuntimesFailed} (ADR 0080).
+     */
+    record LoadRuntimes() implements Action {}
 }

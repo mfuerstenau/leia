@@ -31,6 +31,9 @@ sealed interface Notice {
     /** A segment of an older commit that the open reader doesn't have (ADR 0051). */
     record NotOpened(String segment) implements Notice {}
 
+    /** {@code D} on the start screen, when there is no {@code runtimes/} to download into (ADR 0080). */
+    record CannotDownload(String reason) implements Notice {}
+
     default Line line() {
         return switch (this) {
             case Reopening _ -> Line.from("Reopening…");
@@ -44,11 +47,16 @@ sealed interface Notice {
             case ExportRunning _ -> Line.from("An export runs; Esc cancels it");
             case NotOpened notOpened ->
                 Line.styled(notOpened.segment() + " isn't in the opened commit", Style.EMPTY.yellow());
+            case CannotDownload cannot ->
+                Line.styled("Cannot download runtimes: " + cannot.reason(), Style.EMPTY.yellow());
         };
     }
 
-    /** Whether the notice takes the footer, which is wider than the tab line: the outcome of an export names its file. */
+    /**
+     * Whether the notice takes the footer, which is wider than the tab line: the outcome of an export
+     * names its file, and the start screen has no tab line.
+     */
     default boolean inFooter() {
-        return this instanceof Exported || this instanceof ExportFailed;
+        return this instanceof Exported || this instanceof ExportFailed || this instanceof CannotDownload;
     }
 }

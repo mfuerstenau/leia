@@ -27,6 +27,7 @@ import io.github.mfuerstenau.leia.server.index.ReopenIndexHandler;
 import io.github.mfuerstenau.leia.server.jars.AddJarsHandler;
 import io.github.mfuerstenau.leia.server.jars.GetJarsHandler;
 import io.github.mfuerstenau.leia.server.jars.GetRuntimesHandler;
+import io.github.mfuerstenau.leia.server.jars.LoadRuntimesHandler;
 import io.github.mfuerstenau.leia.server.job.CancelJobHandler;
 import io.github.mfuerstenau.leia.server.points.GetPointCellHandler;
 import io.github.mfuerstenau.leia.server.points.GetPointTreeHandler;
@@ -222,4 +223,8 @@ interface HandlerModule {
     @Binds
     @IntoSet
     MethodHandler<?, ?> getRuntimes(GetRuntimesHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> loadRuntimes(LoadRuntimesHandler handler);
 }

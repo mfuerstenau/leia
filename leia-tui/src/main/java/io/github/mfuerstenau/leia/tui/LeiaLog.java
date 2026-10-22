@@ -49,11 +49,6 @@ final class LeiaLog {
         configure(System.err, defaultLevel);
     }
 
-    /** Logs to {@code stream}, such as a buffer while a dialogue has the terminal. */
-    static void to(PrintStream stream, Level defaultLevel) {
-        configure(stream, defaultLevel);
-    }
-
     private static Optional<PrintStream> open(Path file) {
         try {
             Path dir = file.getParent();

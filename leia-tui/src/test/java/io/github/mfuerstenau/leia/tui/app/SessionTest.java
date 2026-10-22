@@ -28,7 +28,8 @@ class SessionTest {
 
         assertThat(Session.describe(error))
                 .isEqualTo("The index was written by Lucene 8.11.4; reading it needs the runtime runtimes/lucene9,"
-                        + " which isn't loaded: /i; install it with leia --download-runtimes (MISSING_RUNTIME -32020)");
+                        + " which isn't loaded: /i; close the index (c) and press D on the start screen to download it"
+                        + " (MISSING_RUNTIME -32020)");
     }
 
     @Test

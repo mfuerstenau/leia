@@ -1,6 +1,6 @@
 # Runtimes: features and differences
 
-leia reads every index through a runtime (ADR 0071), a folder in `runtimes/` beside `leia.jar`, which holds no Lucene itself (ADR 0044, ADR 0072): indexes of Lucene 9 and 10, and those whose version it can't detect, with Lucene 10.5.2 in the jar chain; older ones with an older Lucene in a class loader of its own. Each folder has the runtime's adapter jar and the official Lucene jars it lists, which `leia --download-runtimes` installs (ADR 0073). Without its folder, an index opens only without a reader, and the about screen says what is missing:
+leia reads every index through a runtime (ADR 0071), a folder in `runtimes/` beside `leia.jar`, which holds no Lucene itself (ADR 0044, ADR 0072): indexes of Lucene 9 and 10, and those whose version it can't detect, with Lucene 10.5.2 in the jar chain; older ones with an older Lucene in a class loader of its own. Each folder has the runtime's adapter jar and the official Lucene jars it lists, which `D` on leia's start screen downloads, or `leia --download-runtimes --runtime <folder>` unattended (ADR 0073, ADR 0080). Without its folder, an index opens only without a reader, and the about screen says what is missing:
 
 | Runtime | Folder | Reads indexes of |
 |---|---|---|

@@ -51,6 +51,7 @@ import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsResult;
 import io.github.mfuerstenau.leia.protocol.jars.GetRuntimesResult;
 import io.github.mfuerstenau.leia.protocol.jars.JarComponents;
+import io.github.mfuerstenau.leia.protocol.jars.LoadRuntimesResult;
 import io.github.mfuerstenau.leia.protocol.jars.RuntimeFolder;
 import io.github.mfuerstenau.leia.protocol.jars.RuntimeState;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeResult;
@@ -88,6 +89,7 @@ import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
 import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
 import io.github.mfuerstenau.leia.protocol.version.JavaRuntime;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
+import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders.Known;
 import io.github.mfuerstenau.leia.tui.TestScreens;
 import io.github.mfuerstenau.leia.tui.analysis.AnalyzerSettings;
 import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
@@ -96,6 +98,7 @@ import io.github.mfuerstenau.leia.tui.documents.Documents;
 import io.github.mfuerstenau.leia.tui.jars.DefaultJars;
 import io.github.mfuerstenau.leia.tui.jars.RuntimeFolders;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
+import io.github.mfuerstenau.leia.tui.runtimes.RuntimeInstall;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.EnumSet;
@@ -646,10 +649,100 @@ class AppTest {
         assertThat(TestScreens.render(app::render, 200, 30))
                 .contains(
                         "Runtimes: Lucene 10.5.2 (9–10), 3.6.2 (2–3)",
-                        "Missing lucene9 (Lucene 8): install them into /opt/leia/runtimes with leia --download-runtimes",
-                        "Incomplete runtimes/lucene7: lucene-core-7.7.3.jar is missing; leia --download-runtimes installs it",
+                        "Missing lucene9 (Lucene 8): press D to download them into /opt/leia/runtimes",
+                        "Incomplete runtimes/lucene7: lucene-core-7.7.3.jar is missing; press D to download it",
                         "Refused runtimes/lucene5: too new")
                 .doesNotContain("Without runtimes");
+    }
+
+    /** Every state a runtime can be in, one per folder. */
+    private static GetRuntimesResult everyState() {
+        return new GetRuntimesResult(List.of(
+                new RuntimeFolder("lucene10", List.of(9, 10), RuntimeState.RESTART, Optional.empty(), Optional.empty()),
+                new RuntimeFolder("lucene9", List.of(8), RuntimeState.MISSING, Optional.empty(), Optional.empty()),
+                new RuntimeFolder(
+                        "lucene7",
+                        List.of(6, 7),
+                        RuntimeState.INCOMPLETE,
+                        Optional.empty(),
+                        Optional.of("lucene-core-7.7.3.jar")),
+                new RuntimeFolder(
+                        "lucene5", List.of(4, 5), RuntimeState.REFUSED, Optional.empty(), Optional.of("too new")),
+                new RuntimeFolder(
+                        "lucene3", List.of(2, 3), RuntimeState.LOADED, Optional.of("3.6.2"), Optional.empty())));
+    }
+
+    @Test
+    void theAboutScreenSaysWhenARuntimeNeedsARestart() {
+        App app = app().withRuntimeFolders(new RuntimeFolders(Optional.of(Path.of("/opt/leia/runtimes"))));
+        app.runtimesLoaded(everyState());
+
+        assertThat(TestScreens.render(app::render, 200, 30))
+                .contains("runtimes/lucene10 is installed; restart leia to load it")
+                .contains("D download runtimes");
+    }
+
+    @Test
+    void dOnTheStartScreenPlansOnlyTheMissingAndIncompleteRuntimes() {
+        App app = app().withRuntimeFolders(new RuntimeFolders(Optional.of(Path.of("/opt/leia/runtimes"))));
+        app.runtimesLoaded(everyState());
+
+        Optional<Action> action = app.handleKey(key('D'));
+
+        assertThat(action)
+                .hasValueSatisfying(plan -> assertThat(plan)
+                        .isInstanceOfSatisfying(
+                                Action.PlanRuntimes.class,
+                                planned -> assertThat(planned.runtimes())
+                                        .extracting(Known::folder)
+                                        .containsExactly("lucene9", "lucene7")));
+        assertThat(TestScreens.render(app::render, 160, 40)).contains(" Download runtimes ", "Reading runtimes/…");
+        assertThat(app.animating()).isTrue();
+        // The window takes the keys: Esc closes it, and doesn't quit.
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).isEmpty();
+        assertThat(TestScreens.render(app::render, 160, 40)).doesNotContain(" Download runtimes ");
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.Quit());
+    }
+
+    @Test
+    void dWithoutRuntimesBesideLeiaJarSaysWhy() {
+        App app = app();
+
+        assertThat(app.handleKey(key('D'))).isEmpty();
+
+        assertThat(TestScreens.render(app::render, 160, 30))
+                .contains("Cannot download runtimes: leia doesn't run from leia.jar")
+                .doesNotContain(" Download runtimes ");
+    }
+
+    @Test
+    void dOnTheAnalysisTabIsTheAnalysisTabs() {
+        App app = app().withRuntimeFolders(new RuntimeFolders(Optional.of(Path.of("/opt/leia/runtimes"))));
+        app.handleKey(key('6'));
+
+        Optional<Action> action = app.handleKey(key('D'));
+
+        assertThat(action.filter(Action.PlanRuntimes.class::isInstance)).isEmpty();
+
+        assertThat(TestScreens.render(app::render, 160, 30)).doesNotContain(" Download runtimes ");
+    }
+
+    @Test
+    void theNewRuntimesAreLoadedOnceInstalledAndTheAboutScreenFollows() {
+        App app = app().withRuntimeFolders(new RuntimeFolders(Optional.of(Path.of("/opt/leia/runtimes"))));
+        app.runtimesLoaded(everyState());
+        app.handleKey(key('D'));
+
+        // An outcome while the window doesn't install loads nothing.
+        assertThat(app.runtimesInstalled(new RuntimeInstall.Outcome(Map.of()))).isEmpty();
+
+        app.runtimesReloaded(new LoadRuntimesResult(
+                List.of("lucene9"),
+                List.of(new RuntimeFolder(
+                        "lucene9", List.of(8), RuntimeState.LOADED, Optional.of("9.12.3"), Optional.empty()))));
+        app.handleKey(key(KeyCode.ESCAPE));
+
+        assertThat(TestScreens.render(app::render, 200, 30)).contains("Runtimes: Lucene 9.12.3 (8)");
     }
 
     @Test
@@ -698,7 +791,7 @@ class AppTest {
         App app = app();
         List<String> rows = TestScreens.render(app::render, 30, 20).lines().toList();
         assertThat(rows.subList(18, 20))
-                .containsExactly(" q quit   o open   6 analysis ", " X jars                       ");
+                .containsExactly(" q quit   o open   6 analysis ", " X jars   D download runtimes ");
         // The screen ends above the footer.
         assertThat(rows.get(17)).startsWith("└").endsWith("┘");
 
@@ -2674,7 +2767,7 @@ class AppTest {
         Path home = Path.of("/home/me");
         Path dir = home.resolve(".config/leia/jars");
         App app = app(Optional.of(home)).withDefaultJars(new DefaultJars(Optional.of(dir), DefaultJars.State.LOADED));
-        assertThat(render(app)).contains("X jars", "or X to");
+        assertThat(render(app)).contains("X jars", "X to add");
         assertThat(app.handleKey(key('6'))).hasValue(new Action.LoadAnalysisComponents());
         app.componentsLoaded(COMPONENTS);
 

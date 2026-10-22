@@ -34,6 +34,7 @@ public final class Runtimes {
     private static final int MAX_ERRORS = 100;
 
     private ClassLoader loader;
+    private List<LuceneRuntime> folders;
     private Loaded loaded;
     private List<LuceneRuntime> all;
     private final Set<String> reported;
@@ -41,14 +42,15 @@ public final class Runtimes {
     @Inject
     public Runtimes() {
         loader = JarChain.classLoader();
+        folders = RuntimeFolders.runtimes();
         loaded = load(loader);
-        all = all(loaded);
+        all = all(folders, loaded);
         // LeiaBackend.start refused these already, or RuntimeFolders reports them.
         reported = new HashSet<>(loaded.refused());
     }
 
-    private static List<LuceneRuntime> all(Loaded chain) {
-        List<LuceneRuntime> all = new ArrayList<>(RuntimeFolders.runtimes());
+    private static List<LuceneRuntime> all(List<LuceneRuntime> folders, Loaded chain) {
+        List<LuceneRuntime> all = new ArrayList<>(folders);
         all.addAll(chain.runtimes());
         return List.copyOf(all);
     }
@@ -110,13 +112,21 @@ public final class Runtimes {
                 : source.getLocation().toString();
     }
 
-    /** The runtimes of the jar chain now, loaded again if jars were added since. */
+    /**
+     * The runtimes of the jar chain now, loaded again if jars were added since; {@link #all} follows
+     * the folders' runtimes too, which {@code loadRuntimes} adds to (ADR 0080).
+     */
     private Loaded chain() {
         ClassLoader now = JarChain.classLoader();
-        if (now != loader) {
+        List<LuceneRuntime> nowFolders = RuntimeFolders.runtimes();
+        boolean chainChanged = now != loader;
+        if (chainChanged) {
             loader = now;
             loaded = load(now);
-            all = all(loaded);
+        }
+        if (chainChanged || nowFolders != folders) {
+            folders = nowFolders;
+            all = all(folders, loaded);
         }
         return loaded;
     }

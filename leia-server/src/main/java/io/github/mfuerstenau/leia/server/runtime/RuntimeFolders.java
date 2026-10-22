@@ -33,8 +33,8 @@ import java.util.zip.ZipEntry;
  * {@link JarChain} instead, since the jars of {@code --jar} link against its Lucene (ADR 0065).
  *
  * <p>A folder that is missing, incomplete or refused is not fatal: leia starts, and {@code
- * getRuntimes} says what is wrong. The folders are loaded once per JVM, like the jar chain; a folder
- * that is loaded stays loaded.
+ * getRuntimes} says what is wrong. The folders are loaded per JVM, like the jar chain: at startup, and
+ * again by {@code loadRuntimes} after a download (ADR 0080); a folder that is loaded stays loaded.
  */
 public final class RuntimeFolders {
 
@@ -83,12 +83,19 @@ public final class RuntimeFolders {
 
         /** The folder is complete, but its runtime can't be used, for {@code reason}. */
         record Refused(String reason) implements State {}
+
+        /**
+         * Lucene 10's folder is complete, but the jar chain has jars already, which link against no
+         * Lucene of it: leia has to restart to load it (ADR 0080).
+         */
+        record Restart() implements State {}
     }
 
     // Written while holding the class's lock, read without it.
     private static volatile Map<Known, State> states = initialStates();
     private static volatile List<LuceneRuntime> runtimes = List.of();
     private static volatile List<String> chainRefusals = List.of();
+    private static volatile Optional<Path> dir = Optional.empty();
 
     private RuntimeFolders() {}
 
@@ -112,6 +119,7 @@ public final class RuntimeFolders {
      * chain, so this comes before the jars of {@code --jar}.
      */
     public static synchronized void load(Path dir) {
+        RuntimeFolders.dir = Optional.of(dir);
         Map<Known, State> now = new LinkedHashMap<>(states);
         List<LuceneRuntime> loaded = new ArrayList<>(runtimes);
         for (Known known : KNOWN) {
@@ -127,10 +135,21 @@ public final class RuntimeFolders {
                     LOG.warning(() -> "The runtime " + dir.resolve(known.folder()) + " lacks " + incomplete.jar());
                 case State.Refused refused ->
                     LOG.warning(() -> "Refused the runtime " + dir.resolve(known.folder()) + ": " + refused.reason());
+                case State.Restart _ ->
+                    LOG.info(() -> "The runtime " + dir.resolve(known.folder())
+                            + " is complete, but the jar chain has jars; restart leia to load it");
             }
         }
         runtimes = List.copyOf(loaded);
         states = Map.copyOf(now);
+    }
+
+    /**
+     * Loads the folders of the {@code runtimes/} that {@link #load} was given whose runtime isn't
+     * loaded yet, such as those just downloaded (ADR 0080); does nothing if {@link #load} never ran.
+     */
+    public static synchronized void reload() {
+        dir.ifPresent(RuntimeFolders::load);
     }
 
     /**
@@ -157,7 +176,12 @@ public final class RuntimeFolders {
             }
             jars.add(jar);
         }
-        return known.equals(LATEST) ? loadIntoChain(known, jars) : loadAlone(known, jars, loaded);
+        if (!known.equals(LATEST)) {
+            return loadAlone(known, jars, loaded);
+        }
+        // At startup the chain is empty here; later, the jars in it link against no Lucene of this
+        // folder, and a chain can't be rebuilt under them (ADR 0080).
+        return JarChain.jars().isEmpty() ? loadIntoChain(known, jars) : new State.Restart();
     }
 
     /** Lucene 10's folder, as the first link of the jar chain (ADR 0065). */

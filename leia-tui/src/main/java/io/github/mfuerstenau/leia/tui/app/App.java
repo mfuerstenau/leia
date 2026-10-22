@@ -48,6 +48,7 @@ import io.github.mfuerstenau.leia.protocol.index.SkippedIndex;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsResult;
 import io.github.mfuerstenau.leia.protocol.jars.GetRuntimesResult;
+import io.github.mfuerstenau.leia.protocol.jars.LoadRuntimesResult;
 import io.github.mfuerstenau.leia.protocol.jars.RuntimeFolder;
 import io.github.mfuerstenau.leia.protocol.jars.RuntimeState;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellResult;
@@ -61,6 +62,7 @@ import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
+import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders.Known;
 import io.github.mfuerstenau.leia.tui.analysis.Analysis;
 import io.github.mfuerstenau.leia.tui.analysis.AutoStopWordsForm;
 import io.github.mfuerstenau.leia.tui.check.Check;
@@ -79,6 +81,8 @@ import io.github.mfuerstenau.leia.tui.prompt.ExportPrompt;
 import io.github.mfuerstenau.leia.tui.prompt.ExportPrompt.ExportTarget;
 import io.github.mfuerstenau.leia.tui.prompt.PathCompletion;
 import io.github.mfuerstenau.leia.tui.prompt.PathPrompt;
+import io.github.mfuerstenau.leia.tui.runtimes.RuntimeInstall;
+import io.github.mfuerstenau.leia.tui.runtimes.RuntimeWindow;
 import io.github.mfuerstenau.leia.tui.search.Search;
 import io.github.mfuerstenau.leia.tui.terms.Terms;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
@@ -237,6 +241,9 @@ public final class App {
 
     /** The jars popup, while it is open; or null. */
     private JarsPopup jars;
+
+    /** The window that downloads runtimes (ADR 0080), while it is open; or null. */
+    private RuntimeWindow runtimeWindow;
 
     /** Whether an open, reopen or close runs. */
     private boolean busy;
@@ -727,6 +734,83 @@ public final class App {
     /** Whether the jars popup waits for the jars to be listed or added. */
     boolean jarsWaiting() {
         return jars != null && jars.waiting();
+    }
+
+    /** What {@code install} found for the runtimes of {@link Action.PlanRuntimes}. */
+    public void runtimesPlanned(RuntimeInstall install, RuntimeInstall.Plan plan) {
+        if (runtimeWindow != null) {
+            runtimeWindow.planned(install, plan);
+        }
+    }
+
+    public void runtimesPlanFailed(String message) {
+        if (runtimeWindow != null) {
+            runtimeWindow.planFailed(message);
+        }
+    }
+
+    /**
+     * The download has ended. Returns {@link Action.LoadRuntimes} if a runtime was installed, so that
+     * the backend loads it (ADR 0080).
+     */
+    public Optional<Action> runtimesInstalled(RuntimeInstall.Outcome outcome) {
+        // The window takes no Esc while it installs, so it is still open.
+        if (runtimeWindow != null && runtimeWindow.finished(outcome)) {
+            return Optional.of(new Action.LoadRuntimes());
+        }
+        return Optional.empty();
+    }
+
+    /** What the backend made of the new runtimes; the about screen shows their states now. */
+    public void runtimesReloaded(LoadRuntimesResult result) {
+        runtimes = new GetRuntimesResult(result.runtimes());
+        if (runtimeWindow != null) {
+            runtimeWindow.loaded(result);
+        }
+    }
+
+    public void reloadRuntimesFailed(String message) {
+        if (runtimeWindow != null) {
+            runtimeWindow.loadFailed(message);
+        }
+    }
+
+    /** Whether the window that downloads runtimes shows something that moves. */
+    boolean animating() {
+        return runtimeWindow != null && runtimeWindow.animating();
+    }
+
+    /** A tick of the UI's clock; returns whether something moved, so that the screen is drawn again. */
+    boolean tick() {
+        if (runtimeWindow == null) {
+            return false;
+        }
+        runtimeWindow.tick();
+        return runtimeWindow.animating();
+    }
+
+    /**
+     * {@code D} on the start screen: opens the window that downloads runtimes (ADR 0080), for the
+     * runtimes that are missing or incomplete. Those are never loaded, so no jar that is open gets
+     * written; a loaded, refused or restart one is left alone.
+     */
+    private Optional<Action> openRuntimeWindow() {
+        if (runtimeFolders.dir().isEmpty()) {
+            notice = new Notice.CannotDownload("leia doesn't run from leia.jar, so there is no runtimes/ beside it");
+            return Optional.empty();
+        }
+        List<String> needing = runtimes == null
+                ? List.of()
+                : runtimes.runtimes().stream()
+                        .filter(runtime ->
+                                runtime.state() == RuntimeState.MISSING || runtime.state() == RuntimeState.INCOMPLETE)
+                        .map(RuntimeFolder::folder)
+                        .toList();
+        List<Known> known = io.github.mfuerstenau.leia.server.runtime.RuntimeFolders.KNOWN.stream()
+                .filter(runtime -> needing.contains(runtime.folder()))
+                .toList();
+        runtimeWindow = new RuntimeWindow();
+        return Optional.of(new Action.PlanRuntimes(known));
     }
 
     /**
@@ -1718,6 +1802,16 @@ public final class App {
             return Optional.empty();
         }
         notice = null;
+        if (runtimeWindow != null) {
+            return switch (runtimeWindow.handleKey(key)) {
+                case RuntimeWindow.Install install -> Optional.of(new Action.InstallRuntimes(install));
+                case RuntimeWindow.Close _ -> {
+                    runtimeWindow = null;
+                    yield Optional.empty();
+                }
+                case RuntimeWindow.Nothing _ -> Optional.empty();
+            };
+        }
         if (jars != null) {
             return switch (jars.handleKey(key)) {
                 case JarsPopup.Submit submit -> {
@@ -1850,6 +1944,10 @@ public final class App {
             case 'X' -> {
                 jars = new JarsPopup(defaultJars, runtimeFolders, home);
                 return Optional.of(new Action.LoadJars());
+            }
+            case 'D' -> {
+                // Only on the start screen: the analysis tab has a D of its own.
+                return opened == null && screen != Screen.ANALYSIS ? openRuntimeWindow() : screenKey(key);
             }
             case 'c' -> {
                 if (hasIndex()) {
@@ -2112,6 +2210,9 @@ public final class App {
         if (jars != null) {
             jars.render(frame, body);
         }
+        if (runtimeWindow != null) {
+            runtimeWindow.render(frame, body);
+        }
     }
 
     /** Draws the shown screen into {@code body}. */
@@ -2151,7 +2252,7 @@ public final class App {
                     : " q quit   o open   " + analysis.keys();
         }
         if (opened == null) {
-            return " q quit   o open   6 analysis   X jars";
+            return " q quit   o open   6 analysis   X jars   D download runtimes";
         }
         if (screen == Screen.COMMITS) {
             String keys = commits != null ? commits.keys() : "r read again   ⏎ segments   Tab panel   ↑↓";
@@ -2214,7 +2315,8 @@ public final class App {
                 + version.java().vendor() + ") in " + version.java().home()));
         lines.add(Line.empty());
         lines.addAll(runtimesLines());
-        lines.add(Line.from("No index open. Press o to open one, 6 to try an analyzer, or X to add jars."));
+        lines.add(Line.from(
+                "No index open. Press o to open one, 6 to try an analyzer, X to add jars, or D to download runtimes."));
         Block block = bordered(" leia ");
         Rect inner = block.inner(body);
         frame.renderWidget(block, body);
@@ -2261,7 +2363,7 @@ public final class App {
         if (!missing.isEmpty()) {
             String where = runtimeFolders
                     .dir()
-                    .map(dir -> "install them into " + dir + " with leia --download-runtimes")
+                    .map(dir -> "press D to download them into " + dir)
                     .orElse("(not run from leia.jar)");
             lines.add(Line.styled(
                     "Missing "
@@ -2279,10 +2381,13 @@ public final class App {
                 case INCOMPLETE ->
                     lines.add(Line.styled(
                             "Incomplete runtimes/" + runtime.folder() + ": " + problem
-                                    + " is missing; leia --download-runtimes installs it",
+                                    + " is missing; press D to download it",
                             warning));
                 case REFUSED ->
                     lines.add(Line.styled("Refused runtimes/" + runtime.folder() + ": " + problem, warning));
+                case RESTART ->
+                    lines.add(Line.styled(
+                            "runtimes/" + runtime.folder() + " is installed; restart leia to load it", warning));
                 case LOADED, MISSING -> {}
             }
         }

@@ -10,6 +10,7 @@ import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import jakarta.inject.Inject;
+import java.util.List;
 import java.util.Optional;
 
 /** {@code getRuntimes}: every runtime leia knows, and whether it is loaded (ADR 0072, ADR 0073). */
@@ -29,11 +30,15 @@ public final class GetRuntimesHandler implements MethodHandler<GetRuntimesParams
 
     @Override
     public GetRuntimesResult handle(GetRuntimesParams params) {
-        return new GetRuntimesResult(
-                runtimes.known().stream().map(GetRuntimesHandler::folder).toList());
+        return new GetRuntimesResult(folders(runtimes));
     }
 
-    private static RuntimeFolder folder(Runtimes.KnownState known) {
+    /** Every runtime leia knows, newest first, as {@code getRuntimes} and {@code loadRuntimes} return them. */
+    static List<RuntimeFolder> folders(Runtimes runtimes) {
+        return runtimes.known().stream().map(GetRuntimesHandler::folder).toList();
+    }
+
+    static RuntimeFolder folder(Runtimes.KnownState known) {
         String name = known.known().folder();
         if (known.luceneVersion().isPresent()) {
             return new RuntimeFolder(
@@ -58,6 +63,9 @@ public final class GetRuntimesHandler implements MethodHandler<GetRuntimesParams
                         RuntimeState.REFUSED,
                         Optional.empty(),
                         Optional.of(refused.reason()));
+            case RuntimeFolders.State.Restart _ ->
+                new RuntimeFolder(
+                        name, known.known().indexMajors(), RuntimeState.RESTART, Optional.empty(), Optional.empty());
         };
     }
 }

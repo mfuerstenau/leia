@@ -2,14 +2,6 @@
 
 The work queue for leia. Check items off (`[x]`) as they land, and keep it aligned with the "Remaining / next" section of the latest entry in `docs/SESSION-SUMMARIES.md`. Finished items move to `docs/tasklist-done.md`.
 
-## Runtime download inside leia
-
-Goal: the runtimes are downloaded from within leia's UI, and `--download-runtimes` stays only for unattended installs. This amends ADR 0079 in a new ADR.
-
-- [ ] `--download-runtimes` only for unattended downloads: it needs `--runtime` (repeatable) and downloads without asking. Without `--runtime` it exits 2 and points to the UI. Decide whether `--yes` is still needed, or whether `--download-runtimes --runtime …` implies it. Drop the standalone `RuntimeDialog` runner from `Main`.
-- [ ] The download dialogue inside leia: a hotkey on the welcome (about) page opens it as a window, within leia's frame like the other popups (`jars`, `prompt`). Its list, details and progress (spinner, per-jar bytes, overall gauge) all stay inside that window's frame. Esc stops any ongoing download (cooperatively, no `.part` left), and Esc again or when idle closes the window.
-- [ ] After the download, load the new runtimes into the running backend: `RuntimeFolders.load` loads only folders not yet loaded, and the about screen updates through `getRuntimes`. If loading in place is too hard (Windows file locks, a jar chain that is already built), say "restart leia to use the new runtimes" in the window instead. Decide in the ADR.
-
 ## Lucene 9.12 beyond classic search
 
 Goal: an index created by Lucene 8.x (read with `leia-lucene9`, ADR 0049) gets the features that are greyed out for it today. 9.12 has the APIs that leia-core uses for them on Lucene 10, so most are ports. What needs no runtime change goes to every runtime at once. The others need runtime interface 7 (one ADR for the interface, amending ADR 0049 §4). They land in 9.12 first, and in 5.5 and 7.7 where the copy is the same (ADR 0050). Each item adds its feature in `RuntimeResults.features`, a `runtime()` branch in its handlers, and its row in `docs/runtimes.md` (checked by `RuntimeFeaturesTest`). The TUI already gates on the features.

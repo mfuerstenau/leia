@@ -27,7 +27,7 @@ dependencies {
 }
 
 tasks.test {
-    useJUnitPlatform { excludeTags("jars") }
+    useJUnitPlatform { excludeTags("jars", "runtimeLoad") }
 }
 
 fun runtimeTestFiles(runtime: String, name: String, configuration: String) =
@@ -149,6 +149,24 @@ val jarsTest = tasks.register<Test>("jarsTest") {
     )
 }
 
+val runtimeLoadTest = tasks.register<Test>("runtimeLoadTest") {
+    description = "Runs the tests that load runtimes while leia runs, each class in a JVM of its own."
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath - lucene10World
+    // The runtimes' folders are loaded once per JVM (ADR 0080).
+    forkEvery = 1
+    include("**/RuntimeLoadBackendTest.class", "**/RuntimeRestartBackendTest.class")
+    useJUnitPlatform { includeTags("runtimeLoad") }
+    testFiles(
+        mapOf(
+            "leia.test.index.lucene8" to testIndexFiles.getValue("lucene8"),
+            "leia.test.index.lucene9" to testIndexFiles.getValue("lucene9"),
+            "leia.test.runtimes" to files(jarsTestRuntimes),
+        ),
+    )
+}
+
 // Hard rule 6 of AGENTS.md: the server reaches Lucene only through the runtime interface (ADR 0071),
 // so neither leia-core nor a Lucene artifact may be on its compile classpath; nor on its runtime
 // classpath, since leia.jar takes every Lucene from runtimes/ (ADR 0072, ADR 0073).
@@ -200,7 +218,7 @@ val runtimeCatalogCheck = tasks.register<RuntimeCatalogCheck>("runtimeCatalogChe
 }
 
 tasks.check {
-    dependsOn(jarsTest, noLuceneCheck, runtimeCatalogCheck)
+    dependsOn(jarsTest, runtimeLoadTest, noLuceneCheck, runtimeCatalogCheck)
 }
 
 // Version and build of leia, read at runtime by BuildInfo. The commit time (not the

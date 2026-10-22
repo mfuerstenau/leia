@@ -30,6 +30,7 @@ import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexParams;
 import io.github.mfuerstenau.leia.protocol.jars.GetJarsParams;
 import io.github.mfuerstenau.leia.protocol.jars.GetRuntimesParams;
+import io.github.mfuerstenau.leia.protocol.jars.LoadRuntimesParams;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellParams;
@@ -44,6 +45,8 @@ import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.tui.Osc52;
 import io.github.mfuerstenau.leia.tui.documents.DocumentExport;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
+import io.github.mfuerstenau.leia.tui.runtimes.RuntimeInstall;
+import io.github.mfuerstenau.leia.tui.runtimes.RuntimeWindow;
 import io.github.mfuerstenau.leia.tui.terms.Terms;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -60,6 +63,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongFunction;
@@ -108,6 +112,15 @@ public final class Session {
     private final App app;
     private final LeiaBackend backend;
 
+    /** Installs into {@code runtimes/} beside {@code leia.jar}; empty if leia doesn't run from it. */
+    private final Optional<RuntimeInstall> runtimeInstall;
+
+    /** The thread that downloads runtimes, while one runs (ADR 0080). */
+    private volatile Thread installer;
+
+    /** Set once leia quits, which cancels a download. */
+    private final AtomicBoolean quitting = new AtomicBoolean();
+
     /** What made leia quit, if not the user: set on the UI thread. */
     private Throwable failure;
 
@@ -115,8 +128,28 @@ public final class Session {
     private final Set<Poll> polling = new HashSet<>();
 
     public Session(App app, LeiaBackend backend) {
+        this(app, backend, Optional.empty());
+    }
+
+    /**
+     * @param runtimeInstall installs the runtimes that the window of {@code D} downloads (ADR 0080)
+     */
+    public Session(App app, LeiaBackend backend, Optional<RuntimeInstall> runtimeInstall) {
         this.app = app;
         this.backend = backend;
+        this.runtimeInstall = runtimeInstall;
+    }
+
+    /**
+     * Cancels a download that still runs, such as after Ctrl+C, and waits for it, so that it leaves
+     * no unfinished file behind.
+     */
+    public void awaitInstall() throws InterruptedException {
+        quitting.set(true);
+        Thread running = installer;
+        if (running != null) {
+            running.join();
+        }
     }
 
     /** An event that performs {@code action}, for an action that no key started. */
@@ -187,7 +220,7 @@ public final class Session {
             }
             case TickEvent _ -> {
                 poll(runner);
-                yield false;
+                yield app.tick();
             }
             default -> false;
         };
@@ -625,6 +658,26 @@ public final class Session {
                         });
                     }
                 });
+            case Action.PlanRuntimes plan -> planRuntimes(plan, runner);
+            case Action.InstallRuntimes install -> installRuntimes(install.install(), runner);
+            case Action.LoadRuntimes _ ->
+                backend.call(Methods.LOAD_RUNTIMES, new LoadRuntimesParams()).whenComplete((result, error) -> {
+                    if (error == null) {
+                        reply(runner, app -> {
+                            app.runtimesReloaded(result);
+                            return Optional.empty();
+                        });
+                        return;
+                    }
+                    RpcException rpc = rpcException(error, runner);
+                    if (rpc != null) {
+                        String message = describe(rpc);
+                        reply(runner, app -> {
+                            app.reloadRuntimesFailed(message);
+                            return Optional.empty();
+                        });
+                    }
+                });
             case Action.WriteExport write -> {
                 // On the UI thread, as the Rust TUI wrote it in its loop: a few writes of text.
                 Optional<String> error = DocumentExport.writeFile(
@@ -636,6 +689,60 @@ public final class Session {
                 }
             }
         }
+    }
+
+    /** Plans the download on a thread of its own: it hashes the jars that are there (ADR 0080). */
+    private void planRuntimes(Action.PlanRuntimes plan, TuiRunner runner) {
+        if (runtimeInstall.isEmpty()) {
+            reply(runner, app -> {
+                app.runtimesPlanFailed("leia doesn't run from leia.jar, so there is no runtimes/ beside it");
+                return Optional.empty();
+            });
+            return;
+        }
+        RuntimeInstall install = runtimeInstall.get();
+        Thread.ofPlatform().daemon().name("leia-runtime-plan").start(() -> {
+            try {
+                RuntimeInstall.Plan planned = install.plan(plan.runtimes());
+                reply(runner, app -> {
+                    app.runtimesPlanned(install, planned);
+                    return Optional.empty();
+                });
+            } catch (RuntimeInstall.InstallException | RuntimeException e) {
+                LOG.log(Level.WARNING, "Cannot plan the runtimes' download", e);
+                String message = e.getMessage() != null ? e.getMessage() : e.toString();
+                reply(runner, app -> {
+                    app.runtimesPlanFailed(message);
+                    return Optional.empty();
+                });
+            }
+        });
+    }
+
+    /**
+     * Downloads the runtimes on a thread of its own, not as a backend job (ADR 0080): no index is
+     * involved, and the backend thread stays free. Quitting leia cancels it.
+     */
+    private void installRuntimes(RuntimeWindow.Install install, TuiRunner runner) {
+        installer = Thread.ofPlatform().daemon().name("leia-runtime-install").start(() -> {
+            RuntimeInstall.Outcome outcome;
+            try {
+                outcome = install.install()
+                        .install(
+                                install.plan(),
+                                install.chosen(),
+                                install.listener(),
+                                () -> quitting.get() || install.cancelled().getAsBoolean());
+            } catch (RuntimeException e) {
+                LOG.log(Level.WARNING, "The runtimes' download failed", e);
+                outcome = RuntimeWindow.failedOutcome(install.chosen(), e);
+            }
+            RuntimeInstall.Outcome done = outcome;
+            reply(runner, app -> {
+                installer = null;
+                return app.runtimesInstalled(done);
+            });
+        });
     }
 
     /** Hands the app the runtime jars that are loaded and missing now, for the about screen. */
@@ -1139,7 +1246,7 @@ public final class Session {
     static RpcException withJarHint(RpcException error) {
         String hint = switch (error.code()) {
             case MISSING_CODEC -> "; add a jar that has it with X, or start leia with --jar";
-            case MISSING_RUNTIME -> "; install it with leia --download-runtimes";
+            case MISSING_RUNTIME -> "; close the index (c) and press D on the start screen to download it";
             default -> null;
         };
         if (hint == null) {
