@@ -2,6 +2,11 @@
 
 The work queue for leia. Check items off (`[x]`) as they land, and keep it aligned with the "Remaining / next" section of the latest entry in `docs/SESSION-SUMMARIES.md`. Finished items move to `docs/tasklist-done.md`.
 
+## One distribution
+
+- [ ] Build one distribution instead of a folder per OS (`build-dist.sh`, ADR 0004 and ADR 0034 amended by an ADR). `leia.jar` doesn't depend on the platform, so one folder holds it with both start scripts, `leia` and `leia.cmd`, and is packed as `dist/leia-<version>.zip` (executable bit of `leia` kept).
+- [ ] Package a `README.md` for users in the distribution, written for usage rather than development (the repository's `README.md` is the base, but it's long): requirements (Java 25, Linux or Windows on x86_64, `--java`/`JAVA_HOME`), the CLI options (from the TUI CLI contract in `AGENTS.md`), extension jars (`--jar`, the default jars folder, `X`), the runtimes and the capability matrix of what each one can do (from `docs/runtimes.md`). State that leia is read-only towards the index (no `IndexWriter`, no lock, no file changed), and that it downloads its runtimes on request (`D` or `--download-runtimes`), but only the official Lucene jars from Maven Central, checked against SHA-256 and size; leia's own adapter jars come out of `leia.jar`. Add a disclaimer that leia is not affiliated with or endorsed by Disney or Lucasfilm, and the license (the repository has no `LICENSE` file yet: choose one, add it, and package it too, with Lucene's Apache 2.0 notice where it applies).
+
 ## Runtime download window
 
 - [ ] Show the runtimes that are already present in the download window (`RuntimeWindow`, ADR 0080), not only those that need downloads. A present runtime can't be chosen: show it as checked but greyed out, so the user can still read its jars' file names, URLs and SHA-256s in the details pane. This changes ADR 0079's rejected alternative "offer complete runtimes too" and ADR 0080 §2, so it needs an ADR amendment. Loaded runtimes have open jars: the install must never write them, as now.
