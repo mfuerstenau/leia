@@ -1,6 +1,7 @@
 package io.github.mfuerstenau.leia.tui;
 
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
+import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
 import java.io.Serial;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -21,8 +22,10 @@ import java.util.Optional;
  * @param noReader {@code --no-reader}
  * @param indexPath {@code INDEX_PATH}
  * @param downloadRuntimes {@code --download-runtimes}, which takes no other option but {@code
- *     --yes} and no {@code INDEX_PATH}
+ *     --yes} and {@code --runtime}, and no {@code INDEX_PATH}
  * @param yes {@code --yes}: with {@code --download-runtimes}, download without asking (ADR 0077)
+ * @param runtimes {@code --runtime}, in the order given: with {@code --download-runtimes}, the
+ *     runtimes' folders to install, each one leia knows (ADR 0079)
  */
 record Cli(
         boolean help,
@@ -33,7 +36,8 @@ record Cli(
         boolean noReader,
         Optional<String> indexPath,
         boolean downloadRuntimes,
-        boolean yes) {
+        boolean yes,
+        List<String> runtimes) {
 
     static final String USAGE = "Usage: leia [OPTIONS] [INDEX_PATH]";
 
@@ -72,12 +76,17 @@ record Cli(
                   --download-runtimes
                       Install the runtimes into the folder runtimes beside leia.jar, then exit:
                       leia's own jars from leia.jar, Lucene's from Maven Central
-                      (https://repo1.maven.org/maven2/), each checked against its SHA-256. It lists
-                      the Lucene jars with their URLs and SHA-256s and asks before it downloads them.
-                      A jar that is there and matches is kept. Behind a proxy, start it with
-                      LEIA_OPTS=-Djava.net.useSystemProxies=true. Takes no other option but --yes
+                      (https://repo1.maven.org/maven2/), each checked against its SHA-256. A dialog
+                      shows the runtimes that need downloads, with their URLs and SHA-256s; none is
+                      checked until you check it. A jar that is there and matches is kept. Behind a
+                      proxy, start it with LEIA_OPTS=-Djava.net.useSystemProxies=true. Takes no
+                      other option but --yes and --runtime
+                  --runtime <FOLDER>
+                      With --download-runtimes, only this runtime, checked in the dialog: lucene10,
+                      lucene9, lucene7, lucene5 or lucene3. Can be repeated
                   --yes
-                      With --download-runtimes, download without asking, as for a script
+                      With --download-runtimes, download without asking, as for a script: it lists
+                      the Lucene jars with their URLs and SHA-256s, then downloads them
               -V, --version
                       Print the version and build of leia, and the Java version in use
               -h, --help
@@ -91,6 +100,7 @@ record Cli(
 
     Cli {
         jars = List.copyOf(jars);
+        runtimes = List.copyOf(runtimes);
     }
 
     /** A wrong command line: an unknown option, a missing or bad value, a second index path. */
@@ -117,6 +127,7 @@ record Cli(
         Optional<String> indexPath = Optional.empty();
         boolean downloadRuntimes = false;
         boolean yes = false;
+        List<String> runtimes = new ArrayList<>();
         boolean directoryGiven = false;
         boolean options = true;
         for (int i = 0; i < args.length; i++) {
@@ -137,6 +148,10 @@ record Cli(
                     case "--jar" -> {
                         String value = inline.isPresent() ? inline.get() : next(args, ++i, name, "<PATH>");
                         jars.add(path(name, value));
+                    }
+                    case "--runtime" -> {
+                        String value = inline.isPresent() ? inline.get() : next(args, ++i, name, "<FOLDER>");
+                        runtimes.add(runtime(value));
                     }
                     case "--directory" -> {
                         String value = inline.isPresent() ? inline.get() : next(args, ++i, name, "<IMPL>");
@@ -163,7 +178,20 @@ record Cli(
         if (yes && !downloadRuntimes) {
             throw new UsageException("--yes goes only with --download-runtimes");
         }
-        return new Cli(help, version, jars, noDefaultJars, directory, noReader, indexPath, downloadRuntimes, yes);
+        if (!runtimes.isEmpty() && !downloadRuntimes) {
+            throw new UsageException("--runtime goes only with --download-runtimes");
+        }
+        return new Cli(
+                help,
+                version,
+                jars,
+                noDefaultJars,
+                directory,
+                noReader,
+                indexPath,
+                downloadRuntimes,
+                yes,
+                runtimes.stream().distinct().toList());
     }
 
     private static boolean flag(String name, Optional<String> inline) throws UsageException {
@@ -186,6 +214,16 @@ record Cli(
         } catch (InvalidPathException e) {
             throw new UsageException(name + ": not a path: " + e.getMessage());
         }
+    }
+
+    private static String runtime(String value) throws UsageException {
+        List<String> known =
+                RuntimeFolders.KNOWN.stream().map(RuntimeFolders.Known::folder).toList();
+        if (!known.contains(value)) {
+            throw new UsageException("invalid value '" + value + "' for --runtime <FOLDER>: possible values are "
+                    + String.join(", ", known));
+        }
+        return value;
     }
 
     private static DirectoryImpl directory(String value) throws UsageException {

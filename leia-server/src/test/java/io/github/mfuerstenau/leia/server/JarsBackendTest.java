@@ -39,12 +39,16 @@ import io.github.mfuerstenau.leia.protocol.jars.RuntimeFolder;
 import io.github.mfuerstenau.leia.protocol.jars.RuntimeState;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
+import io.github.mfuerstenau.leia.server.jars.JarChain;
 import io.github.mfuerstenau.leia.server.runtime.FutureRuntime;
+import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
+import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -160,6 +164,18 @@ class JarsBackendTest {
                         assertThat(runtime.state()).isEqualTo(RuntimeState.LOADED);
                         assertThat(runtime.luceneVersion()).isPresent();
                     });
+            // Each loaded runtime reads the majors that the catalog gives its folder (ADR 0078).
+            List<LuceneRuntime> loaded = new ArrayList<>(RuntimeFolders.runtimes());
+            loaded.addAll(Runtimes.load(JarChain.classLoader()).runtimes());
+            for (RuntimeFolders.Known known : RuntimeFolders.KNOWN) {
+                assertThat(loaded)
+                        .as(known.folder())
+                        .filteredOn(runtime -> runtime.indexMajors()
+                                .contains(known.indexMajors().getFirst()))
+                        .singleElement()
+                        .satisfies(runtime -> assertThat(runtime.indexMajors())
+                                .containsExactlyInAnyOrderElementsOf(known.indexMajors()));
+            }
 
             // Indexes created by 8.x, with Lucene 9.12 in a class loader of its own (ADR 0049, ADR 0073).
             for (String name : List.of("lucene8", "lucene8to9")) {

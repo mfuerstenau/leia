@@ -70,8 +70,8 @@ val oldTestIndexes = mapOf(
 }
 
 // The runtimes' folders, as leiaFolder puts them into runtimes/ beside leia.jar (ADR 0073), one per
-// runtime module. A new runtime is one more entry in RUNTIME_MODULES of build-logic, and in
-// RuntimeFolders.KNOWN of leia-server.
+// runtime module. A new runtime is one more entry in RUNTIME_MODULES of build-logic, and in the
+// runtime catalog META-INF/leia/runtimes.json of leia-server (ADR 0078).
 val runtimeFolders = RUNTIME_MODULES.associateWith { runtimeFolderJars(it) }
 
 // leia's own jars of each runtime's folder, the adapter and for Lucene 10 leia-core's, which leia.jar

@@ -373,3 +373,11 @@ Goal: no Star Wars imagery in leia, because of copyright concerns. The name leia
 Goal, as reached: `leia --download-runtimes` (ADR 0073) fetches nothing until the user agrees to it, having seen what will be fetched (ADR 0077).
 
 - [x] `RuntimeInstall` plans first, without the network or writes, then lists each Lucene jar to download with its URL, SHA-256 and size, says that they are the official, unchanged Maven Central jars and that leia's own come from `leia.jar`, and asks `[y/N]` through a `Prompt` (`System.console()` in `Main`). No terminal or no yes: nothing downloaded, exit 1. `--yes` in `Cli` skips the question, only with `--download-runtimes`. Nothing to download: nothing asked. `Cli.HELP`, README, AGENTS.md, ADR 0073; tests for the listing, the refusal, no terminal, a yes, nothing to download and a partial listing.
+
+## Runtime download: a TamboUI dialogue — done
+
+Goal, as reached: `leia --download-runtimes` lets the user choose the runtimes to install in a TamboUI dialogue, and the runtimes come from a catalog instead of code (ADR 0078, ADR 0079).
+
+- [x] A TamboUI dialogue for `--download-runtimes` (ADR 0079): a checkbox per runtime that needs downloads, none checked, `a` all and `n` none, with each runtime's jars, URLs, SHA-256s and sizes and what is kept. `--yes` keeps the text listing; `--runtime <folder>` (repeatable) narrows both and pre-checks in the dialogue; Esc or nothing installed exits 1 with `runtimes/` untouched.
+- [x] A spinner while downloading, in the dialogue (ADR 0079): per jar and overall progress, failures per runtime, which don't stop the others, and Esc to cancel, cooperatively on the dialogue's own thread, leaving no `.part` file.
+- [x] The runtimes in a JSON catalog, `META-INF/leia/runtimes.json` of leia-server, with a display name (ADR 0078): read by `RuntimeCatalog` with the JDK only, checked against `RUNTIME_MODULES` by `runtimeCatalogCheck`, and the majors against each loaded runtime in `jarsTest`.

@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-14
 - **Supersedes:** ADR 0044 §1 (relocation, and its rejected alternative of separate class loaders)
-- **Amended by:** ADR 0077 (`--download-runtimes` lists the jars and asks first; `--yes`)
+- **Amended by:** ADR 0077 (`--download-runtimes` lists the jars and asks first; `--yes`); ADR 0078 (the runtimes in a catalog, not in `RuntimeFolders.KNOWN`); ADR 0079 (§7: a dialogue, per-runtime failures, cancel)
 - **Amends:** ADR 0004 (release folders without `runtimes/`); ADR 0065 §4 (step 5 dropped, steps 6 and 7 as built here); ADR 0068 §2 (old runtimes see no `--jar` jars); ADR 0072 (the layout of `runtimes/`); AGENTS.md hard rule 5, the architecture and the CLI contract
 
 ## Context
@@ -35,4 +35,4 @@ Since ADR 0072, `leia.jar` holds no Lucene at all. A class loader whose parent s
 - An old runtime can no longer come through `X` or `--jar`, which would need its Lucene in the chain; Lucene 10 can, by adding the `runtimes/lucene10` directory. An old runtime's loader could take `--jar` jars of its own Lucene (ADR 0068 §2); not done.
 - The release folders are about 7 MB instead of 38 MB, and the first run needs the network once.
 - The tests load the old runtimes as leia does: leia-server's and leia-tui's `testRuntimes` put the folders together, passed as `-Dleia.test.runtimes`, while Lucene 10 stays on the test classpath; the `Lucene*BackendTest`s now also cover the isolation and the context class loader. leia-server's `jarsTest` loads all five folders on a classpath without Lucene, and covers an incomplete and a refused folder; `RuntimeInstallTest` runs against the JDK's `HttpServer`.
-- A new runtime is one module with the conventions, one entry in `RuntimeFolders.KNOWN` and one in build-logic's `RUNTIME_MODULES`.
+- A new runtime is one module with the conventions, one entry in `RuntimeFolders.KNOWN` and one in build-logic's `RUNTIME_MODULES`. (Since ADR 0078: one entry in the runtime catalog instead of `KNOWN`.)

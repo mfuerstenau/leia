@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-15
+- **Amended by:** ADR 0079 (§2–§4: a dialogue instead of the question; `--runtime`)
 - **Amends:** ADR 0073 §7 (`--download-runtimes` asks first, and takes `--yes`); AGENTS.md, the CLI contract
 
 ## Context

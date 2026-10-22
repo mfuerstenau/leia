@@ -10,15 +10,20 @@ import io.github.mfuerstenau.leia.protocol.version.VersionParams;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import io.github.mfuerstenau.leia.server.LeiaBackend;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders.Known;
 import io.github.mfuerstenau.leia.tui.app.Action;
 import io.github.mfuerstenau.leia.tui.app.App;
 import io.github.mfuerstenau.leia.tui.app.History;
 import io.github.mfuerstenau.leia.tui.app.Session;
 import io.github.mfuerstenau.leia.tui.jars.DefaultJars;
 import io.github.mfuerstenau.leia.tui.jars.RuntimeFolders;
+import io.github.mfuerstenau.leia.tui.runtimes.RuntimeDialog;
+import io.github.mfuerstenau.leia.tui.runtimes.RuntimeDownload;
 import io.github.mfuerstenau.leia.tui.runtimes.RuntimeInstall;
+import java.io.ByteArrayOutputStream;
 import java.io.Console;
 import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -26,6 +31,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ExecutionException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -81,7 +87,7 @@ public final class Main {
             return printVersion(out, err);
         }
         if (cli.downloadRuntimes()) {
-            return downloadRuntimes(platform, cli.yes(), out, err);
+            return downloadRuntimes(platform, cli, out, err);
         }
         for (Path jar : cli.jars()) {
             if (!Files.exists(jar)) {
@@ -138,10 +144,11 @@ public final class Main {
 
     /**
      * {@code --download-runtimes} (ADR 0073): before any jar is loaded, so that none of the runtimes'
-     * jars is open, which Windows wouldn't let it replace, and with the terminal still leia's. It
-     * asks on the terminal before it downloads, unless {@code yes} (ADR 0077).
+     * jars is open, which Windows wouldn't let it replace, and with the terminal still leia's. On a
+     * terminal, the user chooses the runtimes in a dialogue, unless {@code --yes} (ADR 0077, ADR
+     * 0079).
      */
-    private static int downloadRuntimes(Platform platform, boolean yes, PrintStream out, PrintStream err) {
+    private static int downloadRuntimes(Platform platform, Cli cli, PrintStream out, PrintStream err) throws Exception {
         // Not into leia.log, which would lose the last session's log; only problems show.
         LeiaLog.toStderr(Level.WARNING);
         Optional<Path> runtimesDir = platform.runtimesDir();
@@ -151,12 +158,45 @@ public final class Main {
             return 1;
         }
         Console console = System.console();
-        RuntimeInstall.Prompt prompt = console != null && console.isTerminal()
-                ? question -> Optional.ofNullable(console.readLine("%s", question))
-                : question -> Optional.empty();
-        return new RuntimeInstall(
-                        runtimesDir.get(), RuntimeInstall.base(), Main.class.getClassLoader(), out, err, prompt)
-                .run(yes);
+        return RuntimeDownload.run(
+                new RuntimeInstall(runtimesDir.get(), RuntimeInstall.base(), Main.class.getClassLoader()),
+                cli.runtimes(),
+                cli.yes(),
+                console != null && console.isTerminal(),
+                (install, plan, checked) -> runtimeDialog(install, plan, checked, err),
+                out,
+                err);
+    }
+
+    /**
+     * The dialogue of {@code --download-runtimes}. While it has the terminal, the log and anything
+     * printed go into memory, and to stderr once the terminal is restored.
+     */
+    private static Optional<RuntimeInstall.Outcome> runtimeDialog(
+            RuntimeInstall install, RuntimeInstall.Plan plan, Set<Known> checked, PrintStream err) throws Exception {
+        selectBackend();
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        PrintStream log = new PrintStream(buffer, true, StandardCharsets.UTF_8);
+        PrintStream stdout = System.out;
+        PrintStream stderr = System.err;
+        LeiaLog.to(log, Level.WARNING);
+        TuiConfig config = TuiConfig.builder()
+                .tickRate(Duration.ofMillis(100))
+                .errorOutput(log)
+                .build();
+        try {
+            System.setOut(log);
+            System.setErr(log);
+            return RuntimeDialog.run(install, plan, checked, config);
+        } finally {
+            System.setOut(stdout);
+            System.setErr(stderr);
+            LeiaLog.toStderr(Level.WARNING);
+            log.flush();
+            if (buffer.size() > 0) {
+                err.print(buffer.toString(StandardCharsets.UTF_8));
+            }
+        }
     }
 
     /**
@@ -241,7 +281,7 @@ public final class Main {
      * of a comma-separated {@code tamboui.backend} in order. An explicit {@code -Dtamboui.backend}
      * or {@code TAMBOUI_BACKEND} still wins.
      */
-    private static void selectBackend() {
+    static void selectBackend() {
         String property = System.getProperty("tamboui.backend");
         String env = System.getenv("TAMBOUI_BACKEND");
         if ((property == null || property.isEmpty()) && (env == null || env.isEmpty())) {

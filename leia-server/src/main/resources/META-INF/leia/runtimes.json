@@ -1,0 +1,9 @@
+{
+  "runtimes": [
+    { "folder": "lucene10", "name": "Lucene 10", "indexMajors": [9, 10] },
+    { "folder": "lucene9", "name": "Lucene 9", "indexMajors": [8] },
+    { "folder": "lucene7", "name": "Lucene 7", "indexMajors": [6, 7] },
+    { "folder": "lucene5", "name": "Lucene 5", "indexMajors": [4, 5] },
+    { "folder": "lucene3", "name": "Lucene 3", "indexMajors": [2, 3] }
+  ]
+}

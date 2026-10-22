@@ -1,5 +1,6 @@
 // A library for leia-tui, which calls the methods in-process through LeiaBackend (ADR 0034).
 import io.github.mfuerstenau.leia.buildlogic.RUNTIME_MODULES
+import io.github.mfuerstenau.leia.buildlogic.RuntimeCatalogCheck
 import io.github.mfuerstenau.leia.buildlogic.runtimeFolder
 import io.github.mfuerstenau.leia.buildlogic.runtimeFolderJars
 
@@ -187,8 +188,19 @@ val noLuceneCheck = tasks.register("noLuceneCheck") {
     }
 }
 
+// The runtime catalog names the folders that the build puts into runtimes/, Lucene 10's first (ADR
+// 0078).
+val runtimeCatalogCheck = tasks.register<RuntimeCatalogCheck>("runtimeCatalogCheck") {
+    description = "Checks that the runtime catalog names the folders of the runtime modules."
+    group = "verification"
+    catalog = layout.projectDirectory.file("src/main/resources/META-INF/leia/runtimes.json")
+    folders = RUNTIME_MODULES.map { runtimeFolder(it) }
+    latest = runtimeFolder("leia-lucene10")
+    report = layout.buildDirectory.file("reports/runtimeCatalogCheck.txt")
+}
+
 tasks.check {
-    dependsOn(jarsTest, noLuceneCheck)
+    dependsOn(jarsTest, noLuceneCheck, runtimeCatalogCheck)
 }
 
 // Version and build of leia, read at runtime by BuildInfo. The commit time (not the

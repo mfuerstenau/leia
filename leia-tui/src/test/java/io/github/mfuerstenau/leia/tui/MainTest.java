@@ -85,6 +85,18 @@ class MainTest {
     }
 
     @Test
+    void downloadsNothingWithoutATerminal() throws Exception {
+        Path leiaJar = Files.writeString(tmp.resolve("leia.jar"), "");
+        platform = new Platform(platform.env(), Optional.empty(), false, Optional.of(leiaJar));
+
+        assertThat(run("--download-runtimes", "--runtime", "lucene9")).isEqualTo(1);
+
+        assertThat(err()).contains("leia: nothing downloaded", "no terminal", "--yes");
+        assertThat(tmp.resolve("runtimes")).doesNotExist();
+        assertThat(logFile).doesNotExist();
+    }
+
+    @Test
     void refusesTheDownloadWithAnIndexPath() throws Exception {
         assertThat(run("--download-runtimes", "/data/index")).isEqualTo(2);
 

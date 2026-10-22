@@ -73,10 +73,13 @@ doesn't and removes jars that no longer belong there, such as those of an older 
 update of leia. Behind a proxy, run it as `LEIA_OPTS=-Djava.net.useSystemProxies=true leia
 --download-runtimes`.
 
-Before it downloads anything, leia lists each Lucene jar it would fetch with its URL, SHA-256 and
-size, and asks `Download 33 jars, 30.0 MiB in all? [y/N]`. Only `y` or `yes` downloads; any other
-answer, or no terminal to ask on, downloads nothing and exits with status 1. For a script, `leia
---download-runtimes --yes` downloads without asking. When every jar is already there and matches,
+Before it downloads anything, leia shows a dialog with the runtimes that need downloads, none of them
+checked. Space checks a runtime, `a` checks all and `n` none; beside the list, each runtime shows the
+Lucene jars it would fetch with their URLs, SHA-256s and sizes. Enter downloads the checked runtimes
+and shows their progress, which Esc cancels. Esc before that, or no terminal to ask on, downloads
+nothing and exits with status 1. `--runtime lucene9` (repeatable) offers only that runtime, checked.
+For a script, `leia --download-runtimes --yes` lists the jars and downloads them without asking,
+`--yes --runtime lucene9` only those of Lucene 9. When every jar is already there and matches,
 nothing is asked.
 
 Without `runtimes`, leia starts all the same: indexes open only without a reader, and the about
@@ -97,8 +100,9 @@ leia [OPTIONS] [INDEX_PATH]
 | `--no-default-jars` | don't load the jars of the default folder (see [Jars](#jars)) |
 | `--directory <IMPL>` | the Lucene `Directory` to read indexes through: `fs` (default) lets Lucene choose, which is `MMapDirectory` on 64-bit; `mmap` is `MMapDirectory`, `nio` is `NIOFSDirectory`. `Ctrl+D` in the open prompt changes it |
 | `--no-reader` | open `INDEX_PATH` without a reader, for an index that a reader can't open (see [Without a reader](#without-a-reader)); `Ctrl+N` in the open prompt does the same |
-| `--download-runtimes` | install the runtimes into `runtimes` beside `leia.jar`, then exit, after listing the Lucene jars and asking (see [Install](#install)); takes no other option but `--yes` |
-| `--yes` | with `--download-runtimes`, download without asking, as for a script |
+| `--download-runtimes` | install the runtimes into `runtimes` beside `leia.jar`, then exit, after you choose them in a dialog (see [Install](#install)); takes no other option but `--yes` and `--runtime` |
+| `--runtime <FOLDER>` | with `--download-runtimes`, only this runtime (`lucene10`, `lucene9`, `lucene7`, `lucene5` or `lucene3`), checked in the dialog; can be repeated |
+| `--yes` | with `--download-runtimes`, list the Lucene jars and download them without asking, as for a script |
 
 `leia` (or `leia.cmd` on Windows) is a script that finds the JVM and runs the `leia.jar` next to
 it. `leia` resolves symlinks, so a link to it in `~/bin` works; on Windows, put the folder on

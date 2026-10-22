@@ -27,7 +27,8 @@ class CliTest {
                         false,
                         Optional.empty(),
                         false,
-                        false));
+                        false,
+                        java.util.List.of()));
     }
 
     @Test
@@ -57,6 +58,15 @@ class CliTest {
         assertThat(Cli.parse().downloadRuntimes()).isFalse();
         assertThat(Cli.parse("--download-runtimes").yes()).isFalse();
         assertThat(Cli.parse("--download-runtimes", "--yes").yes()).isTrue();
+        assertThat(Cli.parse("--download-runtimes").runtimes()).isEmpty();
+        assertThat(Cli.parse("--download-runtimes", "--runtime", "lucene9", "--yes"))
+                .satisfies(cli -> {
+                    assertThat(cli.runtimes()).containsExactly("lucene9");
+                    assertThat(cli.yes()).isTrue();
+                });
+        assertThat(Cli.parse("--runtime=lucene5", "--download-runtimes", "--runtime", "lucene9", "--runtime", "lucene5")
+                        .runtimes())
+                .containsExactly("lucene5", "lucene9");
     }
 
     @ParameterizedTest
@@ -102,6 +112,9 @@ class CliTest {
             --download-runtimes --no-default-jars | --download-runtimes takes no INDEX_PATH
             --yes                       | --yes goes only with --download-runtimes
             --download-runtimes --yes=1 | --yes takes no value
+            --runtime lucene9           | --runtime goes only with --download-runtimes
+            --download-runtimes --runtime lucene99 | invalid value 'lucene99' for --runtime <FOLDER>: possible values are lucene10, lucene9, lucene7, lucene5, lucene3
+            --download-runtimes --runtime | --runtime needs a value <FOLDER>
             -j /opt/jdk                 | -j is taken by the leia script
             --java=/opt/jdk             | --java is taken by the leia script
             """)
@@ -122,6 +135,7 @@ class CliTest {
                         "--no-reader",
                         "--download-runtimes",
                         "--yes",
+                        "--runtime <FOLDER>",
                         "repo1.maven.org",
                         "SHA-256",
                         "-Djava.net.useSystemProxies=true",

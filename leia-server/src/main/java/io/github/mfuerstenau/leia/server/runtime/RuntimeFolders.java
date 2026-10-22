@@ -49,9 +49,10 @@ public final class RuntimeFolders {
      * A runtime that leia knows.
      *
      * @param folder its folder in {@code runtimes/}, such as {@code lucene9}
+     * @param name its name for people, such as {@code Lucene 9}
      * @param indexMajors the majors of the indexes it reads, oldest first
      */
-    public record Known(String folder, List<Integer> indexMajors) {
+    public record Known(String folder, String name, List<Integer> indexMajors) {
 
         /** The adapter jar in the folder, such as {@code leia-lucene9.jar}. */
         public String adapterJar() {
@@ -59,13 +60,11 @@ public final class RuntimeFolders {
         }
     }
 
-    /** Every runtime leia knows, newest first. A new runtime is one more entry here. */
-    public static final List<Known> KNOWN = List.of(
-            new Known("lucene10", List.of(9, 10)),
-            new Known("lucene9", List.of(8)),
-            new Known("lucene7", List.of(6, 7)),
-            new Known("lucene5", List.of(4, 5)),
-            new Known("lucene3", List.of(2, 3)));
+    /**
+     * Every runtime leia knows, newest first, from the catalog {@value RuntimeCatalog#RESOURCE} (ADR
+     * 0078). A new runtime is one more entry there.
+     */
+    public static final List<Known> KNOWN = RuntimeCatalog.load(RuntimeFolders.class.getClassLoader());
 
     /** The runtime that reads the newest indexes, and those whose version can't be detected (ADR 0071). */
     public static final Known LATEST = KNOWN.getFirst();
