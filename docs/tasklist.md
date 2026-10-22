@@ -2,6 +2,10 @@
 
 The work queue for leia. Check items off (`[x]`) as they land, and keep it aligned with the "Remaining / next" section of the latest entry in `docs/SESSION-SUMMARIES.md`. Finished items move to `docs/tasklist-done.md`.
 
+## Runtime download window
+
+- [ ] Show the runtimes that are already present in the download window (`RuntimeWindow`, ADR 0080), not only those that need downloads. A present runtime can't be chosen: show it as checked but greyed out, so the user can still read its jars' file names, URLs and SHA-256s in the details pane. This changes ADR 0079's rejected alternative "offer complete runtimes too" and ADR 0080 §2, so it needs an ADR amendment. Loaded runtimes have open jars: the install must never write them, as now.
+
 ## Lucene 9.12 beyond classic search
 
 Goal: an index created by Lucene 8.x (read with `leia-lucene9`, ADR 0049) gets the features that are greyed out for it today. 9.12 has the APIs that leia-core uses for them on Lucene 10, so most are ports. What needs no runtime change goes to every runtime at once. The others need runtime interface 7 (one ADR for the interface, amending ADR 0049 §4). They land in 9.12 first, and in 5.5 and 7.7 where the copy is the same (ADR 0050). Each item adds its feature in `RuntimeResults.features`, a `runtime()` branch in its handlers, and its row in `docs/runtimes.md` (checked by `RuntimeFeaturesTest`). The TUI already gates on the features.
