@@ -1810,7 +1810,15 @@ public final class Search {
                 if (knn && !vectorFields.isEmpty()) {
                     int len = vectorFields.size();
                     vectorField = c == 'f' ? (vectorField + 1) % len : (vectorField + len - 1) % len;
-                    return Optional.of(resubmit());
+                    Optional<Request> next = resubmit();
+                    if (next.isEmpty() && recall != null) {
+                        // A recall check belongs to its field: the next field doesn't show it.
+                        List<Long> cancel = jobs();
+                        recall = null;
+                        return Optional.of(
+                                cancel.isEmpty() ? Optional.empty() : Optional.of(new Request.Cancel(cancel)));
+                    }
+                    return Optional.of(next);
                 }
                 if (!fields.isEmpty() && !likes && mode != Mode.DOC_VALUES && !knn) {
                     int len = fields.size();
@@ -2044,7 +2052,15 @@ public final class Search {
                 case "s/l settings" -> scores() ? entry : "l settings";
                 case "x explain" -> supports(Feature.EXPLAIN) ? entry : "";
                 case "H highlight", "v view" -> supports(Feature.HIGHLIGHT) ? entry : "";
-                case "⏎ open doc" -> supports(Feature.DOCUMENTS) ? entry : "";
+                case "⏎ open doc" -> {
+                    // Enter on a sampled target of a recall check searches its nearest (ADR 0086).
+                    if (mode == Mode.KNN
+                            && recall != null
+                            && recall.params().sample().isPresent()) {
+                        yield "⏎ nearest";
+                    }
+                    yield supports(Feature.DOCUMENTS) ? entry : "";
+                }
                 case "b/B browse" -> supports(Feature.FILTER) ? entry : "";
                 default -> entry;
             };

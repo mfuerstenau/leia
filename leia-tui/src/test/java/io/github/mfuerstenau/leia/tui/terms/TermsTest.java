@@ -699,7 +699,8 @@ class TermsTest {
                         "embedding · 2 segments · 25 vectors · cosine",
                         "▸ _0  20 vectors · 2 levels · M 16",
                         "_1  5 vectors · no graph",
-                        "⏎ on a node shows its neighbours.");
+                        "⏎ on a node shows its",
+                        "neighbours.");
         assertThat(terms.keys()).contains("< back", "d open doc");
     }
 
@@ -765,6 +766,19 @@ class TermsTest {
         assertThat(render(terms)).contains(" ord 1 ", "L1      17    18").doesNotContain("› 0");
         assertThat(terms.handleKey(key('<'))).isEmpty();
         assertThat(render(terms)).contains("the walk's first node");
+    }
+
+    @Test
+    void theNeighboursColumnIsNoWiderThanTheGraphsNeed() {
+        Terms terms = graphTerms();
+
+        // Ordinals and documents of four digits fit the postings' width, which leaves the rest to the
+        // middle column.
+        String top = TestScreens.render(frame -> terms.render(frame, frame.area()), 80, 12)
+                .lines()
+                .findFirst()
+                .orElseThrow();
+        assertThat(top.substring(top.indexOf("┌ Neighbours"))).hasSize(34);
     }
 
     @Test

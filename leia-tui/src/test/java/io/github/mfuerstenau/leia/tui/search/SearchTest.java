@@ -1065,6 +1065,23 @@ class SearchTest {
     }
 
     @Test
+    void aSampledRecallCheckBelongsToItsField() {
+        Search search = knnMode();
+        assertThat(search.keys()).contains("⏎ open doc");
+        Request.Recall recall = recallOf(press(search, 'r'));
+        assertThat(recall.params().sample()).hasValue(Search.RECALL_SAMPLE);
+        search.knnRecallStarted(recall.recallId(), 5);
+        // Enter on a sampled target searches its nearest.
+        assertThat(search.keys()).contains("⏎ nearest").doesNotContain("⏎ open doc");
+
+        // The next field searches nothing on a blank line, but stops the check and drops it.
+        assertThat(press(search, 'f')).hasValue(new Request.Cancel(List.of(5L)));
+        assertThat(search.knnRecallJob()).isEmpty();
+        assertThat(render(search)).contains("KNN · fingerprint").doesNotContain("Recall ·");
+        assertThat(search.keys()).contains("⏎ open doc");
+    }
+
+    @Test
     void knnModeWithoutVectorsSaysSo() {
         Search search = search();
         for (int i = 0; i < 4; i++) {

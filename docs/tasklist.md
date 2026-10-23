@@ -21,7 +21,8 @@ From the read-only checklist in `docs/luke-features.md` §7. Ordered roughly by 
 
 ## Bugs
 
-None open.
+- [ ] Scores of a euclidean field over bytes show as `0.0000`: `fingerprint` of the demo index scores `1/(1+d²)`, about `1e-5`, so the KNN hits (all but the target's own 1.0000) and the terms screen's neighbours print four zero decimals; the recall's missed rows print `1.1744533E-5`. Wants a format that keeps a few significant digits, on the search screen's hits as well as in the neighbours column (found trying ADR 0085/0086 by hand)
+- [ ] On the terms screen, Enter on a vector field's segment in the same burst of keys as the move onto the field does nothing: it comes before the `getKnnGraph` reply, which has no rows yet. Pressed again, it expands (seen in tmux on `lucene8to9`; a typist rarely hits it)
 
 ## Open questions
 

@@ -86,8 +86,11 @@ public final class Terms {
     /** Wide enough for the title of the postings in a filter (ADR 0032). */
     private static final int POSTINGS_WIDTH = 34;
 
-    /** Wide enough for a neighbour of a graph of millions of nodes (ADR 0085). */
+    /** Wide enough for a neighbour of a graph of any size (ADR 0085). */
     private static final int NEIGHBOURS_WIDTH = 42;
+
+    /** The neighbours' columns but the ordinal and the document, with their spacing and the borders. */
+    private static final int NEIGHBOURS_FIXED_WIDTH = 23;
 
     private static final int COLUMN_SPACING = 2;
 
@@ -1368,7 +1371,7 @@ public final class Terms {
                 .constraints(
                         Constraint.length(Math.clamp(nameWidth + 4, 12, FIELDS_MAX_WIDTH)),
                         Constraint.fill(),
-                        Constraint.length(showsGraph() ? NEIGHBOURS_WIDTH : POSTINGS_WIDTH))
+                        Constraint.length(showsGraph() ? neighboursWidth() : POSTINGS_WIDTH))
                 .split(area);
         renderFields(frame, columns.get(0));
         if (selectedVectorField().isPresent()) {
@@ -1756,6 +1759,22 @@ public final class Terms {
     /** A node, such as {@code ord 17 · doc 42}, and whether its document is deleted. */
     private static String nodeText(KnnGraphNode node) {
         return "ord " + node.ord() + " · doc " + node.docId() + (node.deleted() ? " · deleted" : "");
+    }
+
+    /**
+     * The width of the neighbours column: as wide as the graphs' largest ordinal and document need,
+     * from the postings' width to {@link #NEIGHBOURS_WIDTH}, which leaves a narrow terminal's middle
+     * column the rest.
+     */
+    private int neighboursWidth() {
+        if (knnTree == null || knnTree.graph == null) {
+            return POSTINGS_WIDTH;
+        }
+        List<KnnGraphSegment> segments = knnTree.graph.segments();
+        int ordWidth = Selection.numberWidth(segments.stream().mapToLong(segment -> segment.vectors() - 1L));
+        int docWidth = Selection.numberWidth(
+                segments.stream().mapToLong(segment -> segment.docBase() + segment.maxDoc() - 1L));
+        return Math.clamp(NEIGHBOURS_FIXED_WIDTH + ordWidth + docWidth, POSTINGS_WIDTH, NEIGHBOURS_WIDTH);
     }
 
     private void renderNeighbours(Frame frame, Rect area) {
