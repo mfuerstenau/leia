@@ -662,26 +662,28 @@ class TermsTest {
         Terms terms = new Terms(List.of(field("id", 0, IndexOptions.DOCS), vectorField("embedding", 1)));
         terms.initialRequest();
         assertThat(terms.handleKey(key(KeyCode.DOWN))).hasValue(new Request.LoadKnnGraph("embedding", 1));
-        assertThat(terms.knnGraphLoaded(
-                        new Request.LoadKnnGraph("embedding", 1),
-                        new GetKnnGraphResult(
-                                "embedding",
-                                8,
-                                VectorEncoding.FLOAT32,
-                                VectorSimilarity.COSINE,
-                                List.of(
-                                        new KnnGraphSegment(
-                                                0,
-                                                0,
-                                                Optional.of("_0"),
-                                                0,
-                                                21,
-                                                20,
-                                                Optional.of(
-                                                        new KnnGraphShape(List.of(20, 2), ENTRY, OptionalInt.of(16)))),
-                                        new KnnGraphSegment(1, 0, Optional.of("_1"), 21, 5, 5, Optional.empty())))))
+        assertThat(terms.knnGraphLoaded(new Request.LoadKnnGraph("embedding", 1), graphResult()))
                 .isEmpty();
         return terms;
+    }
+
+    /** The graphs of {@code embedding}, as {@link #graphTerms} describes them. */
+    private static GetKnnGraphResult graphResult() {
+        return new GetKnnGraphResult(
+                "embedding",
+                8,
+                VectorEncoding.FLOAT32,
+                VectorSimilarity.COSINE,
+                List.of(
+                        new KnnGraphSegment(
+                                0,
+                                0,
+                                Optional.of("_0"),
+                                0,
+                                21,
+                                20,
+                                Optional.of(new KnnGraphShape(List.of(20, 2), ENTRY, OptionalInt.of(16)))),
+                        new KnnGraphSegment(1, 0, Optional.of("_1"), 21, 5, 5, Optional.empty())));
     }
 
     private static GetKnnGraphNodeResult neighbours(KnnGraphNode node, List<KnnGraphLevel> levels) {
@@ -811,6 +813,123 @@ class TermsTest {
         // With the graphs in, the node is asked for at once.
         assertThat(terms.showNode("embedding", 7)).hasValue(Request.LoadKnnNode.ofDoc("embedding", 1, 7));
         assertThat(terms.showNode("id", 7)).isEmpty();
+    }
+
+    @Test
+    void keysBeforeTheGraphsWaitForThem() {
+        Terms terms = new Terms(List.of(field("id", 0, IndexOptions.DOCS), vectorField("embedding", 1)));
+        terms.initialRequest();
+        Request.LoadKnnGraph graph = new Request.LoadKnnGraph("embedding", 1);
+        assertThat(terms.handleKey(key(KeyCode.DOWN))).hasValue(graph);
+        assertThat(terms.handleKey(key(KeyCode.RIGHT))).isEmpty();
+        assertThat(terms.handleKey(key(KeyCode.ENTER))).isEmpty();
+
+        assertThat(terms.knnGraphLoaded(graph, graphResult())).isEmpty();
+        assertThat(render(terms)).contains("▾ _0", "entry  ord 17 · doc 18", "▸ L1  2 nodes", "▸ L0  20 nodes");
+    }
+
+    @Test
+    void heldKeysReplayInOrder() {
+        Terms terms = new Terms(List.of(field("id", 0, IndexOptions.DOCS), vectorField("embedding", 1)));
+        terms.initialRequest();
+        Request.LoadKnnGraph graph = new Request.LoadKnnGraph("embedding", 1);
+        terms.handleKey(key(KeyCode.DOWN));
+        terms.handleKey(key(KeyCode.RIGHT));
+        terms.handleKey(key(KeyCode.DOWN));
+        terms.handleKey(key(KeyCode.ENTER));
+
+        // ↓ selects _1 before Enter opens it.
+        assertThat(terms.knnGraphLoaded(graph, graphResult())).isEmpty();
+        assertThat(render(terms)).contains("no graph in this segment").doesNotContain("▾ _0");
+    }
+
+    @Test
+    void keysBeforeThePointTreeWaitForIt() {
+        Terms terms = pointTerms();
+        terms.initialRequest();
+        terms.handleKey(key(KeyCode.DOWN));
+        Request.LoadPointTree tree = new Request.LoadPointTree("code", 1);
+        assertThat(terms.handleKey(key(KeyCode.DOWN))).hasValue(tree);
+        assertThat(terms.handleKey(key(KeyCode.RIGHT))).isEmpty();
+        assertThat(terms.handleKey(key(KeyCode.ENTER))).isEmpty();
+
+        // Enter opens the root cell rather than moving the focus on to the empty points.
+        Request.LoadPointCell root = new Request.LoadPointCell("code", 1, 0, List.of());
+        assertThat(terms.pointTreeLoaded(
+                        tree,
+                        new GetPointTreeResult(
+                                "code",
+                                1,
+                                1,
+                                4,
+                                3,
+                                3,
+                                Optional.of(intPoint(-5)),
+                                Optional.of(intPoint(40)),
+                                List.of(new PointSegment(
+                                        0, 0, Optional.of("_0"), 0, 3, 3, 3, intPoint(-5), intPoint(40))))))
+                .hasValue(root);
+        terms.pointCellLoaded(
+                root,
+                new GetPointCellResult(
+                        cell(-5, 40, 3, false),
+                        List.of(cell(-5, 7, 2, true), cell(40, 40, 1, true)),
+                        List.of(),
+                        false));
+        terms.handleKey(key(KeyCode.DOWN));
+        assertThat(terms.handleKey(key(KeyCode.ENTER))).hasValue(new Request.LoadPointCell("code", 1, 0, List.of(0)));
+    }
+
+    @Test
+    void aFailedTreeEndsTheWaitToo() {
+        Terms terms = pointTerms();
+        terms.initialRequest();
+        terms.handleKey(key(KeyCode.DOWN));
+        Request.LoadPointTree tree = new Request.LoadPointTree("code", 1);
+        terms.handleKey(key(KeyCode.DOWN));
+        terms.handleKey(key(KeyCode.RIGHT));
+        terms.handleKey(key(KeyCode.LEFT));
+
+        assertThat(terms.pointTreeFailed(tree, "Index error: broken")).isEmpty();
+        // ← took the focus back to the fields, so ↓ selects the next one.
+        assertThat(terms.handleKey(key(KeyCode.DOWN))).hasValue(new Request.LoadPointTree("price", 2));
+    }
+
+    @Test
+    void aKeyThatFetchesEndsTheReplay() {
+        Terms terms = new Terms(List.of(field("id", 0, IndexOptions.DOCS), vectorField("embedding", 1)));
+        terms.initialRequest();
+        Request.LoadKnnGraph graph = new Request.LoadKnnGraph("embedding", 1);
+        terms.handleKey(key(KeyCode.DOWN));
+        terms.handleKey(key(KeyCode.RIGHT));
+        terms.handleKey(key(KeyCode.ENTER));
+        for (int i = 0; i < 3; i++) {
+            terms.handleKey(key(KeyCode.DOWN));
+        }
+        terms.handleKey(key(KeyCode.ENTER));
+        // Dropped: they would go back up to _0 and collapse it.
+        for (int i = 0; i < 3; i++) {
+            terms.handleKey(key(KeyCode.UP));
+        }
+        terms.handleKey(key(KeyCode.ENTER));
+
+        assertThat(terms.knnGraphLoaded(graph, graphResult()))
+                .hasValue(new Request.LoadKnnNodes("embedding", 1, 0, 0, 0));
+        assertThat(render(terms)).contains("▾ _0", "L0  20 nodes");
+    }
+
+    @Test
+    void heldKeysAreForgottenWhenTheScreenIsLeft() {
+        Terms terms = new Terms(List.of(field("id", 0, IndexOptions.DOCS), vectorField("embedding", 1)));
+        terms.initialRequest();
+        Request.LoadKnnGraph graph = new Request.LoadKnnGraph("embedding", 1);
+        terms.handleKey(key(KeyCode.DOWN));
+        terms.handleKey(key(KeyCode.RIGHT));
+        terms.handleKey(key(KeyCode.ENTER));
+        terms.leave();
+
+        assertThat(terms.knnGraphLoaded(graph, graphResult())).isEmpty();
+        assertThat(render(terms)).contains("▸ _0").doesNotContain("▾ _0");
     }
 
     @Test

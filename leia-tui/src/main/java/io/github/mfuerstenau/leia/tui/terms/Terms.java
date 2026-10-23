@@ -45,7 +45,9 @@ import io.github.mfuerstenau.leia.tui.points.PointFormats;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -70,7 +72,8 @@ import java.util.stream.LongStream;
  * screen shows is dropped: a first page of terms that isn't the last one asked for, postings of a
  * term that isn't selected any more, and a next page of a list that was replaced. The fetch for what
  * the screen shows now has always been asked for, and the backend answers in order, so its reply
- * comes last.
+ * comes last. Keys pressed past the fields column before a point tree or HNSW graphs are in are held
+ * and replayed once they are, so that a quick ↓, → and Enter still opens the first segment.
  */
 public final class Terms {
 
@@ -348,6 +351,12 @@ public final class Terms {
 
     /** The document whose node is to be shown once the graphs are in (ADR 0085); empty if none. */
     private OptionalInt wantedDocNode = OptionalInt.empty();
+
+    /**
+     * The keys pressed in the tree or neighbours/points column while the selected row's tree or graphs
+     * were being fetched, replayed in order once they are in.
+     */
+    private final Deque<KeyEvent> heldKeys = new ArrayDeque<>();
 
     /** The format each point field is shown in, shared with the documents screen. */
     private PointFormats pointFormats = new PointFormats();
@@ -663,18 +672,21 @@ public final class Terms {
     /** Shows the BKD tree of a point field, if it is still the one wanted. */
     public Optional<Request> pointTreeLoaded(Request.LoadPointTree request, GetPointTreeResult result) {
         pending.remove(request);
-        if (wantedTree(request)) {
-            pointTree = new PointTree(request.serial(), request.field(), result);
+        if (!wantedTree(request)) {
+            return Optional.empty();
         }
-        return Optional.empty();
+        pointTree = new PointTree(request.serial(), request.field(), result);
+        return replayHeldKeys();
     }
 
     /** Shows why the BKD tree of a point field could not be fetched, if it is still the one wanted. */
-    public void pointTreeFailed(Request.LoadPointTree request, String error) {
+    public Optional<Request> pointTreeFailed(Request.LoadPointTree request, String error) {
         pending.remove(request);
-        if (wantedTree(request)) {
-            pointTree = new PointTree(request.serial(), request.field(), error);
+        if (!wantedTree(request)) {
+            return Optional.empty();
         }
+        pointTree = new PointTree(request.serial(), request.field(), error);
+        return replayHeldKeys();
     }
 
     private boolean wantedTree(Request.LoadPointTree request) {
@@ -727,16 +739,51 @@ public final class Terms {
             return Optional.empty();
         }
         knnTree = new KnnGraphTree(request.serial(), request.field(), result);
-        return docNodeRequest();
+        Optional<Request> docNode = docNodeRequest();
+        return docNode.isPresent() ? docNode : replayHeldKeys();
     }
 
     /** Shows why the graphs of a vector field could not be fetched, if they are still the ones wanted. */
-    public void knnGraphFailed(Request.LoadKnnGraph request, String error) {
+    public Optional<Request> knnGraphFailed(Request.LoadKnnGraph request, String error) {
         pending.remove(request);
-        if (wantedGraph(request)) {
-            knnTree = new KnnGraphTree(request.serial(), request.field(), error);
-            wantedDocNode = OptionalInt.empty();
+        if (!wantedGraph(request)) {
+            return Optional.empty();
         }
+        knnTree = new KnnGraphTree(request.serial(), request.field(), error);
+        wantedDocNode = OptionalInt.empty();
+        return replayHeldKeys();
+    }
+
+    /**
+     * Whether the keys past the fields column wait for the selected row's point tree or HNSW graphs,
+     * which are being fetched.
+     */
+    private boolean awaitingTree() {
+        if (focus == Column.FIELDS) {
+            return false;
+        }
+        if (selectedVectorField().isPresent()) {
+            return knnTree == null && wantedGraph != null && pending.contains(wantedGraph);
+        }
+        if (selectedPointField().isPresent()) {
+            return pointTree == null && wantedTree != null && pending.contains(wantedTree);
+        }
+        return false;
+    }
+
+    /**
+     * Handles the held keys in order, now that the tree they waited for is in. The first that fetches
+     * something ends the replay, and the keys after it are dropped, as only one fetch can be returned.
+     */
+    private Optional<Request> replayHeldKeys() {
+        while (!heldKeys.isEmpty()) {
+            Optional<Request> request = handleKey(heldKeys.poll());
+            if (request.isPresent()) {
+                heldKeys.clear();
+                return request;
+            }
+        }
+        return Optional.empty();
     }
 
     private boolean wantedGraph(Request.LoadKnnGraph request) {
@@ -978,6 +1025,7 @@ public final class Terms {
         fieldRow = row;
         seek = null;
         note = null;
+        heldKeys.clear();
         focus = Column.POSTINGS;
         wantedDocNode = OptionalInt.of(docId);
         if (knnTree != null && knnTree.field.equals(field)) {
@@ -1011,6 +1059,7 @@ public final class Terms {
         fieldRow = row;
         seek = null;
         note = null;
+        heldKeys.clear();
         if (points || term.isEmpty()) {
             focus = Column.TERMS;
             return nextRequest();
@@ -1072,11 +1121,13 @@ public final class Terms {
         wantedDocNode = OptionalInt.empty();
         seek = null;
         note = null;
+        heldKeys.clear();
     }
 
-    /** The screen is left: its note ends with it. */
+    /** The screen is left: its note and the keys it held end with it. */
     public void leave() {
         note = null;
+        heldKeys.clear();
     }
 
     /** Whether the seek prompt takes the keys, Esc included. */
@@ -1093,11 +1144,16 @@ public final class Terms {
      * collapses a cell, or shows a leaf's points, and on a point shows its document; {@code t}
      * cycles the format the points are shown in. On a vector field's graphs, Enter expands or
      * collapses a segment or level, shows a node's neighbours, and on a neighbour walks on to it;
-     * {@code <} walks back, and {@code d} shows the document of a node or neighbour (ADR 0085).
+     * {@code <} walks back, and {@code d} shows the document of a node or neighbour (ADR 0085). Past
+     * the fields column, a key pressed before the selected row's tree or graphs are in waits for them.
      */
     public Optional<Request> handleKey(KeyEvent key) {
         if (seek != null) {
             return seekKey(key);
+        }
+        if (awaitingTree()) {
+            heldKeys.add(key);
+            return Optional.empty();
         }
         note = null;
         Optional<String> unsupported = unsupported(key);

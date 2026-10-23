@@ -67,7 +67,7 @@ The index doesn't record what a point encodes. A 4-byte point is an `IntPoint` o
     - **Right column:** the leaf's points, `Doc  Value`, deleted ones in red; `Enter` shows the document on the documents screen, with the field selected.
     - **Title:** `price · 3 segments · 499 points in 499 docs · as double`. `/` and `e` say they work on terms only.
     - **`t`** cycles the field's format, shared with the documents screen (decision 5).
-    - **Replies:** each `getPointTree` call has a serial, and a cell's reply names it, so a reply for a tree no longer shown is dropped. A reopen that finds a new commit changes the segments' positions; the tree is fetched again, collapsed.
+    - **Replies:** each `getPointTree` call has a serial, and a cell's reply names it, so a reply for a tree no longer shown is dropped. A reopen that finds a new commit changes the segments' positions; the tree is fetched again, collapsed. Keys pressed in the middle or right column before the tree is in wait for it, as the HNSW graphs' do (ADR 0085 §7), so Enter in that burst opens the root cell rather than moving the focus to the empty points.
 
 11. **The demo index writes leaves of 16 points.** Its segments have at most 200 points per field, below Lucene's 512, so each tree would be one leaf. `DemoIndexWriter` wraps the default codec under its own name, with a points format whose writer is `Lucene90PointsWriter` with 16 points per leaf. The leaf size is in the files, so the default codec reads them, and nothing else of the index changes.
 

@@ -21,7 +21,7 @@ From the read-only checklist in `docs/luke-features.md` §7. Ordered roughly by 
 
 ## Bugs
 
-- [ ] On the terms screen, Enter on a vector field's segment in the same burst of keys as the move onto the field does nothing: it comes before the `getKnnGraph` reply, which has no rows yet. Pressed again, it expands (seen in tmux on `lucene8to9`; a typist rarely hits it)
+None open.
 
 ## Open questions
 

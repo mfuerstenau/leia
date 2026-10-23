@@ -1604,19 +1604,19 @@ public final class App {
         return terms == null ? Optional.empty() : termsAction(terms.postingsLoaded(request(load), result));
     }
 
-    /** Shows the BKD tree of a point field. */
+    /** Shows the BKD tree of a point field. Returns what the keys held for it ask for. */
     public Optional<Action> pointTreeLoaded(Action.LoadPointTree load, GetPointTreeResult result) {
-        if (terms != null) {
-            terms.pointTreeLoaded(new Terms.Request.LoadPointTree(load.field(), load.serial()), result);
-        }
-        return Optional.empty();
+        return terms == null
+                ? Optional.empty()
+                : termsAction(
+                        terms.pointTreeLoaded(new Terms.Request.LoadPointTree(load.field(), load.serial()), result));
     }
 
     public Optional<Action> pointTreeFailed(Action.LoadPointTree load, String error) {
-        if (terms != null) {
-            terms.pointTreeFailed(new Terms.Request.LoadPointTree(load.field(), load.serial()), error);
-        }
-        return Optional.empty();
+        return terms == null
+                ? Optional.empty()
+                : termsAction(
+                        terms.pointTreeFailed(new Terms.Request.LoadPointTree(load.field(), load.serial()), error));
     }
 
     /** Shows a cell of a BKD tree. */
@@ -1638,7 +1638,10 @@ public final class App {
         return new Terms.Request.LoadPointCell(load.field(), load.serial(), load.segment(), load.path());
     }
 
-    /** Shows the HNSW graphs of a vector field (ADR 0085). Returns the node the terms screen waited for. */
+    /**
+     * Shows the HNSW graphs of a vector field (ADR 0085). Returns the node the terms screen waited for,
+     * or what the keys held for the graphs ask for.
+     */
     public Optional<Action> knnGraphLoaded(Action.LoadKnnGraph load, GetKnnGraphResult result) {
         return terms == null
                 ? Optional.empty()
@@ -1647,10 +1650,9 @@ public final class App {
     }
 
     public Optional<Action> knnGraphFailed(Action.LoadKnnGraph load, String error) {
-        if (terms != null) {
-            terms.knnGraphFailed(new Terms.Request.LoadKnnGraph(load.field(), load.serial()), error);
-        }
-        return Optional.empty();
+        return terms == null
+                ? Optional.empty()
+                : termsAction(terms.knnGraphFailed(new Terms.Request.LoadKnnGraph(load.field(), load.serial()), error));
     }
 
     /** Shows a page of a level's nodes. */
