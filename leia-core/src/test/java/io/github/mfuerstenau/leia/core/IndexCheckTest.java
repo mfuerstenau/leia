@@ -9,6 +9,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -81,6 +82,19 @@ class IndexCheckTest {
 
         assertThat(result.clean()).isTrue();
         assertThat(threads).containsOnly(Thread.currentThread().getName());
+    }
+
+    @Test
+    void listsTheSegmentsInCommitOrderWhenTheyGetSmaller() throws Exception {
+        Path dir = writeIndex(tmp.resolve("index"), 200, 20, 2);
+
+        IndexCheck.Result result = IndexCheck.check(dir, DirectoryImpl.FS, 2, _ -> {}, ScanProgress.NONE);
+
+        assertThat(result.clean()).isTrue();
+        assertThat(result.segments()).extracting(IndexCheck.SegmentResult::name).containsExactly("_0", "_1", "_2");
+        assertThat(result.segments())
+                .extracting(IndexCheck.SegmentResult::maxDoc)
+                .containsExactly(200, 20, 2);
     }
 
     @Test
@@ -223,11 +237,18 @@ class IndexCheckTest {
 
     /** Writes {@code segments} commits of two documents each, one segment per commit. */
     private static Path writeIndex(Path dir, int segments) throws IOException {
+        int[] docs = new int[segments];
+        Arrays.fill(docs, 2);
+        return writeIndex(dir, docs);
+    }
+
+    /** Writes a commit for each of {@code docs}, one segment per commit, with that many documents. */
+    private static Path writeIndex(Path dir, int... docs) throws IOException {
         try (FSDirectory directory = FSDirectory.open(dir);
                 IndexWriter writer =
                         new IndexWriter(directory, new IndexWriterConfig().setMergePolicy(NoMergePolicy.INSTANCE))) {
-            for (int segment = 0; segment < segments; segment++) {
-                for (int i = 0; i < 2; i++) {
+            for (int segment = 0; segment < docs.length; segment++) {
+                for (int i = 0; i < docs[segment]; i++) {
                     Document doc = new Document();
                     doc.add(new StringField("id", segment + "-" + i, Field.Store.YES));
                     doc.add(new TextField("body", "some text for segment " + segment, Field.Store.NO));

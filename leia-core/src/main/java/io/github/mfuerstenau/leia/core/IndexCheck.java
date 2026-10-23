@@ -7,6 +7,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
@@ -14,6 +15,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 import org.apache.lucene.index.CheckIndex;
+import org.apache.lucene.index.SegmentCommitInfo;
 import org.apache.lucene.index.SegmentInfos;
 import org.apache.lucene.store.Directory;
 
@@ -124,11 +126,12 @@ public final class IndexCheck {
             checker.setLevel(level);
             checker.setFailFast(false);
             checker.setInfoStream(infoStream);
-            CheckIndex.Status status = run(checker, directory);
+            List<String> commit = segmentNames(directory);
+            CheckIndex.Status status = run(checker, commit.size());
             infoStream.flush();
             report.end();
             report.check();
-            return result(dir, status);
+            return result(dir, status, commit);
         } catch (CancellationException e) {
             throw e;
         } catch (IOException | RuntimeException e) {
@@ -140,8 +143,8 @@ public final class IndexCheck {
     }
 
     /** Checks segments in parallel if there are several, on an executor that is never interrupted. */
-    private static CheckIndex.Status run(CheckIndex checker, Directory directory) throws IOException {
-        int threads = Math.min(Runtime.getRuntime().availableProcessors(), segmentCount(directory));
+    private static CheckIndex.Status run(CheckIndex checker, int segments) throws IOException {
+        int threads = Math.min(Runtime.getRuntime().availableProcessors(), segments);
         if (threads < 2) {
             return checker.checkIndex(null, null);
         }
@@ -155,18 +158,32 @@ public final class IndexCheck {
         }
     }
 
-    /** The segments of the latest commit; 0 if it can't be read, which the check then reports. */
-    private static int segmentCount(Directory directory) {
+    /** The segments of the latest commit, in order; none if it can't be read, which the check then reports. */
+    private static List<String> segmentNames(Directory directory) {
         try {
-            return SegmentInfos.readLatestCommit(directory).size();
+            List<String> names = new ArrayList<>();
+            for (SegmentCommitInfo info : SegmentInfos.readLatestCommit(directory)) {
+                names.add(info.info.name);
+            }
+            return names;
         } catch (IOException | RuntimeException e) {
-            return 0;
+            return List.of();
         }
     }
 
-    private static Result result(Path dir, CheckIndex.Status status) {
+    /**
+     * The result, with the segments in the order of {@code commit}, if it names them: the parallel
+     * check sorts them by size.
+     */
+    private static Result result(Path dir, CheckIndex.Status status, List<String> commit) {
+        List<CheckIndex.Status.SegmentInfoStatus> checked = new ArrayList<>(status.segmentInfos);
+        // A segment the commit doesn't name, which can't happen, goes last.
+        checked.sort(Comparator.comparingInt(segment -> {
+            int position = commit.indexOf(segment.name);
+            return position < 0 ? Integer.MAX_VALUE : position;
+        }));
         List<SegmentResult> segments = new ArrayList<>();
-        for (CheckIndex.Status.SegmentInfoStatus segment : status.segmentInfos) {
+        for (CheckIndex.Status.SegmentInfoStatus segment : checked) {
             segments.add(new SegmentResult(
                     segment.name,
                     segment.maxDoc,

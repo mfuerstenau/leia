@@ -11,12 +11,17 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Consumer;
 import java.util.function.LongConsumer;
 import org.apache.lucene.index.CheckIndex;
+import org.apache.lucene.index.SegmentCommitInfo;
+import org.apache.lucene.index.SegmentInfos;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FilterDirectory;
 import org.apache.lucene.store.IOContext;
@@ -29,9 +34,16 @@ import org.apache.lucene.store.RandomAccessInput;
  * Lucene 9.12's {@code CheckIndex}, read-only (ADR 0049), as leia-lucene7 runs 7.7's: the directory it
  * reads refuses every write, its lock is one that locks nothing, and {@code exorciseIndex} is never
  * called. The levels map to 9.12's modes: 1 checks the checksums only, 2 is the default check, 3 adds
- * the slow checks, which include the term vectors against the postings. It runs on one thread, the
- * job's. The check stops when {@code progress} throws: each line of the report asks it, and the
- * inputs, their clones and slices ask on positioning and bulk reads.
+ * the slow checks, which include the term vectors against the postings. A commit with several
+ * segments is checked as Lucene 10's (ADR 0022 §5): by as many threads as there are processors, at most
+ * one per segment, on an executor leia owns, and each segment's report then comes when the segment is
+ * done; with one segment, it runs on the job's thread. The segments of the result are in commit order,
+ * which 9.12's parallel check doesn't keep. The check stops when {@code progress} throws: each line of
+ * the report asks it, and the inputs, their clones and slices ask on positioning and bulk reads.
+ *
+ * <p>The threads share the {@link Cancellation} and the {@link CheckReport}, which are synchronized;
+ * each {@link CancellableInput} belongs to one segment's reader, so one thread uses it at a time; and
+ * 9.12 buffers each segment's report and prints it from the calling thread.
  *
  * <p>9.12 catches every {@link Throwable} of a segment's check and goes on with the next segment, so
  * what {@code progress} threw is kept, thrown again at once by every later read, and rethrown when
@@ -55,15 +67,15 @@ final class Lucene9Check implements Check {
         Cancellation cancellation = new Cancellation(progress);
         CheckReport report = new CheckReport(line, cancellation);
         CheckIndex.Status status;
+        List<String> commit;
         try (Directory directory = new ReadOnlyDirectory(Directories.open(dir, kind), cancellation);
                 PrintStream infoStream = new PrintStream(report, true, StandardCharsets.UTF_8);
                 CheckIndex checker = new CheckIndex(directory, NoLock.INSTANCE)) {
             checker.setInfoStream(infoStream, false);
             checker.setChecksumsOnly(checkLevel == 1);
             checker.setDoSlowChecks(checkLevel >= 3);
-            // On the job's thread, the one that progress may stop.
-            checker.setThreadCount(1);
-            status = checker.checkIndex();
+            commit = segmentNames(directory);
+            status = run(checker, commit.size());
             infoStream.flush();
             report.end();
         } catch (IOException | RuntimeException e) {
@@ -73,12 +85,51 @@ final class Lucene9Check implements Check {
             return CheckResult.failed(Failures.describe(e));
         }
         cancellation.rethrow();
-        return result(status);
+        return result(status, commit);
     }
 
-    private static CheckResult result(CheckIndex.Status status) {
+    /** Checks segments in parallel if there are several, on an executor that is never interrupted. */
+    private static CheckIndex.Status run(CheckIndex checker, int segments) throws IOException {
+        int threads = Math.min(Runtime.getRuntime().availableProcessors(), segments);
+        if (threads < 2) {
+            return checker.checkIndex(null, null);
+        }
+        ExecutorService executor = Executors.newFixedThreadPool(
+                threads, Thread.ofPlatform().daemon().name("leia-check-", 1).factory());
+        try {
+            return checker.checkIndex(null, executor);
+        } finally {
+            // Not shutdownNow: an interrupted thread breaks NIOFSDirectory (AGENTS.md, hard rule 7).
+            executor.shutdown();
+        }
+    }
+
+    /** The segments of the latest commit, in order; none if it can't be read, which the check then reports. */
+    private static List<String> segmentNames(Directory directory) {
+        try {
+            List<String> names = new ArrayList<>();
+            for (SegmentCommitInfo info : SegmentInfos.readLatestCommit(directory)) {
+                names.add(info.info.name);
+            }
+            return names;
+        } catch (IOException | RuntimeException e) {
+            return List.of();
+        }
+    }
+
+    /**
+     * The result, with the segments in the order of {@code commit}, if it names them: the parallel
+     * check sorts them by size.
+     */
+    private static CheckResult result(CheckIndex.Status status, List<String> commit) {
+        List<CheckIndex.Status.SegmentInfoStatus> checked = new ArrayList<>(status.segmentInfos);
+        // A segment the commit doesn't name, which can't happen, goes last.
+        checked.sort(Comparator.comparingInt(segment -> {
+            int position = commit.indexOf(segment.name);
+            return position < 0 ? Integer.MAX_VALUE : position;
+        }));
         List<SegmentCheck> segments = new ArrayList<>();
-        for (CheckIndex.Status.SegmentInfoStatus segment : status.segmentInfos) {
+        for (CheckIndex.Status.SegmentInfoStatus segment : checked) {
             segments.add(new SegmentCheck(
                     segment.name,
                     segment.maxDoc,

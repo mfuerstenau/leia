@@ -89,7 +89,7 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 | Rebuild (ADR 0059, ADR 0062) | terms only, no points, no total; fields with payloads from the postings, since its term vectors have none; deleted documents through raw postings | terms only: no points | terms, and points through `PointValues.intersect` | terms, and points through the `PointTree` | as 9.12.3 |
 | Point cell sizes | – | – | computed from the tree's shape (ADR 0048 §5) | from the `PointTree` | from the `PointTree` |
 | Norms, decoded by the created major (ADR 0047, ADR 0048 §3) | `floatToByte315(1/√length)` | `floatToByte315(1/√length)` | 6: `floatToByte315(1/√length)`, 7: the length | the length | the length |
-| Check levels | none | 1 checksums only, 2 default, 3 `crossCheckTermVectors` | as 5.5.5 | as 5.5.5, but 3 is `doSlowChecks`; one thread | Lucene's own `setLevel` |
+| Check levels | none | 1 checksums only, 2 default, 3 `crossCheckTermVectors` | as 5.5.5 | as 5.5.5, but 3 is `doSlowChecks`; segments in parallel, as Lucene 10 | Lucene's own `setLevel` |
 | `-fast` hint in the check | – | rewritten to leia's levels | not given | not given | – |
 | Search analyzers | 6 of lucene-core | 42 of analyzers-common (+ `CollationKeyAnalyzer`) | 43 (+ Bengali, `CollationKeyAnalyzer`) | 48 (+ Estonian, Nepali, Serbian, Tamil, Telugu, `CollationKeyAnalyzer`) | every preset of `getAnalysisComponents`, the extension jars' included |
 | Custom analyzers, shingles (ADR 0067, ADR 0075) | – | ✓, with 5.5's own components; shingles only within a phrase | ✓, with 7.7's own components | ✓, with 9.12's own components; one only Lucene 10 has is `NOT_SUPPORTED` | ✓ |
