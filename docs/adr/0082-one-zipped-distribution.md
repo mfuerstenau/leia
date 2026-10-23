@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-15
 - **Amends:** ADR 0004 §3 (unpacked folders, no archives) and its deferred alternative "Archives (`.tar.gz`, `.zip`)"; ADR 0034 §9 (a folder per OS)
+- **Amended by:** ADR 0083 (the zip also holds the user `README.md`, `LICENSE` and `NOTICE`)
 
 ## Context
 

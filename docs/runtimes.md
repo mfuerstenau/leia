@@ -14,7 +14,7 @@ The first index of a path decides which Lucene opens it, by the major in its new
 
 ## Features
 
-`RuntimeFeaturesTest` checks this table against what `openIndex` reports for each runtime's newest test index: its rows against `Feature`, and each column against the features of that runtime. A cell starting with ✓ is a feature the runtime has.
+`RuntimeFeaturesTest` checks this table against what `openIndex` reports for each runtime's newest test index: its rows against `Feature`, and each column against the features of that runtime. A cell starting with ✓ is a feature the runtime has. The condensed table of the user README in the distribution (`leia-tui/src/dist/README.md`, ADR 0083) is checked against this one by the same test.
 
 | Feature | 3.6.2 | 5.5.5 | 7.7.3 | 9.12.3 | 10.5.2 |
 |---|---|---|---|---|---|

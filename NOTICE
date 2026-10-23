@@ -1,0 +1,39 @@
+leia
+Copyright 2026 mfuerstenau
+
+This product includes software developed at
+The Apache Software Foundation (https://www.apache.org/).
+
+  Apache Lucene
+  Copyright 2001-2026 The Apache Software Foundation
+
+  The runtime adapter jars embedded in leia.jar (leia-runtimes/) contain code
+  adapted from Apache Lucene: the date range handling of its classic and
+  standard query parsers (Lucene3DateRangeQueryParser,
+  Lucene5DateRangeQueryParser, Lucene7DateRangeQueryParser,
+  Lucene9DateRangeQueryParser and the DateRangeQueryNodeProcessors of
+  leia-lucene5, leia-lucene7 and leia-lucene9). Apache Lucene is licensed under
+  the Apache License, Version 2.0.
+
+Third-party software in leia.jar
+--------------------------------
+
+  TamboUI 0.5.0                       MIT License
+  JLine 3.25.1                        BSD 3-Clause License
+  Jackson 3.2.3 (core, databind)      Apache License, Version 2.0
+  jackson-annotations 2.22            Apache License, Version 2.0
+  FastDoubleParser (in Jackson)       MIT License
+  Schubfach (in Jackson)              MIT License
+  Dagger 2.60.1                       Apache License, Version 2.0
+  Jakarta Inject 2.0.1, javax.inject  Apache License, Version 2.0
+  JSpecify                            Apache License, Version 2.0
+
+Each is included unmodified, under the license named.
+
+Lucene in runtimes/
+-------------------
+
+The Lucene jars in the folder runtimes/ beside leia.jar are not part of this
+distribution. leia downloads them on request from Maven Central
+(https://repo1.maven.org/maven2/), unchanged, as the Apache Software
+Foundation publishes them; each carries its own LICENSE and NOTICE.

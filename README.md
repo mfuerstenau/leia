@@ -54,13 +54,13 @@ The rest of Luke's read-only features are still to come (see
 
 - **Java 25 or newer** to run `leia.jar`. Any JRE will do. leia doesn't bundle a Java runtime;
   started with an older Java, it says which version it needs.
-- Linux or Windows. The release folders are built for x86_64, but `leia.jar` is plain Java. macOS
+- Linux or Windows. The release zip is built for x86_64, but `leia.jar` is plain Java. macOS
   may work through the `leia` script, but isn't tested or supported.
 
 ## Install
 
-Unpack the release folder for your platform, start leia, and press `D` on its start screen to
-download the runtimes once. This fills the folder `runtimes` beside `leia.jar` with a folder per
+Unzip `leia-<version>.zip`, start leia (`leia-<version>/leia`, or `leia.cmd` on Windows), and
+press `D` on its start screen to download the runtimes once. This fills the folder `runtimes` beside `leia.jar` with a folder per
 Lucene (`lucene3`, `lucene5`, `lucene7`, `lucene9`, `lucene10`): leia's own jars come from
 `leia.jar`, Lucene's from Maven Central (`https://repo1.maven.org/maven2/`), each checked against
 the SHA-256 that the build recorded. It needs the network once, about 32 MB in all. After an update
@@ -628,8 +628,9 @@ nearly everything leia shows to `leia-core/build/test-indexes/demo`; see
 ```
 
 This builds `dist/leia-<version>.zip`, for Linux and Windows alike. It unpacks to the folder
-`leia-<version>/` with `leia.jar` and the scripts `leia` and `leia.cmd`, which can be copied
-anywhere.
+`leia-<version>/` with `leia.jar`, the scripts `leia` and `leia.cmd`, a README for users
+([`leia-tui/src/dist/README.md`](leia-tui/src/dist/README.md)), `LICENSE` and `NOTICE`; the folder
+can be copied anywhere.
 
 ## How it works
 
@@ -640,6 +641,11 @@ thread, so the UI never waits for Lucene; long scans run as jobs that the UI pol
 
 More detail for contributors: [`AGENTS.md`](AGENTS.md) (layout, rules, commands) and the
 architecture decisions in [`docs/adr/`](docs/adr/).
+
+## License
+
+leia is licensed under the [Apache License, Version 2.0](LICENSE). [`NOTICE`](NOTICE) lists the
+Apache Lucene code it adapts and the third-party software in `leia.jar`.
 
 ## Name and disclaimer
 

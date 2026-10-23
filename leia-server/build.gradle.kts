@@ -121,11 +121,13 @@ fun Test.testFiles(properties: Map<String, FileCollection>) {
 }
 
 tasks.test {
-    // docs/runtimes.md, whose feature table RuntimeFeaturesTest checks against the runtimes.
+    // docs/runtimes.md, whose feature table RuntimeFeaturesTest checks against the runtimes, and the
+    // user README of the distribution, whose condensed table it checks against that one.
     testFiles(
         testIndexFiles.mapKeys { "leia.test.index.${it.key}" } +
             mapOf(
                 "leia.test.doc.runtimes" to files(rootProject.file("docs/runtimes.md")),
+                "leia.test.doc.distReadme" to files(rootProject.file("leia-tui/src/dist/README.md")),
                 "leia.test.runtimes" to files(testRuntimes),
             ),
     )

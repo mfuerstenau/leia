@@ -2,10 +2,6 @@
 
 The work queue for leia. Check items off (`[x]`) as they land, and keep it aligned with the "Remaining / next" section of the latest entry in `docs/SESSION-SUMMARIES.md`. Finished items move to `docs/tasklist-done.md`.
 
-## One distribution
-
-- [ ] Package a README for users in the distribution, as a Markdown file named `README.md` (not plain text), written for usage rather than development (the repository's `README.md` is the base, but it's long): requirements (Java 25, Linux or Windows on x86_64, `--java`/`JAVA_HOME`), the CLI options (from the TUI CLI contract in `AGENTS.md`), extension jars (`--jar`, the default jars folder, `X`), the runtimes and the capability matrix of what each one can do (from `docs/runtimes.md`). State that leia is read-only towards the index (no `IndexWriter`, no lock, no file changed), and that it downloads its runtimes on request (`D` or `--download-runtimes`), but only the official Lucene jars from Maven Central, checked against SHA-256 and size; leia's own adapter jars come out of `leia.jar`. Add a disclaimer that leia is not affiliated with or endorsed by Disney or Lucasfilm, and the license (the repository has no `LICENSE` file yet: choose one, add it, and package it too, with Lucene's Apache 2.0 notice where it applies).
-
 ## Lucene 9.12 beyond classic search
 
 Goal: an index created by Lucene 8.x (read with `leia-lucene9`, ADR 0049) gets the features that are greyed out for it today. 9.12 has the APIs that leia-core uses for them on Lucene 10, so most are ports. What needs no runtime change goes to every runtime at once. The others need runtime interface 7 (one ADR for the interface, amending ADR 0049 §4). They land in 9.12 first, and in 5.5 and 7.7 where the copy is the same (ADR 0050). Each item adds its feature in `RuntimeResults.features`, a `runtime()` branch in its handlers, and its row in `docs/runtimes.md` (checked by `RuntimeFeaturesTest`). The TUI already gates on the features.

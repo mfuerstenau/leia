@@ -13,11 +13,13 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Stream;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -43,10 +45,7 @@ class RuntimeFeaturesTest {
 
     private static Table table() throws IOException {
         List<String> lines = Files.readAllLines(testFile("leia.test.doc.runtimes"));
-        int header = 0;
-        while (!lines.get(header).startsWith("| Feature |")) {
-            header++;
-        }
+        int header = header(lines, "| Feature |");
         List<String> versions =
                 cells(lines.get(header)).subList(1, cells(lines.get(header)).size());
         Map<String, Set<Feature>> columns = new LinkedHashMap<>();
@@ -64,6 +63,15 @@ class RuntimeFeaturesTest {
             }
         }
         return new Table(rows, columns);
+    }
+
+    /** The line of the table whose header starts with {@code start}. */
+    private static int header(List<String> lines, String start) {
+        int header = 0;
+        while (!lines.get(header).startsWith(start)) {
+            header++;
+        }
+        return header;
     }
 
     private static List<String> cells(String line) {
@@ -97,6 +105,114 @@ class RuntimeFeaturesTest {
             assertThat(opened.features())
                     .as("the features of %s in docs/runtimes.md", runtime)
                     .containsExactlyInAnyOrderElementsOf(documented);
+        }
+    }
+
+    /**
+     * The condensed table of the user README in the distribution ({@code leia-tui/src/dist/README.md},
+     * ADR 0083) against the feature table: a row per group of features, in user terms, each cell ✓
+     * if the runtime has all of them and – if it has none.
+     */
+    @Nested
+    class DistReadme {
+
+        /** Each row of the README's table with the features it stands for. */
+        private static final Map<String, Set<Feature>> ROWS = rows();
+
+        private static Map<String, Set<Feature>> rows() {
+            Map<String, Set<Feature>> rows = new LinkedHashMap<>();
+            rows.put(
+                    "Overview, documents, stored values and term vectors",
+                    EnumSet.of(
+                            Feature.INDEX_STATS,
+                            Feature.TOP_TERMS,
+                            Feature.DOCUMENTS,
+                            Feature.STORED_VALUES,
+                            Feature.TERM_VECTORS,
+                            Feature.RECONSTRUCT,
+                            Feature.REOPEN));
+            rows.put(
+                    "Terms, postings and positions, export terms",
+                    EnumSet.of(Feature.TERMS, Feature.POSTINGS, Feature.POSITIONS, Feature.EXPORT_TERMS));
+            rows.put("Commits and check index", EnumSet.of(Feature.COMMITS, Feature.CHECK_INDEX));
+            rows.put("Check levels", EnumSet.of(Feature.CHECK_LEVELS));
+            rows.put("Points", EnumSet.of(Feature.POINTS));
+            rows.put("Doc values", EnumSet.of(Feature.DOC_VALUES));
+            rows.put("KNN vectors and KNN search", EnumSet.of(Feature.KNN_VECTORS));
+            rows.put(
+                    "Classic and term queries, explain, regex over stored values, auto stop words",
+                    EnumSet.of(
+                            Feature.CLASSIC_SEARCH,
+                            Feature.TERM_SEARCH,
+                            Feature.EXPLAIN,
+                            Feature.STORED_SCAN,
+                            Feature.AUTO_STOP_WORDS));
+            rows.put("Filter documents by a query", EnumSet.of(Feature.FILTER));
+            rows.put("Standard query parser", EnumSet.of(Feature.STANDARD_SEARCH));
+            rows.put("More-Like-This", EnumSet.of(Feature.MORE_LIKE_THIS));
+            rows.put("Doc values queries", EnumSet.of(Feature.DOC_VALUES_SEARCH));
+            rows.put("Similarity and sort", EnumSet.of(Feature.SCORING));
+            rows.put("Highlighting", EnumSet.of(Feature.HIGHLIGHT));
+            return rows;
+        }
+
+        /** The README's table: its header and its rows, each a label with its cells. */
+        private record Readme(List<String> columns, Map<String, List<String>> rows) {}
+
+        private static Readme readme() throws IOException {
+            List<String> lines = Files.readAllLines(testFile("leia.test.doc.distReadme"));
+            int header = header(lines, "| Can |");
+            List<String> columns =
+                    cells(lines.get(header)).subList(1, cells(lines.get(header)).size());
+            Map<String, List<String>> rows = new LinkedHashMap<>();
+            for (int i = header + 2; i < lines.size() && lines.get(i).startsWith("|"); i++) {
+                List<String> cells = cells(lines.get(i));
+                rows.put(cells.getFirst(), cells.subList(1, cells.size()));
+            }
+            return new Readme(columns, rows);
+        }
+
+        @Test
+        void hasTheRowsThatTheTestKnows() throws IOException {
+            assertThat(readme().rows().keySet()).containsExactlyElementsOf(ROWS.keySet());
+        }
+
+        @Test
+        void coversEachFeatureOnce() {
+            List<Feature> covered = ROWS.values().stream().flatMap(Set::stream).toList();
+            assertThat(covered).doesNotHaveDuplicates().containsExactlyInAnyOrder(Feature.values());
+        }
+
+        @Test
+        void hasTheColumnsOfTheFeatureTable() throws IOException {
+            assertThat(readme().columns())
+                    .containsExactlyElementsOf(table().columns().keySet());
+        }
+
+        @Test
+        void marksWhatEachRuntimeHas() throws IOException {
+            Readme readme = readme();
+            Table table = table();
+            for (Map.Entry<String, List<String>> row : readme.rows().entrySet()) {
+                Set<Feature> features = ROWS.get(row.getKey());
+                for (int column = 0; column < readme.columns().size(); column++) {
+                    String runtime = readme.columns().get(column);
+                    Set<Feature> has = new HashSet<>(features);
+                    has.retainAll(table.columns().get(runtime));
+                    String cell = row.getValue().get(column);
+                    String where = "the row \"%s\" of %s".formatted(row.getKey(), runtime);
+                    assertThat(has.isEmpty() || has.equals(features))
+                            .as(
+                                    "%s mixes features the runtime has and lacks (%s of %s): split the row",
+                                    where, has, features)
+                            .isTrue();
+                    if (has.isEmpty()) {
+                        assertThat(cell).as(where).isEqualTo("–");
+                    } else {
+                        assertThat(cell).as(where).startsWith("✓");
+                    }
+                }
+            }
         }
     }
 }

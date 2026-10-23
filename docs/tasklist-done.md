@@ -397,3 +397,4 @@ Goal: the runtimes are downloaded from within leia's UI, and `--download-runtime
 ## One distribution
 
 - [x] Build one distribution instead of a folder per OS (`build-dist.sh`, ADR 0004 and ADR 0034 amended by ADR 0082). `leia.jar` doesn't depend on the platform, so one folder holds it with both start scripts, `leia` and `leia.cmd`, and is packed as `dist/leia-<version>.zip` (executable bit of `leia` kept). Gradle's `leiaZip` packs it; `build-dist.sh` copies it to `dist/`.
+- [x] Package a README for users in the distribution, `leia-tui/src/dist/README.md`, with the license: Apache 2.0 in `LICENSE`, and a `NOTICE` for the adapted Lucene code and the libraries in `leia.jar` (ADR 0083). Its condensed capability matrix is checked against `docs/runtimes.md` by `RuntimeFeaturesTest.DistReadme`; `leiaZip` packs README.md, LICENSE and NOTICE beside the jar.

@@ -236,10 +236,11 @@ tasks.assemble {
     dependsOn(leiaFolder)
 }
 
-// The distribution: leia.jar and the scripts in one folder leia-<version>/, packed as a zip for
-// Linux and Windows alike, without runtimes/ (ADR 0073, ADR 0082). build-dist.sh copies it to dist/.
+// The distribution: leia.jar, the scripts, the user README (src/dist) and the repository's LICENSE
+// and NOTICE in one folder leia-<version>/, packed as a zip for Linux and Windows alike, without
+// runtimes/ (ADR 0073, ADR 0082, ADR 0083). build-dist.sh copies it to dist/.
 val leiaZip by tasks.registering(Zip::class) {
-    description = "Packs leia.jar and the scripts as leia-<version>.zip."
+    description = "Packs leia.jar, the scripts, README.md, LICENSE and NOTICE as leia-<version>.zip."
     archiveFileName = "leia-${project.version}.zip"
     destinationDirectory = layout.buildDirectory.dir("dist")
     into("leia-${project.version}") {
@@ -247,6 +248,8 @@ val leiaZip by tasks.registering(Zip::class) {
         from("src/scripts") {
             filesMatching("leia") { permissions { unix("rwxr-xr-x") } }
         }
+        from("src/dist")
+        from(rootProject.file("LICENSE"), rootProject.file("NOTICE"))
     }
 }
 

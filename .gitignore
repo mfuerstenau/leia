@@ -8,7 +8,7 @@ hs_err_pid*
 replay_pid*
 
 # --- Distribution output ---
-dist/
+/dist/
 
 # --- IDEs ---
 .idea/
