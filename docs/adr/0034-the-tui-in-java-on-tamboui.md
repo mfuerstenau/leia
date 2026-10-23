@@ -4,7 +4,7 @@
 - **Date:** 2026-10-09
 - **Supersedes:** ADR 0001, ADR 0003
 - **Amends:** ADR 0004 (the folders and the launch), ADR 0005 decision 2 (the transport)
-- **Amended by:** ADR 0082 (§9: one `dist/leia-<version>.zip` instead of a folder per OS)
+- **Amended by:** ADR 0082 (§9: one `dist/leia-<version>.zip` instead of a folder per OS), ADR 0087 (§7: the log window, `L`, which also sets the level)
 
 ## Context
 
@@ -55,6 +55,7 @@ What has to carry over:
    - The file is overwritten on each start. The level comes from `-Dleia.log.level`, as now (`ServerLogging`). If the file can't be written, the logs are dropped.
    - Until the UI takes the terminal, messages go to stderr: a bad argument, jars that fail to load, `--version`. An error exits with a non-zero code.
    - While the UI runs, `System.out` and `System.err` go into the log, so a stray print can't break the screen. The terminal takes its streams before that.
+   - *Amended by ADR 0087: `L` shows the last records in a window, whose level filter also sets the level logged at.*
 8. **The launch.**
    - Two scripts, `leia` (sh) and `leia.cmd`, find the JVM as `tui/src/java.rs` does now: `-j/--java` (a `java` executable, or a JDK/JRE directory), then `$JAVA_HOME/bin/java`, then `java` on `PATH`. They run `leia.jar` from the script's own folder, symlinks resolved, and pass the other arguments on. *Settled with the scripts:*
      - *The environment variable `LEIA_OPTS` holds options for the JVM, such as `-Dleia.log.level=FINE`. It is split at spaces, without globbing, and goes before `-jar`.*

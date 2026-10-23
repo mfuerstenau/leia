@@ -2,10 +2,13 @@ package io.github.mfuerstenau.leia.tui;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.mfuerstenau.leia.tui.log.LogBuffer;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
+import java.util.logging.Handler;
+import java.util.logging.Level;
 import java.util.logging.LogManager;
 import java.util.logging.Logger;
 import org.junit.jupiter.api.AfterEach;
@@ -36,7 +39,7 @@ class LeiaLogTest {
         assertThat(Files.readString(file)).contains("INFO", "[" + LeiaLogTest.class.getName() + "] first session");
         assertThat(Files.readString(file)).doesNotContain("not at INFO");
 
-        try (PrintStream stream = LeiaLog.toFile(Optional.of(file))) {
+        try (PrintStream stream = LeiaLog.toFile(Optional.of(file)).stream()) {
             LOG.info("second session");
             stream.println("a stray print");
         }
@@ -56,6 +59,25 @@ class LeiaLogTest {
     }
 
     @Test
+    void theLogWindowLowersTheLevelForTheFileToo() throws Exception {
+        Path file = tmp.resolve("leia.log");
+
+        try (LeiaLog.Opened log = LeiaLog.toFile(Optional.of(file))) {
+            LOG.fine("before");
+            log.buffer().logFrom(Level.FINE);
+            LOG.fine("after");
+
+            assertThat(log.buffer().entries())
+                    .extracting(LogBuffer.Entry::message)
+                    .containsExactly("Logging at FINE", "after");
+            assertThat(Logger.getLogger("").getHandlers())
+                    .extracting(Handler::getLevel)
+                    .containsOnly(Level.ALL);
+        }
+        assertThat(Files.readString(file)).contains("Logging at FINE", "after").doesNotContain("before");
+    }
+
+    @Test
     void warnsOfAnUnknownLevel() throws Exception {
         Path file = tmp.resolve("leia.log");
         System.setProperty(LeiaLog.LEVEL_PROPERTY, "LOUD");
@@ -71,7 +93,7 @@ class LeiaLogTest {
     void dropsTheLogIfTheFileCantBeWritten() throws Exception {
         Path notADirectory = Files.createFile(tmp.resolve("state"));
 
-        try (PrintStream stream = LeiaLog.toFile(Optional.of(notADirectory.resolve("leia.log")))) {
+        try (PrintStream stream = LeiaLog.toFile(Optional.of(notADirectory.resolve("leia.log"))).stream()) {
             LOG.info("dropped");
             stream.println("dropped too");
             assertThat(stream.checkError()).isFalse();
@@ -83,7 +105,7 @@ class LeiaLogTest {
 
     /** Logs with {@code body} into {@code file}, and closes it. */
     private static void logInto(Optional<Path> file, Runnable body) {
-        try (PrintStream stream = LeiaLog.toFile(file)) {
+        try (PrintStream stream = LeiaLog.toFile(file).stream()) {
             body.run();
             assertThat(stream.checkError()).isFalse();
         }

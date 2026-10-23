@@ -21,6 +21,7 @@ import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
 import io.github.mfuerstenau.leia.protocol.search.ValueHighlight;
+import io.github.mfuerstenau.leia.tui.Osc52;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import java.nio.ByteBuffer;
@@ -48,9 +49,6 @@ public final class Viewer {
 
     /** Spaces a tab is shown as. */
     private static final String TAB = "    ";
-
-    /** From this many bytes on, copying warns that the terminal may drop the copy. */
-    static final int LARGE_COPY = 100 * 1024;
 
     /** From this inner width on, a hex row has 16 bytes instead of 8. */
     private static final int WIDE_HEX_WIDTH = 78;
@@ -856,7 +854,7 @@ public final class Viewer {
         };
         int length = utf8Length(text);
         // The terminal may drop a long escape sequence without a word: tmux takes about 1 MiB.
-        String caveat = length > LARGE_COPY ? "; terminals may drop copies this large" : "";
+        String caveat = length > Osc52.LARGE_COPY ? "; terminals may drop copies this large" : "";
         message = "Copied " + TextFormat.size(length) + " as " + mode.name + " (OSC 52)" + caveat + ".";
         return Optional.of(new Event.Copy(text));
     }

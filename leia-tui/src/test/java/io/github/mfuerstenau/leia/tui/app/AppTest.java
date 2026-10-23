@@ -97,6 +97,7 @@ import io.github.mfuerstenau.leia.tui.documents.DocumentExport.DocumentData;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
 import io.github.mfuerstenau.leia.tui.jars.DefaultJars;
 import io.github.mfuerstenau.leia.tui.jars.RuntimeFolders;
+import io.github.mfuerstenau.leia.tui.log.LogBuffer;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.runtimes.RuntimeInstall;
 import java.nio.file.Path;
@@ -108,6 +109,8 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -708,6 +711,79 @@ class AppTest {
         assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.Quit());
     }
 
+    private static App appWithLog(LogBuffer log) {
+        return app().withLog(log, Optional.of(Path.of("/state/leia/leia.log")));
+    }
+
+    private static void log(LogBuffer log, Level level, String message) {
+        LogRecord record = new LogRecord(level, message);
+        record.setLoggerName("leia.Test");
+        log.publish(record);
+    }
+
+    @Test
+    void lShowsTheLogOnTheStartScreenAndEscClosesIt() {
+        LogBuffer log = LogBuffer.detached();
+        log(log, Level.INFO, "leia started");
+        App app = appWithLog(log);
+        assertThat(TestScreens.render(app::render, 160, 30)).contains("L log", "L shows the log, which is written to");
+
+        assertThat(app.handleKey(key('L'))).isEmpty();
+        assertThat(TestScreens.render(app::render, 160, 30)).contains(" Log: INFO and above", "[Test] leia started");
+        assertThat(app.tick()).isFalse();
+        log(log, Level.WARNING, "something new");
+        assertThat(app.tick()).isTrue();
+        assertThat(TestScreens.render(app::render, 160, 30)).contains("something new");
+
+        // The window takes the keys: Esc closes it, and doesn't quit.
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).isEmpty();
+        assertThat(TestScreens.render(app::render, 160, 30)).doesNotContain(" Log: ");
+        assertThat(app.tick()).isFalse();
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.Quit());
+    }
+
+    @Test
+    void lShowsTheLogWithAnIndexOpenAndCopies() {
+        LogBuffer log = LogBuffer.detached();
+        log(log, Level.INFO, "opened");
+        App app = appWithLog(log);
+        app.opened(stats("/data/idx"), List.of());
+
+        app.handleKey(key('L'));
+        assertThat(TestScreens.render(app::render, 160, 30)).contains(" Log: INFO and above", "[Test] opened");
+
+        assertThat(app.handleKey(key('y')))
+                .hasValueSatisfying(action -> assertThat(action)
+                        .isInstanceOfSatisfying(
+                                Action.Copy.class,
+                                copy -> assertThat(copy.text()).contains("[leia.Test] opened")));
+    }
+
+    @Test
+    void lInTheOpenPromptIsTyped() {
+        App app = appWithLog(LogBuffer.detached());
+        app.handleKey(key('o'));
+
+        typed(app, "/data/L");
+
+        assertThat(render(app)).contains("/data/L").doesNotContain(" Log: ");
+    }
+
+    @Test
+    void theLogsFilterOutlastsTheWindow() {
+        LogBuffer log = LogBuffer.detached();
+        log(log, Level.FINE, "a call");
+        App app = appWithLog(log);
+
+        app.handleKey(key('L'));
+        app.handleKey(key('-'));
+        app.handleKey(key('-'));
+        app.handleKey(key(KeyCode.ESCAPE));
+        app.handleKey(key('L'));
+
+        assertThat(TestScreens.render(app::render, 160, 30)).contains(" Log: FINE and above", "a call");
+    }
+
     @Test
     void dWithoutRuntimesBesideLeiaJarSaysWhy() {
         App app = app();
@@ -794,10 +870,13 @@ class AppTest {
     void theKeyLegendWrapsOnANarrowTerminal() {
         App app = app();
         List<String> rows = TestScreens.render(app::render, 30, 20).lines().toList();
-        assertThat(rows.subList(18, 20))
-                .containsExactly(" q quit   o open   6 analysis ", " X jars   D download runtimes ");
+        assertThat(rows.subList(17, 20))
+                .containsExactly(
+                        " q quit   o open   6 analysis ",
+                        " X jars   D download runtimes ",
+                        " L log                        ");
         // The screen ends above the footer.
-        assertThat(rows.get(17)).startsWith("└").endsWith("┘");
+        assertThat(rows.get(16)).startsWith("└").endsWith("┘");
 
         app = appWithDocuments();
         app.handleKey(key('2'));

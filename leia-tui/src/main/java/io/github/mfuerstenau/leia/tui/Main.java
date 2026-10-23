@@ -96,7 +96,7 @@ public final class Main {
         List<Path> jars = new ArrayList<>(cli.jars());
         defaultJars.loadedDir().ifPresent(jars::add);
 
-        try (PrintStream log = LeiaLog.toFile(platform.logFile())) {
+        try (LeiaLog.Opened log = LeiaLog.toFile(platform.logFile())) {
             LOG.info(() -> "leia started with " + List.of(args));
             LeiaBackend backend;
             try {
@@ -169,19 +169,21 @@ public final class Main {
             RuntimeFolders runtimeFolders,
             DefaultJars defaultJars,
             LeiaBackend backend,
-            PrintStream log,
+            LeiaLog.Opened leiaLog,
             PrintStream out,
             PrintStream err,
             Instant started)
             throws Exception {
         boolean exitAfterFirstFrame = Boolean.getBoolean("leia.exitAfterFirstFrame");
+        PrintStream log = leiaLog.stream();
         VersionResult version =
                 backend.call(Methods.VERSION, new VersionParams()).get();
         History history = platform.historyFile().map(History::load).orElseGet(History::inMemory);
         App app = new App(version, platform.home(), history, cli.directory())
                 .withCwd(Path.of("").toAbsolutePath())
                 .withDefaultJars(defaultJars)
-                .withRuntimeFolders(runtimeFolders);
+                .withRuntimeFolders(runtimeFolders)
+                .withLog(leiaLog.buffer(), platform.logFile());
         app.runtimesLoaded(
                 backend.call(Methods.GET_RUNTIMES, new GetRuntimesParams()).get());
         Session session = new Session(

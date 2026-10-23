@@ -156,6 +156,7 @@ and doesn't start. A name that is already taken is ignored, so `--jar` wins over
 | `R` | reopen the index, if another process committed to it since |
 | `X` | list the loaded jars and add more |
 | `D` | on the start screen: download the runtimes |
+| `L` | show the log; `-`/`+` change its level, `y` copies it |
 | `1` … `7` | overview, documents, terms, commits, search, analysis, check |
 | `Backspace` | go back to where the last jump came from |
 | `Esc` | stop what is running; with nothing running, quit |
@@ -166,8 +167,9 @@ The footer of each screen shows its own keys.
 ## Files
 
 - **Log:** `~/.local/state/leia/leia.log` (`$XDG_STATE_HOME/leia/leia.log` if that is set), or
-  `%LOCALAPPDATA%\leia\leia.log` on Windows, written anew on each start. Start leia with
-  `LEIA_OPTS=-Dleia.log.level=FINE` to log every call and its result.
+  `%LOCALAPPDATA%\leia\leia.log` on Windows, written anew on each start. `L` shows it inside
+  leia, and `-` there lowers the level at once: at FINE, every call and its result is logged.
+  To start at FINE, run leia with `LEIA_OPTS=-Dleia.log.level=FINE`.
 - **History:** the last 10 opened index paths, in `history` beside the log.
 
 ## License and disclaimer

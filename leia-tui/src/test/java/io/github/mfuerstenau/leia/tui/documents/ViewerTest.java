@@ -13,6 +13,7 @@ import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
+import io.github.mfuerstenau.leia.tui.Osc52;
 import io.github.mfuerstenau.leia.tui.TestScreens;
 import io.github.mfuerstenau.leia.tui.documents.Viewer.ByteRange;
 import io.github.mfuerstenau.leia.tui.documents.Viewer.Delimiters;
@@ -295,7 +296,7 @@ class ViewerTest {
 
     @Test
     void warnsThatALargeCopyMayBeDropped() {
-        Viewer viewer = viewer(Value.stored(0, text("x".repeat(Viewer.LARGE_COPY + 1))));
+        Viewer viewer = viewer(Value.stored(0, text("x".repeat(Osc52.LARGE_COPY + 1))));
         assertThat(viewer.handleKey(key('y'))).get().isInstanceOf(Event.Copy.class);
         assertThat(render(viewer, 120, 6))
                 .contains("Copied 100.0 KiB as text (OSC 52); terminals may drop copies this large.");

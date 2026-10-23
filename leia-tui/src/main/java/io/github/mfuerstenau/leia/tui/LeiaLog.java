@@ -1,5 +1,6 @@
 package io.github.mfuerstenau.leia.tui;
 
+import io.github.mfuerstenau.leia.tui.log.LogBuffer;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
@@ -19,7 +20,8 @@ import java.util.logging.StreamHandler;
  * belongs to the UI, or to stderr for {@code --version}.
  *
  * <p>The level comes from the system property {@code leia.log.level}, and the format from {@code
- * java.util.logging.SimpleFormatter.format} if it is set.
+ * java.util.logging.SimpleFormatter.format} if it is set. The level is the root logger's alone, and
+ * the handlers take what it lets through, so that the log window can change it (ADR 0087).
  */
 final class LeiaLog {
 
@@ -31,17 +33,32 @@ final class LeiaLog {
     private LeiaLog() {}
 
     /**
-     * Logs into {@code file}, which is written anew, at {@code INFO} without {@code leia.log.level}.
-     * If it can't be written, or there is none, the log is dropped.
+     * The log of the UI.
      *
-     * @return the log's stream, which also takes {@code System.out} and {@code System.err} while
-     *     the UI runs
+     * @param stream the log's stream, which also takes {@code System.out} and {@code System.err}
+     *     while the UI runs
+     * @param buffer the last records, for the log window (ADR 0087)
      */
-    static PrintStream toFile(Optional<Path> file) {
+    record Opened(PrintStream stream, LogBuffer buffer) implements AutoCloseable {
+
+        @Override
+        public void close() {
+            stream.close();
+        }
+    }
+
+    /**
+     * Logs into {@code file}, which is written anew, at {@code INFO} without {@code leia.log.level},
+     * and into a {@link LogBuffer}. If the file can't be written, or there is none, only the buffer
+     * keeps the log.
+     */
+    static Opened toFile(Optional<Path> file) {
         PrintStream stream = file.flatMap(LeiaLog::open)
                 .orElseGet(() -> new PrintStream(OutputStream.nullOutputStream(), true, StandardCharsets.UTF_8));
-        configure(stream, Level.INFO);
-        return stream;
+        Level level = configure(stream, Level.INFO);
+        LogBuffer buffer = new LogBuffer(level);
+        Logger.getLogger("").addHandler(buffer);
+        return new Opened(stream, buffer);
     }
 
     /** Logs to stderr, at {@code defaultLevel} without {@code leia.log.level}. */
@@ -61,7 +78,8 @@ final class LeiaLog {
         }
     }
 
-    private static void configure(PrintStream stream, Level defaultLevel) {
+    /** Returns the level logged at. */
+    private static Level configure(PrintStream stream, Level defaultLevel) {
         if (System.getProperty(FORMAT_PROPERTY) == null) {
             System.setProperty(FORMAT_PROPERTY, DEFAULT_FORMAT);
         }
@@ -71,13 +89,14 @@ final class LeiaLog {
 
         LogManager.getLogManager().reset();
         StreamHandler handler = new FlushingHandler(stream);
-        handler.setLevel(level);
+        handler.setLevel(Level.ALL);
         Logger root = Logger.getLogger("");
         root.setLevel(level);
         root.addHandler(handler);
         if (parsed.isEmpty()) {
             root.warning(() -> "Unknown " + LEVEL_PROPERTY + " '" + name + "', logging at " + level);
         }
+        return level;
     }
 
     private static Optional<Level> level(String name) {

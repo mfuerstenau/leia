@@ -78,6 +78,8 @@ import io.github.mfuerstenau.leia.tui.documents.Documents;
 import io.github.mfuerstenau.leia.tui.jars.DefaultJars;
 import io.github.mfuerstenau.leia.tui.jars.JarsPopup;
 import io.github.mfuerstenau.leia.tui.jars.RuntimeFolders;
+import io.github.mfuerstenau.leia.tui.log.LogBuffer;
+import io.github.mfuerstenau.leia.tui.log.LogWindow;
 import io.github.mfuerstenau.leia.tui.overview.FieldScan;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.points.PointFormats;
@@ -102,6 +104,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
+import java.util.logging.Level;
 
 /**
  * The application state: what is on screen and what a key does. It makes no calls itself: {@link
@@ -249,6 +252,18 @@ public final class App {
     /** The window that downloads runtimes (ADR 0080), while it is open; or null. */
     private RuntimeWindow runtimeWindow;
 
+    /** The last records of the log (ADR 0087). */
+    private LogBuffer log = LogBuffer.detached();
+
+    /** The log window, while it is open; or null. */
+    private LogWindow logWindow;
+
+    /** The level the log window shows; it outlasts the window. */
+    private Level logFilter = log.logged();
+
+    /** Where the log is written to, for the about screen; empty if it is dropped. */
+    private Optional<Path> logFile = Optional.empty();
+
     /** Whether an open, reopen or close runs. */
     private boolean busy;
 
@@ -315,6 +330,17 @@ public final class App {
     /** The jars popup shows the folder of runtimes (ADR 0044), and marks the jars that came from it. */
     public App withRuntimeFolders(RuntimeFolders runtimeFolders) {
         this.runtimeFolders = runtimeFolders;
+        return this;
+    }
+
+    /**
+     * The log window shows the records of {@code log}, from the level it logs at, and the about
+     * screen says that {@code file} has them too.
+     */
+    public App withLog(LogBuffer log, Optional<Path> file) {
+        this.log = log;
+        this.logFilter = log.logged();
+        this.logFile = file;
         return this;
     }
 
@@ -790,11 +816,12 @@ public final class App {
 
     /** A tick of the UI's clock; returns whether something moved, so that the screen is drawn again. */
     boolean tick() {
+        boolean logged = logWindow != null && logWindow.changed();
         if (runtimeWindow == null) {
-            return false;
+            return logged;
         }
         runtimeWindow.tick();
-        return runtimeWindow.animating();
+        return runtimeWindow.animating() || logged;
     }
 
     /**
@@ -1913,6 +1940,17 @@ public final class App {
         if (isChar && key.codePoint() == 'c' && key.hasCtrl()) {
             return Optional.of(new Action.Quit());
         }
+        if (logWindow != null) {
+            return switch (logWindow.handleKey(key)) {
+                case LogWindow.Copy copy -> Optional.of(new Action.Copy(copy.text()));
+                case LogWindow.Close _ -> {
+                    logFilter = logWindow.filter();
+                    logWindow = null;
+                    yield Optional.empty();
+                }
+                case LogWindow.Nothing _ -> Optional.empty();
+            };
+        }
         if (busy) {
             return Optional.empty();
         }
@@ -2056,6 +2094,7 @@ public final class App {
                 failedPath = null;
                 prompt = pathPrompt(path);
             }
+            case 'L' -> logWindow = new LogWindow(log, logFilter);
             case 'X' -> {
                 jars = new JarsPopup(defaultJars, runtimeFolders, home);
                 return Optional.of(new Action.LoadJars());
@@ -2328,6 +2367,9 @@ public final class App {
         if (runtimeWindow != null) {
             runtimeWindow.render(frame, body);
         }
+        if (logWindow != null) {
+            logWindow.render(frame, body);
+        }
     }
 
     /** Draws the shown screen into {@code body}. */
@@ -2367,7 +2409,7 @@ public final class App {
                     : " q quit   o open   " + analysis.keys();
         }
         if (opened == null) {
-            return " q quit   o open   6 analysis   X jars   D download runtimes";
+            return " q quit   o open   6 analysis   X jars   D download runtimes   L log";
         }
         if (screen == Screen.COMMITS) {
             String keys = commits != null ? commits.keys() : "r read again   ⏎ segments   Tab panel   ↑↓";
@@ -2432,6 +2474,8 @@ public final class App {
         lines.addAll(runtimesLines());
         lines.add(Line.from(
                 "No index open. Press o to open one, 6 to try an analyzer, X to add jars, or D to download runtimes."));
+        lines.add(Line.from("L shows the log"
+                + logFile.map(file -> ", which is written to " + file + " too").orElse("") + "."));
         Block block = bordered(" leia ");
         Rect inner = block.inner(body);
         frame.renderWidget(block, body);

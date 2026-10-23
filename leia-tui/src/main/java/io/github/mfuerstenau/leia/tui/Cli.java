@@ -92,6 +92,7 @@ record Cli(
             %LOCALAPPDATA%\\leia\\leia.log on Windows, written anew at each start. Its level comes
             from the JVM option -Dleia.log.level (INFO without it). The environment variable
             LEIA_OPTS passes options to the JVM, for example LEIA_OPTS=-Dleia.log.level=FINE.
+            L in leia shows the log, and - there lowers its level at once.
             """;
 
     Cli {

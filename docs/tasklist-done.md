@@ -406,3 +406,7 @@ Goal: the runtimes are downloaded from within leia's UI, and `--download-runtime
 ## Bugs — done
 
 - [x] On the terms screen, Enter on a vector field's segment in the same burst of keys as the move onto the field did nothing: it came before the `getKnnGraph` reply. A point tree had the same race, and Enter moved the focus to the empty points column. Keys pressed past the fields column while the selected row's tree or graphs are on their way are now held and replayed in order once they are in (ADR 0041 §10, ADR 0085 §7).
+
+## Log window — done
+
+- [x] Misc: log view with level filter (ADR 0087): `L` on any screen opens a window on the last 10,000 records of `java.util.logging` (`LogBuffer`, kept as text), newest at the bottom and followed; `-`/`+` step the filter, which also sets the level logged at, for `leia.log` too, never below the start's; `y` copies the shown records in the file's format; Esc closes it.
