@@ -55,7 +55,7 @@ public final class SegmentsHeader {
         try (InputStream in = Files.newInputStream(segments.get());
                 DataInputStream data = new DataInputStream(new BufferedInputStream(in))) {
             return read(data);
-        } catch (IOException e) {
+        } catch (IOException _) {
             return Optional.empty();
         }
     }
@@ -63,13 +63,7 @@ public final class SegmentsHeader {
     private static Optional<IndexVersion> read(DataInputStream in) throws IOException {
         int first = in.readInt();
         if (first <= FORMAT_LOCKLESS && first >= FORMAT_3_1) {
-            if (first > FORMAT_DIAGNOSTICS) {
-                return Optional.of(new IndexVersion(2, "2.x"));
-            }
-            if (first == FORMAT_DIAGNOSTICS) {
-                return Optional.of(new IndexVersion(2, "2.9 or 3.0"));
-            }
-            return Optional.of(new IndexVersion(3, "3.x"));
+            return Optional.of(lucene2or3(first));
         }
         if (first != CODEC_MAGIC || !CODEC.equals(readString(in))) {
             return Optional.empty();
@@ -91,14 +85,7 @@ public final class SegmentsHeader {
             return Optional.empty();
         }
         if (format >= VERSION_70) {
-            int created = readVInt(in);
-            if (created < 1 || created > writer.major()) {
-                return Optional.empty();
-            }
-            return Optional.of(
-                    created == writer.major()
-                            ? new IndexVersion(created, writer.toString())
-                            : new IndexVersion(created, writer + ", created with " + created));
+            return created(in, writer);
         }
         in.readLong(); // version
         in.readInt(); // counter
@@ -114,6 +101,27 @@ public final class SegmentsHeader {
                 oldest.major() == writer.major()
                         ? new IndexVersion(writer.major(), writer.toString())
                         : new IndexVersion(oldest.major(), writer + ", with a segment from " + oldest));
+    }
+
+    /** The version of an index of Lucene 2 or 3, from the format of its segments file. */
+    private static IndexVersion lucene2or3(int format) {
+        if (format > FORMAT_DIAGNOSTICS) {
+            return new IndexVersion(2, "2.x");
+        }
+        if (format == FORMAT_DIAGNOSTICS) {
+            return new IndexVersion(2, "2.9 or 3.0");
+        }
+        return new IndexVersion(3, "3.x");
+    }
+
+    /** From 7.0 on, the major that created the index follows the version that wrote it. */
+    private static Optional<IndexVersion> created(DataInputStream in, Version writer) throws IOException {
+        int created = readVInt(in);
+        if (created < 1 || created > writer.major()) {
+            return Optional.empty();
+        }
+        return Optional.of(new IndexVersion(
+                created, created == writer.major() ? writer.toString() : writer + ", created with " + created));
     }
 
     private record Version(int major, int minor, int bugfix) {
@@ -158,7 +166,7 @@ public final class SegmentsHeader {
         try (Stream<Path> files = Files.list(dir)) {
             return files.filter(file -> generation(file).isPresent())
                     .max(Comparator.comparingLong(file -> generation(file).orElseThrow()));
-        } catch (IOException e) {
+        } catch (IOException _) {
             return Optional.empty();
         }
     }
@@ -170,7 +178,7 @@ public final class SegmentsHeader {
         }
         try {
             return OptionalLong.of(Long.parseLong(name.substring("segments_".length()), Character.MAX_RADIX));
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException _) {
             return OptionalLong.empty();
         }
     }

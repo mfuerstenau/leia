@@ -46,22 +46,7 @@ public final class RuntimeAnalyzers {
     public static AnalyzerSpec spec(Analyzer analyzer) throws RpcException {
         AnalyzerSpec spec = single(analyzer);
         if (!analyzer.fields().isEmpty()) {
-            Map<String, AnalyzerSpec> fields = new LinkedHashMap<>();
-            for (FieldAnalyzer field : analyzer.fields()) {
-                String name = field.field();
-                if (name.isEmpty()) {
-                    throw invalid("a field analyzer needs a field name");
-                }
-                if (fields.containsKey(name)) {
-                    throw invalid("field '" + name + "' has more than one analyzer");
-                }
-                Analyzer own = field.analyzer();
-                if (!own.fields().isEmpty() || !own.autoStopWords().isEmpty()) {
-                    throw invalid("the analyzer of field '" + name + "' can't have fields or auto stop words");
-                }
-                fields.put(name, single(own));
-            }
-            spec = new AnalyzerSpec.PerField(spec, fields);
+            spec = new AnalyzerSpec.PerField(spec, fieldSpecs(analyzer.fields()));
         }
         if (!analyzer.autoStopWords().isEmpty()) {
             // After the whole chain, as on Lucene 10 (ADR 0061).
@@ -74,6 +59,26 @@ public final class RuntimeAnalyzers {
             spec = new AnalyzerSpec.AutoStopWords(spec, words);
         }
         return spec;
+    }
+
+    /** The analyzer of each field, which has neither fields nor auto stop words of its own. */
+    private static Map<String, AnalyzerSpec> fieldSpecs(List<FieldAnalyzer> analyzers) throws RpcException {
+        Map<String, AnalyzerSpec> fields = new LinkedHashMap<>();
+        for (FieldAnalyzer field : analyzers) {
+            String name = field.field();
+            if (name.isEmpty()) {
+                throw invalid("a field analyzer needs a field name");
+            }
+            if (fields.containsKey(name)) {
+                throw invalid("field '" + name + "' has more than one analyzer");
+            }
+            Analyzer own = field.analyzer();
+            if (!own.fields().isEmpty() || !own.autoStopWords().isEmpty()) {
+                throw invalid("the analyzer of field '" + name + "' can't have fields or auto stop words");
+            }
+            fields.put(name, single(own));
+        }
+        return fields;
     }
 
     /**

@@ -11,6 +11,7 @@ import io.github.mfuerstenau.leia.server.ByteStrings;
 import io.github.mfuerstenau.leia.server.RpcException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -20,6 +21,8 @@ import java.util.stream.Stream;
  * (Lucene's {@code BM25Similarity}, leia-core's {@code SortType}), before the runtime gets them.
  */
 final class RuntimeScoring {
+
+    private static final String REVERSED = " reversed";
 
     private RuntimeScoring() {}
 
@@ -31,7 +34,7 @@ final class RuntimeScoring {
      */
     static Scoring.Similarity similarity(Similarity similarity) throws RpcException {
         long present = Stream.of(similarity.bm25(), similarity.classic(), similarity.booleanSimilarity())
-                .filter(alternative -> alternative.isPresent())
+                .filter(Optional::isPresent)
                 .count();
         if (present != 1) {
             throw new RpcException(
@@ -79,7 +82,7 @@ final class RuntimeScoring {
         List<Scoring.SortKey> sort = new ArrayList<>(keys.size());
         for (SortKey key : keys) {
             long present = Stream.of(key.field(), key.score(), key.doc())
-                    .filter(alternative -> alternative.isPresent())
+                    .filter(Optional::isPresent)
                     .count();
             if (present != 1) {
                 throw new RpcException(
@@ -101,10 +104,10 @@ final class RuntimeScoring {
     static String describe(List<Scoring.SortKey> sort) {
         return sort.stream()
                 .map(key -> switch (key) {
-                    case Scoring.SortKey.Score score -> "score" + (score.reverse() ? " reversed" : "");
-                    case Scoring.SortKey.Doc doc -> "doc" + (doc.reverse() ? " reversed" : "");
+                    case Scoring.SortKey.Score score -> "score" + (score.reverse() ? REVERSED : "");
+                    case Scoring.SortKey.Doc doc -> "doc" + (doc.reverse() ? REVERSED : "");
                     case Scoring.SortKey.Field field ->
-                        field.field() + " " + field.type() + (field.reverse() ? " reversed" : "")
+                        field.field() + " " + field.type() + (field.reverse() ? REVERSED : "")
                                 + (field.selector() == Scoring.SortSelector.MIN ? "" : " " + field.selector())
                                 + (field.missing() == Scoring.SortMissing.DEFAULT ? "" : " missing " + field.missing());
                 })
@@ -113,8 +116,7 @@ final class RuntimeScoring {
 
     /** {@code value} as the protocol carries it, as {@code StartSearchHandler} carries core's. */
     static SortValue sortValue(Scoring.SortValue value) {
-        return new SortValue(
-                value.number().map(Number::toString), value.term().map(term -> ByteStrings.bytesValue(term)));
+        return new SortValue(value.number().map(Number::toString), value.term().map(ByteStrings::bytesValue));
     }
 
     /**
@@ -142,12 +144,11 @@ final class RuntimeScoring {
         } else if (docValues != RuntimeIndex.DocValuesType.SORTED_SET || !string) {
             throw invalidParams(
                     switch (docValues) {
-                        case NONE -> "the field '" + field.name() + "' has no doc values to sort by";
-                        case BINARY ->
-                            "the field '" + field.name() + "' has BINARY doc values, which can't be sorted by";
+                        case NONE -> theField(field.name()) + " has no doc values to sort by";
+                        case BINARY -> theField(field.name()) + " has BINARY doc values, which can't be sorted by";
                         default ->
-                            "the field '" + field.name() + "' has " + docValues
-                                    + " doc values, which can't be sorted by as " + type;
+                            theField(field.name()) + " has " + docValues + " doc values, which can't be sorted by as "
+                                    + type;
                     });
         }
         return new Scoring.SortKey.Field(
@@ -167,11 +168,15 @@ final class RuntimeScoring {
             }
         }
         String kind = allowed.length == 1 ? "single-valued" : "multi-valued numeric";
-        throw invalidParams("the field '" + field.name() + "' has " + kind + " " + field.docValuesType()
+        throw invalidParams(theField(field.name()) + " has " + kind + " " + field.docValuesType()
                 + " doc values, which can't select " + selector);
     }
 
     private static RpcException invalidParams(String message) {
         return new RpcException(ErrorCode.INVALID_PARAMS, "Invalid params: " + message);
+    }
+
+    private static String theField(String name) {
+        return "the field '" + name + "'";
     }
 }

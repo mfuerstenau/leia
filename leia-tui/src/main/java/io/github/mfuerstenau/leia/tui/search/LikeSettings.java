@@ -129,11 +129,11 @@ public final class LikeSettings {
     /** The chosen fields, such as {@code fields title · body}, or how many of them there are. */
     public String fieldsText() {
         List<String> fields = fields();
-        String names = fields.stream().map(TextFormat::escapeControl).collect(Collectors.joining(" · "));
+        String shown = fields.stream().map(TextFormat::escapeControl).collect(Collectors.joining(" · "));
         return switch (fields.size()) {
             case 0 -> "no field";
-            case 1 -> "field " + names;
-            case 2, 3 -> "fields " + names;
+            case 1 -> "field " + shown;
+            case 2, 3 -> "fields " + shown;
             default -> fields.size() + " fields";
         };
     }

@@ -141,7 +141,9 @@ public final class AnalyzerSettings {
     Optional<LimitTokenCount> limitTokenCount = Optional.empty();
 
     /** The standard analyzer; {@code EnglishAnalyzer} as the preset; the standard chain as the custom one. */
-    public AnalyzerSettings() {}
+    public AnalyzerSettings() {
+        // The fields' initializers are the defaults.
+    }
 
     /** A copy that can be changed without changing this one. */
     public AnalyzerSettings copy() {
@@ -528,7 +530,7 @@ public final class AnalyzerSettings {
             if (number >= min && number <= max) {
                 return OptionalInt.of(number);
             }
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException _) {
             // Below.
         }
         throw new IllegalArgumentException("Write a whole number from " + min + " to " + max + ".");

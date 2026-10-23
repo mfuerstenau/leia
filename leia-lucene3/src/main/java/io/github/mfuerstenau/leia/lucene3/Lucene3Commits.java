@@ -139,7 +139,7 @@ final class Lucene3Commits implements Commits {
         OptionalLong size;
         try {
             size = OptionalLong.of(info.sizeInBytes(true));
-        } catch (IOException e) {
+        } catch (IOException _) {
             // A file that can't be stat'ed (ADR 0009 §5).
             size = OptionalLong.empty();
         }
@@ -173,7 +173,7 @@ final class Lucene3Commits implements Commits {
     private static OptionalLong size(Directory directory, String file) {
         try {
             return OptionalLong.of(directory.fileLength(file));
-        } catch (IOException e) {
+        } catch (IOException _) {
             return OptionalLong.empty();
         }
     }

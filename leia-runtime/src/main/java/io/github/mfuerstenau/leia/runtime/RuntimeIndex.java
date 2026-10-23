@@ -270,7 +270,7 @@ public interface RuntimeIndex extends Closeable {
     private static long versionPart(String part) {
         try {
             return Long.parseLong(part);
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException _) {
             return -1;
         }
     }

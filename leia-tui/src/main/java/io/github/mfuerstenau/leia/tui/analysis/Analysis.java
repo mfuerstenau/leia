@@ -320,33 +320,10 @@ public final class Analysis {
             return stopWordsKey(key);
         }
         if (form != null) {
-            return switch (form.handleKey(key)) {
-                case Form.Event.None<AnalyzerSettings> _ -> Optional.empty();
-                case Form.Event.Cancel<AnalyzerSettings> _ -> {
-                    form = null;
-                    yield Optional.empty();
-                }
-                case Form.Event.Apply<AnalyzerSettings> apply -> {
-                    trying = settings.withAnalyzer(field, apply.draft());
-                    yield analyze(trying);
-                }
-            };
+            return formKey(key);
         }
         if (editing) {
-            switch (key.code()) {
-                case ENTER -> {
-                    if (input.text().length() > AnalyzeParams.MAX_TEXT_LENGTH) {
-                        shown = null;
-                        error = "The text is longer than " + AnalyzeParams.MAX_TEXT_LENGTH + " characters.";
-                        return Optional.empty();
-                    }
-                    editing = false;
-                    return analyze(settings);
-                }
-                case ESCAPE -> editing = false;
-                default -> input.handleKey(key, LineInput::wordStart);
-            }
-            return Optional.empty();
+            return editKey(key);
         }
         if (key.isChar('/')) {
             editing = true;
@@ -379,14 +356,55 @@ public final class Analysis {
             return Optional.empty();
         }
         if (key.code() == KeyCode.TAB) {
-            boolean back = key.hasShift();
-            focus = switch (focus) {
-                case STEPS -> back ? Focus.DETAILS : Focus.TOKENS;
-                case TOKENS -> back ? Focus.STEPS : Focus.DETAILS;
-                case DETAILS -> back ? Focus.TOKENS : Focus.STEPS;
-            };
+            focus = nextFocus(focus, key.hasShift());
             return Optional.empty();
         }
+        moveKey(key);
+        return Optional.empty();
+    }
+
+    private Optional<Request> formKey(KeyEvent key) {
+        return switch (form.handleKey(key)) {
+            case Form.Event.None<AnalyzerSettings> _ -> Optional.empty();
+            case Form.Event.Cancel<AnalyzerSettings> _ -> {
+                form = null;
+                yield Optional.empty();
+            }
+            case Form.Event.Apply<AnalyzerSettings> apply -> {
+                trying = settings.withAnalyzer(field, apply.draft());
+                yield analyze(trying);
+            }
+        };
+    }
+
+    /** A key while the text is edited: Enter analyzes it, Esc stops. */
+    private Optional<Request> editKey(KeyEvent key) {
+        switch (key.code()) {
+            case ENTER -> {
+                if (input.text().length() > AnalyzeParams.MAX_TEXT_LENGTH) {
+                    shown = null;
+                    error = "The text is longer than " + AnalyzeParams.MAX_TEXT_LENGTH + " characters.";
+                    return Optional.empty();
+                }
+                editing = false;
+                return analyze(settings);
+            }
+            case ESCAPE -> editing = false;
+            default -> input.handleKey(key, LineInput::wordStart);
+        }
+        return Optional.empty();
+    }
+
+    private static Focus nextFocus(Focus focus, boolean back) {
+        return switch (focus) {
+            case STEPS -> back ? Focus.DETAILS : Focus.TOKENS;
+            case TOKENS -> back ? Focus.STEPS : Focus.DETAILS;
+            case DETAILS -> back ? Focus.TOKENS : Focus.STEPS;
+        };
+    }
+
+    /** Moves the selected step or token, or scrolls the details. */
+    private void moveKey(KeyEvent key) {
         switch (focus) {
             case STEPS -> {
                 OptionalInt moved = Selection.moved(Math.max(step, 0), stepsLen(), key);
@@ -407,7 +425,6 @@ public final class Analysis {
             }
             case DETAILS -> scrollDetails(key);
         }
-        return Optional.empty();
     }
 
     private Optional<Request> stopWordsKey(KeyEvent key) {
@@ -563,35 +580,8 @@ public final class Analysis {
      * why the component names are missing.
      */
     private List<Line> analyzerLines() {
-        List<Line> lines = new ArrayList<>();
-        if (field.isEmpty()) {
-            lines.add(Line.from(
-                    Span.raw(settings.analyzer(field).text()),
-                    Span.styled(fields.isEmpty() ? "" : "   for any field · f picks one", Form.dim())));
-        } else {
-            String name = TextFormat.escapeControl(field.get());
-            boolean own = settings.hasOwn(field.get());
-            lines.add(Line.from(
-                    Span.styled(name + ": ", Style.EMPTY.bold()),
-                    Span.raw(settings.analyzer(field).text()),
-                    Span.styled(own ? "   its own · D drops it" : "   the default one", Form.dim())));
-            List<String> words = settings.stopWords(field.get());
-            if (!words.isEmpty()) {
-                lines.add(Line.styled(
-                        AnalysisSettings.count(words.size(), "auto stop word") + " of " + name, Form.dim()));
-            }
-        }
-        long others = settings.fields().keySet().stream()
-                .filter(name -> !field.equals(Optional.of(name)))
-                .count();
-        String stopWords = settings.stopWordsText();
-        if (others > 0 || !stopWords.isEmpty()) {
-            String text = others > 0
-                    ? AnalysisSettings.count((int) others, field.isEmpty() ? "field" : "other field") + " with its own"
-                    : "";
-            text += stopWords.isEmpty() ? "" : (text.isEmpty() ? stopWords.substring(3) : stopWords);
-            lines.add(Line.styled(text, Form.dim()));
-        }
+        List<Line> lines = new ArrayList<>(fieldLines());
+        othersLine().ifPresent(lines::add);
         if (componentsError != null) {
             lines.add(Line.styled("Cannot list the components: " + componentsError, Style.EMPTY.red()));
         }
@@ -599,6 +589,44 @@ public final class Analysis {
             lines.add(Line.from(NO_ANALYSIS));
         }
         return lines;
+    }
+
+    /** The analyzer of the chosen field, or the default one for any field. */
+    private List<Line> fieldLines() {
+        if (field.isEmpty()) {
+            return List.of(Line.from(
+                    Span.raw(settings.analyzer(field).text()),
+                    Span.styled(fields.isEmpty() ? "" : "   for any field · f picks one", Form.dim())));
+        }
+        List<Line> lines = new ArrayList<>();
+        String name = TextFormat.escapeControl(field.get());
+        boolean own = settings.hasOwn(field.get());
+        lines.add(Line.from(
+                Span.styled(name + ": ", Style.EMPTY.bold()),
+                Span.raw(settings.analyzer(field).text()),
+                Span.styled(own ? "   its own · D drops it" : "   the default one", Form.dim())));
+        List<String> words = settings.stopWords(field.get());
+        if (!words.isEmpty()) {
+            lines.add(Line.styled(AnalysisSettings.count(words.size(), "auto stop word") + " of " + name, Form.dim()));
+        }
+        return lines;
+    }
+
+    /** How many other fields have analyzers of their own, and the auto stop words. */
+    private Optional<Line> othersLine() {
+        long others = settings.fields().keySet().stream()
+                .filter(name -> !field.equals(Optional.of(name)))
+                .count();
+        String stopWords = settings.stopWordsText();
+        if (others == 0 && stopWords.isEmpty()) {
+            return Optional.empty();
+        }
+        String noun = field.isEmpty() ? "field" : "other field";
+        String text = others > 0 ? AnalysisSettings.count((int) others, noun) + " with its own" : "";
+        if (!stopWords.isEmpty()) {
+            text += text.isEmpty() ? stopWords.substring(3) : stopWords;
+        }
+        return Optional.of(Line.styled(text, Form.dim()));
     }
 
     private void renderText(Frame frame, Rect area) {
@@ -783,7 +811,7 @@ public final class Analysis {
         // there too (ADR 0034 §10, the commits screen).
         Rect inner = block.inner(area);
         List<Line> wrapped = Panels.wrap(lines, inner.width());
-        detailsScroll = Math.min(detailsScroll, Math.max(wrapped.size() - inner.height(), 0));
+        detailsScroll = Math.clamp(detailsScroll, 0, Math.max(wrapped.size() - inner.height(), 0));
         frame.renderWidget(
                 Paragraph.builder()
                         .text(Text.from(wrapped))

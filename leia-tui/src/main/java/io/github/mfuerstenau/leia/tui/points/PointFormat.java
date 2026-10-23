@@ -155,7 +155,7 @@ public enum PointFormat {
     private static String inet(byte[] bytes) {
         try {
             return InetAddress.getByAddress(bytes).getHostAddress();
-        } catch (UnknownHostException e) {
+        } catch (UnknownHostException _) {
             return HexFormat.of().formatHex(bytes);
         }
     }

@@ -177,30 +177,37 @@ public final class DocValuesSyntax {
                 tokens.add(new Token(token.toString(), false));
                 continue;
             }
-            i++;
-            while (true) {
-                if (i >= chars.length) {
-                    throw new IllegalArgumentException("A quote is not closed.");
-                }
-                int next = chars[i++];
-                if (next == '"') {
-                    break;
-                }
-                if (next == '\\') {
-                    if (i < chars.length && (chars[i] == '"' || chars[i] == '\\')) {
-                        token.appendCodePoint(chars[i++]);
-                        continue;
-                    }
-                    throw new IllegalArgumentException("In quotes, \\ is followed by \" or \\.");
-                }
-                token.appendCodePoint(next);
-            }
+            i = quoted(chars, i + 1, token);
             if (i < chars.length && !isWhitespace(chars[i])) {
                 throw new IllegalArgumentException("A closing quote is followed by a space or the end.");
             }
             tokens.add(new Token(token.toString(), true));
         }
         return tokens;
+    }
+
+    /**
+     * Appends to {@code token} the text in quotes from {@code i} on, after the opening quote, and
+     * returns the index after the closing one.
+     */
+    private static int quoted(int[] chars, int i, StringBuilder token) {
+        while (true) {
+            if (i >= chars.length) {
+                throw new IllegalArgumentException("A quote is not closed.");
+            }
+            int next = chars[i++];
+            if (next == '"') {
+                return i;
+            }
+            if (next == '\\') {
+                if (i < chars.length && (chars[i] == '"' || chars[i] == '\\')) {
+                    token.appendCodePoint(chars[i++]);
+                    continue;
+                }
+                throw new IllegalArgumentException("In quotes, \\ is followed by \" or \\.");
+            }
+            token.appendCodePoint(next);
+        }
     }
 
     /** Unicode's White_Space, as Rust's {@code char::is_whitespace}. */

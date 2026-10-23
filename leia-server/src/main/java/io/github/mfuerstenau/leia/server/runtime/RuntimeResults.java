@@ -157,10 +157,7 @@ public final class RuntimeResults {
      * values, standard and More-Like-This queries where it has them and searches (ADR 0066), and the
      * HNSW graphs where it reads them and a field has vectors (ADR 0085).
      */
-    public static Set<Feature> features(OpenRuntime open) {
-        RuntimeIndex index = open.index();
-        // Every runtime reopens (ADR 0060).
-        Set<Feature> features = EnumSet.of(Feature.INDEX_STATS, Feature.REOPEN);
+    private static void addDocumentFeatures(RuntimeIndex index, Set<Feature> features) {
         if (index.documents().isPresent()) {
             features.addAll(
                     List.of(Feature.DOCUMENTS, Feature.STORED_VALUES, Feature.TERM_VECTORS, Feature.STORED_SCAN));
@@ -168,6 +165,36 @@ public final class RuntimeResults {
                 features.add(Feature.DOC_VALUES);
             }
         }
+    }
+
+    /** The search features: those beyond the classic search need it too. */
+    private static void addSearchFeatures(RuntimeIndex index, Set<Feature> features) {
+        if (index.search().isEmpty()) {
+            return;
+        }
+        features.addAll(List.of(Feature.CLASSIC_SEARCH, Feature.TERM_SEARCH, Feature.FILTER, Feature.EXPLAIN));
+        if (index.highlight().isPresent()) {
+            features.add(Feature.HIGHLIGHT);
+        }
+        if (index.scoring().isPresent()) {
+            features.add(Feature.SCORING);
+        }
+        if (index.docValuesSearch().isPresent()) {
+            features.add(Feature.DOC_VALUES_SEARCH);
+        }
+        if (index.standardSearch().isPresent()) {
+            features.add(Feature.STANDARD_SEARCH);
+        }
+        if (index.moreLikeThisSearch().isPresent()) {
+            features.add(Feature.MORE_LIKE_THIS);
+        }
+    }
+
+    public static Set<Feature> features(OpenRuntime open) {
+        RuntimeIndex index = open.index();
+        // Every runtime reopens (ADR 0060).
+        Set<Feature> features = EnumSet.of(Feature.INDEX_STATS, Feature.REOPEN);
+        addDocumentFeatures(index, features);
         if (index.terms().isPresent()) {
             features.addAll(List.of(
                     Feature.TERMS,
@@ -177,24 +204,7 @@ public final class RuntimeResults {
                     Feature.EXPORT_TERMS,
                     Feature.AUTO_STOP_WORDS));
         }
-        if (index.search().isPresent()) {
-            features.addAll(List.of(Feature.CLASSIC_SEARCH, Feature.TERM_SEARCH, Feature.FILTER, Feature.EXPLAIN));
-        }
-        if (index.highlight().isPresent() && index.search().isPresent()) {
-            features.add(Feature.HIGHLIGHT);
-        }
-        if (index.scoring().isPresent() && index.search().isPresent()) {
-            features.add(Feature.SCORING);
-        }
-        if (index.docValuesSearch().isPresent() && index.search().isPresent()) {
-            features.add(Feature.DOC_VALUES_SEARCH);
-        }
-        if (index.standardSearch().isPresent() && index.search().isPresent()) {
-            features.add(Feature.STANDARD_SEARCH);
-        }
-        if (index.moreLikeThisSearch().isPresent() && index.search().isPresent()) {
-            features.add(Feature.MORE_LIKE_THIS);
-        }
+        addSearchFeatures(index, features);
         if (index.points().isPresent() && index.fields().stream().anyMatch(field -> field.pointDimensionCount() > 0)) {
             features.add(Feature.POINTS);
         }
@@ -284,7 +294,7 @@ public final class RuntimeResults {
             }
             return stats.indexes().size() + " indexes, " + stats.maxDoc() + " docs, "
                     + open.skipped().size() + " skipped, read with Lucene " + version;
-        } catch (IOException e) {
+        } catch (IOException _) {
             return "read with Lucene " + version;
         }
     }
@@ -790,7 +800,7 @@ public final class RuntimeResults {
                 position.position(),
                 position.startOffset(),
                 position.endOffset(),
-                position.payload().map(payload -> ByteStrings.hex(payload)));
+                position.payload().map(ByteStrings::hex));
     }
 
     /** {@code getPointTree}: a point field's BKD tree, segment by segment (ADR 0041, ADR 0048). */
@@ -878,6 +888,20 @@ public final class RuntimeResults {
         return info.pointNumBytes();
     }
 
+    private static void checkWindow(int offset, int limit) throws RpcException {
+        if (limit < 1 || limit > StartSearchParams.MAX_LIMIT) {
+            throw new RpcException(
+                    ErrorCode.INVALID_PARAMS,
+                    "Invalid params: limit must be between 1 and " + StartSearchParams.MAX_LIMIT + ", not " + limit);
+        }
+        if (offset < 0 || offset > StartSearchParams.MAX_WINDOW - limit) {
+            throw new RpcException(
+                    ErrorCode.INVALID_PARAMS,
+                    "Invalid params: offset must be between 0 and " + (StartSearchParams.MAX_WINDOW - limit)
+                            + " for a limit of " + limit + ", not " + offset);
+        }
+    }
+
     /**
      * {@code startSearch}: a classic query, parsed with the analyzer of the params as the runtime has
      * it ({@link RuntimeAnalyzers}), a term query (ADR 0058), a KNN query if the runtime reads vectors
@@ -892,17 +916,7 @@ public final class RuntimeResults {
         Search search = open.index().search().orElseThrow(open::notSupported);
         int offset = params.offset();
         int limit = params.limit();
-        if (limit < 1 || limit > StartSearchParams.MAX_LIMIT) {
-            throw new RpcException(
-                    ErrorCode.INVALID_PARAMS,
-                    "Invalid params: limit must be between 1 and " + StartSearchParams.MAX_LIMIT + ", not " + limit);
-        }
-        if (offset < 0 || offset > StartSearchParams.MAX_WINDOW - limit) {
-            throw new RpcException(
-                    ErrorCode.INVALID_PARAMS,
-                    "Invalid params: offset must be between 0 and " + (StartSearchParams.MAX_WINDOW - limit)
-                            + " for a limit of " + limit + ", not " + offset);
-        }
+        checkWindow(offset, limit);
         Optional<Scoring> scoring = open.index().scoring();
         if (scoring.isEmpty() && !bestScoreFirst(params.sort())) {
             throw open.notSupported();
@@ -910,14 +924,11 @@ public final class RuntimeResults {
         Optional<Scoring.Similarity> similarity =
                 scoring.isPresent() ? Optional.of(RuntimeScoring.similarity(params.similarity())) : Optional.empty();
         List<Scoring.SortKey> sort = scoring.isPresent() ? RuntimeScoring.sort(open.index(), params.sort()) : List.of();
-        String scored = scoring.isPresent()
-                ? (sort.isEmpty() ? "" : " sorted by " + RuntimeScoring.describe(sort)) + ", scored by "
-                        + RuntimeScoring.describe(params.similarity()) + ","
-                : "";
-        if (params.fields().isPresent()) {
-            for (String field : params.fields().get()) {
-                checkField(open.index(), field);
-            }
+        String sorted = sort.isEmpty() ? "" : " sorted by " + RuntimeScoring.describe(sort);
+        String scored =
+                scoring.isPresent() ? sorted + ", scored by " + RuntimeScoring.describe(params.similarity()) + "," : "";
+        for (String field : params.fields().orElse(List.of())) {
+            checkField(open.index(), field);
         }
         // Doc values and KNN queries have no terms to highlight.
         Optional<HighlightOptions> options = params.highlight()
@@ -933,7 +944,7 @@ public final class RuntimeResults {
         Optional<List<String>> fields = params.fields().map(List::copyOf);
         int maxDoc = open.index().maxDoc();
         long jobId = jobs.start(
-                "search " + query + scored + " with Lucene " + open.runtime().luceneVersion() + ", hits " + offset
+                "search " + query + scored + withLucene(open) + ", hits " + offset
                         + " to "
                         + (offset + limit) + (options.isPresent() ? ", highlighted" : ""),
                 SearchResults.class,
@@ -1007,13 +1018,11 @@ public final class RuntimeResults {
         }
         if (query.standard().isPresent()) {
             StandardSearch standard = open.index().standardSearch().orElseThrow(open::notSupported);
-            return RuntimeQueries.standard(
-                    open, search, standard, query.standard().get());
+            return RuntimeQueries.standard(open, standard, query.standard().get());
         }
         if (query.moreLikeThis().isPresent()) {
             MoreLikeThisSearch like = open.index().moreLikeThisSearch().orElseThrow(open::notSupported);
-            return RuntimeQueries.moreLikeThis(
-                    open, search, like, query.moreLikeThis().get());
+            return RuntimeQueries.moreLikeThis(open, like, query.moreLikeThis().get());
         }
         if (query.docValues().isPresent()) {
             DocValuesSearch docValues = open.index().docValuesSearch().orElseThrow(open::notSupported);
@@ -1030,7 +1039,7 @@ public final class RuntimeResults {
      */
     public static JobStarted startFilter(OpenRuntime open, StartFilterParams params, Jobs jobs) throws RpcException {
         boolean includeDeleted = params.includeDeleted();
-        String lucene = " with Lucene " + open.runtime().luceneVersion();
+        String lucene = withLucene(open);
         String deleted = includeDeleted ? ", deleted documents too" : "";
         int maxDoc = open.index().maxDoc();
         if (params.pattern().isPresent()) {
@@ -1093,8 +1102,7 @@ public final class RuntimeResults {
         String scored = scoring.isPresent() ? ", scored by " + RuntimeScoring.describe(params.similarity()) + "," : "";
         Search.ParsedQuery query = parsedQuery(open, search, params.query());
         return new JobStarted(jobs.start(
-                "explain " + query + " for document " + docId + scored + " with Lucene "
-                        + open.runtime().luceneVersion(),
+                "explain " + query + " for document " + docId + scored + withLucene(open),
                 Explanation.class,
                 progress -> {
                     try {
@@ -1113,6 +1121,38 @@ public final class RuntimeResults {
     }
 
     /**
+     * The fields to rebuild: those {@code given}, which must have terms or points, or else every one
+     * that has, in the order of their numbers.
+     */
+    private static List<RuntimeIndex.Field> rebuiltFields(RuntimeIndex index, Optional<List<String>> given)
+            throws RpcException {
+        if (given.isEmpty()) {
+            return index.fields().stream()
+                    .filter(RuntimeResults::rebuildable)
+                    .sorted(Comparator.comparingInt(RuntimeIndex.Field::number))
+                    .toList();
+        }
+        Map<String, RuntimeIndex.Field> byName = new LinkedHashMap<>();
+        for (RuntimeIndex.Field field : index.fields()) {
+            byName.put(field.name(), field);
+        }
+        List<RuntimeIndex.Field> fields = new ArrayList<>();
+        for (String name : given.get()) {
+            RuntimeIndex.Field field = byName.get(name);
+            if (field == null) {
+                throw new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + name + "' in the index");
+            }
+            if (!rebuildable(field)) {
+                throw new RpcException(
+                        ErrorCode.INVALID_PARAMS,
+                        "Invalid params: the field '" + name + "' has no terms or points to rebuild");
+            }
+            fields.add(field);
+        }
+        return fields;
+    }
+
+    /**
      * {@code startReconstruct} (ADR 0059): checks the document and fields at once, as {@link
      * StartReconstructHandler} does for Lucene 10, counts the terms and points to go through, then
      * rebuilds the document with the runtime in a job. Without fields, every field with postings or
@@ -1123,30 +1163,7 @@ public final class RuntimeResults {
         Rebuild rebuild = open.index().rebuild().orElseThrow(open::notSupported);
         int docId = params.docId();
         checkDocId(open.index(), docId);
-        Map<String, RuntimeIndex.Field> byName = new LinkedHashMap<>();
-        for (RuntimeIndex.Field field : open.index().fields()) {
-            byName.put(field.name(), field);
-        }
-        List<RuntimeIndex.Field> fields = new ArrayList<>();
-        if (params.fields().isPresent()) {
-            for (String name : params.fields().get()) {
-                RuntimeIndex.Field field = byName.get(name);
-                if (field == null) {
-                    throw new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + name + "' in the index");
-                }
-                if (!rebuildable(field)) {
-                    throw new RpcException(
-                            ErrorCode.INVALID_PARAMS,
-                            "Invalid params: the field '" + name + "' has no terms or points to rebuild");
-                }
-                fields.add(field);
-            }
-        } else {
-            open.index().fields().stream()
-                    .filter(RuntimeResults::rebuildable)
-                    .sorted(Comparator.comparingInt(RuntimeIndex.Field::number))
-                    .forEach(fields::add);
-        }
+        List<RuntimeIndex.Field> fields = rebuiltFields(open.index(), params.fields());
         List<String> names = fields.stream().map(RuntimeIndex.Field::name).toList();
         OptionalLong total;
         try {
@@ -1157,7 +1174,7 @@ public final class RuntimeResults {
         return new JobStarted(jobs.start(
                 "reconstruct document " + docId
                         + params.fields().map(given -> ", fields " + given).orElse("")
-                        + " with Lucene " + open.runtime().luceneVersion(),
+                        + withLucene(open),
                 ReconstructResult.class,
                 new StartReconstructHandler.Count(total),
                 progress -> {
@@ -1318,10 +1335,7 @@ public final class RuntimeResults {
         Terms terms = open.index().terms().orElseThrow(open::notSupported);
         checkField(open.index(), field);
         long jobId = jobs.start(
-                "term scan of field " + field + ", top " + topN + " with Lucene "
-                        + open.runtime().luceneVersion(),
-                FieldTerms.class,
-                progress -> {
+                "term scan of field " + field + ", top " + topN + withLucene(open), FieldTerms.class, progress -> {
                     try {
                         Terms.FieldTerms scanned = terms.topTerms(field, topN, progress::scanned);
                         return new FieldTerms(
@@ -1380,7 +1394,7 @@ public final class RuntimeResults {
         RuntimeIndex index = open.index();
         long jobId = jobs.start(
                 "auto stop words of " + (fields.isEmpty() ? "every indexed field" : "fields " + List.copyOf(fields))
-                        + " with Lucene " + open.runtime().luceneVersion(),
+                        + withLucene(open),
                 io.github.mfuerstenau.leia.protocol.analysis.AutoStopWords.class,
                 progress -> StartAutoStopWordsHandler.found(() -> {
                     // Inside the job, so the statistics aren't read on the backend thread.
@@ -1573,5 +1587,10 @@ public final class RuntimeResults {
         if (index.fields().stream().noneMatch(f -> f.name().equals(field))) {
             throw new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + field + "' in the index");
         }
+    }
+
+    /** How a job's description names the Lucene that runs it. */
+    private static String withLucene(OpenRuntime open) {
+        return " with Lucene " + open.runtime().luceneVersion();
     }
 }

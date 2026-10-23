@@ -17,11 +17,14 @@ import io.github.mfuerstenau.leia.tui.widgets.Form;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /** The More-Like-This popup: a draft of the {@link LikeSettings}, applied with Enter once a field is chosen. */
 public final class LikeForm {
 
     /** The largest frequency the popup takes. */
+    private static final Pattern STOP_WORDS_PREFIX = Pattern.compile("^stop words ");
+
     private static final int MAX_FREQ = 99_999_999;
 
     /** The longest word length the popup takes. */
@@ -84,14 +87,7 @@ public final class LikeForm {
      */
     public Form.Event<LikeSettings> handleKey(KeyEvent key) {
         if (editing != null) {
-            switch (key.code()) {
-                case ESCAPE -> editing = null;
-                case ENTER -> {
-                    draft.stopWords = LikeSettings.splitStopWords(editing.text());
-                    editing = null;
-                }
-                default -> editing.handleKey(key, LineInput::wordStart);
-            }
+            editKey(key);
             return new Form.Event.None<>();
         }
         int last = rowCount() - 1;
@@ -99,16 +95,7 @@ public final class LikeForm {
         Row row = row(index);
         switch (key.code()) {
             case ENTER -> {
-                if (!draft.chosen.contains(true)) {
-                    noField = true;
-                    return new Form.Event.None<>();
-                }
-                LikeSettings settings = draft.copy();
-                settings.maxQueryTerms = Math.max(settings.maxQueryTerms, 1);
-                if (settings.maxWordLen > 0) {
-                    settings.maxWordLen = Math.max(settings.maxWordLen, settings.minWordLen);
-                }
-                return new Form.Event.Apply<>(settings);
+                return apply();
             }
             case ESCAPE -> {
                 return new Form.Event.Cancel<>();
@@ -121,42 +108,72 @@ public final class LikeForm {
             case END -> selected = last;
             case LEFT -> change(row, index, -1);
             case RIGHT -> change(row, index, 1);
-            case BACKSPACE, DELETE -> {
-                if (row == Row.STOP_WORDS) {
-                    draft.stopWords = List.of();
-                } else if (key.code() == KeyCode.BACKSPACE && isNumber(row)) {
-                    setNumber(row, number(row) / 10);
-                }
-            }
-            case CHAR -> {
-                int c = key.codePoint();
-                switch (c) {
-                    case 'k' -> selected = Math.max(selected - 1, 0);
-                    case 'j' -> selected = Math.min(selected + 1, last);
-                    case 'g' -> selected = 0;
-                    case 'G' -> selected = last;
-                    case 'h', '-' -> change(row, index, -1);
-                    case 'l', '+', ' ' -> change(row, index, 1);
-                    case 'a' -> Collections.fill(draft.chosen, true);
-                    case 'n' -> Collections.fill(draft.chosen, false);
-                    case 'd' -> {
-                        if (row == Row.STOP_WORDS) {
-                            draft.stopWords = List.of();
-                        }
-                    }
-                    default -> {
-                        if (c >= '0' && c <= '9' && isNumber(row)) {
-                            setNumber(row, Form.typeDigit(number(row), (char) c, max(row)));
-                        }
-                    }
-                }
-            }
+            case BACKSPACE, DELETE -> delete(row, key.code() == KeyCode.BACKSPACE);
+            case CHAR -> charKey(key.codePoint(), row, index, last);
             default -> {}
         }
         if (draft.chosen.contains(true)) {
             noField = false;
         }
         return new Form.Event.None<>();
+    }
+
+    /** A key while the stop words are edited: Enter takes them, Esc drops them. */
+    private void editKey(KeyEvent key) {
+        switch (key.code()) {
+            case ESCAPE -> editing = null;
+            case ENTER -> {
+                draft.stopWords = LikeSettings.splitStopWords(editing.text());
+                editing = null;
+            }
+            default -> editing.handleKey(key, LineInput::wordStart);
+        }
+    }
+
+    /** The settings, if a field is chosen. */
+    private Form.Event<LikeSettings> apply() {
+        if (!draft.chosen.contains(true)) {
+            noField = true;
+            return new Form.Event.None<>();
+        }
+        LikeSettings settings = draft.copy();
+        settings.maxQueryTerms = Math.max(settings.maxQueryTerms, 1);
+        if (settings.maxWordLen > 0) {
+            settings.maxWordLen = Math.max(settings.maxWordLen, settings.minWordLen);
+        }
+        return new Form.Event.Apply<>(settings);
+    }
+
+    /** Clears the stop words; Backspace drops a number's last digit. */
+    private void delete(Row row, boolean backspace) {
+        if (row == Row.STOP_WORDS) {
+            draft.stopWords = List.of();
+        } else if (backspace && isNumber(row)) {
+            setNumber(row, number(row) / 10);
+        }
+    }
+
+    private void charKey(int c, Row row, int index, int last) {
+        switch (c) {
+            case 'k' -> selected = Math.max(selected - 1, 0);
+            case 'j' -> selected = Math.min(selected + 1, last);
+            case 'g' -> selected = 0;
+            case 'G' -> selected = last;
+            case 'h', '-' -> change(row, index, -1);
+            case 'l', '+', ' ' -> change(row, index, 1);
+            case 'a' -> Collections.fill(draft.chosen, true);
+            case 'n' -> Collections.fill(draft.chosen, false);
+            case 'd' -> {
+                if (row == Row.STOP_WORDS) {
+                    draft.stopWords = List.of();
+                }
+            }
+            default -> {
+                if (c >= '0' && c <= '9' && isNumber(row)) {
+                    setNumber(row, Form.typeDigit(number(row), (char) c, max(row)));
+                }
+            }
+        }
     }
 
     private static boolean isNumber(Row row) {
@@ -241,53 +258,10 @@ public final class LikeForm {
                 lines.add(Line.empty());
                 lines.add(Line.styled("Fields to take terms from", Form.dim()));
             }
-            String label;
-            String value;
-            switch (row) {
-                case MIN_TERM_FREQ -> {
-                    label = "Min term freq";
-                    value = Integer.toString(draft.minTermFreq);
-                }
-                case MIN_DOC_FREQ -> {
-                    label = "Min doc freq";
-                    value = Integer.toString(draft.minDocFreq);
-                }
-                case MAX_DOC_FREQ -> {
-                    label = "Max doc freq";
-                    value = limit(draft.maxDocFreq);
-                }
-                case MAX_QUERY_TERMS -> {
-                    label = "Max query terms";
-                    value = Integer.toString(draft.maxQueryTerms);
-                }
-                case BOOST -> {
-                    label = "Boost by score";
-                    value = draft.boost ? "yes" : "no";
-                }
-                case MIN_WORD_LEN -> {
-                    label = "Min word length";
-                    value = limit(draft.minWordLen);
-                }
-                case MAX_WORD_LEN -> {
-                    label = "Max word length";
-                    value = limit(draft.maxWordLen);
-                }
-                case STOP_WORDS -> {
-                    label = "Stop words";
-                    value = draft.stopWords.isEmpty()
-                            ? "none"
-                            : LikeSettings.stopWordsText(draft.stopWords).replaceFirst("^stop words ", "");
-                }
-                default -> {
-                    int field = i - Row.FIELD.ordinal();
-                    label = "  " + TextFormat.escapeControl(draft.names.get(field));
-                    value = draft.chosen.get(field) ? "[x]" : "[ ]";
-                }
-            }
             if (i == shown) {
                 selectedLine = lines.size();
             }
-            lines.add(Form.row(label, value, i == shown));
+            lines.add(Form.row(label(row, i), value(row, i), i == shown));
         }
         lines.add(Line.empty());
         if (noField) {
@@ -300,6 +274,39 @@ public final class LikeForm {
         if (editing != null) {
             renderStopWords(frame, area, editing);
         }
+    }
+
+    private String label(Row row, int i) {
+        return switch (row) {
+            case MIN_TERM_FREQ -> "Min term freq";
+            case MIN_DOC_FREQ -> "Min doc freq";
+            case MAX_DOC_FREQ -> "Max doc freq";
+            case MAX_QUERY_TERMS -> "Max query terms";
+            case BOOST -> "Boost by score";
+            case MIN_WORD_LEN -> "Min word length";
+            case MAX_WORD_LEN -> "Max word length";
+            case STOP_WORDS -> "Stop words";
+            default -> "  " + TextFormat.escapeControl(draft.names.get(i - Row.FIELD.ordinal()));
+        };
+    }
+
+    private String value(Row row, int i) {
+        return switch (row) {
+            case MIN_TERM_FREQ -> Integer.toString(draft.minTermFreq);
+            case MIN_DOC_FREQ -> Integer.toString(draft.minDocFreq);
+            case MAX_DOC_FREQ -> limit(draft.maxDocFreq);
+            case MAX_QUERY_TERMS -> Integer.toString(draft.maxQueryTerms);
+            case BOOST -> draft.boost ? "yes" : "no";
+            case MIN_WORD_LEN -> limit(draft.minWordLen);
+            case MAX_WORD_LEN -> limit(draft.maxWordLen);
+            case STOP_WORDS ->
+                draft.stopWords.isEmpty()
+                        ? "none"
+                        : STOP_WORDS_PREFIX
+                                .matcher(LikeSettings.stopWordsText(draft.stopWords))
+                                .replaceFirst("");
+            default -> draft.chosen.get(i - Row.FIELD.ordinal()) ? "[x]" : "[ ]";
+        };
     }
 
     /** A number, or {@code no limit} for 0. */

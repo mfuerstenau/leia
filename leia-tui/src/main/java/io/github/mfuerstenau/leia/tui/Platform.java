@@ -45,7 +45,7 @@ record Platform(Function<String, String> env, Optional<Path> home, boolean windo
                             && DefaultJars.isJarName(path.getFileName().toString())
                     ? Optional.of(path)
                     : Optional.empty();
-        } catch (URISyntaxException | IllegalArgumentException | FileSystemNotFoundException e) {
+        } catch (URISyntaxException | IllegalArgumentException | FileSystemNotFoundException _) {
             return Optional.empty();
         }
     }

@@ -163,32 +163,12 @@ public final class Viewer {
                 case '\\' -> out.append('\\');
                 case 'x' -> {
                     int end = Math.min(i + 2, chars.length);
-                    String hex = new String(chars, i, end - i);
+                    out.append(hexEscape(new String(chars, i, end - i)));
                     i = end;
-                    int value = hex.length() == 2 ? parseHex(hex) : -1;
-                    if (value < 0 || value > 0x7f) {
-                        throw new IllegalArgumentException("\\x takes two hex digits from 00 to 7f.");
-                    }
-                    out.append((char) value);
                 }
                 case 'u' -> {
-                    int close = -1;
-                    for (int j = i; j < chars.length; j++) {
-                        if (chars[j] == '}') {
-                            close = j;
-                            break;
-                        }
-                    }
-                    int value = i < chars.length && chars[i] == '{' && close > i
-                            ? parseHex(new String(chars, i + 1, close - i - 1))
-                            : -1;
-                    if (value < 0
-                            || !Character.isValidCodePoint(value)
-                            || (value >= Character.MIN_SURROGATE && value <= Character.MAX_SURROGATE)) {
-                        throw new IllegalArgumentException(
-                                "\\u takes a character code in hex in braces, such as \\u{1f}.");
-                    }
-                    out.appendCodePoint(value);
+                    int close = closingBrace(chars, i);
+                    out.appendCodePoint(unicodeEscape(chars, i, close));
                     i = close + 1;
                 }
                 default ->
@@ -199,11 +179,43 @@ public final class Viewer {
         return out.toString();
     }
 
+    /** The character of {@code \\x} and the two hex digits {@code hex}. */
+    private static char hexEscape(String hex) {
+        int value = hex.length() == 2 ? parseHex(hex) : -1;
+        if (value < 0 || value > 0x7f) {
+            throw new IllegalArgumentException("\\x takes two hex digits from 00 to 7f.");
+        }
+        return (char) value;
+    }
+
+    /** The index of the first closing brace from {@code from} on; -1 if none. */
+    private static int closingBrace(int[] chars, int from) {
+        for (int j = from; j < chars.length; j++) {
+            if (chars[j] == '}') {
+                return j;
+            }
+        }
+        return -1;
+    }
+
+    /** The code point of {@code \\u} and the hex digits in braces from {@code open} to {@code close}. */
+    private static int unicodeEscape(int[] chars, int open, int close) {
+        int value = open < chars.length && chars[open] == '{' && close > open
+                ? parseHex(new String(chars, open + 1, close - open - 1))
+                : -1;
+        if (value < 0
+                || !Character.isValidCodePoint(value)
+                || (value >= Character.MIN_SURROGATE && value <= Character.MAX_SURROGATE)) {
+            throw new IllegalArgumentException("\\u takes a character code in hex in braces, such as \\u{1f}.");
+        }
+        return value;
+    }
+
     /** {@code hex} as a number, or -1 if it isn't one. */
     private static int parseHex(String hex) {
         try {
             return Integer.parseInt(hex, 16);
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException _) {
             return -1;
         }
     }
@@ -234,7 +246,7 @@ public final class Viewer {
             if (binary) {
                 try {
                     return bytes(HexFormat.of().parseHex(value));
-                } catch (IllegalArgumentException e) {
+                } catch (IllegalArgumentException _) {
                     // Shown as it came.
                 }
             }
@@ -246,7 +258,7 @@ public final class Viewer {
             byte[] bytes;
             try {
                 bytes = encode.bytes(text);
-            } catch (NumberFormatException e) {
+            } catch (NumberFormatException _) {
                 bytes = text.getBytes(StandardCharsets.UTF_8);
             }
             return new Content(Kind.NUMBER, text, bytes);
@@ -420,35 +432,44 @@ public final class Viewer {
             for (String line : text.split("\n", -1)) {
                 String shown = stripCr(line);
                 int end = lineStart + utf8Length(shown);
-                List<Segment> segments = new ArrayList<>();
-                int pos = lineStart;
                 // Matches that end before this line are done.
                 while (next < matches.size() && matches.get(next).to() <= lineStart) {
                     next++;
                 }
-                for (int i = next; i < matches.size(); i++) {
-                    ByteRange match = matches.get(i);
-                    if (match.from() >= end) {
-                        break;
-                    }
-                    int from = Math.max(match.from(), pos);
-                    int to = Math.min(match.to(), end);
-                    if (to <= from || from < 0 || charAt[from] < 0 || charAt[to] < 0) {
-                        continue;
-                    }
-                    if (from > pos) {
-                        segments.add(new Segment(Style.EMPTY, text.substring(charAt[pos], charAt[from])));
-                    }
-                    segments.add(new Segment(TextFormat.MATCH, text.substring(charAt[from], charAt[to])));
-                    pos = to;
-                }
-                if (pos < end || segments.isEmpty()) {
-                    segments.add(new Segment(Style.EMPTY, text.substring(charAt[pos], charAt[end])));
-                }
+                List<Segment> segments = segments(text, charAt, matches.subList(next, matches.size()), lineStart, end);
                 lines.add(segments);
                 lineStart += utf8Length(line) + 1;
             }
             return new Formatted(lines, null, null);
+        }
+
+        /**
+         * The segments of the line from byte {@code lineStart} to {@code end}, with the parts that
+         * {@code matches} cover highlighted.
+         */
+        private static List<Segment> segments(
+                String text, int[] charAt, List<ByteRange> matches, int lineStart, int end) {
+            List<Segment> segments = new ArrayList<>();
+            int pos = lineStart;
+            for (ByteRange match : matches) {
+                if (match.from() >= end) {
+                    break;
+                }
+                int from = Math.max(match.from(), pos);
+                int to = Math.min(match.to(), end);
+                if (to <= from || from < 0 || charAt[from] < 0 || charAt[to] < 0) {
+                    continue;
+                }
+                if (from > pos) {
+                    segments.add(new Segment(Style.EMPTY, text.substring(charAt[pos], charAt[from])));
+                }
+                segments.add(new Segment(TextFormat.MATCH, text.substring(charAt[from], charAt[to])));
+                pos = to;
+            }
+            if (pos < end || segments.isEmpty()) {
+                segments.add(new Segment(Style.EMPTY, text.substring(charAt[pos], charAt[end])));
+            }
+            return segments;
         }
 
         /** The lines as plain text, as they are copied. */
@@ -873,17 +894,9 @@ public final class Viewer {
                 ? Math.max(Math.ceilDiv(value.content.bytes().length, bytesPerRow), 1)
                 : wrapped(inner.width()).lines().size();
         if (toMatch && mode == Mode.TEXT) {
-            List<Integer> matchRows = wrapped.matchRows();
-            if (matchIndex < matchRows.size()) {
-                // Two rows of context above the match.
-                scroll = Math.max(matchRows.get(matchIndex) - 2, 0);
-                toMatch = false;
-            } else if (value.fullLength.isEmpty() || value.error != null) {
-                // Otherwise the match is past the cut: once the whole value is in.
-                toMatch = false;
-            }
+            scrollToMatch(value);
         }
-        scroll = Math.min(scroll, Math.max(rows - height, 0));
+        scroll = Math.clamp(scroll, 0, Math.max(rows - height, 0));
         int start = scroll;
         int end = Math.min(rows, scroll + height);
 
@@ -897,24 +910,7 @@ public final class Viewer {
             lines.addAll(shown.lines().subList(start, end));
         }
 
-        String status;
-        if (message != null) {
-            status = message;
-        } else if (value.error != null) {
-            status = "Cut; cannot fetch it whole: " + value.error;
-        } else if (value.fullLength.isPresent()) {
-            status = "Cut at " + TextFormat.size(value.content.bytes().length) + " of "
-                    + TextFormat.size(value.fullLength.getAsLong()) + "; fetching it whole…";
-        } else if (shown != null && shown.notice() != null) {
-            status = shown.notice();
-        } else if (!value.matches.isEmpty()) {
-            int marked = value.matches.size();
-            String more = value.matchCount > marked ? " (" + marked + " of " + value.matchCount + " marked)" : "";
-            String hidden = mode == Mode.TEXT ? "" : "; t shows them";
-            status = "match " + (matchIndex + 1) + " of " + marked + more + hidden;
-        } else {
-            status = "";
-        }
+        String status = status(value, shown);
         String modeLabel = shown != null && shown.detail() != null ? mode.name + " · " + shown.detail() : mode.name;
         String position = " " + modeLabel + " · rows " + (start + 1) + "–" + end + " of " + rows + " ";
         block.titleBottom(Title.from(position).right());
@@ -930,6 +926,43 @@ public final class Viewer {
         if (form != null) {
             renderForm(frame, area, form);
         }
+    }
+
+    /** Scrolls to the match that {@code m} or {@code M} chose, once the text has it. */
+    private void scrollToMatch(Value value) {
+        List<Integer> matchRows = wrapped.matchRows();
+        if (matchIndex < matchRows.size()) {
+            // Two rows of context above the match.
+            scroll = Math.max(matchRows.get(matchIndex) - 2, 0);
+            toMatch = false;
+        } else if (value.fullLength.isEmpty() || value.error != null) {
+            // Otherwise the match is past the cut: once the whole value is in.
+            toMatch = false;
+        }
+    }
+
+    /** What the bottom border says left of the position. */
+    private String status(Value value, Wrapped shown) {
+        if (message != null) {
+            return message;
+        }
+        if (value.error != null) {
+            return "Cut; cannot fetch it whole: " + value.error;
+        }
+        if (value.fullLength.isPresent()) {
+            return "Cut at " + TextFormat.size(value.content.bytes().length) + " of "
+                    + TextFormat.size(value.fullLength.getAsLong()) + "; fetching it whole…";
+        }
+        if (shown != null && shown.notice() != null) {
+            return shown.notice();
+        }
+        if (value.matches.isEmpty()) {
+            return "";
+        }
+        int marked = value.matches.size();
+        String more = value.matchCount > marked ? " (" + marked + " of " + value.matchCount + " marked)" : "";
+        String hidden = mode == Mode.TEXT ? "" : "; t shows them";
+        return "match " + (matchIndex + 1) + " of " + marked + more + hidden;
     }
 
     /** The shown value formatted in the mode and wrapped at {@code width}, formatted again only when needed. */
@@ -1034,10 +1067,7 @@ public final class Viewer {
             switch (c) {
                 case '{', '[' -> {
                     char close = c == '{' ? '}' : ']';
-                    int next = i + 1;
-                    while (next < text.length() && isJsonSpace(text.charAt(next))) {
-                        next++;
-                    }
+                    int next = skipJsonSpace(text, i + 1);
                     if (next < text.length() && text.charAt(next) == close) {
                         line.add(new Segment(Style.EMPTY, "" + c + close));
                         i = next + 1;
@@ -1067,29 +1097,49 @@ public final class Viewer {
                     i++;
                 }
                 case '"' -> {
-                    int end = i + 1;
-                    while (end < text.length() && text.charAt(end) != '"') {
-                        end += text.charAt(end) == '\\' ? 2 : 1;
-                    }
-                    end = Math.min(end, text.length() - 1);
+                    int end = jsonStringEnd(text, i);
                     line.add(new Segment(expectKey ? JSON_KEY : JSON_STRING, text.substring(i, end + 1)));
                     i = end + 1;
                 }
                 default -> {
-                    int end = i;
-                    while (end < text.length()
-                            && !isJsonSpace(text.charAt(end))
-                            && ",:]}".indexOf(text.charAt(end)) < 0) {
-                        end++;
-                    }
-                    Style style = c == '-' || (c >= '0' && c <= '9') ? JSON_NUMBER : JSON_LITERAL;
-                    line.add(new Segment(style, text.substring(i, end)));
+                    int end = jsonLiteralEnd(text, i);
+                    line.add(new Segment(jsonLiteralStyle(c), text.substring(i, end)));
                     i = end;
                 }
             }
         }
         lines.add(line);
         return lines;
+    }
+
+    private static int skipJsonSpace(String text, int from) {
+        int next = from;
+        while (next < text.length() && isJsonSpace(text.charAt(next))) {
+            next++;
+        }
+        return next;
+    }
+
+    /** The index of the quote that closes the string at {@code start}, or of the last character. */
+    private static int jsonStringEnd(String text, int start) {
+        int end = start + 1;
+        while (end < text.length() && text.charAt(end) != '"') {
+            end += text.charAt(end) == '\\' ? 2 : 1;
+        }
+        return Math.min(end, text.length() - 1);
+    }
+
+    /** The index after the number or literal at {@code start}. */
+    private static int jsonLiteralEnd(String text, int start) {
+        int end = start;
+        while (end < text.length() && !isJsonSpace(text.charAt(end)) && ",:]}".indexOf(text.charAt(end)) < 0) {
+            end++;
+        }
+        return end;
+    }
+
+    private static Style jsonLiteralStyle(char first) {
+        return first == '-' || (first >= '0' && first <= '9') ? JSON_NUMBER : JSON_LITERAL;
     }
 
     private static boolean isJsonSpace(char c) {
@@ -1174,29 +1224,35 @@ public final class Viewer {
      * matchRows}.
      */
     static void wrap(List<Segment> line, int width, List<Line> out, List<Integer> matchRows) {
-        int columns = Math.max(width, 1);
-        List<Span> spans = new ArrayList<>();
-        StringBuilder current = new StringBuilder();
-        int used = 0;
+        LineWrapper wrapper = new LineWrapper(Math.max(width, 1), out, matchRows);
         for (Segment segment : line) {
+            wrapper.add(segment);
+        }
+        out.add(Line.from(wrapper.spans));
+    }
+
+    /** Wraps a line at {@code columns}, segment after segment, noting the row each match starts on. */
+    private static final class LineWrapper {
+        private final int columns;
+        private final List<Line> out;
+        private final List<Integer> matchRows;
+        private List<Span> spans = new ArrayList<>();
+        private final StringBuilder current = new StringBuilder();
+        private int used;
+
+        LineWrapper(int columns, List<Line> out, List<Integer> matchRows) {
+            this.columns = columns;
+            this.out = out;
+            this.matchRows = matchRows;
+        }
+
+        void add(Segment segment) {
             boolean first = segment.style().equals(TextFormat.MATCH);
-            int[] chars = segment.text().codePoints().toArray();
-            for (int c : chars) {
-                String shown = c == '\t'
-                        ? TAB
-                        : Character.isISOControl(c)
-                                ? TextFormat.escapeControl(Character.toString(c))
-                                : Character.toString(c);
-                for (int s : shown.codePoints().toArray()) {
+            for (int c : segment.text().codePoints().toArray()) {
+                for (int s : shown(c).codePoints().toArray()) {
                     int w = CharWidth.of(s);
                     if (used + w > columns && used > 0) {
-                        if (!current.isEmpty()) {
-                            spans.add(Span.styled(current.toString(), segment.style()));
-                            current.setLength(0);
-                        }
-                        out.add(Line.from(spans));
-                        spans = new ArrayList<>();
-                        used = 0;
+                        breakLine(segment.style());
                     }
                     if (first) {
                         matchRows.add(out.size());
@@ -1206,12 +1262,31 @@ public final class Viewer {
                     used += w;
                 }
             }
+            flush(segment.style());
+        }
+
+        private void breakLine(Style style) {
+            flush(style);
+            out.add(Line.from(spans));
+            spans = new ArrayList<>();
+            used = 0;
+        }
+
+        private void flush(Style style) {
             if (!current.isEmpty()) {
-                spans.add(Span.styled(current.toString(), segment.style()));
+                spans.add(Span.styled(current.toString(), style));
                 current.setLength(0);
             }
         }
-        out.add(Line.from(spans));
+
+        /** A tab as {@link #TAB}, and a control character escaped. */
+        private static String shown(int c) {
+            if (c == '\t') {
+                return TAB;
+            }
+            String text = Character.toString(c);
+            return Character.isISOControl(c) ? TextFormat.escapeControl(text) : text;
+        }
     }
 
     /** One row of the hex dump: the offset, the bytes in hex, and the printable ASCII ones. */

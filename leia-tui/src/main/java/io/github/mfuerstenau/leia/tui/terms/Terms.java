@@ -77,6 +77,10 @@ import java.util.stream.LongStream;
  */
 public final class Terms {
 
+    private static final String POSTINGS_TITLE = " Postings (";
+
+    private static final String COLUMN_KEYS = "←/→ column   ↑↓";
+
     /** How many terms one {@code getTerms} call fetches. */
     public static final int TERMS_PAGE = 100;
 
@@ -492,30 +496,11 @@ public final class Terms {
     private Optional<Request> nextRequest() {
         Optional<IndexField> vectorField = selectedVectorField();
         if (vectorField.isPresent()) {
-            String field = vectorField.get().name();
-            if (!features.contains(Feature.KNN_GRAPH)) {
-                return Optional.empty();
-            }
-            if (knnTree != null && knnTree.field.equals(field)) {
-                return Optional.empty();
-            }
-            knnTree = null;
-            if (wantedGraph == null || !wantedGraph.field().equals(field)) {
-                wantedGraph = new Request.LoadKnnGraph(field, nextTreeSerial++);
-            }
-            return send(wantedGraph);
+            return graphRequest(vectorField.get().name());
         }
         Optional<IndexField> pointField = selectedPointField();
         if (pointField.isPresent()) {
-            String field = pointField.get().name();
-            if (pointTree != null && pointTree.field.equals(field)) {
-                return Optional.empty();
-            }
-            pointTree = null;
-            if (wantedTree == null || !wantedTree.field().equals(field)) {
-                wantedTree = new Request.LoadPointTree(field, nextTreeSerial++);
-            }
-            return send(wantedTree);
+            return pointTreeRequest(pointField.get().name());
         }
         Optional<IndexField> selected = selectedField();
         if (selected.isEmpty()) {
@@ -533,6 +518,38 @@ public final class Terms {
         if (terms.error.isEmpty() && terms.selected + 1 >= terms.entries.size() && terms.next.isPresent()) {
             return send(new Request.LoadTerms(field, terms.next, true));
         }
+        return postingsRequest(field);
+    }
+
+    /** The HNSW graph of vector field {@code field}, unless it is loaded or the index has none. */
+    private Optional<Request> graphRequest(String field) {
+        if (!features.contains(Feature.KNN_GRAPH)) {
+            return Optional.empty();
+        }
+        if (knnTree != null && knnTree.field.equals(field)) {
+            return Optional.empty();
+        }
+        knnTree = null;
+        if (wantedGraph == null || !wantedGraph.field().equals(field)) {
+            wantedGraph = new Request.LoadKnnGraph(field, nextTreeSerial++);
+        }
+        return send(wantedGraph);
+    }
+
+    /** The BKD tree of point field {@code field}, unless it is loaded. */
+    private Optional<Request> pointTreeRequest(String field) {
+        if (pointTree != null && pointTree.field.equals(field)) {
+            return Optional.empty();
+        }
+        pointTree = null;
+        if (wantedTree == null || !wantedTree.field().equals(field)) {
+            wantedTree = new Request.LoadPointTree(field, nextTreeSerial++);
+        }
+        return send(wantedTree);
+    }
+
+    /** The postings of the selected term, or their next page once the last one is selected. */
+    private Optional<Request> postingsRequest(String field) {
         Optional<BytesValue> term = terms.selectedTerm();
         if (term.isEmpty()) {
             return Optional.empty();
@@ -899,7 +916,7 @@ public final class Terms {
         level.loading = true;
         level.error = Optional.empty();
         return send(new Request.LoadKnnNodes(
-                knnTree.field, knnTree.serial, level.segment, level.level, level.nodes.size()));
+                knnTree.field, knnTree.serial, level.segment, level.number, level.nodes.size()));
     }
 
     /** The neighbours of {@code node} of {@code segment}, as the start of a walk. */
@@ -1161,50 +1178,80 @@ public final class Terms {
             return unsupported.map(Request.Unsupported::new);
         }
         if (selectedVectorField().isPresent()) {
-            if (key.isChar('/') || key.isChar('e') || key.isChar('s')) {
-                note = (key.isChar('/') ? "/ seeks" : key.isChar('e') ? "e exports" : "s searches") + " terms only";
-                return Optional.empty();
-            }
-            if (knnTree != null && knnTree.graph != null) {
-                if (key.code() == KeyCode.ENTER && focus == Column.TERMS) {
-                    return openGraphRow();
-                }
-                if (key.code() == KeyCode.ENTER && focus == Column.POSTINGS) {
-                    return walkOn();
-                }
-                if (key.isChar('<')) {
-                    walkBack();
-                    return Optional.empty();
-                }
-                if (key.isChar('d')) {
-                    return graphDocument();
-                }
-            }
-            if (key.code() == KeyCode.ENTER && focus != Column.FIELDS) {
-                return Optional.empty();
+            Optional<Request> request = vectorKey(key);
+            if (request != null) {
+                return request;
             }
         }
         Optional<IndexField> pointField = selectedPointField();
         if (pointField.isPresent()) {
-            if (key.isChar('t')) {
-                pointFormats.cycle(pointField.get());
-                return Optional.empty();
-            }
-            if (key.isChar('/') || key.isChar('e') || key.isChar('s')) {
-                note = (key.isChar('/') ? "/ seeks" : key.isChar('e') ? "e exports" : "s searches") + " terms only";
-                return Optional.empty();
-            }
-            if (key.code() == KeyCode.ENTER && pointTree != null) {
-                if (focus == Column.TERMS) {
-                    return openCell();
-                }
-                if (focus == Column.POSTINGS) {
-                    return pointTree
-                            .selectedPoint()
-                            .map(point -> new Request.PointDocument(pointTree.field, point.docId()));
-                }
+            Optional<Request> request = pointKey(key, pointField.get());
+            if (request != null) {
+                return request;
             }
         }
+        return termsKey(key);
+    }
+
+    /** A key on a vector field, or null for one that works as on any field. */
+    private Optional<Request> vectorKey(KeyEvent key) {
+        if (key.isChar('/') || key.isChar('e') || key.isChar('s')) {
+            note = termsOnly(key);
+            return Optional.empty();
+        }
+        if (knnTree != null && knnTree.graph != null) {
+            Optional<Request> request = graphKey(key);
+            if (request != null) {
+                return request;
+            }
+        }
+        if (key.code() == KeyCode.ENTER && focus != Column.FIELDS) {
+            return Optional.empty();
+        }
+        return null;
+    }
+
+    /** A key on the HNSW graph, or null for one it doesn't take. */
+    private Optional<Request> graphKey(KeyEvent key) {
+        if (key.code() == KeyCode.ENTER && focus == Column.TERMS) {
+            return openGraphRow();
+        }
+        if (key.code() == KeyCode.ENTER && focus == Column.POSTINGS) {
+            return walkOn();
+        }
+        if (key.isChar('<')) {
+            walkBack();
+            return Optional.empty();
+        }
+        if (key.isChar('d')) {
+            return graphDocument();
+        }
+        return null;
+    }
+
+    /** A key on a point field, or null for one that works as on any field. */
+    private Optional<Request> pointKey(KeyEvent key, IndexField field) {
+        if (key.isChar('t')) {
+            pointFormats.cycle(field);
+            return Optional.empty();
+        }
+        if (key.isChar('/') || key.isChar('e') || key.isChar('s')) {
+            note = termsOnly(key);
+            return Optional.empty();
+        }
+        if (key.code() != KeyCode.ENTER || pointTree == null) {
+            return null;
+        }
+        if (focus == Column.TERMS) {
+            return openCell();
+        }
+        if (focus == Column.POSTINGS) {
+            return pointTree.selectedPoint().map(point -> new Request.PointDocument(pointTree.field, point.docId()));
+        }
+        return null;
+    }
+
+    private Optional<Request> termsKey(KeyEvent key) {
         if (key.isChar('e')) {
             return selectedField().map(field -> new Request.Export(field.name()));
         }
@@ -1220,62 +1267,80 @@ public final class Terms {
             focus = Column.TERMS;
             return Optional.empty();
         }
-        KeyCode code = key.code();
-        boolean tab = code == KeyCode.TAB && !key.hasShift();
-        boolean backTab = code == KeyCode.TAB && key.hasShift();
-        if (code == KeyCode.ENTER && focus == Column.POSTINGS) {
+        if (key.code() == KeyCode.ENTER && focus == Column.POSTINGS) {
             return postings == null ? Optional.empty() : postings.hit().map(Request.Document::new);
         }
-        if (code == KeyCode.ENTER || code == KeyCode.RIGHT || key.isChar('l') || tab) {
-            focus = switch (focus) {
-                case FIELDS -> Column.TERMS;
-                case TERMS -> Column.POSTINGS;
-                case POSTINGS -> tab ? Column.FIELDS : Column.POSTINGS;
-            };
-            return Optional.empty();
-        }
-        if (code == KeyCode.LEFT || key.isChar('h') || backTab) {
-            focus = switch (focus) {
-                case FIELDS -> backTab ? Column.POSTINGS : Column.FIELDS;
-                case TERMS -> Column.FIELDS;
-                case POSTINGS -> Column.TERMS;
-            };
+        if (moveFocus(key)) {
             return Optional.empty();
         }
         return moveSelection(key);
+    }
+
+    /** Moves the focus to the column right or left of it, if {@code key} does; Tab wraps around. */
+    private boolean moveFocus(KeyEvent key) {
+        KeyCode code = key.code();
+        boolean tab = code == KeyCode.TAB && !key.hasShift();
+        boolean backTab = code == KeyCode.TAB && key.hasShift();
+        if (code == KeyCode.ENTER || code == KeyCode.RIGHT || key.isChar('l') || tab) {
+            focus = rightOf(focus, tab);
+            return true;
+        }
+        if (code == KeyCode.LEFT || key.isChar('h') || backTab) {
+            focus = leftOf(focus, backTab);
+            return true;
+        }
+        return false;
+    }
+
+    private static Column rightOf(Column column, boolean wraps) {
+        return switch (column) {
+            case FIELDS -> Column.TERMS;
+            case TERMS -> Column.POSTINGS;
+            case POSTINGS -> wraps ? Column.FIELDS : Column.POSTINGS;
+        };
+    }
+
+    private static Column leftOf(Column column, boolean wraps) {
+        return switch (column) {
+            case FIELDS -> wraps ? Column.POSTINGS : Column.FIELDS;
+            case TERMS -> Column.FIELDS;
+            case POSTINGS -> Column.TERMS;
+        };
     }
 
     /** What {@code key} is called if the index lacks a feature it needs (ADR 0044); empty otherwise. */
     private Optional<String> unsupported(KeyEvent key) {
         boolean points = showsPoints();
         boolean graph = showsGraph();
-        Feature needed;
-        String what;
-        if (graph && (key.code() == KeyCode.ENTER && focus != Column.FIELDS || key.isChar('<'))) {
-            needed = Feature.KNN_GRAPH;
-            what = "HNSW graph";
-        } else if (graph && key.isChar('d')) {
-            needed = Feature.DOCUMENTS;
-            what = "Open doc";
-        } else if (key.code() == KeyCode.ENTER && focus == Column.POSTINGS) {
-            needed = Feature.DOCUMENTS;
-            what = "Open doc";
-        } else if (key.isChar('t') && points) {
-            needed = Feature.POINTS;
-            what = "Points";
-        } else if (key.isChar('e') && !points && !graph) {
-            needed = Feature.EXPORT_TERMS;
-            what = "Export";
-        } else if (key.isChar('s') && !points && !graph) {
+        if (key.isChar('s') && !points && !graph) {
             // A runtime has term queries without the rest of search (ADR 0058).
             return searchesTerms() ? Optional.empty() : Optional.of("Search term");
-        } else if (key.isChar('b') && filter.isPresent()) {
-            needed = Feature.FILTER;
-            what = "Filter";
-        } else {
-            return Optional.empty();
         }
-        return features.contains(needed) ? Optional.empty() : Optional.of(what);
+        return need(key, points, graph)
+                .filter(need -> !features.contains(need.feature()))
+                .map(Need::what);
+    }
+
+    /** A feature that a key needs, and what the key is called. */
+    private record Need(Feature feature, String what) {}
+
+    private Optional<Need> need(KeyEvent key, boolean points, boolean graph) {
+        if (graph && (key.code() == KeyCode.ENTER && focus != Column.FIELDS || key.isChar('<'))) {
+            return Optional.of(new Need(Feature.KNN_GRAPH, "HNSW graph"));
+        }
+        if ((graph && key.isChar('d')) || (key.code() == KeyCode.ENTER && focus == Column.POSTINGS)) {
+            return Optional.of(new Need(Feature.DOCUMENTS, "Open doc"));
+        }
+        if (key.isChar('t') && points) {
+            return Optional.of(new Need(Feature.POINTS, "Points"));
+        }
+        if (key.isChar('e') && !points && !graph) {
+            return Optional.of(new Need(Feature.EXPORT_TERMS, "Export"));
+        }
+        if (key.isChar('b') && filter.isPresent()) {
+            return Optional.of(new Need(Feature.FILTER, "Filter"));
+        }
+        return Optional.empty();
     }
 
     /** Whether the index can search a term (ADR 0058). */
@@ -1290,20 +1355,23 @@ public final class Terms {
     public String keys() {
         if (showsGraph()) {
             if (!features.contains(Feature.KNN_GRAPH)) {
-                return "←/→ column   ↑↓";
+                return COLUMN_KEYS;
             }
             return "⏎ expand / neighbours / walk on   < back   "
-                    + (features.contains(Feature.DOCUMENTS) ? "d open doc   " : "") + "←/→ column   ↑↓";
+                    + (features.contains(Feature.DOCUMENTS) ? "d open doc   " : "") + COLUMN_KEYS;
         }
         if (showsPoints()) {
             return "⏎ expand / points / open doc   " + (features.contains(Feature.POINTS) ? "t format   " : "")
-                    + "←/→ column   ↑↓";
+                    + COLUMN_KEYS;
         }
         String open = features.contains(Feature.DOCUMENTS) ? "⏎ open doc   " : "";
-        String only = !filtered() ? "" : onlyFiltered ? "b all postings   " : "b filter only   ";
+        String only = "";
+        if (filtered()) {
+            only = onlyFiltered ? "b all postings   " : "b filter only   ";
+        }
         String export = features.contains(Feature.EXPORT_TERMS) ? "e export   " : "";
         String search = searchesTerms() ? "s search   " : "";
-        return "/ seek   " + open + search + only + export + "←/→ column   ↑↓";
+        return "/ seek   " + open + search + only + export + COLUMN_KEYS;
     }
 
     /**
@@ -1350,66 +1418,75 @@ public final class Terms {
     }
 
     private Optional<Request> moveSelection(KeyEvent key) {
-        switch (focus) {
-            case FIELDS -> {
-                OptionalInt row = Selection.moved(fieldRow, fields.size(), key);
-                if (row.isEmpty() || row.getAsInt() == fieldRow) {
-                    return Optional.empty();
-                }
-                fieldRow = row.getAsInt();
-            }
-            case TERMS -> {
-                if (selectedVectorField().isPresent()) {
-                    if (knnTree != null) {
-                        Selection.moved(knnTree.selected, knnTree.visible().size(), key)
-                                .ifPresent(row -> knnTree.selected = row);
-                    }
-                    return Optional.empty();
-                }
-                if (selectedPointField().isPresent()) {
-                    if (pointTree != null) {
-                        Selection.moved(pointTree.selected, pointTree.visible().size(), key)
-                                .ifPresent(row -> pointTree.selected = row);
-                    }
-                    return Optional.empty();
-                }
-                if (terms == null) {
-                    return Optional.empty();
-                }
-                OptionalInt row = Selection.moved(terms.selected, terms.entries.size(), key);
-                if (row.isEmpty()) {
-                    return Optional.empty();
-                }
-                terms.selected = row.getAsInt();
-            }
-            case POSTINGS -> {
-                if (selectedVectorField().isPresent()) {
-                    if (knnTree == null) {
-                        return Optional.empty();
-                    }
-                    knnTree.shown()
-                            .ifPresent(shown -> Selection.moved(
-                                            shown.selected, shown.neighbours().size(), key)
-                                    .ifPresent(row -> shown.selected = row));
-                    return Optional.empty();
-                }
-                if (selectedPointField().isPresent()) {
-                    if (pointTree != null && pointTree.leaf != null) {
-                        Selection.moved(pointTree.pointSelected, pointTree.leaf.points.size(), key)
-                                .ifPresent(row -> pointTree.pointSelected = row);
-                    }
-                    return Optional.empty();
-                }
-                if (postings == null) {
-                    return Optional.empty();
-                }
-                OptionalInt row = Selection.moved(postings.selected, postings.postings.size(), key);
-                if (row.isEmpty()) {
-                    return Optional.empty();
-                }
-                postings.selected = row.getAsInt();
-            }
+        return switch (focus) {
+            case FIELDS -> moveField(key);
+            case TERMS -> moveTerm(key);
+            case POSTINGS -> movePosting(key);
+        };
+    }
+
+    private Optional<Request> moveField(KeyEvent key) {
+        OptionalInt row = Selection.moved(fieldRow, fields.size(), key);
+        if (row.isEmpty() || row.getAsInt() == fieldRow) {
+            return Optional.empty();
         }
+        fieldRow = row.getAsInt();
+        return nextRequest();
+    }
+
+    /** Moves in the middle column: the graph's rows, the tree's cells or the terms. */
+    private Optional<Request> moveTerm(KeyEvent key) {
+        if (selectedVectorField().isPresent()) {
+            if (knnTree != null) {
+                Selection.moved(knnTree.selected, knnTree.visible().size(), key)
+                        .ifPresent(row -> knnTree.selected = row);
+            }
+            return Optional.empty();
+        }
+        if (selectedPointField().isPresent()) {
+            if (pointTree != null) {
+                Selection.moved(pointTree.selected, pointTree.visible().size(), key)
+                        .ifPresent(row -> pointTree.selected = row);
+            }
+            return Optional.empty();
+        }
+        if (terms == null) {
+            return Optional.empty();
+        }
+        OptionalInt row = Selection.moved(terms.selected, terms.entries.size(), key);
+        if (row.isEmpty()) {
+            return Optional.empty();
+        }
+        terms.selected = row.getAsInt();
+        return nextRequest();
+    }
+
+    /** Moves in the right column: a node's neighbours, a leaf's points or the postings. */
+    private Optional<Request> movePosting(KeyEvent key) {
+        if (selectedVectorField().isPresent()) {
+            if (knnTree != null) {
+                knnTree.shown()
+                        .ifPresent(shown -> Selection.moved(
+                                        shown.selected, shown.neighbours().size(), key)
+                                .ifPresent(row -> shown.selected = row));
+            }
+            return Optional.empty();
+        }
+        if (selectedPointField().isPresent()) {
+            if (pointTree != null && pointTree.leaf != null) {
+                Selection.moved(pointTree.pointSelected, pointTree.leaf.points.size(), key)
+                        .ifPresent(row -> pointTree.pointSelected = row);
+            }
+            return Optional.empty();
+        }
+        if (postings == null) {
+            return Optional.empty();
+        }
+        OptionalInt row = Selection.moved(postings.selected, postings.postings.size(), key);
+        if (row.isEmpty()) {
+            return Optional.empty();
+        }
+        postings.selected = row.getAsInt();
         return nextRequest();
     }
 
@@ -1425,7 +1502,7 @@ public final class Terms {
                 .orElse(0);
         List<Rect> columns = Layout.horizontal()
                 .constraints(
-                        Constraint.length(Math.clamp(nameWidth + 4, 12, FIELDS_MAX_WIDTH)),
+                        Constraint.length(Math.clamp((long) nameWidth + 4, 12, FIELDS_MAX_WIDTH)),
                         Constraint.fill(),
                         Constraint.length(showsGraph() ? neighboursWidth() : POSTINGS_WIDTH))
                 .split(area);
@@ -1534,24 +1611,9 @@ public final class Terms {
             return;
         }
         boolean onlyMatches = postings.filter.map(PostingsFilter::onlyMatches).orElse(false);
-        String title;
-        if (postings.filter.isEmpty()) {
-            title = " Postings (" + postings.docFreq + ") ";
-        } else if (onlyMatches) {
-            title = " Postings (" + postings.docFreq + ") · filter only ";
-        } else {
-            title = " Postings (" + postings.docFreq + ") · • filter ";
-        }
+        String title = postingsTitle(onlyMatches);
         if (postings.postings.isEmpty()) {
-            String text;
-            if (postings.error.isPresent()) {
-                text = "Cannot read the postings: " + postings.error.get();
-            } else if (onlyMatches) {
-                text = "No postings in the filter.";
-            } else {
-                text = "No postings.";
-            }
-            message(frame, area, title, focused, text);
+            message(frame, area, title, focused, noPostingsText(onlyMatches));
             return;
         }
         boolean marked = postings.filter.isPresent() && !onlyMatches;
@@ -1560,19 +1622,7 @@ public final class Terms {
                 .style(Style.EMPTY.bold());
         List<Row> rows = new ArrayList<>();
         for (Posting posting : postings.postings) {
-            // Marked: in the filter, or dimmed outside it.
-            boolean in = posting.inFilter().orElse(false);
-            boolean out = !posting.inFilter().orElse(true);
-            String mark = marked && in ? "• " : "";
-            Row row = Row.from(
-                    right(mark + posting.docId(), docWidth),
-                    right(
-                            posting.freq().isPresent()
-                                    ? Integer.toString(posting.freq().getAsInt())
-                                    : "-",
-                            4),
-                    posting.deleted() ? Cell.from("deleted").style(Style.EMPTY.red()) : Cell.from(""));
-            rows.add(marked && out ? row.style(Style.EMPTY.fg(Color.DARK_GRAY)) : row);
+            rows.add(postingRow(posting, marked, docWidth));
         }
         tailRow(postings.nextDoc.isPresent(), postings.error).ifPresent(rows::add);
         postings.table.select(postings.selected);
@@ -1582,6 +1632,36 @@ public final class Terms {
                 .block(panel(title, focused))
                 .build();
         frame.renderStatefulWidget(table, area, postings.table);
+    }
+
+    private String postingsTitle(boolean onlyMatches) {
+        if (postings.filter.isEmpty()) {
+            return POSTINGS_TITLE + postings.docFreq + ") ";
+        }
+        return POSTINGS_TITLE + postings.docFreq + (onlyMatches ? ") · filter only " : ") · • filter ");
+    }
+
+    private String noPostingsText(boolean onlyMatches) {
+        if (postings.error.isPresent()) {
+            return "Cannot read the postings: " + postings.error.get();
+        }
+        return onlyMatches ? "No postings in the filter." : "No postings.";
+    }
+
+    /** A posting; {@code marked}, it is marked in the filter, or dimmed outside it. */
+    private static Row postingRow(Posting posting, boolean marked, int docWidth) {
+        boolean in = posting.inFilter().orElse(false);
+        boolean out = !posting.inFilter().orElse(true);
+        String mark = marked && in ? "• " : "";
+        Row row = Row.from(
+                right(mark + posting.docId(), docWidth),
+                right(
+                        posting.freq().isPresent()
+                                ? Integer.toString(posting.freq().getAsInt())
+                                : "-",
+                        4),
+                posting.deleted() ? Cell.from("deleted").style(Style.EMPTY.red()) : Cell.from(""));
+        return marked && out ? row.style(Style.EMPTY.fg(Color.DARK_GRAY)) : row;
     }
 
     private void renderPointTree(Frame frame, Rect area) {
@@ -1757,46 +1837,8 @@ public final class Terms {
         List<Row> rows = new ArrayList<>();
         Style dim = Style.EMPTY.dim();
         for (KnnGraphTree.Item item : visible) {
-            List<Span> spans = new ArrayList<>();
-            switch (item) {
-                case KnnGraphTree.Item.SegmentItem segment -> {
-                    KnnGraphSegment info = segment.segment().info;
-                    spans.add(Span.raw(info.shape().isEmpty() ? "  " : segment.segment().expanded ? "▾ " : "▸ "));
-                    spans.add(Span.styled(info.name().orElse("#" + info.segment()) + "  ", Style.EMPTY.bold()));
-                    spans.add(Span.raw(TextFormat.count(info.vectors(), "vector")));
-                    spans.add(Span.styled(info.shape().map(Terms::shapeText).orElse(" · no graph"), dim));
-                }
-                case KnnGraphTree.Item.EntryItem entry -> {
-                    spans.add(Span.styled("    entry  ", dim));
-                    spans.add(Span.raw(nodeText(entry.node())));
-                }
-                case KnnGraphTree.Item.LevelItem levelItem -> {
-                    KnnGraphTree.Level level = levelItem.level();
-                    spans.add(Span.raw("  " + (level.expanded ? "▾" : "▸") + " L" + level.level + "  "));
-                    spans.add(Span.raw(TextFormat.count(level.total, "node")));
-                    if (level.loading) {
-                        spans.add(Span.styled("  …", dim));
-                    }
-                    level.error.ifPresent(
-                            error -> spans.add(Span.styled("  cannot read it: " + error, Style.EMPTY.red())));
-                }
-                case KnnGraphTree.Item.NodeItem nodeItem -> {
-                    spans.add(Span.raw("      " + nodeText(nodeItem.node())));
-                    if (nodeItem.node().topLevel() > nodeItem.level().level) {
-                        spans.add(Span.styled(" · top L" + nodeItem.node().topLevel(), dim));
-                    }
-                }
-                case KnnGraphTree.Item.MoreItem more ->
-                    spans.add(Span.styled(
-                            "      ⏎ more (" + more.level().nodes.size() + " of " + more.level().total + ")", dim));
-            }
-            Row row = Row.from(Cell.from(Line.from(spans)));
-            boolean deleted = switch (item) {
-                case KnnGraphTree.Item.EntryItem entry -> entry.node().deleted();
-                case KnnGraphTree.Item.NodeItem nodeItem -> nodeItem.node().deleted();
-                default -> false;
-            };
-            rows.add(deleted ? row.style(Style.EMPTY.red()) : row);
+            Row row = Row.from(Cell.from(Line.from(itemSpans(item, dim))));
+            rows.add(deleted(item) ? row.style(Style.EMPTY.red()) : row);
         }
         knnTree.table.select(knnTree.selected);
         Table table = table(rows, focused)
@@ -1804,6 +1846,52 @@ public final class Terms {
                 .block(panel(title, focused))
                 .build();
         frame.renderStatefulWidget(table, area, knnTree.table);
+    }
+
+    /** A row of the graph tree: a segment, its entry point, a level or a node of it. */
+    private static List<Span> itemSpans(KnnGraphTree.Item item, Style dim) {
+        List<Span> spans = new ArrayList<>();
+        switch (item) {
+            case KnnGraphTree.Item.SegmentItem segment -> {
+                KnnGraphSegment info = segment.segment().info;
+                String marker = segment.segment().expanded ? "▾ " : "▸ ";
+                spans.add(Span.raw(info.shape().isEmpty() ? "  " : marker));
+                spans.add(Span.styled(info.name().orElse("#" + info.segment()) + "  ", Style.EMPTY.bold()));
+                spans.add(Span.raw(TextFormat.count(info.vectors(), "vector")));
+                spans.add(Span.styled(info.shape().map(Terms::shapeText).orElse(" · no graph"), dim));
+            }
+            case KnnGraphTree.Item.EntryItem entry -> {
+                spans.add(Span.styled("    entry  ", dim));
+                spans.add(Span.raw(nodeText(entry.node())));
+            }
+            case KnnGraphTree.Item.LevelItem levelItem -> {
+                KnnGraphTree.Level level = levelItem.level();
+                spans.add(Span.raw("  " + (level.expanded ? "▾" : "▸") + " L" + level.number + "  "));
+                spans.add(Span.raw(TextFormat.count(level.total, "node")));
+                if (level.loading) {
+                    spans.add(Span.styled("  …", dim));
+                }
+                level.error.ifPresent(error -> spans.add(Span.styled("  cannot read it: " + error, Style.EMPTY.red())));
+            }
+            case KnnGraphTree.Item.NodeItem nodeItem -> {
+                spans.add(Span.raw("      " + nodeText(nodeItem.node())));
+                if (nodeItem.node().topLevel() > nodeItem.level().number) {
+                    spans.add(Span.styled(" · top L" + nodeItem.node().topLevel(), dim));
+                }
+            }
+            case KnnGraphTree.Item.MoreItem more ->
+                spans.add(Span.styled(
+                        "      ⏎ more (" + more.level().nodes.size() + " of " + more.level().total + ")", dim));
+        }
+        return spans;
+    }
+
+    private static boolean deleted(KnnGraphTree.Item item) {
+        return switch (item) {
+            case KnnGraphTree.Item.EntryItem entry -> entry.node().deleted();
+            case KnnGraphTree.Item.NodeItem nodeItem -> nodeItem.node().deleted();
+            default -> false;
+        };
     }
 
     /** A graph's levels and M, such as {@code · 3 levels · M 16}. */
@@ -1830,7 +1918,7 @@ public final class Terms {
         int ordWidth = Selection.numberWidth(segments.stream().mapToLong(segment -> segment.vectors() - 1L));
         int docWidth = Selection.numberWidth(
                 segments.stream().mapToLong(segment -> segment.docBase() + segment.maxDoc() - 1L));
-        return Math.clamp(NEIGHBOURS_FIXED_WIDTH + ordWidth + docWidth, POSTINGS_WIDTH, NEIGHBOURS_WIDTH);
+        return Math.clamp((long) NEIGHBOURS_FIXED_WIDTH + ordWidth + docWidth, POSTINGS_WIDTH, NEIGHBOURS_WIDTH);
     }
 
     private void renderNeighbours(Frame frame, Rect area) {
@@ -1868,7 +1956,6 @@ public final class Terms {
                         right("Score", 6))
                 .style(Style.EMPTY.bold());
         List<Row> rows = new ArrayList<>();
-        Style dim = Style.EMPTY.dim();
         // The node itself first, then each level's neighbours, the level on the first of them.
         Row self = Row.from(
                         Cell.from("node"),
@@ -1878,6 +1965,28 @@ public final class Terms {
                         Cell.from(""))
                 .style(node.node().deleted() ? Style.EMPTY.red().bold() : Style.EMPTY.bold());
         rows.add(self);
+        int selectedRow = addLevelRows(rows, node, shown.get().selected, ordWidth, docWidth);
+        shown.get().table.select(neighbours.isEmpty() ? 0 : selectedRow);
+        Table table = table(rows, focused)
+                .widths(
+                        Constraint.length(4),
+                        Constraint.length(ordWidth),
+                        Constraint.length(docWidth),
+                        Constraint.length(3),
+                        Constraint.length(6))
+                .header(header)
+                .block(panel(title, focused))
+                .build();
+        frame.renderStatefulWidget(table, area, shown.get().table);
+    }
+
+    /**
+     * Adds each level's neighbours, the level on the first of them, and returns the row of neighbour
+     * {@code selected}.
+     */
+    private static int addLevelRows(
+            List<Row> rows, GetKnnGraphNodeResult node, int selected, int ordWidth, int docWidth) {
+        Style dim = Style.EMPTY.dim();
         int selectedRow = 0;
         int index = 0;
         for (KnnGraphLevel level : node.levels()) {
@@ -1888,7 +1997,7 @@ public final class Terms {
             }
             boolean first = true;
             for (KnnGraphNeighbour neighbour : level.neighbours()) {
-                if (index == shown.get().selected) {
+                if (index == selected) {
                     selectedRow = rows.size();
                 }
                 Row row = Row.from(
@@ -1902,18 +2011,7 @@ public final class Terms {
                 index++;
             }
         }
-        shown.get().table.select(neighbours.isEmpty() ? 0 : selectedRow);
-        Table table = table(rows, focused)
-                .widths(
-                        Constraint.length(4),
-                        Constraint.length(ordWidth),
-                        Constraint.length(docWidth),
-                        Constraint.length(3),
-                        Constraint.length(6))
-                .header(header)
-                .block(panel(title, focused))
-                .build();
-        frame.renderStatefulWidget(table, area, shown.get().table);
+        return selectedRow;
     }
 
     /**
@@ -1953,5 +2051,13 @@ public final class Terms {
 
     private static void message(Frame frame, Rect area, String title, boolean focused, String text) {
         frame.renderWidget(Panels.wrapped(text, panel(title, focused), area), area);
+    }
+
+    /** What a key that works on terms only says on a points or graph field. */
+    private static String termsOnly(KeyEvent key) {
+        if (key.isChar('/')) {
+            return "/ seeks terms only";
+        }
+        return key.isChar('e') ? "e exports terms only" : "s searches terms only";
     }
 }

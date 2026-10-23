@@ -21,6 +21,7 @@ import java.util.Optional;
 import java.util.jar.JarFile;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 
 /**
@@ -42,6 +43,8 @@ public final class RuntimeFolders {
 
     /** The list of the jars beside the adapter, in the adapter jar. */
     public static final String LIST = "META-INF/leia/runtime.txt";
+
+    private static final Pattern WHITESPACE = Pattern.compile("\\s+");
 
     private static final String API_PACKAGE = LuceneRuntime.class.getPackageName() + ".";
 
@@ -163,7 +166,7 @@ public final class RuntimeFolders {
         }
         List<String> listed;
         try {
-            listed = list(adapter);
+            listed = listedJars(adapter);
         } catch (IOException e) {
             return new State.Refused("cannot read " + LIST + " of " + adapter + ": " + e.getMessage());
         }
@@ -207,7 +210,7 @@ public final class RuntimeFolders {
         for (int i = 0; i < urls.length; i++) {
             try {
                 urls[i] = jars.get(i).toUri().toURL();
-            } catch (MalformedURLException e) {
+            } catch (MalformedURLException _) {
                 return new State.Refused("not a jar: " + jars.get(i));
             }
         }
@@ -246,14 +249,14 @@ public final class RuntimeFolders {
     public record ListedJar(String name, String sha256, long size, Optional<String> mavenPath) {}
 
     /** The file names that {@code adapter}'s list names, in order. */
-    static List<String> list(Path adapter) throws IOException {
+    static List<String> listedJars(Path adapter) throws IOException {
         try (JarFile jar = new JarFile(adapter.toFile())) {
             ZipEntry entry = jar.getEntry(LIST);
             if (entry == null) {
                 throw new IOException("there is none");
             }
             try (InputStream in = jar.getInputStream(entry)) {
-                return list(in).stream().map(ListedJar::name).toList();
+                return listedJars(in).stream().map(ListedJar::name).toList();
             }
         }
     }
@@ -263,7 +266,7 @@ public final class RuntimeFolders {
      *
      * @throws IOException if it can't be read, or a line is malformed
      */
-    public static List<ListedJar> list(InputStream list) throws IOException {
+    public static List<ListedJar> listedJars(InputStream list) throws IOException {
         List<ListedJar> jars = new ArrayList<>();
         BufferedReader reader = new BufferedReader(new InputStreamReader(list, StandardCharsets.UTF_8));
         for (String line = reader.readLine(); line != null; line = reader.readLine()) {
@@ -271,7 +274,7 @@ public final class RuntimeFolders {
             if (trimmed.isEmpty() || trimmed.startsWith("#")) {
                 continue;
             }
-            String[] fields = trimmed.split("\\s+");
+            String[] fields = WHITESPACE.split(trimmed);
             if (fields.length < 3 || fields.length > 4) {
                 throw new IOException("not a line of a runtime's list: " + trimmed);
             }

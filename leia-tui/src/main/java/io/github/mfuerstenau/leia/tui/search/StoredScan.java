@@ -164,36 +164,42 @@ public final class StoredScan {
         }
         int current = Math.min(selected, hits.size() - 1);
         int docId = hits.get(current).docId();
-        int row = -1;
-        if (forward) {
-            for (int i = current + 1; i < hits.size(); i++) {
-                if (hits.get(i).docId() != docId) {
-                    row = i;
-                    break;
-                }
-            }
-        } else {
-            int before = -1;
-            for (int i = current - 1; i >= 0; i--) {
-                if (hits.get(i).docId() != docId) {
-                    before = i;
-                    break;
-                }
-            }
-            if (before >= 0) {
-                // The first hit of that document.
-                int other = hits.get(before).docId();
-                row = before;
-                while (row > 0 && hits.get(row - 1).docId() == other) {
-                    row--;
-                }
-            }
-        }
+        int row = forward ? nextDocument(current, docId) : previousDocument(current, docId);
         if (row < 0) {
             return OptionalInt.empty();
         }
         selected = row;
         return OptionalInt.of(hits.get(row).docId());
+    }
+
+    /** The row of the first hit after {@code current} of another document than {@code docId}; -1 if none. */
+    private int nextDocument(int current, int docId) {
+        for (int i = current + 1; i < hits.size(); i++) {
+            if (hits.get(i).docId() != docId) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /** The row of the first hit of the document before {@code current}'s {@code docId}; -1 if none. */
+    private int previousDocument(int current, int docId) {
+        int before = -1;
+        for (int i = current - 1; i >= 0 && before < 0; i--) {
+            if (hits.get(i).docId() != docId) {
+                before = i;
+            }
+        }
+        if (before < 0) {
+            return -1;
+        }
+        // The first hit of that document.
+        int other = hits.get(before).docId();
+        int row = before;
+        while (row > 0 && hits.get(row - 1).docId() == other) {
+            row--;
+        }
+        return row;
     }
 
     public void render(Frame frame, Rect area, boolean focused, int maxDoc) {
@@ -234,7 +240,7 @@ public final class StoredScan {
                     right(Integer.toString(hit.matchCount()), matchesWidth),
                     Cell.from(snippetLine(hit))));
         }
-        table.select(Math.min(Math.max(selected, 0), hits.size() - 1));
+        table.select(Math.clamp(selected, 0, hits.size() - 1));
         Table widget = Table.builder()
                 .rows(rows)
                 .header(Row.from(
@@ -307,23 +313,31 @@ public final class StoredScan {
                                 + " values are listed; the counts are of all of them.",
                         Form.dim()));
             }
-            if (result.timedOutValues() > 0) {
-                lines.add(Line.styled(
-                        TextFormat.count(result.timedOutValues(), "value") + " took too long to match and "
-                                + (result.timedOutValues() == 1 ? "was" : "were") + " skipped:",
-                        Style.EMPTY.yellow()));
-                for (ValueRef value : result.timedOut()) {
-                    lines.add(Line.from("  doc " + value.docId() + " · " + TextFormat.escapeControl(value.field()) + "["
-                            + value.valueIndex() + "]"));
-                }
-                long listed = result.timedOut().size();
-                if (result.timedOutValues() > listed) {
-                    lines.add(Line.from("  and " + (result.timedOutValues() - listed) + " more"));
-                }
-            }
+            lines.addAll(timedOutLines());
         }
         if (error != null) {
             lines.add(Line.styled(error, Style.EMPTY.red()));
+        }
+        return lines;
+    }
+
+    /** The values that took too long to match, if any. */
+    private List<Line> timedOutLines() {
+        if (result.timedOutValues() == 0) {
+            return List.of();
+        }
+        List<Line> lines = new ArrayList<>();
+        lines.add(Line.styled(
+                TextFormat.count(result.timedOutValues(), "value") + " took too long to match and "
+                        + (result.timedOutValues() == 1 ? "was" : "were") + " skipped:",
+                Style.EMPTY.yellow()));
+        for (ValueRef value : result.timedOut()) {
+            lines.add(Line.from("  doc " + value.docId() + " · " + TextFormat.escapeControl(value.field()) + "["
+                    + value.valueIndex() + "]"));
+        }
+        long listed = result.timedOut().size();
+        if (result.timedOutValues() > listed) {
+            lines.add(Line.from("  and " + (result.timedOutValues() - listed) + " more"));
         }
         return lines;
     }

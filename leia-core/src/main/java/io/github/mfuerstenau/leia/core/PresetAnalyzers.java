@@ -188,12 +188,8 @@ final class PresetAnalyzers {
             throw new InvalidAnalyzerException("no preset analyzer '" + spec.className() + "'", null);
         }
         check(preset, spec);
-        Optional<CharArraySet> stopwords = spec.stopwords().isPresent()
-                ? Optional.of(read("stop words", spec.stopwords().orElseThrow()))
-                : Optional.empty();
-        Optional<CharArraySet> stemExclusion = spec.stemExclusion().isPresent()
-                ? Optional.of(read("stem exclusions", spec.stemExclusion().orElseThrow()))
-                : Optional.empty();
+        Optional<CharArraySet> stopwords = given("stop words", spec.stopwords());
+        Optional<CharArraySet> stemExclusion = given("stem exclusions", spec.stemExclusion());
         Analyzer analyzer;
         if (preset.collation().isPresent()) {
             Constructor<? extends Analyzer> constructor = preset.collation().orElseThrow();
@@ -212,7 +208,7 @@ final class PresetAnalyzers {
             Constructor<? extends Analyzer> constructor = preset.japanese().orElseThrow();
             Japanese options =
                     spec.japanese().orElse(new Japanese(Optional.empty(), Optional.empty(), Optional.empty()));
-            CharArraySet set = stopwords.isPresent() ? stopwords.orElseThrow() : defaultStopwords(preset);
+            CharArraySet set = stopwordsOrDefault(stopwords, preset);
             analyzer = construct(preset, constructor, KuromojiNori.japaneseArguments(constructor, set, options));
         } else if (spec.korean().isPresent()) {
             Constructor<? extends Analyzer> constructor = preset.korean().orElseThrow();
@@ -225,14 +221,14 @@ final class PresetAnalyzers {
             analyzer = construct(
                     preset,
                     preset.stemOverride().orElseThrow(),
-                    stopwords.isPresent() ? stopwords.orElseThrow() : defaultStopwords(preset),
+                    stopwordsOrDefault(stopwords, preset),
                     stemExclusion.orElse(CharArraySet.EMPTY_SET),
                     dictionary);
         } else if (stemExclusion.isPresent()) {
             analyzer = construct(
                     preset,
                     preset.stopwordsAndStemExclusion().orElseThrow(),
-                    stopwords.isPresent() ? stopwords.orElseThrow() : defaultStopwords(preset),
+                    stopwordsOrDefault(stopwords, preset),
                     stemExclusion.orElseThrow());
         } else if (stopwords.isPresent()) {
             analyzer = construct(preset, preset.stopwords().orElseThrow(), stopwords.orElseThrow());
@@ -252,7 +248,6 @@ final class PresetAnalyzers {
 
     /** Whether the preset takes what {@code spec} gives it, and the values are in range. */
     private static void check(Preset preset, AnalyzerSpec.Preset spec) throws InvalidAnalyzerException {
-        List<PresetOption> options = preset.options();
         if (spec.stopwords().isPresent() && preset.stopwordSupport() == WordSetSupport.NONE) {
             throw new InvalidAnalyzerException(preset.name() + " takes no stop words", null);
         }
@@ -262,30 +257,30 @@ final class PresetAnalyzers {
         if (spec.stopwords().isEmpty() && preset.stopwordSupport() == WordSetSupport.REQUIRED) {
             throw new InvalidAnalyzerException(preset.name() + " needs stop words", null);
         }
-        if (spec.maxTokenLength().isPresent() && !options.contains(PresetOption.MAX_TOKEN_LENGTH)) {
-            throw new InvalidAnalyzerException(preset.name() + " takes no max token length", null);
-        }
-        if (spec.stemOverride().isPresent() && !options.contains(PresetOption.STEM_OVERRIDE)) {
-            throw new InvalidAnalyzerException(preset.name() + " takes no stem overrides", null);
-        }
-        if (spec.japanese().isPresent() && !options.contains(PresetOption.JAPANESE)) {
-            throw new InvalidAnalyzerException(preset.name() + " takes no Japanese options", null);
-        }
-        if (spec.korean().isPresent() && !options.contains(PresetOption.KOREAN)) {
-            throw new InvalidAnalyzerException(preset.name() + " takes no Korean options", null);
-        }
-        if (spec.collation().isPresent() && !options.contains(PresetOption.COLLATION)) {
-            throw new InvalidAnalyzerException(preset.name() + " takes no collation", null);
-        }
-        if (spec.japaneseCompletion().isPresent() && !options.contains(PresetOption.JAPANESE_COMPLETION)) {
-            throw new InvalidAnalyzerException(preset.name() + " takes no Japanese completion options", null);
-        }
+        checkOption(preset, spec.maxTokenLength().isPresent(), PresetOption.MAX_TOKEN_LENGTH, "max token length");
+        checkOption(preset, spec.stemOverride().isPresent(), PresetOption.STEM_OVERRIDE, "stem overrides");
+        checkOption(preset, spec.japanese().isPresent(), PresetOption.JAPANESE, "Japanese options");
+        checkOption(preset, spec.korean().isPresent(), PresetOption.KOREAN, "Korean options");
+        checkOption(preset, spec.collation().isPresent(), PresetOption.COLLATION, "collation");
+        checkOption(
+                preset,
+                spec.japaneseCompletion().isPresent(),
+                PresetOption.JAPANESE_COMPLETION,
+                "Japanese completion options");
         if (spec.maxTokenLength().isPresent()) {
             int length = spec.maxTokenLength().getAsInt();
             if (length < 1 || length > MAX_TOKEN_LENGTH) {
                 throw new InvalidAnalyzerException(
                         "max token length: must be from 1 to " + MAX_TOKEN_LENGTH + ", not " + length, null);
             }
+        }
+    }
+
+    /** Fails if {@code given} is an option that {@code preset} doesn't take. */
+    private static void checkOption(Preset preset, boolean given, PresetOption option, String what)
+            throws InvalidAnalyzerException {
+        if (given && !preset.options().contains(option)) {
+            throw new InvalidAnalyzerException(preset.name() + " takes no " + what, null);
         }
     }
 
@@ -300,6 +295,16 @@ final class PresetAnalyzers {
             analyzer.close();
             throw new InvalidAnalyzerException(preset.name() + ": " + e, e);
         }
+    }
+
+    /** The set of {@code words}, if given. */
+    private static Optional<CharArraySet> given(String what, Optional<WordSet> words) throws InvalidAnalyzerException {
+        return words.isPresent() ? Optional.of(read(what, words.orElseThrow())) : Optional.empty();
+    }
+
+    private static CharArraySet stopwordsOrDefault(Optional<CharArraySet> stopwords, Preset preset)
+            throws InvalidAnalyzerException {
+        return stopwords.isPresent() ? stopwords.orElseThrow() : defaultStopwords(preset);
     }
 
     /** What the preset uses without stop words of its own. */
@@ -383,7 +388,7 @@ final class PresetAnalyzers {
 
     /** Reads a file. */
     interface FileReader<T> {
-        T read(Reader reader) throws Exception;
+        T read(Reader reader) throws IOException, ReflectiveOperationException, InvalidAnalyzerException;
     }
 
     /**
@@ -395,7 +400,7 @@ final class PresetAnalyzers {
             return read.read(reader);
         } catch (InvalidAnalyzerException e) {
             throw e;
-        } catch (Exception e) {
+        } catch (IOException | ReflectiveOperationException | RuntimeException e) {
             throw unreadable(what, path, e);
         }
     }
@@ -534,7 +539,7 @@ final class PresetAnalyzers {
         try {
             Method method = type.getMethod("setMaxTokenLength", int.class);
             return Modifier.isStatic(method.getModifiers()) ? Optional.empty() : Optional.of(method);
-        } catch (NoSuchMethodException | LinkageError e) {
+        } catch (NoSuchMethodException | LinkageError _) {
             return Optional.empty();
         }
     }
@@ -544,7 +549,7 @@ final class PresetAnalyzers {
             Class<? extends Analyzer> type, Class<?>... parameters) {
         try {
             return Optional.of(type.getConstructor(parameters));
-        } catch (NoSuchMethodException | LinkageError e) {
+        } catch (NoSuchMethodException | LinkageError _) {
             return Optional.empty();
         }
     }
@@ -557,7 +562,7 @@ final class PresetAnalyzers {
                             && CharArraySet.class.isAssignableFrom(method.getReturnType())
                     ? Optional.of(method)
                     : Optional.empty();
-        } catch (NoSuchMethodException | LinkageError e) {
+        } catch (NoSuchMethodException | LinkageError _) {
             return Optional.empty();
         }
     }

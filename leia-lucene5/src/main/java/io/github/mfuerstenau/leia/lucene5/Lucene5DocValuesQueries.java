@@ -169,7 +169,7 @@ final class Lucene5DocValuesQueries {
             lower = parseLong(range.lower().get());
             if (!range.includeLower()) {
                 if (lower == Long.MAX_VALUE) {
-                    return none(field);
+                    return none();
                 }
                 lower++;
             }
@@ -178,7 +178,7 @@ final class Lucene5DocValuesQueries {
             upper = parseLong(range.upper().get());
             if (!range.includeUpper()) {
                 if (upper == Long.MIN_VALUE) {
-                    return none(field);
+                    return none();
                 }
                 upper--;
             }
@@ -196,18 +196,18 @@ final class Lucene5DocValuesQueries {
         Optional<Double> upper = range.upper().map(text -> parseFloating(number, text));
         if (lower.isPresent() && !range.includeLower()) {
             if (lower.get() == Double.POSITIVE_INFINITY) {
-                return none(field);
+                return none();
             }
             lower = Optional.of(nextUp(number, lower.get()));
         }
         if (upper.isPresent() && !range.includeUpper()) {
             if (upper.get() == Double.NEGATIVE_INFINITY) {
-                return none(field);
+                return none();
             }
             upper = Optional.of(nextDown(number, upper.get()));
         }
         if (lower.isPresent() && upper.isPresent() && Double.compare(lower.get(), upper.get()) > 0) {
-            return none(field);
+            return none();
         }
         if (!raw(number)) {
             return longRange(
@@ -215,6 +215,15 @@ final class Lucene5DocValuesQueries {
                     lower.map(value -> encode(number, value)).orElse(Long.MIN_VALUE),
                     upper.map(value -> encode(number, value)).orElse(Long.MAX_VALUE));
         }
+        return rawRange(field, number, lower, upper);
+    }
+
+    /**
+     * A range of raw float bits: the positive and the negative values each are a range of longs, the
+     * negative ones reversed.
+     */
+    private static Query rawRange(
+            FieldInfo field, NumberEncoding number, Optional<Double> lower, Optional<Double> upper) {
         BooleanQuery.Builder parts = new BooleanQuery.Builder();
         if (upper.isEmpty() || Double.compare(upper.get(), 0.0) >= 0) {
             double from = lower.filter(value -> Double.compare(value, 0.0) > 0).orElse(0.0);
@@ -243,7 +252,7 @@ final class Lucene5DocValuesQueries {
     }
 
     /** No document: 5.5's {@link MatchNoDocsQuery} takes no reason. */
-    private static Query none(FieldInfo field) {
+    private static Query none() {
         return new MatchNoDocsQuery();
     }
 

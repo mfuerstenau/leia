@@ -89,7 +89,7 @@ public final class PathCompletion {
         String prefix = input.substring(split);
         List<Match> matches;
         try {
-            Path listed = dir.isEmpty() ? Path.of(".") : Path.of(expandHome(dir, home));
+            Path listed = Path.of(dir.isEmpty() ? "." : expandHome(dir, home));
             try (Stream<Path> entries = Files.list(listed)) {
                 matches = entries.map(entry -> match(entry, file))
                         .flatMap(Optional::stream)
@@ -98,7 +98,7 @@ public final class PathCompletion {
                         .sorted(Comparator.comparing(Match::name))
                         .toList();
             }
-        } catch (IOException | InvalidPathException e) {
+        } catch (IOException | InvalidPathException _) {
             return new Completion(input, List.of());
         }
         if (matches.isEmpty()) {

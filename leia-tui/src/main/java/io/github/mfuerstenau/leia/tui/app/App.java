@@ -124,6 +124,10 @@ import java.util.logging.Level;
  */
 public final class App {
 
+    private static final String APP_KEYS = "q quit   o open   c close   ";
+
+    private static final String INDEXES = " indexes";
+
     /** The major of the Lucene that reads the newest indexes, leia-lucene10's (ADR 0071). */
     static final int NEWEST_LUCENE_MAJOR = 10;
 
@@ -505,7 +509,7 @@ public final class App {
                     changed++;
                 }
             }
-            reopened = changed + " of " + indexes.size() + " indexes";
+            reopened = changed + " of " + indexes.size() + INDEXES;
         }
         // Before anything below reads it.
         opened = new Opened(
@@ -592,7 +596,7 @@ public final class App {
                                 .reader()
                                 .map(ReaderInfo::segmentsFile)
                                 .orElse("")
-                        : indexes.size() + " indexes");
+                        : indexes.size() + INDEXES);
         busy = false;
     }
 
@@ -998,8 +1002,8 @@ public final class App {
                 Optional.of(new Action.StartExplain(explain.explainId(), explain.params(), explain.cancel()));
             case Search.Request.Highlight highlight ->
                 Optional.of(new Action.StartHighlight(highlight.highlightId(), highlight.params(), highlight.cancel()));
-            case Search.Request.StoredScan scan ->
-                Optional.of(new Action.StartStoredScan(scan.scanId(), scan.params(), scan.cancel()));
+            case Search.Request.StoredScan storedScan ->
+                Optional.of(new Action.StartStoredScan(storedScan.scanId(), storedScan.params(), storedScan.cancel()));
             case Search.Request.Recall recall ->
                 Optional.of(new Action.StartKnnRecall(recall.recallId(), recall.params(), recall.cancel()));
             case Search.Request.Cancel cancel -> Optional.of(new Action.CancelSearch(cancel.jobs()));
@@ -1446,11 +1450,11 @@ public final class App {
     /** Starts the export the prompt asks for: the prompt says "Exporting…" until it has started. */
     private Optional<Action> startExport(ExportPrompt.ExportRequest request) {
         return switch (request) {
-            case ExportPrompt.ExportRequest.Terms terms -> {
+            case ExportPrompt.ExportRequest.Terms termsRequest -> {
                 exportPrompt.setBusy();
                 long id = nextExportId++;
-                export = new TermsExport(id, terms.params().field(), null, 0);
-                yield Optional.of(new Action.StartExportTerms(id, terms.params()));
+                export = new TermsExport(id, termsRequest.params().field(), null, 0);
+                yield Optional.of(new Action.StartExportTerms(id, termsRequest.params()));
             }
             case ExportPrompt.ExportRequest.Document document -> {
                 exportPrompt.setBusy();
@@ -1503,9 +1507,9 @@ public final class App {
      * meanwhile, returns the action that cancels the job.
      */
     public Optional<Action> exportStarted(long exportId, long jobId) {
-        if (export instanceof TermsExport terms && terms.id() == exportId && terms.jobId() == null) {
+        if (export instanceof TermsExport termsExport && termsExport.id() == exportId && termsExport.jobId() == null) {
             exportPrompt = null;
-            export = new TermsExport(exportId, terms.field(), jobId, 0);
+            export = new TermsExport(exportId, termsExport.field(), jobId, 0);
             return Optional.empty();
         }
         if (!(export instanceof Rebuilding rebuilding) || rebuilding.id() != exportId || rebuilding.jobId() != null) {
@@ -1525,7 +1529,7 @@ public final class App {
 
     /** Shows the progress of terms export {@code exportId}, or where it wrote the terms. */
     public void termsExportProgress(long exportId, GetExportTermsResult result) {
-        if (!(export instanceof TermsExport terms) || terms.id() != exportId) {
+        if (!(export instanceof TermsExport termsExport) || termsExport.id() != exportId) {
             return;
         }
         if (result.result().isPresent()) {
@@ -1535,7 +1539,7 @@ public final class App {
                             + shownPath(result.result().get().path()));
             return;
         }
-        export = new TermsExport(exportId, terms.field(), terms.jobId(), result.termsWritten());
+        export = new TermsExport(exportId, termsExport.field(), termsExport.jobId(), result.termsWritten());
     }
 
     /** Shows the progress of the rebuild. Returns where the export goes once it is done. */
@@ -1767,8 +1771,8 @@ public final class App {
         if (export instanceof Rebuilding rebuilding && rebuilding.jobId() != null) {
             polls.add(new Poll.DocumentExport(rebuilding.id(), rebuilding.jobId()));
         }
-        if (export instanceof TermsExport terms && terms.jobId() != null) {
-            polls.add(new Poll.ExportTerms(terms.id(), terms.jobId()));
+        if (export instanceof TermsExport termsExport && termsExport.jobId() != null) {
+            polls.add(new Poll.ExportTerms(termsExport.id(), termsExport.jobId()));
         }
         if (search != null) {
             search.searchJob().ifPresent(job -> polls.add(new Poll.Search(job[0], job[1])));
@@ -1898,18 +1902,7 @@ public final class App {
     /** What the overview does with a key that isn't one of the app's. */
     private Optional<Action> overviewKey(KeyEvent key) {
         if (key.code() == KeyCode.ENTER) {
-            Optional<Overview.FieldTerm> top = overview.selectedTopTerm();
-            if (top.isPresent()) {
-                if (!opened.supports(Feature.TERMS)) {
-                    notice = new Notice.NotSupported("Term's docs", reason());
-                    return Optional.empty();
-                }
-                jump(Screen.TERMS);
-                return termsAction(terms.browse(top.get().field(), top.get().term()));
-            }
-            return overview.selectedField()
-                    .filter(overview::needsScan)
-                    .flatMap(field -> requestScans(List.of(field.name())));
+            return overviewEnter();
         }
         if (key.isChar('/')) {
             Optional<Overview.FieldTerm> top = overview.selectedTopTerm();
@@ -1935,122 +1928,51 @@ public final class App {
         return Optional.empty();
     }
 
+    /** Enter on the overview: the docs of the selected top term, or else a scan of the selected field. */
+    private Optional<Action> overviewEnter() {
+        Optional<Overview.FieldTerm> top = overview.selectedTopTerm();
+        if (top.isEmpty()) {
+            return overview.selectedField()
+                    .filter(overview::needsScan)
+                    .flatMap(field -> requestScans(List.of(field.name())));
+        }
+        if (!opened.supports(Feature.TERMS)) {
+            notice = new Notice.NotSupported("Term's docs", reason());
+            return Optional.empty();
+        }
+        jump(Screen.TERMS);
+        return termsAction(terms.browse(top.get().field(), top.get().term()));
+    }
+
     public Optional<Action> handleKey(KeyEvent key) {
         boolean isChar = key.code() == KeyCode.CHAR;
         if (isChar && key.codePoint() == 'c' && key.hasCtrl()) {
             return Optional.of(new Action.Quit());
         }
         if (logWindow != null) {
-            return switch (logWindow.handleKey(key)) {
-                case LogWindow.Copy copy -> Optional.of(new Action.Copy(copy.text()));
-                case LogWindow.Close _ -> {
-                    logFilter = logWindow.filter();
-                    logWindow = null;
-                    yield Optional.empty();
-                }
-                case LogWindow.Nothing _ -> Optional.empty();
-            };
+            return logWindowKey(key);
         }
         if (busy) {
             return Optional.empty();
         }
         notice = null;
         if (runtimeWindow != null) {
-            return switch (runtimeWindow.handleKey(key)) {
-                case RuntimeWindow.Install install -> Optional.of(new Action.InstallRuntimes(install));
-                case RuntimeWindow.Close _ -> {
-                    runtimeWindow = null;
-                    yield Optional.empty();
-                }
-                case RuntimeWindow.Nothing _ -> Optional.empty();
-            };
+            return runtimeWindowKey(key);
         }
         if (jars != null) {
-            return switch (jars.handleKey(key)) {
-                case JarsPopup.Submit submit -> {
-                    jars.setBusy();
-                    yield Optional.of(new Action.AddJars(
-                            new AddJarsParams(List.of(PathCompletion.expandHome(submit.path(), home)))));
-                }
-                case JarsPopup.Close _ -> {
-                    jars = null;
-                    yield Optional.empty();
-                }
-                case JarsPopup.Nothing _ -> Optional.empty();
-            };
+            return jarsKey(key);
         }
         if (prompt != null) {
-            return switch (prompt.handleKey(key)) {
-                case PathPrompt.Submit submit -> {
-                    prompt.setBusy();
-                    directory = prompt.directory();
-                    busy = true;
-                    yield Optional.of(
-                            new Action.Open(PathCompletion.expandHome(submit.path(), home), directory, prompt.mode()));
-                }
-                case PathPrompt.Cancel _ -> {
-                    failedPath = prompt.error().isPresent() ? prompt.input() : null;
-                    prompt = null;
-                    yield Optional.empty();
-                }
-                case PathPrompt.Nothing _ -> Optional.empty();
-            };
+            return promptKey(key);
         }
         if (exportPrompt != null) {
-            return switch (exportPrompt.handleKey(key)) {
-                case ExportPrompt.Submit submit -> startExport(submit.request());
-                case ExportPrompt.Cancel _ -> {
-                    exportPrompt = null;
-                    yield Optional.empty();
-                }
-                case ExportPrompt.Nothing _ -> Optional.empty();
-            };
+            return exportPromptKey(key);
         }
-        if (screen == Screen.TERMS && terms != null && terms.prompting()) {
-            return termsAction(terms.handleKey(key));
-        }
-        if (screen == Screen.DOCUMENTS && documents != null && documents.prompting()) {
-            return documentsAction(documents.handleKey(key));
-        }
-        if (screen == Screen.ANALYSIS && analysis.prompting()) {
-            return analysisAction(analysis.handleKey(key));
-        }
-        if (screen == Screen.SEARCH && search != null && search.prompting()) {
-            return searchAction(search.handleKey(key));
+        if (screenPrompting()) {
+            return screenPromptKey(key);
         }
         if (key.code() == KeyCode.ESCAPE) {
-            // Esc stops the scans first, then the export, then the shown screen's jobs, and quits only
-            // when there are none.
-            if (scan != null) {
-                return cancelScans();
-            }
-            if (export != null) {
-                Long job = switch (export) {
-                    case Rebuilding rebuilding -> rebuilding.jobId();
-                    case TermsExport terms -> terms.jobId();
-                    default -> null;
-                };
-                export = null;
-                return job != null ? Optional.of(new Action.CancelExport(job)) : Optional.empty();
-            }
-            if (screen == Screen.SEARCH && searching()) {
-                // A job that hasn't started yet is cancelled once it starts.
-                List<Long> jobs = search.cancel();
-                return jobs.isEmpty() ? Optional.empty() : Optional.of(new Action.CancelSearch(jobs));
-            }
-            if (screen == Screen.DOCUMENTS && documents != null && documents.rebuilding()) {
-                OptionalLong job = documents.stopRebuild();
-                return job.isPresent() ? Optional.of(new Action.CancelReconstruct(job.getAsLong())) : Optional.empty();
-            }
-            if (screen == Screen.DOCUMENTS && documents != null && documents.filterBuilding()) {
-                return documentsAction(documents.clearFilter());
-            }
-            if (screen == Screen.CHECK && checking()) {
-                // A job that hasn't started yet is cancelled once it starts.
-                OptionalLong job = check.cancel();
-                return job.isPresent() ? Optional.of(new Action.CancelCheck(job.getAsLong())) : Optional.empty();
-            }
-            return Optional.of(new Action.Quit());
+            return escapeKey();
         }
         if (key.code() == KeyCode.BACKSPACE) {
             return goBack();
@@ -2058,28 +1980,150 @@ public final class App {
         if (!isChar) {
             return screenKey(key);
         }
+        return charKey(key);
+    }
+
+    private Optional<Action> logWindowKey(KeyEvent key) {
+        return switch (logWindow.handleKey(key)) {
+            case LogWindow.Copy copy -> Optional.of(new Action.Copy(copy.text()));
+            case LogWindow.Close _ -> {
+                logFilter = logWindow.filter();
+                logWindow = null;
+                yield Optional.empty();
+            }
+            case LogWindow.Nothing _ -> Optional.empty();
+        };
+    }
+
+    private Optional<Action> runtimeWindowKey(KeyEvent key) {
+        return switch (runtimeWindow.handleKey(key)) {
+            case RuntimeWindow.Install install -> Optional.of(new Action.InstallRuntimes(install));
+            case RuntimeWindow.Close _ -> {
+                runtimeWindow = null;
+                yield Optional.empty();
+            }
+            case RuntimeWindow.Nothing _ -> Optional.empty();
+        };
+    }
+
+    private Optional<Action> jarsKey(KeyEvent key) {
+        return switch (jars.handleKey(key)) {
+            case JarsPopup.Submit submit -> {
+                jars.setBusy();
+                yield Optional.of(
+                        new Action.AddJars(new AddJarsParams(List.of(PathCompletion.expandHome(submit.path(), home)))));
+            }
+            case JarsPopup.Close _ -> {
+                jars = null;
+                yield Optional.empty();
+            }
+            case JarsPopup.Nothing _ -> Optional.empty();
+        };
+    }
+
+    private Optional<Action> promptKey(KeyEvent key) {
+        return switch (prompt.handleKey(key)) {
+            case PathPrompt.Submit submit -> {
+                prompt.setBusy();
+                directory = prompt.directory();
+                busy = true;
+                yield Optional.of(
+                        new Action.Open(PathCompletion.expandHome(submit.path(), home), directory, prompt.mode()));
+            }
+            case PathPrompt.Cancel _ -> {
+                failedPath = prompt.error().isPresent() ? prompt.input() : null;
+                prompt = null;
+                yield Optional.empty();
+            }
+            case PathPrompt.Nothing _ -> Optional.empty();
+        };
+    }
+
+    private Optional<Action> exportPromptKey(KeyEvent key) {
+        return switch (exportPrompt.handleKey(key)) {
+            case ExportPrompt.Submit submit -> startExport(submit.request());
+            case ExportPrompt.Cancel _ -> {
+                exportPrompt = null;
+                yield Optional.empty();
+            }
+            case ExportPrompt.Nothing _ -> Optional.empty();
+        };
+    }
+
+    /** Whether the shown screen has a prompt open, which takes every key. */
+    private boolean screenPrompting() {
+        return switch (screen) {
+            case TERMS -> terms != null && terms.prompting();
+            case DOCUMENTS -> documents != null && documents.prompting();
+            case ANALYSIS -> analysis.prompting();
+            case SEARCH -> search != null && search.prompting();
+            default -> false;
+        };
+    }
+
+    private Optional<Action> screenPromptKey(KeyEvent key) {
+        return switch (screen) {
+            case TERMS -> termsAction(terms.handleKey(key));
+            case DOCUMENTS -> documentsAction(documents.handleKey(key));
+            case ANALYSIS -> analysisAction(analysis.handleKey(key));
+            case SEARCH -> searchAction(search.handleKey(key));
+            default -> Optional.empty();
+        };
+    }
+
+    /**
+     * Esc stops the scans first, then the export, then the shown screen's jobs, and quits only when
+     * there are none.
+     */
+    private Optional<Action> escapeKey() {
+        if (scan != null) {
+            return cancelScans();
+        }
+        if (export != null) {
+            return cancelExport();
+        }
+        if (screen == Screen.SEARCH && searching()) {
+            // A job that hasn't started yet is cancelled once it starts.
+            List<Long> jobs = search.cancel();
+            return jobs.isEmpty() ? Optional.empty() : Optional.of(new Action.CancelSearch(jobs));
+        }
+        if (screen == Screen.DOCUMENTS && documents != null && documents.rebuilding()) {
+            return documents.stopRebuild().stream().boxed().findFirst().map(Action.CancelReconstruct::new);
+        }
+        if (screen == Screen.DOCUMENTS && documents != null && documents.filterBuilding()) {
+            return documentsAction(documents.clearFilter());
+        }
+        if (screen == Screen.CHECK && checking()) {
+            // A job that hasn't started yet is cancelled once it starts.
+            return check.cancel().stream().boxed().findFirst().map(Action.CancelCheck::new);
+        }
+        return Optional.of(new Action.Quit());
+    }
+
+    private Optional<Action> cancelExport() {
+        Long job = switch (export) {
+            case Rebuilding rebuilding -> rebuilding.jobId();
+            case TermsExport termsExport -> termsExport.jobId();
+            default -> null;
+        };
+        export = null;
+        return job != null ? Optional.of(new Action.CancelExport(job)) : Optional.empty();
+    }
+
+    private Optional<Action> charKey(KeyEvent key) {
         switch (key.codePoint()) {
             case 'q' -> {
                 return Optional.of(new Action.Quit());
             }
             case '1' -> showIf(hasIndex() && supported(Screen.OVERVIEW), Screen.OVERVIEW);
             case '2' -> {
-                if (hasIndex() && supported(Screen.DOCUMENTS)) {
-                    show(Screen.DOCUMENTS);
-                    return initialRequest();
-                }
+                return showLoading(Screen.DOCUMENTS);
             }
             case '3' -> {
-                if (hasIndex() && supported(Screen.TERMS)) {
-                    show(Screen.TERMS);
-                    return initialRequest();
-                }
+                return showLoading(Screen.TERMS);
             }
             case '4' -> {
-                if (hasIndex() && supported(Screen.COMMITS)) {
-                    show(Screen.COMMITS);
-                    return initialRequest();
-                }
+                return showLoading(Screen.COMMITS);
             }
             case '5' -> showIf(hasIndex() && supported(Screen.SEARCH), Screen.SEARCH);
             case '6' -> {
@@ -2087,13 +2131,7 @@ public final class App {
                 return initialRequest();
             }
             case '7' -> showIf(check != null && supported(Screen.CHECK), Screen.CHECK);
-            case 'o' -> {
-                // Starts from the path that failed to open, then from the open index, so a sibling
-                // is a Ctrl+W away.
-                String path = failedPath != null ? failedPath : opened != null ? opened.path() : "";
-                failedPath = null;
-                prompt = pathPrompt(path);
-            }
+            case 'o' -> openPrompt();
             case 'L' -> logWindow = new LogWindow(log, logFilter);
             case 'X' -> {
                 jars = new JarsPopup(defaultJars, runtimeFolders, home);
@@ -2110,17 +2148,46 @@ public final class App {
                 }
             }
             case 'R' -> {
-                if (hasIndex() && !opened.supports(Feature.REOPEN)) {
-                    notice = new Notice.NotSupported("Reopen", reason());
-                } else if (overview != null) {
-                    notice = new Notice.Reopening();
-                    busy = true;
-                    return Optional.of(new Action.Reopen());
-                }
+                return reopenKey();
             }
             default -> {
                 return screenKey(key);
             }
+        }
+        return Optional.empty();
+    }
+
+    /** Shows {@code shown}, if the index has it, with what it loads first. */
+    private Optional<Action> showLoading(Screen shown) {
+        if (hasIndex() && supported(shown)) {
+            show(shown);
+            return initialRequest();
+        }
+        return Optional.empty();
+    }
+
+    /**
+     * Starts from the path that failed to open, then from the open index, so a sibling is a Ctrl+W
+     * away.
+     */
+    private void openPrompt() {
+        String path = "";
+        if (failedPath != null) {
+            path = failedPath;
+        } else if (opened != null) {
+            path = opened.path();
+        }
+        failedPath = null;
+        prompt = pathPrompt(path);
+    }
+
+    private Optional<Action> reopenKey() {
+        if (hasIndex() && !opened.supports(Feature.REOPEN)) {
+            notice = new Notice.NotSupported("Reopen", reason());
+        } else if (overview != null) {
+            notice = new Notice.Reopening();
+            busy = true;
+            return Optional.of(new Action.Reopen());
         }
         return Optional.empty();
     }
@@ -2255,32 +2322,37 @@ public final class App {
      */
     private void jump(Screen to) {
         if (to != screen) {
-            boolean leavesDocuments = screen == Screen.DOCUMENTS && documents != null;
-            boolean leavesTerms = screen == Screen.TERMS
-                    || leavesDocuments
-                            && documents
-                                    .walk()
-                                    .filter(Documents.Walk.TERM_DOCS::equals)
-                                    .isPresent();
-            // A search hit's [/] step the search screen, as a term's document's step the terms screen.
-            boolean leavesSearch = screen == Screen.SEARCH
-                    || leavesDocuments
-                            && documents
-                                    .walk()
-                                    .filter(Documents.Walk.SEARCH_HITS::equals)
-                                    .isPresent();
-            back.push(new Back(
-                    screen,
-                    leavesTerms && terms != null ? Optional.of(terms.mark()) : Optional.empty(),
-                    leavesDocuments ? Optional.of(documents.mark()) : Optional.empty(),
-                    leavesSearch && search != null ? Optional.of(search.mark()) : Optional.empty(),
-                    screen == Screen.COMMITS && commits != null ? Optional.of(commits.mark()) : Optional.empty()));
-            if (back.size() > BACK_DEPTH) {
-                back.removeLast();
-            }
+            pushBack();
         }
         leaving(to);
         screen = to;
+    }
+
+    /** Keeps where the shown screen is, for Backspace to go back to. */
+    private void pushBack() {
+        boolean leavesDocuments = screen == Screen.DOCUMENTS && documents != null;
+        boolean leavesTerms = screen == Screen.TERMS
+                || leavesDocuments
+                        && documents
+                                .walk()
+                                .filter(Documents.Walk.TERM_DOCS::equals)
+                                .isPresent();
+        // A search hit's [/] step the search screen, as a term's document's step the terms screen.
+        boolean leavesSearch = screen == Screen.SEARCH
+                || leavesDocuments
+                        && documents
+                                .walk()
+                                .filter(Documents.Walk.SEARCH_HITS::equals)
+                                .isPresent();
+        back.push(new Back(
+                screen,
+                leavesTerms && terms != null ? Optional.of(terms.mark()) : Optional.empty(),
+                leavesDocuments ? Optional.of(documents.mark()) : Optional.empty(),
+                leavesSearch && search != null ? Optional.of(search.mark()) : Optional.empty(),
+                screen == Screen.COMMITS && commits != null ? Optional.of(commits.mark()) : Optional.empty()));
+        if (back.size() > BACK_DEPTH) {
+            back.removeLast();
+        }
     }
 
     /**
@@ -2291,36 +2363,41 @@ public final class App {
         while (!back.isEmpty()) {
             Back to = back.pop();
             if (canShow(to.screen())) {
-                if (terms != null) {
-                    to.terms().ifPresent(terms::restore);
-                }
-                if (commits != null) {
-                    to.commits().ifPresent(commits::restore);
-                }
-                Optional<Search.Request.Cancel> searchCancel = to.search().isPresent() && search != null
-                        ? search.restore(to.search().get())
-                        : Optional.empty();
-                Optional<Action> document = to.documents().isPresent() && documents != null
-                        ? documentsAction(documents.restore(to.documents().get()))
-                        : Optional.empty();
-                leaving(to.screen());
-                screen = to.screen();
-                if (searchCancel.isPresent()) {
-                    // The newer search's jobs are cancelled with the fetch, if the document needs one.
-                    if (document.orElse(null) instanceof Action.LoadDocument load) {
-                        List<Long> cancel = new ArrayList<>(load.cancel());
-                        cancel.addAll(searchCancel.get().jobs());
-                        return Optional.of(new Action.LoadDocument(
-                                load.docId(), List.copyOf(cancel), load.locate(), load.matches()));
-                    }
-                    if (document.isEmpty()) {
-                        return searchAction(searchCancel.map(Search.Request.class::cast));
-                    }
-                }
-                return document.isPresent() ? document : initialRequest();
+                return restore(to);
             }
         }
         return Optional.empty();
+    }
+
+    /** Shows the screen of {@code to} again as it was, with what it fetches. */
+    private Optional<Action> restore(Back to) {
+        if (terms != null) {
+            to.terms().ifPresent(terms::restore);
+        }
+        if (commits != null) {
+            to.commits().ifPresent(commits::restore);
+        }
+        Optional<Search.Request.Cancel> searchCancel = to.search().isPresent() && search != null
+                ? search.restore(to.search().get())
+                : Optional.empty();
+        Optional<Action> document = to.documents().isPresent() && documents != null
+                ? documentsAction(documents.restore(to.documents().get()))
+                : Optional.empty();
+        leaving(to.screen());
+        screen = to.screen();
+        if (searchCancel.isPresent()) {
+            // The newer search's jobs are cancelled with the fetch, if the document needs one.
+            if (document.orElse(null) instanceof Action.LoadDocument load) {
+                List<Long> cancel = new ArrayList<>(load.cancel());
+                cancel.addAll(searchCancel.get().jobs());
+                return Optional.of(
+                        new Action.LoadDocument(load.docId(), List.copyOf(cancel), load.locate(), load.matches()));
+            }
+            if (document.isEmpty()) {
+                return searchAction(searchCancel.map(Search.Request.class::cast));
+            }
+        }
+        return document.isPresent() ? document : initialRequest();
     }
 
     /** Whether {@code screen} is there to go back to: the open index supports it, and it was made. */
@@ -2345,7 +2422,8 @@ public final class App {
                 ? List.of(Line.from(Span.raw(" ")).append(notice.line()))
                 : KeyLegend.lines(footerKeys(), area.width());
         // A legend that wraps takes a third of the screen at most, so the screen keeps the rest.
-        int footerHeight = Math.min(footer.size(), Math.max(area.height() / 3, 1));
+        int footerCap = Math.max(area.height() / 3, 1);
+        int footerHeight = Math.min(footer.size(), footerCap);
         List<Rect> rows = Layout.vertical()
                 .constraints(Constraint.length(tabsShown ? 1 : 0), Constraint.fill(), Constraint.length(footerHeight))
                 .split(area);
@@ -2398,60 +2476,79 @@ public final class App {
     /** The footer's keys for the shown screen; they follow the branches of {@link #renderScreen}. */
     private String footerKeys() {
         String reopen = overview != null && opened.supports(Feature.REOPEN) ? "R reopen   " : "";
-        String cancel = scan != null ? "Esc cancel scan   " : export != null ? "Esc cancel export   " : "";
+        String cancel = "";
+        if (scan != null) {
+            cancel = "Esc cancel scan   ";
+        } else if (export != null) {
+            cancel = "Esc cancel export   ";
+        }
         String screens = "1-7 screen   " + (back.isEmpty() ? "" : "⌫ back   ");
         if (screen == Screen.ANALYSIS) {
-            if (analysis.prompting()) {
-                return analysis.keys();
-            }
-            return hasIndex()
-                    ? " " + cancel + "q quit   o open   c close   " + screens + analysis.keys()
-                    : " q quit   o open   " + analysis.keys();
+            return analysisFooter(cancel, screens);
         }
         if (opened == null) {
             return " q quit   o open   6 analysis   X jars   D download runtimes   L log";
         }
         if (screen == Screen.COMMITS) {
             String keys = commits != null ? commits.keys() : "r read again   ⏎ segments   Tab panel   ↑↓";
-            return " " + cancel + "q quit   o open   c close   " + reopen + screens + keys;
+            return " " + cancel + APP_KEYS + reopen + screens + keys;
         }
         if (screen == Screen.CHECK && check != null) {
-            return " " + cancel + "q quit   o open   c close   " + reopen + screens + check.keys();
+            return " " + cancel + APP_KEYS + reopen + screens + check.keys();
         }
         if (overview == null) {
             return " q quit   o open   c close   1-7 screen";
         }
         if (screen == Screen.SEARCH) {
-            if (search.prompting()) {
-                return search.keys();
-            }
-            String stop = scan != null || search.running() ? "Esc cancel   " : "";
-            return " " + stop + "q quit   o open   c close   " + screens + search.keys();
+            return searchFooter(screens);
         }
         if (screen == Screen.TERMS) {
-            if (terms.prompting()) {
-                return " type to seek   ⏎/Esc done";
-            }
-            return " " + cancel + "q quit   o open   c close   " + screens + terms.keys();
+            return terms.prompting() ? " type to seek   ⏎/Esc done" : " " + cancel + APP_KEYS + screens + terms.keys();
         }
         if (screen == Screen.DOCUMENTS) {
-            if (documents.viewer().isPresent()) {
-                return documents.viewer().get().keys();
-            }
-            if (documents.seeking()) {
-                return " type to seek a field   ⏎/Esc done";
-            }
-            if (documents.goingTo()) {
-                return " type a document id   ⏎ go   Esc cancel";
-            }
-            // Esc stops the scan first.
-            if (cancel.isEmpty() && documents.rebuilding()) {
-                cancel = "Esc stop rebuild   ";
-            } else if (cancel.isEmpty() && documents.filterBuilding()) {
-                cancel = "Esc stop filter   ";
-            }
-            return " " + cancel + "q quit   o open   c close   " + screens + documents.keys();
+            return documentsFooter(cancel, screens);
         }
+        return overviewFooter(reopen, screens);
+    }
+
+    private String analysisFooter(String cancel, String screens) {
+        if (analysis.prompting()) {
+            return analysis.keys();
+        }
+        return hasIndex()
+                ? " " + cancel + APP_KEYS + screens + analysis.keys()
+                : " q quit   o open   " + analysis.keys();
+    }
+
+    private String searchFooter(String screens) {
+        if (search.prompting()) {
+            return search.keys();
+        }
+        String stop = scan != null || search.running() ? "Esc cancel   " : "";
+        return " " + stop + APP_KEYS + screens + search.keys();
+    }
+
+    private String documentsFooter(String cancel, String screens) {
+        if (documents.viewer().isPresent()) {
+            return documents.viewer().get().keys();
+        }
+        if (documents.seeking()) {
+            return " type to seek a field   ⏎/Esc done";
+        }
+        if (documents.goingTo()) {
+            return " type a document id   ⏎ go   Esc cancel";
+        }
+        // Esc stops the scan first.
+        String stop = cancel;
+        if (stop.isEmpty() && documents.rebuilding()) {
+            stop = "Esc stop rebuild   ";
+        } else if (stop.isEmpty() && documents.filterBuilding()) {
+            stop = "Esc stop filter   ";
+        }
+        return " " + stop + APP_KEYS + screens + documents.keys();
+    }
+
+    private String overviewFooter(String reopen, String screens) {
         if (scan != null) {
             return " Esc cancel scan   q quit   o open   c close   " + reopen + screens + "s/S sort   Tab panel   ↑↓";
         }
@@ -2591,8 +2688,9 @@ public final class App {
         return switch (export) {
             case null -> Optional.empty();
             case Loading _ -> Optional.empty();
-            case TermsExport terms ->
-                Optional.of("Exporting " + terms.field() + ": " + TextFormat.count(terms.termsWritten(), "term"));
+            case TermsExport termsExport ->
+                Optional.of("Exporting " + termsExport.field() + ": "
+                        + TextFormat.count(termsExport.termsWritten(), "term"));
             case Rebuilding rebuilding ->
                 Optional.of("Exporting doc " + rebuilding.docId() + ": " + rebuilding.scanned()
                         + (rebuilding.total().isPresent()
@@ -2602,12 +2700,28 @@ public final class App {
         };
     }
 
+    private Span tabSpan(Screen tab) {
+        if (tab == screen) {
+            return Span.styled(tab.title(), Style.EMPTY.reversed());
+        }
+        return supports(tab) ? Span.raw(tab.title()) : Span.styled(tab.title(), Style.EMPTY.dim());
+    }
+
+    /** What the tabs show after them, if anything: the notice, the running export or the index. */
+    private Line tabsLine() {
+        Optional<String> exporting = exportLine();
+        if (notice != null && !notice.inFooter()) {
+            return notice.line();
+        }
+        if (exporting.isPresent()) {
+            return Line.from(exporting.get());
+        }
+        return opened != null ? marker(opened) : null;
+    }
+
     /** The tabs, and the notice, the running export or how the index was opened, right-aligned after them. */
     private void renderTabs(Frame frame, Rect area) {
-        Optional<String> exporting = exportLine();
-        Line line = notice != null && !notice.inFooter()
-                ? notice.line()
-                : exporting.isPresent() ? Line.from(exporting.get()) : opened != null ? marker(opened) : null;
+        Line line = tabsLine();
         // Without padding, the tabs leave the line more room when it needs it.
         boolean compact = line != null && Math.max(area.width() - TABS_WIDTH, 0) < line.width();
         int tabsWidth = compact ? COMPACT_TABS_WIDTH : TABS_WIDTH;
@@ -2627,10 +2741,7 @@ public final class App {
                 spans.add(Span.raw("│"));
             }
             spans.add(Span.raw(padding));
-            spans.add(
-                    tab == screen
-                            ? Span.styled(tab.title(), Style.EMPTY.reversed())
-                            : supports(tab) ? Span.raw(tab.title()) : Span.styled(tab.title(), Style.EMPTY.dim()));
+            spans.add(tabSpan(tab));
             spans.add(Span.raw(padding));
         }
         frame.renderWidget(Paragraph.from(Line.from(spans)), tabs);
@@ -2658,11 +2769,11 @@ public final class App {
         int count = opened.indexes().size();
         String text;
         if (opened.noReader()) {
-            text = count == 1 ? "no reader" : "no reader, " + count + " indexes";
+            text = count == 1 ? "no reader" : "no reader, " + count + INDEXES;
         } else if (opened.oldLucene().isPresent()) {
             text = opened.oldLucene().get();
         } else if (count > 1) {
-            text = count + " indexes";
+            text = count + INDEXES;
         } else {
             return null;
         }

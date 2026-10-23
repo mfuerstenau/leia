@@ -73,7 +73,7 @@ final class LeiaLog {
                 Files.createDirectories(dir);
             }
             return Optional.of(new PrintStream(Files.newOutputStream(file), true, StandardCharsets.UTF_8));
-        } catch (IOException e) {
+        } catch (IOException _) {
             return Optional.empty();
         }
     }
@@ -102,7 +102,7 @@ final class LeiaLog {
     private static Optional<Level> level(String name) {
         try {
             return Optional.of(Level.parse(name));
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException _) {
             return Optional.empty();
         }
     }
@@ -115,8 +115,8 @@ final class LeiaLog {
         }
 
         @Override
-        public synchronized void publish(LogRecord record) {
-            super.publish(record);
+        public synchronized void publish(LogRecord logRecord) {
+            super.publish(logRecord);
             flush();
         }
 

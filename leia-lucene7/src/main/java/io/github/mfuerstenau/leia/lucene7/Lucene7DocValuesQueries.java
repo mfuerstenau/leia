@@ -228,6 +228,15 @@ final class Lucene7DocValuesQueries {
                     lower.map(value -> encode(number, value)).orElse(Long.MIN_VALUE),
                     upper.map(value -> encode(number, value)).orElse(Long.MAX_VALUE));
         }
+        return rawRange(field, sorted, number, lower, upper);
+    }
+
+    /**
+     * A range of raw float bits: the positive and the negative values each are a range of longs, the
+     * negative ones reversed.
+     */
+    private static Query rawRange(
+            FieldInfo field, boolean sorted, NumberEncoding number, Optional<Double> lower, Optional<Double> upper) {
         BooleanQuery.Builder parts = new BooleanQuery.Builder();
         if (upper.isEmpty() || Double.compare(upper.get(), 0.0) >= 0) {
             double from = lower.filter(value -> Double.compare(value, 0.0) > 0).orElse(0.0);

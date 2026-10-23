@@ -105,10 +105,14 @@ public final class StoredScan {
     /** Passes nothing on: a scan for a filter only notes the matching documents. */
     private static final Listener NO_HITS = new Listener() {
         @Override
-        public void hit(Hit hit) {}
+        public void hit(Hit hit) {
+            // No hits are kept.
+        }
 
         @Override
-        public void matched(long matchedValues) {}
+        public void matched(long matchedValues) {
+            // No count is kept.
+        }
     };
 
     /** Receives what the scan finds, on the scan's thread. */
@@ -264,7 +268,7 @@ public final class StoredScan {
     private Optional<String> utf8(byte[] bytes) {
         try {
             return Optional.of(utf8.decode(ByteBuffer.wrap(bytes)).toString());
-        } catch (CharacterCodingException e) {
+        } catch (CharacterCodingException _) {
             return Optional.empty();
         }
     }
@@ -283,7 +287,7 @@ public final class StoredScan {
                 }
                 matchCount++;
             }
-        } catch (ValueTimeout e) {
+        } catch (ValueTimeout _) {
             timedOutValues++;
             if (timedOut.size() < MAX_TIMED_OUT) {
                 timedOut.add(new ValueRef(docId, field, index));

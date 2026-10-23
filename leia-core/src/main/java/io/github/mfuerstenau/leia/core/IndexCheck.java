@@ -166,7 +166,7 @@ public final class IndexCheck {
                 names.add(info.info.name);
             }
             return names;
-        } catch (IOException | RuntimeException e) {
+        } catch (IOException | RuntimeException _) {
             return List.of();
         }
     }

@@ -62,6 +62,8 @@ import java.util.stream.IntStream;
  */
 public final class Commits {
 
+    private static final String SEGMENTS_TITLE = " Segments ";
+
     /** The commits panel shows at most this many rows before it scrolls. */
     private static final int COMMIT_ROWS = 6;
 
@@ -414,14 +416,7 @@ public final class Commits {
         // A key moves on from the segment that was asked for.
         wantedSegment = null;
         if (key.isChar('r')) {
-            // The commits stay until the new ones are in, so the selection can stay on its commit.
-            int index = indexRow;
-            details.keySet().removeIf(commit -> commit.index() == index);
-            pending.removeIf(request -> request instanceof Request.LoadCommit commit && commit.index() == index);
-            detailsScroll = 0;
-            Request request = new Request.LoadList(index);
-            pending.add(request);
-            return Optional.of(request);
+            return Optional.of(readAgain());
         }
         if (key.code() == KeyCode.TAB) {
             List<Focus> panels = panels();
@@ -430,82 +425,111 @@ public final class Commits {
             focus(panels.get(next));
             return Optional.empty();
         }
-        if (key.code() == KeyCode.ENTER && focus == Focus.INDEXES) {
-            focus(Focus.COMMITS);
-            return Optional.empty();
+        if (key.code() == KeyCode.ENTER) {
+            return enter(key);
         }
-        if (key.code() == KeyCode.ENTER && focus == Focus.COMMITS) {
-            focus(Focus.SEGMENTS);
-            return Optional.empty();
-        }
-        if (key.code() == KeyCode.ENTER && focus == Focus.SEGMENTS) {
-            return readerOpen
-                    ? selectedSegment().map(segment -> new Request.ShowDocuments(indexRow, segment.name()))
-                    : Optional.empty();
-        }
+        return move(key);
+    }
+
+    /** The commits stay until the new ones are in, so the selection can stay on its commit. */
+    private Request readAgain() {
+        int index = indexRow;
+        details.keySet().removeIf(commit -> commit.index() == index);
+        pending.removeIf(request -> request instanceof Request.LoadCommit commit && commit.index() == index);
+        detailsScroll = 0;
+        Request request = new Request.LoadList(index);
+        pending.add(request);
+        return request;
+    }
+
+    /** Enter goes to the next panel, and from a segment to its documents. */
+    private Optional<Request> enter(KeyEvent key) {
         switch (focus) {
-            case INDEXES -> {
-                OptionalInt row = Selection.moved(indexRow, indexes.size(), key);
-                if (row.isEmpty()) {
-                    return Optional.empty();
-                }
-                selectIndex(row.getAsInt());
-                return nextRequest();
-            }
-            case COMMITS -> {
-                Optional<List<Commit>> commits = commits();
-                if (commits.isEmpty()) {
-                    return Optional.empty();
-                }
-                int len = commits.get().size() + unreadable.get(indexRow).size();
-                OptionalInt row = Selection.moved(commitRow, len, key);
-                if (row.isEmpty()) {
-                    return Optional.empty();
-                }
-                if (row.getAsInt() != commitRow) {
-                    commitRow = row.getAsInt();
-                    segmentRow = 0;
-                    detailsScroll = 0;
-                }
-                return nextRequest();
-            }
+            case INDEXES -> focus(Focus.COMMITS);
+            case COMMITS -> focus(Focus.SEGMENTS);
             case SEGMENTS -> {
-                Optional<GetCommitResult> result = selectedResult();
-                if (result.isEmpty()) {
-                    return Optional.empty();
-                }
-                OptionalInt row =
-                        Selection.moved(segmentRow, result.get().segments().size(), key);
-                if (row.isPresent() && row.getAsInt() != segmentRow) {
-                    segmentRow = row.getAsInt();
-                    detailsScroll = 0;
-                }
-                return Optional.empty();
+                return readerOpen
+                        ? selectedSegment().map(segment -> new Request.ShowDocuments(indexRow, segment.name()))
+                        : Optional.empty();
             }
             case DETAILS -> {
-                scrollDetails(key);
-                return Optional.empty();
+                return move(key);
             }
         }
         return Optional.empty();
     }
 
+    private Optional<Request> move(KeyEvent key) {
+        return switch (focus) {
+            case INDEXES -> {
+                OptionalInt row = Selection.moved(indexRow, indexes.size(), key);
+                if (row.isEmpty()) {
+                    yield Optional.empty();
+                }
+                selectIndex(row.getAsInt());
+                yield nextRequest();
+            }
+            case COMMITS -> moveCommit(key);
+            case SEGMENTS -> {
+                moveSegment(key);
+                yield Optional.empty();
+            }
+            case DETAILS -> {
+                scrollDetails(key);
+                yield Optional.empty();
+            }
+        };
+    }
+
+    private Optional<Request> moveCommit(KeyEvent key) {
+        Optional<List<Commit>> commits = commits();
+        if (commits.isEmpty()) {
+            return Optional.empty();
+        }
+        int len = commits.get().size() + unreadable.get(indexRow).size();
+        OptionalInt row = Selection.moved(commitRow, len, key);
+        if (row.isEmpty()) {
+            return Optional.empty();
+        }
+        if (row.getAsInt() != commitRow) {
+            commitRow = row.getAsInt();
+            segmentRow = 0;
+            detailsScroll = 0;
+        }
+        return nextRequest();
+    }
+
+    private void moveSegment(KeyEvent key) {
+        Optional<GetCommitResult> result = selectedResult();
+        if (result.isEmpty()) {
+            return;
+        }
+        OptionalInt row = Selection.moved(segmentRow, result.get().segments().size(), key);
+        if (row.isPresent() && row.getAsInt() != segmentRow) {
+            segmentRow = row.getAsInt();
+            detailsScroll = 0;
+        }
+    }
+
     /** The screen's keys for the footer, after the app's. */
     public String keys() {
-        String enter = focus == Focus.SEGMENTS ? (readerOpen ? "⏎ documents   " : "") : "⏎ segments   ";
+        String enter = "⏎ segments   ";
+        if (focus == Focus.SEGMENTS) {
+            enter = readerOpen ? "⏎ documents   " : "";
+        }
         return "r read again   " + enter + "Tab panel   ↑↓";
     }
 
     private void focus(Focus focus) {
-        boolean segmentDetails = switch (focus) {
+        boolean showsDetails = switch (focus) {
             case INDEXES, COMMITS -> false;
             case SEGMENTS -> true;
-            case DETAILS -> this.segmentDetails;
+            case DETAILS -> segmentDetails;
         };
-        if (segmentDetails != this.segmentDetails) {
+        if (showsDetails != segmentDetails) {
             detailsScroll = 0;
         }
-        this.segmentDetails = segmentDetails;
+        segmentDetails = showsDetails;
         this.focus = focus;
     }
 
@@ -547,7 +571,7 @@ public final class Commits {
         }
         int unreadableCount = unreadable.get(indexRow).size();
         int rows = commits()
-                .map(commits -> Math.clamp(commits.size() + unreadableCount, 1, COMMIT_ROWS))
+                .map(commits -> Math.clamp((long) commits.size() + unreadableCount, 1, COMMIT_ROWS))
                 .orElse(1);
         // Borders and the header.
         List<Rect> parts = Layout.vertical()
@@ -670,21 +694,26 @@ public final class Commits {
         boolean focused = focus == Focus.SEGMENTS;
         Optional<UnreadableCommit> unreadableCommit = selectedUnreadable();
         if (unreadableCommit.isPresent()) {
-            message(frame, area, " Segments ", focused, unreadableCommit.get().segmentsFile() + " could not be read.");
+            message(
+                    frame,
+                    area,
+                    SEGMENTS_TITLE,
+                    focused,
+                    unreadableCommit.get().segmentsFile() + " could not be read.");
             return;
         }
         GetCommitResult result;
         switch (selectedDetails().orElse(null)) {
             case null -> {
                 if (selectedCommit().isPresent()) {
-                    message(frame, area, " Segments ", focused, "Reading the commit…");
+                    message(frame, area, SEGMENTS_TITLE, focused, "Reading the commit…");
                 } else {
-                    frame.renderWidget(panel(" Segments ", focused), area);
+                    frame.renderWidget(panel(SEGMENTS_TITLE, focused), area);
                 }
                 return;
             }
             case Fetched.Failed<GetCommitResult> failed -> {
-                message(frame, area, " Segments ", focused, "Cannot read the commit: " + failed.error());
+                message(frame, area, SEGMENTS_TITLE, focused, "Cannot read the commit: " + failed.error());
                 return;
             }
             case Fetched.Done<GetCommitResult> done -> result = done.value();
@@ -772,7 +801,7 @@ public final class Commits {
         Block block = panel(title, focused);
         Rect inner = block.inner(area);
         List<Line> wrapped = Panels.wrap(lines, inner.width());
-        detailsScroll = Math.min(detailsScroll, Math.max(wrapped.size() - inner.height(), 0));
+        detailsScroll = Math.clamp(detailsScroll, 0, Math.max(wrapped.size() - inner.height(), 0));
         frame.renderWidget(
                 Paragraph.builder()
                         .text(Text.from(wrapped))
@@ -886,8 +915,9 @@ public final class Commits {
                 + (atLeast(version, 7, 4) ? " · " + segment.softDelCount() + " soft-deleted" : "")));
         lines.add(Line.from(
                 "Lucene " + version + minVersion + " · codec " + segment.codec().orElse(NONE)));
+        String blocks = segment.hasBlocks() ? "yes" : "no";
         lines.add(Line.from("Compound file " + (segment.compound() ? "yes" : "no")
-                + (atLeast(version, 9, 10) ? " · blocks " + (segment.hasBlocks() ? "yes" : "no") : "")
+                + (atLeast(version, 9, 10) ? " · blocks " + blocks : "")
                 + " · size " + sizeOr(segment.sizeInBytes(), "unknown")));
         if (atLeast(version, 6, 2)) {
             lines.add(Line.from("Sorted by " + segment.indexSort().orElse("document id (no index sort)")));
@@ -951,7 +981,7 @@ public final class Commits {
         }
         try {
             return value + " (" + TextFormat.utcTime(Long.parseLong(value)) + ")";
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException _) {
             return value;
         }
     }
@@ -1064,7 +1094,7 @@ public final class Commits {
                 .max()
                 .orElse(0);
         boolean segments = withSegment && segmentWidth > 0 && nameWidth + sizeWidth + segmentWidth + 4 <= width;
-        int column = Math.max(Math.min(nameWidth, width - 2 - sizeWidth), 1);
+        int column = Math.clamp(nameWidth, 1, Math.max(width - 2 - sizeWidth, 1));
         for (int i = 0; i < files.size(); i++) {
             List<String> parts = TextFormat.wrap(names.get(i), column, Integer.MAX_VALUE);
             String size = sizes.get(i);

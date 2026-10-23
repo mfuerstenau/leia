@@ -227,17 +227,22 @@ public final class KnnGraphs {
             while (starts[segment + 1] <= position) {
                 segment++;
             }
-            LeafReaderContext context = leaves.get(segment);
-            KnnVectorValues vectors = values.get(segment);
-            Bits liveDocs = context.reader().getLiveDocs();
-            for (int ord = (int) (position - starts[segment]); ord < vectors.size(); ord++) {
-                int doc = vectors.ordToDoc(ord);
-                if ((liveDocs == null || liveDocs.get(doc)) && docs.add(context.docBase + doc)) {
-                    break;
-                }
-            }
+            addFirstLive(docs, leaves.get(segment), values.get(segment), (int) (position - starts[segment]));
         }
         return List.copyOf(docs);
+    }
+
+    /** Adds the first live document of {@code vectors} from ordinal {@code from} on that {@code docs} lacks. */
+    private static void addFirstLive(
+            java.util.TreeSet<Integer> docs, LeafReaderContext context, KnnVectorValues vectors, int from)
+            throws IOException {
+        Bits liveDocs = context.reader().getLiveDocs();
+        for (int ord = from; ord < vectors.size(); ord++) {
+            int doc = vectors.ordToDoc(ord);
+            if ((liveDocs == null || liveDocs.get(doc)) && docs.add(context.docBase + doc)) {
+                return;
+            }
+        }
     }
 
     private static SegmentNodes segmentNodes(IndexReader reader, FieldInfo field, int segment) throws IOException {
@@ -283,7 +288,7 @@ public final class KnnGraphs {
         HnswGraph graph;
         try {
             graph = provider.getGraph(field);
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException _) {
             // The reader doesn't know the field: it holds another field's format.
             return Optional.empty();
         }

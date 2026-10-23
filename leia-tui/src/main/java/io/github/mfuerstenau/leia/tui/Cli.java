@@ -39,7 +39,7 @@ record Cli(
 
     static final String USAGE = "Usage: leia [OPTIONS] [INDEX_PATH]";
 
-    static final String HELP = """
+    static final String HELP_TEXT = """
             Read-only Lucene index inspector (terminal UI)
 
             Usage: leia [OPTIONS] [INDEX_PATH]
@@ -115,78 +115,99 @@ record Cli(
      * @throws UsageException if the command line is wrong
      */
     static Cli parse(String... args) throws UsageException {
-        boolean help = false;
-        boolean version = false;
-        List<Path> jars = new ArrayList<>();
-        boolean noDefaultJars = false;
-        DirectoryImpl directory = DirectoryImpl.FS;
-        boolean noReader = false;
-        Optional<String> indexPath = Optional.empty();
-        boolean downloadRuntimes = false;
-        List<String> runtimes = new ArrayList<>();
-        boolean directoryGiven = false;
-        boolean options = true;
-        for (int i = 0; i < args.length; i++) {
-            String arg = args[i];
-            if (options && arg.equals("--")) {
-                options = false;
-            } else if (options && arg.startsWith("-") && !arg.equals("-")) {
-                int equals = arg.startsWith("--") ? arg.indexOf('=') : -1;
-                String name = equals < 0 ? arg : arg.substring(0, equals);
-                Optional<String> inline = equals < 0 ? Optional.empty() : Optional.of(arg.substring(equals + 1));
-                switch (name) {
-                    case "-h", "--help" -> help = flag(name, inline);
-                    case "-V", "--version" -> version = flag(name, inline);
-                    case "--no-default-jars" -> noDefaultJars = flag(name, inline);
-                    case "--no-reader" -> noReader = flag(name, inline);
-                    case "--download-runtimes" -> downloadRuntimes = flag(name, inline);
-                    case "--jar" -> {
-                        String value = inline.isPresent() ? inline.get() : next(args, ++i, name, "<PATH>");
-                        jars.add(path(name, value));
-                    }
-                    case "--runtime" -> {
-                        String value = inline.isPresent() ? inline.get() : next(args, ++i, name, "<FOLDER>");
-                        runtimes.add(runtime(value));
-                    }
-                    case "--directory" -> {
-                        String value = inline.isPresent() ? inline.get() : next(args, ++i, name, "<IMPL>");
-                        directory = directory(value);
-                        directoryGiven = true;
-                    }
-                    case "-j", "--java" ->
-                        throw new UsageException(
-                                name + " is taken by the leia script, which chooses the JVM; start leia with it");
-                    default -> throw new UsageException("unknown option '" + arg + "'");
+        Parser parser = new Parser(args);
+        parser.parse();
+        return parser.cli();
+    }
+
+    /** What the arguments say so far, as {@link #parse} reads them one after another. */
+    private static final class Parser {
+        private final String[] args;
+        private int i;
+        private boolean help;
+        private boolean version;
+        private final List<Path> jars = new ArrayList<>();
+        private boolean noDefaultJars;
+        private DirectoryImpl directory = DirectoryImpl.FS;
+        private boolean directoryGiven;
+        private boolean noReader;
+        private Optional<String> indexPath = Optional.empty();
+        private boolean downloadRuntimes;
+        private final List<String> runtimes = new ArrayList<>();
+
+        Parser(String[] args) {
+            this.args = args;
+        }
+
+        void parse() throws UsageException {
+            boolean options = true;
+            for (i = 0; i < args.length; i++) {
+                String arg = args[i];
+                if (options && arg.equals("--")) {
+                    options = false;
+                } else if (options && arg.startsWith("-") && !arg.equals("-")) {
+                    option(arg);
+                } else if (indexPath.isPresent()) {
+                    throw new UsageException("unexpected argument '" + arg + "': there is only one INDEX_PATH");
+                } else {
+                    indexPath = Optional.of(arg);
                 }
-            } else if (indexPath.isPresent()) {
-                throw new UsageException("unexpected argument '" + arg + "': there is only one INDEX_PATH");
-            } else {
-                indexPath = Optional.of(arg);
             }
         }
-        if (downloadRuntimes
-                && (indexPath.isPresent() || !jars.isEmpty() || noDefaultJars || directoryGiven || noReader)) {
-            throw new UsageException(
-                    "--download-runtimes takes no INDEX_PATH and none of --jar, --no-default-jars, --directory,"
-                            + " --no-reader");
+
+        private void option(String arg) throws UsageException {
+            int equals = arg.startsWith("--") ? arg.indexOf('=') : -1;
+            String name = equals < 0 ? arg : arg.substring(0, equals);
+            Optional<String> inline = equals < 0 ? Optional.empty() : Optional.of(arg.substring(equals + 1));
+            switch (name) {
+                case "-h", "--help" -> help = flag(name, inline);
+                case "-V", "--version" -> version = flag(name, inline);
+                case "--no-default-jars" -> noDefaultJars = flag(name, inline);
+                case "--no-reader" -> noReader = flag(name, inline);
+                case "--download-runtimes" -> downloadRuntimes = flag(name, inline);
+                case "--jar" -> jars.add(path(name, value(name, inline, "<PATH>")));
+                case "--runtime" -> runtimes.add(runtime(value(name, inline, "<FOLDER>")));
+                case "--directory" -> {
+                    directory = directory(value(name, inline, "<IMPL>"));
+                    directoryGiven = true;
+                }
+                case "-j", "--java" ->
+                    throw new UsageException(
+                            name + " is taken by the leia script, which chooses the JVM; start leia with it");
+                default -> throw new UsageException("unknown option '" + arg + "'");
+            }
         }
-        if (!runtimes.isEmpty() && !downloadRuntimes) {
-            throw new UsageException("--runtime goes only with --download-runtimes");
+
+        /** The value of option {@code name}: after its {@code =}, or else the next argument. */
+        private String value(String name, Optional<String> inline, String placeholder) throws UsageException {
+            return inline.isPresent() ? inline.get() : next(args, ++i, name, placeholder);
         }
-        if (downloadRuntimes && runtimes.isEmpty() && !help && !version) {
-            throw new UsageException("--download-runtimes needs --runtime <FOLDER>; to choose runtimes, start leia"
-                    + " and press D on its start screen");
+
+        Cli cli() throws UsageException {
+            if (downloadRuntimes
+                    && (indexPath.isPresent() || !jars.isEmpty() || noDefaultJars || directoryGiven || noReader)) {
+                throw new UsageException(
+                        "--download-runtimes takes no INDEX_PATH and none of --jar, --no-default-jars, --directory,"
+                                + " --no-reader");
+            }
+            if (!runtimes.isEmpty() && !downloadRuntimes) {
+                throw new UsageException("--runtime goes only with --download-runtimes");
+            }
+            if (downloadRuntimes && runtimes.isEmpty() && !help && !version) {
+                throw new UsageException("--download-runtimes needs --runtime <FOLDER>; to choose runtimes, start leia"
+                        + " and press D on its start screen");
+            }
+            return new Cli(
+                    help,
+                    version,
+                    jars,
+                    noDefaultJars,
+                    directory,
+                    noReader,
+                    indexPath,
+                    downloadRuntimes,
+                    runtimes.stream().distinct().toList());
         }
-        return new Cli(
-                help,
-                version,
-                jars,
-                noDefaultJars,
-                directory,
-                noReader,
-                indexPath,
-                downloadRuntimes,
-                runtimes.stream().distinct().toList());
     }
 
     private static boolean flag(String name, Optional<String> inline) throws UsageException {

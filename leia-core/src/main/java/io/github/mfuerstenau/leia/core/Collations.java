@@ -30,12 +30,12 @@ final class Collations {
     static Optional<Constructor<? extends Analyzer>> constructor(Class<? extends Analyzer> type) {
         try {
             return Optional.of(type.getConstructor(Collator.class));
-        } catch (NoSuchMethodException | LinkageError e) {
+        } catch (NoSuchMethodException | LinkageError _) {
             // Not the JDK's; maybe ICU's.
         }
         try {
             return Optional.of(type.getConstructor(Class.forName(ICU_COLLATOR, false, type.getClassLoader())));
-        } catch (ReflectiveOperationException | LinkageError e) {
+        } catch (ReflectiveOperationException | LinkageError _) {
             return Optional.empty();
         }
     }

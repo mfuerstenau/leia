@@ -170,9 +170,12 @@ final class Lucene9Rebuild implements Rebuild {
             IndexOptions options = info.getIndexOptions();
             boolean positions = hasPositions(options);
             boolean offsets = hasOffsets(options);
-            int flags = positions
-                    ? PostingsEnum.ALL
-                    : options == IndexOptions.DOCS ? PostingsEnum.NONE : PostingsEnum.FREQS;
+            int flags = PostingsEnum.FREQS;
+            if (positions) {
+                flags = PostingsEnum.ALL;
+            } else if (options == IndexOptions.DOCS) {
+                flags = PostingsEnum.NONE;
+            }
             List<VectorTerm> result = new ArrayList<>();
             TermsEnum termsEnum = terms.iterator();
             PostingsEnum postings = null;

@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.core;
 
 import java.io.IOException;
 import java.io.Serial;
+import java.util.Arrays;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -67,15 +68,20 @@ public final class MissingCodecException extends IOException {
             if (t instanceof IllegalArgumentException iae && iae.getMessage() != null) {
                 Matcher matcher = SPI_MESSAGE.matcher(iae.getMessage());
                 if (matcher.find()) {
-                    for (Kind kind : Kind.values()) {
-                        if (kind.type.getName().equals(matcher.group(1))) {
-                            return Optional.of(new MissingCodecException(kind, matcher.group(2), iae));
-                        }
+                    Optional<Kind> kind = kind(matcher.group(1));
+                    if (kind.isPresent()) {
+                        return Optional.of(new MissingCodecException(kind.get(), matcher.group(2), iae));
                     }
                 }
             }
         }
         return Optional.empty();
+    }
+
+    private static Optional<Kind> kind(String typeName) {
+        return Arrays.stream(Kind.values())
+                .filter(kind -> kind.type.getName().equals(typeName))
+                .findFirst();
     }
 
     public Kind kind() {

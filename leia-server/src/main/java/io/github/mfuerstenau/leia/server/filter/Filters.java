@@ -20,7 +20,9 @@ public final class Filters {
     private Optional<Kept> kept = Optional.empty();
 
     @Inject
-    public Filters() {}
+    public Filters() {
+        // For Dagger.
+    }
 
     /** Keeps {@code filter} under {@code id}, in place of the filter kept before. */
     public void put(long id, DocFilter filter) {

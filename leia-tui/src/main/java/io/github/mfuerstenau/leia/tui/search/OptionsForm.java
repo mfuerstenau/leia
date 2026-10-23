@@ -318,18 +318,7 @@ public final class OptionsForm {
         int selectedLine = 0;
         for (int i = 0; i < count; i++) {
             Row row = row(i);
-            if (row == Row.DATE_RESOLUTION) {
-                lines.add(Line.empty());
-                lines.add(Line.styled("Range bounds as dates", Form.dim()));
-            }
-            if (i == fixedRows().size() && !draft.dateFields.isEmpty()) {
-                lines.add(Line.empty());
-                lines.add(Line.styled("Per field, over the resolution above", Form.dim()));
-            }
-            if (!classic && i == firstPoint()) {
-                lines.add(Line.empty());
-                lines.add(Line.styled("Point types, guessed: the index doesn't say", Form.dim()));
-            }
+            addHeading(lines, row, i);
             String label;
             String value;
             switch (row) {
@@ -400,6 +389,21 @@ public final class OptionsForm {
         Form.renderPopup(frame, area, title, lines, selectedLine, WIDTH);
         if (editingRow != null) {
             renderText(frame, area);
+        }
+    }
+
+    /** The heading of the group that row {@code i} starts, if it starts one. */
+    private void addHeading(List<Line> lines, Row row, int i) {
+        addHeading(lines, row == Row.DATE_RESOLUTION, "Range bounds as dates");
+        addHeading(
+                lines, i == fixedRows().size() && !draft.dateFields.isEmpty(), "Per field, over the resolution above");
+        addHeading(lines, !classic && i == firstPoint(), "Point types, guessed: the index doesn't say");
+    }
+
+    private static void addHeading(List<Line> lines, boolean starts, String heading) {
+        if (starts) {
+            lines.add(Line.empty());
+            lines.add(Line.styled(heading, Form.dim()));
         }
     }
 

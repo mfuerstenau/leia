@@ -113,7 +113,7 @@ public final class FakeRepository implements AutoCloseable {
                 JarInputStream jar = new JarInputStream(adapter)) {
             for (JarEntry entry = jar.getNextJarEntry(); entry != null; entry = jar.getNextJarEntry()) {
                 if (entry.getName().equals(RuntimeFolders.LIST)) {
-                    return RuntimeFolders.list(jar);
+                    return RuntimeFolders.listedJars(jar);
                 }
             }
         }

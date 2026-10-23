@@ -53,6 +53,8 @@ import java.util.function.BooleanSupplier;
  */
 public final class RuntimeWindow {
 
+    private static final String CLOSE_KEYS = "Esc close";
+
     /** The window is at most this wide, borders included. */
     private static final int MAX_WIDTH = 110;
 
@@ -235,25 +237,44 @@ public final class RuntimeWindow {
             return new Close();
         }
         if (key.code() == KeyCode.ENTER) {
-            if (checked.isEmpty() && refreshed().isEmpty()) {
-                hint = Optional.of(offered.isEmpty() ? "Nothing to download; Esc closes" : NOTHING_CHECKED);
-                return new Nothing();
-            }
-            return start();
+            return startChosen();
         }
-        if (key.isChar(' ') && cursor < offered.size()) {
-            RuntimeFolders.Known known = offered.get(cursor).known();
-            if (!checked.remove(known)) {
-                checked.add(known);
-            }
-        } else if (key.isChar(' ') && cursor < rowCount()) {
-            String folder = present.get(cursor - offered.size()).known().folder();
-            hint = Optional.of(folder + " is " + stateWord(folder) + "; there is nothing to download for it");
+        if (key.isChar(' ') && cursor < rowCount()) {
+            toggle();
         } else if (key.isChar('a')) {
             offered.forEach(runtime -> checked.add(runtime.known()));
         } else if (key.isChar('n')) {
             checked.clear();
-        } else if (key.isChar(']') || (key.hasShift() && key.code() == KeyCode.DOWN)) {
+        } else {
+            scrollOrMove(key);
+        }
+        return new Nothing();
+    }
+
+    private Event startChosen() {
+        if (checked.isEmpty() && refreshed().isEmpty()) {
+            hint = Optional.of(offered.isEmpty() ? "Nothing to download; Esc closes" : NOTHING_CHECKED);
+            return new Nothing();
+        }
+        return start();
+    }
+
+    /** Checks or unchecks the runtime at the cursor; a present one has nothing to download. */
+    private void toggle() {
+        if (cursor < offered.size()) {
+            RuntimeFolders.Known known = offered.get(cursor).known();
+            if (!checked.remove(known)) {
+                checked.add(known);
+            }
+            return;
+        }
+        String folder = present.get(cursor - offered.size()).known().folder();
+        hint = Optional.of(folder + " is " + stateWord(folder) + "; there is nothing to download for it");
+    }
+
+    /** Scrolls the details, or moves the cursor. */
+    private void scrollOrMove(KeyEvent key) {
+        if (key.isChar(']') || (key.hasShift() && key.code() == KeyCode.DOWN)) {
             detailsScroll++;
         } else if (key.isChar('[') || (key.hasShift() && key.code() == KeyCode.UP)) {
             detailsScroll = Math.max(detailsScroll - 1, 0);
@@ -264,7 +285,6 @@ public final class RuntimeWindow {
                 detailsScroll = 0;
             }
         }
-        return new Nothing();
     }
 
     /** The rows of the list: the offered runtimes, then the present ones. */
@@ -311,7 +331,7 @@ public final class RuntimeWindow {
 
     /** Draws the window, centred in {@code area}. */
     public void render(Frame frame, Rect area) {
-        int width = Math.min(Math.max(area.width() - 4, 0), MAX_WIDTH);
+        int width = Math.clamp((long) area.width() - 4, 0, MAX_WIDTH);
         int height = Math.max(area.height() - 2, 0);
         Rect window = Panels.centered(area, width, height);
         frame.renderWidget(Clear.INSTANCE, window);
@@ -324,67 +344,17 @@ public final class RuntimeWindow {
         if (inner.width() <= 0 || inner.height() <= 0) {
             return;
         }
-        List<Line> header = new ArrayList<>();
-        List<Line> footer;
-        switch (phase) {
-            case PLANNING -> {
-                header.add(Line.from(SPINNER[ticks % SPINNER.length] + " Reading runtimes/…"));
-                footer = KeyLegend.lines("Esc close", inner.width());
-            }
-            case PLAN_FAILED -> {
-                header.add(Line.styled("Cannot plan the download: " + planError, FAILED));
-                footer = KeyLegend.lines("Esc close", inner.width());
-            }
-            case CHOOSE -> {
-                if (plan.runtimes().isEmpty()) {
-                    header.add(Line.from("Every runtime is loaded or complete; there is nothing to download."));
-                } else {
-                    header.add(Line.from(install.source() + ", and checks each against the SHA-256 and size that"
-                            + " leia's build recorded."));
-                    List<RuntimeInstall.RuntimePlan> refreshed = refreshed();
-                    if (!refreshed.isEmpty()) {
-                        header.add(Line.from("Need no download, and are installed from leia.jar with them: "
-                                + String.join(
-                                        ", ",
-                                        refreshed.stream()
-                                                .map(runtime -> runtime.known().folder())
-                                                .toList())));
-                    }
-                    header.add(Line.from(Span.styled(checkedTotal(), Style.EMPTY.bold())));
-                }
-                footer = new ArrayList<>();
-                hint.ifPresent(text -> footer.add(Line.from(Span.styled(" " + text, WARNING))));
-                String keys = !plan.runtimes().isEmpty() ? CHOOSE_KEYS : present.isEmpty() ? "Esc close" : VIEW_KEYS;
-                footer.addAll(KeyLegend.lines(keys, inner.width()));
-            }
-            case INSTALLING -> {
-                header.add(Line.from(Span.styled(
-                        cancelled.get()
-                                ? "Cancelling…"
-                                : "Downloading " + TextFormat.count(progress.jarCount(), "jar") + " into "
-                                        + install.runtimesDir(),
-                        Style.EMPTY.bold())));
-                footer = KeyLegend.lines("Esc cancel", inner.width());
-            }
-            default -> {
-                header.add(Line.from(Span.styled("Done: " + install.runtimesDir(), Style.EMPTY.bold())));
-                for (String line : progress.outcome().summary()) {
-                    header.add(line.contains(": failed: ") ? Line.from(Span.styled(line, FAILED)) : Line.from(line));
-                }
-                if (phase == Phase.LOADING) {
-                    header.add(Line.from(SPINNER[ticks % SPINNER.length] + " Loading the new runtimes…"));
-                } else {
-                    header.addAll(loadLines);
-                }
-                footer = KeyLegend.lines("⏎/Esc close", inner.width());
-            }
-        }
+        List<Line> header = header();
+        List<Line> footer = footer(inner.width());
         List<Line> wrappedHeader = Panels.wrap(header, Math.max(inner.width() - 1, 1));
         // Below the header goes the list or the jars, but only once there is a plan.
-        int headerHeight = phase != Phase.PLANNING && phase != Phase.PLAN_FAILED
-                ? Math.min(wrappedHeader.size(), Math.max(inner.height() / 3, 1))
-                : Math.min(wrappedHeader.size(), inner.height());
-        int footerHeight = Math.min(footer.size(), Math.max(inner.height() / 3, 1));
+        int headerHeight = Math.min(
+                wrappedHeader.size(),
+                phase != Phase.PLANNING && phase != Phase.PLAN_FAILED
+                        ? Math.max(inner.height() / 3, 1)
+                        : inner.height());
+        int footerCap = Math.max(inner.height() / 3, 1);
+        int footerHeight = Math.min(footer.size(), footerCap);
         int gaugeHeight = phase == Phase.INSTALLING || phase == Phase.LOADING || phase == Phase.DONE ? 1 : 0;
         List<Rect> rows = Layout.vertical()
                 .constraints(
@@ -403,6 +373,74 @@ public final class RuntimeWindow {
             renderProgress(frame, rows.get(2));
         }
         frame.renderWidget(Paragraph.from(Text.from(footer)), rows.get(3));
+    }
+
+    private List<Line> header() {
+        return switch (phase) {
+            case PLANNING -> List.of(Line.from(SPINNER[ticks % SPINNER.length] + " Reading runtimes/…"));
+            case PLAN_FAILED -> List.of(Line.styled("Cannot plan the download: " + planError, FAILED));
+            case CHOOSE -> chooseHeader();
+            case INSTALLING ->
+                List.of(Line.from(Span.styled(
+                        cancelled.get()
+                                ? "Cancelling…"
+                                : "Downloading " + TextFormat.count(progress.jarCount(), "jar") + " into "
+                                        + install.runtimesDir(),
+                        Style.EMPTY.bold())));
+            default -> doneHeader();
+        };
+    }
+
+    private List<Line> chooseHeader() {
+        if (plan.runtimes().isEmpty()) {
+            return List.of(Line.from("Every runtime is loaded or complete; there is nothing to download."));
+        }
+        List<Line> header = new ArrayList<>();
+        header.add(Line.from(
+                install.source() + ", and checks each against the SHA-256 and size that" + " leia's build recorded."));
+        List<RuntimeInstall.RuntimePlan> refreshed = refreshed();
+        if (!refreshed.isEmpty()) {
+            header.add(Line.from("Need no download, and are installed from leia.jar with them: "
+                    + String.join(
+                            ", ",
+                            refreshed.stream()
+                                    .map(runtime -> runtime.known().folder())
+                                    .toList())));
+        }
+        header.add(Line.from(Span.styled(checkedTotal(), Style.EMPTY.bold())));
+        return header;
+    }
+
+    private List<Line> doneHeader() {
+        List<Line> header = new ArrayList<>();
+        header.add(Line.from(Span.styled("Done: " + install.runtimesDir(), Style.EMPTY.bold())));
+        for (String line : progress.outcome().summary()) {
+            header.add(line.contains(": failed: ") ? Line.from(Span.styled(line, FAILED)) : Line.from(line));
+        }
+        if (phase == Phase.LOADING) {
+            header.add(Line.from(SPINNER[ticks % SPINNER.length] + " Loading the new runtimes…"));
+        } else {
+            header.addAll(loadLines);
+        }
+        return header;
+    }
+
+    private List<Line> footer(int width) {
+        return switch (phase) {
+            case PLANNING, PLAN_FAILED -> KeyLegend.lines(CLOSE_KEYS, width);
+            case CHOOSE -> {
+                List<Line> footer = new ArrayList<>();
+                hint.ifPresent(text -> footer.add(Line.from(Span.styled(" " + text, WARNING))));
+                String keys = CHOOSE_KEYS;
+                if (plan.runtimes().isEmpty()) {
+                    keys = present.isEmpty() ? CLOSE_KEYS : VIEW_KEYS;
+                }
+                footer.addAll(KeyLegend.lines(keys, width));
+                yield footer;
+            }
+            case INSTALLING -> KeyLegend.lines("Esc cancel", width);
+            default -> KeyLegend.lines("⏎/Esc close", width);
+        };
     }
 
     /** The jars and bytes of the checked runtimes. */
@@ -424,8 +462,8 @@ public final class RuntimeWindow {
                 .toList();
     }
 
-    private void renderChoose(Frame frame, Rect area) {
-        Block listBlock = Panels.panel(" Runtimes ", true);
+    /** A row for each runtime: the offered ones first, then the present ones. */
+    private List<String> runtimeTexts() {
         List<String> texts = new ArrayList<>();
         for (RuntimeInstall.RuntimePlan runtime : offered) {
             texts.add((checked.contains(runtime.known()) ? "[x] " : "[ ] ")
@@ -442,6 +480,12 @@ public final class RuntimeWindow {
             texts.add("[x] " + runtime.known().name() + " · indexes of "
                     + majors(runtime.known().indexMajors()) + " · " + state);
         }
+        return texts;
+    }
+
+    private void renderChoose(Frame frame, Rect area) {
+        Block listBlock = Panels.panel(" Runtimes ", true);
+        List<String> texts = runtimeTexts();
         int listWidth = texts.stream().mapToInt(CharWidth::of).max().orElse(0) + 2;
         List<Rect> parts = area.width() >= WIDE
                 ? Layout.horizontal()
@@ -580,7 +624,7 @@ public final class RuntimeWindow {
         List<Line> lines = Panels.wrap(progress.lines(SPINNER[ticks % SPINNER.length]), Math.max(inner.width(), 1));
         // The active jar stays in sight.
         int active = progress.activeLine();
-        int top = Math.clamp(active - inner.height() / 2, 0, Math.max(lines.size() - inner.height(), 0));
+        int top = Math.clamp((long) active - inner.height() / 2, 0, Math.max(lines.size() - inner.height(), 0));
         frame.renderWidget(
                 Paragraph.builder()
                         .text(Text.from(lines))

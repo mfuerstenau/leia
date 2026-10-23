@@ -290,11 +290,12 @@ public final class Check {
 
     /** The keys of the screen, for the footer. */
     public String keys() {
-        return running()
-                ? "Esc cancel check   Tab panel   ↑↓←→"
-                : levels
-                        ? "⏎ check   l level: " + level + " " + levelName(level) + "   Tab panel   ↑↓←→"
-                        : "⏎ check   Tab panel   ↑↓←→";
+        if (running()) {
+            return "Esc cancel check   Tab panel   ↑↓←→";
+        }
+        return levels
+                ? "⏎ check   l level: " + level + " " + levelName(level) + "   Tab panel   ↑↓←→"
+                : "⏎ check   Tab panel   ↑↓←→";
     }
 
     public void render(Frame frame, Rect area) {
@@ -313,7 +314,7 @@ public final class Check {
 
         // TamboUI scrolls no further than to show the last line at the bottom, so the scroll stops
         // there too (ADR 0034 §10).
-        summaryScroll = Math.min(summaryScroll, Math.max(summaryRows - (summaryHeight - 2), 0));
+        summaryScroll = Math.clamp(summaryScroll, 0, Math.max(summaryRows - (summaryHeight - 2), 0));
         frame.renderWidget(
                 Paragraph.builder()
                         .text(Text.from(wrapped))
@@ -339,7 +340,7 @@ public final class Check {
                 .max()
                 .orElse(0);
         // TamboUI's Paragraph doesn't scroll sideways, so the lines are cut here.
-        outputColumn = Math.min(outputColumn, Math.max(widest - inner, 0));
+        outputColumn = Math.clamp(outputColumn, 0, Math.max(widest - inner, 0));
         List<Line> shown = texts.subList(outputScroll, Math.min(outputScroll + outputRows, texts.size())).stream()
                 .map(text -> Line.styled(fromColumn(text, outputColumn), outputStyle(text)))
                 .toList();
@@ -381,8 +382,8 @@ public final class Check {
         long bad = result.indexes().stream().filter(index -> !index.clean()).count();
         String took = String.format(Locale.ROOT, "took %.1f s", result.tookMillis() / 1000.0);
         int count = result.indexes().size();
-        List<Line> lines = new ArrayList<>();
-        lines.add(
+        List<Line> shown = new ArrayList<>();
+        shown.add(
                 bad == 0
                         ? Line.styled(
                                 "OK: no problems found in " + indexCount(count) + " (" + took + ")",
@@ -393,10 +394,10 @@ public final class Check {
         boolean several = count > 1;
         for (IndexCheck index : result.indexes()) {
             if (several || !index.clean()) {
-                lines.addAll(indexLines(index, several));
+                shown.addAll(indexLines(index, several));
             }
         }
-        return lines;
+        return shown;
     }
 
     private List<Line> indexLines(IndexCheck index, boolean named) {
@@ -410,21 +411,21 @@ public final class Check {
             head.add(Span.raw(": "));
         }
         head.add(Span.raw(indexSummary(index)));
-        List<Line> lines = new ArrayList<>();
-        lines.add(Line.from(head));
+        List<Line> shown = new ArrayList<>();
+        shown.add(Line.from(head));
         for (String problem : indexProblems(index)) {
-            lines.add(Line.styled("    " + problem, Style.EMPTY.red()));
+            shown.add(Line.styled("    " + problem, Style.EMPTY.red()));
         }
         for (SegmentCheck segment : index.segments()) {
             if (segment.error().isPresent()) {
-                lines.add(Line.styled(
+                shown.add(Line.styled(
                         "    " + segment.name() + " (" + TextFormat.count(segment.maxDoc(), "doc") + ", "
                                 + TextFormat.size(segment.sizeBytes()) + "): "
                                 + segment.error().get(),
                         Style.EMPTY.red()));
             }
         }
-        return lines;
+        return shown;
     }
 
     /** What the summary line of an index says. */

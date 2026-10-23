@@ -36,15 +36,15 @@ dependencies {
     runtimeOnly(libs.tamboui.panama.backend)
 
     testImplementation(launcher.output)
-    // Lucene 10 for the indexes of 9 and 10, with leia-core and Lucene, as leia-server's tests have it;
-    // the old indexes of the Pilot tests need the old runtimes, which the tests load from their folders
-    // (testRuntimes below).
-    testRuntimeOnly(project(":leia-lucene10"))
     // The Pilot tests write the indexes they open, as leia-server's tests do.
     testImplementation(libs.lucene.core)
     testImplementation(platform(libs.tamboui.bom))
     testImplementation(testFixtures(libs.tamboui.tui))
     testImplementation(testFixtures(libs.tamboui.core))
+    // Lucene 10 for the indexes of 9 and 10, with leia-core and Lucene, as leia-server's tests have it;
+    // the old indexes of the Pilot tests need the old runtimes, which the tests load from their folders
+    // (testRuntimes below).
+    testRuntimeOnly(project(":leia-lucene10"))
 }
 
 application {
@@ -79,6 +79,7 @@ val runtimeFolders = RUNTIME_MODULES.associateWith { runtimeFolderJars(it) }
 // (ADR 0073).
 val runtimeAdapters = tasks.register<Sync>("runtimeAdapters") {
     description = "Puts leia's own jars of the runtimes' folders together, for leia.jar."
+    group = "build"
     into(layout.buildDirectory.dir("generated/runtime-adapters"))
     for ((module, jars) in runtimeFolders) {
         val own = jars.incoming.artifactView {
@@ -95,6 +96,7 @@ sourceSets.main {
 // The old runtimes' folders for the tests, whose classpath has Lucene 10.
 val testRuntimes = tasks.register<Sync>("testRuntimes") {
     description = "Puts the old runtimes' folders together for the tests."
+    group = "verification"
     into(layout.buildDirectory.dir("test-runtimes"))
     for ((module, jars) in runtimeFolders - "leia-lucene10") {
         from(jars) { into(runtimeFolder(module)) }
@@ -105,6 +107,7 @@ val testRuntimes = tasks.register<Sync>("testRuntimes") {
 // loading it from testRuntimes would put it into the jar chain twice.
 val testLucene10Folder = tasks.register<Sync>("testLucene10Folder") {
     description = "Puts Lucene 10's runtime folder together for the tests."
+    group = "verification"
     into(layout.buildDirectory.dir("test-lucene10"))
     from(runtimeFolders.getValue("leia-lucene10"))
 }

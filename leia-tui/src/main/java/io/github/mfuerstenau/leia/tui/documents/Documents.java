@@ -95,6 +95,14 @@ import java.util.stream.Stream;
  */
 public final class Documents {
 
+    private static final String AS = ", as ";
+
+    private static final String FIELDS_TITLE = " Fields (";
+
+    private static final String FLAGS_LABEL = "Flags";
+
+    private static final String TERM_VECTOR = "Term vector";
+
     /** From this width on, the details panel is next to the fields instead of below them. */
     private static final int SIDE_BY_SIDE_WIDTH = 130;
 
@@ -591,13 +599,14 @@ public final class Documents {
         documents.indexes = indexes;
         documents.segments = List.copyOf(segments);
         documents.features = features;
-        documents.docId = Math.max(Math.min(docId, maxDoc - 1), 0);
+        documents.docId = Math.clamp(docId, 0, Math.max(maxDoc - 1, 0));
         if (pinned != null) {
             Optional<SegmentStart> same = documents.segment(pinned.index(), pinned.name());
             if (same.isPresent()) {
                 documents.pinned = same.get();
                 documents.docId = same.get().docBase()
-                        + Math.clamp(docId - pinned.docBase(), 0, same.get().maxDoc() - 1);
+                        + Math.clamp(
+                                (long) docId - pinned.docBase(), 0, same.get().maxDoc() - 1);
             } else {
                 documents.note = "segment " + pinned.name() + " is gone";
             }
@@ -1497,154 +1506,193 @@ public final class Documents {
      */
     public Optional<Request> handleKey(KeyEvent key) {
         if (viewer != null) {
-            Optional<Viewer.Event> event = viewer.handleKey(key);
-            if (event.isPresent() && event.get() instanceof Viewer.Event.Close) {
-                closeViewer();
-            }
-            return event.flatMap(Documents::viewerRequest);
+            return viewerKey(key);
         }
         if (seek != null) {
             seekKey(key);
             return Optional.empty();
         }
         if (prompt != null) {
-            if (key.code() == KeyCode.ESCAPE) {
-                prompt = null;
-                return Optional.empty();
-            }
-            OptionalInt chosen = promptKey(prompt, key, maxDoc);
-            if (chosen.isEmpty()) {
-                return Optional.empty();
-            }
-            prompt = null;
-            // i goes anywhere: a document outside the pinned segment unpins it.
-            leaveSegment(chosen.getAsInt());
-            return stepsThroughFilter()
-                    ? filterStep(chosen.getAsInt(), true, FilterStep.NEAREST)
-                    : Optional.of(new Request.Document(chosen.getAsInt()));
+            return docIdPromptKey(key);
         }
         clearNotes();
         KeyCode code = key.code();
         // A key pressed before the last step's document is in goes on from that document.
         int from = wanted.orElse(docId);
         if (code == KeyCode.LEFT || key.isChar('p')) {
-            if (stepsThroughFilter()) {
-                return moveThroughFilter(false);
-            }
-            if (pinned != null && from - 1 < pinned.docBase()) {
-                note = "first document of " + pinned.name();
-                return Optional.empty();
-            }
-            return from > 0 ? Optional.of(new Request.Document(from - 1)) : Optional.empty();
+            return previous(from);
         }
         if (code == KeyCode.RIGHT || key.isChar('n')) {
-            if (stepsThroughFilter()) {
-                return moveThroughFilter(true);
-            }
-            if (pinned != null && from + 1 >= pinned.end()) {
-                note = "last document of " + pinned.name();
-                return Optional.empty();
-            }
-            return from < maxDoc - 1 ? Optional.of(new Request.Document(from + 1)) : Optional.empty();
+            return next(from);
         }
         Optional<String> unsupported = unsupported(key);
         if (unsupported.isPresent()) {
             return unsupported.map(Request.Unsupported::new);
         }
         if (code == KeyCode.ENTER) {
-            Optional<DocumentField> field = selectedField();
-            if (field.isEmpty()
-                    || !field.get().hasTermVector()
-                    || termVectors.containsKey(field.get().name())) {
-                return Optional.empty();
-            }
-            return Optional.of(new Request.TermVector(docId, field.get().name()));
+            return termVector();
         }
         if (code == KeyCode.TAB) {
             focus = focus == Focus.FIELDS ? Focus.DETAILS : Focus.FIELDS;
             return Optional.empty();
         }
         if (code == KeyCode.CHAR) {
-            switch (key.codePoint()) {
-                case 'i' -> {
-                    if (maxDoc > 0) {
-                        prompt = new DocIdPrompt();
-                    }
-                    return Optional.empty();
-                }
-                case 'S' -> {
-                    if (pinned != null) {
-                        pinned = null;
-                    } else {
-                        pinned = segmentOf(from).orElse(null);
-                    }
-                    return Optional.empty();
-                }
-                case '<', '>' -> {
-                    return jumpSegment(key.codePoint() == '>', from);
-                }
-                case '/' -> {
-                    if (!rows.isEmpty()) {
-                        seek = new StringBuilder();
-                        focus = Focus.FIELDS;
-                    }
-                    return Optional.empty();
-                }
-                case '[', ']' -> {
-                    boolean forward = key.codePoint() == ']';
-                    return walk().map(walk -> new Request.Step(walk, forward));
-                }
-                case 'v' -> {
-                    return view();
-                }
-                case 'r' -> {
-                    return reconstruct();
-                }
-                case 'b' -> {
-                    return clearFilter();
-                }
-                case 'a' -> {
-                    return analyze();
-                }
-                case 'm' -> {
-                    return maxDoc > 0 ? Optional.of(new Request.MoreLikeThis(docId)) : Optional.empty();
-                }
-                case 'x' -> {
-                    numbers = numbers.next();
-                    return Optional.empty();
-                }
-                case 't' -> {
-                    selectedField()
-                            .map(field -> schema.get(field.name()))
-                            .filter(field -> field.pointDimensionCount() > 0)
-                            .ifPresent(pointFormats::cycle);
-                    return Optional.empty();
-                }
-                case 's' -> {
-                    return searchDocValues();
-                }
-                case 'N' -> {
-                    return selectedField()
-                            .filter(field -> field.vector().isPresent())
-                            .map(field -> new Request.SearchKnn(field.name(), docId));
-                }
-                case 'E' -> {
-                    return Optional.ofNullable(document).map(doc -> new Request.Export(doc.docId()));
-                }
-                case 'C' -> {
-                    return segmentOf(from).map(segment -> new Request.ShowCommit(segment.index(), segment.name()));
-                }
-                case 'T' -> {
-                    return browseTerms();
-                }
-                case 'e' -> {
-                    hideEmpty = !hideEmpty;
-                    updateRows(selectedField().map(DocumentField::name).orElse(null));
-                    return Optional.empty();
-                }
-                default -> {}
+            Optional<Request> request = charKey(key, from);
+            if (request != null) {
+                return request;
             }
         }
+        moveKey(key);
+        return Optional.empty();
+    }
+
+    private Optional<Request> viewerKey(KeyEvent key) {
+        Optional<Viewer.Event> event = viewer.handleKey(key);
+        if (event.isPresent() && event.get() instanceof Viewer.Event.Close) {
+            closeViewer();
+        }
+        return event.flatMap(Documents::viewerRequest);
+    }
+
+    private Optional<Request> docIdPromptKey(KeyEvent key) {
+        if (key.code() == KeyCode.ESCAPE) {
+            prompt = null;
+            return Optional.empty();
+        }
+        OptionalInt chosen = promptKey(prompt, key, maxDoc);
+        if (chosen.isEmpty()) {
+            return Optional.empty();
+        }
+        prompt = null;
+        // i goes anywhere: a document outside the pinned segment unpins it.
+        leaveSegment(chosen.getAsInt());
+        return stepsThroughFilter()
+                ? filterStep(chosen.getAsInt(), true, FilterStep.NEAREST)
+                : Optional.of(new Request.Document(chosen.getAsInt()));
+    }
+
+    /** The document before {@code from}: the previous match while a filter steps, in the pinned segment. */
+    private Optional<Request> previous(int from) {
+        if (stepsThroughFilter()) {
+            return moveThroughFilter(false);
+        }
+        if (pinned != null && from - 1 < pinned.docBase()) {
+            note = "first document of " + pinned.name();
+            return Optional.empty();
+        }
+        return from > 0 ? Optional.of(new Request.Document(from - 1)) : Optional.empty();
+    }
+
+    /** The document after {@code from}: the next match while a filter steps, in the pinned segment. */
+    private Optional<Request> next(int from) {
+        if (stepsThroughFilter()) {
+            return moveThroughFilter(true);
+        }
+        if (pinned != null && from + 1 >= pinned.end()) {
+            note = "last document of " + pinned.name();
+            return Optional.empty();
+        }
+        return from < maxDoc - 1 ? Optional.of(new Request.Document(from + 1)) : Optional.empty();
+    }
+
+    /** The term vector of the selected field, unless it has none or it is loaded. */
+    private Optional<Request> termVector() {
+        Optional<DocumentField> field = selectedField();
+        if (field.isEmpty()
+                || !field.get().hasTermVector()
+                || termVectors.containsKey(field.get().name())) {
+            return Optional.empty();
+        }
+        return Optional.of(new Request.TermVector(docId, field.get().name()));
+    }
+
+    /** A letter's command, or null for a key that moves the selection. */
+    private Optional<Request> charKey(KeyEvent key, int from) {
+        switch (key.codePoint()) {
+            case 'i' -> {
+                if (maxDoc > 0) {
+                    prompt = new DocIdPrompt();
+                }
+                return Optional.empty();
+            }
+            case 'S' -> {
+                if (pinned != null) {
+                    pinned = null;
+                } else {
+                    pinned = segmentOf(from).orElse(null);
+                }
+                return Optional.empty();
+            }
+            case '<', '>' -> {
+                return jumpSegment(key.codePoint() == '>', from);
+            }
+            case '/' -> {
+                if (!rows.isEmpty()) {
+                    seek = new StringBuilder();
+                    focus = Focus.FIELDS;
+                }
+                return Optional.empty();
+            }
+            case '[', ']' -> {
+                boolean forward = key.codePoint() == ']';
+                return walk().map(walk -> new Request.Step(walk, forward));
+            }
+            case 'v' -> {
+                return view();
+            }
+            case 'r' -> {
+                return reconstruct();
+            }
+            case 'b' -> {
+                return clearFilter();
+            }
+            case 'a' -> {
+                return analyze();
+            }
+            case 'm' -> {
+                return maxDoc > 0 ? Optional.of(new Request.MoreLikeThis(docId)) : Optional.empty();
+            }
+            case 'x' -> {
+                numbers = numbers.next();
+                return Optional.empty();
+            }
+            case 't' -> {
+                selectedField()
+                        .map(field -> schema.get(field.name()))
+                        .filter(field -> field.pointDimensionCount() > 0)
+                        .ifPresent(pointFormats::cycle);
+                return Optional.empty();
+            }
+            case 's' -> {
+                return searchDocValues();
+            }
+            case 'N' -> {
+                return selectedField()
+                        .filter(field -> field.vector().isPresent())
+                        .map(field -> new Request.SearchKnn(field.name(), docId));
+            }
+            case 'E' -> {
+                return Optional.ofNullable(document).map(doc -> new Request.Export(doc.docId()));
+            }
+            case 'C' -> {
+                return segmentOf(from).map(segment -> new Request.ShowCommit(segment.index(), segment.name()));
+            }
+            case 'T' -> {
+                return browseTerms();
+            }
+            case 'e' -> {
+                hideEmpty = !hideEmpty;
+                updateRows(selectedField().map(DocumentField::name).orElse(null));
+                return Optional.empty();
+            }
+            default -> {
+                return null;
+            }
+        }
+    }
+
+    /** Moves the selected field, or scrolls the details. */
+    private void moveKey(KeyEvent key) {
         if (focus == Focus.DETAILS) {
             scrollDetails(key);
         } else if (!rows.isEmpty()) {
@@ -1654,7 +1702,6 @@ public final class Documents {
                 detailsScroll = 0;
             }
         }
-        return Optional.empty();
     }
 
     /**
@@ -1722,7 +1769,7 @@ public final class Documents {
     /** What {@code key} is called if the index lacks a feature it needs (ADR 0044); empty otherwise. */
     private Optional<String> unsupported(KeyEvent key) {
         if (key.code() == KeyCode.ENTER) {
-            return supports(Feature.TERM_VECTORS) ? Optional.empty() : Optional.of("Term vector");
+            return supports(Feature.TERM_VECTORS) ? Optional.empty() : Optional.of(TERM_VECTOR);
         }
         if (key.code() != KeyCode.CHAR) {
             return Optional.empty();
@@ -1821,7 +1868,7 @@ public final class Documents {
                     if (docId < maxDoc) {
                         return OptionalInt.of(docId);
                     }
-                } catch (NumberFormatException e) {
+                } catch (NumberFormatException _) {
                     // Said below.
                 }
                 prompt.error = "Enter a number from 0 to " + (maxDoc - 1) + ".";
@@ -1945,37 +1992,20 @@ public final class Documents {
                 valueSummary(field, numbers)
             });
         }
-        String[] titles = {"Field", "Flags", "Norm", "Value"};
-        int[] widths = new int[3];
-        for (int column = 0; column < 3; column++) {
-            int width = titles[column].length();
-            for (String[] row : cells) {
-                width = Math.max(width, row[column].codePointCount(0, row[column].length()));
-            }
-            widths[column] = width;
-        }
-        Row header = Row.from(Cell.from("Field"), Cell.from("Flags"), right("Norm", widths[2]), Cell.from("Value"))
+        String[] titles = {"Field", FLAGS_LABEL, "Norm", "Value"};
+        int[] widths = columnWidths(titles, cells);
+        Row header = Row.from(Cell.from("Field"), Cell.from(FLAGS_LABEL), right("Norm", widths[2]), Cell.from("Value"))
                 .style(Style.EMPTY.bold());
         List<Row> tableRows = new ArrayList<>();
         for (int i = 0; i < cells.size(); i++) {
-            String[] row = cells.get(i);
-            Cell name =
-                    matched.get(i) ? Cell.from(Line.from(Span.styled(row[0], TextFormat.MATCH))) : Cell.from(row[0]);
-            Row tableRow = Row.from(name, Cell.from(row[1]), right(row[2], widths[2]), Cell.from(row[3]));
+            String[] cellRow = cells.get(i);
+            Cell name = matched.get(i)
+                    ? Cell.from(Line.from(Span.styled(cellRow[0], TextFormat.MATCH)))
+                    : Cell.from(cellRow[0]);
+            Row tableRow = Row.from(name, Cell.from(cellRow[1]), right(cellRow[2], widths[2]), Cell.from(cellRow[3]));
             tableRows.add(empty.get(i) ? tableRow.style(Style.EMPTY.dim()) : tableRow);
         }
-        int shown = rows.size();
-        int total = document.fields().size();
-        String count =
-                (shown == total ? Integer.toString(total) : shown + " of " + total + ", e shows all") + matchesTitle();
-        String title;
-        if (seek == null) {
-            title = " Fields (" + count + ", / seeks) ";
-        } else if (!seek.isEmpty() && seekMatch().isEmpty()) {
-            title = " Fields (" + count + ") /" + TextFormat.escapeControl(seek.toString()) + "▏ no match ";
-        } else {
-            title = " Fields (" + count + ") /" + TextFormat.escapeControl(seek.toString()) + "▏ ";
-        }
+        String title = fieldsTitle();
         if (row >= 0) {
             table.select(row);
         } else {
@@ -1996,6 +2026,34 @@ public final class Documents {
                 .block(panel(title, focused))
                 .build();
         frame.renderStatefulWidget(widget, area, table);
+    }
+
+    /** The widths of the first three columns: of their title or their widest cell. */
+    private static int[] columnWidths(String[] titles, List<String[]> cells) {
+        int[] widths = new int[3];
+        for (int column = 0; column < 3; column++) {
+            int width = titles[column].length();
+            for (String[] cellRow : cells) {
+                width = Math.max(width, cellRow[column].codePointCount(0, cellRow[column].length()));
+            }
+            widths[column] = width;
+        }
+        return widths;
+    }
+
+    /** How many fields there are, how many are shown, and the seek. */
+    private String fieldsTitle() {
+        int shown = rows.size();
+        int total = document.fields().size();
+        String count =
+                (shown == total ? Integer.toString(total) : shown + " of " + total + ", e shows all") + matchesTitle();
+        if (seek == null) {
+            return FIELDS_TITLE + count + ", / seeks) ";
+        }
+        if (!seek.isEmpty() && seekMatch().isEmpty()) {
+            return FIELDS_TITLE + count + ") /" + TextFormat.escapeControl(seek.toString()) + "▏ no match ";
+        }
+        return FIELDS_TITLE + count + ") /" + TextFormat.escapeControl(seek.toString()) + "▏ ";
     }
 
     private void renderDetails(Frame frame, Rect area) {
@@ -2026,7 +2084,7 @@ public final class Documents {
         Block block = panel(title, focused);
         Rect inner = block.inner(area);
         List<Line> wrapped = Panels.wrap(lines, inner.width());
-        detailsScroll = Math.min(detailsScroll, Math.max(wrapped.size() - inner.height(), 0));
+        detailsScroll = Math.clamp(detailsScroll, 0, Math.max(wrapped.size() - inner.height(), 0));
         frame.renderWidget(
                 Paragraph.builder()
                         .text(Text.from(wrapped))
@@ -2184,10 +2242,10 @@ public final class Documents {
     /** A vector's euclidean length; a field compared by dot product holds vectors of length 1. */
     static double vectorLength(KnnVector vector) {
         double sum = 0;
-        for (float f : vector.floats()) {
+        for (Float f : vector.floats()) {
             sum += (double) f * f;
         }
-        for (byte b : vector.bytes()) {
+        for (Byte b : vector.bytes()) {
             sum += (double) b * b;
         }
         return Math.sqrt(sum);
@@ -2252,44 +2310,8 @@ public final class Documents {
             int createdVersionMajor) {
         List<Line> lines = new ArrayList<>();
         String flags = flags(schema, field);
-        lines.add(labelled("Flags", flags + "  " + flagWords(flags)));
-        if (schema.isPresent()) {
-            IndexField index = schema.get();
-            List<String> indexed = new ArrayList<>();
-            indexed.add(
-                    index.indexOptions() == IndexOptions.NONE
-                            ? "not indexed"
-                            : Overview.postings(index.indexOptions()));
-            if (index.hasPayloads()) {
-                indexed.add("payloads");
-            }
-            lines.add(labelled("Indexed", String.join(", ", indexed)));
-            List<String> other = new ArrayList<>();
-            if (index.hasNorms()) {
-                other.add("norms");
-            }
-            if (index.hasTermVectors()) {
-                other.add("term vectors");
-            }
-            if (index.docValuesType() != DocValuesType.NONE) {
-                other.add(Overview.docValues(index.docValuesType()) + " doc values");
-            }
-            if (index.pointDimensionCount() > 0) {
-                other.add("points " + index.pointDimensionCount() + "×" + index.pointNumBytes() + "B");
-            }
-            if (index.vectorDimension() > 0) {
-                other.add("vectors " + index.vectorDimension() + "d"
-                        + index.vectorEncoding()
-                                .map(e -> " " + Overview.vectorEncoding(e))
-                                .orElse("")
-                        + index.vectorSimilarity()
-                                .map(s -> " " + Overview.vectorSimilarity(s))
-                                .orElse(""));
-            }
-            if (!other.isEmpty()) {
-                lines.add(labelled("Field has", String.join(", ", other)));
-            }
-        }
+        lines.add(labelled(FLAGS_LABEL, flags + "  " + flagWords(flags)));
+        schema.ifPresent(index -> lines.addAll(schemaLines(index)));
         lines.add(labelled(
                 "Norm", field.norm().isPresent() ? normText(field.norm().getAsLong(), createdVersionMajor) : "-"));
         matchesLine.ifPresent(text -> lines.add(labelled("Matches", text)));
@@ -2299,99 +2321,163 @@ public final class Documents {
         }
 
         lines.add(Line.empty());
-        if (field.stored().isEmpty()) {
-            lines.add(labelled("Stored", "-"));
-        } else {
-            lines.add(labelled("Stored", TextFormat.count(field.stored().size(), "value")));
-            Style dim = Style.EMPTY.dim();
-            for (int v = 0; v < field.stored().size(); v++) {
-                StoredValue value = field.stored().get(v);
-                // Multi-line text keeps its lines, indented under the first; a long value shows its
-                // beginning, and the viewer the rest.
-                String text = storedText(value);
-                String shown = TextFormat.firstChars(text, DETAIL_VALUE_CHARS);
-                boolean more = !shown.equals(text);
-                List<int[]> marks = valueMarks(text, shown, matches, v);
-                String[] valueLines = shown.split("\n", -1);
-                int lineStart = 0;
-                for (int i = 0; i < valueLines.length; i++) {
-                    if (i == DETAIL_VALUE_LINES) {
-                        more = true;
-                        break;
-                    }
-                    String prefix = i == 0
-                            ? String.format(Locale.ROOT, "  %-8s", Viewer.storedType(value.type()))
-                            : " ".repeat(10);
-                    List<Span> spans = new ArrayList<>();
-                    spans.add(Span.styled(prefix, dim));
-                    spans.addAll(TextFormat.marked(shown, lineStart, lineStart + valueLines[i].length(), marks));
-                    lines.add(Line.from(spans));
-                    lineStart += valueLines[i].length() + 1;
-                }
-                if (value.fullLength().isPresent()) {
-                    lines.add(Line.styled(
-                            " ".repeat(10) + "cut at " + Viewer.cutSize() + " of "
-                                    + TextFormat.size(value.fullLength().getAsLong()) + ", v views it whole",
-                            dim));
-                } else if (more) {
-                    lines.add(Line.styled(" ".repeat(10) + "… v views it whole", dim));
-                }
-            }
-        }
+        lines.addAll(storedLines(field, matches));
 
         lines.add(Line.empty());
-        if (field.docValues().isEmpty()) {
-            lines.add(labelled("Doc values", "-"));
-        } else {
-            DocValues values = field.docValues().get();
-            String heading = Overview.docValues(values.type());
-            if (!values.numbers().isEmpty()) {
-                heading += ", as " + numbers.label() + " (x)";
-            }
-            lines.add(labelled("Doc values", heading));
-            for (String text : docValueTexts(values, numbers)) {
-                lines.add(Line.from("  " + text));
-            }
-        }
+        lines.addAll(docValuesLines(field, numbers));
 
-        if (field.vector().isPresent()
-                || schema.filter(index -> index.vectorDimension() > 0).isPresent()) {
-            lines.add(Line.empty());
-            if (field.vector().isEmpty()) {
-                lines.add(labelled("Vector", "-"));
-            } else {
-                KnnVector vector = field.vector().get();
-                lines.add(labelled(
-                        "Vector",
-                        vector.dimension() + "d " + Overview.vectorEncoding(vector.encoding()) + ", length "
-                                + String.format(Locale.ROOT, "%.6g", vectorLength(vector))
-                                + ", N finds the nearest, T its graph node"));
-                lines.addAll(vectorLines(vector));
-            }
-        }
+        lines.addAll(vectorSection(schema, field));
 
         lines.add(Line.empty());
-        if (!field.hasTermVector()) {
-            lines.add(labelled("Term vector", "-"));
-        } else {
-            switch (termVector) {
-                case null ->
-                    lines.add(labelled(
-                            "Term vector", features.contains(Feature.TERM_VECTORS) ? "⏎ loads it" : "not read"));
-                case TermVector.Failed failed ->
-                    lines.add(labelled("Term vector", "cannot read it: " + failed.error()));
-                case TermVector.Loaded loaded -> {
-                    lines.add(labelled(
-                            "Term vector", TextFormat.count(loaded.terms().size(), "term")));
-                    lines.addAll(termLines(loaded.terms(), true));
-                }
-            }
-        }
+        lines.addAll(termVectorLines(field, termVector, features));
 
         if (features.contains(Feature.RECONSTRUCT)
                 && schema.filter(Documents::rebuildable).isPresent()) {
             lines.add(Line.empty());
             lines.addAll(reconstructionLines(reconstruction, schema.get(), pointFormats));
+        }
+        return lines;
+    }
+
+    /** How the field is indexed, and what else it has. */
+    private static List<Line> schemaLines(IndexField index) {
+        List<Line> lines = new ArrayList<>();
+        List<String> indexed = new ArrayList<>();
+        indexed.add(
+                index.indexOptions() == IndexOptions.NONE ? "not indexed" : Overview.postings(index.indexOptions()));
+        if (index.hasPayloads()) {
+            indexed.add("payloads");
+        }
+        lines.add(labelled("Indexed", String.join(", ", indexed)));
+        List<String> other = new ArrayList<>();
+        if (index.hasNorms()) {
+            other.add("norms");
+        }
+        if (index.hasTermVectors()) {
+            other.add("term vectors");
+        }
+        if (index.docValuesType() != DocValuesType.NONE) {
+            other.add(Overview.docValues(index.docValuesType()) + " doc values");
+        }
+        if (index.pointDimensionCount() > 0) {
+            other.add("points " + index.pointDimensionCount() + "×" + index.pointNumBytes() + "B");
+        }
+        if (index.vectorDimension() > 0) {
+            other.add("vectors " + index.vectorDimension() + "d"
+                    + index.vectorEncoding()
+                            .map(e -> " " + Overview.vectorEncoding(e))
+                            .orElse("")
+                    + index.vectorSimilarity()
+                            .map(s -> " " + Overview.vectorSimilarity(s))
+                            .orElse(""));
+        }
+        if (!other.isEmpty()) {
+            lines.add(labelled("Field has", String.join(", ", other)));
+        }
+        return lines;
+    }
+
+    private static List<Line> storedLines(DocumentField field, Optional<FieldMatches> matches) {
+        if (field.stored().isEmpty()) {
+            return List.of(labelled("Stored", "-"));
+        }
+        List<Line> lines = new ArrayList<>();
+        lines.add(labelled("Stored", TextFormat.count(field.stored().size(), "value")));
+        for (int v = 0; v < field.stored().size(); v++) {
+            lines.addAll(storedValueLines(field.stored().get(v), v, matches));
+        }
+        return lines;
+    }
+
+    /**
+     * Multi-line text keeps its lines, indented under the first; a long value shows its beginning,
+     * and the viewer the rest.
+     */
+    private static List<Line> storedValueLines(StoredValue value, int v, Optional<FieldMatches> matches) {
+        List<Line> lines = new ArrayList<>();
+        Style dim = Style.EMPTY.dim();
+        String text = storedText(value);
+        String shown = TextFormat.firstChars(text, DETAIL_VALUE_CHARS);
+        boolean more = !shown.equals(text);
+        List<int[]> marks = valueMarks(text, shown, matches, v);
+        String[] valueLines = shown.split("\n", -1);
+        int lineStart = 0;
+        for (int i = 0; i < valueLines.length; i++) {
+            if (i == DETAIL_VALUE_LINES) {
+                more = true;
+                break;
+            }
+            String prefix =
+                    i == 0 ? String.format(Locale.ROOT, "  %-8s", Viewer.storedType(value.type())) : " ".repeat(10);
+            List<Span> spans = new ArrayList<>();
+            spans.add(Span.styled(prefix, dim));
+            spans.addAll(TextFormat.marked(shown, lineStart, lineStart + valueLines[i].length(), marks));
+            lines.add(Line.from(spans));
+            lineStart += valueLines[i].length() + 1;
+        }
+        if (value.fullLength().isPresent()) {
+            lines.add(Line.styled(
+                    " ".repeat(10) + "cut at " + Viewer.cutSize() + " of "
+                            + TextFormat.size(value.fullLength().getAsLong()) + ", v views it whole",
+                    dim));
+        } else if (more) {
+            lines.add(Line.styled(" ".repeat(10) + "… v views it whole", dim));
+        }
+        return lines;
+    }
+
+    private static List<Line> docValuesLines(DocumentField field, NumberFormat numbers) {
+        if (field.docValues().isEmpty()) {
+            return List.of(labelled("Doc values", "-"));
+        }
+        List<Line> lines = new ArrayList<>();
+        DocValues values = field.docValues().get();
+        String heading = Overview.docValues(values.type());
+        if (!values.numbers().isEmpty()) {
+            heading += AS + numbers.label() + " (x)";
+        }
+        lines.add(labelled("Doc values", heading));
+        for (String text : docValueTexts(values, numbers)) {
+            lines.add(Line.from("  " + text));
+        }
+        return lines;
+    }
+
+    /** The field's vector, for a field with vectors. */
+    private static List<Line> vectorSection(Optional<IndexField> schema, DocumentField field) {
+        if (field.vector().isEmpty()
+                && schema.filter(index -> index.vectorDimension() > 0).isEmpty()) {
+            return List.of();
+        }
+        List<Line> lines = new ArrayList<>();
+        lines.add(Line.empty());
+        if (field.vector().isEmpty()) {
+            lines.add(labelled("Vector", "-"));
+            return lines;
+        }
+        KnnVector vector = field.vector().get();
+        lines.add(labelled(
+                "Vector",
+                vector.dimension() + "d " + Overview.vectorEncoding(vector.encoding()) + ", length "
+                        + String.format(Locale.ROOT, "%.6g", vectorLength(vector))
+                        + ", N finds the nearest, T its graph node"));
+        lines.addAll(vectorLines(vector));
+        return lines;
+    }
+
+    private static List<Line> termVectorLines(DocumentField field, TermVector termVector, Set<Feature> features) {
+        if (!field.hasTermVector()) {
+            return List.of(labelled(TERM_VECTOR, "-"));
+        }
+        List<Line> lines = new ArrayList<>();
+        switch (termVector) {
+            case null ->
+                lines.add(labelled(TERM_VECTOR, features.contains(Feature.TERM_VECTORS) ? "⏎ loads it" : "not read"));
+            case TermVector.Failed failed -> lines.add(labelled(TERM_VECTOR, "cannot read it: " + failed.error()));
+            case TermVector.Loaded loaded -> {
+                lines.add(labelled(TERM_VECTOR, TextFormat.count(loaded.terms().size(), "term")));
+                lines.addAll(termLines(loaded.terms(), true));
+            }
         }
         return lines;
     }
@@ -2405,34 +2491,44 @@ public final class Documents {
         boolean terms = field.indexOptions() != IndexOptions.NONE;
         boolean points = field.pointDimensionCount() > 0;
         if (reconstruction == null) {
-            String what = terms && points ? "the terms and points" : points ? "the points" : "the terms";
+            String what = "the terms";
+            if (points) {
+                what = terms ? "the terms and points" : "the points";
+            }
             return List.of(labelled("Rebuilt", "r rebuilds " + what + " it was indexed with"));
         }
         List<Line> lines = new ArrayList<>();
         PointFormat format = pointFormats.of(field);
         String summary = reconstruction.summary(terms, points);
         boolean onlyPoints = points && !terms && reconstruction instanceof Reconstruction.Done;
-        lines.add(labelled("Rebuilt", onlyPoints ? summary + ", as " + format.label() + " (t)" : summary));
+        lines.add(labelled("Rebuilt", onlyPoints ? summary + AS + format.label() + " (t)" : summary));
         if (reconstruction instanceof Reconstruction.Done done) {
-            if (terms) {
-                Optional<String> tokens = Reconstruction.tokenLine(done.field().terms());
-                if (tokens.isPresent()) {
-                    lines.add(Line.from("  " + tokens.get()));
-                    lines.add(Line.empty());
-                }
-                lines.addAll(termLines(done.field().terms(), Reconstruction.hasFreqs(done.field())));
+            lines.addAll(rebuiltLines(done, terms, points, format));
+        }
+        return lines;
+    }
+
+    /** The terms and the points that a rebuild found. */
+    private static List<Line> rebuiltLines(
+            Reconstruction.Done done, boolean terms, boolean points, PointFormat format) {
+        List<Line> lines = new ArrayList<>();
+        if (terms) {
+            Optional<String> tokens = Reconstruction.tokenLine(done.field().terms());
+            if (tokens.isPresent()) {
+                lines.add(Line.from("  " + tokens.get()));
+                lines.add(Line.empty());
             }
-            if (points) {
-                if (terms) {
-                    lines.add(Line.empty());
-                    lines.add(labelled(
-                            "Points",
-                            TextFormat.count(done.field().points().size(), "point") + ", as " + format.label()
-                                    + " (t)"));
-                }
-                for (PointValue point : done.field().points()) {
-                    lines.add(Line.from("  " + format.format(point)));
-                }
+            lines.addAll(termLines(done.field().terms(), Reconstruction.hasFreqs(done.field())));
+        }
+        if (points) {
+            if (terms) {
+                lines.add(Line.empty());
+                lines.add(labelled(
+                        "Points",
+                        TextFormat.count(done.field().points().size(), "point") + AS + format.label() + " (t)"));
+            }
+            for (PointValue point : done.field().points()) {
+                lines.add(Line.from("  " + format.format(point)));
             }
         }
         return lines;
@@ -2595,7 +2691,7 @@ public final class Documents {
         if (b < numFreeValues) {
             return b;
         }
-        long int4 = b - numFreeValues;
+        long int4 = (long) b - numFreeValues;
         long bits = int4 & 0x07;
         long exponent = int4 >>> 3;
         long decoded = exponent == 0 ? bits : (bits | 0x08) << (exponent - 1);

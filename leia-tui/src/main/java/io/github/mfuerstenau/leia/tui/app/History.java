@@ -42,7 +42,7 @@ public final class History {
                     paths.add(line);
                 }
             }
-        } catch (IOException e) {
+        } catch (IOException _) {
             paths.clear();
         }
         return new History(paths, Optional.of(file));
@@ -81,10 +81,10 @@ public final class History {
             }
             Files.writeString(temporary, String.join("\n", paths) + "\n", StandardCharsets.UTF_8);
             Files.move(temporary, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-        } catch (IOException e) {
+        } catch (IOException _) {
             try {
                 Files.deleteIfExists(temporary);
-            } catch (IOException ignored) {
+            } catch (IOException _) {
                 // Nothing else to do: the history is a convenience.
             }
         }

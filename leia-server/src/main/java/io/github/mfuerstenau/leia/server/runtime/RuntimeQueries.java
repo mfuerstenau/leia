@@ -46,7 +46,7 @@ final class RuntimeQueries {
      *     {@code INVALID_QUERY} if the expression doesn't parse; {@code NOT_SUPPORTED} for an analyzer
      *     the runtime doesn't have
      */
-    static Search.ParsedQuery standard(OpenRuntime open, Search search, StandardSearch group, StandardQuery standard)
+    static Search.ParsedQuery standard(OpenRuntime open, StandardSearch group, StandardQuery standard)
             throws RpcException {
         RuntimeResults.checkField(open.index(), standard.defaultField());
         ParserChecks.numbers(standard.options());
@@ -130,8 +130,8 @@ final class RuntimeQueries {
      *     range; {@code DOC_NOT_FOUND} for a document outside 0 to maxDoc - 1; {@code FIELD_NOT_FOUND}
      *     for an unknown field; {@code NOT_SUPPORTED} for an analyzer the runtime doesn't have
      */
-    static Search.ParsedQuery moreLikeThis(
-            OpenRuntime open, Search search, MoreLikeThisSearch group, MoreLikeThisQuery like) throws RpcException {
+    static Search.ParsedQuery moreLikeThis(OpenRuntime open, MoreLikeThisSearch group, MoreLikeThisQuery like)
+            throws RpcException {
         if (like.docId().isPresent() == like.text().isPresent()) {
             throw new RpcException(
                     ErrorCode.INVALID_PARAMS, "Invalid params: moreLikeThis needs exactly one of docId and text");

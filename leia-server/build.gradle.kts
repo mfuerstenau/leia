@@ -20,10 +20,10 @@ dependencies {
     // ADR 0073). On the test classpath, for the tests that open indexes through Lucene10Runtime
     // directly and those that write indexes. The old runtimes are never on it: the tests load their
     // folders as leia does (testRuntimes below).
-    testImplementation(project(":leia-lucene10"))
-    testImplementation(project(":leia-core"))
     implementation(libs.dagger)
     annotationProcessor(libs.dagger.compiler)
+    testImplementation(project(":leia-lucene10"))
+    testImplementation(project(":leia-core"))
 }
 
 tasks.test {
@@ -95,6 +95,7 @@ val runtimeFolders = RUNTIME_MODULES.associateWith { runtimeFolderJars(it) }
 
 fun runtimesSync(name: String, modules: List<String>) = tasks.register<Sync>(name) {
     description = "Puts the runtimes' folders together for the tests."
+    group = "verification"
     into(layout.buildDirectory.dir(name))
     for (module in modules) {
         from(runtimeFolders.getValue(module)) { into(runtimeFolder(module)) }
@@ -238,6 +239,8 @@ fun git(vararg args: String): Provider<String> =
 val buildInfoDir = layout.buildDirectory.dir("generated/build-info")
 
 val generateBuildInfo = tasks.register<WriteProperties>("generateBuildInfo") {
+    description = "Writes leia's version, commit and commit time for the version method."
+    group = "build"
     destinationFile = buildInfoDir.map { it.file("io/github/mfuerstenau/leia/server/build-info.properties") }
     property("version", project.version.toString())
     property("commit", git("rev-parse", "--short", "HEAD"))

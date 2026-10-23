@@ -121,7 +121,7 @@ class CliTest {
 
     @Test
     void helpNamesEveryOption() {
-        assertThat(Cli.HELP)
+        assertThat(Cli.HELP_TEXT)
                 .contains(
                         "--java <PATH>",
                         "--jar <PATH>",
@@ -142,8 +142,8 @@ class CliTest {
 
     @Test
     void helpSaysWhatTheRuntimesAreFor() {
-        assertThat(Cli.HELP).doesNotContain("--yes");
-        assertThat(Cli.HELP.replaceAll("\\s+", " "))
+        assertThat(Cli.HELP_TEXT).doesNotContain("--yes");
+        assertThat(Cli.HELP_TEXT.replaceAll("\\s+", " "))
                 .contains("a folder for each Lucene from 3.6 to 10 in the folder runtimes beside leia.jar")
                 .contains("without them, an index opens only without a reader. D on the start screen downloads them")
                 .contains("To choose runtimes instead, start leia and press D on its start screen");

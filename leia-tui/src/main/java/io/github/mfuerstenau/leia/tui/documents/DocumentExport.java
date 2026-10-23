@@ -282,7 +282,7 @@ public final class DocumentExport {
             Path realDir;
             try {
                 realDir = Path.of(dir).toRealPath();
-            } catch (IOException e) {
+            } catch (IOException _) {
                 realDir = Path.of(dir);
             }
             if (realParent.startsWith(realDir)) {
@@ -292,7 +292,7 @@ public final class DocumentExport {
         BasicFileAttributes attributes;
         try {
             attributes = Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
-        } catch (IOException e) {
+        } catch (IOException _) {
             return Optional.empty();
         }
         if (attributes.isSymbolicLink()) {
@@ -321,7 +321,7 @@ public final class DocumentExport {
         FileChannel channel;
         try {
             channel = FileChannel.open(path, options);
-        } catch (FileAlreadyExistsException e) {
+        } catch (FileAlreadyExistsException _) {
             return Optional.of("File exists: " + path);
         } catch (IOException e) {
             return Optional.of("Cannot create " + path + ": " + reason(e));
@@ -336,7 +336,7 @@ public final class DocumentExport {
         } catch (IOException e) {
             try {
                 Files.deleteIfExists(path);
-            } catch (IOException ignored) {
+            } catch (IOException _) {
                 // What was written stays; the error says the export failed.
             }
             return Optional.of("Cannot write " + path + ": " + reason(e));

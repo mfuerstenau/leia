@@ -56,20 +56,7 @@ public final class RuntimeKnnRecall {
         String field = query.field();
         List<Target> targets;
         if (params.sample().isPresent()) {
-            int sample = params.sample().getAsInt();
-            if (format.dimension() == 0) {
-                throw invalid("the field '" + field + "' has no KNN vectors");
-            }
-            if (query.docId().isPresent() || query.vector().isPresent()) {
-                throw invalid("a sampled recall check takes its targets from the sample: the query has no target");
-            }
-            if (query.k().isEmpty() || query.k().getAsInt() < 1 || query.k().getAsInt() > KnnQuery.MAX_K - 1) {
-                throw invalid("a sampled recall check needs k from 1 to " + (KnnQuery.MAX_K - 1)
-                        + (query.k().isPresent() ? ": " + query.k().getAsInt() : ""));
-            }
-            if (sample < 1 || sample > StartKnnRecallParams.MAX_SAMPLE) {
-                throw invalid("sample must be between 1 and " + StartKnnRecallParams.MAX_SAMPLE + ", not " + sample);
-            }
+            checkSampled(query, format, params.sample().getAsInt());
             targets = null;
         } else {
             KnnChecks.check(query, format.dimension());
@@ -98,6 +85,23 @@ public final class RuntimeKnnRecall {
             }
         });
         return new JobStarted(jobId);
+    }
+
+    /** Checks a recall check over a sample of {@code sample} documents, which are its targets. */
+    private static void checkSampled(KnnQuery query, RuntimeIndex.VectorFormat format, int sample) throws RpcException {
+        if (format.dimension() == 0) {
+            throw invalid("the field '" + query.field() + "' has no KNN vectors");
+        }
+        if (query.docId().isPresent() || query.vector().isPresent()) {
+            throw invalid("a sampled recall check takes its targets from the sample: the query has no target");
+        }
+        if (query.k().isEmpty() || query.k().getAsInt() < 1 || query.k().getAsInt() > KnnQuery.MAX_K - 1) {
+            throw invalid("a sampled recall check needs k from 1 to " + (KnnQuery.MAX_K - 1)
+                    + (query.k().isPresent() ? ": " + query.k().getAsInt() : ""));
+        }
+        if (sample < 1 || sample > StartKnnRecallParams.MAX_SAMPLE) {
+            throw invalid("sample must be between 1 and " + StartKnnRecallParams.MAX_SAMPLE + ", not " + sample);
+        }
     }
 
     /** The sampled documents' vectors, as targets. */

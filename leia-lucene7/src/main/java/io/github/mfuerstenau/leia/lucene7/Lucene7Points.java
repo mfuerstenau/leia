@@ -103,14 +103,7 @@ final class Lucene7Points implements Points {
             }
         }
         if (!walk.tree.isLeafNode()) {
-            List<Cell> children = new ArrayList<>();
-            for (int child = 0; child <= 1; child++) {
-                if (walk.push(child)) {
-                    children.add(walk.cell());
-                    walk.pop();
-                }
-            }
-            return new CellContents(walk.cell(), List.copyOf(children), List.of(), false);
+            return new CellContents(walk.cell(), children(walk), List.of(), false);
         }
         bkd.visitLeafBlockValues(walk.tree, walk.state);
         List<LeafPoint> points = visitor.points;
@@ -118,6 +111,18 @@ final class Lucene7Points implements Points {
         List<LeafPoint> shown = new ArrayList<>(cut ? points.subList(0, MAX_POINTS) : points);
         shown.sort(Comparator.comparingInt(LeafPoint::docId).thenComparing(LeafPoint::value, Arrays::compareUnsigned));
         return new CellContents(walk.cell(), List.of(), List.copyOf(shown), cut);
+    }
+
+    /** The children of the inner node {@code walk} is at. */
+    private static List<Cell> children(Walk walk) throws IOException {
+        List<Cell> children = new ArrayList<>();
+        for (int child = 0; child <= 1; child++) {
+            if (walk.push(child)) {
+                children.add(walk.cell());
+                walk.pop();
+            }
+        }
+        return List.copyOf(children);
     }
 
     /**
@@ -320,10 +325,14 @@ final class Lucene7Points implements Points {
     /** Takes every cell as inside, so that {@code estimatePointCount} counts every leaf full. */
     private static final class AllInside implements PointValues.IntersectVisitor {
         @Override
-        public void visit(int docID) {}
+        public void visit(int docID) {
+            // Not called: only estimatePointCount, which visits no documents, uses this visitor.
+        }
 
         @Override
-        public void visit(int docID, byte[] packedValue) {}
+        public void visit(int docID, byte[] packedValue) {
+            // Not called: only estimatePointCount, which visits no documents, uses this visitor.
+        }
 
         @Override
         public PointValues.Relation compare(byte[] minPackedValue, byte[] maxPackedValue) {

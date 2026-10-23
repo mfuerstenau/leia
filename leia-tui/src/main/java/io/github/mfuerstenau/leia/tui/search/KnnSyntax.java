@@ -33,7 +33,7 @@ public final class KnnSyntax {
     }
 
     /** A decimal number, as Java writes a float, without NaN, the infinities, hex or a type suffix. */
-    private static final Pattern DECIMAL = Pattern.compile("[+-]?(\\d+\\.?\\d*|\\.\\d+)([eE][+-]?\\d+)?");
+    private static final Pattern DECIMAL = Pattern.compile("[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?");
 
     private static final Pattern WHOLE = Pattern.compile("[+-]?\\d+");
 
@@ -75,30 +75,34 @@ public final class KnnSyntax {
             throw new IllegalArgumentException("The vector has no components.");
         }
         return switch (encoding) {
-            case FLOAT32 -> {
-                List<Float> floats = new ArrayList<>(parts.size());
-                for (String part : parts) {
-                    float value = DECIMAL.matcher(part).matches() ? Float.parseFloat(part) : Float.NaN;
-                    if (!Float.isFinite(value)) {
-                        throw new IllegalArgumentException("'" + part + "' is not a finite decimal number.");
-                    }
-                    floats.add(value);
-                }
-                yield new KnnVector(VectorEncoding.FLOAT32, List.copyOf(floats), List.of());
-            }
-            case BYTE -> {
-                List<Byte> bytes = new ArrayList<>(parts.size());
-                for (String part : parts) {
-                    int value = WHOLE.matcher(part).matches() && part.length() <= 5 ? Integer.parseInt(part) : 1000;
-                    if (value < Byte.MIN_VALUE || value > Byte.MAX_VALUE) {
-                        throw new IllegalArgumentException("'" + part
-                                + "' is not a byte: a vector of bytes takes whole numbers from -128 to 127.");
-                    }
-                    bytes.add((byte) value);
-                }
-                yield new KnnVector(VectorEncoding.BYTE, List.of(), List.copyOf(bytes));
-            }
+            case FLOAT32 -> new KnnVector(VectorEncoding.FLOAT32, floats(parts), List.of());
+            case BYTE -> new KnnVector(VectorEncoding.BYTE, List.of(), bytes(parts));
         };
+    }
+
+    private static List<Float> floats(List<String> parts) {
+        List<Float> floats = new ArrayList<>(parts.size());
+        for (String part : parts) {
+            float value = DECIMAL.matcher(part).matches() ? Float.parseFloat(part) : Float.NaN;
+            if (!Float.isFinite(value)) {
+                throw new IllegalArgumentException("'" + part + "' is not a finite decimal number.");
+            }
+            floats.add(value);
+        }
+        return List.copyOf(floats);
+    }
+
+    private static List<Byte> bytes(List<String> parts) {
+        List<Byte> bytes = new ArrayList<>(parts.size());
+        for (String part : parts) {
+            int value = WHOLE.matcher(part).matches() && part.length() <= 5 ? Integer.parseInt(part) : 1000;
+            if (value < Byte.MIN_VALUE || value > Byte.MAX_VALUE) {
+                throw new IllegalArgumentException(
+                        "'" + part + "' is not a byte: a vector of bytes takes whole numbers from -128 to 127.");
+            }
+            bytes.add((byte) value);
+        }
+        return List.copyOf(bytes);
     }
 
     private static String example(VectorEncoding encoding) {

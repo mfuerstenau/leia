@@ -112,7 +112,7 @@ public final class Session {
 
     private int firstPolls;
 
-    private final App app;
+    private final App ui;
     private final LeiaBackend backend;
 
     /** Installs into {@code runtimes/} beside {@code leia.jar}; empty if leia doesn't run from it. */
@@ -138,7 +138,7 @@ public final class Session {
      * @param runtimeInstall installs the runtimes that the window of {@code D} downloads (ADR 0080)
      */
     public Session(App app, LeiaBackend backend, Optional<RuntimeInstall> runtimeInstall) {
-        this.app = app;
+        this.ui = app;
         this.backend = backend;
         this.runtimeInstall = runtimeInstall;
     }
@@ -187,7 +187,7 @@ public final class Session {
      */
     private void startFirstPolls(TuiRunner runner) {
         List<Poll> polls = new ArrayList<>();
-        for (Poll poll : app.polls()) {
+        for (Poll poll : ui.polls()) {
             polls.add(
                     switch (poll) {
                         case Poll.StoredScan scan -> new Poll.StoredScan(scan.scanId(), scan.jobId(), 0);
@@ -214,23 +214,23 @@ public final class Session {
     private boolean handleEvent(Event event, TuiRunner runner) {
         return switch (event) {
             case KeyEvent key -> {
-                perform(app.handleKey(key), runner);
+                perform(ui.handleKey(key), runner);
                 yield true;
             }
             case Reply reply -> {
-                perform(reply.apply().apply(app), runner);
+                perform(reply.apply().apply(ui), runner);
                 yield true;
             }
             case TickEvent _ -> {
                 poll(runner);
-                yield app.tick();
+                yield ui.tick();
             }
             default -> false;
         };
     }
 
     public void render(Frame frame) {
-        app.render(frame);
+        ui.render(frame);
     }
 
     private void perform(Optional<Action> action, TuiRunner runner) {
@@ -254,282 +254,117 @@ public final class Session {
                 });
             case Action.Reopen _ -> reopen(runner);
             case Action.StartScan start ->
-                backend.call(Methods.START_FIELD_TERM_SCAN, new StartFieldTermScanParams(start.field(), start.topN()))
-                        .whenComplete((job, error) -> {
-                            if (error == null) {
-                                reply(runner, app -> app.scanStarted(start.scanId(), job.jobId()));
-                                return;
-                            }
-                            RpcException rpc = rpcException(error, runner);
-                            if (rpc != null) {
-                                String message = describe(rpc);
-                                reply(runner, app -> app.scanFailed(start.scanId(), message));
-                            }
-                        });
+                complete(
+                        backend.call(
+                                Methods.START_FIELD_TERM_SCAN,
+                                new StartFieldTermScanParams(start.field(), start.topN())),
+                        runner,
+                        job -> app -> app.scanStarted(start.scanId(), job.jobId()),
+                        message -> app -> app.scanFailed(start.scanId(), message));
             case Action.LoadCommits load ->
-                backend.call(Methods.GET_COMMITS, new GetCommitsParams(OptionalInt.of(load.index())))
-                        .whenComplete((result, error) -> {
-                            if (error == null) {
-                                reply(runner, app -> app.commitsLoaded(load.index(), result));
-                                return;
-                            }
-                            RpcException rpc = rpcException(error, runner);
-                            if (rpc != null) {
-                                String message = describe(rpc);
-                                reply(runner, app -> {
-                                    app.commitsFailed(load.index(), message);
-                                    return Optional.empty();
-                                });
-                            }
-                        });
+                complete(
+                        backend.call(Methods.GET_COMMITS, new GetCommitsParams(OptionalInt.of(load.index()))),
+                        runner,
+                        result -> app -> app.commitsLoaded(load.index(), result),
+                        message -> changing(app -> app.commitsFailed(load.index(), message)));
             case Action.LoadCommit load ->
-                backend.call(Methods.GET_COMMIT, new GetCommitParams(load.generation(), OptionalInt.of(load.index())))
-                        .whenComplete((result, error) -> {
-                            if (error == null) {
-                                reply(runner, app -> {
-                                    app.commitLoaded(load.index(), load.generation(), result);
-                                    return Optional.empty();
-                                });
-                                return;
-                            }
-                            RpcException rpc = rpcException(error, runner);
-                            if (rpc != null) {
-                                String message = describe(rpc);
-                                reply(runner, app -> {
-                                    app.commitFailed(load.index(), load.generation(), message);
-                                    return Optional.empty();
-                                });
-                            }
-                        });
-            case Action.LoadAnalysisComponents _ ->
-                backend.call(Methods.GET_ANALYSIS_COMPONENTS, new GetAnalysisComponentsParams())
-                        .whenComplete((result, error) -> {
-                            if (error == null) {
-                                reply(runner, app -> {
-                                    app.componentsLoaded(result);
-                                    return Optional.empty();
-                                });
-                                return;
-                            }
-                            RpcException rpc = rpcException(error, runner);
-                            if (rpc != null && rpc.code() == ErrorCode.NOT_SUPPORTED) {
-                                reply(runner, app -> {
-                                    app.noAnalysis();
-                                    return Optional.empty();
-                                });
-                            } else if (rpc != null) {
-                                String message = describe(rpc);
-                                reply(runner, app -> {
-                                    app.componentsFailed(message);
-                                    return Optional.empty();
-                                });
-                            }
-                        });
+                complete(
+                        backend.call(
+                                Methods.GET_COMMIT,
+                                new GetCommitParams(load.generation(), OptionalInt.of(load.index()))),
+                        runner,
+                        result -> changing(app -> app.commitLoaded(load.index(), load.generation(), result)),
+                        message -> changing(app -> app.commitFailed(load.index(), load.generation(), message)));
+            case Action.LoadAnalysisComponents _ -> loadAnalysisComponents(runner);
             case Action.Analyze analyze ->
-                backend.call(Methods.ANALYZE, analyze.params()).whenComplete((result, error) -> {
-                    if (error == null) {
-                        reply(runner, app -> app.analyzed(analyze.params().text(), result));
-                        return;
-                    }
-                    RpcException rpc = rpcException(error, runner);
-                    if (rpc != null) {
-                        String message = describe(rpc);
-                        reply(runner, app -> app.analyzeFailed(message));
-                    }
-                });
+                complete(
+                        backend.call(Methods.ANALYZE, analyze.params()),
+                        runner,
+                        result -> app -> app.analyzed(analyze.params().text(), result),
+                        message -> app -> app.analyzeFailed(message));
             case Action.LoadTerms load ->
-                backend.call(Methods.GET_TERMS, new GetTermsParams(load.field(), load.from(), Terms.TERMS_PAGE))
-                        .whenComplete((result, error) -> {
-                            if (error == null) {
-                                reply(runner, app -> app.termsLoaded(load, result));
-                                return;
-                            }
-                            RpcException rpc = rpcException(error, runner);
-                            if (rpc != null) {
-                                String message = describe(rpc);
-                                reply(runner, app -> app.termsFailed(load, message));
-                            }
-                        });
+                complete(
+                        backend.call(
+                                Methods.GET_TERMS, new GetTermsParams(load.field(), load.from(), Terms.TERMS_PAGE)),
+                        runner,
+                        result -> app -> app.termsLoaded(load, result),
+                        message -> app -> app.termsFailed(load, message));
             case Action.LoadPostings load ->
-                backend.call(
+                complete(
+                        backend.call(
                                 Methods.GET_POSTINGS,
                                 new GetPostingsParams(
-                                        load.field(), load.term(), load.fromDoc(), Terms.POSTINGS_PAGE, load.filter()))
-                        .whenComplete((result, error) -> {
-                            if (error == null) {
-                                reply(runner, app -> app.postingsLoaded(load, result));
-                                return;
-                            }
-                            RpcException rpc = rpcException(error, runner);
-                            if (rpc != null) {
-                                String message = describe(rpc);
-                                reply(runner, app -> {
-                                    app.postingsFailed(load, message);
-                                    return Optional.empty();
-                                });
-                            }
-                        });
+                                        load.field(), load.term(), load.fromDoc(), Terms.POSTINGS_PAGE, load.filter())),
+                        runner,
+                        result -> app -> app.postingsLoaded(load, result),
+                        message -> changing(app -> app.postingsFailed(load, message)));
             case Action.LoadPointTree load ->
-                backend.call(Methods.GET_POINT_TREE, new GetPointTreeParams(load.field()))
-                        .whenComplete((result, error) -> {
-                            if (error == null) {
-                                reply(runner, app -> app.pointTreeLoaded(load, result));
-                                return;
-                            }
-                            RpcException rpc = rpcException(error, runner);
-                            if (rpc != null) {
-                                String message = describe(rpc);
-                                reply(runner, app -> app.pointTreeFailed(load, message));
-                            }
-                        });
+                complete(
+                        backend.call(Methods.GET_POINT_TREE, new GetPointTreeParams(load.field())),
+                        runner,
+                        result -> app -> app.pointTreeLoaded(load, result),
+                        message -> app -> app.pointTreeFailed(load, message));
             case Action.LoadPointCell load ->
-                backend.call(Methods.GET_POINT_CELL, new GetPointCellParams(load.field(), load.segment(), load.path()))
-                        .whenComplete((result, error) -> {
-                            if (error == null) {
-                                reply(runner, app -> app.pointCellLoaded(load, result));
-                                return;
-                            }
-                            RpcException rpc = rpcException(error, runner);
-                            if (rpc != null) {
-                                String message = describe(rpc);
-                                reply(runner, app -> app.pointCellFailed(load, message));
-                            }
-                        });
+                complete(
+                        backend.call(
+                                Methods.GET_POINT_CELL,
+                                new GetPointCellParams(load.field(), load.segment(), load.path())),
+                        runner,
+                        result -> app -> app.pointCellLoaded(load, result),
+                        message -> app -> app.pointCellFailed(load, message));
             case Action.LoadKnnGraph load ->
-                backend.call(Methods.GET_KNN_GRAPH, new GetKnnGraphParams(load.field()))
-                        .whenComplete((result, error) -> {
-                            if (error == null) {
-                                reply(runner, app -> app.knnGraphLoaded(load, result));
-                                return;
-                            }
-                            RpcException rpc = rpcException(error, runner);
-                            if (rpc != null) {
-                                String message = describe(rpc);
-                                reply(runner, app -> app.knnGraphFailed(load, message));
-                            }
-                        });
+                complete(
+                        backend.call(Methods.GET_KNN_GRAPH, new GetKnnGraphParams(load.field())),
+                        runner,
+                        result -> app -> app.knnGraphLoaded(load, result),
+                        message -> app -> app.knnGraphFailed(load, message));
             case Action.LoadKnnNodes load ->
-                backend.call(
+                complete(
+                        backend.call(
                                 Methods.GET_KNN_GRAPH_NODES,
                                 new GetKnnGraphNodesParams(
                                         load.field(),
                                         load.segment(),
                                         load.level(),
                                         load.offset(),
-                                        GetKnnGraphNodesParams.MAX_NODES))
-                        .whenComplete((result, error) -> {
-                            if (error == null) {
-                                reply(runner, app -> app.knnNodesLoaded(load, result));
-                                return;
-                            }
-                            RpcException rpc = rpcException(error, runner);
-                            if (rpc != null) {
-                                String message = describe(rpc);
-                                reply(runner, app -> app.knnNodesFailed(load, message));
-                            }
-                        });
+                                        GetKnnGraphNodesParams.MAX_NODES)),
+                        runner,
+                        result -> app -> app.knnNodesLoaded(load, result),
+                        message -> app -> app.knnNodesFailed(load, message));
             case Action.LoadKnnNode load ->
-                backend.call(
+                complete(
+                        backend.call(
                                 Methods.GET_KNN_GRAPH_NODE,
-                                new GetKnnGraphNodeParams(load.field(), load.segment(), load.ord(), load.docId()))
-                        .whenComplete((result, error) -> {
-                            if (error == null) {
-                                reply(runner, app -> app.knnNodeLoaded(load, result));
-                                return;
-                            }
-                            RpcException rpc = rpcException(error, runner);
-                            if (rpc != null) {
-                                String message = describe(rpc);
-                                reply(runner, app -> app.knnNodeFailed(load, message));
-                            }
-                        });
-            case Action.LoadDocument load -> {
-                cancelJobs(load.cancel(), runner);
-                load.matches()
-                        .ifPresent(matches -> startJob(
-                                backend.call(Methods.START_HIGHLIGHT, matches.params()),
-                                runner,
-                                app -> jobId -> app.documentMatchesStarted(matches.matchesId(), jobId),
-                                app -> message -> app.documentMatchesFailed(matches.matchesId(), message)));
-                backend.call(Methods.GET_DOCUMENT, new GetDocumentParams(load.docId()))
-                        .whenComplete((result, error) -> {
-                            if (error == null) {
-                                if (load.locate().isPresent()) {
-                                    locate(load.locate().get(), result, runner);
-                                } else {
-                                    reply(runner, app -> app.documentLoaded(result));
-                                }
-                                return;
-                            }
-                            RpcException rpc = rpcException(error, runner);
-                            if (rpc != null) {
-                                String message = describe(rpc);
-                                reply(runner, app -> {
-                                    app.documentFailed(load.docId(), message);
-                                    return Optional.empty();
-                                });
-                            }
-                        });
-            }
+                                new GetKnnGraphNodeParams(load.field(), load.segment(), load.ord(), load.docId())),
+                        runner,
+                        result -> app -> app.knnNodeLoaded(load, result),
+                        message -> app -> app.knnNodeFailed(load, message));
+            case Action.LoadDocument load -> loadDocument(load, runner);
             case Action.LoadStoredValue load ->
-                backend.call(
+                complete(
+                        backend.call(
                                 Methods.GET_STORED_VALUE,
-                                new GetStoredValueParams(load.docId(), load.field(), load.index()))
-                        .whenComplete((result, error) -> {
-                            if (error == null) {
-                                reply(runner, app -> {
-                                    app.storedValueLoaded(load.docId(), load.field(), load.index(), result.value());
-                                    return Optional.empty();
-                                });
-                                return;
-                            }
-                            RpcException rpc = rpcException(error, runner);
-                            if (rpc != null) {
-                                String message = describe(rpc);
-                                reply(runner, app -> {
-                                    app.storedValueFailed(load.docId(), load.field(), load.index(), message);
-                                    return Optional.empty();
-                                });
-                            }
-                        });
+                                new GetStoredValueParams(load.docId(), load.field(), load.index())),
+                        runner,
+                        result -> changing(
+                                app -> app.storedValueLoaded(load.docId(), load.field(), load.index(), result.value())),
+                        message -> changing(
+                                app -> app.storedValueFailed(load.docId(), load.field(), load.index(), message)));
             case Action.LoadTermVector load ->
-                backend.call(Methods.GET_TERM_VECTOR, new GetTermVectorParams(load.docId(), load.field()))
-                        .whenComplete((result, error) -> {
-                            if (error == null) {
-                                reply(runner, app -> {
-                                    app.termVectorLoaded(load.docId(), load.field(), result.terms());
-                                    return Optional.empty();
-                                });
-                                return;
-                            }
-                            RpcException rpc = rpcException(error, runner);
-                            if (rpc != null) {
-                                String message = describe(rpc);
-                                reply(runner, app -> {
-                                    app.termVectorFailed(load.docId(), load.field(), message);
-                                    return Optional.empty();
-                                });
-                            }
-                        });
+                complete(
+                        backend.call(Methods.GET_TERM_VECTOR, new GetTermVectorParams(load.docId(), load.field())),
+                        runner,
+                        result -> changing(app -> app.termVectorLoaded(load.docId(), load.field(), result.terms())),
+                        message -> changing(app -> app.termVectorFailed(load.docId(), load.field(), message)));
             case Action.LoadPositions load ->
-                backend.call(Methods.GET_POSITIONS, new GetPositionsParams(load.docId(), load.field(), load.term()))
-                        .whenComplete((result, error) -> {
-                            if (error == null) {
-                                reply(runner, app -> {
-                                    app.positionsLoaded(load.docId(), load.field(), load.term(), result.positions());
-                                    return Optional.empty();
-                                });
-                                return;
-                            }
-                            RpcException rpc = rpcException(error, runner);
-                            if (rpc != null) {
-                                String message = describe(rpc);
-                                reply(runner, app -> {
-                                    app.positionsFailed(load.docId(), load.field(), load.term(), message);
-                                    return Optional.empty();
-                                });
-                            }
-                        });
+                complete(
+                        backend.call(
+                                Methods.GET_POSITIONS, new GetPositionsParams(load.docId(), load.field(), load.term())),
+                        runner,
+                        result -> changing(app ->
+                                app.positionsLoaded(load.docId(), load.field(), load.term(), result.positions())),
+                        message ->
+                                changing(app -> app.positionsFailed(load.docId(), load.field(), load.term(), message)));
             case Action.Copy copy -> copy(copy.text(), runner);
             case Action.StartSearch start -> {
                 cancelJobs(start.cancel(), runner);
@@ -594,160 +429,146 @@ public final class Session {
                         app -> message -> app.exportFailed(start.exportId(), message));
             case Action.StartReconstruct start -> {
                 cancelJobs(start.cancel(), runner);
-                backend.call(
+                complete(
+                        backend.call(
                                 Methods.START_RECONSTRUCT,
-                                new StartReconstructParams(start.docId(), Optional.of(List.of(start.field()))))
-                        .whenComplete((job, error) -> {
-                            if (error == null) {
-                                reply(runner, app -> app.reconstructStarted(start.docId(), start.field(), job.jobId()));
-                                return;
-                            }
-                            RpcException rpc = rpcException(error, runner);
-                            if (rpc != null) {
-                                String message = describe(rpc);
-                                reply(runner, app -> {
-                                    app.reconstructStartFailed(start.docId(), start.field(), message);
-                                    return Optional.empty();
-                                });
-                            }
-                        });
+                                new StartReconstructParams(start.docId(), Optional.of(List.of(start.field())))),
+                        runner,
+                        job -> app -> app.reconstructStarted(start.docId(), start.field(), job.jobId()),
+                        message -> changing(app -> app.reconstructStartFailed(start.docId(), start.field(), message)));
             }
             case Action.CancelReconstruct cancel -> cancelJobs(List.of(cancel.jobId()), runner);
             case Action.StartFilter start -> {
                 clearFilter(start.cancel(), start.release(), runner);
-                backend.call(Methods.START_FILTER, start.params()).whenComplete((job, error) -> {
-                    if (error == null) {
-                        reply(runner, app -> app.filterStarted(start.serial(), job.jobId()));
-                        return;
-                    }
-                    RpcException rpc = rpcException(error, runner);
-                    if (rpc != null) {
-                        String message = describe(rpc);
-                        reply(runner, app -> {
-                            app.filterFailed(start.serial(), message);
-                            return Optional.empty();
-                        });
-                    }
-                });
+                complete(
+                        backend.call(Methods.START_FILTER, start.params()),
+                        runner,
+                        job -> app -> app.filterStarted(start.serial(), job.jobId()),
+                        message -> changing(app -> app.filterFailed(start.serial(), message)));
             }
             case Action.StepFilter step ->
-                backend.call(Methods.STEP_FILTER, step.params()).whenComplete((result, error) -> {
-                    if (error == null) {
-                        reply(
-                                runner,
-                                app -> app.filterStepped(step.serial(), step.params(), step.step(), result.match()));
-                        return;
-                    }
-                    RpcException rpc = rpcException(error, runner);
-                    if (rpc != null) {
-                        String message = describe(rpc);
-                        reply(runner, app -> {
-                            app.filterStepFailed(step.serial(), message);
-                            return Optional.empty();
-                        });
-                    }
-                });
+                complete(
+                        backend.call(Methods.STEP_FILTER, step.params()),
+                        runner,
+                        result -> app -> app.filterStepped(step.serial(), step.params(), step.step(), result.match()),
+                        message -> changing(app -> app.filterStepFailed(step.serial(), message)));
             case Action.ClearFilter clear -> clearFilter(clear.cancel(), clear.release(), runner);
             case Action.CancelScan cancel -> cancelJobs(List.of(cancel.jobId()), runner);
             case Action.LoadDocumentExport load ->
-                DocumentExport.load(exportFetch(), load.docId(), load.termVectors())
-                        .whenComplete((data, error) -> {
-                            if (error == null) {
-                                reply(runner, app -> app.documentExportLoaded(load.exportId(), data));
-                                return;
-                            }
-                            RpcException rpc = rpcException(error, runner);
-                            if (rpc != null) {
-                                String message = describe(rpc);
-                                reply(runner, app -> {
-                                    app.exportFailed(load.exportId(), message);
-                                    return Optional.empty();
-                                });
-                            }
-                        });
+                complete(
+                        DocumentExport.load(exportFetch(), load.docId(), load.termVectors()),
+                        runner,
+                        data -> app -> app.documentExportLoaded(load.exportId(), data),
+                        message -> changing(app -> app.exportFailed(load.exportId(), message)));
             case Action.StartDocumentExport start ->
-                backend.call(Methods.START_RECONSTRUCT, new StartReconstructParams(start.docId(), Optional.empty()))
-                        .whenComplete((job, error) -> {
-                            if (error == null) {
-                                reply(runner, app -> app.exportStarted(start.exportId(), job.jobId()));
-                                return;
-                            }
-                            RpcException rpc = rpcException(error, runner);
-                            if (rpc != null) {
-                                String message = describe(rpc);
-                                reply(runner, app -> {
-                                    app.exportFailed(start.exportId(), message);
-                                    return Optional.empty();
-                                });
-                            }
-                        });
+                complete(
+                        backend.call(
+                                Methods.START_RECONSTRUCT, new StartReconstructParams(start.docId(), Optional.empty())),
+                        runner,
+                        job -> app -> app.exportStarted(start.exportId(), job.jobId()),
+                        message -> changing(app -> app.exportFailed(start.exportId(), message)));
             case Action.CancelExport cancel -> cancelJobs(List.of(cancel.jobId()), runner);
             case Action.LoadJars _ ->
-                backend.call(Methods.GET_JARS, new GetJarsParams()).whenComplete((result, error) -> {
-                    if (error == null) {
-                        reply(runner, app -> {
-                            app.jarsLoaded(result.jars());
-                            return Optional.empty();
-                        });
-                        return;
-                    }
-                    RpcException rpc = rpcException(error, runner);
-                    if (rpc != null) {
-                        String message = describe(rpc);
-                        reply(runner, app -> {
-                            app.jarsFailed(message);
-                            return Optional.empty();
-                        });
-                    }
-                });
-            case Action.AddJars add ->
-                backend.call(Methods.ADD_JARS, add.params()).whenComplete((result, error) -> {
-                    if (error == null) {
-                        reply(runner, app -> app.jarsAdded(result));
-                        // The jars may hold a runtime (ADR 0072).
-                        loadRuntimes(runner);
-                        return;
-                    }
-                    RpcException rpc = rpcException(error, runner);
-                    if (rpc != null) {
-                        String message = describe(rpc);
-                        reply(runner, app -> {
-                            app.addJarsFailed(message);
-                            return Optional.empty();
-                        });
-                    }
-                });
+                complete(
+                        backend.call(Methods.GET_JARS, new GetJarsParams()),
+                        runner,
+                        result -> changing(app -> app.jarsLoaded(result.jars())),
+                        message -> changing(app -> app.jarsFailed(message)));
+            case Action.AddJars add -> addJars(add, runner);
             case Action.PlanRuntimes plan -> planRuntimes(plan, runner);
             case Action.InstallRuntimes install -> installRuntimes(install.install(), runner);
             case Action.LoadRuntimes _ ->
-                backend.call(Methods.LOAD_RUNTIMES, new LoadRuntimesParams()).whenComplete((result, error) -> {
-                    if (error == null) {
-                        reply(runner, app -> {
-                            app.runtimesReloaded(result);
-                            return Optional.empty();
-                        });
-                        return;
-                    }
-                    RpcException rpc = rpcException(error, runner);
-                    if (rpc != null) {
-                        String message = describe(rpc);
-                        reply(runner, app -> {
-                            app.reloadRuntimesFailed(message);
-                            return Optional.empty();
-                        });
-                    }
-                });
+                complete(
+                        backend.call(Methods.LOAD_RUNTIMES, new LoadRuntimesParams()),
+                        runner,
+                        result -> changing(app -> app.runtimesReloaded(result)),
+                        message -> changing(app -> app.reloadRuntimesFailed(message)));
             case Action.WriteExport write -> {
                 // On the UI thread, as the Rust TUI wrote it in its loop: a few writes of text.
                 Optional<String> error = DocumentExport.writeFile(
                         Path.of(write.path()), write.text(), write.overwrite(), write.indexDirs());
                 if (error.isPresent()) {
-                    app.exportFailed(write.exportId(), error.get());
+                    ui.exportFailed(write.exportId(), error.get());
                 } else {
-                    app.documentExported(write.exportId(), write.docId(), write.path());
+                    ui.documentExported(write.exportId(), write.docId(), write.path());
                 }
             }
         }
+    }
+
+    /** Loads the analysis components; an index whose runtime has no analysis shows none. */
+    private void loadAnalysisComponents(TuiRunner runner) {
+        backend.call(Methods.GET_ANALYSIS_COMPONENTS, new GetAnalysisComponentsParams())
+                .whenComplete((result, error) -> {
+                    if (error == null) {
+                        reply(runner, app -> {
+                            app.componentsLoaded(result);
+                            return Optional.empty();
+                        });
+                        return;
+                    }
+                    RpcException rpc = rpcException(error, runner);
+                    if (rpc != null && rpc.code() == ErrorCode.NOT_SUPPORTED) {
+                        reply(runner, app -> {
+                            app.noAnalysis();
+                            return Optional.empty();
+                        });
+                    } else if (rpc != null) {
+                        String message = describe(rpc);
+                        reply(runner, app -> {
+                            app.componentsFailed(message);
+                            return Optional.empty();
+                        });
+                    }
+                });
+    }
+
+    /** Loads a document, and starts finding its matches if asked to. */
+    private void loadDocument(Action.LoadDocument load, TuiRunner runner) {
+        cancelJobs(load.cancel(), runner);
+        load.matches()
+                .ifPresent(matches -> startJob(
+                        backend.call(Methods.START_HIGHLIGHT, matches.params()),
+                        runner,
+                        app -> jobId -> app.documentMatchesStarted(matches.matchesId(), jobId),
+                        app -> message -> app.documentMatchesFailed(matches.matchesId(), message)));
+        backend.call(Methods.GET_DOCUMENT, new GetDocumentParams(load.docId())).whenComplete((result, error) -> {
+            if (error == null) {
+                if (load.locate().isPresent()) {
+                    locate(load.locate().get(), result, runner);
+                } else {
+                    reply(runner, app -> app.documentLoaded(result));
+                }
+                return;
+            }
+            RpcException rpc = rpcException(error, runner);
+            if (rpc != null) {
+                String message = describe(rpc);
+                reply(runner, app -> {
+                    app.documentFailed(load.docId(), message);
+                    return Optional.empty();
+                });
+            }
+        });
+    }
+
+    private void addJars(Action.AddJars add, TuiRunner runner) {
+        backend.call(Methods.ADD_JARS, add.params()).whenComplete((result, error) -> {
+            if (error == null) {
+                reply(runner, app -> app.jarsAdded(result));
+                // The jars may hold a runtime (ADR 0072).
+                loadRuntimes(runner);
+                return;
+            }
+            RpcException rpc = rpcException(error, runner);
+            if (rpc != null) {
+                String message = describe(rpc);
+                reply(runner, app -> {
+                    app.addJarsFailed(message);
+                    return Optional.empty();
+                });
+            }
+        });
     }
 
     /** Plans the download on a thread of its own: it hashes the jars that are there (ADR 0080). */
@@ -872,6 +693,54 @@ public final class Session {
     }
 
     /**
+     * Hands the app the outcome of {@code call} on the UI thread: its result through {@code done}, or
+     * the message of an expected failure through {@code failed}. An unexpected failure ends leia.
+     */
+    private <R> void complete(
+            CompletionStage<R> call,
+            TuiRunner runner,
+            Function<R, Function<App, Optional<Action>>> done,
+            Function<String, Function<App, Optional<Action>>> failed) {
+        complete(call, runner, apply -> reply(runner, apply), done, failed);
+    }
+
+    /** As {@link #complete} does, for the call that fetches {@code poll}, which may then be sent again. */
+    private <R> void fetch(
+            Poll poll,
+            CompletionStage<R> call,
+            TuiRunner runner,
+            Function<R, Function<App, Optional<Action>>> done,
+            Function<String, Function<App, Optional<Action>>> failed) {
+        complete(call, runner, apply -> polled(runner, poll, apply), done, failed);
+    }
+
+    private <R> void complete(
+            CompletionStage<R> call,
+            TuiRunner runner,
+            Consumer<Function<App, Optional<Action>>> deliver,
+            Function<R, Function<App, Optional<Action>>> done,
+            Function<String, Function<App, Optional<Action>>> failed) {
+        call.whenComplete((result, error) -> {
+            if (error == null) {
+                deliver.accept(done.apply(result));
+                return;
+            }
+            RpcException rpc = rpcException(error, runner);
+            if (rpc != null) {
+                deliver.accept(failed.apply(describe(rpc)));
+            }
+        });
+    }
+
+    /** A reply that only changes the app. */
+    private static Function<App, Optional<Action>> changing(Consumer<App> change) {
+        return app -> {
+            change.accept(app);
+            return Optional.empty();
+        };
+    }
+
+    /**
      * Reports a job that started with {@code started}, or why it didn't with {@code failed}, on the UI
      * thread.
      */
@@ -933,248 +802,106 @@ public final class Session {
 
     /** Fetches the progress or the outcome of each running job that isn't being fetched already. */
     private void poll(TuiRunner runner) {
-        for (Poll poll : app.polls()) {
+        for (Poll poll : ui.polls()) {
             if (!polling.add(poll)) {
                 continue;
             }
             switch (poll) {
                 case Poll.Scan scan ->
-                    backend.call(Methods.GET_FIELD_TERM_SCAN, new JobParams(scan.jobId()))
-                            .whenComplete((result, error) -> {
-                                if (error == null) {
-                                    polled(runner, poll, app -> app.scanProgress(scan.scanId(), result));
-                                    return;
-                                }
-                                RpcException rpc = rpcException(error, runner);
-                                if (rpc != null) {
-                                    String message = describe(rpc);
-                                    polled(runner, poll, app -> app.scanFailed(scan.scanId(), message));
-                                }
-                            });
+                    fetch(
+                            poll,
+                            backend.call(Methods.GET_FIELD_TERM_SCAN, new JobParams(scan.jobId())),
+                            runner,
+                            result -> app -> app.scanProgress(scan.scanId(), result),
+                            message -> app -> app.scanFailed(scan.scanId(), message));
                 case Poll.Reconstruct rebuild ->
-                    backend.call(Methods.GET_RECONSTRUCT, new JobParams(rebuild.jobId()))
-                            .whenComplete((result, error) -> {
-                                if (error == null) {
-                                    polled(runner, poll, app -> {
-                                        app.reconstructProgress(rebuild.jobId(), result);
-                                        return Optional.empty();
-                                    });
-                                    return;
-                                }
-                                RpcException rpc = rpcException(error, runner);
-                                if (rpc != null) {
-                                    String message = describe(rpc);
-                                    polled(runner, poll, app -> {
-                                        app.reconstructFailed(rebuild.jobId(), message);
-                                        return Optional.empty();
-                                    });
-                                }
-                            });
+                    fetch(
+                            poll,
+                            backend.call(Methods.GET_RECONSTRUCT, new JobParams(rebuild.jobId())),
+                            runner,
+                            result -> changing(app -> app.reconstructProgress(rebuild.jobId(), result)),
+                            message -> changing(app -> app.reconstructFailed(rebuild.jobId(), message)));
                 case Poll.Filter filter ->
-                    backend.call(Methods.GET_FILTER, new JobParams(filter.jobId()))
-                            .whenComplete((result, error) -> {
-                                if (error == null) {
-                                    polled(runner, poll, app -> app.filterProgress(filter.serial(), result));
-                                    return;
-                                }
-                                RpcException rpc = rpcException(error, runner);
-                                if (rpc != null) {
-                                    String message = describe(rpc);
-                                    polled(runner, poll, app -> {
-                                        app.filterFailed(filter.serial(), message);
-                                        return Optional.empty();
-                                    });
-                                }
-                            });
+                    fetch(
+                            poll,
+                            backend.call(Methods.GET_FILTER, new JobParams(filter.jobId())),
+                            runner,
+                            result -> app -> app.filterProgress(filter.serial(), result),
+                            message -> changing(app -> app.filterFailed(filter.serial(), message)));
                 case Poll.Search searching ->
-                    backend.call(Methods.GET_SEARCH, new JobParams(searching.jobId()))
-                            .whenComplete((result, error) -> {
-                                if (error == null) {
-                                    polled(runner, poll, app -> app.searchProgress(searching.searchId(), result));
-                                    return;
-                                }
-                                RpcException rpc = rpcException(error, runner);
-                                if (rpc != null) {
-                                    String message = describe(rpc);
-                                    polled(runner, poll, app -> {
-                                        app.searchFailed(searching.searchId(), message);
-                                        return Optional.empty();
-                                    });
-                                }
-                            });
+                    fetch(
+                            poll,
+                            backend.call(Methods.GET_SEARCH, new JobParams(searching.jobId())),
+                            runner,
+                            result -> app -> app.searchProgress(searching.searchId(), result),
+                            message -> changing(app -> app.searchFailed(searching.searchId(), message)));
                 case Poll.AutoStopWords finding ->
-                    backend.call(Methods.GET_AUTO_STOP_WORDS, new JobParams(finding.jobId()))
-                            .whenComplete((result, error) -> {
-                                if (error == null) {
-                                    polled(runner, poll, app -> {
-                                        app.autoStopWordsProgress(finding.id(), result);
-                                        return Optional.empty();
-                                    });
-                                    return;
-                                }
-                                RpcException rpc = rpcException(error, runner);
-                                if (rpc != null) {
-                                    String message = describe(rpc);
-                                    polled(runner, poll, app -> {
-                                        app.autoStopWordsFailed(finding.id(), message);
-                                        return Optional.empty();
-                                    });
-                                }
-                            });
+                    fetch(
+                            poll,
+                            backend.call(Methods.GET_AUTO_STOP_WORDS, new JobParams(finding.jobId())),
+                            runner,
+                            result -> changing(app -> app.autoStopWordsProgress(finding.id(), result)),
+                            message -> changing(app -> app.autoStopWordsFailed(finding.id(), message)));
                 case Poll.Explain explaining ->
-                    backend.call(Methods.GET_EXPLAIN, new JobParams(explaining.jobId()))
-                            .whenComplete((result, error) -> {
-                                if (error == null) {
-                                    polled(runner, poll, app -> {
-                                        app.explainProgress(explaining.explainId(), result);
-                                        return Optional.empty();
-                                    });
-                                    return;
-                                }
-                                RpcException rpc = rpcException(error, runner);
-                                if (rpc != null) {
-                                    String message = describe(rpc);
-                                    polled(runner, poll, app -> {
-                                        app.explainFailed(explaining.explainId(), message);
-                                        return Optional.empty();
-                                    });
-                                }
-                            });
+                    fetch(
+                            poll,
+                            backend.call(Methods.GET_EXPLAIN, new JobParams(explaining.jobId())),
+                            runner,
+                            result -> changing(app -> app.explainProgress(explaining.explainId(), result)),
+                            message -> changing(app -> app.explainFailed(explaining.explainId(), message)));
                 case Poll.Highlight highlighting ->
-                    backend.call(Methods.GET_HIGHLIGHT, new JobParams(highlighting.jobId()))
-                            .whenComplete((result, error) -> {
-                                if (error == null) {
-                                    polled(
-                                            runner,
-                                            poll,
-                                            app -> app.highlightProgress(highlighting.highlightId(), result));
-                                    return;
-                                }
-                                RpcException rpc = rpcException(error, runner);
-                                if (rpc != null) {
-                                    String message = describe(rpc);
-                                    polled(runner, poll, app -> {
-                                        app.highlightFailed(highlighting.highlightId(), message);
-                                        return Optional.empty();
-                                    });
-                                }
-                            });
+                    fetch(
+                            poll,
+                            backend.call(Methods.GET_HIGHLIGHT, new JobParams(highlighting.jobId())),
+                            runner,
+                            result -> app -> app.highlightProgress(highlighting.highlightId(), result),
+                            message -> changing(app -> app.highlightFailed(highlighting.highlightId(), message)));
                 case Poll.DocumentMatches finding ->
-                    backend.call(Methods.GET_HIGHLIGHT, new JobParams(finding.jobId()))
-                            .whenComplete((result, error) -> {
-                                if (error == null) {
-                                    polled(runner, poll, app -> {
-                                        app.documentMatchesProgress(finding.matchesId(), result);
-                                        return Optional.empty();
-                                    });
-                                    return;
-                                }
-                                RpcException rpc = rpcException(error, runner);
-                                if (rpc != null) {
-                                    String message = describe(rpc);
-                                    polled(runner, poll, app -> {
-                                        app.documentMatchesFailed(finding.matchesId(), message);
-                                        return Optional.empty();
-                                    });
-                                }
-                            });
+                    fetch(
+                            poll,
+                            backend.call(Methods.GET_HIGHLIGHT, new JobParams(finding.jobId())),
+                            runner,
+                            result -> changing(app -> app.documentMatchesProgress(finding.matchesId(), result)),
+                            message -> changing(app -> app.documentMatchesFailed(finding.matchesId(), message)));
                 case Poll.KnnRecall checking ->
-                    backend.call(Methods.GET_KNN_RECALL, new JobParams(checking.jobId()))
-                            .whenComplete((result, error) -> {
-                                if (error == null) {
-                                    polled(runner, poll, app -> {
-                                        app.knnRecallProgress(checking.recallId(), result);
-                                        return Optional.empty();
-                                    });
-                                    return;
-                                }
-                                RpcException rpc = rpcException(error, runner);
-                                if (rpc != null) {
-                                    String message = describe(rpc);
-                                    polled(runner, poll, app -> {
-                                        app.knnRecallFailed(checking.recallId(), message);
-                                        return Optional.empty();
-                                    });
-                                }
-                            });
+                    fetch(
+                            poll,
+                            backend.call(Methods.GET_KNN_RECALL, new JobParams(checking.jobId())),
+                            runner,
+                            result -> changing(app -> app.knnRecallProgress(checking.recallId(), result)),
+                            message -> changing(app -> app.knnRecallFailed(checking.recallId(), message)));
                 case Poll.StoredScan scanning ->
-                    backend.call(Methods.GET_STORED_SCAN, new GetStoredScanParams(scanning.jobId(), scanning.fromHit()))
-                            .whenComplete((result, error) -> {
-                                if (error == null) {
-                                    polled(runner, poll, app -> {
-                                        app.storedScanProgress(scanning.scanId(), result);
-                                        return Optional.empty();
-                                    });
-                                    return;
-                                }
-                                RpcException rpc = rpcException(error, runner);
-                                if (rpc != null) {
-                                    String message = describe(rpc);
-                                    polled(runner, poll, app -> {
-                                        app.storedScanFailed(scanning.scanId(), message);
-                                        return Optional.empty();
-                                    });
-                                }
-                            });
+                    fetch(
+                            poll,
+                            backend.call(
+                                    Methods.GET_STORED_SCAN,
+                                    new GetStoredScanParams(scanning.jobId(), scanning.fromHit())),
+                            runner,
+                            result -> changing(app -> app.storedScanProgress(scanning.scanId(), result)),
+                            message -> changing(app -> app.storedScanFailed(scanning.scanId(), message)));
                 case Poll.DocumentExport exporting ->
-                    backend.call(Methods.GET_RECONSTRUCT, new JobParams(exporting.jobId()))
-                            .whenComplete((result, error) -> {
-                                if (error == null) {
-                                    polled(
-                                            runner,
-                                            poll,
-                                            app -> app.documentExportProgress(exporting.exportId(), result));
-                                    return;
-                                }
-                                RpcException rpc = rpcException(error, runner);
-                                if (rpc != null) {
-                                    String message = describe(rpc);
-                                    polled(runner, poll, app -> {
-                                        app.exportFailed(exporting.exportId(), message);
-                                        return Optional.empty();
-                                    });
-                                }
-                            });
+                    fetch(
+                            poll,
+                            backend.call(Methods.GET_RECONSTRUCT, new JobParams(exporting.jobId())),
+                            runner,
+                            result -> app -> app.documentExportProgress(exporting.exportId(), result),
+                            message -> changing(app -> app.exportFailed(exporting.exportId(), message)));
                 case Poll.Check checking ->
-                    backend.call(
+                    fetch(
+                            poll,
+                            backend.call(
                                     Methods.GET_CHECK_INDEX,
-                                    new GetCheckIndexParams(checking.jobId(), checking.fromLine()))
-                            .whenComplete((result, error) -> {
-                                if (error == null) {
-                                    polled(runner, poll, app -> {
-                                        app.checkProgress(checking.checkId(), result);
-                                        return Optional.empty();
-                                    });
-                                    return;
-                                }
-                                RpcException rpc = rpcException(error, runner);
-                                if (rpc != null) {
-                                    String message = describe(rpc);
-                                    polled(runner, poll, app -> {
-                                        app.checkFailed(checking.checkId(), message);
-                                        return Optional.empty();
-                                    });
-                                }
-                            });
+                                    new GetCheckIndexParams(checking.jobId(), checking.fromLine())),
+                            runner,
+                            result -> changing(app -> app.checkProgress(checking.checkId(), result)),
+                            message -> changing(app -> app.checkFailed(checking.checkId(), message)));
                 case Poll.ExportTerms exporting ->
-                    backend.call(Methods.GET_EXPORT_TERMS, new JobParams(exporting.jobId()))
-                            .whenComplete((result, error) -> {
-                                if (error == null) {
-                                    polled(runner, poll, app -> {
-                                        app.termsExportProgress(exporting.exportId(), result);
-                                        return Optional.empty();
-                                    });
-                                    return;
-                                }
-                                RpcException rpc = rpcException(error, runner);
-                                if (rpc != null) {
-                                    String message = describe(rpc);
-                                    polled(runner, poll, app -> {
-                                        app.exportFailed(exporting.exportId(), message);
-                                        return Optional.empty();
-                                    });
-                                }
-                            });
+                    fetch(
+                            poll,
+                            backend.call(Methods.GET_EXPORT_TERMS, new JobParams(exporting.jobId())),
+                            runner,
+                            result -> changing(app -> app.termsExportProgress(exporting.exportId(), result)),
+                            message -> changing(app -> app.exportFailed(exporting.exportId(), message)));
             }
         }
     }

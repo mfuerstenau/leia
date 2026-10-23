@@ -11,6 +11,7 @@ import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
+import java.util.regex.Pattern;
 
 /**
  * How text from the index is shown: control characters escaped, so that they can't break the
@@ -20,6 +21,9 @@ public final class TextFormat {
 
     /** How a match of a pattern is highlighted: black on yellow. */
     public static final Style MATCH = Style.EMPTY.black().onYellow();
+
+    /** The leading zeros of a negative exponent, as {@code %e} writes it. */
+    private static final Pattern EXPONENT_ZEROS = Pattern.compile("e-0*");
 
     private TextFormat() {}
 
@@ -107,7 +111,13 @@ public final class TextFormat {
     }
 
     private static int utf8Length(int codePoint) {
-        return codePoint < 0x80 ? 1 : codePoint < 0x800 ? 2 : codePoint < 0x10000 ? 3 : 4;
+        if (codePoint < 0x80) {
+            return 1;
+        }
+        if (codePoint < 0x800) {
+            return 2;
+        }
+        return codePoint < 0x10000 ? 3 : 4;
     }
 
     /**
@@ -166,7 +176,9 @@ public final class TextFormat {
         for (int decimals = 4; decimals >= 0; decimals--) {
             text = fixed
                     ? String.format(Locale.ROOT, "%." + decimals + "f", score)
-                    : String.format(Locale.ROOT, "%." + decimals + "e", score).replaceFirst("e-0*", "e-");
+                    : EXPONENT_ZEROS
+                            .matcher(String.format(Locale.ROOT, "%." + decimals + "e", score))
+                            .replaceFirst("e-");
             if (text.length() <= width) {
                 break;
             }
@@ -226,15 +238,20 @@ public final class TextFormat {
             lines.add(line.toString());
         }
         if (lines.size() > maxLines) {
-            lines.subList(maxLines, lines.size()).clear();
-            int lastWidth = Math.max(maxLines == 1 ? first : width, 1);
-            String last = lines.getLast();
-            while (!last.isEmpty() && CharWidth.of(last) + 1 > lastWidth) {
-                last = last.substring(0, last.offsetByCodePoints(last.length(), -1));
-            }
-            lines.set(lines.size() - 1, last + "…");
+            cut(lines, maxLines, first, width);
         }
         return lines;
+    }
+
+    /** Keeps the first {@code maxLines} of {@code lines}, the last of them ending in an ellipsis. */
+    private static void cut(List<String> lines, int maxLines, int first, int width) {
+        lines.subList(maxLines, lines.size()).clear();
+        int lastWidth = Math.max(maxLines == 1 ? first : width, 1);
+        String last = lines.getLast();
+        while (!last.isEmpty() && CharWidth.of(last) + 1 > lastWidth) {
+            last = last.substring(0, last.offsetByCodePoints(last.length(), -1));
+        }
+        lines.set(lines.size() - 1, last + "…");
     }
 
     /** Whether {@code columns} fit on the next line: the first one is {@code first} wide, the others {@code width}. */
@@ -253,37 +270,58 @@ public final class TextFormat {
      * column.
      */
     public static List<LineRange> wrapRanges(String text, int width) {
-        int columns = Math.max(width, 1);
-        List<LineRange> lines = new ArrayList<>();
-        int start = 0;
-        int end = 0;
-        int lineWidth = 0;
-        // The line has a word on it; until then, the first line holds its indentation.
-        boolean open = false;
+        RangeWrapper wrapper = new RangeWrapper(text, Math.max(width, 1));
         int pos = 0;
         while (pos < text.length()) {
             int spaces = pos;
-            while (pos < text.length() && text.charAt(pos) == ' ') {
-                pos++;
-            }
-            int wordStart = pos;
-            while (pos < text.length() && text.charAt(pos) != ' ') {
-                pos++;
-            }
+            int wordStart = skip(text, pos, true);
+            pos = skip(text, wordStart, false);
             if (wordStart == pos) {
                 break;
             }
+            wrapper.word(spaces, wordStart, pos);
+        }
+        return wrapper.lines();
+    }
+
+    /** The index after the spaces from {@code from} on, or after the word that isn't. */
+    private static int skip(String text, int from, boolean spaces) {
+        int pos = from;
+        while (pos < text.length() && (text.charAt(pos) == ' ') == spaces) {
+            pos++;
+        }
+        return pos;
+    }
+
+    /** The lines of {@link #wrapRanges}, as its words come in. */
+    private static final class RangeWrapper {
+        private final String text;
+        private final int columns;
+        private final List<LineRange> lines = new ArrayList<>();
+        private int start;
+        private int end;
+        private int lineWidth;
+        // The line has a word on it; until then, the first line holds its indentation.
+        private boolean open;
+
+        RangeWrapper(String text, int columns) {
+            this.text = text;
+            this.columns = columns;
+        }
+
+        /** The word from {@code wordStart} to {@code wordEnd}, after the spaces from {@code spaces}. */
+        void word(int spaces, int wordStart, int wordEnd) {
             int gap = wordStart - spaces;
-            int wordWidth = CharWidth.of(text.substring(wordStart, pos));
+            int wordWidth = CharWidth.of(text.substring(wordStart, wordEnd));
             boolean indented = !open && lines.isEmpty();
             if ((open || indented) && lineWidth + gap + wordWidth <= columns) {
                 if (!open) {
                     start = spaces;
                 }
-                end = pos;
+                end = wordEnd;
                 lineWidth += gap + wordWidth;
                 open = true;
-                continue;
+                return;
             }
             if (open) {
                 lines.add(new LineRange(start, end));
@@ -292,7 +330,8 @@ public final class TextFormat {
             end = wordStart;
             lineWidth = 0;
             open = true;
-            for (int i = wordStart; i < pos; ) {
+            // A word wider than the line is cut where it fills it.
+            for (int i = wordStart; i < wordEnd; ) {
                 int c = text.codePointAt(i);
                 int charWidth = CharWidth.of(c);
                 if (lineWidth > 0 && lineWidth + charWidth > columns) {
@@ -305,9 +344,12 @@ public final class TextFormat {
                 lineWidth += charWidth;
             }
         }
-        if (open || lines.isEmpty()) {
-            lines.add(open ? new LineRange(start, end) : new LineRange(0, text.length()));
+
+        List<LineRange> lines() {
+            if (open || lines.isEmpty()) {
+                lines.add(open ? new LineRange(start, end) : new LineRange(0, text.length()));
+            }
+            return lines;
         }
-        return lines;
     }
 }

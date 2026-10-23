@@ -74,7 +74,7 @@ public final class Main {
             return 2;
         }
         if (cli.help()) {
-            out.print(Cli.HELP);
+            out.print(Cli.HELP_TEXT);
             return 0;
         }
         if (cli.version()) {

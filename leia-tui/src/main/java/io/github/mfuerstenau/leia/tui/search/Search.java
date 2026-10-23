@@ -100,6 +100,8 @@ import java.util.stream.Collectors;
  */
 public final class Search {
 
+    private static final String CANCELLED = "Cancelled.";
+
     /** How many hits one {@code startSearch} call fetches. */
     public static final int SEARCH_PAGE = 100;
 
@@ -685,13 +687,13 @@ public final class Search {
             recall.cancelled();
         }
         if (running != null) {
-            fail(running, "Cancelled.");
+            fail(running, CANCELLED);
         }
         if (explain != null && explain.running()) {
-            explain.error = "Cancelled.";
+            explain.error = CANCELLED;
         }
         if (highlighting != null && highlighting.error == null) {
-            highlighting.error = "Cancelled.";
+            highlighting.error = CANCELLED;
         }
         return jobs;
     }
@@ -786,13 +788,13 @@ public final class Search {
         stepPending = false;
         // A next page that never came is fetched again on scroll; a first page shows as cancelled.
         if (mark.running != null && !mark.running.more()) {
-            fail(mark.running, "Cancelled.");
+            fail(mark.running, CANCELLED);
         }
         if (explain != null && explain.running()) {
-            explain.error = "Cancelled.";
+            explain.error = CANCELLED;
         }
         if (highlighting != null && highlighting.error == null) {
-            highlighting.error = "Cancelled.";
+            highlighting.error = CANCELLED;
         }
         if (scan != null) {
             scan.cancelled();
@@ -996,7 +998,7 @@ public final class Search {
         if (mode == Mode.DOC_VALUES || mode == Mode.KNN) {
             try {
                 return mode == Mode.KNN ? knnLine() : docValuesLine();
-            } catch (IllegalArgumentException e) {
+            } catch (IllegalArgumentException _) {
                 return Optional.empty();
             }
         }
@@ -1029,7 +1031,7 @@ public final class Search {
                 int docId;
                 try {
                     docId = Integer.parseInt(text.strip());
-                } catch (NumberFormatException e) {
+                } catch (NumberFormatException _) {
                     yield Optional.empty();
                 }
                 yield like.query(new LikeSource.Doc(docId), analyzer.analyzer())
@@ -1440,9 +1442,9 @@ public final class Search {
             return Optional.empty();
         }
         Highlighting done = highlighting;
-        String field = done.params.field().orElseThrow();
+        String highlighted = done.params.field().orElseThrow();
         List<ValueHighlight> values = result.highlight().get().fields().stream()
-                .filter(matches -> matches.field().equals(field))
+                .filter(matches -> matches.field().equals(highlighted))
                 .findFirst()
                 .map(FieldMatches::values)
                 .orElse(List.of());
@@ -1451,13 +1453,14 @@ public final class Search {
                 .findFirst()
                 .or(() -> values.stream().findFirst());
         if (value.isEmpty()) {
-            done.error = "No match in " + TextFormat.escapeControl(field) + " of document " + done.params.docId() + ".";
+            done.error = "No match in " + TextFormat.escapeControl(highlighted) + " of document " + done.params.docId()
+                    + ".";
             return Optional.empty();
         }
         highlighting = null;
         return Optional.of(new Request.View(
                 done.params.docId(),
-                field,
+                highlighted,
                 value.get().valueIndex(),
                 value.get().spans(),
                 value.get().matchCount()));
@@ -1575,7 +1578,7 @@ public final class Search {
         StartKnnRecallParams params = new StartKnnRecallParams(query, sample);
         List<Long> cancel = jobs();
         if (running != null) {
-            fail(running, "Cancelled.");
+            fail(running, CANCELLED);
         }
         recall = new KnnRecall(params);
         recallId = nextId++;
@@ -1648,36 +1651,7 @@ public final class Search {
             return formKey(key);
         }
         if (editing) {
-            switch (key.code()) {
-                case ENTER -> {
-                    editing = false;
-                    if (editLine == EditLine.K) {
-                        k = parseK(kInput.text());
-                    }
-                    return submit();
-                }
-                case ESCAPE -> editing = false;
-                default -> {
-                    String typed = LineInput.typed(key);
-                    // A document id and k have digits only.
-                    boolean nonDigit = typed != null && !typed.chars().allMatch(c -> c >= '0' && c <= '9');
-                    switch (editLine) {
-                        case FILTER -> knnFilter.handleKey(key, LineInput::wordStart);
-                        case K -> {
-                            if (!nonDigit) {
-                                kInput.handleKey(key, LineInput::wordStart);
-                            }
-                        }
-                        case QUERY -> {
-                            if (!(mode == Mode.LIKE && nonDigit)
-                                    && input.handleKey(key, LineInput::wordStart) == LineInput.Edit.CHANGED) {
-                                binary = false;
-                            }
-                        }
-                    }
-                }
-            }
-            return Optional.empty();
+            return editKey(key);
         }
         Optional<String> unsupported = unsupported(key);
         if (unsupported.isPresent()) {
@@ -1704,6 +1678,47 @@ public final class Search {
                 return handled.get();
             }
         }
+        return moveKey(key, recalls);
+    }
+
+    /** A key while a line of the query is edited: Enter submits, Esc stops. */
+    private Optional<Request> editKey(KeyEvent key) {
+        switch (key.code()) {
+            case ENTER -> {
+                editing = false;
+                if (editLine == EditLine.K) {
+                    k = parseK(kInput.text());
+                }
+                return submit();
+            }
+            case ESCAPE -> editing = false;
+            default -> typeKey(key);
+        }
+        return Optional.empty();
+    }
+
+    /** Edits the line being edited. */
+    private void typeKey(KeyEvent key) {
+        String typed = LineInput.typed(key);
+        // A document id and k have digits only.
+        boolean nonDigit = typed != null && !typed.chars().allMatch(c -> c >= '0' && c <= '9');
+        switch (editLine) {
+            case FILTER -> knnFilter.handleKey(key, LineInput::wordStart);
+            case K -> {
+                if (!nonDigit) {
+                    kInput.handleKey(key, LineInput::wordStart);
+                }
+            }
+            case QUERY -> {
+                if (!(mode == Mode.LIKE && nonDigit)
+                        && input.handleKey(key, LineInput::wordStart) == LineInput.Edit.CHANGED) {
+                    binary = false;
+                }
+            }
+        }
+    }
+
+    private Optional<Request> moveKey(KeyEvent key, boolean recalls) {
         if (focus == Focus.DETAILS) {
             scrollDetails(key);
             return Optional.empty();
@@ -1734,7 +1749,7 @@ public final class Search {
         }
         try {
             return Math.clamp(Long.parseLong(text.strip()), 1, KnnQuery.MAX_K);
-        } catch (NumberFormatException e) {
+        } catch (NumberFormatException _) {
             // More digits than a long has.
             return KnnQuery.MAX_K;
         }
@@ -1743,40 +1758,21 @@ public final class Search {
     /** The character keys of every mode but the regex one; empty for a key they don't take. */
     private Optional<Optional<Request>> charKey(int c) {
         Optional<Request> none = Optional.empty();
-        // The KNN filter is a classic query, with the classic mode's parser options and operator.
-        boolean parsers = mode == Mode.CLASSIC || mode == Mode.STANDARD || mode == Mode.KNN;
-        boolean likes = mode == Mode.LIKE || mode == Mode.LIKE_TEXT;
         boolean knn = mode == Mode.KNN;
         switch (c) {
             case '/' -> {
-                if (hasFields()) {
-                    editing = true;
-                    editLine = EditLine.QUERY;
-                }
+                edit(hasFields(), EditLine.QUERY);
                 return Optional.of(none);
             }
             case 'w' -> {
-                if (knn && hasFields()) {
-                    editing = true;
-                    editLine = EditLine.FILTER;
-                }
+                edit(knn && hasFields(), EditLine.FILTER);
                 return Optional.of(none);
             }
             case 'k' -> {
-                if (knn && hasFields()) {
-                    editing = true;
-                    editLine = EditLine.K;
-                    kInput = new LineInput(Integer.toString(k));
-                    return Optional.of(none);
-                }
-                return Optional.empty();
+                return editK();
             }
             case 'e' -> {
-                if (knn) {
-                    knnExact = !knnExact;
-                    return Optional.of(resubmit());
-                }
-                return Optional.empty();
+                return toggleKnnExact();
             }
             case 'r' -> {
                 return knn ? Optional.of(startRecall()) : Optional.empty();
@@ -1786,11 +1782,7 @@ public final class Search {
                 return Optional.of(switchMode(modes.get((modes.indexOf(mode) + 1) % modes.size())));
             }
             case 'p' -> {
-                if (likes) {
-                    form = new LikeForm(like);
-                } else if (parsers) {
-                    form = new OptionsForm(parser, mode != Mode.STANDARD);
-                }
+                openParserForm();
                 return Optional.of(none);
             }
             case 's' -> {
@@ -1802,51 +1794,16 @@ public final class Search {
                 return Optional.of(none);
             }
             case 'f', 'F' -> {
-                if (mode == Mode.DOC_VALUES && !docValuesFields.isEmpty()) {
-                    int len = docValuesFields.size();
-                    docValuesField = c == 'f' ? (docValuesField + 1) % len : (docValuesField + len - 1) % len;
-                    return Optional.of(resubmit());
-                }
-                if (knn && !vectorFields.isEmpty()) {
-                    int len = vectorFields.size();
-                    vectorField = c == 'f' ? (vectorField + 1) % len : (vectorField + len - 1) % len;
-                    Optional<Request> next = resubmit();
-                    if (next.isEmpty() && recall != null) {
-                        // A recall check belongs to its field: the next field doesn't show it.
-                        List<Long> cancel = jobs();
-                        recall = null;
-                        return Optional.of(
-                                cancel.isEmpty() ? Optional.empty() : Optional.of(new Request.Cancel(cancel)));
-                    }
-                    return Optional.of(next);
-                }
-                if (!fields.isEmpty() && !likes && mode != Mode.DOC_VALUES && !knn) {
-                    int len = fields.size();
-                    field = c == 'f' ? (field + 1) % len : (field + len - 1) % len;
-                    return Optional.of(resubmit());
-                }
-                return Optional.of(none);
+                return Optional.of(cycleField(c == 'f'));
             }
             case 'n' -> {
-                if (mode == Mode.DOC_VALUES && numberField()) {
-                    number = nextNumber(number);
-                    return Optional.of(resubmit());
-                }
-                return Optional.empty();
+                return nextNumberFormat();
             }
             case 'h' -> {
-                if (mode == Mode.DOC_VALUES && !numberField()) {
-                    hex = !hex;
-                    return Optional.of(resubmit());
-                }
-                return Optional.empty();
+                return toggleHex();
             }
             case 'a' -> {
-                if (parsers) {
-                    operator = operator == QueryOperator.OR ? QueryOperator.AND : QueryOperator.OR;
-                    return Optional.of(resubmit());
-                }
-                return Optional.of(none);
+                return toggleOperator();
             }
             case 't' -> {
                 exact = !exact;
@@ -1856,15 +1813,7 @@ public final class Search {
                 return Optional.of(explainSelected());
             }
             case 'H' -> {
-                if (mode == Mode.DOC_VALUES || knn) {
-                    return Optional.empty();
-                }
-                highlights = switch (highlights) {
-                    case QUERY_FIELDS -> Highlights.ANY_FIELD;
-                    case ANY_FIELD -> Highlights.OFF;
-                    case OFF -> Highlights.QUERY_FIELDS;
-                };
-                return Optional.of(resubmit());
+                return cycleHighlights();
             }
             case 'v' -> {
                 return Optional.of(viewSelected());
@@ -1876,6 +1825,114 @@ public final class Search {
                 return Optional.empty();
             }
         }
+    }
+
+    /** Starts editing {@code line}, if {@code allowed}. */
+    private void edit(boolean allowed, EditLine line) {
+        if (allowed) {
+            editing = true;
+            editLine = line;
+        }
+    }
+
+    private Optional<Optional<Request>> editK() {
+        if (mode == Mode.KNN && hasFields()) {
+            editing = true;
+            editLine = EditLine.K;
+            kInput = new LineInput(Integer.toString(k));
+            return Optional.of(Optional.empty());
+        }
+        return Optional.empty();
+    }
+
+    private Optional<Optional<Request>> toggleKnnExact() {
+        if (mode == Mode.KNN) {
+            knnExact = !knnExact;
+            return Optional.of(resubmit());
+        }
+        return Optional.empty();
+    }
+
+    /** The More Like This options for its modes, the parser's for those that parse a query. */
+    private void openParserForm() {
+        // The KNN filter is a classic query, with the classic mode's parser options and operator.
+        if (mode == Mode.LIKE || mode == Mode.LIKE_TEXT) {
+            form = new LikeForm(like);
+        } else if (parses()) {
+            form = new OptionsForm(parser, mode != Mode.STANDARD);
+        }
+    }
+
+    /** Whether the mode parses a query, with the parser's options and operator. */
+    private boolean parses() {
+        return mode == Mode.CLASSIC || mode == Mode.STANDARD || mode == Mode.KNN;
+    }
+
+    /** Steps to the next field, or the one before: of the doc values, the vectors or the query. */
+    private Optional<Request> cycleField(boolean forward) {
+        boolean knn = mode == Mode.KNN;
+        if (mode == Mode.DOC_VALUES && !docValuesFields.isEmpty()) {
+            docValuesField = step(docValuesField, docValuesFields.size(), forward);
+            return resubmit();
+        }
+        if (knn && !vectorFields.isEmpty()) {
+            vectorField = step(vectorField, vectorFields.size(), forward);
+            Optional<Request> next = resubmit();
+            if (next.isEmpty() && recall != null) {
+                // A recall check belongs to its field: the next field doesn't show it.
+                List<Long> cancel = jobs();
+                recall = null;
+                return cancel.isEmpty() ? Optional.empty() : Optional.of(new Request.Cancel(cancel));
+            }
+            return next;
+        }
+        boolean likes = mode == Mode.LIKE || mode == Mode.LIKE_TEXT;
+        if (!fields.isEmpty() && !likes && mode != Mode.DOC_VALUES && !knn) {
+            field = step(field, fields.size(), forward);
+            return resubmit();
+        }
+        return Optional.empty();
+    }
+
+    /** The index after {@code index}, or before it, of {@code size}, round. */
+    private static int step(int index, int size, boolean forward) {
+        return forward ? (index + 1) % size : (index + size - 1) % size;
+    }
+
+    private Optional<Optional<Request>> nextNumberFormat() {
+        if (mode == Mode.DOC_VALUES && numberField()) {
+            number = nextNumber(number);
+            return Optional.of(resubmit());
+        }
+        return Optional.empty();
+    }
+
+    private Optional<Optional<Request>> toggleHex() {
+        if (mode == Mode.DOC_VALUES && !numberField()) {
+            hex = !hex;
+            return Optional.of(resubmit());
+        }
+        return Optional.empty();
+    }
+
+    private Optional<Optional<Request>> toggleOperator() {
+        if (parses()) {
+            operator = operator == QueryOperator.OR ? QueryOperator.AND : QueryOperator.OR;
+            return Optional.of(resubmit());
+        }
+        return Optional.of(Optional.empty());
+    }
+
+    private Optional<Optional<Request>> cycleHighlights() {
+        if (mode == Mode.DOC_VALUES || mode == Mode.KNN) {
+            return Optional.empty();
+        }
+        highlights = switch (highlights) {
+            case QUERY_FIELDS -> Highlights.ANY_FIELD;
+            case ANY_FIELD -> Highlights.OFF;
+            case OFF -> Highlights.QUERY_FIELDS;
+        };
+        return Optional.of(resubmit());
     }
 
     /** Passes a key to the open popup, and takes its outcome: a changed setting searches again. */
@@ -1961,10 +2018,8 @@ public final class Search {
                 default -> {}
             }
         }
-        if (focus == Focus.HITS && key.code() != KeyCode.TAB && scan != null) {
-            if (scan.moveSelection(key)) {
-                return Optional.of(none);
-            }
+        if (focus == Focus.HITS && key.code() != KeyCode.TAB && scan != null && scan.moveSelection(key)) {
+            return Optional.of(none);
         }
         return Optional.empty();
     }
@@ -2046,29 +2101,34 @@ public final class Search {
     private String available(String keys) {
         List<String> shown = new ArrayList<>();
         for (String entry : keys.split("   ")) {
-            String kept = switch (entry) {
-                case "m mode" -> modes().size() > 1 ? entry : "";
-                case "p/s/l settings" -> scores() ? entry : "p/l settings";
-                case "s/l settings" -> scores() ? entry : "l settings";
-                case "x explain" -> supports(Feature.EXPLAIN) ? entry : "";
-                case "H highlight", "v view" -> supports(Feature.HIGHLIGHT) ? entry : "";
-                case "⏎ open doc" -> {
-                    // Enter on a sampled target of a recall check searches its nearest (ADR 0086).
-                    if (mode == Mode.KNN
-                            && recall != null
-                            && recall.params().sample().isPresent()) {
-                        yield "⏎ nearest";
-                    }
-                    yield supports(Feature.DOCUMENTS) ? entry : "";
-                }
-                case "b/B browse" -> supports(Feature.FILTER) ? entry : "";
-                default -> entry;
-            };
+            String kept = kept(entry);
             if (!kept.isEmpty()) {
                 shown.add(kept);
             }
         }
         return String.join("   ", shown);
+    }
+
+    /** What the footer says of the keys of {@code entry}; empty for keys the index lacks. */
+    private String kept(String entry) {
+        return switch (entry) {
+            case "m mode" -> shownIf(modes().size() > 1, entry);
+            case "p/s/l settings" -> scores() ? entry : "p/l settings";
+            case "s/l settings" -> scores() ? entry : "l settings";
+            case "x explain" -> shownIf(supports(Feature.EXPLAIN), entry);
+            case "H highlight", "v view" -> shownIf(supports(Feature.HIGHLIGHT), entry);
+            // Enter on a sampled target of a recall check searches its nearest (ADR 0086).
+            case "⏎ open doc" ->
+                mode == Mode.KNN && recall != null && recall.params().sample().isPresent()
+                        ? "⏎ nearest"
+                        : shownIf(supports(Feature.DOCUMENTS), entry);
+            case "b/B browse" -> shownIf(supports(Feature.FILTER), entry);
+            default -> entry;
+        };
+    }
+
+    private static String shownIf(boolean shown, String entry) {
+        return shown ? entry : "";
     }
 
     public void render(Frame frame, Rect area) {
@@ -2099,36 +2159,7 @@ public final class Search {
 
     private void renderQuery(Frame frame, Rect area) {
         String fieldName = field < fields.size() ? TextFormat.escapeControl(fields.get(field)) : "";
-        String count = exact ? "exact count" : "count to 1000";
-        String title = switch (mode) {
-            case CLASSIC ->
-                " Classic query · default field " + fieldName + " · " + operator + " · " + count + highlightsTitle()
-                        + " ";
-            case STANDARD ->
-                " Standard query · default field " + fieldName + " · " + operator + " · " + count + highlightsTitle()
-                        + " ";
-            case TERM ->
-                " Term · field " + fieldName + (binary ? " · hex" : "") + " · " + count + highlightsTitle() + " ";
-            case LIKE -> " More like this document · " + like.fieldsText() + " · " + count + highlightsTitle() + " ";
-            case LIKE_TEXT -> " More like this text · " + like.fieldsText() + " · " + count + highlightsTitle() + " ";
-            case REGEX ->
-                " Regex over stored values · fields " + hitFields.text().orElse("all") + " · "
-                        + (caseInsensitive ? "ignore case" : "match case")
-                        + (includeDeleted ? " · deleted docs too" : "") + " ";
-            case DOC_VALUES -> {
-                String name = docValuesField()
-                        .map(f -> TextFormat.escapeControl(f.name()))
-                        .orElse("");
-                DocValuesType type =
-                        docValuesField().map(IndexField::docValuesType).orElse(DocValuesType.NONE);
-                String encoding = numberField() ? numberLabel(number) : hex ? "hex" : "text";
-                yield " Doc values · field " + name + " (" + (type == DocValuesType.NONE ? "none" : type.name())
-                        + ") · " + encoding + " · " + count + " ";
-            }
-            case KNN ->
-                " KNN · " + vectorField().map(Search::vectorText).orElse("") + " · "
-                        + (knnExact ? "exact" : "k " + k + " · approximate") + " ";
-        };
+        String title = queryTitle(fieldName);
         Block block = panel(title, editing);
         Rect inner = block.inner(area);
         frame.renderWidget(block, area);
@@ -2153,6 +2184,42 @@ public final class Search {
         } else {
             frame.renderWidget(Paragraph.from(Line.from(TextFormat.escapeControl(input.text()))), inner);
         }
+    }
+
+    private String queryTitle(String fieldName) {
+        String count = exact ? "exact count" : "count to 1000";
+        return switch (mode) {
+            case CLASSIC ->
+                " Classic query · default field " + fieldName + " · " + operator + " · " + count + highlightsTitle()
+                        + " ";
+            case STANDARD ->
+                " Standard query · default field " + fieldName + " · " + operator + " · " + count + highlightsTitle()
+                        + " ";
+            case TERM ->
+                " Term · field " + fieldName + (binary ? " · hex" : "") + " · " + count + highlightsTitle() + " ";
+            case LIKE -> " More like this document · " + like.fieldsText() + " · " + count + highlightsTitle() + " ";
+            case LIKE_TEXT -> " More like this text · " + like.fieldsText() + " · " + count + highlightsTitle() + " ";
+            case REGEX ->
+                " Regex over stored values · fields " + hitFields.text().orElse("all") + " · "
+                        + (caseInsensitive ? "ignore case" : "match case")
+                        + (includeDeleted ? " · deleted docs too" : "") + " ";
+            case DOC_VALUES -> docValuesTitle(count);
+            case KNN ->
+                " KNN · " + vectorField().map(Search::vectorText).orElse("") + " · "
+                        + (knnExact ? "exact" : "k " + k + " · approximate") + " ";
+        };
+    }
+
+    private String docValuesTitle(String count) {
+        String name =
+                docValuesField().map(f -> TextFormat.escapeControl(f.name())).orElse("");
+        DocValuesType type = docValuesField().map(IndexField::docValuesType).orElse(DocValuesType.NONE);
+        String encoding = hex ? "hex" : "text";
+        if (numberField()) {
+            encoding = numberLabel(number);
+        }
+        return " Doc values · field " + name + " (" + (type == DocValuesType.NONE ? "none" : type.name()) + ") · "
+                + encoding + " · " + count + " ";
     }
 
     /** The KNN mode's second line: the filter, or the k while it is typed. */
@@ -2203,11 +2270,7 @@ public final class Search {
             }
             return;
         }
-        String searching = null;
-        if (running != null) {
-            long percent = maxDoc > 0 ? running.docsSearched() * 100 / maxDoc : 0;
-            searching = "searching… " + percent + "%";
-        }
+        String searching = searchingText();
         if (lineError != null) {
             String what = mode == Mode.KNN ? " Cannot read the target " : " Cannot read the values ";
             message(frame, area, what, focused, Line.styled(lineError, Style.EMPTY.red()));
@@ -2225,7 +2288,19 @@ public final class Search {
             frame.renderWidget(panel(" " + (searching == null ? "" : searching) + " ", focused), area);
             return;
         }
-        HitList list = submitted.hits;
+        renderHitList(frame, area, submitted.hits, hitsTitle(submitted.hits, searching), focused);
+    }
+
+    /** How far the running search is, if one runs. */
+    private String searchingText() {
+        if (running == null) {
+            return null;
+        }
+        long percent = maxDoc > 0 ? running.docsSearched() * 100 / maxDoc : 0;
+        return "searching… " + percent + "%";
+    }
+
+    private String hitsTitle(HitList list, String searching) {
         String title = " " + list.total() + " in " + list.tookMillis + " ms ";
         Optional<String> sort = scoring.sortText();
         if (sort.isPresent()) {
@@ -2240,6 +2315,10 @@ public final class Search {
         } else if (!list.more && list.hits.size() >= StartSearchParams.MAX_WINDOW) {
             title += "· first " + StartSearchParams.MAX_WINDOW + " only ";
         }
+        return title;
+    }
+
+    private void renderHitList(Frame frame, Rect area, HitList list, String title, boolean focused) {
         if (list.hits.isEmpty()) {
             message(frame, area, title, focused, Line.from("No document matches."));
             return;
@@ -2271,24 +2350,7 @@ public final class Search {
                 cells.add(Cell.from(sortTexts.get(i)));
             }
             boolean isSource = source.isPresent() && source.getAsInt() == hit.docId();
-            List<Span> fieldSpans = new ArrayList<>();
-            if (isSource) {
-                fieldSpans.add(Span.raw(SOURCE_MARK + " "));
-            }
-            if (hit.highlights().isEmpty()) {
-                fieldSpans.add(Span.raw(fieldsText(hit)));
-            } else {
-                // The first passage of each field, as the stored fields would be.
-                for (HitHighlight highlight : hit.highlights()) {
-                    if (highlight != hit.highlights().getFirst()) {
-                        fieldSpans.add(Span.raw("  "));
-                    }
-                    fieldSpans.add(Span.styled(TextFormat.escapeControl(highlight.field()) + ": ", Form.dim()));
-                    fieldSpans.addAll(
-                            passageSpans(hit, highlight, highlight.passages().getFirst()));
-                }
-            }
-            cells.add(Cell.from(Line.from(fieldSpans)));
+            cells.add(Cell.from(Line.from(fieldSpans(hit, isSource))));
             rows.add(Row.from(cells.toArray(Cell[]::new)));
         }
         tailRow(list.more, Optional.ofNullable(list.error)).ifPresent(rows::add);
@@ -2313,6 +2375,27 @@ public final class Search {
                 .block(panel(title, focused))
                 .build();
         frame.renderStatefulWidget(widget, area, table);
+    }
+
+    /** A hit's fields: the first passage of each highlighted field, or else its stored fields. */
+    private List<Span> fieldSpans(Hit hit, boolean isSource) {
+        List<Span> fieldSpans = new ArrayList<>();
+        if (isSource) {
+            fieldSpans.add(Span.raw(SOURCE_MARK + " "));
+        }
+        if (hit.highlights().isEmpty()) {
+            fieldSpans.add(Span.raw(fieldsText(hit)));
+            return fieldSpans;
+        }
+        // The first passage of each field, as the stored fields would be.
+        for (HitHighlight highlight : hit.highlights()) {
+            if (highlight != hit.highlights().getFirst()) {
+                fieldSpans.add(Span.raw("  "));
+            }
+            fieldSpans.add(Span.styled(TextFormat.escapeControl(highlight.field()) + ": ", Form.dim()));
+            fieldSpans.addAll(passageSpans(hit, highlight, highlight.passages().getFirst()));
+        }
+        return fieldSpans;
     }
 
     private static void message(Frame frame, Rect area, String title, boolean focused, Line line) {
@@ -2350,7 +2433,7 @@ public final class Search {
         Block block = panel(title, focused);
         Rect inner = block.inner(area);
         List<Line> wrapped = Panels.wrap(lines, inner.width());
-        detailsScroll = Math.min(detailsScroll, Math.max(wrapped.size() - inner.height(), 0));
+        detailsScroll = Math.clamp(detailsScroll, 0, Math.max(wrapped.size() - inner.height(), 0));
         frame.renderWidget(
                 Paragraph.builder()
                         .text(Text.from(wrapped))

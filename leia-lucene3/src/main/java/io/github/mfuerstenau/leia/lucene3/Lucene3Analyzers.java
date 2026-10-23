@@ -30,13 +30,14 @@ import org.apache.lucene.util.Version;
  */
 final class Lucene3Analyzers {
 
-    private static final Set<String> NAMES = Set.of(
-            "StandardAnalyzer",
-            "ClassicAnalyzer",
-            "WhitespaceAnalyzer",
-            "SimpleAnalyzer",
-            "StopAnalyzer",
-            "KeywordAnalyzer");
+    private static final String STOP = "StopAnalyzer";
+
+    private static final String CLASSIC = "ClassicAnalyzer";
+
+    private static final String STANDARD = "StandardAnalyzer";
+
+    private static final Set<String> NAMES =
+            Set.of(STANDARD, CLASSIC, "WhitespaceAnalyzer", "SimpleAnalyzer", STOP, "KeywordAnalyzer");
 
     private Lucene3Analyzers() {}
 
@@ -52,7 +53,7 @@ final class Lucene3Analyzers {
      */
     static Analyzer analyzer(AnalyzerSpec spec) throws UnsupportedAnalyzerException, InvalidAnalyzerException {
         return switch (spec) {
-            case AnalyzerSpec.Standard _ -> named("StandardAnalyzer", Optional.empty(), OptionalInt.empty());
+            case AnalyzerSpec.Standard _ -> named(STANDARD, Optional.empty(), OptionalInt.empty());
             case AnalyzerSpec.Preset preset -> {
                 String name = preset.simpleName();
                 if (NAMES.contains(name)
@@ -104,10 +105,8 @@ final class Lucene3Analyzers {
             throw new UnsupportedAnalyzerException("Lucene " + Constants.LUCENE_MAIN_VERSION + " has no analyzer "
                     + name + "; it has " + String.join(", ", new TreeSet<>(NAMES)));
         }
-        boolean takesStopwords =
-                Set.of("StandardAnalyzer", "ClassicAnalyzer", "StopAnalyzer").contains(name);
-        boolean takesMaxTokenLength =
-                Set.of("StandardAnalyzer", "ClassicAnalyzer").contains(name);
+        boolean takesStopwords = Set.of(STANDARD, CLASSIC, STOP).contains(name);
+        boolean takesMaxTokenLength = Set.of(STANDARD, CLASSIC).contains(name);
         if (stopwords.isPresent() && !takesStopwords) {
             throw new UnsupportedAnalyzerException(
                     "The " + name + " of Lucene " + Constants.LUCENE_MAIN_VERSION + " takes no stop words");
@@ -118,21 +117,21 @@ final class Lucene3Analyzers {
         }
         Optional<CharArraySet> stopSet = stopwords.map(words -> new CharArraySet(Version.LUCENE_36, words, false));
         return switch (name) {
-            case "StandardAnalyzer" -> {
+            case STANDARD -> {
                 StandardAnalyzer analyzer = stopSet.isPresent()
                         ? new StandardAnalyzer(Version.LUCENE_36, stopSet.get())
                         : new StandardAnalyzer(Version.LUCENE_36);
                 maxTokenLength.ifPresent(analyzer::setMaxTokenLength);
                 yield analyzer;
             }
-            case "ClassicAnalyzer" -> {
+            case CLASSIC -> {
                 ClassicAnalyzer analyzer = stopSet.isPresent()
                         ? new ClassicAnalyzer(Version.LUCENE_36, stopSet.get())
                         : new ClassicAnalyzer(Version.LUCENE_36);
                 maxTokenLength.ifPresent(analyzer::setMaxTokenLength);
                 yield analyzer;
             }
-            case "StopAnalyzer" ->
+            case STOP ->
                 stopSet.isPresent()
                         ? new StopAnalyzer(Version.LUCENE_36, stopSet.get())
                         : new StopAnalyzer(Version.LUCENE_36);

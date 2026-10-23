@@ -452,26 +452,28 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
         int[] freqs = vector.getTermFrequencies();
         List<VectorTerm> result = new ArrayList<>();
         for (int i = 0; i < terms.length; i++) {
-            List<Position> positions = new ArrayList<>();
-            if (vector instanceof TermPositionVector withPositions) {
-                int[] at = withPositions.getTermPositions(i);
-                TermVectorOffsetInfo[] offsets = withPositions.getOffsets(i);
-                int count = Math.max(at == null ? 0 : at.length, offsets == null ? 0 : offsets.length);
-                for (int j = 0; j < count; j++) {
-                    positions.add(new Position(
-                            at != null && j < at.length ? OptionalInt.of(at[j]) : OptionalInt.empty(),
-                            offsets != null && j < offsets.length
-                                    ? OptionalInt.of(offsets[j].getStartOffset())
-                                    : OptionalInt.empty(),
-                            offsets != null && j < offsets.length
-                                    ? OptionalInt.of(offsets[j].getEndOffset())
-                                    : OptionalInt.empty(),
-                            Optional.empty()));
-                }
-            }
-            result.add(new VectorTerm(utf8(terms[i]), freqs[i], List.copyOf(positions)));
+            List<Position> positions =
+                    vector instanceof TermPositionVector withPositions ? positions(withPositions, i) : List.of();
+            result.add(new VectorTerm(utf8(terms[i]), freqs[i], positions));
         }
         return List.copyOf(result);
+    }
+
+    /** The positions and offsets of term {@code i} of {@code vector}. */
+    private static List<Position> positions(TermPositionVector vector, int i) {
+        int[] at = vector.getTermPositions(i);
+        TermVectorOffsetInfo[] offsets = vector.getOffsets(i);
+        int count = Math.max(at == null ? 0 : at.length, offsets == null ? 0 : offsets.length);
+        List<Position> positions = new ArrayList<>(count);
+        for (int j = 0; j < count; j++) {
+            boolean hasOffsets = offsets != null && j < offsets.length;
+            positions.add(new Position(
+                    at != null && j < at.length ? OptionalInt.of(at[j]) : OptionalInt.empty(),
+                    hasOffsets ? OptionalInt.of(offsets[j].getStartOffset()) : OptionalInt.empty(),
+                    hasOffsets ? OptionalInt.of(offsets[j].getEndOffset()) : OptionalInt.empty(),
+                    Optional.empty()));
+        }
+        return List.copyOf(positions);
     }
 
     /**
@@ -787,13 +789,15 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
         }
 
         @Override
-        public void setScorer(Scorer scorer) {}
+        public void setScorer(Scorer scorer) {
+            // No scores: the collector only notes the documents.
+        }
 
         @Override
         public void collect(int doc) {
             docs.set(docBase + doc);
             if (++collected % PROGRESS_INTERVAL == 0) {
-                progress.accept(docBase + doc);
+                progress.accept((long) docBase + doc);
             }
         }
 

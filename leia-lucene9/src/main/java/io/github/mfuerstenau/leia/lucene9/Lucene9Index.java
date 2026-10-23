@@ -515,25 +515,36 @@ final class Lucene9Index
                 values.add(BytesRef.deepCopyOf(sorted.lookupOrd(sorted.ordValue())).bytes);
             }
             case SORTED_NUMERIC -> {
-                SortedNumericDocValues sorted = leaf.getSortedNumericDocValues(name);
-                if (sorted == null || !sorted.advanceExact(doc)) {
-                    return Optional.empty();
-                }
-                for (int i = 0; i < sorted.docValueCount(); i++) {
-                    numbers.add(sorted.nextValue());
-                }
+                return sortedNumeric(leaf.getSortedNumericDocValues(name), doc, field);
             }
             case SORTED_SET -> {
-                SortedSetDocValues set = leaf.getSortedSetDocValues(name);
-                if (set == null || !set.advanceExact(doc)) {
-                    return Optional.empty();
-                }
-                for (int i = 0; i < set.docValueCount(); i++) {
-                    values.add(BytesRef.deepCopyOf(set.lookupOrd(set.nextOrd())).bytes);
-                }
+                return sortedSet(leaf.getSortedSetDocValues(name), doc, field);
             }
         }
         return Optional.of(new DocValues(field.docValuesType(), List.copyOf(numbers), List.copyOf(values)));
+    }
+
+    private static Optional<DocValues> sortedNumeric(SortedNumericDocValues sorted, int doc, Field field)
+            throws IOException {
+        if (sorted == null || !sorted.advanceExact(doc)) {
+            return Optional.empty();
+        }
+        List<Long> numbers = new ArrayList<>();
+        for (int i = 0; i < sorted.docValueCount(); i++) {
+            numbers.add(sorted.nextValue());
+        }
+        return Optional.of(new DocValues(field.docValuesType(), List.copyOf(numbers), List.of()));
+    }
+
+    private static Optional<DocValues> sortedSet(SortedSetDocValues set, int doc, Field field) throws IOException {
+        if (set == null || !set.advanceExact(doc)) {
+            return Optional.empty();
+        }
+        List<byte[]> values = new ArrayList<>();
+        for (int i = 0; i < set.docValueCount(); i++) {
+            values.add(BytesRef.deepCopyOf(set.lookupOrd(set.nextOrd())).bytes);
+        }
+        return Optional.of(new DocValues(field.docValuesType(), List.of(), List.copyOf(values)));
     }
 
     /**
@@ -899,6 +910,20 @@ final class Lucene9Index
         return search(parsed, DEFAULT_SIMILARITY, List.of(), offset, limit, exactTotalHits, fields, progress);
     }
 
+    /** The values a hit was sorted by; none for a hit that wasn't sorted. */
+    private List<SortValue> sortValues(ScoreDoc scoreDoc, SortField[] sortFields) throws IOException {
+        List<SortValue> sortValues = new ArrayList<>(sortFields.length);
+        if (scoreDoc instanceof FieldDoc fieldDoc) {
+            for (int i = 0; i < sortFields.length; i++) {
+                sortValues.add(
+                        Lucene9Sorts.numeric(sortFields[i]) && !hasNumber(sortFields[i].getField(), scoreDoc.doc)
+                                ? new SortValue(Optional.empty(), Optional.empty())
+                                : sortValue(fieldDoc.fields[i]));
+            }
+        }
+        return List.copyOf(sortValues);
+    }
+
     /**
      * {@inheritDoc} The progress is reported once per segment, and asked from time to time in
      * between, also by the graph search of an approximate KNN query, which runs when it is rewritten.
@@ -954,16 +979,7 @@ final class Lucene9Index
                     values.computeIfAbsent(field.name(), _ -> new ArrayList<>()).add(storedValue(field));
                 }
             }
-            List<SortValue> sortValues = new ArrayList<>(sortFields.length);
-            if (scoreDoc instanceof FieldDoc fieldDoc) {
-                for (int i = 0; i < sortFields.length; i++) {
-                    sortValues.add(
-                            Lucene9Sorts.numeric(sortFields[i]) && !hasNumber(sortFields[i].getField(), scoreDoc.doc)
-                                    ? new SortValue(Optional.empty(), Optional.empty())
-                                    : sortValue(fieldDoc.fields[i]));
-                }
-            }
-            hits.add(new Hit(scoreDoc.doc, scoreDoc.score, List.copyOf(sortValues), values));
+            hits.add(new Hit(scoreDoc.doc, scoreDoc.score, sortValues(scoreDoc, sortFields), values));
         }
         return new SearchResults(
                 query.toString(),
@@ -1115,7 +1131,9 @@ final class Lucene9Index
             int docBase = context.docBase;
             return new LeafCollector() {
                 @Override
-                public void setScorer(Scorable scorer) {}
+                public void setScorer(Scorable scorer) {
+                    // No scores: the collector only notes the documents.
+                }
 
                 @Override
                 public void collect(int doc) {

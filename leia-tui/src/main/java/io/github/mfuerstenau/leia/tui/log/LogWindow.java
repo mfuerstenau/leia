@@ -165,7 +165,7 @@ public final class LogWindow {
     /** One level more verbose for {@code by} 1, one less for -1, and the log follows. */
     private void step(int by) {
         int at = LEVELS.indexOf(filter);
-        filter = LEVELS.get(Math.clamp(at + by, 0, LEVELS.size() - 1));
+        filter = LEVELS.get(Math.clamp((long) at + by, 0, LEVELS.size() - 1));
         buffer.logFrom(filter);
     }
 
@@ -293,7 +293,8 @@ public final class LogWindow {
         List<Line> footer = new ArrayList<>();
         message.ifPresent(text -> footer.add(Line.from(Span.raw(" " + text).dim())));
         footer.addAll(KeyLegend.lines(KEYS, inner.width()));
-        int footerHeight = Math.min(footer.size(), Math.max(inner.height() / 3, 1));
+        int footerCap = Math.max(inner.height() / 3, 1);
+        int footerHeight = Math.min(footer.size(), footerCap);
         List<Rect> parts = Layout.vertical()
                 .constraints(Constraint.fill(), Constraint.length(footerHeight))
                 .split(inner);
@@ -307,7 +308,7 @@ public final class LogWindow {
         scroll = Math.min(scroll, lastScroll());
         int widest = all.stream().mapToInt(row -> codePoints(row.text())).max().orElse(0);
         // TamboUI's Paragraph doesn't scroll sideways, so the rows are cut here.
-        column = Math.min(column, Math.max(widest - list.width(), 0));
+        column = Math.clamp(column, 0, Math.max(widest - list.width(), 0));
         List<Line> lines = new ArrayList<>();
         if (all.isEmpty()) {
             lines.add(Line.from(Span.raw("No records at " + filter.getName() + " and above yet")

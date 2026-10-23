@@ -13,7 +13,6 @@ import io.github.mfuerstenau.leia.core.IndexStats.SegmentStats;
 import io.github.mfuerstenau.leia.core.KnnQueries;
 import io.github.mfuerstenau.leia.core.KnnVector;
 import io.github.mfuerstenau.leia.core.MoreLikeThisOptions;
-import io.github.mfuerstenau.leia.core.PostingsPage;
 import io.github.mfuerstenau.leia.core.Queries;
 import io.github.mfuerstenau.leia.core.ReadOnlyIndex;
 import io.github.mfuerstenau.leia.core.Similarities;
@@ -550,9 +549,7 @@ final class Lucene10Index
                     new ClassicOptions(
                             options.fuzzyMaxEdits(), options.splitOnWhitespace(), options.autoGeneratePhraseQueries()),
                     analyzer));
-        } catch (io.github.mfuerstenau.leia.core.InvalidQueryException e) {
-            throw new InvalidQueryException(e.getMessage(), e);
-        } catch (RuntimeException e) {
+        } catch (io.github.mfuerstenau.leia.core.InvalidQueryException | RuntimeException e) {
             throw new InvalidQueryException(e.getMessage(), e);
         } finally {
             analyzer.close();
@@ -654,9 +651,7 @@ final class Lucene10Index
                             options.dates()),
                     types,
                     analyzer));
-        } catch (io.github.mfuerstenau.leia.core.InvalidQueryException e) {
-            throw new InvalidQueryException(e.getMessage(), e);
-        } catch (RuntimeException e) {
+        } catch (io.github.mfuerstenau.leia.core.InvalidQueryException | RuntimeException e) {
             throw new InvalidQueryException(e.getMessage(), e);
         }
     }

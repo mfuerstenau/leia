@@ -16,6 +16,7 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.function.Consumer;
 import java.util.function.LongConsumer;
+import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.index.CheckIndex;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FilterDirectory;
@@ -80,7 +81,7 @@ final class Lucene7Check implements Check {
             segments.add(new SegmentCheck(
                     segment.name,
                     segment.maxDoc,
-                    Optional.ofNullable(segment.codec).map(codec -> codec.getName()),
+                    Optional.ofNullable(segment.codec).map(Codec::getName),
                     segment.compound,
                     segment.numFiles,
                     Math.round(segment.sizeMB * 1024 * 1024),
@@ -145,10 +146,14 @@ final class Lucene7Check implements Check {
         static final NoLock INSTANCE = new NoLock();
 
         @Override
-        public void close() {}
+        public void close() {
+            // Nothing to release: no lock was taken.
+        }
 
         @Override
-        public void ensureValid() {}
+        public void ensureValid() {
+            // A lock that isn't held is always valid.
+        }
 
         @Override
         public String toString() {

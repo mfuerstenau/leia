@@ -192,7 +192,7 @@ public final class JarsPopup {
 
     /** Draws the popup, centered in {@code area}. */
     public void render(Frame frame, Rect area) {
-        int width = Math.min(Math.max(area.width() - 4, 0), MAX_WIDTH);
+        int width = Math.clamp((long) area.width() - 4, 0, MAX_WIDTH);
         int innerWidth = Math.max(width - 2, 1);
         List<Line> outcome = outcome(innerWidth);
         int candidateLines = candidates.isEmpty() ? 0 : 1;
@@ -202,7 +202,7 @@ public final class JarsPopup {
         // border.
         int fixed = 1 + 1 + 1 + 1 + candidateLines + outcome.size() + 1 + 2;
         int height = Math.min(fixed + jarLines.size(), area.height());
-        int listHeight = Math.clamp(height - fixed, 0, jarLines.size());
+        int listHeight = Math.clamp((long) height - fixed, 0, jarLines.size());
         Rect popup = Panels.centered(area, width, height);
         frame.renderWidget(Clear.INSTANCE, popup);
         Block block = Block.builder().borders(Borders.ALL).title(" Jars ").build();
@@ -322,7 +322,7 @@ public final class JarsPopup {
                             ? "default folder"
                             : shorten(parent);
                 }
-            } catch (InvalidPathException e) {
+            } catch (InvalidPathException _) {
                 // Shown as it came.
             }
             lines.add(Line.from(Span.raw("  " + name + "  "), Span.raw(place).dim()));

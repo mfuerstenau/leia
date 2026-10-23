@@ -98,9 +98,10 @@ public final class IndexFinder {
             }
         } catch (IOException e) {
             if (dir.equals(root)) {
-                throw e instanceof AccessDeniedException
-                        ? new RpcException(ErrorCode.INDEX_NOT_READABLE, "Permission denied: " + e.getMessage(), e)
-                        : new RpcException(ErrorCode.INDEX_NOT_READABLE, "Cannot list " + dir + ": " + e, e);
+                String message = e instanceof AccessDeniedException
+                        ? "Permission denied: " + e.getMessage()
+                        : "Cannot list " + dir + ": " + e;
+                throw new RpcException(ErrorCode.INDEX_NOT_READABLE, message, e);
             }
             LOG.log(Level.FINE, e, () -> "Cannot list " + dir);
             return;

@@ -93,11 +93,10 @@ public enum SortType {
         }
         throw new IllegalArgumentException(
                 switch (docValues) {
-                    case NONE -> "the field '" + field.name + "' has no doc values to sort by";
-                    case BINARY -> "the field '" + field.name + "' has BINARY doc values, which can't be sorted by";
+                    case NONE -> theField(field.name) + " has no doc values to sort by";
+                    case BINARY -> theField(field.name) + " has BINARY doc values, which can't be sorted by";
                     default ->
-                        "the field '" + field.name + "' has " + docValues + " doc values, which can't be sorted by as "
-                                + this;
+                        theField(field.name) + " has " + docValues + " doc values, which can't be sorted by as " + this;
                 });
     }
 
@@ -119,7 +118,11 @@ public enum SortType {
             }
         }
         String kind = allowed.length == 1 ? "single-valued" : "multi-valued numeric";
-        throw new IllegalArgumentException("the field '" + field.name + "' has " + kind + " " + field.getDocValuesType()
+        throw new IllegalArgumentException(theField(field.name) + " has " + kind + " " + field.getDocValuesType()
                 + " doc values, which can't select " + selector);
+    }
+
+    private static String theField(String name) {
+        return "the field '" + name + "'";
     }
 }

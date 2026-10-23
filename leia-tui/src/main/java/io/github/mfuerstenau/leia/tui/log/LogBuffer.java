@@ -35,7 +35,7 @@ public final class LogBuffer extends Handler {
      */
     public record Entry(Instant instant, Level level, String logger, String message, Optional<String> trace) {}
 
-    private final int capacity;
+    private final int maxEntries;
 
     /** The level that the start set, from {@code leia.log.level}. */
     private final Level configured;
@@ -49,7 +49,7 @@ public final class LogBuffer extends Handler {
     private long dropped;
 
     private LogBuffer(int capacity, Level configured, Optional<Logger> root) {
-        this.capacity = capacity;
+        this.maxEntries = capacity;
         this.configured = configured;
         this.root = root;
         setLevel(Level.ALL);
@@ -70,18 +70,18 @@ public final class LogBuffer extends Handler {
     }
 
     @Override
-    public void publish(LogRecord record) {
-        if (!isLoggable(record)) {
+    public void publish(LogRecord logRecord) {
+        if (!isLoggable(logRecord)) {
             return;
         }
         Entry entry = new Entry(
-                record.getInstant(),
-                record.getLevel(),
-                record.getLoggerName() == null ? "" : record.getLoggerName(),
-                formatter.formatMessage(record),
-                Optional.ofNullable(record.getThrown()).map(LogBuffer::trace));
+                logRecord.getInstant(),
+                logRecord.getLevel(),
+                logRecord.getLoggerName() == null ? "" : logRecord.getLoggerName(),
+                formatter.formatMessage(logRecord),
+                Optional.ofNullable(logRecord.getThrown()).map(LogBuffer::trace));
         synchronized (entries) {
-            if (entries.size() == capacity) {
+            if (entries.size() == maxEntries) {
                 entries.removeFirst();
                 dropped++;
             }
@@ -149,8 +149,12 @@ public final class LogBuffer extends Handler {
     }
 
     @Override
-    public void flush() {}
+    public void flush() {
+        // Nothing is buffered.
+    }
 
     @Override
-    public void close() {}
+    public void close() {
+        // Nothing to release.
+    }
 }

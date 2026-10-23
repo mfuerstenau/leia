@@ -240,28 +240,33 @@ public final class DocFilter {
                 text = "finding matches… " + percent + "%";
             }
             case State.Ready ready when ready.matchCount() == 0 -> text = "no matches";
-            case State.Ready ready -> {
-                if (located != null && located.docId() == docId) {
-                    text = located.index().isPresent()
-                            ? (located.index().getAsInt() + 1) + " of " + ready.matchCount()
-                            : "not a match, " + ready.matchCount() + " in all";
-                } else {
-                    text = ready.matchCount() == 1 ? "1 match" : ready.matchCount() + " matches";
-                }
-            }
+            case State.Ready ready -> text = matchesText(ready, docId);
             case State.Failed failed -> {
                 text = TextFormat.firstChars(failed.error(), 80);
                 error = true;
             }
         }
         if (state instanceof State.Ready ready) {
-            if (ready.timedOut() == 1) {
-                timedOut = " · 1 value timed out";
-            } else if (ready.timedOut() > 1) {
-                timedOut = " · " + ready.timedOut() + " values timed out";
-            }
+            timedOut = timedOutText(ready.timedOut());
         }
         String noted = note != null ? " · " + note : "";
         return new Title("filter " + shown + deleted + ": " + text + timedOut + noted, error);
+    }
+
+    /** Which match document {@code docId} is, if it was located, or else how many there are. */
+    private String matchesText(State.Ready ready, int docId) {
+        if (located != null && located.docId() == docId) {
+            return located.index().isPresent()
+                    ? (located.index().getAsInt() + 1) + " of " + ready.matchCount()
+                    : "not a match, " + ready.matchCount() + " in all";
+        }
+        return ready.matchCount() == 1 ? "1 match" : ready.matchCount() + " matches";
+    }
+
+    private static String timedOutText(long timedOut) {
+        if (timedOut == 1) {
+            return " · 1 value timed out";
+        }
+        return timedOut > 1 ? " · " + timedOut + " values timed out" : "";
     }
 }

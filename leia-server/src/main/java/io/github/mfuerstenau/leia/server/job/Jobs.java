@@ -39,11 +39,13 @@ public final class Jobs {
 
     private final ExecutorService executor = Executors.newThreadPerTaskExecutor(
             Thread.ofPlatform().daemon().name("leia-job-", 1).factory());
-    private final Map<Long, Job<?>> jobs = new HashMap<>();
+    private final Map<Long, Job<?>> byId = new HashMap<>();
     private long nextId = 1;
 
     @Inject
-    public Jobs() {}
+    public Jobs() {
+        // For Dagger.
+    }
 
     /** The work of a job. It runs on the job's thread and must pass {@code progress} its progress. */
     @FunctionalInterface
@@ -90,7 +92,7 @@ public final class Jobs {
     private <R> long start(String description, Class<R> resultType, Optional<Object> attachment, Work<R> work) {
         long id = nextId++;
         Job<R> job = new Job<>(id, description, resultType, attachment);
-        jobs.put(id, job);
+        byId.put(id, job);
         executor.execute(() -> job.run(work));
         LOG.fine(() -> "Started job " + id + ": " + description);
         return id;
@@ -104,14 +106,14 @@ public final class Jobs {
      *     job's own error if it failed
      */
     public <R> Poll<R> poll(long id, Class<R> resultType) throws RpcException {
-        Job<?> job = jobs.get(id);
+        Job<?> job = byId.get(id);
         if (job == null || job.resultType != resultType) {
             throw notFound(id);
         }
         if (!job.outcome.isDone()) {
             return new Poll<>(job.progress, Optional.empty());
         }
-        jobs.remove(id);
+        byId.remove(id);
         try {
             return new Poll<>(job.progress, Optional.of(resultType.cast(job.outcome.join())));
         } catch (CompletionException e) {
@@ -130,7 +132,7 @@ public final class Jobs {
      *     has no attachment of this type
      */
     public <A> A attachment(long id, Class<?> resultType, Class<A> type) throws RpcException {
-        Job<?> job = jobs.get(id);
+        Job<?> job = byId.get(id);
         if (job == null || job.resultType != resultType) {
             throw notFound(id);
         }
@@ -143,7 +145,7 @@ public final class Jobs {
      * @return whether the job was still running; false if it had finished or is unknown
      */
     public boolean cancel(long id) {
-        Job<?> job = jobs.remove(id);
+        Job<?> job = byId.remove(id);
         if (job == null) {
             return false;
         }
@@ -158,26 +160,26 @@ public final class Jobs {
 
     /** Stops every job and waits for each, so that the index they read can be closed. */
     public void cancelAll() {
-        for (long id : List.copyOf(jobs.keySet())) {
+        for (long id : List.copyOf(byId.keySet())) {
             cancel(id);
         }
     }
 
     /** Whether the job has an outcome that was not handed out yet. */
     boolean isDone(long id) {
-        Job<?> job = jobs.get(id);
+        Job<?> job = byId.get(id);
         return job != null && job.outcome.isDone();
     }
 
     private static void awaitStop(Job<?> job) {
         try {
             job.outcome.get(STOP_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-        } catch (ExecutionException | CancellationException e) {
+        } catch (ExecutionException | CancellationException _) {
             // Stopped.
-        } catch (TimeoutException e) {
+        } catch (TimeoutException _) {
             LOG.warning(() ->
                     "Job " + job.id + " did not stop within " + STOP_TIMEOUT.toSeconds() + " s: " + job.description);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         }
     }
@@ -218,7 +220,7 @@ public final class Jobs {
                         + Duration.ofNanos(System.nanoTime() - start).toMillis() + " ms: " + description);
             } catch (RpcException e) {
                 outcome.completeExceptionally(e);
-            } catch (CancellationException e) {
+            } catch (CancellationException _) {
                 outcome.cancel(false);
             } catch (RuntimeException e) {
                 LOG.log(Level.SEVERE, e, () -> "Job " + id + " failed: " + description);

@@ -31,8 +31,10 @@ public record DefaultJars(Optional<Path> dir, State state) {
 
     /** Looks into {@code dir}: its jars are loaded if it has any, unless {@code skip}. */
     public static DefaultJars find(Optional<Path> dir, boolean skip) {
-        State state =
-                skip ? State.SKIPPED : dir.filter(DefaultJars::hasJars).isPresent() ? State.LOADED : State.NO_JARS;
+        State state = State.SKIPPED;
+        if (!skip) {
+            state = dir.filter(DefaultJars::hasJars).isPresent() ? State.LOADED : State.NO_JARS;
+        }
         return new DefaultJars(dir, state);
     }
 
@@ -51,7 +53,7 @@ public record DefaultJars(Optional<Path> dir, State state) {
         try (Stream<Path> entries = Files.list(dir)) {
             return entries.anyMatch(entry ->
                     Files.isRegularFile(entry) && isJarName(entry.getFileName().toString()));
-        } catch (IOException e) {
+        } catch (IOException _) {
             return false;
         }
     }

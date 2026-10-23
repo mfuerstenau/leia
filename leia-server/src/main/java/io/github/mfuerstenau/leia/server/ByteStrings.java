@@ -30,7 +30,7 @@ public final class ByteStrings {
                             .decode(ByteBuffer.wrap(bytes))
                             .toString(),
                     false);
-        } catch (CharacterCodingException e) {
+        } catch (CharacterCodingException _) {
             return new Encoded(hex(bytes), true);
         }
     }

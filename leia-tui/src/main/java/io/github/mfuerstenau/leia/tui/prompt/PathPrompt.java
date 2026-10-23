@@ -154,26 +154,11 @@ public final class PathPrompt {
                 return new Nothing();
             }
             case TAB -> {
-                browsing = null;
-                PathCompletion.Completion completion = PathCompletion.complete(input.text(), home);
-                candidates = completion.candidates();
-                if (!completion.input().equals(input.text())) {
-                    error = null;
-                }
-                input.set(completion.input());
+                complete();
                 return new Nothing();
             }
             default -> {
-                if (ctrl && key.codePoint() == 'n') {
-                    mode = mode == OpenMode.READER ? OpenMode.DIRECTORY_ONLY : OpenMode.READER;
-                    return new Nothing();
-                }
-                if (ctrl && key.codePoint() == 'd') {
-                    directory = switch (directory) {
-                        case FS -> DirectoryImpl.MMAP;
-                        case MMAP -> DirectoryImpl.NIO;
-                        case NIO -> DirectoryImpl.FS;
-                    };
+                if (ctrl && toggle(key.codePoint())) {
                     return new Nothing();
                 }
             }
@@ -188,6 +173,34 @@ public final class PathPrompt {
         return new Nothing();
     }
 
+    /** Completes the input as far as its candidates agree. */
+    private void complete() {
+        browsing = null;
+        PathCompletion.Completion completion = PathCompletion.complete(input.text(), home);
+        candidates = completion.candidates();
+        if (!completion.input().equals(input.text())) {
+            error = null;
+        }
+        input.set(completion.input());
+    }
+
+    /** Ctrl+N switches the reader on and off, Ctrl+D the directory; returns whether {@code c} did. */
+    private boolean toggle(int c) {
+        if (c == 'n') {
+            mode = mode == OpenMode.READER ? OpenMode.DIRECTORY_ONLY : OpenMode.READER;
+            return true;
+        }
+        if (c == 'd') {
+            directory = switch (directory) {
+                case FS -> DirectoryImpl.MMAP;
+                case MMAP -> DirectoryImpl.NIO;
+                case NIO -> DirectoryImpl.FS;
+            };
+            return true;
+        }
+        return false;
+    }
+
     /**
      * Steps to an older ({@code older}) or newer recent path, like a shell's history. The path that
      * was in the input before the first Up is skipped, and Down past the newest brings it back.
@@ -197,14 +210,7 @@ public final class PathPrompt {
         Integer position = browsing == null ? null : browsing.position();
         List<String> entries =
                 recent.stream().filter(path -> !path.equals(typed)).toList();
-        Integer next;
-        if (older) {
-            next = position == null
-                    ? (entries.isEmpty() ? null : 0)
-                    : Integer.valueOf(Math.min(position + 1, entries.size() - 1));
-        } else {
-            next = position == null || position == 0 ? null : position - 1;
-        }
+        Integer next = next(older, position, entries.size());
         if (position != null || next != null) {
             String text = next == null ? typed : entries.get(next);
             if (!text.equals(input.text())) {
@@ -216,9 +222,20 @@ public final class PathPrompt {
         browsing = next == null ? null : new Browsing(typed, next);
     }
 
+    /** The position after {@code position} in {@code size} entries, or before it; null for the input. */
+    private static Integer next(boolean older, Integer position, int size) {
+        if (!older) {
+            return position == null || position == 0 ? null : position - 1;
+        }
+        if (position != null) {
+            return Math.min(position + 1, size - 1);
+        }
+        return size == 0 ? null : 0;
+    }
+
     /** Draws the popup, centered in {@code area}. */
     public void render(Frame frame, Rect area) {
-        int width = Math.min(Math.max(area.width() - 4, 0), MAX_WIDTH);
+        int width = Math.clamp((long) area.width() - 4, 0, MAX_WIDTH);
         int innerWidth = Math.max(width - 2, 1);
         List<Line> errorLines = error == null ? List.of() : errorLines(error, innerWidth);
         int candidateLines = candidates.isEmpty() ? 0 : 1;

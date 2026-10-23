@@ -32,14 +32,14 @@ final class KnnGraphTree {
 
         Segment(KnnGraphSegment info) {
             this.info = info;
-            List<Level> levels = new ArrayList<>();
+            List<Level> topFirst = new ArrayList<>();
             info.shape().ifPresent(shape -> {
                 for (int level = shape.levelSizes().size() - 1; level >= 0; level--) {
-                    levels.add(
+                    topFirst.add(
                             new Level(info.segment(), level, shape.levelSizes().get(level)));
                 }
             });
-            this.levels = List.copyOf(levels);
+            this.levels = List.copyOf(topFirst);
         }
     }
 
@@ -47,7 +47,7 @@ final class KnnGraphTree {
     static final class Level {
 
         final int segment;
-        final int level;
+        final int number;
         final int total;
 
         /** The nodes fetched, in ordinal order; empty before the first page. */
@@ -59,7 +59,7 @@ final class KnnGraphTree {
 
         Level(int segment, int level, int total) {
             this.segment = segment;
-            this.level = level;
+            this.number = level;
             this.total = total;
         }
 
@@ -198,7 +198,7 @@ final class KnnGraphTree {
         return segments.stream()
                 .filter(s -> s.info.segment() == segment)
                 .flatMap(s -> s.levels.stream())
-                .filter(l -> l.level == level)
+                .filter(l -> l.number == level)
                 .findFirst();
     }
 

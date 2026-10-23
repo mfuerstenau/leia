@@ -102,20 +102,26 @@ public final class Highlights {
                 .highlight(List.copyOf(fields), docIds, max, TextHighlighter.Mode.PASSAGES)
                 .found();
         for (int i = 0; i < docIds.length; i++) {
-            List<FieldHighlight> hit = new ArrayList<>();
-            for (Map.Entry<String, List<StoredValue>> entry : stored.get(i).entrySet()) {
-                List<Optional<FoundText>> perDoc = byField.get(entry.getKey());
-                if (perDoc != null && perDoc.get(i).isPresent()) {
-                    FoundText found = perDoc.get(i).get();
-                    List<Passage> passages = passages(found, textIndexes(entry.getValue()));
-                    if (!passages.isEmpty()) {
-                        hit.add(new FieldHighlight(entry.getKey(), found.source(), passages));
-                    }
-                }
-            }
-            highlights.add(List.copyOf(hit));
+            highlights.add(hit(i, stored.get(i), byField));
         }
         return List.copyOf(highlights);
+    }
+
+    /** The highlighted fields of hit {@code i}, from what the highlighter found in each field. */
+    private static List<FieldHighlight> hit(
+            int i, Map<String, List<StoredValue>> stored, Map<String, List<Optional<FoundText>>> byField) {
+        List<FieldHighlight> hit = new ArrayList<>();
+        for (Map.Entry<String, List<StoredValue>> entry : stored.entrySet()) {
+            List<Optional<FoundText>> perDoc = byField.get(entry.getKey());
+            if (perDoc != null && perDoc.get(i).isPresent()) {
+                FoundText found = perDoc.get(i).get();
+                List<Passage> passages = passages(found, textIndexes(entry.getValue()));
+                if (!passages.isEmpty()) {
+                    hit.add(new FieldHighlight(entry.getKey(), found.source(), passages));
+                }
+            }
+        }
+        return List.copyOf(hit);
     }
 
     /**
@@ -149,7 +155,7 @@ public final class Highlights {
             String field = fields.get(f);
             List<Integer> indexes = textIndexes.get(f);
             List<StoredValue> values = stored.get(field);
-            long chars = indexes.size() - 1;
+            long chars = indexes.size() - 1L;
             for (int index : indexes) {
                 chars += ((StoredValue.Text) values.get(index)).value().length();
             }
@@ -194,48 +200,53 @@ public final class Highlights {
         String content = raw.content();
         List<Passage> passages = new ArrayList<>(raw.passages().size());
         for (FoundPassage passage : raw.passages()) {
-            Value value = Value.of(content, passage.start());
-            if (value.ordinal() >= textIndexes.size()) {
-                continue;
-            }
-            List<int[]> matches = matches(passage, value.start(), value.end());
-            if (matches.isEmpty()) {
-                continue;
-            }
-            int first = matches.getFirst()[0];
-            int last = matches.getLast()[1];
-            int start = Math.max(passage.start(), value.start());
-            int end = Math.min(passage.end(), value.end());
-            if (end - start > MAX_PASSAGE_CHARS) {
-                int from = Math.max(start, first - PASSAGE_BEFORE);
-                int to = Math.min(end, from + MAX_PASSAGE_CHARS);
-                start = Math.max(start, to - MAX_PASSAGE_CHARS);
-                end = to;
-            }
-            while (start < first && Character.isWhitespace(content.charAt(start))) {
-                start++;
-            }
-            while (end > last && Character.isWhitespace(content.charAt(end - 1))) {
-                end--;
-            }
-            start = characterStart(content, start);
-            end = characterStart(content, end);
-            Utf8Offsets offsets = new Utf8Offsets(content.substring(value.start(), value.end()));
-            int byteStart = offsets.at(start - value.start());
-            List<Span> spans = new ArrayList<>(matches.size());
-            for (int[] match : matches) {
-                if (match[0] >= start && match[1] <= end) {
-                    spans.add(new Span(offsets.at(match[0] - value.start()), offsets.at(match[1] - value.start())));
-                }
-            }
-            passages.add(new Passage(
-                    textIndexes.get(value.ordinal()),
-                    byteStart,
-                    content.substring(start, end),
-                    List.copyOf(spans),
-                    passage.score()));
+            passage(content, passage, textIndexes).ifPresent(passages::add);
         }
         return List.copyOf(passages);
+    }
+
+    /** {@code passage} within the value it starts in, cut to its matches; empty without a match. */
+    private static Optional<Passage> passage(String content, FoundPassage passage, List<Integer> textIndexes) {
+        Value value = Value.of(content, passage.start());
+        if (value.ordinal() >= textIndexes.size()) {
+            return Optional.empty();
+        }
+        List<int[]> matches = matches(passage, value.start(), value.end());
+        if (matches.isEmpty()) {
+            return Optional.empty();
+        }
+        int first = matches.getFirst()[0];
+        int last = matches.getLast()[1];
+        int start = Math.max(passage.start(), value.start());
+        int end = Math.min(passage.end(), value.end());
+        if (end - start > MAX_PASSAGE_CHARS) {
+            int from = Math.max(start, first - PASSAGE_BEFORE);
+            int to = Math.min(end, from + MAX_PASSAGE_CHARS);
+            start = Math.max(start, to - MAX_PASSAGE_CHARS);
+            end = to;
+        }
+        while (start < first && Character.isWhitespace(content.charAt(start))) {
+            start++;
+        }
+        while (end > last && Character.isWhitespace(content.charAt(end - 1))) {
+            end--;
+        }
+        start = characterStart(content, start);
+        end = characterStart(content, end);
+        Utf8Offsets offsets = new Utf8Offsets(content.substring(value.start(), value.end()));
+        int byteStart = offsets.at(start - value.start());
+        List<Span> spans = new ArrayList<>(matches.size());
+        for (int[] match : matches) {
+            if (match[0] >= start && match[1] <= end) {
+                spans.add(new Span(offsets.at(match[0] - value.start()), offsets.at(match[1] - value.start())));
+            }
+        }
+        return Optional.of(new Passage(
+                textIndexes.get(value.ordinal()),
+                byteStart,
+                content.substring(start, end),
+                List.copyOf(spans),
+                passage.score()));
     }
 
     /** {@code at}, or the position before it if it falls between the halves of a surrogate pair. */

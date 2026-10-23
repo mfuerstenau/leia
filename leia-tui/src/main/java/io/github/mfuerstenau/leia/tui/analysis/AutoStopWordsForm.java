@@ -6,6 +6,7 @@ import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
 import dev.tamboui.tui.event.KeyEvent;
 import io.github.mfuerstenau.leia.protocol.analysis.AutoStopWords;
+import io.github.mfuerstenau.leia.protocol.analysis.FieldStopWords;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAutoStopWordsResult;
 import io.github.mfuerstenau.leia.protocol.analysis.StartAutoStopWordsParams;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
@@ -172,28 +173,10 @@ public final class AutoStopWordsForm {
         int last = 1 + fields.size();
         switch (key.code()) {
             case ESCAPE -> {
-                if (running) {
-                    if (jobId.isPresent()) {
-                        long job = jobId.getAsLong();
-                        failed("Stopped.");
-                        return new Event.Cancel(job);
-                    }
-                    return new Event.None();
-                }
-                return new Event.Close();
+                return escape();
             }
             case ENTER -> {
-                if (running) {
-                    return new Event.None();
-                }
-                if (unsupported.isPresent()) {
-                    message = "Auto stop words: " + unsupported.get();
-                    return new Event.None();
-                }
-                running = true;
-                scanned = 0;
-                message = null;
-                return new Event.Start(params());
+                return start();
             }
             case UP -> selected = Math.max(selected - 1, 0);
             case DOWN -> selected = Math.min(selected + 1, last);
@@ -206,29 +189,60 @@ public final class AutoStopWordsForm {
                 }
             }
             case CHAR -> {
-                int c = key.codePoint();
-                if (selected == Row.VALUE.ordinal() && c >= '0' && c <= '9') {
-                    setValue(Form.typeDigit(value(), (char) c, percent ? 100 : Integer.MAX_VALUE));
-                    return new Event.None();
-                }
-                switch (c) {
-                    case 'k' -> selected = Math.max(selected - 1, 0);
-                    case 'j' -> selected = Math.min(selected + 1, last);
-                    case ' ' -> change();
-                    case 'a' -> Collections.fill(chosen, true);
-                    case 'n' -> Collections.fill(chosen, false);
-                    case 'v' -> {
-                        Optional<String> field = selectedField();
-                        listed = field.equals(listed) ? Optional.empty() : field;
-                    }
-                    case 'd' -> {
-                        if (!running && found.isPresent()) {
-                            found = Optional.empty();
-                            listed = Optional.empty();
-                            return new Event.Clear();
-                        }
-                    }
-                    default -> {}
+                return charKey(key.codePoint(), last);
+            }
+            default -> {}
+        }
+        return new Event.None();
+    }
+
+    /** Esc stops the running job, or else closes the form. */
+    private Event escape() {
+        if (!running) {
+            return new Event.Close();
+        }
+        if (jobId.isPresent()) {
+            long job = jobId.getAsLong();
+            failed("Stopped.");
+            return new Event.Cancel(job);
+        }
+        return new Event.None();
+    }
+
+    private Event start() {
+        if (running) {
+            return new Event.None();
+        }
+        if (unsupported.isPresent()) {
+            message = "Auto stop words: " + unsupported.get();
+            return new Event.None();
+        }
+        running = true;
+        scanned = 0;
+        message = null;
+        return new Event.Start(params());
+    }
+
+    private Event charKey(int c, int last) {
+        if (selected == Row.VALUE.ordinal() && c >= '0' && c <= '9') {
+            setValue(Form.typeDigit(value(), (char) c, percent ? 100 : Integer.MAX_VALUE));
+            return new Event.None();
+        }
+        switch (c) {
+            case 'k' -> selected = Math.max(selected - 1, 0);
+            case 'j' -> selected = Math.min(selected + 1, last);
+            case ' ' -> change();
+            case 'a' -> Collections.fill(chosen, true);
+            case 'n' -> Collections.fill(chosen, false);
+            case 'v' -> {
+                Optional<String> field = selectedField();
+                listed = field.equals(listed) ? Optional.empty() : field;
+            }
+            case 'd' -> {
+                if (!running && found.isPresent()) {
+                    found = Optional.empty();
+                    listed = Optional.empty();
+                    return new Event.Clear();
                 }
             }
             default -> {}
@@ -291,33 +305,44 @@ public final class AutoStopWordsForm {
             lines.add(Form.row(
                     TextFormat.escapeControl(field), (chosen.get(i) ? "[x]" : "[ ]") + words, selected == i + 2));
             if (listed.equals(Optional.of(field)) && found.isPresent()) {
-                List<String> fieldWords = words(field);
-                String text = fieldWords.isEmpty()
-                        ? "no words"
-                        : String.join(", ", fieldWords.subList(0, Math.min(fieldWords.size(), SHOWN_WORDS)))
-                                + (fieldWords.size() > SHOWN_WORDS ? ", …" : "");
-                for (String line : TextFormat.wrap(TextFormat.escapeControl(text), WIDTH - 6, Integer.MAX_VALUE)) {
-                    lines.add(Line.styled("    " + line, Form.dim()));
-                }
+                lines.addAll(wordLines(field));
             }
         }
         if (fields.isEmpty()) {
             lines.add(Line.styled("  No indexed fields: open an index with a reader.", Form.dim()));
         }
         lines.add(Line.empty());
-        if (running) {
-            lines.add(Line.from("Finding the stop words: " + scanned + " terms scanned"));
-        } else if (found.isPresent()) {
-            lines.add(Line.from("Found: more than " + found.get().maxDocFreq() + " documents"));
-        } else {
-            lines.add(Line.styled("A term in more documents than this is a stop word of its field.", Form.dim()));
-        }
+        lines.add(stateLine());
         if (message != null) {
             for (String line : TextFormat.wrap(message, WIDTH - 2, Integer.MAX_VALUE)) {
                 lines.add(Line.styled(line, Style.EMPTY.red()));
             }
         }
         Form.renderPopup(frame, area, " Auto stop words ", lines, selectedLine, WIDTH);
+    }
+
+    /** The first stop words found in {@code field}. */
+    private List<Line> wordLines(String field) {
+        List<String> fieldWords = words(field);
+        String more = fieldWords.size() > SHOWN_WORDS ? ", …" : "";
+        String text = fieldWords.isEmpty()
+                ? "no words"
+                : String.join(", ", fieldWords.subList(0, Math.min(fieldWords.size(), SHOWN_WORDS))) + more;
+        List<Line> lines = new ArrayList<>();
+        for (String line : TextFormat.wrap(TextFormat.escapeControl(text), WIDTH - 6, Integer.MAX_VALUE)) {
+            lines.add(Line.styled("    " + line, Form.dim()));
+        }
+        return lines;
+    }
+
+    private Line stateLine() {
+        if (running) {
+            return Line.from("Finding the stop words: " + scanned + " terms scanned");
+        }
+        if (found.isPresent()) {
+            return Line.from("Found: more than " + found.get().maxDocFreq() + " documents");
+        }
+        return Line.styled("A term in more documents than this is a stop word of its field.", Form.dim());
     }
 
     private boolean hasField(String field) {
@@ -328,7 +353,7 @@ public final class AutoStopWordsForm {
         return found.get().fields().stream()
                 .filter(words -> words.field().equals(field))
                 .findFirst()
-                .map(words -> words.words())
+                .map(FieldStopWords::words)
                 .orElse(List.of());
     }
 

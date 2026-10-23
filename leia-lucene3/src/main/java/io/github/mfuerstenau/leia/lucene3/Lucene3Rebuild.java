@@ -34,14 +34,14 @@ final class Lucene3Rebuild implements Rebuild {
     private final int[] starts;
 
     Lucene3Rebuild(IndexReader reader) {
-        List<IndexReader> segments = new ArrayList<>();
-        ReaderUtil.gatherSubReaders(segments, reader);
-        this.segments = List.copyOf(segments);
-        this.starts = new int[segments.size()];
+        List<IndexReader> gathered = new ArrayList<>();
+        ReaderUtil.gatherSubReaders(gathered, reader);
+        this.segments = List.copyOf(gathered);
+        this.starts = new int[gathered.size()];
         int start = 0;
-        for (int i = 0; i < segments.size(); i++) {
+        for (int i = 0; i < gathered.size(); i++) {
             starts[i] = start;
-            start += segments.get(i).maxDoc();
+            start += gathered.get(i).maxDoc();
         }
     }
 

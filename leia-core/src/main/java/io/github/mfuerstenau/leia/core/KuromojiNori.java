@@ -54,7 +54,7 @@ final class KuromojiNori {
                     Class.forName(JAPANESE_MODE, false, loader),
                     CharArraySet.class,
                     Set.class));
-        } catch (ReflectiveOperationException | LinkageError e) {
+        } catch (ReflectiveOperationException | LinkageError _) {
             return Optional.empty();
         }
     }
@@ -74,7 +74,7 @@ final class KuromojiNori {
                     Class.forName(KOREAN_MODE, false, loader),
                     Set.class,
                     boolean.class));
-        } catch (ReflectiveOperationException | LinkageError e) {
+        } catch (ReflectiveOperationException | LinkageError _) {
             return Optional.empty();
         }
     }
@@ -92,7 +92,7 @@ final class KuromojiNori {
             return Optional.of(type.getConstructor(
                     Class.forName(JAPANESE_DICTIONARY, false, loader),
                     Class.forName(JAPANESE_COMPLETION_MODE, false, loader)));
-        } catch (ReflectiveOperationException | LinkageError e) {
+        } catch (ReflectiveOperationException | LinkageError _) {
             return Optional.empty();
         }
     }

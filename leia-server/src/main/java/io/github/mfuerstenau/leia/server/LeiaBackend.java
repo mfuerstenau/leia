@@ -149,7 +149,7 @@ public final class LeiaBackend implements AutoCloseable {
             if (!executor.awaitTermination(CLOSE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {
                 LOG.warning(() -> "The backend did not stop within " + CLOSE_TIMEOUT.toSeconds() + " s");
             }
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         }
     }

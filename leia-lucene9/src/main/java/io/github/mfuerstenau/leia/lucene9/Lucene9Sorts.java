@@ -64,6 +64,13 @@ final class Lucene9Sorts {
                         });
     }
 
+    private static SortField withMissing(SortField sortField, Object missingValue) {
+        if (missingValue != null) {
+            sortField.setMissingValue(missingValue);
+        }
+        return sortField;
+    }
+
     /**
      * Sorts by a field with the sort field class of its doc values type. The sort reads every match's
      * doc value and never prunes: Lucene skips documents through the points or terms of the same
@@ -91,10 +98,7 @@ final class Lucene9Sorts {
                     return super.getComparator(numHits, Pruning.NONE);
                 }
             };
-            if (missingValue != null) {
-                sortField.setMissingValue(missingValue);
-            }
-            return sortField;
+            return withMissing(sortField, missingValue);
         }
         if (docValues == DocValuesType.SORTED_NUMERIC && !string) {
             checkSelector(field, key.selector(), SortSelector.MIN, SortSelector.MAX);
@@ -105,10 +109,7 @@ final class Lucene9Sorts {
                             return super.getComparator(numHits, Pruning.NONE);
                         }
                     };
-            if (missingValue != null) {
-                sortField.setMissingValue(missingValue);
-            }
-            return sortField;
+            return withMissing(sortField, missingValue);
         }
         if (docValues == DocValuesType.SORTED_SET && string) {
             SortField sortField = new SortedSetSortField(field.name, reverse, set(key.selector())) {
@@ -117,17 +118,14 @@ final class Lucene9Sorts {
                     return super.getComparator(numHits, Pruning.NONE);
                 }
             };
-            if (missingValue != null) {
-                sortField.setMissingValue(missingValue);
-            }
-            return sortField;
+            return withMissing(sortField, missingValue);
         }
         throw new IllegalArgumentException(
                 switch (docValues) {
-                    case NONE -> "the field '" + field.name + "' has no doc values to sort by";
-                    case BINARY -> "the field '" + field.name + "' has BINARY doc values, which can't be sorted by";
+                    case NONE -> theField(field.name) + " has no doc values to sort by";
+                    case BINARY -> theField(field.name) + " has BINARY doc values, which can't be sorted by";
                     default ->
-                        "the field '" + field.name + "' has " + docValues + " doc values, which can't be sorted by as "
+                        theField(field.name) + " has " + docValues + " doc values, which can't be sorted by as "
                                 + key.type();
                 });
     }
@@ -177,7 +175,11 @@ final class Lucene9Sorts {
             }
         }
         String kind = allowed.length == 1 ? "single-valued" : "multi-valued numeric";
-        throw new IllegalArgumentException("the field '" + field.name + "' has " + kind + " " + field.getDocValuesType()
+        throw new IllegalArgumentException(theField(field.name) + " has " + kind + " " + field.getDocValuesType()
                 + " doc values, which can't select " + selector);
+    }
+
+    private static String theField(String name) {
+        return "the field '" + name + "'";
     }
 }

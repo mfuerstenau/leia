@@ -22,6 +22,8 @@ import java.util.regex.Pattern;
  */
 public final class RuntimeCatalog {
 
+    private static final String RUNTIMES = "runtimes";
+
     /** The catalog, as a resource. */
     public static final String RESOURCE = "META-INF/leia/runtimes.json";
 
@@ -56,8 +58,8 @@ public final class RuntimeCatalog {
     static List<RuntimeFolders.Known> parse(String json) {
         Object root = new Reader(json).document();
         Map<String, Object> catalog = object(root, "the catalog");
-        keys(catalog, Set.of("runtimes"), "the catalog");
-        List<Object> entries = array(catalog.get("runtimes"), "runtimes");
+        keys(catalog, Set.of(RUNTIMES), "the catalog");
+        List<Object> entries = array(catalog.get(RUNTIMES), RUNTIMES);
         if (entries.isEmpty()) {
             throw new IllegalArgumentException("runtimes is empty");
         }
@@ -79,25 +81,35 @@ public final class RuntimeCatalog {
             if (name.isBlank()) {
                 throw new IllegalArgumentException(where + ".name is blank");
             }
-            List<Object> values = array(entry.get("indexMajors"), where + ".indexMajors");
-            if (values.isEmpty()) {
-                throw new IllegalArgumentException(where + ".indexMajors is empty");
-            }
-            List<Integer> indexMajors = new ArrayList<>();
-            for (Object value : values) {
-                if (!(value instanceof Long major) || major < 1 || major > Integer.MAX_VALUE) {
-                    throw new IllegalArgumentException(where + ".indexMajors has " + value + ", not a major");
-                }
-                String other = majors.putIfAbsent(major.intValue(), folder);
-                if (other != null) {
-                    throw new IllegalArgumentException(
-                            "the indexes of " + major + " are read by both " + other + " and " + folder);
-                }
-                indexMajors.add(major.intValue());
-            }
-            known.add(new RuntimeFolders.Known(folder, name, List.copyOf(indexMajors)));
+            List<Integer> indexMajors = indexMajors(entry, where, folder, majors);
+            known.add(new RuntimeFolders.Known(folder, name, indexMajors));
         }
         return List.copyOf(known);
+    }
+
+    /**
+     * The majors whose indexes the runtime of {@code entry} reads; {@code majors} holds the folder of
+     * each major seen, and a major that another runtime reads fails.
+     */
+    private static List<Integer> indexMajors(
+            Map<String, Object> entry, String where, String folder, Map<Integer, String> majors) {
+        List<Object> values = array(entry.get("indexMajors"), where + ".indexMajors");
+        if (values.isEmpty()) {
+            throw new IllegalArgumentException(where + ".indexMajors is empty");
+        }
+        List<Integer> indexMajors = new ArrayList<>();
+        for (Object value : values) {
+            if (!(value instanceof Long major) || major < 1 || major > Integer.MAX_VALUE) {
+                throw new IllegalArgumentException(where + ".indexMajors has " + value + ", not a major");
+            }
+            String other = majors.putIfAbsent(major.intValue(), folder);
+            if (other != null) {
+                throw new IllegalArgumentException(
+                        "the indexes of " + major + " are read by both " + other + " and " + folder);
+            }
+            indexMajors.add(major.intValue());
+        }
+        return List.copyOf(indexMajors);
     }
 
     private static void keys(Map<String, Object> object, Set<String> expected, String where) {
@@ -248,29 +260,35 @@ public final class RuntimeCatalog {
                 } else if (pos >= json.length()) {
                     throw error("a string doesn't end");
                 } else {
-                    char escaped = json.charAt(pos++);
-                    switch (escaped) {
-                        case '"', '\\', '/' -> string.append(escaped);
-                        case 'b' -> string.append('\b');
-                        case 'f' -> string.append('\f');
-                        case 'n' -> string.append('\n');
-                        case 'r' -> string.append('\r');
-                        case 't' -> string.append('\t');
-                        case 'u' -> {
-                            if (pos + 4 > json.length()) {
-                                throw error("a \\u escape ends early");
-                            }
-                            try {
-                                string.append((char) Integer.parseInt(json.substring(pos, pos + 4), 16));
-                            } catch (NumberFormatException e) {
-                                throw error("not a \\u escape");
-                            }
-                            pos += 4;
-                        }
-                        default -> throw error("the escape \\" + escaped);
-                    }
+                    string.append(escape());
                 }
             }
+        }
+
+        /** The character of the escape after a backslash. */
+        private char escape() {
+            char escaped = json.charAt(pos++);
+            return switch (escaped) {
+                case '"', '\\', '/' -> escaped;
+                case 'b' -> '\b';
+                case 'f' -> '\f';
+                case 'n' -> '\n';
+                case 'r' -> '\r';
+                case 't' -> '\t';
+                case 'u' -> {
+                    if (pos + 4 > json.length()) {
+                        throw error("a \\u escape ends early");
+                    }
+                    try {
+                        char unicode = (char) Integer.parseInt(json.substring(pos, pos + 4), 16);
+                        pos += 4;
+                        yield unicode;
+                    } catch (NumberFormatException _) {
+                        throw error("not a \\u escape");
+                    }
+                }
+                default -> throw error("the escape \\" + escaped);
+            };
         }
 
         private Long number() {
@@ -286,7 +304,7 @@ public final class RuntimeCatalog {
             }
             try {
                 return Long.parseLong(json.substring(start, pos));
-            } catch (NumberFormatException e) {
+            } catch (NumberFormatException _) {
                 throw error("not a number: " + json.substring(start, pos));
             }
         }

@@ -42,6 +42,7 @@ val legacyIndexTasks = legacyLucene.map { (name, library) ->
 
     name to tasks.register<JavaExec>("${name}TestIndex") {
         description = "Writes a test index with ${library.get().version}."
+        group = "verification"
         classpath = legacyIndex.output + runtime
         mainClass = "io.github.mfuerstenau.leia.core.LegacyIndexWriter"
         val indexDir = testIndexesDir.map { it.dir(name) }
@@ -73,6 +74,7 @@ dependencies {
 
 val testCodecJar = tasks.register<Jar>("testCodecJar") {
     description = "Builds the jar with the test codec and formats."
+    group = "verification"
     from(testCodec.output)
     exclude("**/TestCodecIndexWriter*")
     archiveFileName = "leia-test-codec.jar"
@@ -83,6 +85,7 @@ val testCodecIndexNames = listOf("custom-codec", "custom-formats")
 
 val testCodecIndexes = tasks.register<JavaExec>("testCodecIndexes") {
     description = "Writes the test indexes that need the test codec jar."
+    group = "verification"
     classpath = testCodec.runtimeClasspath
     mainClass = "io.github.mfuerstenau.leia.testcodec.TestCodecIndexWriter"
     jvmArgs("--enable-native-access=ALL-UNNAMED")
@@ -154,6 +157,7 @@ val testAnalysisModuleJars = testAnalysisModules.mapValues { (name, library) ->
 
 val testAnalysisJars = tasks.register<Sync>("testAnalysisJars") {
     description = "Copies the analysis modules that the jar tests load."
+    group = "verification"
     into(testAnalysisJarsDir)
     for ((name, jars) in testAnalysisModuleJars) {
         from(jars) { into(name) }

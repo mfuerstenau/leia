@@ -832,6 +832,20 @@ final class Lucene5Index
         return search(parsed, DEFAULT_SIMILARITY, List.of(), offset, limit, exactTotalHits, fields, progress);
     }
 
+    /** The values a hit was sorted by; none for a hit that wasn't sorted. */
+    private List<SortValue> sortValues(ScoreDoc scoreDoc, SortField[] sortFields) throws IOException {
+        List<SortValue> sortValues = new ArrayList<>(sortFields.length);
+        if (scoreDoc instanceof FieldDoc fieldDoc) {
+            for (int i = 0; i < sortFields.length; i++) {
+                sortValues.add(
+                        Lucene5Sorts.numeric(sortFields[i]) && !hasNumber(sortFields[i].getField(), scoreDoc.doc)
+                                ? new SortValue(Optional.empty(), Optional.empty())
+                                : sortValue(fieldDoc.fields[i]));
+            }
+        }
+        return List.copyOf(sortValues);
+    }
+
     /**
      * {@inheritDoc} Every hit is counted, as 5.5 always counts them. The progress is reported once per
      * segment. A field sort keeps the scores of the hits it collects.
@@ -881,16 +895,7 @@ final class Lucene5Index
                     values.computeIfAbsent(field.name(), _ -> new ArrayList<>()).add(storedValue(field));
                 }
             }
-            List<SortValue> sortValues = new ArrayList<>(sortFields.length);
-            if (scoreDoc instanceof FieldDoc fieldDoc) {
-                for (int i = 0; i < sortFields.length; i++) {
-                    sortValues.add(
-                            Lucene5Sorts.numeric(sortFields[i]) && !hasNumber(sortFields[i].getField(), scoreDoc.doc)
-                                    ? new SortValue(Optional.empty(), Optional.empty())
-                                    : sortValue(fieldDoc.fields[i]));
-                }
-            }
-            hits.add(new Hit(scoreDoc.doc, scoreDoc.score, List.copyOf(sortValues), values));
+            hits.add(new Hit(scoreDoc.doc, scoreDoc.score, sortValues(scoreDoc, sortFields), values));
         }
         return new SearchResults(
                 query.toString(),
@@ -1063,13 +1068,15 @@ final class Lucene5Index
             progress.accept(docBase);
             return new LeafCollector() {
                 @Override
-                public void setScorer(Scorer scorer) {}
+                public void setScorer(Scorer scorer) {
+                    // No scores: the collector only notes the documents.
+                }
 
                 @Override
                 public void collect(int doc) {
                     docs.set(docBase + doc);
                     if (++collected % PROGRESS_INTERVAL == 0) {
-                        progress.accept(docBase + doc);
+                        progress.accept((long) docBase + doc);
                     }
                 }
             };

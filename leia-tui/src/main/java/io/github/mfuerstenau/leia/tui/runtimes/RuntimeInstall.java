@@ -68,7 +68,7 @@ public final class RuntimeInstall {
 
     private final Path runtimesDir;
     private final URI base;
-    private final ClassLoader resources;
+    private final ClassLoader resourceLoader;
 
     /**
      * @param runtimesDir the folder {@code runtimes} beside {@code leia.jar}
@@ -78,7 +78,7 @@ public final class RuntimeInstall {
     public RuntimeInstall(Path runtimesDir, URI base, ClassLoader resources) {
         this.runtimesDir = runtimesDir;
         this.base = base.toString().endsWith("/") ? base : URI.create(base + "/");
-        this.resources = resources;
+        this.resourceLoader = resources;
     }
 
     /** The folder {@code runtimes}. */
@@ -366,7 +366,7 @@ public final class RuntimeInstall {
                 } catch (InstallException e) {
                     results.put(runtime.known(), new Result.Failed(e.getMessage()));
                     listener.runtimeFailed(runtime.known().folder(), e.getMessage());
-                } catch (CancelledException e) {
+                } catch (CancelledException _) {
                     results.put(runtime.known(), new Result.Cancelled());
                 }
             }
@@ -413,7 +413,7 @@ public final class RuntimeInstall {
     /** One of leia's jars, embedded in {@code leia.jar}. */
     private byte[] resource(String folder, String jar) throws InstallException {
         String name = RESOURCES + folder + "/" + jar;
-        try (InputStream in = resources.getResourceAsStream(name)) {
+        try (InputStream in = resourceLoader.getResourceAsStream(name)) {
             if (in == null) {
                 throw new InstallException(
                         "leia.jar lacks " + name + "; --download-runtimes works only from a complete leia.jar");
@@ -430,7 +430,7 @@ public final class RuntimeInstall {
         try (JarInputStream jar = new JarInputStream(new ByteArrayInputStream(adapter))) {
             for (JarEntry entry = jar.getNextJarEntry(); entry != null; entry = jar.getNextJarEntry()) {
                 if (entry.getName().equals(RuntimeFolders.LIST)) {
-                    return RuntimeFolders.list(jar);
+                    return RuntimeFolders.listedJars(jar);
                 }
             }
         } catch (IOException e) {
@@ -512,7 +512,7 @@ public final class RuntimeInstall {
         } catch (IOException e) {
             delete(part);
             throw new InstallException("cannot download " + jar.name() + " from " + uri + " to " + target + ": " + e);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             delete(part);
             Thread.currentThread().interrupt();
             throw new InstallException("interrupted while downloading " + jar.name() + " from " + uri);
@@ -544,7 +544,7 @@ public final class RuntimeInstall {
     private static void move(Path part, Path target) throws IOException {
         try {
             Files.move(part, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-        } catch (AtomicMoveNotSupportedException e) {
+        } catch (AtomicMoveNotSupportedException _) {
             Files.move(part, target, StandardCopyOption.REPLACE_EXISTING);
         }
     }
@@ -555,7 +555,7 @@ public final class RuntimeInstall {
         }
         try {
             Files.deleteIfExists(part);
-        } catch (IOException e) {
+        } catch (IOException _) {
             // Removed by the next install.
         }
     }

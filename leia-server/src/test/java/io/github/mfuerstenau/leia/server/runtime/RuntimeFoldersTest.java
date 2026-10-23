@@ -44,7 +44,7 @@ class RuntimeFoldersTest {
         Path folder = Files.createDirectories(tmp.resolve("lucene9"));
         Path testFolder = Path.of(System.getProperty("leia.test.runtimes")).resolve("lucene9");
         Files.copy(testFolder.resolve("leia-lucene9.jar"), folder.resolve("leia-lucene9.jar"));
-        List<String> listed = RuntimeFolders.list(folder.resolve("leia-lucene9.jar"));
+        List<String> listed = RuntimeFolders.listedJars(folder.resolve("leia-lucene9.jar"));
         assertThat(listed).anySatisfy(jar -> assertThat(jar).startsWith("lucene-core-9."));
         // All but the last.
         for (String jar : listed.subList(0, listed.size() - 1)) {

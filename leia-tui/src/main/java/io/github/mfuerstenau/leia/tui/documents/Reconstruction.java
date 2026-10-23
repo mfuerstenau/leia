@@ -43,7 +43,10 @@ public sealed interface Reconstruction {
      */
     default String summary(boolean hasTerms, boolean points) {
         boolean terms = hasTerms || !points;
-        String unit = terms && points ? "terms and points" : points ? "points" : "terms";
+        String unit = "terms";
+        if (points) {
+            unit = terms ? "terms and points" : "points";
+        }
         return switch (this) {
             case Starting _ -> "rebuilding…";
             case Running running
@@ -87,18 +90,7 @@ public sealed interface Reconstruction {
      * a removed stop word. Empty if the terms have no positions.
      */
     static Optional<String> tokenLine(List<TermVectorTerm> terms) {
-        List<Token> tokens = new ArrayList<>();
-        for (TermVectorTerm term : terms) {
-            String text = TextFormat.bytesText(term.term(), term.binary());
-            for (TermPosition position : term.positions()) {
-                if (position.position().isPresent()) {
-                    tokens.add(new Token(
-                            position.position().getAsInt(),
-                            position.startOffset().orElse(0),
-                            text));
-                }
-            }
-        }
+        List<Token> tokens = tokens(terms);
         if (tokens.isEmpty()) {
             return Optional.empty();
         }
@@ -121,5 +113,22 @@ public sealed interface Reconstruction {
             last = token.position();
         }
         return Optional.of(line.toString());
+    }
+
+    /** A token for each position of each term. */
+    private static List<Token> tokens(List<TermVectorTerm> terms) {
+        List<Token> tokens = new ArrayList<>();
+        for (TermVectorTerm term : terms) {
+            String text = TextFormat.bytesText(term.term(), term.binary());
+            for (TermPosition position : term.positions()) {
+                if (position.position().isPresent()) {
+                    tokens.add(new Token(
+                            position.position().getAsInt(),
+                            position.startOffset().orElse(0),
+                            text));
+                }
+            }
+        }
+        return tokens;
     }
 }

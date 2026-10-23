@@ -138,7 +138,7 @@ public final class TermExport {
     private static Path realPath(Path dir) {
         try {
             return dir.toRealPath();
-        } catch (IOException e) {
+        } catch (IOException _) {
             return dir.toAbsolutePath().normalize();
         }
     }
@@ -202,7 +202,7 @@ public final class TermExport {
                 lines.closeQuietly();
                 try {
                     Files.deleteIfExists(target);
-                } catch (IOException e) {
+                } catch (IOException _) {
                     // The export fails anyway, with the error that ended it.
                 }
             }
@@ -249,7 +249,7 @@ public final class TermExport {
             try {
                 utf8.reset().decode(ByteBuffer.wrap(term, offset, length));
                 return true;
-            } catch (CharacterCodingException e) {
+            } catch (CharacterCodingException _) {
                 return false;
             }
         }
@@ -268,7 +268,7 @@ public final class TermExport {
                 closed = true;
                 try {
                     out.close();
-                } catch (IOException e) {
+                } catch (IOException _) {
                     // The export fails anyway.
                 }
             }

@@ -29,7 +29,7 @@ import java.util.Optional;
 public final class ScoringSettings {
 
     /** How many sort levels the popup offers, as Luke does. */
-    static final int LEVELS = 2;
+    static final int MAX_LEVELS = 2;
 
     /** BM25's defaults in hundredths. */
     static final int DEFAULT_K1 = 120;
@@ -86,7 +86,7 @@ public final class ScoringSettings {
     final List<SortableField> fields;
 
     /** The sort levels; null for none. The second level only with the first. */
-    final SortLevel[] levels = new SortLevel[LEVELS];
+    final SortLevel[] levels = new SortLevel[MAX_LEVELS];
 
     private ScoringSettings(List<SortableField> fields) {
         this.fields = fields;
@@ -107,7 +107,7 @@ public final class ScoringSettings {
         copy.kind = kind;
         copy.k1 = k1;
         copy.b = b;
-        System.arraycopy(levels, 0, copy.levels, 0, LEVELS);
+        System.arraycopy(levels, 0, copy.levels, 0, MAX_LEVELS);
         return copy;
     }
 
@@ -177,26 +177,29 @@ public final class ScoringSettings {
             switch (level.target()) {
                 case Target.Score _ -> texts.add(level.reverse() ? "score ↑" : "score");
                 case Target.Doc _ -> texts.add("doc " + arrow);
-                case Target.Field field -> {
-                    List<String> parts = new ArrayList<>();
-                    parts.add(TextFormat.escapeControl(fields.get(field.index()).name()));
-                    if (level.sortType() != SortType.STRING && level.sortType() != SortType.LONG) {
-                        parts.add(level.sortType().name());
-                    }
-                    if (level.selector() != SortSelector.MIN) {
-                        parts.add(level.selector().name());
-                    }
-                    switch (level.missing()) {
-                        case FIRST -> parts.add("first");
-                        case LAST -> parts.add("last");
-                        case DEFAULT -> {}
-                    }
-                    parts.add(arrow);
-                    texts.add(String.join(" ", parts));
-                }
+                case Target.Field field -> texts.add(fieldText(level, field, arrow));
             }
         }
         return texts.isEmpty() ? Optional.empty() : Optional.of(String.join(" · ", texts));
+    }
+
+    /** A level that sorts by a field: its name, and what isn't the default of its type, selector and missing values. */
+    private String fieldText(SortLevel level, Target.Field field, String arrow) {
+        List<String> parts = new ArrayList<>();
+        parts.add(TextFormat.escapeControl(fields.get(field.index()).name()));
+        if (level.sortType() != SortType.STRING && level.sortType() != SortType.LONG) {
+            parts.add(level.sortType().name());
+        }
+        if (level.selector() != SortSelector.MIN) {
+            parts.add(level.selector().name());
+        }
+        switch (level.missing()) {
+            case FIRST -> parts.add("first");
+            case LAST -> parts.add("last");
+            case DEFAULT -> {}
+        }
+        parts.add(arrow);
+        return String.join(" ", parts);
     }
 
     /** Hundredths as a decimal with two places: {@code 120} is {@code 1.20}. */

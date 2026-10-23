@@ -60,7 +60,7 @@ class MainTest {
         assertThat(run("--help", "--frobnicate-is-not-reached")).isEqualTo(2);
         assertThat(run("--help")).isZero();
 
-        assertThat(out()).isEqualTo(Cli.HELP);
+        assertThat(out()).isEqualTo(Cli.HELP_TEXT);
     }
 
     @Test

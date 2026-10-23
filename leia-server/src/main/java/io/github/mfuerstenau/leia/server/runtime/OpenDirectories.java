@@ -20,5 +20,7 @@ public record OpenDirectories(Path path, List<Path> directories, DirectoryKind k
 
     /** Nothing to close: no reader or directory is open. */
     @Override
-    public void close() {}
+    public void close() {
+        // Nothing to close.
+    }
 }

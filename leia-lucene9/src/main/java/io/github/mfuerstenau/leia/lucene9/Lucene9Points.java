@@ -84,16 +84,7 @@ final class Lucene9Points implements Points {
             throw new IllegalArgumentException("Segment " + segment + " has no points in field " + field);
         }
         PointValues.PointTree tree = values.getPointTree();
-        for (int i = 0; i < path.size(); i++) {
-            int child = path.get(i);
-            boolean found = child >= 0 && tree.moveToChild();
-            for (int n = 0; found && n < child; n++) {
-                found = tree.moveToSibling();
-            }
-            if (!found) {
-                throw new IllegalArgumentException("No cell at " + path.subList(0, i + 1) + " in segment " + segment);
-            }
-        }
+        moveTo(tree, path, segment);
         List<Cell> children = new ArrayList<>();
         boolean leaf = !tree.moveToChild();
         if (!leaf) {
@@ -129,6 +120,20 @@ final class Lucene9Points implements Points {
         List<LeafPoint> shown = new ArrayList<>(cut ? points.subList(0, MAX_POINTS) : points);
         shown.sort(Comparator.comparingInt(LeafPoint::docId).thenComparing(LeafPoint::value, Arrays::compareUnsigned));
         return new CellContents(cell(tree, true), List.of(), List.copyOf(shown), cut);
+    }
+
+    /** Moves {@code tree} down {@code path}, the index of a child at each level. */
+    private static void moveTo(PointValues.PointTree tree, List<Integer> path, int segment) throws IOException {
+        for (int i = 0; i < path.size(); i++) {
+            int child = path.get(i);
+            boolean found = child >= 0 && tree.moveToChild();
+            for (int n = 0; found && n < child; n++) {
+                found = tree.moveToSibling();
+            }
+            if (!found) {
+                throw new IllegalArgumentException("No cell at " + path.subList(0, i + 1) + " in segment " + segment);
+            }
+        }
     }
 
     /** The cell the tree is at, and whether it is a leaf; the tree stays there. */

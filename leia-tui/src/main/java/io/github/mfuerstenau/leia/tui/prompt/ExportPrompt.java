@@ -255,7 +255,7 @@ public final class ExportPrompt {
 
     /** Draws the popup, centered in {@code area}. */
     public void render(Frame frame, Rect area) {
-        int width = Math.min(Math.max(area.width() - 4, 0), MAX_WIDTH);
+        int width = Math.clamp((long) area.width() - 4, 0, MAX_WIDTH);
         int innerWidth = Math.max(width - 2, 1);
         List<Line> errorLines = error == null ? List.of() : errorLines(error, overwrite != null, innerWidth);
         // Input, error, hint, and the top and bottom border.
@@ -273,8 +273,9 @@ public final class ExportPrompt {
             }
             case DocumentKind document -> {
                 title = " Export document " + document.docId() + " as JSON ";
+                String indexedTerms = document.indexedTerms() ? "on" : "off";
                 choice = document.rebuilds()
-                        ? " Tab terms and points: " + (document.indexedTerms() ? "on" : "off") + " "
+                        ? " Tab terms and points: " + indexedTerms + " "
                         : " Terms and points: off ";
                 keys = document.rebuilds()
                         ? "Enter export   Ctrl+Y copy   Tab terms and points   Esc cancel"

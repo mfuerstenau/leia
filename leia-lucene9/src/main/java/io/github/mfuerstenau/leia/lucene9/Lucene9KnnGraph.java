@@ -226,7 +226,7 @@ final class Lucene9KnnGraph implements KnnGraph {
         HnswGraph graph;
         try {
             graph = provider.getGraph(field);
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException _) {
             // The reader doesn't know the field: it holds another field's format.
             return Optional.empty();
         }

@@ -244,6 +244,21 @@ final class Searcher {
         return Queries.built(searcher.getIndexReader(), query);
     }
 
+    /** The values a hit was sorted by; none for a hit that wasn't sorted. */
+    private static List<SortValue> sortValues(IndexReader reader, SortField[] sortFields, ScoreDoc scoreDoc)
+            throws IOException {
+        List<SortValue> sortValues = new ArrayList<>(sortFields.length);
+        if (scoreDoc instanceof FieldDoc fieldDoc) {
+            for (int i = 0; i < sortFields.length; i++) {
+                sortValues.add(SortValue.of(
+                        numeric(sortFields[i]) && !hasNumber(reader, sortFields[i].getField(), scoreDoc.doc)
+                                ? null
+                                : fieldDoc.fields[i]));
+            }
+        }
+        return List.copyOf(sortValues);
+    }
+
     private static List<Hit> hits(
             IndexReader reader,
             ScoreDoc[] page,
@@ -277,19 +292,10 @@ final class Searcher {
             List<HitField> hitFields = stored.get(h).entrySet().stream()
                     .map(entry -> new HitField(entry.getKey(), List.copyOf(entry.getValue())))
                     .toList();
-            List<SortValue> sortValues = new ArrayList<>(sortFields.length);
-            if (scoreDoc instanceof FieldDoc fieldDoc) {
-                for (int i = 0; i < sortFields.length; i++) {
-                    sortValues.add(
-                            numeric(sortFields[i]) && !hasNumber(reader, sortFields[i].getField(), scoreDoc.doc)
-                                    ? SortValue.of(null)
-                                    : SortValue.of(fieldDoc.fields[i]));
-                }
-            }
             hits.add(new Hit(
                     scoreDoc.doc,
                     scoreDoc.score,
-                    List.copyOf(sortValues),
+                    sortValues(reader, sortFields, scoreDoc),
                     hitFields,
                     highlights.isEmpty() ? List.of() : highlights.get(h)));
         }
@@ -417,7 +423,9 @@ final class Searcher {
                     int docBase = context.docBase;
                     return new LeafCollector() {
                         @Override
-                        public void setScorer(Scorable scorer) {}
+                        public void setScorer(Scorable scorer) {
+                            // No scores: the collector only notes the documents.
+                        }
 
                         @Override
                         public void collect(int doc) {
