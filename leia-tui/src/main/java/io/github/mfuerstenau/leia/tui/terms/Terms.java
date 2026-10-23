@@ -1840,7 +1840,7 @@ public final class Terms {
                         right(Integer.toString(neighbour.node().ord()), ordWidth),
                         right(Integer.toString(neighbour.node().docId()), docWidth),
                         Cell.from("L" + neighbour.node().topLevel()),
-                        right(String.format(java.util.Locale.ROOT, "%.4f", neighbour.score()), 6));
+                        right(TextFormat.score(neighbour.score(), 6), 6));
                 rows.add(neighbour.node().deleted() ? row.style(Style.EMPTY.red()) : row);
                 first = false;
                 index++;

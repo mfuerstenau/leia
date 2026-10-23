@@ -185,7 +185,7 @@ public final class KnnRecall {
                 rows.add(Row.from(
                         right("#" + miss.rank(), rankWidth),
                         right(Integer.toString(miss.docId()), docWidth),
-                        Cell.from(Float.toString(miss.score()))));
+                        Cell.from(TextFormat.score(miss.score(), 9))));
             }
             widths = List.of(Constraint.length(rankWidth), Constraint.length(docWidth), Constraint.fill());
         }

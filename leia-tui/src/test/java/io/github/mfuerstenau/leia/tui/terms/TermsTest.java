@@ -737,7 +737,8 @@ class TermsTest {
                                         0,
                                         List.of(
                                                 new KnnGraphNeighbour(node(0, 0, 0), 0.9312f),
-                                                new KnnGraphNeighbour(new KnnGraphNode(5, 6, true, 0), 0.5f))))));
+                                                new KnnGraphNeighbour(
+                                                        new KnnGraphNode(5, 6, true, 0), 1.1744533e-5f))))));
         assertThat(render(terms))
                 .contains(
                         " ord 1 ",
@@ -745,7 +746,7 @@ class TermsTest {
                         "node     1     2  L1",
                         "L1      17    18  L1   0.7500",
                         "L0       0     0  L0   0.9312",
-                        "         5     6  L0   0.5000");
+                        "         5     6  L0   1.2e-5");
 
         // Enter walks on to the selected neighbour; d opens its document.
         terms.handleKey(key(KeyCode.DOWN));

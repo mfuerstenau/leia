@@ -6,6 +6,7 @@ import static io.github.mfuerstenau.leia.tui.text.TextFormat.count;
 import static io.github.mfuerstenau.leia.tui.text.TextFormat.escapeControl;
 import static io.github.mfuerstenau.leia.tui.text.TextFormat.firstChars;
 import static io.github.mfuerstenau.leia.tui.text.TextFormat.marked;
+import static io.github.mfuerstenau.leia.tui.text.TextFormat.score;
 import static io.github.mfuerstenau.leia.tui.text.TextFormat.size;
 import static io.github.mfuerstenau.leia.tui.text.TextFormat.utcTime;
 import static io.github.mfuerstenau.leia.tui.text.TextFormat.utf8Length;
@@ -58,6 +59,19 @@ class TextFormatTest {
     void escapesControlCharacters() {
         assertThat(escapeControl("a\tb\nc\u0001")).isEqualTo("a\\tb\\nc\\u{1}");
         assertThat(escapeControl("grüße")).isEqualTo("grüße");
+    }
+
+    @Test
+    void keepsSignificantDigitsInScores() {
+        assertThat(score(0.9674f, 6)).isEqualTo("0.9674");
+        assertThat(score(0, 9)).isEqualTo("0.0000");
+        assertThat(score(0.00123, 6)).isEqualTo("0.0012");
+        assertThat(score(1.1744533e-5, 6)).isEqualTo("1.2e-5");
+        assertThat(score(1.1744533e-5, 9)).isEqualTo("1.1745e-5");
+        assertThat(score(-1.1744533e-5, 6)).isEqualTo("-1e-5");
+        assertThat(score(12.3456, 6)).isEqualTo("12.346");
+        assertThat(score(123456.7, 6)).isEqualTo("123457");
+        assertThat(score(1234567.8, 6)).isEqualTo("1234568");
     }
 
     @Test

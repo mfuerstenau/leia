@@ -155,6 +155,25 @@ public final class TextFormat {
         return String.format(Locale.ROOT, "%.1f GiB", bytes / kib / kib / kib);
     }
 
+    /**
+     * A score in at most {@code width} columns where it can: four decimals, fewer if it is too wide,
+     * and below 0.001, where four decimals would show zeros, as {@code 1.1745e-5}, with as many
+     * decimals as fit.
+     */
+    public static String score(double score, int width) {
+        boolean fixed = score == 0 || !Double.isFinite(score) || Math.abs(score) >= 0.001;
+        String text = "";
+        for (int decimals = 4; decimals >= 0; decimals--) {
+            text = fixed
+                    ? String.format(Locale.ROOT, "%." + decimals + "f", score)
+                    : String.format(Locale.ROOT, "%." + decimals + "e", score).replaceFirst("e-0*", "e-");
+            if (text.length() <= width) {
+                break;
+            }
+        }
+        return text;
+    }
+
     private static final DateTimeFormatter UTC_TIME = DateTimeFormatter.ofPattern(
                     "uuuu-MM-dd HH:mm:ss 'UTC'", Locale.ROOT)
             .withZone(ZoneOffset.UTC);

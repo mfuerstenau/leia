@@ -2266,7 +2266,7 @@ public final class Search {
             List<Cell> cells = new ArrayList<>();
             cells.add(right(Integer.toString(i + 1), rankWidth));
             cells.add(right(Integer.toString(hit.docId()), docWidth));
-            cells.add(Cell.from(String.format(Locale.ROOT, "%9.4f", hit.score())));
+            cells.add(right(TextFormat.score(hit.score(), 9), 9));
             if (sorted) {
                 cells.add(Cell.from(sortTexts.get(i)));
             }
@@ -2577,8 +2577,8 @@ public final class Search {
             LikeTerm term = terms.get(i);
             lines.add(Line.from(String.format(
                     Locale.ROOT,
-                    "           %9.4f  %" + tfWidth + "d  %" + dfWidth + "d  %s  %s",
-                    term.score(),
+                    "           %9s  %" + tfWidth + "d  %" + dfWidth + "d  %s  %s",
+                    TextFormat.score(term.score(), 9),
                     term.tf(),
                     term.docFreq(),
                     Form.padded(names.get(i), fieldWidth),
