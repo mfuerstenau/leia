@@ -2,9 +2,9 @@
 
 leia is a **read-only Lucene index inspector** for the terminal, an alternative to
 [Luke](https://github.com/apache/lucene/tree/main/lucene/luke), the Swing tool that ships with
-Lucene. It shows an index's fields, documents, terms, postings, points, doc values, vectors and
-commits, searches it, explains scores, analyzes text and checks the index. It opens indexes
-written by Lucene 2.1 to 10, each with the Lucene that reads it.
+Lucene. It shows an index's fields, documents, terms, postings, points, doc values, vectors with
+their HNSW graphs, and commits, searches it, explains scores, analyzes text and checks the index.
+It opens indexes written by Lucene 2.1 to 10, each with the Lucene that reads it.
 
 leia is **read-only** towards the index: it never opens an `IndexWriter`, never takes the write
 lock and never changes, adds or deletes a file in the index directory. It is safe to point at a
@@ -88,7 +88,7 @@ that runtime; a screen or option the runtime lacks is greyed out:
 | Check levels | – | ✓ | ✓ | ✓ | ✓ |
 | Points | – | – | ✓² | ✓² | ✓² |
 | Doc values | – | ✓² | ✓² | ✓² | ✓² |
-| KNN vectors and KNN search | – | – | – | ✓²³ | ✓² |
+| KNN vectors, KNN search and HNSW graphs | – | – | – | ✓²³ | ✓² |
 | Classic and term queries, explain, regex over stored values, auto stop words | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Filter documents by a query | ✓¹ | ✓ | ✓ | ✓ | ✓ |
 | Standard query parser | – | ✓ | ✓ | ✓ | ✓ |

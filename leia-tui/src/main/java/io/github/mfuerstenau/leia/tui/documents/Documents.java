@@ -214,6 +214,9 @@ public final class Documents {
          * term its terms from there on, and otherwise its terms from the first one.
          */
         record BrowseTerms(String field, Optional<BytesValue> term, boolean points) implements Request {}
+
+        /** Show the HNSW graph node of this document's vector in {@code field} on the terms screen (ADR 0085). */
+        record BrowseGraph(String field, int docId) implements Request {}
     }
 
     /** The filter to locate a document in once it is loaded: its serial and the backend's id. */
@@ -643,7 +646,7 @@ public final class Documents {
 
     /**
      * Forgets the term hit: the terms screen opened a document with a point of {@code field} (ADR
-     * 0041), which is selected once the document is in.
+     * 0041), or a vector (ADR 0085), which is selected once the document is in.
      */
     public void showPoint(String field) {
         selectField = field;
@@ -1674,6 +1677,17 @@ public final class Documents {
         if (field.filter(f -> f.pointDimensionCount() > 0).isPresent()) {
             return Optional.of(new Request.BrowseTerms(name, Optional.empty(), true));
         }
+        if (field.filter(f -> f.vectorDimension() > 0).isPresent()) {
+            if (!supports(Feature.KNN_GRAPH)) {
+                note = "HNSW graph not supported";
+                return Optional.empty();
+            }
+            if (selected.get().vector().isEmpty()) {
+                note = "no vector in " + TextFormat.escapeControl(name);
+                return Optional.empty();
+            }
+            return Optional.of(new Request.BrowseGraph(name, docId));
+        }
         note = TextFormat.escapeControl(name) + " has no terms";
         return Optional.empty();
     }
@@ -2350,7 +2364,8 @@ public final class Documents {
                 lines.add(labelled(
                         "Vector",
                         vector.dimension() + "d " + Overview.vectorEncoding(vector.encoding()) + ", length "
-                                + String.format(Locale.ROOT, "%.6g", vectorLength(vector)) + ", N finds the nearest"));
+                                + String.format(Locale.ROOT, "%.6g", vectorLength(vector))
+                                + ", N finds the nearest, T its graph node"));
                 lines.addAll(vectorLines(vector));
             }
         }

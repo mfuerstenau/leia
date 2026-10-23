@@ -30,6 +30,9 @@ import io.github.mfuerstenau.leia.protocol.index.Feature;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnRecallResult;
+import io.github.mfuerstenau.leia.protocol.knn.KnnRecallTarget;
+import io.github.mfuerstenau.leia.protocol.knn.StartKnnRecallParams;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
@@ -139,6 +142,13 @@ public final class Search {
          * {@link #storedScanProgress}.
          */
         record StoredScan(long scanId, StartStoredScanParams params, List<Long> cancel) implements Request {}
+
+        /**
+         * Cancel the jobs in {@code cancel}, then start recall check {@code recallId} of the KNN mode
+         * (ADR 0086), reported back with {@link #knnRecallStarted} or {@link #knnRecallFailed}; its job
+         * with {@link #knnRecallProgress}.
+         */
+        record Recall(long recallId, StartKnnRecallParams params, List<Long> cancel) implements Request {}
 
         /** Cancel these jobs; the screen has forgotten them already, so nothing is reported back. */
         record Cancel(List<Long> jobs) implements Request {}
@@ -354,6 +364,14 @@ public final class Search {
 
     /** Whether the regex scan reads deleted documents too. */
     private boolean includeDeleted;
+
+    /** How many documents {@code r} on a blank KNN line samples (ADR 0086). */
+    static final int RECALL_SAMPLE = 100;
+
+    /** The last recall check of the KNN mode, until the next search; null otherwise (ADR 0086). */
+    private KnnRecall recall;
+
+    private long recallId;
 
     /** The last regex scan, while the mode is {@link Mode#REGEX}; null otherwise. */
     private StoredScan scan;
@@ -619,10 +637,19 @@ public final class Search {
         return scan == null ? 0 : scan.fromHit();
     }
 
+    /** The recall check job to poll, while one runs: its check id and job id (ADR 0086). */
+    public Optional<long[]> knnRecallJob() {
+        if (recall == null || recall.job().isEmpty()) {
+            return Optional.empty();
+        }
+        return Optional.of(new long[] {recallId, recall.job().getAsLong()});
+    }
+
     /** The jobs that have started and still run. */
     List<Long> jobs() {
         List<Long> jobs = new ArrayList<>();
         searchJob().ifPresent(job -> jobs.add(job[1]));
+        knnRecallJob().ifPresent(job -> jobs.add(job[1]));
         explainJob().ifPresent(job -> jobs.add(job[1]));
         storedScanJob().ifPresent(job -> jobs.add(job[1]));
         highlightJob().ifPresent(job -> jobs.add(job[1]));
@@ -641,6 +668,7 @@ public final class Search {
         return running != null
                 || (explain != null && explain.running())
                 || (scan != null && scan.running())
+                || (recall != null && recall.running())
                 || (highlighting != null && highlighting.error == null);
     }
 
@@ -652,6 +680,9 @@ public final class Search {
         List<Long> jobs = jobs();
         if (scan != null) {
             scan.cancelled();
+        }
+        if (recall != null) {
+            recall.cancelled();
         }
         if (running != null) {
             fail(running, "Cancelled.");
@@ -689,6 +720,8 @@ public final class Search {
         private final Highlighting highlighting;
         private final StoredScan scan;
         private final long scanId;
+        private final KnnRecall recall;
+        private final long recallId;
 
         private Mark(Search of) {
             this.mode = of.mode;
@@ -709,6 +742,8 @@ public final class Search {
             this.highlighting = of.highlighting;
             this.scan = of.scan;
             this.scanId = of.scanId;
+            this.recall = of.recall;
+            this.recallId = of.recallId;
         }
     }
 
@@ -723,7 +758,7 @@ public final class Search {
      * running was stopped by the newer search, and shows so, as Esc would have.
      */
     public Optional<Request.Cancel> restore(Mark mark) {
-        if (submitted == mark.submitted && scan == mark.scan && mode == mark.mode) {
+        if (submitted == mark.submitted && scan == mark.scan && recall == mark.recall && mode == mark.mode) {
             return Optional.empty();
         }
         List<Long> cancel = jobs();
@@ -744,6 +779,8 @@ public final class Search {
         highlighting = mark.highlighting;
         scan = mark.scan;
         scanId = mark.scanId;
+        recall = mark.recall;
+        recallId = mark.recallId;
         editing = false;
         running = null;
         stepPending = false;
@@ -759,6 +796,9 @@ public final class Search {
         }
         if (scan != null) {
             scan.cancelled();
+        }
+        if (recall != null) {
+            recall.cancelled();
         }
         return cancel.isEmpty() ? Optional.empty() : Optional.of(new Request.Cancel(cancel));
     }
@@ -1066,6 +1106,7 @@ public final class Search {
             } catch (IllegalArgumentException e) {
                 List<Long> cancel = jobs();
                 forgetHits();
+                recall = null;
                 lineError = e.getMessage();
                 return cancel.isEmpty() ? Optional.empty() : Optional.of(new Request.Cancel(cancel));
             }
@@ -1086,6 +1127,7 @@ public final class Search {
         List<Long> cancel = jobs();
         explain = null;
         highlighting = null;
+        recall = null;
         stepPending = false;
         submitted = new Submitted(params);
         long id = nextId++;
@@ -1130,6 +1172,16 @@ public final class Search {
     private Optional<Request> switchMode(Mode next) {
         boolean regex = mode == Mode.REGEX || next == Mode.REGEX;
         mode = next;
+        if (recall != null) {
+            // A recall check belongs to the KNN mode: the next mode doesn't show it.
+            List<Long> cancel = jobs();
+            recall = null;
+            if (submitted == null || query().isEmpty()) {
+                forgetHits();
+                return cancel.isEmpty() ? Optional.empty() : Optional.of(new Request.Cancel(cancel));
+            }
+            return submit();
+        }
         if (regex) {
             List<Long> cancel = jobs();
             scan = null;
@@ -1454,6 +1506,98 @@ public final class Search {
         }
     }
 
+    private boolean checksRecall(long id) {
+        return recall != null && recallId == id && recall.running();
+    }
+
+    /** The job of recall check {@code id} has started. Returns the job to cancel if it was replaced or stopped. */
+    public OptionalLong knnRecallStarted(long id, long jobId) {
+        if (!checksRecall(id)) {
+            return OptionalLong.of(jobId);
+        }
+        recall.started(jobId);
+        return OptionalLong.empty();
+    }
+
+    public void knnRecallProgress(long id, GetKnnRecallResult result) {
+        if (checksRecall(id)) {
+            recall.progress(result);
+        }
+    }
+
+    /** Shows why the recall check could not start or failed. */
+    public void knnRecallFailed(long id, String error) {
+        if (checksRecall(id)) {
+            recall.failed(error);
+        }
+    }
+
+    /**
+     * {@code r} in the KNN mode (ADR 0086): checks the recall of the line's target, or with a blank
+     * line of {@value #RECALL_SAMPLE} sampled documents, with the k and filter of the mode, and stops
+     * what runs. The check is of the approximate search, even while {@code e} is on.
+     */
+    private Optional<Request> startRecall() {
+        Optional<IndexField> vectors = vectorField();
+        if (vectors.isEmpty()) {
+            return Optional.empty();
+        }
+        Optional<ClassicQuery> filter = knnFilter.text().isBlank() || field >= fields.size()
+                ? Optional.empty()
+                : Optional.of(classic(knnFilter.text(), fields.get(field)));
+        KnnQuery query;
+        OptionalInt sample = OptionalInt.empty();
+        if (input.text().isBlank()) {
+            query = new KnnQuery(
+                    vectors.get().name(), OptionalInt.empty(), Optional.empty(), OptionalInt.of(k), false, filter);
+            sample = OptionalInt.of(RECALL_SAMPLE);
+        } else {
+            KnnSyntax.Target target;
+            try {
+                target = KnnSyntax.target(
+                        input.text(), vectors.get().vectorEncoding().orElse(VectorEncoding.FLOAT32));
+            } catch (IllegalArgumentException e) {
+                List<Long> cancel = jobs();
+                forgetHits();
+                recall = null;
+                lineError = e.getMessage();
+                return cancel.isEmpty() ? Optional.empty() : Optional.of(new Request.Cancel(cancel));
+            }
+            query = new KnnQuery(
+                    vectors.get().name(),
+                    target instanceof KnnSyntax.Target.Doc doc ? OptionalInt.of(doc.docId()) : OptionalInt.empty(),
+                    target instanceof KnnSyntax.Target.Vector vector ? Optional.of(vector.vector()) : Optional.empty(),
+                    OptionalInt.of(k),
+                    false,
+                    filter);
+        }
+        lineError = null;
+        StartKnnRecallParams params = new StartKnnRecallParams(query, sample);
+        List<Long> cancel = jobs();
+        if (running != null) {
+            fail(running, "Cancelled.");
+        }
+        recall = new KnnRecall(params);
+        recallId = nextId++;
+        focus = Focus.HITS;
+        detailsScroll = 0;
+        return Optional.of(new Request.Recall(recallId, params, cancel));
+    }
+
+    /**
+     * Enter on the recall check's rows: a missed document opens on the documents screen, a sampled
+     * target is searched for its nearest.
+     */
+    private Optional<Request> openRecallRow() {
+        Optional<KnnRecallTarget> target = recall.selectedTarget();
+        if (target.isPresent() && target.get().docId().isPresent()) {
+            input.set(Integer.toString(target.get().docId().getAsInt()));
+            binary = false;
+            return submit();
+        }
+        return recall.selectedMiss().map(miss -> new Request.Document(miss.docId()));
+    }
+
     /**
      * Selects the previous or next hit and shows its document, for {@code [}/{@code ]} on the
      * documents screen. Past the last hit, the next page is fetched first, if there is one.
@@ -1546,8 +1690,9 @@ public final class Search {
             }
         }
         KeyCode code = key.code();
+        boolean recalls = mode == Mode.KNN && recall != null;
         if (code == KeyCode.ENTER) {
-            return selectedHit().map(hit -> new Request.Document(hit.docId()));
+            return recalls ? openRecallRow() : selectedHit().map(hit -> new Request.Document(hit.docId()));
         }
         if (code == KeyCode.TAB) {
             focus = focus == Focus.HITS ? Focus.DETAILS : Focus.HITS;
@@ -1561,6 +1706,10 @@ public final class Search {
         }
         if (focus == Focus.DETAILS) {
             scrollDetails(key);
+            return Optional.empty();
+        }
+        if (recalls) {
+            recall.moveSelection(key);
             return Optional.empty();
         }
         Optional<HitList> list = hitList();
@@ -1628,6 +1777,9 @@ public final class Search {
                     return Optional.of(resubmit());
                 }
                 return Optional.empty();
+            }
+            case 'r' -> {
+                return knn ? Optional.of(startRecall()) : Optional.empty();
             }
             case 'm' -> {
                 List<Mode> modes = modes();
@@ -1871,8 +2023,8 @@ public final class Search {
                         "/ values   m mode   s/l settings   f/F field   n number   h hex   t count   x explain   ⏎ open doc   "
                                 + "b/B browse   Tab panel   ↑↓";
                     case KNN ->
-                        "/ target   w filter   m mode   p/s/l settings   f/F field   k k   e exact   a AND/OR   t count   "
-                                + "x explain   ⏎ open doc   b/B browse   Tab panel   ↑↓";
+                        "/ target   w filter   m mode   p/s/l settings   f/F field   k k   e exact   r recall   a AND/OR   "
+                                + "t count   x explain   ⏎ open doc   b/B browse   Tab panel   ↑↓";
                     case TERM ->
                         "/ term   m mode   s/l settings   f/F field   t count   x explain   H highlight   v view   ⏎ open doc   "
                                 + "b/B browse   Tab panel   ↑↓";
@@ -2023,6 +2175,10 @@ public final class Search {
 
     private void renderHits(Frame frame, Rect area) {
         boolean focused = focus == Focus.HITS && !editing;
+        if (mode == Mode.KNN && recall != null) {
+            recall.render(frame, area, focused);
+            return;
+        }
         if (mode == Mode.REGEX) {
             if (scan != null) {
                 scan.render(frame, area, focused, maxDoc);
@@ -2166,6 +2322,9 @@ public final class Search {
         } else if (mode == Mode.REGEX) {
             title = " Scan ";
             lines = scanLines();
+        } else if (mode == Mode.KNN && recall != null) {
+            title = " Recall ";
+            lines = recall.detailLines();
         } else {
             title = " Query ";
             lines = queryLines();
@@ -2237,7 +2396,10 @@ public final class Search {
                                     "A document id takes that document's vector; a vector in brackets has the field's",
                                     "dimension, floats or bytes from -128 to 127. k sets how many the graph search",
                                     "finds; e scores every document with a vector instead, exactly, best first.",
-                                    "w filters in classic syntax; p and a set its parser options and operator.");
+                                    "w filters in classic syntax; p and a set its parser options and operator.",
+                                    "r checks how many of the exact k nearest the graph search finds: for the line's",
+                                    "target, or with a blank line for " + RECALL_SAMPLE
+                                            + " documents spread over the segments.");
                         case REGEX -> List.of();
                         case LIKE ->
                             List.of(

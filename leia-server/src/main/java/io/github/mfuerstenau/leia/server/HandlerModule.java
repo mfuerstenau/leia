@@ -29,6 +29,11 @@ import io.github.mfuerstenau.leia.server.jars.GetJarsHandler;
 import io.github.mfuerstenau.leia.server.jars.GetRuntimesHandler;
 import io.github.mfuerstenau.leia.server.jars.LoadRuntimesHandler;
 import io.github.mfuerstenau.leia.server.job.CancelJobHandler;
+import io.github.mfuerstenau.leia.server.knn.GetKnnGraphHandler;
+import io.github.mfuerstenau.leia.server.knn.GetKnnGraphNodeHandler;
+import io.github.mfuerstenau.leia.server.knn.GetKnnGraphNodesHandler;
+import io.github.mfuerstenau.leia.server.knn.GetKnnRecallHandler;
+import io.github.mfuerstenau.leia.server.knn.StartKnnRecallHandler;
 import io.github.mfuerstenau.leia.server.points.GetPointCellHandler;
 import io.github.mfuerstenau.leia.server.points.GetPointTreeHandler;
 import io.github.mfuerstenau.leia.server.search.GetExplainHandler;
@@ -119,6 +124,26 @@ interface HandlerModule {
     @Binds
     @IntoSet
     MethodHandler<?, ?> getPointCell(GetPointCellHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> getKnnGraph(GetKnnGraphHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> getKnnGraphNodes(GetKnnGraphNodesHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> getKnnGraphNode(GetKnnGraphNodeHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> startKnnRecall(StartKnnRecallHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> getKnnRecall(GetKnnRecallHandler handler);
 
     @Binds
     @IntoSet

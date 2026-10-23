@@ -46,6 +46,13 @@ import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodeParams;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodeResult;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodesParams;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphParams;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphResult;
+import io.github.mfuerstenau.leia.protocol.knn.KnnGraphNode;
+import io.github.mfuerstenau.leia.protocol.knn.KnnGraphShape;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellParams;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellResult;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
@@ -183,6 +190,28 @@ class Lucene9BackendTest {
             // [N, 0, 1] for N = 1..3, without the deleted 2.
             assertThat(backend.search(query, 10).hits()).extracting(Hit::docId).containsExactly(2, 0);
         }
+    }
+
+    /** The graph of a 9.x segment, read through Lucene 10's backward codecs (ADR 0085). */
+    @Test
+    void readsTheGraph() throws Exception {
+        GetKnnGraphResult graph = backend.call(Methods.GET_KNN_GRAPH, new GetKnnGraphParams("vector"));
+
+        assertThat(graph.segments()).singleElement().satisfies(segment -> {
+            assertThat(segment.vectors()).isEqualTo(3);
+            assertThat(segment.shape().map(KnnGraphShape::levelSizes)).contains(List.of(3));
+            assertThat(segment.shape().orElseThrow().maxConn()).isPresent();
+        });
+        assertThat(backend.call(Methods.GET_KNN_GRAPH_NODES, new GetKnnGraphNodesParams("vector", 0, 0, 0, 10))
+                        .nodes())
+                .extracting(KnnGraphNode::docId, KnnGraphNode::deleted)
+                .containsExactly(tuple(0, false), tuple(1, true), tuple(2, false));
+        GetKnnGraphNodeResult first =
+                backend.call(Methods.GET_KNN_GRAPH_NODE, GetKnnGraphNodeParams.ofDoc("vector", 0));
+        // [1, 0, 1] links to [2, 0, 1] only: [3, 0, 1] is nearer to that than to it.
+        assertThat(first.levels().getFirst().neighbours())
+                .extracting(neighbour -> neighbour.node().docId())
+                .containsExactly(1);
     }
 
     @Test

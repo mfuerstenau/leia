@@ -24,6 +24,14 @@ import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.index.Feature;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodeResult;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodesResult;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphResult;
+import io.github.mfuerstenau.leia.protocol.knn.KnnGraphLevel;
+import io.github.mfuerstenau.leia.protocol.knn.KnnGraphNeighbour;
+import io.github.mfuerstenau.leia.protocol.knn.KnnGraphNode;
+import io.github.mfuerstenau.leia.protocol.knn.KnnGraphSegment;
+import io.github.mfuerstenau.leia.protocol.knn.KnnGraphShape;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellResult;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeResult;
 import io.github.mfuerstenau.leia.protocol.points.LeafPoint;
@@ -44,6 +52,7 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
+import java.util.stream.LongStream;
 
 /**
  * The terms screen: the fields with postings, the terms of the selected field and the postings of
@@ -52,7 +61,9 @@ import java.util.Set;
  * documents screen. With a filter on the documents screen, the postings in it are marked, or {@code
  * b} shows only those (ADR 0032). A field with points has a row of its own, which shows its BKD
  * tree instead: a row per segment and, below an expanded one, its cells, fetched a level at a time,
- * with the points of a leaf on the right (ADR 0041).
+ * with the points of a leaf on the right (ADR 0041). So has a field with KNN vectors, for its HNSW
+ * graphs: a row per segment, its entry node and levels, each level's nodes, and on the right the
+ * neighbours of a node, from which Enter walks on and {@code <} goes back (ADR 0085).
  *
  * <p>The Rust TUI got each reply before the next key; here a reply can come after the user moved
  * on. So a fetch that is under way is not asked for again, and a reply that no longer fits what the
@@ -74,6 +85,9 @@ public final class Terms {
 
     /** Wide enough for the title of the postings in a filter (ADR 0032). */
     private static final int POSTINGS_WIDTH = 34;
+
+    /** Wide enough for a neighbour of a graph of millions of nodes (ADR 0085). */
+    private static final int NEIGHBOURS_WIDTH = 42;
 
     private static final int COLUMN_SPACING = 2;
 
@@ -116,6 +130,42 @@ public final class Terms {
         /** Show this document, which has a point of {@code field}, on the documents screen. */
         record PointDocument(String field, int docId) implements Request {}
 
+        /**
+         * The HNSW graphs of a vector field (ADR 0085), reported back with {@link #knnGraphLoaded} or
+         * {@link #knnGraphFailed}; {@code serial} tells the replies of one call from another's.
+         */
+        record LoadKnnGraph(String field, long serial) implements Request {}
+
+        /**
+         * A page of the nodes of a level of the graphs {@code serial}, from {@code offset} on, reported
+         * back with {@link #knnNodesLoaded} or {@link #knnNodesFailed}.
+         */
+        record LoadKnnNodes(String field, long serial, int segment, int level, int offset) implements Request {}
+
+        /**
+         * A node of the graphs {@code serial} with its neighbours, reported back with {@link
+         * #knnNodeLoaded} or {@link #knnNodeFailed}: node {@code ord} of segment {@code segment}, or
+         * else the node of document {@code docId}. With {@code walk}, it continues the walk shown;
+         * otherwise it starts one.
+         */
+        record LoadKnnNode(
+                String field, long serial, OptionalInt segment, OptionalInt ord, OptionalInt docId, boolean walk)
+                implements Request {
+
+            static LoadKnnNode ofOrd(String field, long serial, int segment, int ord, boolean walk) {
+                return new LoadKnnNode(
+                        field, serial, OptionalInt.of(segment), OptionalInt.of(ord), OptionalInt.empty(), walk);
+            }
+
+            static LoadKnnNode ofDoc(String field, long serial, int docId) {
+                return new LoadKnnNode(
+                        field, serial, OptionalInt.empty(), OptionalInt.empty(), OptionalInt.of(docId), false);
+            }
+        }
+
+        /** Show this document, which has a vector in {@code field}, on the documents screen. */
+        record VectorDocument(String field, int docId) implements Request {}
+
         /** Search the documents with this term on the search screen (ADR 0052). */
         record Search(String field, BytesValue term) implements Request {}
 
@@ -123,11 +173,23 @@ public final class Terms {
         record Unsupported(String what) implements Request {}
     }
 
-    /**
-     * A row of the fields column: a field with postings, or with {@code points} the same or another
-     * field's BKD tree.
-     */
-    private record FieldRow(IndexField field, boolean points) {}
+    /** What a row of the fields column shows of its field. */
+    private enum RowKind {
+        /** Its terms and postings. */
+        TERMS,
+        /** Its BKD tree (ADR 0041). */
+        POINTS,
+        /** Its HNSW graphs (ADR 0085). */
+        GRAPH
+    }
+
+    /** A row of the fields column: a field's terms, BKD tree or HNSW graphs. */
+    private record FieldRow(IndexField field, RowKind kind) {
+
+        boolean points() {
+            return kind == RowKind.POINTS;
+        }
+    }
 
     /**
      * A document that contains a term: a posting, as the documents screen shows it.
@@ -232,8 +294,8 @@ public final class Terms {
     }
 
     /**
-     * The fields with postings, and those with points, in field number order; a field with both has
-     * a row for each, its postings first.
+     * The fields with postings, those with points, and those with vectors, in field number order; a
+     * field with more than one has a row for each, its postings first, then its points.
      */
     private final List<FieldRow> fields;
 
@@ -272,6 +334,18 @@ public final class Terms {
     /** The serial of the next tree asked for. */
     private long nextTreeSerial = 1;
 
+    /** The graphs of the selected vector field; null before they are in, or for another row. */
+    private KnnGraphTree knnTree;
+
+    /** The graphs asked for last; a reply for others is dropped. Null before. */
+    private Request.LoadKnnGraph wantedGraph;
+
+    /** The node asked for last; a reply for another is dropped. Null before. */
+    private Request.LoadKnnNode wantedNode;
+
+    /** The document whose node is to be shown once the graphs are in (ADR 0085); empty if none. */
+    private OptionalInt wantedDocNode = OptionalInt.empty();
+
     /** The format each point field is shown in, shared with the documents screen. */
     private PointFormats pointFormats = new PointFormats();
 
@@ -285,10 +359,13 @@ public final class Terms {
         List<FieldRow> rows = new ArrayList<>();
         for (IndexField field : fields) {
             if (field.indexOptions() != IndexOptions.NONE) {
-                rows.add(new FieldRow(field, false));
+                rows.add(new FieldRow(field, RowKind.TERMS));
             }
             if (field.pointDimensionCount() > 0) {
-                rows.add(new FieldRow(field, true));
+                rows.add(new FieldRow(field, RowKind.POINTS));
+            }
+            if (field.vectorDimension() > 0) {
+                rows.add(new FieldRow(field, RowKind.GRAPH));
             }
         }
         this.fields = List.copyOf(rows);
@@ -315,7 +392,7 @@ public final class Terms {
         selectedRow().ifPresent(row -> {
             for (int i = 0; i < reopened.fields.size(); i++) {
                 FieldRow other = reopened.fields.get(i);
-                if (other.field().name().equals(row.field().name()) && other.points() == row.points()) {
+                if (other.field().name().equals(row.field().name()) && other.kind() == row.kind()) {
                     reopened.fieldRow = i;
                     break;
                 }
@@ -325,7 +402,7 @@ public final class Terms {
         reopened.onlyFiltered = onlyFiltered;
         reopened.pointFormats = pointFormats;
         reopened.features = features;
-        // The segments' positions change with a reopen: the tree is fetched again, collapsed.
+        // The segments' positions change with a reopen: the tree or graphs are fetched again, collapsed.
         reopened.nextTreeSerial = nextTreeSerial;
         return reopened;
     }
@@ -376,7 +453,12 @@ public final class Terms {
 
     /** The selected field, if its postings are shown. */
     private Optional<IndexField> selectedField() {
-        return selectedRow().filter(row -> !row.points()).map(FieldRow::field);
+        return selectedRow().filter(row -> row.kind() == RowKind.TERMS).map(FieldRow::field);
+    }
+
+    /** The selected field, if its HNSW graphs are shown. */
+    private Optional<IndexField> selectedVectorField() {
+        return selectedRow().filter(row -> row.kind() == RowKind.GRAPH).map(FieldRow::field);
     }
 
     /** The selected field, if its BKD tree is shown. */
@@ -396,6 +478,21 @@ public final class Terms {
      * itself.
      */
     private Optional<Request> nextRequest() {
+        Optional<IndexField> vectorField = selectedVectorField();
+        if (vectorField.isPresent()) {
+            String field = vectorField.get().name();
+            if (!features.contains(Feature.KNN_GRAPH)) {
+                return Optional.empty();
+            }
+            if (knnTree != null && knnTree.field.equals(field)) {
+                return Optional.empty();
+            }
+            knnTree = null;
+            if (wantedGraph == null || !wantedGraph.field().equals(field)) {
+                wantedGraph = new Request.LoadKnnGraph(field, nextTreeSerial++);
+            }
+            return send(wantedGraph);
+        }
         Optional<IndexField> pointField = selectedPointField();
         if (pointField.isPresent()) {
             String field = pointField.get().name();
@@ -618,6 +715,195 @@ public final class Terms {
     }
 
     /**
+     * Shows the HNSW graphs of a vector field, if they are still the ones wanted; then the node of
+     * the document asked for, if one was.
+     */
+    public Optional<Request> knnGraphLoaded(Request.LoadKnnGraph request, GetKnnGraphResult result) {
+        pending.remove(request);
+        if (!wantedGraph(request)) {
+            return Optional.empty();
+        }
+        knnTree = new KnnGraphTree(request.serial(), request.field(), result);
+        return docNodeRequest();
+    }
+
+    /** Shows why the graphs of a vector field could not be fetched, if they are still the ones wanted. */
+    public void knnGraphFailed(Request.LoadKnnGraph request, String error) {
+        pending.remove(request);
+        if (wantedGraph(request)) {
+            knnTree = new KnnGraphTree(request.serial(), request.field(), error);
+            wantedDocNode = OptionalInt.empty();
+        }
+    }
+
+    private boolean wantedGraph(Request.LoadKnnGraph request) {
+        return request.equals(wantedGraph)
+                && selectedVectorField()
+                        .map(IndexField::name)
+                        .filter(request.field()::equals)
+                        .isPresent();
+    }
+
+    /** The node of the document asked for, once the graphs it is in are shown. */
+    private Optional<Request> docNodeRequest() {
+        if (wantedDocNode.isEmpty() || knnTree == null || knnTree.graph == null) {
+            return Optional.empty();
+        }
+        int docId = wantedDocNode.getAsInt();
+        wantedDocNode = OptionalInt.empty();
+        wantedNode = Request.LoadKnnNode.ofDoc(knnTree.field, knnTree.serial, docId);
+        return send(wantedNode);
+    }
+
+    /** Shows a page of a level's nodes, if its graphs are still shown. */
+    public void knnNodesLoaded(Request.LoadKnnNodes request, GetKnnGraphNodesResult result) {
+        pending.remove(request);
+        levelOf(request)
+                .filter(level -> level.nodes.size() == request.offset())
+                .ifPresent(level -> level.loaded(result));
+    }
+
+    /** Shows why a page of a level's nodes could not be fetched, if its graphs are still shown. */
+    public void knnNodesFailed(Request.LoadKnnNodes request, String error) {
+        pending.remove(request);
+        levelOf(request).ifPresent(level -> {
+            level.loading = false;
+            level.error = Optional.of(error);
+        });
+    }
+
+    private Optional<KnnGraphTree.Level> levelOf(Request.LoadKnnNodes request) {
+        if (knnTree == null || knnTree.serial != request.serial()) {
+            return Optional.empty();
+        }
+        return knnTree.level(request.segment(), request.level());
+    }
+
+    /**
+     * Shows a node's neighbours, if it is the node asked for last: on the walk shown, or as the start
+     * of a new one. The focus moves to them.
+     */
+    public void knnNodeLoaded(Request.LoadKnnNode request, GetKnnGraphNodeResult result) {
+        pending.remove(request);
+        if (!wantedNode(request)) {
+            return;
+        }
+        if (!request.walk()) {
+            knnTree.path.clear();
+        }
+        knnTree.path.add(new KnnGraphTree.Shown(result));
+        knnTree.nodeError = Optional.empty();
+        focus = Column.POSTINGS;
+    }
+
+    /** Shows why a node could not be fetched, if it is the node asked for last. */
+    public void knnNodeFailed(Request.LoadKnnNode request, String error) {
+        pending.remove(request);
+        if (wantedNode(request)) {
+            knnTree.nodeError = Optional.of(error);
+        }
+    }
+
+    private boolean wantedNode(Request.LoadKnnNode request) {
+        return request.equals(wantedNode) && knnTree != null && knnTree.serial == request.serial();
+    }
+
+    /**
+     * Enter on a row of the graphs: expands or collapses a segment or level, fetching a level's first
+     * page, fetches the next page on the row after a level's nodes, and shows the neighbours of a node.
+     */
+    private Optional<Request> openGraphRow() {
+        Optional<KnnGraphTree.Item> selected = knnTree.selectedItem();
+        if (selected.isEmpty()) {
+            return Optional.empty();
+        }
+        return switch (selected.get()) {
+            case KnnGraphTree.Item.SegmentItem item -> {
+                if (item.segment().info.shape().isEmpty()) {
+                    note = "no graph in this segment";
+                } else {
+                    item.segment().expanded = !item.segment().expanded;
+                }
+                yield Optional.empty();
+            }
+            case KnnGraphTree.Item.EntryItem item ->
+                openNode(item.segment().info.segment(), item.node());
+            case KnnGraphTree.Item.LevelItem item -> {
+                KnnGraphTree.Level level = item.level();
+                if (level.fetched()) {
+                    level.expanded = !level.expanded;
+                    yield Optional.empty();
+                }
+                yield nodesPage(level);
+            }
+            case KnnGraphTree.Item.NodeItem item -> openNode(item.level().segment, item.node());
+            case KnnGraphTree.Item.MoreItem item -> nodesPage(item.level());
+        };
+    }
+
+    /** The next page of a level's nodes, unless one is under way. */
+    private Optional<Request> nodesPage(KnnGraphTree.Level level) {
+        if (level.loading) {
+            return Optional.empty();
+        }
+        level.loading = true;
+        level.error = Optional.empty();
+        return send(new Request.LoadKnnNodes(
+                knnTree.field, knnTree.serial, level.segment, level.level, level.nodes.size()));
+    }
+
+    /** The neighbours of {@code node} of {@code segment}, as the start of a walk. */
+    private Optional<Request> openNode(int segment, KnnGraphNode node) {
+        wantedNode = Request.LoadKnnNode.ofOrd(knnTree.field, knnTree.serial, segment, node.ord(), false);
+        return send(wantedNode);
+    }
+
+    /** Enter on a neighbour: walks on to it. */
+    private Optional<Request> walkOn() {
+        Optional<KnnGraphTree.Shown> shown = knnTree.shown();
+        if (shown.isEmpty()) {
+            return Optional.empty();
+        }
+        return shown.get().selectedNeighbour().flatMap(neighbour -> {
+            wantedNode = Request.LoadKnnNode.ofOrd(
+                    knnTree.field,
+                    knnTree.serial,
+                    shown.get().node.segment(),
+                    neighbour.node().ord(),
+                    true);
+            return send(wantedNode);
+        });
+    }
+
+    /** {@code <}: back to the node the walk came from. */
+    private void walkBack() {
+        if (knnTree.path.size() > 1) {
+            knnTree.path.removeLast();
+            // A node still on its way would land on the wrong step.
+            wantedNode = null;
+        } else {
+            note = "the walk's first node";
+        }
+    }
+
+    /** {@code d}: the document of the selected node or neighbour. */
+    private Optional<Request> graphDocument() {
+        Optional<KnnGraphNode> node = Optional.empty();
+        if (focus == Column.POSTINGS) {
+            node = knnTree.shown()
+                    .flatMap(KnnGraphTree.Shown::selectedNeighbour)
+                    .map(KnnGraphNeighbour::node);
+        } else if (focus == Column.TERMS) {
+            node = knnTree.selectedItem().flatMap(item -> switch (item) {
+                case KnnGraphTree.Item.EntryItem entry -> Optional.of(entry.node());
+                case KnnGraphTree.Item.NodeItem nodeItem -> Optional.of(nodeItem.node());
+                default -> Optional.empty();
+            });
+        }
+        return node.map(n -> new Request.VectorDocument(knnTree.field, n.docId()));
+    }
+
+    /**
      * Enter on a cell: expands or collapses it, or shows the points of a leaf; fetches what that
      * needs first.
      */
@@ -670,6 +956,33 @@ public final class Terms {
                 postings.field, postings.term, postings.nextDoc.getAsInt(), true, postings.filter));
     }
 
+    /**
+     * Shows the HNSW graphs of {@code field} with the neighbours of document {@code docId}'s node
+     * (ADR 0085), as the documents screen asks for. Nothing changes if the screen has no such row.
+     */
+    public Optional<Request> showNode(String field, int docId) {
+        int row = -1;
+        for (int i = 0; i < fields.size(); i++) {
+            if (fields.get(i).kind() == RowKind.GRAPH
+                    && fields.get(i).field().name().equals(field)) {
+                row = i;
+                break;
+            }
+        }
+        if (row < 0) {
+            return Optional.empty();
+        }
+        fieldRow = row;
+        seek = null;
+        note = null;
+        focus = Column.POSTINGS;
+        wantedDocNode = OptionalInt.of(docId);
+        if (knnTree != null && knnTree.field.equals(field)) {
+            return docNodeRequest();
+        }
+        return nextRequest();
+    }
+
     /** Shows the terms of {@code field} from {@code term} on, with the focus on the term's postings. */
     public Optional<Request> browse(String field, BytesValue term) {
         return show(field, Optional.of(term), false);
@@ -682,8 +995,9 @@ public final class Terms {
      */
     public Optional<Request> show(String field, Optional<BytesValue> term, boolean points) {
         int row = -1;
+        RowKind kind = points ? RowKind.POINTS : RowKind.TERMS;
         for (int i = 0; i < fields.size(); i++) {
-            if (fields.get(i).points() == points && fields.get(i).field().name().equals(field)) {
+            if (fields.get(i).kind() == kind && fields.get(i).field().name().equals(field)) {
                 row = i;
                 break;
             }
@@ -714,8 +1028,10 @@ public final class Terms {
         private final TermList terms;
         private final PostingList postings;
         private final PointTree pointTree;
+        private final KnnGraphTree knnTree;
         private final Request.LoadTerms wantedFirst;
         private final Request.LoadPointTree wantedTree;
+        private final Request.LoadKnnGraph wantedGraph;
 
         private Mark(Terms of) {
             this.fieldRow = of.fieldRow;
@@ -723,8 +1039,10 @@ public final class Terms {
             this.terms = of.terms;
             this.postings = of.postings;
             this.pointTree = of.pointTree;
+            this.knnTree = of.knnTree;
             this.wantedFirst = of.wantedFirst;
             this.wantedTree = of.wantedTree;
+            this.wantedGraph = of.wantedGraph;
         }
     }
 
@@ -743,8 +1061,12 @@ public final class Terms {
         terms = mark.terms;
         postings = mark.postings;
         pointTree = mark.pointTree;
+        knnTree = mark.knnTree;
         wantedFirst = mark.wantedFirst;
         wantedTree = mark.wantedTree;
+        wantedGraph = mark.wantedGraph;
+        wantedNode = null;
+        wantedDocNode = OptionalInt.empty();
         seek = null;
         note = null;
     }
@@ -766,7 +1088,9 @@ public final class Terms {
      * term or the postings' term (ADR 0052), and with {@code b} switches between all postings and
      * those in the filter, if there is one. On a point field's tree, Enter expands or
      * collapses a cell, or shows a leaf's points, and on a point shows its document; {@code t}
-     * cycles the format the points are shown in.
+     * cycles the format the points are shown in. On a vector field's graphs, Enter expands or
+     * collapses a segment or level, shows a node's neighbours, and on a neighbour walks on to it;
+     * {@code <} walks back, and {@code d} shows the document of a node or neighbour (ADR 0085).
      */
     public Optional<Request> handleKey(KeyEvent key) {
         if (seek != null) {
@@ -776,6 +1100,30 @@ public final class Terms {
         Optional<String> unsupported = unsupported(key);
         if (unsupported.isPresent()) {
             return unsupported.map(Request.Unsupported::new);
+        }
+        if (selectedVectorField().isPresent()) {
+            if (key.isChar('/') || key.isChar('e') || key.isChar('s')) {
+                note = (key.isChar('/') ? "/ seeks" : key.isChar('e') ? "e exports" : "s searches") + " terms only";
+                return Optional.empty();
+            }
+            if (knnTree != null && knnTree.graph != null) {
+                if (key.code() == KeyCode.ENTER && focus == Column.TERMS) {
+                    return openGraphRow();
+                }
+                if (key.code() == KeyCode.ENTER && focus == Column.POSTINGS) {
+                    return walkOn();
+                }
+                if (key.isChar('<')) {
+                    walkBack();
+                    return Optional.empty();
+                }
+                if (key.isChar('d')) {
+                    return graphDocument();
+                }
+            }
+            if (key.code() == KeyCode.ENTER && focus != Column.FIELDS) {
+                return Optional.empty();
+            }
         }
         Optional<IndexField> pointField = selectedPointField();
         if (pointField.isPresent()) {
@@ -841,18 +1189,25 @@ public final class Terms {
     /** What {@code key} is called if the index lacks a feature it needs (ADR 0044); empty otherwise. */
     private Optional<String> unsupported(KeyEvent key) {
         boolean points = showsPoints();
+        boolean graph = showsGraph();
         Feature needed;
         String what;
-        if (key.code() == KeyCode.ENTER && focus == Column.POSTINGS) {
+        if (graph && (key.code() == KeyCode.ENTER && focus != Column.FIELDS || key.isChar('<'))) {
+            needed = Feature.KNN_GRAPH;
+            what = "HNSW graph";
+        } else if (graph && key.isChar('d')) {
+            needed = Feature.DOCUMENTS;
+            what = "Open doc";
+        } else if (key.code() == KeyCode.ENTER && focus == Column.POSTINGS) {
             needed = Feature.DOCUMENTS;
             what = "Open doc";
         } else if (key.isChar('t') && points) {
             needed = Feature.POINTS;
             what = "Points";
-        } else if (key.isChar('e') && !points) {
+        } else if (key.isChar('e') && !points && !graph) {
             needed = Feature.EXPORT_TERMS;
             what = "Export";
-        } else if (key.isChar('s') && !points) {
+        } else if (key.isChar('s') && !points && !graph) {
             // A runtime has term queries without the rest of search (ADR 0058).
             return searchesTerms() ? Optional.empty() : Optional.of("Search term");
         } else if (key.isChar('b') && filter.isPresent()) {
@@ -874,6 +1229,13 @@ public final class Terms {
      * index has the features for (ADR 0044).
      */
     public String keys() {
+        if (showsGraph()) {
+            if (!features.contains(Feature.KNN_GRAPH)) {
+                return "←/→ column   ↑↓";
+            }
+            return "⏎ expand / neighbours / walk on   < back   "
+                    + (features.contains(Feature.DOCUMENTS) ? "d open doc   " : "") + "←/→ column   ↑↓";
+        }
         if (showsPoints()) {
             return "⏎ expand / points / open doc   " + (features.contains(Feature.POINTS) ? "t format   " : "")
                     + "←/→ column   ↑↓";
@@ -938,6 +1300,13 @@ public final class Terms {
                 fieldRow = row.getAsInt();
             }
             case TERMS -> {
+                if (selectedVectorField().isPresent()) {
+                    if (knnTree != null) {
+                        Selection.moved(knnTree.selected, knnTree.visible().size(), key)
+                                .ifPresent(row -> knnTree.selected = row);
+                    }
+                    return Optional.empty();
+                }
                 if (selectedPointField().isPresent()) {
                     if (pointTree != null) {
                         Selection.moved(pointTree.selected, pointTree.visible().size(), key)
@@ -955,6 +1324,16 @@ public final class Terms {
                 terms.selected = row.getAsInt();
             }
             case POSTINGS -> {
+                if (selectedVectorField().isPresent()) {
+                    if (knnTree == null) {
+                        return Optional.empty();
+                    }
+                    knnTree.shown()
+                            .ifPresent(shown -> Selection.moved(
+                                            shown.selected, shown.neighbours().size(), key)
+                                    .ifPresent(row -> shown.selected = row));
+                    return Optional.empty();
+                }
                 if (selectedPointField().isPresent()) {
                     if (pointTree != null && pointTree.leaf != null) {
                         Selection.moved(pointTree.pointSelected, pointTree.leaf.points.size(), key)
@@ -977,7 +1356,7 @@ public final class Terms {
 
     public void render(Frame frame, Rect area) {
         if (fields.isEmpty()) {
-            message(frame, area, " Fields ", true, "No field has postings or points.");
+            message(frame, area, " Fields ", true, "No field has postings, points or vectors.");
             return;
         }
         int nameWidth = fields.stream()
@@ -989,9 +1368,14 @@ public final class Terms {
                 .constraints(
                         Constraint.length(Math.clamp(nameWidth + 4, 12, FIELDS_MAX_WIDTH)),
                         Constraint.fill(),
-                        Constraint.length(POSTINGS_WIDTH))
+                        Constraint.length(showsGraph() ? NEIGHBOURS_WIDTH : POSTINGS_WIDTH))
                 .split(area);
         renderFields(frame, columns.get(0));
+        if (selectedVectorField().isPresent()) {
+            renderGraph(frame, columns.get(1));
+            renderNeighbours(frame, columns.get(2));
+            return;
+        }
         if (selectedPointField().isPresent()) {
             renderPointTree(frame, columns.get(1));
             renderLeaf(frame, columns.get(2));
@@ -1001,20 +1385,26 @@ public final class Terms {
         renderPostings(frame, columns.get(2));
     }
 
-    /** A field's name, and for its points row their dimensions and bytes, such as {@code pt 1×8}. */
+    /**
+     * A field's name, for its points row with their dimensions and bytes, such as {@code pt 1×8}, and
+     * for its graph row with its vectors' dimension, such as {@code hnsw 8d}.
+     */
     private static String fieldLabel(FieldRow row) {
         String name = TextFormat.escapeControl(row.field().name());
-        return row.points()
-                ? name + " pt " + row.field().pointDimensionCount() + "×"
-                        + row.field().pointNumBytes()
-                : name;
+        return switch (row.kind()) {
+            case TERMS -> name;
+            case POINTS ->
+                name + " pt " + row.field().pointDimensionCount() + "×"
+                        + row.field().pointNumBytes();
+            case GRAPH -> name + " hnsw " + row.field().vectorDimension() + "d";
+        };
     }
 
     private void renderFields(Frame frame, Rect area) {
         boolean focused = focus == Column.FIELDS;
         List<Row> rows = fields.stream()
                 .map(row -> {
-                    if (!row.points()) {
+                    if (row.kind() == RowKind.TERMS) {
                         return Row.from(Cell.from(fieldLabel(row)));
                     }
                     String name = TextFormat.escapeControl(row.field().name());
@@ -1258,6 +1648,217 @@ public final class Terms {
                 .block(panel(title, focused))
                 .build();
         frame.renderStatefulWidget(table, area, pointTree.pointTable);
+    }
+
+    private void renderGraph(Frame frame, Rect area) {
+        boolean focused = focus == Column.TERMS;
+        IndexField field = selectedVectorField().orElseThrow();
+        String name = TextFormat.firstChars(TextFormat.escapeControl(field.name()), 30);
+        int width = area.width() - 2;
+        if (!features.contains(Feature.KNN_GRAPH)) {
+            message(
+                    frame,
+                    area,
+                    fitTitle(name, "", List.of(), width),
+                    focused,
+                    "The runtime that reads this index doesn't read HNSW graphs.");
+            return;
+        }
+        if (knnTree == null) {
+            frame.renderWidget(panel(fitTitle(name, "", List.of(), width), focused), area);
+            return;
+        }
+        if (knnTree.graph == null) {
+            message(
+                    frame,
+                    area,
+                    fitTitle(name, "", List.of(), width),
+                    focused,
+                    "Cannot read the graphs: " + knnTree.error.orElse(""));
+            return;
+        }
+        GetKnnGraphResult graph = knnTree.graph;
+        String vectors = TextFormat.count(
+                graph.segments().stream().mapToLong(KnnGraphSegment::vectors).sum(), "vector");
+        String similarity = " · " + graph.similarity().name().toLowerCase(java.util.Locale.ROOT);
+        String title = fitTitle(
+                name,
+                note != null ? " · " + note : "",
+                List.of(
+                        " · " + TextFormat.count(graph.segments().size(), "segment") + " · " + vectors + similarity,
+                        " · " + vectors + similarity,
+                        similarity),
+                width);
+        if (knnTree.segments.isEmpty()) {
+            message(frame, area, title, focused, "No segment has vectors in the field.");
+            return;
+        }
+        List<KnnGraphTree.Item> visible = knnTree.visible();
+        knnTree.selected = Math.min(knnTree.selected, visible.size() - 1);
+        List<Row> rows = new ArrayList<>();
+        Style dim = Style.EMPTY.dim();
+        for (KnnGraphTree.Item item : visible) {
+            List<Span> spans = new ArrayList<>();
+            switch (item) {
+                case KnnGraphTree.Item.SegmentItem segment -> {
+                    KnnGraphSegment info = segment.segment().info;
+                    spans.add(Span.raw(info.shape().isEmpty() ? "  " : segment.segment().expanded ? "▾ " : "▸ "));
+                    spans.add(Span.styled(info.name().orElse("#" + info.segment()) + "  ", Style.EMPTY.bold()));
+                    spans.add(Span.raw(TextFormat.count(info.vectors(), "vector")));
+                    spans.add(Span.styled(info.shape().map(Terms::shapeText).orElse(" · no graph"), dim));
+                }
+                case KnnGraphTree.Item.EntryItem entry -> {
+                    spans.add(Span.styled("    entry  ", dim));
+                    spans.add(Span.raw(nodeText(entry.node())));
+                }
+                case KnnGraphTree.Item.LevelItem levelItem -> {
+                    KnnGraphTree.Level level = levelItem.level();
+                    spans.add(Span.raw("  " + (level.expanded ? "▾" : "▸") + " L" + level.level + "  "));
+                    spans.add(Span.raw(TextFormat.count(level.total, "node")));
+                    if (level.loading) {
+                        spans.add(Span.styled("  …", dim));
+                    }
+                    level.error.ifPresent(
+                            error -> spans.add(Span.styled("  cannot read it: " + error, Style.EMPTY.red())));
+                }
+                case KnnGraphTree.Item.NodeItem nodeItem -> {
+                    spans.add(Span.raw("      " + nodeText(nodeItem.node())));
+                    if (nodeItem.node().topLevel() > nodeItem.level().level) {
+                        spans.add(Span.styled(" · top L" + nodeItem.node().topLevel(), dim));
+                    }
+                }
+                case KnnGraphTree.Item.MoreItem more ->
+                    spans.add(Span.styled(
+                            "      ⏎ more (" + more.level().nodes.size() + " of " + more.level().total + ")", dim));
+            }
+            Row row = Row.from(Cell.from(Line.from(spans)));
+            boolean deleted = switch (item) {
+                case KnnGraphTree.Item.EntryItem entry -> entry.node().deleted();
+                case KnnGraphTree.Item.NodeItem nodeItem -> nodeItem.node().deleted();
+                default -> false;
+            };
+            rows.add(deleted ? row.style(Style.EMPTY.red()) : row);
+        }
+        knnTree.table.select(knnTree.selected);
+        Table table = table(rows, focused)
+                .widths(Constraint.fill())
+                .block(panel(title, focused))
+                .build();
+        frame.renderStatefulWidget(table, area, knnTree.table);
+    }
+
+    /** A graph's levels and M, such as {@code · 3 levels · M 16}. */
+    private static String shapeText(KnnGraphShape shape) {
+        String levels = " · " + TextFormat.count(shape.levelSizes().size(), "level");
+        return shape.maxConn().isPresent() ? levels + " · M " + shape.maxConn().getAsInt() : levels;
+    }
+
+    /** A node, such as {@code ord 17 · doc 42}, and whether its document is deleted. */
+    private static String nodeText(KnnGraphNode node) {
+        return "ord " + node.ord() + " · doc " + node.docId() + (node.deleted() ? " · deleted" : "");
+    }
+
+    private void renderNeighbours(Frame frame, Rect area) {
+        boolean focused = focus == Column.POSTINGS;
+        Optional<KnnGraphTree.Shown> shown = knnTree == null ? Optional.empty() : knnTree.shown();
+        Optional<String> error = knnTree == null ? Optional.empty() : knnTree.nodeError;
+        if (shown.isEmpty()) {
+            String text = error.map(e -> "Cannot read the node: " + e).orElse("⏎ on a node shows its neighbours.");
+            message(frame, area, " Neighbours ", focused, text);
+            return;
+        }
+        GetKnnGraphNodeResult node = shown.get().node;
+        List<String> ords = knnTree.path.stream()
+                .map(step -> Integer.toString(step.node.node().ord()))
+                .toList();
+        // A step that failed says so in the title, which the walk's ordinals give otherwise.
+        String title = error.map(e -> TextFormat.firstChars(" cannot read the node: " + e, area.width() - 3) + " ")
+                .orElseGet(() -> walkTitle(ords, area.width() - 2));
+        List<KnnGraphNeighbour> neighbours = shown.get().neighbours();
+        int ordWidth = Math.max(
+                3,
+                Selection.numberWidth(LongStream.concat(
+                        LongStream.of(node.node().ord()),
+                        neighbours.stream().mapToLong(n -> n.node().ord()))));
+        int docWidth = Math.max(
+                3,
+                Selection.numberWidth(LongStream.concat(
+                        LongStream.of(node.node().docId()),
+                        neighbours.stream().mapToLong(n -> n.node().docId()))));
+        Row header = Row.from(
+                        Cell.from("Lvl"),
+                        right("Ord", ordWidth),
+                        right("Doc", docWidth),
+                        Cell.from("Top"),
+                        right("Score", 6))
+                .style(Style.EMPTY.bold());
+        List<Row> rows = new ArrayList<>();
+        Style dim = Style.EMPTY.dim();
+        // The node itself first, then each level's neighbours, the level on the first of them.
+        Row self = Row.from(
+                        Cell.from("node"),
+                        right(Integer.toString(node.node().ord()), ordWidth),
+                        right(Integer.toString(node.node().docId()), docWidth),
+                        Cell.from("L" + node.node().topLevel()),
+                        Cell.from(""))
+                .style(node.node().deleted() ? Style.EMPTY.red().bold() : Style.EMPTY.bold());
+        rows.add(self);
+        int selectedRow = 0;
+        int index = 0;
+        for (KnnGraphLevel level : node.levels()) {
+            if (level.neighbours().isEmpty()) {
+                rows.add(Row.from(Cell.from("L" + level.level()), Cell.from("none"))
+                        .style(dim));
+                continue;
+            }
+            boolean first = true;
+            for (KnnGraphNeighbour neighbour : level.neighbours()) {
+                if (index == shown.get().selected) {
+                    selectedRow = rows.size();
+                }
+                Row row = Row.from(
+                        Cell.from(first ? "L" + level.level() : ""),
+                        right(Integer.toString(neighbour.node().ord()), ordWidth),
+                        right(Integer.toString(neighbour.node().docId()), docWidth),
+                        Cell.from("L" + neighbour.node().topLevel()),
+                        right(String.format(java.util.Locale.ROOT, "%.4f", neighbour.score()), 6));
+                rows.add(neighbour.node().deleted() ? row.style(Style.EMPTY.red()) : row);
+                first = false;
+                index++;
+            }
+        }
+        shown.get().table.select(neighbours.isEmpty() ? 0 : selectedRow);
+        Table table = table(rows, focused)
+                .widths(
+                        Constraint.length(4),
+                        Constraint.length(ordWidth),
+                        Constraint.length(docWidth),
+                        Constraint.length(3),
+                        Constraint.length(6))
+                .header(header)
+                .block(panel(title, focused))
+                .build();
+        frame.renderStatefulWidget(table, area, shown.get().table);
+    }
+
+    /**
+     * The title of a walk: the ordinals it went through, such as {@code ord 17 › 3 › 9}, its start
+     * left out as far as {@code width} needs.
+     */
+    static String walkTitle(List<String> ords, int width) {
+        for (int from = 0; from < ords.size(); from++) {
+            String title =
+                    " ord " + (from > 0 ? "… › " : "") + String.join(" › ", ords.subList(from, ords.size())) + " ";
+            if (CharWidth.of(title) <= width || from == ords.size() - 1) {
+                return title;
+            }
+        }
+        return " Neighbours ";
+    }
+
+    /** Whether the selected field's HNSW graphs are shown rather than its terms (ADR 0085). */
+    public boolean showsGraph() {
+        return selectedVectorField().isPresent();
     }
 
     /** Whether the selected field's BKD tree is shown rather than its terms. */

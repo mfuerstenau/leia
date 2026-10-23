@@ -178,6 +178,18 @@ other tests use their own indexes and the Lucene 9 and 8 indexes from `LegacyInd
   finds 42, 98 and 278, the exact top 3, and `b` browses them on the documents screen (`1 of 3`).
   `[1, 2]` on the line fails: `embedding` has 8 dimensions. With `f` on `fingerprint`, `[0.5]`
   can't be read, since a vector of bytes takes whole numbers.
+- HNSW graphs (ADR 0085): Lucene 10 builds none for segments this small, so the demo writer builds
+  one in every segment anyway. On the terms screen, `embedding hnsw 8d` shows `_0  199 vectors · 3
+  levels · M 16`, with 199, 14 and 1 nodes on L0 to L2; `_1` has 200, 14 and 1, `_2` 100 and 6.
+  `fingerprint hnsw 16d`, written with an M of 4, has more levels: 199, 52, 14, 2, 1, 1 in `_0`.
+  On L0 of `_0`, ordinal 36 is document 37, in red: a deleted document keeps its node. On document
+  42, `T` on `embedding` shows its node, ordinal 41 of `_0`, with its neighbours scored as the
+  exact search scores them; Enter walks on, `<` back.
+- Recall (ADR 0086): in the KNN mode of the search screen, `r` on a blank line samples 100
+  documents. `embedding` at `k` 10 has a mean recall of 1.000: its graphs find every exact
+  neighbour. With `f` on `fingerprint` (M 4), 0.997: documents 63, 362 and 472 each miss one of
+  their 10, such as `#9 doc 363`; Enter on 63 searches its nearest. `42` on the line, then `r`,
+  checks that one target.
 - Segments (ADR 0051): document 417's header says `_2 #17 of 0–99`. `S` pins `_2`, and ← stops at
   document 400 (`first document of _2`); `<` goes to document 200, the first of `_1`, and the pin
   moves along. With a filter (`b` on the search screen) and `S`, → stops at the segment's last

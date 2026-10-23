@@ -329,6 +329,8 @@ Finished items, moved here from `docs/tasklist.md` (the open work queue).
   - At 100 columns the point tree's title ran over its panel's corner: the title drops the segments, then the points, then all but the name and note, and is cut last
   - While the documents `i` prompt was open, the footer showed the screen's legend with `⌫ back`: it shows `type a document id   ⏎ go   Esc cancel`
 
+- [x] KNN: HNSW graph inspection (ADR 0085, runtime interface 21): a `KnnGraph` runtime group on 9.12 and 10.5.2 through `HnswGraphProvider`; `getKnnGraph`, `getKnnGraphNodes`, `getKnnGraphNode` and `KNN_GRAPH`; a `hnsw` row per vector field on the terms screen with each segment's levels, entry node and nodes, a node's neighbours scored by the field's similarity, a walk with `<` back, and `T` from a document's vector; the demo index builds a graph in every segment
+- [x] KNN: a recall check of approximate against exact (ADR 0086, runtime interface 22): `Knn.sample`, the job `startKnnRecall`/`getKnnRecall` for one target or a sample with each target left out of its own rankings, and `r` in the search screen's KNN mode, with the missed documents or the worst targets
 ## Lucene 9.12 beyond classic search — done
 
 - [x] Export terms (`EXPORT_TERMS`) on every runtime, with no runtime change: `startExportTerms` pages through `Terms.terms` (`RuntimeResults.exportTerms`), and `TermExport` writes bytes and a docFreq from a `TermSource`. Luke's format stays (ADR 0022); the backlog's `totalTermFreq` and binary-term marker stay open

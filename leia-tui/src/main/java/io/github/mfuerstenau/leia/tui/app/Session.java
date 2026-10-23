@@ -33,6 +33,9 @@ import io.github.mfuerstenau.leia.protocol.jars.GetRuntimesParams;
 import io.github.mfuerstenau.leia.protocol.jars.LoadRuntimesParams;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodeParams;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodesParams;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphParams;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellParams;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanParams;
@@ -392,6 +395,54 @@ public final class Session {
                                 reply(runner, app -> app.pointCellFailed(load, message));
                             }
                         });
+            case Action.LoadKnnGraph load ->
+                backend.call(Methods.GET_KNN_GRAPH, new GetKnnGraphParams(load.field()))
+                        .whenComplete((result, error) -> {
+                            if (error == null) {
+                                reply(runner, app -> app.knnGraphLoaded(load, result));
+                                return;
+                            }
+                            RpcException rpc = rpcException(error, runner);
+                            if (rpc != null) {
+                                String message = describe(rpc);
+                                reply(runner, app -> app.knnGraphFailed(load, message));
+                            }
+                        });
+            case Action.LoadKnnNodes load ->
+                backend.call(
+                                Methods.GET_KNN_GRAPH_NODES,
+                                new GetKnnGraphNodesParams(
+                                        load.field(),
+                                        load.segment(),
+                                        load.level(),
+                                        load.offset(),
+                                        GetKnnGraphNodesParams.MAX_NODES))
+                        .whenComplete((result, error) -> {
+                            if (error == null) {
+                                reply(runner, app -> app.knnNodesLoaded(load, result));
+                                return;
+                            }
+                            RpcException rpc = rpcException(error, runner);
+                            if (rpc != null) {
+                                String message = describe(rpc);
+                                reply(runner, app -> app.knnNodesFailed(load, message));
+                            }
+                        });
+            case Action.LoadKnnNode load ->
+                backend.call(
+                                Methods.GET_KNN_GRAPH_NODE,
+                                new GetKnnGraphNodeParams(load.field(), load.segment(), load.ord(), load.docId()))
+                        .whenComplete((result, error) -> {
+                            if (error == null) {
+                                reply(runner, app -> app.knnNodeLoaded(load, result));
+                                return;
+                            }
+                            RpcException rpc = rpcException(error, runner);
+                            if (rpc != null) {
+                                String message = describe(rpc);
+                                reply(runner, app -> app.knnNodeFailed(load, message));
+                            }
+                        });
             case Action.LoadDocument load -> {
                 cancelJobs(load.cancel(), runner);
                 load.matches()
@@ -511,6 +562,14 @@ public final class Session {
                         runner,
                         app -> jobId -> app.storedScanStarted(start.scanId(), jobId),
                         app -> message -> app.storedScanFailed(start.scanId(), message));
+            }
+            case Action.StartKnnRecall start -> {
+                cancelJobs(start.cancel(), runner);
+                startJob(
+                        backend.call(Methods.START_KNN_RECALL, start.params()),
+                        runner,
+                        app -> jobId -> app.knnRecallStarted(start.recallId(), jobId),
+                        app -> message -> app.knnRecallFailed(start.recallId(), message));
             }
             case Action.CancelSearch cancel -> cancelJobs(cancel.jobs(), runner);
             case Action.StartCheck start ->
@@ -1015,6 +1074,25 @@ public final class Session {
                                     String message = describe(rpc);
                                     polled(runner, poll, app -> {
                                         app.documentMatchesFailed(finding.matchesId(), message);
+                                        return Optional.empty();
+                                    });
+                                }
+                            });
+                case Poll.KnnRecall checking ->
+                    backend.call(Methods.GET_KNN_RECALL, new JobParams(checking.jobId()))
+                            .whenComplete((result, error) -> {
+                                if (error == null) {
+                                    polled(runner, poll, app -> {
+                                        app.knnRecallProgress(checking.recallId(), result);
+                                        return Optional.empty();
+                                    });
+                                    return;
+                                }
+                                RpcException rpc = rpcException(error, runner);
+                                if (rpc != null) {
+                                    String message = describe(rpc);
+                                    polled(runner, poll, app -> {
+                                        app.knnRecallFailed(checking.recallId(), message);
                                         return Optional.empty();
                                     });
                                 }

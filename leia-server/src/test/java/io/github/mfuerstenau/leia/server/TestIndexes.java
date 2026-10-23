@@ -54,7 +54,7 @@ public final class TestIndexes {
      */
     public static Set<Feature> featuresWithoutData() {
         Set<Feature> features = EnumSet.copyOf(Feature.all());
-        features.removeAll(List.of(Feature.DOC_VALUES, Feature.POINTS, Feature.KNN_VECTORS));
+        features.removeAll(List.of(Feature.DOC_VALUES, Feature.POINTS, Feature.KNN_VECTORS, Feature.KNN_GRAPH));
         return features;
     }
 }

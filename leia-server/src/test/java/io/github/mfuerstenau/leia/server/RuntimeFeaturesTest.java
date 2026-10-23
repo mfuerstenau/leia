@@ -138,7 +138,7 @@ class RuntimeFeaturesTest {
             rows.put("Check levels", EnumSet.of(Feature.CHECK_LEVELS));
             rows.put("Points", EnumSet.of(Feature.POINTS));
             rows.put("Doc values", EnumSet.of(Feature.DOC_VALUES));
-            rows.put("KNN vectors and KNN search", EnumSet.of(Feature.KNN_VECTORS));
+            rows.put("KNN vectors, KNN search and HNSW graphs", EnumSet.of(Feature.KNN_VECTORS, Feature.KNN_GRAPH));
             rows.put(
                     "Classic and term queries, explain, regex over stored values, auto stop words",
                     EnumSet.of(

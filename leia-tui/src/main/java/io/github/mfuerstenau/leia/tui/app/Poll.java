@@ -36,6 +36,9 @@ public sealed interface Poll {
      */
     record StoredScan(long scanId, long jobId, int fromHit) implements Poll {}
 
+    /** Report back with {@link App#knnRecallProgress} or {@link App#knnRecallFailed}, under {@code recallId} (ADR 0086). */
+    record KnnRecall(long recallId, long jobId) implements Poll {}
+
     /**
      * Ask for the lines from {@code fromLine} on, and report back with {@link App#checkProgress} or
      * {@link App#checkFailed}, under {@code checkId}.

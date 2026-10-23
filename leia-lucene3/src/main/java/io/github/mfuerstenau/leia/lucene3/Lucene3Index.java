@@ -6,6 +6,7 @@ import io.github.mfuerstenau.leia.runtime.Documents;
 import io.github.mfuerstenau.leia.runtime.Highlight;
 import io.github.mfuerstenau.leia.runtime.IndexReadException;
 import io.github.mfuerstenau.leia.runtime.Knn;
+import io.github.mfuerstenau.leia.runtime.KnnGraph;
 import io.github.mfuerstenau.leia.runtime.MoreLikeThisSearch;
 import io.github.mfuerstenau.leia.runtime.Points;
 import io.github.mfuerstenau.leia.runtime.Rebuild;
@@ -183,6 +184,11 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
     /** {@inheritDoc} KNN vectors came with Lucene 9. */
     @Override
     public Optional<Knn> knn() {
+        return Optional.empty();
+    }
+
+    @Override
+    public Optional<KnnGraph> knnGraph() {
         return Optional.empty();
     }
 

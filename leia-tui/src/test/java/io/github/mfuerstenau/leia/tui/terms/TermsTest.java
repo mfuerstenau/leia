@@ -10,6 +10,16 @@ import io.github.mfuerstenau.leia.protocol.index.Feature;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
+import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
+import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodeResult;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodesResult;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphResult;
+import io.github.mfuerstenau.leia.protocol.knn.KnnGraphLevel;
+import io.github.mfuerstenau.leia.protocol.knn.KnnGraphNeighbour;
+import io.github.mfuerstenau.leia.protocol.knn.KnnGraphNode;
+import io.github.mfuerstenau.leia.protocol.knn.KnnGraphSegment;
+import io.github.mfuerstenau.leia.protocol.knn.KnnGraphShape;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellResult;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeResult;
 import io.github.mfuerstenau.leia.protocol.points.LeafPoint;
@@ -250,7 +260,7 @@ class TermsTest {
         assertThat(terms.initialRequest()).isEmpty();
         assertThat(terms.handleKey(key('/'))).isEmpty();
         assertThat(terms.prompting()).isFalse();
-        assertThat(render(terms)).contains("No field has postings or points.");
+        assertThat(render(terms)).contains("No field has postings, points or vectors.");
     }
 
     @Test
@@ -619,5 +629,191 @@ class TermsTest {
                 new Request.LoadPointCell("code", 1, 0, List.of()),
                 new GetPointCellResult(cell(-5, 40, 3, true), List.of(), List.of(), false));
         assertThat(render(reopened)).doesNotContain("Points (");
+    }
+
+    private static IndexField vectorField(String name, int number) {
+        return new IndexField(
+                name,
+                number,
+                IndexOptions.NONE,
+                false,
+                false,
+                false,
+                DocValuesType.NONE,
+                0,
+                0,
+                8,
+                Optional.of(VectorEncoding.FLOAT32),
+                Optional.of(VectorSimilarity.COSINE),
+                Optional.empty());
+    }
+
+    private static KnnGraphNode node(int ord, int docId, int topLevel) {
+        return new KnnGraphNode(ord, docId, false, topLevel);
+    }
+
+    private static final KnnGraphNode ENTRY = node(17, 18, 1);
+
+    /**
+     * {@code id} has postings, {@code embedding} vectors, with its graphs in: {@code _0} with 20
+     * vectors on two levels, entry ord 17, and {@code _1} without a graph.
+     */
+    private static Terms graphTerms() {
+        Terms terms = new Terms(List.of(field("id", 0, IndexOptions.DOCS), vectorField("embedding", 1)));
+        terms.initialRequest();
+        assertThat(terms.handleKey(key(KeyCode.DOWN))).hasValue(new Request.LoadKnnGraph("embedding", 1));
+        assertThat(terms.knnGraphLoaded(
+                        new Request.LoadKnnGraph("embedding", 1),
+                        new GetKnnGraphResult(
+                                "embedding",
+                                8,
+                                VectorEncoding.FLOAT32,
+                                VectorSimilarity.COSINE,
+                                List.of(
+                                        new KnnGraphSegment(
+                                                0,
+                                                0,
+                                                Optional.of("_0"),
+                                                0,
+                                                21,
+                                                20,
+                                                Optional.of(
+                                                        new KnnGraphShape(List.of(20, 2), ENTRY, OptionalInt.of(16)))),
+                                        new KnnGraphSegment(1, 0, Optional.of("_1"), 21, 5, 5, Optional.empty())))))
+                .isEmpty();
+        return terms;
+    }
+
+    private static GetKnnGraphNodeResult neighbours(KnnGraphNode node, List<KnnGraphLevel> levels) {
+        return new GetKnnGraphNodeResult(0, node, levels);
+    }
+
+    @Test
+    void listsVectorFieldsOnARowOfTheirOwnWithTheirSegments() {
+        Terms terms = graphTerms();
+
+        assertThat(terms.showsGraph()).isTrue();
+        assertThat(TestScreens.render(frame -> terms.render(frame, frame.area()), 140, 12))
+                .contains(
+                        "embedding hnsw 8d",
+                        "embedding · 2 segments · 25 vectors · cosine",
+                        "▸ _0  20 vectors · 2 levels · M 16",
+                        "_1  5 vectors · no graph",
+                        "⏎ on a node shows its neighbours.");
+        assertThat(terms.keys()).contains("< back", "d open doc");
+    }
+
+    @Test
+    void expandsASegmentAndALevelAndWalksFromNodeToNode() {
+        Terms terms = graphTerms();
+        terms.handleKey(key(KeyCode.RIGHT));
+        assertThat(terms.handleKey(key(KeyCode.ENTER))).isEmpty();
+        assertThat(render(terms)).contains("▾ _0", "entry  ord 17 · doc 18", "▸ L1  2 nodes", "▸ L0  20 nodes");
+
+        // L0 fetches its first page.
+        terms.handleKey(key(KeyCode.DOWN));
+        terms.handleKey(key(KeyCode.DOWN));
+        terms.handleKey(key(KeyCode.DOWN));
+        Request.LoadKnnNodes page = new Request.LoadKnnNodes("embedding", 1, 0, 0, 0);
+        assertThat(terms.handleKey(key(KeyCode.ENTER))).hasValue(page);
+        assertThat(terms.handleKey(key(KeyCode.ENTER))).isEmpty();
+        terms.knnNodesLoaded(page, new GetKnnGraphNodesResult(20, List.of(node(0, 0, 0), node(1, 2, 1))));
+        assertThat(render(terms))
+                .contains("▾ L0  20 nodes", "ord 0 · doc 0", "ord 1 · doc 2 · top L1", "⏎ more (2 of 20)");
+
+        // A node's neighbours, by level; the focus moves to them.
+        terms.handleKey(key(KeyCode.DOWN));
+        terms.handleKey(key(KeyCode.DOWN));
+        Request.LoadKnnNode open = Request.LoadKnnNode.ofOrd("embedding", 1, 0, 1, false);
+        assertThat(terms.handleKey(key(KeyCode.ENTER))).hasValue(open);
+        terms.knnNodeLoaded(
+                open,
+                neighbours(
+                        node(1, 2, 1),
+                        List.of(
+                                new KnnGraphLevel(1, List.of(new KnnGraphNeighbour(ENTRY, 0.75f))),
+                                new KnnGraphLevel(
+                                        0,
+                                        List.of(
+                                                new KnnGraphNeighbour(node(0, 0, 0), 0.9312f),
+                                                new KnnGraphNeighbour(new KnnGraphNode(5, 6, true, 0), 0.5f))))));
+        assertThat(render(terms))
+                .contains(
+                        " ord 1 ",
+                        "Lvl    Ord   Doc  Top   Score",
+                        "node     1     2  L1",
+                        "L1      17    18  L1   0.7500",
+                        "L0       0     0  L0   0.9312",
+                        "         5     6  L0   0.5000");
+
+        // Enter walks on to the selected neighbour; d opens its document.
+        terms.handleKey(key(KeyCode.DOWN));
+        assertThat(terms.handleKey(key('d'))).hasValue(new Request.VectorDocument("embedding", 0));
+        Request.LoadKnnNode walk = Request.LoadKnnNode.ofOrd("embedding", 1, 0, 0, true);
+        assertThat(terms.handleKey(key(KeyCode.ENTER))).hasValue(walk);
+        terms.knnNodeLoaded(
+                walk,
+                neighbours(
+                        node(0, 0, 0),
+                        List.of(new KnnGraphLevel(0, List.of(new KnnGraphNeighbour(node(1, 2, 1), 0.9312f))))));
+        assertThat(render(terms))
+                .contains(" ord 1 › 0 ", "node     0     0  L0")
+                .doesNotContain("L1      17");
+
+        // < goes back, without a fetch, to where the walk came from.
+        assertThat(terms.handleKey(key('<'))).isEmpty();
+        assertThat(render(terms)).contains(" ord 1 ", "L1      17    18").doesNotContain("› 0");
+        assertThat(terms.handleKey(key('<'))).isEmpty();
+        assertThat(render(terms)).contains("the walk's first node");
+    }
+
+    @Test
+    void aSegmentWithoutAGraphSaysSo() {
+        Terms terms = graphTerms();
+        terms.handleKey(key(KeyCode.RIGHT));
+        terms.handleKey(key(KeyCode.DOWN));
+
+        assertThat(terms.handleKey(key(KeyCode.ENTER))).isEmpty();
+        assertThat(render(terms)).contains("no graph in this segment");
+        assertThat(terms.handleKey(key('/'))).isEmpty();
+        assertThat(render(terms)).contains("/ seeks terms only");
+    }
+
+    @Test
+    void showNodeOpensADocumentsNodeOnceTheGraphsAreIn() {
+        Terms terms = new Terms(List.of(field("id", 0, IndexOptions.DOCS), vectorField("embedding", 1)));
+        terms.initialRequest();
+
+        assertThat(terms.showNode("embedding", 42)).hasValue(new Request.LoadKnnGraph("embedding", 1));
+        Optional<Request> next = terms.knnGraphLoaded(
+                new Request.LoadKnnGraph("embedding", 1),
+                new GetKnnGraphResult("embedding", 8, VectorEncoding.FLOAT32, VectorSimilarity.COSINE, List.of()));
+        Request.LoadKnnNode byDoc = Request.LoadKnnNode.ofDoc("embedding", 1, 42);
+        assertThat(next).hasValue(byDoc);
+        terms.knnNodeFailed(byDoc, "Invalid params: document 42 has no vector");
+        assertThat(render(terms)).contains("Cannot read the node: Invalid");
+
+        // With the graphs in, the node is asked for at once.
+        assertThat(terms.showNode("embedding", 7)).hasValue(Request.LoadKnnNode.ofDoc("embedding", 1, 7));
+        assertThat(terms.showNode("id", 7)).isEmpty();
+    }
+
+    @Test
+    void theGraphNeedsItsFeature() {
+        Terms terms = new Terms(List.of(field("id", 0, IndexOptions.DOCS), vectorField("embedding", 1)))
+                .withFeatures(Set.of(Feature.TERMS, Feature.POSTINGS, Feature.KNN_VECTORS));
+        terms.initialRequest();
+
+        assertThat(terms.handleKey(key(KeyCode.DOWN))).isEmpty();
+        assertThat(render(terms)).contains("doesn't", "read HNSW graphs.");
+        terms.handleKey(key(KeyCode.RIGHT));
+        assertThat(terms.handleKey(key(KeyCode.ENTER))).hasValue(new Request.Unsupported("HNSW graph"));
+        assertThat(terms.keys()).doesNotContain("< back");
+    }
+
+    @Test
+    void aLongWalkLeavesOutItsStart() {
+        assertThat(Terms.walkTitle(List.of("1", "2", "3"), 30)).isEqualTo(" ord 1 › 2 › 3 ");
+        assertThat(Terms.walkTitle(List.of("100", "200", "300", "400"), 19)).isEqualTo(" ord … › 300 › 400 ");
     }
 }

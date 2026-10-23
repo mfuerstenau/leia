@@ -388,12 +388,26 @@ class DocumentsTest {
                         "-------K  ",
                         "[0.6, -0.8, 0.0] 3d",
                         "vectors 3d float dot product",
-                        "Vector      3d float, length 1.00000, N finds the nearest",
+                        "Vector      3d float, length 1.00000, N finds the nearest, T its graph node",
                         "0  0.6  -0.8  0.0");
         assertThat(documents.handleKey(key('N'))).hasValue(new Request.SearchKnn("vec", 4));
 
         assertThat(documents.handleKey(key('v'))).isEmpty();
         assertThat(render(documents, 100, 20)).contains("vec · 1 of 1 · float vector · 12 B", "│0.6", "│-0.8");
+    }
+
+    @Test
+    void tShowsAVectorsNodeInTheHnswGraph() {
+        Documents documents = withVector();
+        documents.handleKey(key(KeyCode.DOWN));
+
+        assertThat(documents.handleKey(key('T'))).hasValue(new Request.BrowseGraph("vec", 4));
+
+        Documents withoutGraph =
+                withVector().withFeatures(Set.of(Feature.DOCUMENTS, Feature.TERMS, Feature.KNN_VECTORS));
+        withoutGraph.handleKey(key(KeyCode.DOWN));
+        assertThat(withoutGraph.handleKey(key('T'))).isEmpty();
+        assertThat(render(withoutGraph, 100, 20)).contains("HNSW graph not supported");
     }
 
     @Test

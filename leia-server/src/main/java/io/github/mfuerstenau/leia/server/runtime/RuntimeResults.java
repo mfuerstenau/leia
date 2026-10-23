@@ -154,7 +154,8 @@ public final class RuntimeResults {
      * if the runtime's check takes them. Reopen works on every runtime (ADR 0060), auto stop words
      * wherever there are terms (ADR 0061), highlighting where the runtime highlights and searches
      * (ADR 0063), the similarity and sort where it scores and searches (ADR 0064), and the doc
-     * values, standard and More-Like-This queries where it has them and searches (ADR 0066).
+     * values, standard and More-Like-This queries where it has them and searches (ADR 0066), and the
+     * HNSW graphs where it reads them and a field has vectors (ADR 0085).
      */
     public static Set<Feature> features(OpenRuntime open) {
         RuntimeIndex index = open.index();
@@ -203,6 +204,10 @@ public final class RuntimeResults {
         if (index.knn().isPresent()
                 && index.fields().stream().anyMatch(field -> field.vectors().isPresent())) {
             features.add(Feature.KNN_VECTORS);
+        }
+        if (index.knnGraph().isPresent()
+                && index.fields().stream().anyMatch(field -> field.vectors().isPresent())) {
+            features.add(Feature.KNN_GRAPH);
         }
         if (open.runtime().commits().isPresent()) {
             features.add(Feature.COMMITS);
@@ -284,7 +289,7 @@ public final class RuntimeResults {
         }
     }
 
-    private static RuntimeIndex.Stats stats(RuntimeIndex index) throws RpcException {
+    static RuntimeIndex.Stats stats(RuntimeIndex index) throws RpcException {
         try {
             return index.stats();
         } catch (IOException e) {
@@ -489,14 +494,14 @@ public final class RuntimeResults {
         };
     }
 
-    private static VectorEncoding vectorEncoding(RuntimeIndex.VectorEncoding encoding) {
+    static VectorEncoding vectorEncoding(RuntimeIndex.VectorEncoding encoding) {
         return switch (encoding) {
             case BYTE -> VectorEncoding.BYTE;
             case FLOAT32 -> VectorEncoding.FLOAT32;
         };
     }
 
-    private static VectorSimilarity vectorSimilarity(RuntimeIndex.VectorSimilarity similarity) {
+    static VectorSimilarity vectorSimilarity(RuntimeIndex.VectorSimilarity similarity) {
         return switch (similarity) {
             case EUCLIDEAN -> VectorSimilarity.EUCLIDEAN;
             case DOT_PRODUCT -> VectorSimilarity.DOT_PRODUCT;
@@ -1241,14 +1246,32 @@ public final class RuntimeResults {
      */
     private static Search.ParsedQuery knn(OpenRuntime open, Search search, KnnQuery knn) throws RpcException {
         Knn group = open.index().knn().orElseThrow(open::notSupported);
-        RuntimeIndex.Field field = open.index().fields().stream()
-                .filter(f -> f.name().equals(knn.field()))
+        RuntimeIndex.VectorFormat format = vectorFormat(open, knn.field());
+        KnnChecks.check(knn, format.dimension());
+        RuntimeIndex.Vector target = knnTarget(open, group, knn, format);
+        Optional<Search.ParsedQuery> filter = knnFilter(open, search, knn);
+        return knn.exact()
+                ? group.exact(knn.field(), target, filter)
+                : group.approximate(knn.field(), target, knn.k().getAsInt(), filter);
+    }
+
+    /**
+     * The vectors of {@code field}; a dimension of 0 without them, which {@link KnnChecks#check}
+     * refuses.
+     */
+    static RuntimeIndex.VectorFormat vectorFormat(OpenRuntime open, String field) throws RpcException {
+        return open.index().fields().stream()
+                .filter(f -> f.name().equals(field))
                 .findFirst()
-                .orElseThrow(() ->
-                        new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + knn.field() + "' in the index"));
-        KnnChecks.check(
-                knn, field.vectors().map(RuntimeIndex.VectorFormat::dimension).orElse(0));
-        RuntimeIndex.VectorFormat format = field.vectors().orElseThrow();
+                .orElseThrow(() -> new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + field + "' in the index"))
+                .vectors()
+                .orElse(new RuntimeIndex.VectorFormat(
+                        0, RuntimeIndex.VectorEncoding.FLOAT32, RuntimeIndex.VectorSimilarity.EUCLIDEAN));
+    }
+
+    /** The target of {@code knn}, a vector or a document's, checked against the field's vectors. */
+    static RuntimeIndex.Vector knnTarget(OpenRuntime open, Knn group, KnnQuery knn, RuntimeIndex.VectorFormat format)
+            throws RpcException {
         KnnVector target = knn.vector().isPresent() ? knn.vector().get() : documentVector(open, group, knn);
         try {
             KnnChecks.checkTarget(
@@ -1260,12 +1283,14 @@ public final class RuntimeResults {
         } catch (IllegalArgumentException e) {
             throw new RpcException(ErrorCode.INVALID_PARAMS, "Invalid params: " + e.getMessage(), e);
         }
-        Optional<Search.ParsedQuery> filter = knn.filter().isPresent()
+        return runtimeVector(target);
+    }
+
+    /** The filter of {@code knn}, parsed by the runtime. */
+    static Optional<Search.ParsedQuery> knnFilter(OpenRuntime open, Search search, KnnQuery knn) throws RpcException {
+        return knn.filter().isPresent()
                 ? Optional.of(parse(open, search, knn.filter().get()))
                 : Optional.empty();
-        return knn.exact()
-                ? group.exact(knn.field(), runtimeVector(target), filter)
-                : group.approximate(knn.field(), runtimeVector(target), knn.k().getAsInt(), filter);
     }
 
     /** The vector of the query's document, which may be deleted. */

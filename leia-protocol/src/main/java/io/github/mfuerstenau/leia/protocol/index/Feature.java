@@ -35,6 +35,8 @@ public enum Feature {
     DOC_VALUES,
     /** KNN vectors in documents and queries. */
     KNN_VECTORS,
+    /** {@code getKnnGraph}, {@code getKnnGraphNodes} and {@code getKnnGraphNode} (ADR 0085), with {@link #KNN_VECTORS}. */
+    KNN_GRAPH,
     /** {@code getCommits} and {@code getCommit}. */
     COMMITS,
     /**

@@ -24,10 +24,13 @@ import org.apache.lucene.analysis.tokenattributes.CharTermAttribute;
 import org.apache.lucene.analysis.tokenattributes.PayloadAttribute;
 import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.codecs.FilterCodec;
+import org.apache.lucene.codecs.KnnVectorsFormat;
 import org.apache.lucene.codecs.PointsFormat;
 import org.apache.lucene.codecs.PointsReader;
 import org.apache.lucene.codecs.PointsWriter;
 import org.apache.lucene.codecs.lucene90.Lucene90PointsWriter;
+import org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsFormat;
+import org.apache.lucene.codecs.perfield.PerFieldKnnVectorsFormat;
 import org.apache.lucene.collation.CollationKeyAnalyzer;
 import org.apache.lucene.document.BinaryDocValuesField;
 import org.apache.lucene.document.DateTools;
@@ -77,8 +80,11 @@ import org.apache.lucene.util.bkd.BKDWriter;
  * docs/demo-index.md} for what is where.
  *
  * <p>The points are written with leaves of {@value #POINTS_PER_LEAF} points instead of Lucene's 512,
- * so that a segment's 200 points make a tree of several levels to browse (ADR 0041). The files are
- * those of the default codec, which reads them as any other.
+ * so that a segment's 200 points make a tree of several levels to browse (ADR 0041). The KNN vectors
+ * get an HNSW graph in every segment, though Lucene builds none for a segment as small as these
+ * (ADR 0085): {@code embedding} with Lucene's M of 16, {@code fingerprint} with an M of {@value
+ * #FINGERPRINT_M}, for more levels. The files are those of the default codec, which reads them as any
+ * other.
  */
 public final class DemoIndexWriter {
 
@@ -93,6 +99,8 @@ public final class DemoIndexWriter {
     private static final int ODD_TEXT_DOC = 7;
     /** The most points in a leaf of a BKD tree. */
     private static final int POINTS_PER_LEAF = 16;
+    /** The most neighbours of a node of {@code fingerprint}'s graph above level 0. */
+    private static final int FINGERPRINT_M = 4;
     /** The only document with the field {@code deleted_only}; it is deleted. */
     private static final int DELETED_ONLY_DOC = 74;
 
@@ -219,7 +227,7 @@ public final class DemoIndexWriter {
                 IndexWriter writer = new IndexWriter(
                         directory,
                         new IndexWriterConfig(analyzer())
-                                .setCodec(smallPointLeaves())
+                                .setCodec(demoCodec())
                                 // No merges: keep the segments and the deleted documents.
                                 .setMergePolicy(NoMergePolicy.INSTANCE)
                                 // Keep every commit, for the commits screen.
@@ -257,12 +265,29 @@ public final class DemoIndexWriter {
 
     /**
      * The default codec, under its own name, but writing BKD trees with leaves of {@value
-     * #POINTS_PER_LEAF} points. The leaf size is in the files, so the default codec reads them.
+     * #POINTS_PER_LEAF} points, and an HNSW graph however small the segment. The leaf size and M are
+     * in the files, and the graph threshold only decides whether one is written, so the default codec
+     * reads them.
      */
-    private static Codec smallPointLeaves() {
+    private static Codec demoCodec() {
         Codec codec = Codec.getDefault();
         PointsFormat points = codec.pointsFormat();
+        KnnVectorsFormat embedding = new Lucene99HnswVectorsFormat(
+                Lucene99HnswVectorsFormat.DEFAULT_MAX_CONN, Lucene99HnswVectorsFormat.DEFAULT_BEAM_WIDTH, 0);
+        KnnVectorsFormat fingerprint =
+                new Lucene99HnswVectorsFormat(FINGERPRINT_M, Lucene99HnswVectorsFormat.DEFAULT_BEAM_WIDTH, 0);
+        KnnVectorsFormat vectors = new PerFieldKnnVectorsFormat() {
+            @Override
+            public KnnVectorsFormat getKnnVectorsFormatForField(String field) {
+                return field.equals("fingerprint") ? fingerprint : embedding;
+            }
+        };
         return new FilterCodec(codec.getName(), codec) {
+            @Override
+            public KnnVectorsFormat knnVectorsFormat() {
+                return vectors;
+            }
+
             @Override
             public PointsFormat pointsFormat() {
                 return new PointsFormat() {

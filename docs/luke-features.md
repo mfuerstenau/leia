@@ -96,7 +96,7 @@ Overview term → Documents (browse postings) or Search (TermQuery) · Documents
 - Term counts for **all fields are computed eagerly on open** (full term scan of every field) → slow on big indexes.
 - Fixed search page size 10; results only show stored fields; no highlighting (despite the dependency).
 - Term-query mode splits on `:` → values containing `:` are truncated.
-- No KNN vector inspection/search, no point-value browsing, no per-segment (leaf) view of docs, no deleted-doc inspection.
+- No KNN vector inspection/search, no HNSW graph view, no point-value browsing, no per-segment (leaf) view of docs, no deleted-doc inspection.
 - Binary stored values shown as raw `BytesRef.toString()`.
 - No cancellation of long operations (except export terms).
 

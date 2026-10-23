@@ -34,6 +34,16 @@ import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodeParams;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodeResult;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodesParams;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphParams;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphResult;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnRecallResult;
+import io.github.mfuerstenau.leia.protocol.knn.KnnGraphNode;
+import io.github.mfuerstenau.leia.protocol.knn.KnnGraphShape;
+import io.github.mfuerstenau.leia.protocol.knn.KnnRecallResult;
+import io.github.mfuerstenau.leia.protocol.knn.StartKnnRecallParams;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellParams;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellResult;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
@@ -144,6 +154,7 @@ class Lucene8BackendTest {
         // Only with a field that has vectors, which only 9.x writes.
         if (nine) {
             features.add(Feature.KNN_VECTORS);
+            features.add(Feature.KNN_GRAPH);
         }
         assertThat(opened.features()).containsExactlyInAnyOrderElementsOf(features);
         // Created by 8, so its norms are those of 8, though 9 wrote the commit.
@@ -325,6 +336,86 @@ class Lucene8BackendTest {
                 RuntimeExplains.explainsTheHit(backend, query, hit, true);
             }
         }
+    }
+
+    /** Only the 9.x segment has vectors, and 9.12 builds a graph however few they are (ADR 0085). */
+    @Test
+    void readsTheGraphOfThe9xSegment() throws Exception {
+        open(testIndex("lucene8to9"));
+        GetKnnGraphResult graph = backend.call(Methods.GET_KNN_GRAPH, new GetKnnGraphParams("embedding"));
+
+        assertThat(graph.segments()).singleElement().satisfies(segment -> {
+            assertThat(segment.name()).contains("_2");
+            assertThat(List.of(segment.docBase(), segment.vectors())).containsExactly(8, 3);
+            assertThat(segment.shape().map(KnnGraphShape::levelSizes)).contains(List.of(3));
+            // 9.12's graph doesn't say its M.
+            assertThat(segment.shape().orElseThrow().maxConn()).isEmpty();
+        });
+        assertThat(backend.call(
+                                Methods.GET_KNN_GRAPH_NODES,
+                                new GetKnnGraphNodesParams(
+                                        "embedding", graph.segments().getFirst().segment(), 0, 0, 10))
+                        .nodes())
+                .extracting(KnnGraphNode::ord, KnnGraphNode::docId)
+                .containsExactly(tuple(0, 8), tuple(1, 9), tuple(2, 10));
+
+        // North's neighbour by cosine, as Lucene scores it: (1 + cos) / 2. East is no neighbour: it is
+        // nearer to north east than to north, so the graph's diversity check leaves it out.
+        GetKnnGraphNodeResult north =
+                backend.call(Methods.GET_KNN_GRAPH_NODE, GetKnnGraphNodeParams.ofDoc("embedding", 8));
+        assertThat(north.levels())
+                .singleElement()
+                .satisfies(level -> assertThat(level.neighbours())
+                        .extracting(neighbour -> neighbour.node().docId(), neighbour -> neighbour.score())
+                        .containsExactly(tuple(9, 0.9f)));
+        GetKnnGraphNodeResult northEast =
+                backend.call(Methods.GET_KNN_GRAPH_NODE, GetKnnGraphNodeParams.ofDoc("embedding", 9));
+        assertThat(northEast.levels().getFirst().neighbours())
+                .extracting(neighbour -> neighbour.node().docId())
+                .containsExactlyInAnyOrder(8, 10);
+        backend.fails(Methods.GET_KNN_GRAPH_NODE, GetKnnGraphNodeParams.ofDoc("code", 10), ErrorCode.INVALID_PARAMS);
+    }
+
+    /** The recall check through 9.12's searches (ADR 0086): three vectors, so every search is exact. */
+    @Test
+    void checksTheRecallOfTheNearestVectors() throws Exception {
+        open(testIndex("lucene8to9"));
+        KnnRecallResult sampled = backend.job(
+                Methods.START_KNN_RECALL,
+                new StartKnnRecallParams(
+                        new KnnQuery(
+                                "embedding",
+                                OptionalInt.empty(),
+                                Optional.empty(),
+                                OptionalInt.of(1),
+                                false,
+                                Optional.empty()),
+                        OptionalInt.of(10)),
+                Methods.GET_KNN_RECALL,
+                GetKnnRecallResult::recall);
+        // Each of the 3 documents, without itself.
+        assertThat(sampled.targets()).isEqualTo(3);
+        assertThat(sampled.worst())
+                .extracting(target -> target.docId().getAsInt())
+                .containsExactlyInAnyOrder(8, 9, 10);
+        assertThat(sampled.meanRecall()).isEqualTo(1.0);
+
+        KnnRecallResult north = backend.job(
+                Methods.START_KNN_RECALL,
+                new StartKnnRecallParams(
+                        new KnnQuery(
+                                "embedding",
+                                OptionalInt.empty(),
+                                Optional.of(NORTH),
+                                OptionalInt.of(2),
+                                false,
+                                Optional.empty()),
+                        OptionalInt.empty()),
+                Methods.GET_KNN_RECALL,
+                GetKnnRecallResult::recall);
+        assertThat(north.worst())
+                .singleElement()
+                .satisfies(target -> assertThat(target.recall()).isEqualTo(1.0));
     }
 
     @Test

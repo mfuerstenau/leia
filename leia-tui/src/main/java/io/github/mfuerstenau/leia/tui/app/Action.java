@@ -8,6 +8,7 @@ import io.github.mfuerstenau.leia.protocol.filter.StepFilterParams;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsParams;
+import io.github.mfuerstenau.leia.protocol.knn.StartKnnRecallParams;
 import io.github.mfuerstenau.leia.protocol.search.StartExplainParams;
 import io.github.mfuerstenau.leia.protocol.search.StartHighlightParams;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
@@ -99,6 +100,26 @@ public sealed interface Action {
      * App#pointCellLoaded} or {@link App#pointCellFailed} (ADR 0041).
      */
     record LoadPointCell(String field, long serial, int segment, List<Integer> path) implements Action {}
+
+    /**
+     * Fetch the HNSW graphs of a vector field, and report back with {@link App#knnGraphLoaded} or
+     * {@link App#knnGraphFailed} (ADR 0085).
+     */
+    record LoadKnnGraph(String field, long serial) implements Action {}
+
+    /**
+     * Fetch a page of the nodes of a level of the graphs {@code serial}, and report back with {@link
+     * App#knnNodesLoaded} or {@link App#knnNodesFailed} (ADR 0085).
+     */
+    record LoadKnnNodes(String field, long serial, int segment, int level, int offset) implements Action {}
+
+    /**
+     * Fetch a node of the graphs {@code serial} with its neighbours, by segment and ordinal or by
+     * document, and report back with {@link App#knnNodeLoaded} or {@link App#knnNodeFailed} (ADR
+     * 0085).
+     */
+    record LoadKnnNode(String field, long serial, OptionalInt segment, OptionalInt ord, OptionalInt docId, boolean walk)
+            implements Action {}
 
     /**
      * Cancel the jobs in {@code cancel}, fetch this document, and report back with {@link
@@ -233,6 +254,12 @@ public sealed interface Action {
      * {@link App#storedScanStarted} or {@link App#storedScanFailed}.
      */
     record StartStoredScan(long scanId, StartStoredScanParams params, List<Long> cancel) implements Action {}
+
+    /**
+     * Cancel the jobs in {@code cancel}, then start recall check {@code recallId} (ADR 0086), and
+     * report back with {@link App#knnRecallStarted} or {@link App#knnRecallFailed}.
+     */
+    record StartKnnRecall(long recallId, StartKnnRecallParams params, List<Long> cancel) implements Action {}
 
     /** Cancel these search, explanation and scan jobs; the app has forgotten them, so nothing is reported back. */
     record CancelSearch(List<Long> jobs) implements Action {}

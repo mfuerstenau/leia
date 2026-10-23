@@ -26,6 +26,7 @@ import io.github.mfuerstenau.leia.runtime.DocValuesSearch;
 import io.github.mfuerstenau.leia.runtime.Documents;
 import io.github.mfuerstenau.leia.runtime.Highlight;
 import io.github.mfuerstenau.leia.runtime.Knn;
+import io.github.mfuerstenau.leia.runtime.KnnGraph;
 import io.github.mfuerstenau.leia.runtime.MoreLikeThisSearch;
 import io.github.mfuerstenau.leia.runtime.Points;
 import io.github.mfuerstenau.leia.runtime.Rebuild;
@@ -173,6 +174,11 @@ final class Lucene10Index
     @Override
     public Optional<Knn> knn() {
         return Optional.of(this);
+    }
+
+    @Override
+    public Optional<KnnGraph> knnGraph() {
+        return Optional.of(new Lucene10KnnGraph(index));
     }
 
     @Override
@@ -869,6 +875,11 @@ final class Lucene10Index
     public ParsedQuery exact(String field, Vector target, Optional<ParsedQuery> filter) {
         return new Lucene10Query(
                 KnnQueries.exact(vectorField(field), knnVector(target), filter.map(Lucene10Index::query)));
+    }
+
+    @Override
+    public List<Integer> sample(String field, int n) throws IOException {
+        return index.knnSample(field, n);
     }
 
     @Override

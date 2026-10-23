@@ -46,6 +46,14 @@ import io.github.mfuerstenau.leia.protocol.jars.LoadRuntimesResult;
 import io.github.mfuerstenau.leia.protocol.job.CancelJobResult;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodeParams;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodeResult;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodesParams;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodesResult;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphParams;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphResult;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnRecallResult;
+import io.github.mfuerstenau.leia.protocol.knn.StartKnnRecallParams;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellParams;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellResult;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
@@ -195,6 +203,56 @@ public final class Methods {
      */
     public static final RpcMethod<GetPointCellParams, GetPointCellResult> GET_POINT_CELL =
             new RpcMethod<>("getPointCell", GetPointCellParams.class, GetPointCellResult.class);
+
+    /**
+     * The HNSW graphs of a KNN vector field (ADR 0085): for each segment with vectors in it, the
+     * nodes of each level of its graph and the entry node. Fails with {@code NO_INDEX_OPEN}, {@code
+     * NO_READER}, {@code NOT_SUPPORTED}, {@code FIELD_NOT_FOUND}, {@code INDEX_NOT_READABLE}, or
+     * {@code INVALID_PARAMS} for a field without vectors.
+     */
+    public static final RpcMethod<GetKnnGraphParams, GetKnnGraphResult> GET_KNN_GRAPH =
+            new RpcMethod<>("getKnnGraph", GetKnnGraphParams.class, GetKnnGraphResult.class);
+
+    /**
+     * A page of the nodes of one level of a segment's HNSW graph (ADR 0085), in ordinal order. It reads
+     * the node lists of the levels above 0, which are a fraction of the nodes, so it is no job. Fails
+     * with {@code NO_INDEX_OPEN}, {@code NO_READER}, {@code NOT_SUPPORTED}, {@code FIELD_NOT_FOUND},
+     * {@code INDEX_NOT_READABLE}, or {@code INVALID_PARAMS} for a field without vectors, a segment out
+     * of range or without a graph of the field, a level out of range, or an offset or limit out of
+     * range.
+     */
+    public static final RpcMethod<GetKnnGraphNodesParams, GetKnnGraphNodesResult> GET_KNN_GRAPH_NODES =
+            new RpcMethod<>("getKnnGraphNodes", GetKnnGraphNodesParams.class, GetKnnGraphNodesResult.class);
+
+    /**
+     * A node of a segment's HNSW graph with its neighbours on each level it is on, scored by the
+     * field's similarity (ADR 0085). Fails with {@code NO_INDEX_OPEN}, {@code NO_READER}, {@code
+     * NOT_SUPPORTED}, {@code FIELD_NOT_FOUND}, {@code DOC_NOT_FOUND}, {@code INDEX_NOT_READABLE}, or
+     * {@code INVALID_PARAMS} for a field without vectors, neither a document nor a segment and
+     * ordinal, a segment out of range or without a graph of the field, an ordinal out of range, or a
+     * document without a vector in the field.
+     */
+    public static final RpcMethod<GetKnnGraphNodeParams, GetKnnGraphNodeResult> GET_KNN_GRAPH_NODE =
+            new RpcMethod<>("getKnnGraphNode", GetKnnGraphNodeParams.class, GetKnnGraphNodeResult.class);
+
+    /**
+     * Checks the recall of approximate KNN search against exact in a job (ADR 0086): for the
+     * query's target, or for a sample of the field's documents, the approximate top k against the
+     * exact top k, through the same search as {@code startSearch}. Fails with {@code NO_INDEX_OPEN},
+     * {@code NO_READER}, {@code NOT_SUPPORTED}, {@code FIELD_NOT_FOUND}, {@code DOC_NOT_FOUND}, {@code
+     * INVALID_QUERY} for a filter that doesn't parse, or {@code INVALID_PARAMS} for an exact query, a
+     * missing or out-of-range {@code k}, a target that doesn't fit the field, a sample with a target,
+     * no target without a sample, or a sample out of range.
+     */
+    public static final RpcMethod<StartKnnRecallParams, JobStarted> START_KNN_RECALL =
+            new RpcMethod<>("startKnnRecall", StartKnnRecallParams.class, JobStarted.class);
+
+    /**
+     * The progress of a recall check, and its outcome once it is done (ADR 0086). The outcome is
+     * handed out once; afterwards the job is gone ({@code JOB_NOT_FOUND}).
+     */
+    public static final RpcMethod<JobParams, GetKnnRecallResult> GET_KNN_RECALL =
+            new RpcMethod<>("getKnnRecall", JobParams.class, GetKnnRecallResult.class);
 
     /**
      * A page of the terms of a field, in term order, from a given term on (ADR 0007). A field without
@@ -459,6 +517,11 @@ public final class Methods {
             GET_POSITIONS,
             GET_POINT_TREE,
             GET_POINT_CELL,
+            GET_KNN_GRAPH,
+            GET_KNN_GRAPH_NODES,
+            GET_KNN_GRAPH_NODE,
+            START_KNN_RECALL,
+            GET_KNN_RECALL,
             GET_COMMITS,
             GET_COMMIT,
             START_SEARCH,

@@ -752,6 +752,78 @@ public final class ReadOnlyIndex implements OpenedIndex {
         return Points.cell(reader, pointField(field).getName(), segment, path);
     }
 
+    /**
+     * The HNSW graphs of a KNN vector field (ADR 0085): for each segment with vectors in it, its
+     * levels and entry node, if it has a graph.
+     *
+     * @throws IllegalArgumentException if there is no such field, or it has no vectors
+     * @throws IOException if reading the graphs fails
+     */
+    public KnnGraphs.Graph knnGraph(String field) throws IOException {
+        return KnnGraphs.graph(reader, vectorField(field));
+    }
+
+    /**
+     * A page of the nodes of a level of a KNN vector field's graph in one segment (ADR 0085), in
+     * ordinal order.
+     *
+     * @param segment the segment's position among the reader's leaves
+     * @throws IllegalArgumentException if there is no such field, it has no vectors, there is no such
+     *     segment or it has no graph of the field, there is no such level, or the offset or limit is out
+     *     of range
+     * @throws IOException if reading the graph fails
+     */
+    public KnnGraphs.NodePage knnGraphNodes(String field, int segment, int level, int offset, int limit)
+            throws IOException {
+        return KnnGraphs.nodes(reader, vectorField(field), segment, level, offset, limit);
+    }
+
+    /**
+     * A node of a KNN vector field's graph in one segment (ADR 0085), with its neighbours on each
+     * level it is on.
+     *
+     * @throws IllegalArgumentException if there is no such field, it has no vectors, there is no such
+     *     segment or it has no graph of the field, or there is no such node
+     * @throws IOException if reading the graph or the vectors fails
+     */
+    public KnnGraphs.NodeNeighbours knnGraphNode(String field, int segment, int ord) throws IOException {
+        return KnnGraphs.node(reader, vectorField(field), segment, ord);
+    }
+
+    /**
+     * Where a document's vector in a KNN vector field is in the graphs (ADR 0085); empty if it has
+     * none there. A deleted document is found too.
+     *
+     * @throws IllegalArgumentException if there is no such document id, or field with vectors
+     * @throws IOException if reading the vectors fails
+     */
+    public Optional<KnnGraphs.NodeRef> knnGraphFind(String field, int docId) throws IOException {
+        FieldInfo info = vectorField(field);
+        checkDocId(docId);
+        return KnnGraphs.find(reader, info, docId);
+    }
+
+    /**
+     * Up to {@code n} live documents with a vector in a KNN vector field, spread evenly by vector
+     * ordinal over the segments, for a recall check (ADR 0086). In document id order.
+     *
+     * @throws IllegalArgumentException if there is no such field, it has no vectors, or {@code n} is
+     *     below 1
+     * @throws IOException if reading the vectors fails
+     */
+    public List<Integer> knnSample(String field, int n) throws IOException {
+        return KnnGraphs.sample(reader, vectorField(field), n);
+    }
+
+    private FieldInfo vectorField(String field) {
+        checkField(field);
+        FieldInfo info = fieldInfos.fieldInfo(field);
+        if (info.getVectorDimension() == 0) {
+            throw new IllegalArgumentException("Field " + field + " has no KNN vectors");
+        }
+        return info;
+    }
+
     private FieldInfo pointField(String field) {
         checkField(field);
         FieldInfo info = fieldInfos.fieldInfo(field);

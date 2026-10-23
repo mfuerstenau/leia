@@ -22,6 +22,10 @@ import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnRecallResult;
+import io.github.mfuerstenau.leia.protocol.knn.KnnRecallMiss;
+import io.github.mfuerstenau.leia.protocol.knn.KnnRecallResult;
+import io.github.mfuerstenau.leia.protocol.knn.KnnRecallTarget;
 import io.github.mfuerstenau.leia.protocol.search.Bm25Similarity;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
 import io.github.mfuerstenau.leia.protocol.search.ClassicSimilarity;
@@ -937,6 +941,127 @@ class SearchTest {
                 false);
         assertThat(render(reopened))
                 .contains("KNN · fingerprint (2d byte, euclidean) · k 5 · approximate", "where  red");
+    }
+
+    private static Request.Recall recallOf(Optional<Request> request) {
+        assertThat(request).containsInstanceOf(Request.Recall.class);
+        return (Request.Recall) request.orElseThrow();
+    }
+
+    private static KnnRecallResult recallResult(int targets, double mean, List<KnnRecallTarget> worst) {
+        return new KnnRecallResult(
+                "embedding",
+                10,
+                targets,
+                mean,
+                worst.stream().mapToDouble(KnnRecallTarget::recall).min().orElse(1),
+                (int) worst.stream().filter(t -> t.missed().isEmpty()).count(),
+                java.util.OptionalDouble.of(0),
+                java.util.OptionalDouble.of(0),
+                worst);
+    }
+
+    @Test
+    void rChecksTheRecallOfTheLinesTargetAndOpensAMissedDocument() {
+        Search search = knnMode();
+        line(search, "42");
+        assertThat(search.keys()).contains("r recall");
+
+        Request.Recall recall = recallOf(press(search, 'r'));
+        assertThat(recall.params().sample()).isEmpty();
+        assertThat(recall.params().query())
+                .isEqualTo(new KnnQuery(
+                        "embedding",
+                        OptionalInt.of(42),
+                        Optional.empty(),
+                        OptionalInt.of(10),
+                        false,
+                        Optional.empty()));
+        // The search's job is stopped for it.
+        assertThat(search.running()).isTrue();
+        assertThat(search.knnRecallStarted(recall.recallId(), 9)).isEmpty();
+        assertThat(search.knnRecallJob())
+                .hasValueSatisfying(job -> assertThat(job).containsExactly(recall.recallId(), 9));
+        assertThat(render(search)).contains("Recall · k 10 · checking…");
+
+        search.knnRecallProgress(
+                recall.recallId(),
+                new GetKnnRecallResult(
+                        1,
+                        Optional.of(recallResult(
+                                1,
+                                0.8,
+                                List.of(new KnnRecallTarget(
+                                        OptionalInt.of(42),
+                                        0.8,
+                                        List.of(new KnnRecallMiss(4, 77, 0.5f), new KnnRecallMiss(9, 13, 0.25f))))))));
+        assertThat(search.knnRecallJob()).isEmpty();
+        assertThat(render(search))
+                .contains(
+                        "Recall · k 10 · 0.80 · missed by approximate",
+                        "#4    77  0.5",
+                        "#9    13  0.25",
+                        "Recall     0.800 · 2 exact nearest documents missed");
+        press(search, KeyCode.DOWN);
+        assertThat(press(search, KeyCode.ENTER)).hasValue(new Request.Document(13));
+
+        // The next search shows its hits again.
+        assertThat(line(search, "7")).containsInstanceOf(Request.Start.class);
+        assertThat(render(search)).doesNotContain("Recall ·");
+    }
+
+    @Test
+    void rOnABlankLineSamplesDocumentsAndSearchesAWorstTarget() {
+        Search search = knnMode();
+        press(search, 'w');
+        typed(search, "red");
+        press(search, KeyCode.ENTER);
+        press(search, '/');
+        press(search, ctrl('u'));
+        press(search, KeyCode.ESCAPE);
+
+        Request.Recall recall = recallOf(press(search, 'r'));
+        assertThat(recall.params().sample()).hasValue(Search.RECALL_SAMPLE);
+        assertThat(recall.params().query().docId()).isEmpty();
+        assertThat(recall.params().query().vector()).isEmpty();
+        assertThat(recall.params().query().filter().map(ClassicQuery::expression))
+                .hasValue("red");
+        search.knnRecallStarted(recall.recallId(), 3);
+        search.knnRecallProgress(recall.recallId(), new GetKnnRecallResult(37, Optional.empty()));
+        assertThat(render(search)).contains("checking… 37 of 100 targets");
+
+        search.knnRecallProgress(
+                recall.recallId(),
+                new GetKnnRecallResult(
+                        100,
+                        Optional.of(recallResult(
+                                100,
+                                0.997,
+                                List.of(
+                                        new KnnRecallTarget(
+                                                OptionalInt.of(63), 0.9, List.of(new KnnRecallMiss(9, 363, 0.1f))),
+                                        new KnnRecallTarget(OptionalInt.of(3), 1.0, List.of()))))));
+        assertThat(render(search))
+                .contains("100 targets · mean 0.997 · worst first", "63    0.90  #9 doc 363", "3    1.00  -");
+
+        // Enter searches the nearest to the selected target.
+        Optional<Request> searched = press(search, KeyCode.ENTER);
+        assertThat(knnOf(searched).docId()).hasValue(63);
+    }
+
+    @Test
+    void escStopsARecallCheck() {
+        Search search = knnMode();
+        Request.Recall recall = recallOf(press(search, 'r'));
+        search.knnRecallStarted(recall.recallId(), 5);
+
+        assertThat(search.cancel()).containsExactly(5L);
+        assertThat(search.running()).isFalse();
+        assertThat(render(search)).contains("Recall · k 10 · stopped", "Stopped.");
+        // A start of a check that was stopped is cancelled.
+        Request.Recall again = recallOf(press(search, 'r'));
+        assertThat(search.knnRecallStarted(recall.recallId(), 6)).hasValue(6);
+        assertThat(search.knnRecallStarted(again.recallId(), 7)).isEmpty();
     }
 
     @Test

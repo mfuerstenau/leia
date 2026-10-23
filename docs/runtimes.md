@@ -31,6 +31,7 @@ The first index of a path decides which Lucene opens it, by the major in its new
 | `POINTS` | – | – | ✓² | ✓² | ✓² |
 | `DOC_VALUES` | – | ✓¹ | ✓¹ | ✓¹ | ✓¹ |
 | `KNN_VECTORS` | – | – | – | ✓³ | ✓³ |
+| `KNN_GRAPH` | – | – | – | ✓⁷ | ✓⁷ |
 | `COMMITS` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `CLASSIC_SEARCH` | ✓ | ✓ | ✓ | ✓⁴ | ✓ |
 | `TERM_SEARCH` | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -53,6 +54,7 @@ The first index of a path decides which Lucene opens it, by the major in its new
 4. With `KNN_VECTORS`, `CLASSIC_SEARCH` takes a KNN query too, approximate or exact, with a filter (ADR 0049 §6).
 5. A query filter takes no deleted documents: Lucene 3.6 doesn't read their postings, so `startFilter` refuses a query with `includeDeleted` (ADR 0056 §4). A pattern filter takes them.
 6. Reported without regard to the fields; the TUI offers doc values queries with `DOC_VALUES` too, which needs a field with doc values (ADR 0066).
+7. With `KNN_VECTORS` (ADR 0085). A segment shows no graph if its format has none leia can read (a flat format, or those of 9.0 to 9.4, whose readers aren't an `HnswGraphProvider`), or if it was too small for Lucene 10 to build one.
 
 A runtime reports the parts of search it has, such as `CLASSIC_SEARCH`, `TERM_SEARCH`, `SCORING`, `DOC_VALUES_SEARCH`, `STANDARD_SEARCH` and `MORE_LIKE_THIS`, and the TUI offers a part with that feature (ADR 0058, ADR 0064, ADR 0066, ADR 0071). `SCORING` is the similarity and sort of the queries a runtime has.
 
@@ -101,6 +103,8 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 | Hit count without an exact count (ADR 0070) | every hit counted | every hit counted | every hit counted | stops after 1000 | stops after 1000 |
 | Unmapping | never (no `sun.misc.Cleaner`) | only with `-Dsun.misc.unsafe.memory.access=allow` | as 5.5.5 | memory segments | memory segments |
 | KNN search cancellation | – | – | – | through the searcher's `QueryTimeout` | through the searcher's `QueryTimeout` |
+| KNN recall check (ADR 0086) | – | – | – | through 9.12's searches, each stopped through the searcher's `QueryTimeout` | through Lucene 10's |
+| HNSW graph (ADR 0085) | – | – | – | 9.5's and 9.9's formats; no M, and an ordinal's document through `RandomAccessVectorValues` | every `HnswGraphProvider`, with M |
 | Highlight (ADR 0063) | – | – (no `UnifiedHighlighter`) | – (its `UnifiedHighlighter` differs; not yet) | ✓, with its search analyzers | ✓, with every analyzer of `startSearch` |
 | Highlight cancellation (ADR 0063) | – | – | – | before each field of each document | through `ExitableDirectoryReader` |
 | Standard parser (ADR 0066, ADR 0069, ADR 0074) | – | with dates, through a copy of leia-core's processor of term ranges; no points, and Lucene's own lower-casing of expanded terms rather than the analyzer's | as 9.12.3 | with dates, through a copy of leia-core's processor of term ranges | leia-core's, with dates |

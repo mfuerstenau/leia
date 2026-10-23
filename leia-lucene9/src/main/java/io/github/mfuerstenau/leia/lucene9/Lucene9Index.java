@@ -6,6 +6,7 @@ import io.github.mfuerstenau.leia.runtime.Documents;
 import io.github.mfuerstenau.leia.runtime.Highlight;
 import io.github.mfuerstenau.leia.runtime.IndexReadException;
 import io.github.mfuerstenau.leia.runtime.Knn;
+import io.github.mfuerstenau.leia.runtime.KnnGraph;
 import io.github.mfuerstenau.leia.runtime.MoreLikeThisSearch;
 import io.github.mfuerstenau.leia.runtime.Points;
 import io.github.mfuerstenau.leia.runtime.Rebuild;
@@ -224,6 +225,12 @@ final class Lucene9Index
     @Override
     public Optional<Knn> knn() {
         return Optional.of(this);
+    }
+
+    /** {@inheritDoc} Only segments of 9.5's and later HNSW formats have a graph leia reads. */
+    @Override
+    public Optional<KnnGraph> knnGraph() {
+        return Optional.of(new Lucene9KnnGraph(reader, fieldInfos));
     }
 
     @Override
@@ -1194,6 +1201,11 @@ final class Lucene9Index
     public ParsedQuery exact(String field, Vector target, Optional<ParsedQuery> filter) {
         vectorField(field);
         return new Lucene9Query(new ExactKnnQuery(field, target, filter.map(Lucene9Index::query)));
+    }
+
+    @Override
+    public List<Integer> sample(String field, int n) throws IOException {
+        return new Lucene9KnnGraph(reader, fieldInfos).sample(field, n);
     }
 
     @Override

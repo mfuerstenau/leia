@@ -319,6 +319,61 @@ class SessionPilotTest {
         pilot.press('N');
         settle();
         assertThat(screen()).contains("KNN · embedding (4d float, cosine)", "3 hits");
+
+        // r checks the recall of the same target as a job (ADR 0086): 3 vectors, all found.
+        pilot.press('r');
+        settle();
+        assertThat(screen()).contains("Recall · k 10 · 1.00 · missed by approximate", "Recall     1.000");
+    }
+
+    /**
+     * The HNSW graph of the 9.x segment of {@code lucene8to9} (ADR 0085): from the terms screen
+     * through a node's neighbours and back, and from a document's vector to its node.
+     */
+    @Test
+    void walksTheHnswGraphOfAVectorField() throws Exception {
+        Path index = Path.of(System.getProperty("leia.test.index.lucene8to9")).toAbsolutePath();
+        openAtStart(index, OpenMode.READER);
+
+        pilot.press('3');
+        settle();
+        for (int i = 0; i < 30 && !screen().contains("┌ embedding · "); i++) {
+            pilot.press(KeyCode.DOWN);
+            settle();
+        }
+        assertThat(screen()).contains("embedding hnsw 4d", "▸ _2  3 vectors · 1 level");
+        // Into _2, then its entry node's neighbours.
+        pilot.press(KeyCode.RIGHT);
+        pilot.press(KeyCode.ENTER);
+        settle();
+        assertThat(screen()).contains("▾ _2", "entry  ord ", "▸ L0  3 nodes");
+        pilot.press(KeyCode.DOWN);
+        pilot.press(KeyCode.ENTER);
+        settle();
+        assertThat(screen()).contains("Lvl    Ord   Doc  Top   Score", "node ");
+        // On to the first neighbour, and back.
+        pilot.press(KeyCode.DOWN);
+        pilot.press(KeyCode.ENTER);
+        settle();
+        assertThat(screen()).contains(" › ");
+        pilot.press('<');
+        settle();
+        assertThat(screen()).doesNotContain(" › ");
+
+        // Document 8's vector: T opens its node, north's, whose neighbour is north east.
+        pilot.press('2');
+        settle();
+        pilot.press('i');
+        pilot.press('8');
+        pilot.press(KeyCode.ENTER);
+        settle();
+        for (int i = 0; i < 30 && !screen().contains("┌ embedding "); i++) {
+            pilot.press(KeyCode.DOWN);
+            settle();
+        }
+        pilot.press('T');
+        settle();
+        assertThat(screen()).contains(" ord 0 ", "node     0     8  L0", "L0       1     9  L0   0.9000");
     }
 
     @Test

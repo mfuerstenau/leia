@@ -1,6 +1,7 @@
 package io.github.mfuerstenau.leia.runtime;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -37,4 +38,16 @@ public interface Knn {
      * @throws IllegalArgumentException if there is no such document
      */
     Optional<RuntimeIndex.Vector> vector(int docId, String field) throws IOException;
+
+    /**
+     * Up to {@code n} live documents with a vector in {@code field}, for a recall check (ADR 0086):
+     * spread evenly by vector ordinal over the segments, so that each segment gives its share by its
+     * number of vectors. A position that falls on a deleted document takes the next live one of its
+     * segment. In document id order, without duplicates; every live document with a vector if there
+     * are no more than {@code n}.
+     *
+     * @throws IllegalArgumentException if the index has no vectors in {@code field}, or {@code n} is
+     *     below 1
+     */
+    List<Integer> sample(String field, int n) throws IOException;
 }

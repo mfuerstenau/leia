@@ -54,6 +54,22 @@ import io.github.mfuerstenau.leia.protocol.index.ReopenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.ReopenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
+import io.github.mfuerstenau.leia.protocol.job.JobParams;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodeParams;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodeResult;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodesParams;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodesResult;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphParams;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphResult;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnRecallResult;
+import io.github.mfuerstenau.leia.protocol.knn.KnnGraphNeighbour;
+import io.github.mfuerstenau.leia.protocol.knn.KnnGraphNode;
+import io.github.mfuerstenau.leia.protocol.knn.KnnGraphSegment;
+import io.github.mfuerstenau.leia.protocol.knn.KnnGraphShape;
+import io.github.mfuerstenau.leia.protocol.knn.KnnRecallMiss;
+import io.github.mfuerstenau.leia.protocol.knn.KnnRecallResult;
+import io.github.mfuerstenau.leia.protocol.knn.KnnRecallTarget;
+import io.github.mfuerstenau.leia.protocol.knn.StartKnnRecallParams;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellParams;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellResult;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
@@ -1046,6 +1062,285 @@ class DemoIndexTest {
                     Optional.empty(),
                     Optional.of(
                             new KnnQuery(field, OptionalInt.of(docId), Optional.empty(), k, exact, Optional.empty())));
+        }
+    }
+
+    @Nested
+    @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+    class KnnGraph {
+
+        @Test
+        void eachSegmentHasAGraphOfSeveralLevels() throws Exception {
+            GetKnnGraphResult embedding = backend.call(Methods.GET_KNN_GRAPH, new GetKnnGraphParams("embedding"));
+
+            assertThat(embedding)
+                    .extracting(
+                            GetKnnGraphResult::dimension, GetKnnGraphResult::encoding, GetKnnGraphResult::similarity)
+                    .containsExactly(8, VectorEncoding.FLOAT32, VectorSimilarity.COSINE);
+            // Document 0 has no vectors; deleted documents keep their nodes.
+            assertThat(embedding.segments())
+                    .extracting(
+                            KnnGraphSegment::segment,
+                            KnnGraphSegment::name,
+                            KnnGraphSegment::docBase,
+                            KnnGraphSegment::vectors,
+                            segment -> segment.shape().map(KnnGraphShape::levelSizes),
+                            segment -> segment.shape().map(KnnGraphShape::maxConn))
+                    .containsExactly(
+                            tuple(
+                                    0,
+                                    Optional.of("_0"),
+                                    0,
+                                    199,
+                                    Optional.of(List.of(199, 14, 1)),
+                                    Optional.of(OptionalInt.of(16))),
+                            tuple(
+                                    1,
+                                    Optional.of("_1"),
+                                    200,
+                                    200,
+                                    Optional.of(List.of(200, 14, 1)),
+                                    Optional.of(OptionalInt.of(16))),
+                            tuple(
+                                    2,
+                                    Optional.of("_2"),
+                                    400,
+                                    100,
+                                    Optional.of(List.of(100, 6)),
+                                    Optional.of(OptionalInt.of(16))));
+            assertThat(embedding.segments())
+                    .allSatisfy(segment -> assertThat(
+                                    segment.shape().orElseThrow().entry().topLevel())
+                            .isEqualTo(
+                                    segment.shape().orElseThrow().levelSizes().size() - 1));
+
+            // An M of 4: more levels.
+            GetKnnGraphResult fingerprint = backend.call(Methods.GET_KNN_GRAPH, new GetKnnGraphParams("fingerprint"));
+            assertThat(fingerprint.segments())
+                    .extracting(
+                            segment -> segment.shape().map(KnnGraphShape::levelSizes),
+                            segment -> segment.shape().map(KnnGraphShape::maxConn))
+                    .containsExactly(
+                            tuple(Optional.of(List.of(199, 52, 14, 2, 1, 1)), Optional.of(OptionalInt.of(4))),
+                            tuple(Optional.of(List.of(200, 52, 14, 2, 1, 1)), Optional.of(OptionalInt.of(4))),
+                            tuple(Optional.of(List.of(100, 28, 6, 1)), Optional.of(OptionalInt.of(4))));
+        }
+
+        @Test
+        void levelZeroHasEveryNodeInDocumentOrderAndMarksTheDeleted() throws Exception {
+            GetKnnGraphNodesResult page =
+                    backend.call(Methods.GET_KNN_GRAPH_NODES, new GetKnnGraphNodesParams("embedding", 0, 0, 30, 10));
+
+            assertThat(page.total()).isEqualTo(199);
+            // Document 0 has no vector: ordinal 36 is document 37, which is deleted.
+            assertThat(page.nodes())
+                    .extracting(KnnGraphNode::ord, KnnGraphNode::docId)
+                    .startsWith(tuple(30, 31), tuple(31, 32));
+            assertThat(page.nodes())
+                    .filteredOn(KnnGraphNode::deleted)
+                    .extracting(KnnGraphNode::ord, KnnGraphNode::docId)
+                    .containsExactly(tuple(36, 37));
+
+            GetKnnGraphNodesResult top =
+                    backend.call(Methods.GET_KNN_GRAPH_NODES, new GetKnnGraphNodesParams("embedding", 0, 2, 0, 1000));
+            KnnGraphNode entry = backend.call(Methods.GET_KNN_GRAPH, new GetKnnGraphParams("embedding"))
+                    .segments()
+                    .getFirst()
+                    .shape()
+                    .orElseThrow()
+                    .entry();
+            assertThat(top.nodes()).containsExactly(entry);
+        }
+
+        @Test
+        void aNodesNeighboursAreScoredAsAnExactSearchScoresThem() throws Exception {
+            GetKnnGraphNodeResult node =
+                    backend.call(Methods.GET_KNN_GRAPH_NODE, GetKnnGraphNodeParams.ofDoc("embedding", 42));
+
+            assertThat(node.segment()).isZero();
+            assertThat(node.node().ord()).isEqualTo(41);
+            assertThat(node.node().docId()).isEqualTo(42);
+            assertThat(node.levels().getLast().level()).isZero();
+            List<KnnGraphNeighbour> neighbours = node.levels().getLast().neighbours();
+            assertThat(neighbours).isNotEmpty().hasSizeLessThanOrEqualTo(32);
+
+            // The exact search by document 42 gives each neighbour the same score.
+            SearchResults exact = backend.search(Vectors.knn("embedding", 42, OptionalInt.empty(), true), 1000);
+            for (KnnGraphNeighbour neighbour : neighbours) {
+                assertThat(exact.hits())
+                        .filteredOn(hit -> hit.docId() == neighbour.node().docId())
+                        .singleElement()
+                        .satisfies(hit -> assertThat(hit.score()).isEqualTo(neighbour.score()));
+            }
+
+            // A neighbour leads on to its own neighbours.
+            KnnGraphNode next = neighbours.getFirst().node();
+            GetKnnGraphNodeResult onward =
+                    backend.call(Methods.GET_KNN_GRAPH_NODE, GetKnnGraphNodeParams.ofOrd("embedding", 0, next.ord()));
+            assertThat(onward.node()).isEqualTo(next);
+            assertThat(onward.levels()).hasSize(next.topLevel() + 1);
+        }
+
+        @Test
+        void refusesWhatHasNoNode() throws Exception {
+            backend.fails(
+                    Methods.GET_KNN_GRAPH_NODE, GetKnnGraphNodeParams.ofDoc("embedding", 0), ErrorCode.INVALID_PARAMS);
+            backend.fails(Methods.GET_KNN_GRAPH, new GetKnnGraphParams("title"), ErrorCode.INVALID_PARAMS);
+            backend.fails(
+                    Methods.GET_KNN_GRAPH_NODES,
+                    new GetKnnGraphNodesParams("fingerprint", 3, 0, 0, 10),
+                    ErrorCode.INVALID_PARAMS);
+        }
+    }
+
+    @Nested
+    @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+    class KnnRecall {
+
+        private KnnRecallResult recall(StartKnnRecallParams params) throws Exception {
+            return backend.job(Methods.START_KNN_RECALL, params, Methods.GET_KNN_RECALL, GetKnnRecallResult::recall);
+        }
+
+        private static KnnQuery sampled(String field, int k, Optional<String> filter) {
+            return new KnnQuery(
+                    field,
+                    OptionalInt.empty(),
+                    Optional.empty(),
+                    OptionalInt.of(k),
+                    false,
+                    filter.map(expression -> classic(expression).classic().orElseThrow()));
+        }
+
+        @Test
+        void aSampleOfEmbeddingsFindsAllOfTheExactNearest() throws Exception {
+            KnnRecallResult result =
+                    recall(new StartKnnRecallParams(sampled("embedding", 10, Optional.empty()), OptionalInt.of(100)));
+
+            // Graphs of M 16 over at most 200 vectors: the approximate search is exact.
+            assertThat(result)
+                    .extracting(
+                            KnnRecallResult::field,
+                            KnnRecallResult::k,
+                            KnnRecallResult::targets,
+                            KnnRecallResult::meanRecall,
+                            KnnRecallResult::minRecall,
+                            KnnRecallResult::perfectTargets)
+                    .containsExactly("embedding", 10, 100, 1.0, 1.0, 100);
+            // Float vectors without quantization: both searches score alike.
+            assertThat(result.maxScoreDrift()).hasValue(0.0);
+            assertThat(result.worst()).hasSize(KnnRecallResult.MAX_WORST);
+        }
+
+        @Test
+        void aSampleOfFingerprintsMissesAFew() throws Exception {
+            KnnRecallResult result =
+                    recall(new StartKnnRecallParams(sampled("fingerprint", 10, Optional.empty()), OptionalInt.of(100)));
+
+            // An M of 4: three of the 100 targets miss one of their 10 nearest.
+            assertThat(result.meanRecall()).isEqualTo(0.997, org.assertj.core.data.Offset.offset(1e-9));
+            assertThat(result.minRecall()).isEqualTo(0.9, org.assertj.core.data.Offset.offset(1e-9));
+            assertThat(result.perfectTargets()).isEqualTo(97);
+            assertThat(result.worst())
+                    .extracting(target -> target.docId().getAsInt(), KnnRecallTarget::missed)
+                    .startsWith(
+                            tuple(63, List.of(new KnnRecallMiss(9, 363, 1.1744533E-5f))),
+                            tuple(362, List.of(new KnnRecallMiss(9, 119, 1.0693471E-5f))),
+                            tuple(472, List.of(new KnnRecallMiss(8, 179, 1.3812155E-5f))));
+            // The sample: one document in about 5, all live, none twice.
+            assertThat(result.worst().get(3).docId()).hasValue(3);
+        }
+
+        @Test
+        void aSampledTargetIsLeftOutOfItsOwnRankings() throws Exception {
+            KnnRecallResult result =
+                    recall(new StartKnnRecallParams(sampled("embedding", 1, Optional.empty()), OptionalInt.of(5)));
+
+            // Each target is its own nearest, with a score of 1; left out, its nearest other is found.
+            assertThat(result.targets()).isEqualTo(5);
+            assertThat(result.perfectTargets()).isEqualTo(5);
+        }
+
+        @Test
+        void checksOneTargetByDocumentOrByVector() throws Exception {
+            KnnQuery byDoc = new KnnQuery(
+                    "embedding", OptionalInt.of(42), Optional.empty(), OptionalInt.of(10), false, Optional.empty());
+            KnnRecallResult doc = recall(new StartKnnRecallParams(byDoc, OptionalInt.empty()));
+            assertThat(doc.targets()).isEqualTo(1);
+            assertThat(doc.worst()).singleElement().satisfies(target -> {
+                assertThat(target.docId()).hasValue(42);
+                assertThat(target.recall()).isEqualTo(1.0);
+                assertThat(target.missed()).isEmpty();
+            });
+
+            KnnVector vector =
+                    new KnnVector(VectorEncoding.BYTE, List.of(), java.util.Collections.nCopies(16, (byte) 0));
+            KnnRecallResult byVector = recall(new StartKnnRecallParams(
+                    new KnnQuery(
+                            "fingerprint",
+                            OptionalInt.empty(),
+                            Optional.of(vector),
+                            OptionalInt.of(5),
+                            false,
+                            Optional.empty()),
+                    OptionalInt.empty()));
+            assertThat(byVector.worst())
+                    .singleElement()
+                    .satisfies(target -> assertThat(target.docId()).isEmpty());
+        }
+
+        @Test
+        void aFilterNarrowsBothSearches() throws Exception {
+            KnnRecallResult result = recall(new StartKnnRecallParams(
+                    sampled("embedding", 10, Optional.of("category:kitchen")), OptionalInt.of(20)));
+
+            assertThat(result.targets()).isEqualTo(20);
+            assertThat(result.meanRecall()).isEqualTo(1.0);
+        }
+
+        @Test
+        void refusesWhatIsNoRecallCheck() throws Exception {
+            KnnQuery exact = new KnnQuery(
+                    "embedding", OptionalInt.of(42), Optional.empty(), OptionalInt.empty(), true, Optional.empty());
+            backend.fails(
+                    Methods.START_KNN_RECALL,
+                    new StartKnnRecallParams(exact, OptionalInt.empty()),
+                    ErrorCode.INVALID_PARAMS);
+            KnnQuery byDoc = new KnnQuery(
+                    "embedding", OptionalInt.of(42), Optional.empty(), OptionalInt.of(10), false, Optional.empty());
+            backend.fails(
+                    Methods.START_KNN_RECALL,
+                    new StartKnnRecallParams(byDoc, OptionalInt.of(10)),
+                    ErrorCode.INVALID_PARAMS);
+            backend.fails(
+                    Methods.START_KNN_RECALL,
+                    new StartKnnRecallParams(sampled("embedding", 10, Optional.empty()), OptionalInt.empty()),
+                    ErrorCode.INVALID_PARAMS);
+            backend.fails(
+                    Methods.START_KNN_RECALL,
+                    new StartKnnRecallParams(sampled("embedding", 10, Optional.empty()), OptionalInt.of(1001)),
+                    ErrorCode.INVALID_PARAMS);
+            backend.fails(
+                    Methods.START_KNN_RECALL,
+                    new StartKnnRecallParams(sampled("title", 10, Optional.empty()), OptionalInt.of(10)),
+                    ErrorCode.INVALID_PARAMS);
+            backend.fails(
+                    Methods.START_KNN_RECALL,
+                    new StartKnnRecallParams(sampled("nope", 10, Optional.empty()), OptionalInt.of(10)),
+                    ErrorCode.FIELD_NOT_FOUND);
+            backend.fails(
+                    Methods.START_KNN_RECALL,
+                    new StartKnnRecallParams(sampled("embedding", 10, Optional.of("title:(lamp")), OptionalInt.of(10)),
+                    ErrorCode.INVALID_QUERY);
+        }
+
+        @Test
+        void aCancelledCheckIsGone() throws Exception {
+            long jobId = backend.call(
+                            Methods.START_KNN_RECALL,
+                            new StartKnnRecallParams(sampled("embedding", 100, Optional.empty()), OptionalInt.of(1000)))
+                    .jobId();
+            backend.call(Methods.CANCEL_JOB, new JobParams(jobId));
+            backend.fails(Methods.GET_KNN_RECALL, new JobParams(jobId), ErrorCode.JOB_NOT_FOUND);
         }
     }
 

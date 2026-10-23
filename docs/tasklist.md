@@ -18,8 +18,6 @@ From the read-only checklist in `docs/luke-features.md` §7. Ordered roughly by 
 - [ ] Misc: log view with level filter
 - [ ] Misc: themes
 - [ ] Misc: about
-- [ ] Improvements over Luke (§6). Done already: deleted documents (ADR 0006, the filter's `includeDeleted`), binary values as text or hex (ADR 0006), cancellation of long operations (ADR 0005), KNN vectors (ADR 0040), point values (ADR 0041), highlighting of hits (ADR 0042), the per-segment document view (ADR 0051). Left:
-  - [ ] KNN: HNSW graph inspection (a node's levels and neighbours through `HnswGraphProvider`, on 9.12 too, which has it), and a recall check of approximate against exact (left out of ADR 0040)
 
 ## Bugs
 

@@ -51,6 +51,10 @@ import io.github.mfuerstenau.leia.protocol.jars.GetRuntimesResult;
 import io.github.mfuerstenau.leia.protocol.jars.LoadRuntimesResult;
 import io.github.mfuerstenau.leia.protocol.jars.RuntimeFolder;
 import io.github.mfuerstenau.leia.protocol.jars.RuntimeState;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodeResult;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodesResult;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphResult;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnRecallResult;
 import io.github.mfuerstenau.leia.protocol.points.GetPointCellResult;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeResult;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
@@ -921,6 +925,21 @@ public final class App {
                 jump(Screen.DOCUMENTS);
                 yield loadDocument(document.docId());
             }
+            case Terms.Request.LoadKnnGraph load -> Optional.of(new Action.LoadKnnGraph(load.field(), load.serial()));
+            case Terms.Request.LoadKnnNodes load ->
+                Optional.of(new Action.LoadKnnNodes(
+                        load.field(), load.serial(), load.segment(), load.level(), load.offset()));
+            case Terms.Request.LoadKnnNode load ->
+                Optional.of(new Action.LoadKnnNode(
+                        load.field(), load.serial(), load.segment(), load.ord(), load.docId(), load.walk()));
+            case Terms.Request.VectorDocument document -> {
+                if (documents == null) {
+                    yield Optional.<Action>empty();
+                }
+                documents.showPoint(document.field());
+                jump(Screen.DOCUMENTS);
+                yield loadDocument(document.docId());
+            }
             case Terms.Request.Search searched -> {
                 if (search == null) {
                     yield Optional.<Action>empty();
@@ -954,6 +973,8 @@ public final class App {
                 Optional.of(new Action.StartHighlight(highlight.highlightId(), highlight.params(), highlight.cancel()));
             case Search.Request.StoredScan scan ->
                 Optional.of(new Action.StartStoredScan(scan.scanId(), scan.params(), scan.cancel()));
+            case Search.Request.Recall recall ->
+                Optional.of(new Action.StartKnnRecall(recall.recallId(), recall.params(), recall.cancel()));
             case Search.Request.Cancel cancel -> Optional.of(new Action.CancelSearch(cancel.jobs()));
             case Search.Request.Filter filter -> startFilter(filter.label(), filter.params(), filter.startDoc());
             case Search.Request.Document document -> {
@@ -1051,6 +1072,23 @@ public final class App {
     public void storedScanFailed(long scanId, String error) {
         if (search != null) {
             search.storedScanFailed(scanId, error);
+        }
+    }
+
+    /** The job of recall check {@code recallId} has started; the job of one that is gone is cancelled. */
+    public Optional<Action> knnRecallStarted(long recallId, long jobId) {
+        return cancelSearchJob(search == null ? OptionalLong.of(jobId) : search.knnRecallStarted(recallId, jobId));
+    }
+
+    public void knnRecallProgress(long recallId, GetKnnRecallResult result) {
+        if (search != null) {
+            search.knnRecallProgress(recallId, result);
+        }
+    }
+
+    public void knnRecallFailed(long recallId, String error) {
+        if (search != null) {
+            search.knnRecallFailed(recallId, error);
         }
     }
 
@@ -1187,6 +1225,13 @@ public final class App {
                 }
                 jump(Screen.TERMS);
                 yield termsAction(terms.show(browse.field(), browse.term(), browse.points()));
+            }
+            case Documents.Request.BrowseGraph browse -> {
+                if (terms == null) {
+                    yield Optional.<Action>empty();
+                }
+                jump(Screen.TERMS);
+                yield termsAction(terms.showNode(browse.field(), browse.docId()));
             }
         };
     }
@@ -1593,6 +1638,60 @@ public final class App {
         return new Terms.Request.LoadPointCell(load.field(), load.serial(), load.segment(), load.path());
     }
 
+    /** Shows the HNSW graphs of a vector field (ADR 0085). Returns the node the terms screen waited for. */
+    public Optional<Action> knnGraphLoaded(Action.LoadKnnGraph load, GetKnnGraphResult result) {
+        return terms == null
+                ? Optional.empty()
+                : termsAction(
+                        terms.knnGraphLoaded(new Terms.Request.LoadKnnGraph(load.field(), load.serial()), result));
+    }
+
+    public Optional<Action> knnGraphFailed(Action.LoadKnnGraph load, String error) {
+        if (terms != null) {
+            terms.knnGraphFailed(new Terms.Request.LoadKnnGraph(load.field(), load.serial()), error);
+        }
+        return Optional.empty();
+    }
+
+    /** Shows a page of a level's nodes. */
+    public Optional<Action> knnNodesLoaded(Action.LoadKnnNodes load, GetKnnGraphNodesResult result) {
+        if (terms != null) {
+            terms.knnNodesLoaded(request(load), result);
+        }
+        return Optional.empty();
+    }
+
+    public Optional<Action> knnNodesFailed(Action.LoadKnnNodes load, String error) {
+        if (terms != null) {
+            terms.knnNodesFailed(request(load), error);
+        }
+        return Optional.empty();
+    }
+
+    /** Shows a node's neighbours. */
+    public Optional<Action> knnNodeLoaded(Action.LoadKnnNode load, GetKnnGraphNodeResult result) {
+        if (terms != null) {
+            terms.knnNodeLoaded(request(load), result);
+        }
+        return Optional.empty();
+    }
+
+    public Optional<Action> knnNodeFailed(Action.LoadKnnNode load, String error) {
+        if (terms != null) {
+            terms.knnNodeFailed(request(load), error);
+        }
+        return Optional.empty();
+    }
+
+    private static Terms.Request.LoadKnnNodes request(Action.LoadKnnNodes load) {
+        return new Terms.Request.LoadKnnNodes(load.field(), load.serial(), load.segment(), load.level(), load.offset());
+    }
+
+    private static Terms.Request.LoadKnnNode request(Action.LoadKnnNode load) {
+        return new Terms.Request.LoadKnnNode(
+                load.field(), load.serial(), load.segment(), load.ord(), load.docId(), load.walk());
+    }
+
     public void postingsFailed(Action.LoadPostings load, String error) {
         if (terms != null) {
             terms.postingsFailed(request(load), error);
@@ -1648,6 +1747,7 @@ public final class App {
             search.highlightJob().ifPresent(job -> polls.add(new Poll.Highlight(job[0], job[1])));
             search.storedScanJob()
                     .ifPresent(job -> polls.add(new Poll.StoredScan(job[0], job[1], search.storedScanFromHit())));
+            search.knnRecallJob().ifPresent(job -> polls.add(new Poll.KnnRecall(job[0], job[1])));
         }
         if (check != null) {
             check.job().ifPresent(job -> polls.add(new Poll.Check(job[0], job[1], check.fromLine())));

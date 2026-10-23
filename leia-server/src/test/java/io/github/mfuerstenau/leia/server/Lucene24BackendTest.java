@@ -31,6 +31,7 @@ import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.index.ReaderInfo;
+import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphParams;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeParams;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.HitField;
@@ -198,6 +199,7 @@ class Lucene24BackendTest {
     @Test
     void refusesWhatLucene3Lacks() throws Exception {
         backend.fails(Methods.GET_POINT_TREE, new GetPointTreeParams("id"), ErrorCode.NOT_SUPPORTED);
+        backend.fails(Methods.GET_KNN_GRAPH, new GetKnnGraphParams("id"), ErrorCode.NOT_SUPPORTED);
     }
 
     /** The deleted document 1: body from its term vector, id from the raw postings, with no total (ADR 0062). */
