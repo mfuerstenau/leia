@@ -48,6 +48,7 @@ Dependency direction: `leia-server → leia-protocol` (api), `leia-server → le
 5. **Lucene 9 and 10 indexes must open,** with Lucene 10 through `leia-lucene10`'s runtime, `runtimes/lucene10/` (ADR 0065, ADR 0071, ADR 0072, ADR 0073). Keep `lucene-backward-codecs` on its runtime classpath and keep a test that opens a Lucene 9 index. Lucene 2.x and 3.x indexes open with the Lucene 3.6 of `leia-lucene3`, 4.x and 5.x with the Lucene 5.5 of `leia-lucene5`, 6.x and 7.x with the Lucene 7.7 of `leia-lucene7`, 8.x with the Lucene 9.12 of `leia-lucene9`, through the runtime interface of `leia-runtime` (ADR 0044, ADR 0046, ADR 0048, ADR 0049), with the features `openIndex` reports. Each Lucene lives only in its runtime's class loader (ADR 0073): `leia.jar` holds none, an adapter jar holds only leia's code (`adapterJarCheck`), and no Lucene but 10 ever reaches the jar chain.
 6. **Keep core Lucene-only.** UI concepts belong in the TUI, API concepts in protocol/server, and Lucene behind a runtime (ADR 0071).
 7. **Long-running work is a job** (ADR 0005). Anything that can take long (a term scan, check index, …) runs as a backend job behind `start<Op>` / `get<Op>`, with `cancelJob` to stop it, and never blocks the backend thread. Cancellation is cooperative through the server's `ScanProgress` (`…server.job`), which a runtime sees as a `LongConsumer` that throws: never call `Thread.interrupt` on a thread that reads an index (it breaks `NIOFSDirectory`).
+8. **No credentials in the repository** (ADR 0084). Tokens, passwords and signing keys go in `~/.gradle/gradle.properties` or the environment (`ORG_GRADLE_PROJECT_<name>`), never in the project's `gradle.properties` or another tracked file. The pre-commit hook runs gitleaks on every commit; don't skip it with `--no-verify`.
 
 ## Tech stack
 
@@ -72,6 +73,8 @@ leia-tui/build/leia/leia --download-runtimes --runtime lucene10 --runtime lucene
 
 leia-tui/build/leia/leia <index>   # run a development build (needs a Java 25 JAVA_HOME or --java)
 ```
+
+Once per clone, enable the pre-commit hook, which blocks a commit with a secret in it through gitleaks (`.gitleaks.toml`, ADR 0084): `git config core.hooksPath .githooks`. It needs `gitleaks` on `PATH` or in `$GOPATH/bin`: `go install github.com/zricethezav/gitleaks/v8@latest`, or a release binary.
 
 Run the formatters and linters before calling work done.
 

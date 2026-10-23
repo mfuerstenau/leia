@@ -1,0 +1,12 @@
+# gitleaks configuration, used by .githooks/pre-commit: the default rules, minus build output.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Build output, generated test indexes and local JDKs"
+paths = [
+    '''(^|/)build/''',
+    '''(^|/)dist/''',
+    '''(^|/)test-indexes/''',
+    '''(^|/)\.jdks/''',
+]

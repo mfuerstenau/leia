@@ -1,0 +1,20 @@
+#!/bin/sh
+# Blocks a commit whose staged changes hold a secret, found by gitleaks (.gitleaks.toml).
+# Enable once per clone: git config core.hooksPath .githooks
+
+gitleaks=$(command -v gitleaks || true)
+if [ -z "$gitleaks" ] && [ -x "${GOPATH:-$HOME/go}/bin/gitleaks" ]; then
+    gitleaks="${GOPATH:-$HOME/go}/bin/gitleaks"
+fi
+if [ -z "$gitleaks" ]; then
+    echo "pre-commit: gitleaks not found. Install it with" >&2
+    echo "  go install github.com/zricethezav/gitleaks/v8@latest" >&2
+    echo "or from https://github.com/gitleaks/gitleaks/releases, then commit again." >&2
+    exit 1
+fi
+
+if ! "$gitleaks" git --pre-commit --staged --redact --verbose --no-banner --log-level warn; then
+    echo "pre-commit: gitleaks found a secret in the staged changes; the commit is blocked." >&2
+    echo "Keep credentials in ~/.gradle/gradle.properties or the environment (AGENTS.md)." >&2
+    exit 1
+fi
