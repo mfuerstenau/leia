@@ -74,7 +74,10 @@ public final class FieldsForm {
     public void render(Frame frame, Rect area) {
         List<Line> lines = new ArrayList<>();
         for (int i = 0; i < names.size(); i++) {
-            lines.add(Form.row(TextFormat.escapeControl(names.get(i)), shown.get(i) ? "[x]" : "[ ]", i == selected));
+            lines.add(Form.row(
+                    TextFormat.escapeControl(names.get(i)),
+                    shown.get(i).booleanValue() ? "[x]" : "[ ]",
+                    i == selected));
         }
         Form.renderPopup(frame, area, " Stored fields per hit ", lines, selected, 40);
     }

@@ -24,6 +24,7 @@ import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
 import io.github.mfuerstenau.leia.protocol.document.GetReconstructResult;
+import io.github.mfuerstenau.leia.protocol.document.ReconstructResult;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructedField;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.document.TermPosition;
@@ -61,6 +62,8 @@ import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
 import io.github.mfuerstenau.leia.protocol.search.GetHighlightResult;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanResult;
+import io.github.mfuerstenau.leia.protocol.terms.ExportTermsResult;
+import io.github.mfuerstenau.leia.protocol.terms.FieldTerms;
 import io.github.mfuerstenau.leia.protocol.terms.GetExportTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetFieldTermScanResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
@@ -75,6 +78,7 @@ import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.documents.DocumentExport;
 import io.github.mfuerstenau.leia.tui.documents.DocumentExport.DocumentData;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
+import io.github.mfuerstenau.leia.tui.documents.Viewer;
 import io.github.mfuerstenau.leia.tui.jars.DefaultJars;
 import io.github.mfuerstenau.leia.tui.jars.JarsPopup;
 import io.github.mfuerstenau.leia.tui.jars.RuntimeFolders;
@@ -1532,11 +1536,12 @@ public final class App {
         if (!(export instanceof TermsExport termsExport) || termsExport.id() != exportId) {
             return;
         }
-        if (result.result().isPresent()) {
+        Optional<ExportTermsResult> exported = result.result();
+        if (exported.isPresent()) {
             forgetExport();
             notice = new Notice.Exported(
-                    "Exported " + TextFormat.count(result.result().get().terms(), "term") + " to "
-                            + shownPath(result.result().get().path()));
+                    "Exported " + TextFormat.count(exported.get().terms(), "term") + " to "
+                            + shownPath(exported.get().path()));
             return;
         }
         export = new TermsExport(exportId, termsExport.field(), termsExport.jobId(), result.termsWritten());
@@ -1547,12 +1552,10 @@ public final class App {
         if (!(export instanceof Rebuilding rebuilding) || rebuilding.id() != exportId) {
             return Optional.empty();
         }
-        if (result.result().isPresent()) {
+        Optional<ReconstructResult> rebuilt = result.result();
+        if (rebuilt.isPresent()) {
             return finishDocumentExport(
-                    exportId,
-                    rebuilding.data(),
-                    Optional.of(result.result().get().fields()),
-                    rebuilding.target());
+                    exportId, rebuilding.data(), Optional.of(rebuilt.get().fields()), rebuilding.target());
         }
         export = new Rebuilding(
                 exportId,
@@ -1836,9 +1839,9 @@ public final class App {
         if (scan == null || scan.id() != scanId || overview == null) {
             return Optional.empty();
         }
-        if (result.terms().isPresent()) {
-            overview.setScan(
-                    scan.field(), Optional.of(FieldScan.done(result.terms().get(), scan.topN())));
+        Optional<FieldTerms> scanned = result.terms();
+        if (scanned.isPresent()) {
+            overview.setScan(scan.field(), Optional.of(FieldScan.done(scanned.get(), scan.topN())));
             scan = null;
             return startNextScan();
         }
@@ -2377,11 +2380,10 @@ public final class App {
         if (commits != null) {
             to.commits().ifPresent(commits::restore);
         }
-        Optional<Search.Request.Cancel> searchCancel = to.search().isPresent() && search != null
-                ? search.restore(to.search().get())
-                : Optional.empty();
-        Optional<Action> document = to.documents().isPresent() && documents != null
-                ? documentsAction(documents.restore(to.documents().get()))
+        Optional<Search.Request.Cancel> searchCancel =
+                search != null ? to.search().flatMap(search::restore) : Optional.empty();
+        Optional<Action> document = documents != null
+                ? to.documents().map(documents::restore).flatMap(this::documentsAction)
                 : Optional.empty();
         leaving(to.screen());
         screen = to.screen();
@@ -2535,8 +2537,9 @@ public final class App {
     }
 
     private String documentsFooter(String cancel, String screens) {
-        if (documents.viewer().isPresent()) {
-            return documents.viewer().get().keys();
+        Optional<Viewer> viewer = documents.viewer();
+        if (viewer.isPresent()) {
+            return viewer.get().keys();
         }
         if (documents.seeking()) {
             return " type to seek a field   ⏎/Esc done";
@@ -2773,11 +2776,12 @@ public final class App {
      */
     private static Line marker(Opened opened) {
         int count = opened.indexes().size();
+        Optional<String> oldLucene = opened.oldLucene();
         String text;
         if (opened.noReader()) {
             text = count == 1 ? "no reader" : "no reader, " + count + INDEXES;
-        } else if (opened.oldLucene().isPresent()) {
-            text = opened.oldLucene().get();
+        } else if (oldLucene.isPresent()) {
+            text = oldLucene.get();
         } else if (count > 1) {
             text = count + INDEXES;
         } else {

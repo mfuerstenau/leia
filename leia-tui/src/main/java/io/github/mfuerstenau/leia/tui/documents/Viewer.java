@@ -481,50 +481,49 @@ public final class Viewer {
             }
             return String.join("\n", plain);
         }
-    }
 
-    private static String stripCr(String line) {
-        return line.endsWith("\r") ? line.substring(0, line.length() - 1) : line;
+        private static String stripCr(String line) {
+            return line.endsWith("\r") ? line.substring(0, line.length() - 1) : line;
+        }
+
+        /**
+         * For each UTF-8 byte offset into {@code text}, up to its length, the char index there; -1
+         * inside a character.
+         */
+        private static int[] charIndexes(String text) {
+            int[] charAt = new int[utf8Length(text) + 1];
+            Arrays.fill(charAt, -1);
+            int offset = 0;
+            int i = 0;
+            while (i < text.length()) {
+                charAt[offset] = i;
+                int c = text.codePointAt(i);
+                offset += utf8Length(Character.toString(c));
+                i += Character.charCount(c);
+            }
+            charAt[offset] = text.length();
+            return charAt;
+        }
     }
 
     /** The UTF-8 length of {@code text}, in bytes. */
     static int utf8Length(String text) {
         int length = 0;
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
+        int i = 0;
+        while (i < text.length()) {
+            int c = text.codePointAt(i);
             if (c < 0x80) {
                 length++;
             } else if (c < 0x800) {
                 length += 2;
-            } else if (Character.isHighSurrogate(c)
-                    && i + 1 < text.length()
-                    && Character.isLowSurrogate(text.charAt(i + 1))) {
-                length += 4;
-                i++;
-            } else {
+            } else if (c < 0x10000) {
                 length += 3;
+            } else {
+                length += 4;
             }
-        }
-        return length;
-    }
-
-    /**
-     * For each UTF-8 byte offset into {@code text}, up to its length, the char index there; -1
-     * inside a character.
-     */
-    private static int[] charIndexes(String text) {
-        int[] charAt = new int[utf8Length(text) + 1];
-        Arrays.fill(charAt, -1);
-        int offset = 0;
-        int i = 0;
-        while (i < text.length()) {
-            charAt[offset] = i;
-            int c = text.codePointAt(i);
-            offset += utf8Length(Character.toString(c));
             i += Character.charCount(c);
         }
-        charAt[offset] = text.length();
-        return charAt;
+        return length;
     }
 
     /**
@@ -1166,16 +1165,17 @@ public final class Viewer {
         List<String> items = splitAll(text, split.items());
         String detail = items.size() == 1 ? "1 item" : items.size() + " items";
         List<List<Segment>> lines = new ArrayList<>();
-        if (split.keyValue().isEmpty()) {
-            int digits = Integer.toString(items.size()).length();
+        Optional<String> keyValues = split.keyValue();
+        if (keyValues.isEmpty()) {
+            String number = "%" + Integer.toString(items.size()).length() + "d  ";
             for (int i = 0; i < items.size(); i++) {
                 lines.add(List.of(
-                        new Segment(DIM, String.format(Locale.ROOT, "%" + digits + "d  ", i + 1)),
+                        new Segment(DIM, String.format(Locale.ROOT, number, i + 1)),
                         new Segment(Style.EMPTY, TextFormat.escapeControl(items.get(i)))));
             }
             return new Formatted(lines, detail, null);
         }
-        String keyValue = split.keyValue().get();
+        String keyValue = keyValues.get();
         // Each item's key, and its value; null for an item without one.
         List<String[]> pairs = new ArrayList<>();
         for (String item : items) {

@@ -4,6 +4,7 @@ import dev.tamboui.text.CharWidth;
 import dev.tamboui.text.Line;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 
 /**
  * The key legend of the footer, wrapped to the terminal's width. A legend is a list of entries
@@ -12,6 +13,7 @@ import java.util.List;
 public final class KeyLegend {
 
     private static final String GAP = "   ";
+    private static final Pattern GAPS = Pattern.compile(" {3}");
 
     private KeyLegend() {}
 
@@ -23,7 +25,7 @@ public final class KeyLegend {
         List<Line> lines = new ArrayList<>();
         StringBuilder line = new StringBuilder();
         int lineWidth = 0;
-        for (String entry : keys.strip().split(GAP)) {
+        for (String entry : GAPS.split(keys.strip())) {
             String key = entry.strip();
             if (key.isEmpty()) {
                 continue;

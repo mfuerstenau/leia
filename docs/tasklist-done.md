@@ -410,3 +410,7 @@ Goal: the runtimes are downloaded from within leia's UI, and `--download-runtime
 ## Log window — done
 
 - [x] Misc: log view with level filter (ADR 0087): `L` on any screen opens a window on the last 10,000 records of `java.util.logging` (`LogBuffer`, kept as text), newest at the bottom and followed; `-`/`+` step the filter, which also sets the level logged at, for `leia.log` too, never below the start's; `y` copies the shown records in the file's format; Esc closes it.
+
+## SonarQube quality gate — done
+
+- [x] Review the decision to skip (ADR 0088): every open rule decided. Fixed: S3655 (73 `Optional` reads through a local, `map` or `ifPresent`), S2259, S3039, S2388, S3457, S5411, S1141, S127, S3398, S6326. Accepted, with a scope and a reason each: S6878, S7475, S1452, S108, S2094, S106, S1181, S3077, S2143, S6218 (checked: no record with an array is compared or hashed), S2975/S1182, S2095, S2583, S2386, S2326 (every variant uses the type parameter), S6916, S135, S107, S6539, S3400, S110, S1479, S6474. The main code is down from 642 issues in 34 rules to 524 in 24

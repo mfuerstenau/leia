@@ -34,7 +34,7 @@ public record HitFields(List<String> names, List<Boolean> shown) {
         }
         List<String> fields = new ArrayList<>();
         for (int i = 0; i < names.size(); i++) {
-            if (shown.get(i)) {
+            if (shown.get(i).booleanValue()) {
                 fields.add(names.get(i));
             }
         }

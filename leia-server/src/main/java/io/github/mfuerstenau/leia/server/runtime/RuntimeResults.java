@@ -56,16 +56,19 @@ import io.github.mfuerstenau.leia.protocol.points.LeafPoint;
 import io.github.mfuerstenau.leia.protocol.points.PointCell;
 import io.github.mfuerstenau.leia.protocol.points.PointSegment;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
+import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
 import io.github.mfuerstenau.leia.protocol.search.Explanation;
 import io.github.mfuerstenau.leia.protocol.search.HighlightOptions;
 import io.github.mfuerstenau.leia.protocol.search.Hit;
 import io.github.mfuerstenau.leia.protocol.search.HitField;
 import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
 import io.github.mfuerstenau.leia.protocol.search.LikeTerm;
+import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
 import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
 import io.github.mfuerstenau.leia.protocol.search.SearchResults;
 import io.github.mfuerstenau.leia.protocol.search.SortKey;
+import io.github.mfuerstenau.leia.protocol.search.StandardQuery;
 import io.github.mfuerstenau.leia.protocol.search.StartExplainParams;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.TermQuery;
@@ -222,9 +225,10 @@ public final class RuntimeResults {
         if (open.runtime().commits().isPresent()) {
             features.add(Feature.COMMITS);
         }
-        if (open.runtime().check().isPresent()) {
+        Optional<Check> check = open.runtime().check();
+        if (check.isPresent()) {
             features.add(Feature.CHECK_INDEX);
-            if (open.runtime().check().get().hasLevels()) {
+            if (check.get().hasLevels()) {
                 features.add(Feature.CHECK_LEVELS);
             }
         }
@@ -659,8 +663,8 @@ public final class RuntimeResults {
     public static GetTermsResult terms(OpenRuntime open, GetTermsParams params) throws RpcException {
         Terms terms = open.index().terms().orElseThrow(open::notSupported);
         TermParams.checkLimit(params.limit(), GetTermsParams.MAX_LIMIT);
-        Optional<byte[]> from =
-                params.from().isPresent() ? Optional.of(bytes(params.from().get())) : Optional.empty();
+        Optional<BytesValue> fromParam = params.from();
+        Optional<byte[]> from = fromParam.isPresent() ? Optional.of(bytes(fromParam.get())) : Optional.empty();
         checkField(open.index(), params.field());
         try {
             Terms.TermsPage page = terms.terms(params.field(), from, params.limit());
@@ -1009,28 +1013,34 @@ public final class RuntimeResults {
                     "Invalid params: the query needs exactly one of classic, standard, term, moreLikeThis,"
                             + " docValues and knn");
         }
-        if (query.classic().isPresent()) {
-            return parse(open, search, query.classic().get());
+        Optional<ClassicQuery> classic = query.classic();
+        if (classic.isPresent()) {
+            return parse(open, search, classic.get());
         }
-        if (query.term().isPresent()) {
-            TermQuery term = query.term().get();
+        Optional<TermQuery> termQuery = query.term();
+        if (termQuery.isPresent()) {
+            TermQuery term = termQuery.get();
             checkField(open.index(), term.field());
             return search.term(term.field(), bytes(term.term()));
         }
-        if (query.knn().isPresent()) {
-            return knn(open, search, query.knn().get());
+        Optional<KnnQuery> knn = query.knn();
+        if (knn.isPresent()) {
+            return knn(open, search, knn.get());
         }
-        if (query.standard().isPresent()) {
+        Optional<StandardQuery> standardQuery = query.standard();
+        if (standardQuery.isPresent()) {
             StandardSearch standard = open.index().standardSearch().orElseThrow(open::notSupported);
-            return RuntimeQueries.standard(open, standard, query.standard().get());
+            return RuntimeQueries.standard(open, standard, standardQuery.get());
         }
-        if (query.moreLikeThis().isPresent()) {
+        Optional<MoreLikeThisQuery> likeQuery = query.moreLikeThis();
+        if (likeQuery.isPresent()) {
             MoreLikeThisSearch like = open.index().moreLikeThisSearch().orElseThrow(open::notSupported);
-            return RuntimeQueries.moreLikeThis(open, like, query.moreLikeThis().get());
+            return RuntimeQueries.moreLikeThis(open, like, likeQuery.get());
         }
-        if (query.docValues().isPresent()) {
+        Optional<DocValuesQuery> docValuesQuery = query.docValues();
+        if (docValuesQuery.isPresent()) {
             DocValuesSearch docValues = open.index().docValuesSearch().orElseThrow(open::notSupported);
-            return RuntimeQueries.docValues(open, docValues, query.docValues().get());
+            return RuntimeQueries.docValues(open, docValues, docValuesQuery.get());
         }
         throw open.notSupported();
     }
@@ -1046,8 +1056,9 @@ public final class RuntimeResults {
         String lucene = withLucene(open);
         String deleted = includeDeleted ? ", deleted documents too" : "";
         int maxDoc = open.index().maxDoc();
-        if (params.pattern().isPresent()) {
-            FilterPattern filterPattern = params.pattern().get();
+        Optional<FilterPattern> patternParam = params.pattern();
+        if (patternParam.isPresent()) {
+            FilterPattern filterPattern = patternParam.get();
             Optional<Set<String>> fields = filterPattern.fields().map(Set::copyOf);
             StoredScan.StoredSource source = storedSource(open, fields, includeDeleted);
             Pattern pattern = StartStoredScanHandler.pattern(filterPattern.pattern(), filterPattern.caseInsensitive());
@@ -1293,7 +1304,8 @@ public final class RuntimeResults {
     /** The target of {@code knn}, a vector or a document's, checked against the field's vectors. */
     static RuntimeIndex.Vector knnTarget(OpenRuntime open, Knn group, KnnQuery knn, RuntimeIndex.VectorFormat format)
             throws RpcException {
-        KnnVector target = knn.vector().isPresent() ? knn.vector().get() : documentVector(open, group, knn);
+        Optional<KnnVector> vector = knn.vector();
+        KnnVector target = vector.isPresent() ? vector.get() : documentVector(open, group, knn);
         try {
             KnnChecks.checkTarget(
                     knn.field(),
@@ -1309,9 +1321,8 @@ public final class RuntimeResults {
 
     /** The filter of {@code knn}, parsed by the runtime. */
     static Optional<Search.ParsedQuery> knnFilter(OpenRuntime open, Search search, KnnQuery knn) throws RpcException {
-        return knn.filter().isPresent()
-                ? Optional.of(parse(open, search, knn.filter().get()))
-                : Optional.empty();
+        Optional<ClassicQuery> filter = knn.filter();
+        return filter.isPresent() ? Optional.of(parse(open, search, filter.get())) : Optional.empty();
     }
 
     /** The vector of the query's document, which may be deleted. */
@@ -1525,8 +1536,10 @@ public final class RuntimeResults {
     private static boolean bestScoreFirst(List<SortKey> sort) {
         return sort.isEmpty()
                 || sort.size() == 1
-                        && sort.getFirst().score().isPresent()
-                        && !sort.getFirst().score().get().reverse();
+                        && sort.getFirst()
+                                .score()
+                                .filter(score -> !score.reverse())
+                                .isPresent();
     }
 
     /**

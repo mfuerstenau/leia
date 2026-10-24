@@ -130,9 +130,10 @@ final class Lucene7MoreLikeQuery extends Query {
     @Override
     public boolean equals(Object other) {
         return sameClassAs(other)
-                && source.equals(((Lucene7MoreLikeQuery) other).source)
-                && options.equals(((Lucene7MoreLikeQuery) other).options)
-                && analyzer.equals(((Lucene7MoreLikeQuery) other).analyzer);
+                && other instanceof Lucene7MoreLikeQuery that
+                && source.equals(that.source)
+                && options.equals(that.options)
+                && analyzer.equals(that.analyzer);
     }
 
     @Override

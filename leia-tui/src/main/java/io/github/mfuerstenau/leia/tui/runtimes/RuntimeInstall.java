@@ -284,15 +284,15 @@ public final class RuntimeInstall {
         List<Download> downloads = new ArrayList<>();
         List<RuntimeFolders.ListedJar> kept = new ArrayList<>();
         for (RuntimeFolders.ListedJar jar : listed) {
-            if (jar.mavenPath().isEmpty()) {
+            Optional<String> mavenPath = jar.mavenPath();
+            if (mavenPath.isEmpty()) {
                 continue;
             }
             Path target = folder.resolve(jar.name());
             if (Files.isRegularFile(target) && sha256(target).equals(jar.sha256())) {
                 kept.add(jar);
             } else {
-                downloads.add(new Download(
-                        folderName, jar, base.resolve(jar.mavenPath().get())));
+                downloads.add(new Download(folderName, jar, base.resolve(mavenPath.get())));
             }
         }
         return new RuntimePlan(known, adapter, listed, downloads, kept);
@@ -399,10 +399,11 @@ public final class RuntimeInstall {
                 throw new CancelledException();
             }
             names.add(jar.name());
-            if (jar.mavenPath().isEmpty()) {
+            Optional<String> mavenPath = jar.mavenPath();
+            if (mavenPath.isEmpty()) {
                 writeOwn(folder, jar.name(), resource(folderName, jar.name()), listener);
             } else if (downloads.contains(jar.name())) {
-                download(client, folder, jar, base.resolve(jar.mavenPath().get()), listener, cancelled);
+                download(client, folder, jar, base.resolve(mavenPath.get()), listener, cancelled);
             } else {
                 listener.jarDone(folderName, jar.name(), JarDone.KEPT, jar.size());
             }

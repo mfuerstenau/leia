@@ -417,13 +417,11 @@ public final class Check {
             shown.add(Line.styled("    " + problem, Style.EMPTY.red()));
         }
         for (SegmentCheck segment : index.segments()) {
-            if (segment.error().isPresent()) {
-                shown.add(Line.styled(
-                        "    " + segment.name() + " (" + TextFormat.count(segment.maxDoc(), "doc") + ", "
-                                + TextFormat.size(segment.sizeBytes()) + "): "
-                                + segment.error().get(),
-                        Style.EMPTY.red()));
-            }
+            segment.error()
+                    .ifPresent(error -> shown.add(Line.styled(
+                            "    " + segment.name() + " (" + TextFormat.count(segment.maxDoc(), "doc") + ", "
+                                    + TextFormat.size(segment.sizeBytes()) + "): " + error,
+                            Style.EMPTY.red())));
         }
         return shown;
     }
@@ -433,10 +431,11 @@ public final class Check {
         if (index.error().isPresent()) {
             return "could not be checked";
         }
-        if (index.segmentsFile().isEmpty()) {
+        Optional<String> segmentsFile = index.segmentsFile();
+        if (segmentsFile.isEmpty()) {
             return "no readable commit";
         }
-        String file = index.segmentsFile().get();
+        String file = segmentsFile.get();
         String segments = TextFormat.count(index.segmentCount(), "segment");
         if (index.badSegments() > 0) {
             return file + ", " + index.badSegments() + " of " + segments + " broken, "
@@ -447,8 +446,9 @@ public final class Check {
 
     /** What is wrong with an index besides its broken segments. */
     static List<String> indexProblems(IndexCheck index) {
-        if (index.error().isPresent()) {
-            return List.of(index.error().get());
+        Optional<String> error = index.error();
+        if (error.isPresent()) {
+            return List.of(error.get());
         }
         List<String> problems = new ArrayList<>();
         if (index.missingSegments()) {

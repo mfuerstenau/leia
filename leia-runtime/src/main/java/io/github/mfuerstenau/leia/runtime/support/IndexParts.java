@@ -34,7 +34,7 @@ public final class IndexParts {
         }
         List<P> parts = new ArrayList<>();
         List<Skipped> skipped = new ArrayList<>();
-        IOException firstFailure = null;
+        List<IOException> failures = new ArrayList<>();
         for (Path dir : dirs) {
             try {
                 parts.add(opener.open(dir));
@@ -43,13 +43,11 @@ public final class IndexParts {
                     throw e;
                 }
                 skipped.add(new Skipped(dir, Failures.message(e)));
-                if (firstFailure == null) {
-                    firstFailure = Failures.named(dir, e);
-                }
+                failures.add(Failures.named(dir, e));
             }
         }
         if (parts.isEmpty()) {
-            throw firstFailure;
+            throw failures.getFirst();
         }
         return new Opened<>(parts, skipped);
     }

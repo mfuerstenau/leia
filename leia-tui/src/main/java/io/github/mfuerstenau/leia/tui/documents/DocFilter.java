@@ -164,11 +164,12 @@ public final class DocFilter {
         if (!(state instanceof State.Building building)) {
             return Optional.empty();
         }
-        if (result.result().isEmpty()) {
+        Optional<FilterResult> done = result.result();
+        if (done.isEmpty()) {
             state = new State.Building(building.jobId(), result.docsSearched());
             return Optional.empty();
         }
-        FilterResult built = result.result().get();
+        FilterResult built = done.get();
         state = new State.Ready(
                 built.filterId(), built.matchCount(), built.timedOutValues().orElse(0));
         return Optional.of(new Built(built.filterId(), startDoc, rebuilt ? FilterStep.LOCATE : FilterStep.NEAREST));

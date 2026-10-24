@@ -165,8 +165,9 @@ final class Lucene5DocValuesQueries {
     private static Query longRange(FieldInfo field, Match.Range<String> range) {
         long lower = Long.MIN_VALUE;
         long upper = Long.MAX_VALUE;
-        if (range.lower().isPresent()) {
-            lower = parseLong(range.lower().get());
+        Optional<String> from = range.lower();
+        if (from.isPresent()) {
+            lower = parseLong(from.get());
             if (!range.includeLower()) {
                 if (lower == Long.MAX_VALUE) {
                     return none();
@@ -174,8 +175,9 @@ final class Lucene5DocValuesQueries {
                 lower++;
             }
         }
-        if (range.upper().isPresent()) {
-            upper = parseLong(range.upper().get());
+        Optional<String> to = range.upper();
+        if (to.isPresent()) {
+            upper = parseLong(to.get());
             if (!range.includeUpper()) {
                 if (upper == Long.MIN_VALUE) {
                     return none();

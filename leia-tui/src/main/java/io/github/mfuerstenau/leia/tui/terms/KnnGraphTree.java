@@ -8,6 +8,7 @@ import io.github.mfuerstenau.leia.protocol.knn.KnnGraphLevel;
 import io.github.mfuerstenau.leia.protocol.knn.KnnGraphNeighbour;
 import io.github.mfuerstenau.leia.protocol.knn.KnnGraphNode;
 import io.github.mfuerstenau.leia.protocol.knn.KnnGraphSegment;
+import io.github.mfuerstenau.leia.protocol.knn.KnnGraphShape;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -171,10 +172,11 @@ final class KnnGraphTree {
         List<Item> rows = new ArrayList<>();
         for (Segment segment : segments) {
             rows.add(new Item.SegmentItem(segment));
-            if (!segment.expanded || segment.info.shape().isEmpty()) {
+            Optional<KnnGraphShape> shape = segment.info.shape();
+            if (!segment.expanded || shape.isEmpty()) {
                 continue;
             }
-            rows.add(new Item.EntryItem(segment, segment.info.shape().get().entry()));
+            rows.add(new Item.EntryItem(segment, shape.get().entry()));
             for (Level level : segment.levels) {
                 rows.add(new Item.LevelItem(level));
                 if (level.expanded) {

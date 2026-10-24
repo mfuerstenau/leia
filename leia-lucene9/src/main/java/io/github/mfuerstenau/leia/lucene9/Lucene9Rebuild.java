@@ -112,17 +112,6 @@ final class Lucene9Rebuild implements Rebuild {
         return options.compareTo(IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS) >= 0;
     }
 
-    private static RuntimeIndex.IndexOptions indexOptions(IndexOptions options) {
-        return switch (options) {
-            case NONE -> RuntimeIndex.IndexOptions.NONE;
-            case DOCS -> RuntimeIndex.IndexOptions.DOCS;
-            case DOCS_AND_FREQS -> RuntimeIndex.IndexOptions.DOCS_AND_FREQS;
-            case DOCS_AND_FREQS_AND_POSITIONS -> RuntimeIndex.IndexOptions.DOCS_AND_FREQS_AND_POSITIONS;
-            case DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS ->
-                RuntimeIndex.IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS;
-        };
-    }
-
     /** One rebuild, which counts the terms and points it goes through. */
     private static final class Scan {
 
@@ -219,6 +208,17 @@ final class Lucene9Rebuild implements Rebuild {
             });
             result.sort(Arrays::compareUnsigned);
             return List.copyOf(result);
+        }
+
+        private static RuntimeIndex.IndexOptions indexOptions(IndexOptions options) {
+            return switch (options) {
+                case NONE -> RuntimeIndex.IndexOptions.NONE;
+                case DOCS -> RuntimeIndex.IndexOptions.DOCS;
+                case DOCS_AND_FREQS -> RuntimeIndex.IndexOptions.DOCS_AND_FREQS;
+                case DOCS_AND_FREQS_AND_POSITIONS -> RuntimeIndex.IndexOptions.DOCS_AND_FREQS_AND_POSITIONS;
+                case DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS ->
+                    RuntimeIndex.IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS;
+            };
         }
     }
 }

@@ -574,7 +574,8 @@ public final class RuntimeWindow {
         Set<String> mismatched = new LinkedHashSet<>();
         runtime.downloads().forEach(download -> mismatched.add(download.jar().name()));
         for (RuntimeFolders.ListedJar jar : runtime.listed()) {
-            if (jar.mavenPath().isEmpty()) {
+            Optional<String> mavenPath = jar.mavenPath();
+            if (mavenPath.isEmpty()) {
                 continue;
             }
             // Unindented, as in the details of an offered runtime.
@@ -583,8 +584,7 @@ public final class RuntimeWindow {
                 lines.add(Line.styled(
                         "Not there, or doesn't match the list; the loader checks only that it is there", WARNING));
             }
-            lines.add(Line.from(
-                    install.repository().resolve(jar.mavenPath().get()).toString()));
+            lines.add(Line.from(install.repository().resolve(mavenPath.get()).toString()));
             lines.add(Line.from(Span.styled("SHA-256 " + jar.sha256(), Style.EMPTY.dim())));
         }
         ownJars(runtime, lines);

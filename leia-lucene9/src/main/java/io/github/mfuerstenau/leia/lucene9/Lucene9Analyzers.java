@@ -47,11 +47,7 @@ final class Lucene9Analyzers {
         Map<String, Analyzer> fields = new TreeMap<>();
         try {
             for (Map.Entry<String, AnalyzerSpec> field : new TreeMap<>(spec.fields()).entrySet()) {
-                try {
-                    fields.put(field.getKey(), analyzer(field.getValue()));
-                } catch (InvalidAnalyzerException e) {
-                    throw new InvalidAnalyzerException("field '" + field.getKey() + "': " + e.getMessage(), e);
-                }
+                fields.put(field.getKey(), fieldAnalyzer(field.getKey(), field.getValue()));
             }
         } catch (UnsupportedAnalyzerException | InvalidAnalyzerException | RuntimeException e) {
             fields.values().forEach(Analyzer::close);
@@ -59,6 +55,16 @@ final class Lucene9Analyzers {
             throw e;
         }
         return new PerFieldAnalyzerWrapper(fallback, fields);
+    }
+
+    /** The analyzer of {@code field}, with the field's name in the message of an invalid one. */
+    private static Analyzer fieldAnalyzer(String field, AnalyzerSpec spec)
+            throws UnsupportedAnalyzerException, InvalidAnalyzerException {
+        try {
+            return analyzer(spec);
+        } catch (InvalidAnalyzerException e) {
+            throw new InvalidAnalyzerException("field '" + field + "': " + e.getMessage(), e);
+        }
     }
 
     /** The analyzer in Lucene's shingle wrapper, then in its token limit, checked first as leia-core checks them. */

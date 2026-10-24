@@ -66,9 +66,9 @@ final class Lucene3Analyzers {
                     throw new UnsupportedAnalyzerException(
                             "options of " + name + " other than stop words and the longest token");
                 }
-                Optional<List<String>> stopwords = preset.stopwords().isPresent()
-                        ? Optional.of(
-                                WordFiles.words("stop words", preset.stopwords().get()))
+                Optional<AnalyzerSpec.WordSet> stopwordSet = preset.stopwords();
+                Optional<List<String>> stopwords = stopwordSet.isPresent()
+                        ? Optional.of(WordFiles.words("stop words", stopwordSet.get()))
                         : Optional.empty();
                 yield named(name, stopwords, preset.maxTokenLength());
             }
@@ -77,10 +77,11 @@ final class Lucene3Analyzers {
                 if (wrapped.shingles().isPresent()) {
                     throw new UnsupportedAnalyzerException("shingles");
                 }
-                if (wrapped.limitTokenCount().isEmpty()) {
+                Optional<AnalyzerSpec.LimitTokenCount> limit = wrapped.limitTokenCount();
+                if (limit.isEmpty()) {
                     yield analyzer(wrapped.analyzer());
                 }
-                int maxTokenCount = wrapped.limitTokenCount().get().maxTokenCount();
+                int maxTokenCount = limit.get().maxTokenCount();
                 if (maxTokenCount < 1) {
                     throw new InvalidAnalyzerException(
                             "token limit: the maximum token count must be at least 1, not " + maxTokenCount, null);

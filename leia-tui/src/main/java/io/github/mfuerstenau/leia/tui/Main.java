@@ -235,8 +235,9 @@ public final class Main {
                             ? -1
                             : Duration.between(started, firstFrame[0]).toMillis());
         }
-        if (session.failure().isPresent()) {
-            err.println("leia: internal error: " + session.failure().get() + " (see leia.log)");
+        Optional<Throwable> failure = session.failure();
+        if (failure.isPresent()) {
+            err.println("leia: internal error: " + failure.get() + " (see leia.log)");
             return 1;
         }
         return 0;

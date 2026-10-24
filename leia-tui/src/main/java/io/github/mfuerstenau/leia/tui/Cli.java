@@ -208,46 +208,47 @@ record Cli(
                     downloadRuntimes,
                     runtimes.stream().distinct().toList());
         }
-    }
 
-    private static boolean flag(String name, Optional<String> inline) throws UsageException {
-        if (inline.isPresent()) {
-            throw new UsageException(name + " takes no value");
+        private static boolean flag(String name, Optional<String> inline) throws UsageException {
+            if (inline.isPresent()) {
+                throw new UsageException(name + " takes no value");
+            }
+            return true;
         }
-        return true;
-    }
 
-    private static String next(String[] args, int i, String name, String value) throws UsageException {
-        if (i >= args.length) {
-            throw new UsageException(name + " needs a value " + value);
+        private static String next(String[] args, int i, String name, String value) throws UsageException {
+            if (i >= args.length) {
+                throw new UsageException(name + " needs a value " + value);
+            }
+            return args[i];
         }
-        return args[i];
-    }
 
-    private static Path path(String name, String value) throws UsageException {
-        try {
-            return Path.of(value);
-        } catch (InvalidPathException e) {
-            throw new UsageException(name + ": not a path: " + e.getMessage());
+        private static Path path(String name, String value) throws UsageException {
+            try {
+                return Path.of(value);
+            } catch (InvalidPathException e) {
+                throw new UsageException(name + ": not a path: " + e.getMessage());
+            }
         }
-    }
 
-    private static String runtime(String value) throws UsageException {
-        List<String> known =
-                RuntimeFolders.KNOWN.stream().map(RuntimeFolders.Known::folder).toList();
-        if (!known.contains(value)) {
-            throw new UsageException("invalid value '" + value + "' for --runtime <FOLDER>: possible values are "
-                    + String.join(", ", known));
+        private static String runtime(String value) throws UsageException {
+            List<String> known = RuntimeFolders.KNOWN.stream()
+                    .map(RuntimeFolders.Known::folder)
+                    .toList();
+            if (!known.contains(value)) {
+                throw new UsageException("invalid value '" + value + "' for --runtime <FOLDER>: possible values are "
+                        + String.join(", ", known));
+            }
+            return value;
         }
-        return value;
-    }
 
-    private static DirectoryImpl directory(String value) throws UsageException {
-        return switch (value) {
-            case "fs", "mmap", "nio" -> DirectoryImpl.valueOf(value.toUpperCase(Locale.ROOT));
-            default ->
-                throw new UsageException(
-                        "invalid value '" + value + "' for --directory <IMPL>: possible values are fs, mmap, nio");
-        };
+        private static DirectoryImpl directory(String value) throws UsageException {
+            return switch (value) {
+                case "fs", "mmap", "nio" -> DirectoryImpl.valueOf(value.toUpperCase(Locale.ROOT));
+                default ->
+                    throw new UsageException(
+                            "invalid value '" + value + "' for --directory <IMPL>: possible values are fs, mmap, nio");
+            };
+        }
     }
 }

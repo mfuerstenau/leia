@@ -74,7 +74,8 @@ public final class TextFormat {
         // The character position of each byte offset that starts a character, and of the end; -1 inside one.
         int[] chars = new int[utf8Length(text) + 1];
         int bytes = 0;
-        for (int i = 0; i < text.length(); ) {
+        int i = 0;
+        while (i < text.length()) {
             int c = text.codePointAt(i);
             int length = utf8Length(c);
             chars[bytes] = i;
@@ -102,7 +103,8 @@ public final class TextFormat {
     /** How many bytes {@code text} takes in UTF-8. */
     public static int utf8Length(String text) {
         int length = 0;
-        for (int i = 0; i < text.length(); ) {
+        int i = 0;
+        while (i < text.length()) {
             int c = text.codePointAt(i);
             length += utf8Length(c);
             i += Character.charCount(c);
@@ -174,11 +176,9 @@ public final class TextFormat {
         boolean fixed = score == 0 || !Double.isFinite(score) || Math.abs(score) >= 0.001;
         String text = "";
         for (int decimals = 4; decimals >= 0; decimals--) {
-            text = fixed
-                    ? String.format(Locale.ROOT, "%." + decimals + "f", score)
-                    : EXPONENT_ZEROS
-                            .matcher(String.format(Locale.ROOT, "%." + decimals + "e", score))
-                            .replaceFirst("e-");
+            String pattern = "%." + decimals + (fixed ? "f" : "e");
+            String formatted = String.format(Locale.ROOT, pattern, score);
+            text = fixed ? formatted : EXPONENT_ZEROS.matcher(formatted).replaceFirst("e-");
             if (text.length() <= width) {
                 break;
             }
@@ -249,7 +249,7 @@ public final class TextFormat {
         int lastWidth = Math.max(maxLines == 1 ? first : width, 1);
         String last = lines.getLast();
         while (!last.isEmpty() && CharWidth.of(last) + 1 > lastWidth) {
-            last = last.substring(0, last.offsetByCodePoints(last.length(), -1));
+            last = last.substring(0, last.length() - Character.charCount(last.codePointBefore(last.length())));
         }
         lines.set(lines.size() - 1, last + "…");
     }
@@ -331,7 +331,8 @@ public final class TextFormat {
             lineWidth = 0;
             open = true;
             // A word wider than the line is cut where it fills it.
-            for (int i = wordStart; i < wordEnd; ) {
+            int i = wordStart;
+            while (i < wordEnd) {
                 int c = text.codePointAt(i);
                 int charWidth = CharWidth.of(c);
                 if (lineWidth > 0 && lineWidth + charWidth > columns) {

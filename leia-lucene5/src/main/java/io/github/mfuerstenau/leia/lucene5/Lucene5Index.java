@@ -1043,7 +1043,7 @@ final class Lucene5Index
 
         @Override
         public int numDocs() {
-            return maxDoc();
+            return super.maxDoc();
         }
     }
 

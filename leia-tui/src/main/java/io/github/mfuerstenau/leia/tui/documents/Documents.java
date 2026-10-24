@@ -29,6 +29,7 @@ import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
 import io.github.mfuerstenau.leia.protocol.document.GetReconstructResult;
 import io.github.mfuerstenau.leia.protocol.document.KnnVector;
+import io.github.mfuerstenau.leia.protocol.document.ReconstructResult;
 import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.document.TermPosition;
@@ -43,6 +44,7 @@ import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.points.PointValue;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
+import io.github.mfuerstenau.leia.protocol.search.DocumentHighlight;
 import io.github.mfuerstenau.leia.protocol.search.FieldMatches;
 import io.github.mfuerstenau.leia.protocol.search.GetHighlightResult;
 import io.github.mfuerstenau.leia.protocol.search.HighlightOptions;
@@ -740,11 +742,12 @@ public final class Documents {
 
     /** Takes the matches {@code matchesId} once they are in. */
     public void matchesProgress(long matchesId, GetHighlightResult result) {
-        if (!findsMatches(matchesId) || result.highlight().isEmpty()) {
+        Optional<DocumentHighlight> highlight = result.highlight();
+        if (!findsMatches(matchesId) || highlight.isEmpty()) {
             return;
         }
         Map<String, FieldMatches> fields = new HashMap<>();
-        for (FieldMatches field : result.highlight().get().fields()) {
+        for (FieldMatches field : highlight.get().fields()) {
             fields.put(field.field(), field);
         }
         matches.fields = fields;
@@ -1250,8 +1253,9 @@ public final class Documents {
             return;
         }
         Reconstruction next;
-        if (result.result().isPresent()) {
-            next = result.result().get().fields().stream()
+        Optional<ReconstructResult> rebuilt = result.result();
+        if (rebuilt.isPresent()) {
+            next = rebuilt.get().fields().stream()
                     .findFirst()
                     .<Reconstruction>map(Reconstruction.Done::new)
                     .orElse(new Reconstruction.Failed("the server rebuilt no field"));
@@ -1448,10 +1452,15 @@ public final class Documents {
      */
     private Optional<Request> searchDocValues() {
         Optional<DocumentField> field = selectedField();
-        if (field.isEmpty() || field.get().docValues().isEmpty()) {
+        if (field.isEmpty()) {
             return Optional.empty();
         }
-        DocValues docValues = field.get().docValues().get();
+        String name = field.get().name();
+        Optional<DocValues> fieldDocValues = field.get().docValues();
+        if (fieldDocValues.isEmpty()) {
+            return Optional.empty();
+        }
+        DocValues docValues = fieldDocValues.get();
         boolean hex = docValues.values().stream().anyMatch(BytesValue::binary);
         List<String> values = new ArrayList<>();
         for (long number : docValues.numbers()) {
@@ -1479,7 +1488,7 @@ public final class Documents {
         if (deduped.isEmpty()) {
             return Optional.empty();
         }
-        return Optional.of(new Request.SearchDocValues(field.get().name(), numbers.docValuesNumber(), hex, deduped));
+        return Optional.of(new Request.SearchDocValues(name, numbers.docValuesNumber(), hex, deduped));
     }
 
     /** The selected field's first stored text, for the analysis screen; the viewer analyzes any other value. */
@@ -2000,11 +2009,11 @@ public final class Documents {
         List<Row> tableRows = new ArrayList<>();
         for (int i = 0; i < cells.size(); i++) {
             String[] cellRow = cells.get(i);
-            Cell name = matched.get(i)
+            Cell name = matched.get(i).booleanValue()
                     ? Cell.from(Line.from(Span.styled(cellRow[0], TextFormat.MATCH)))
                     : Cell.from(cellRow[0]);
             Row tableRow = Row.from(name, Cell.from(cellRow[1]), right(cellRow[2], widths[2]), Cell.from(cellRow[3]));
-            tableRows.add(empty.get(i) ? tableRow.style(Style.EMPTY.dim()) : tableRow);
+            tableRows.add(empty.get(i).booleanValue() ? tableRow.style(Style.EMPTY.dim()) : tableRow);
         }
         String title = fieldsTitle();
         if (row >= 0) {
@@ -2209,10 +2218,11 @@ public final class Documents {
             int count = field.stored().size();
             return count == 1 ? text : text + " (+" + (count - 1) + " more)";
         }
-        if (field.docValues().isPresent()) {
+        Optional<DocValues> docValues = field.docValues();
+        if (docValues.isPresent()) {
             return "dv: "
                     + TextFormat.escapeControl(TextFormat.firstChars(
-                            String.join(", ", docValueTexts(field.docValues().get(), numbers)), SUMMARY_CHARS));
+                            String.join(", ", docValueTexts(docValues.get(), numbers)), SUMMARY_CHARS));
         }
         return field.vector().map(Documents::vectorSummary).orElse("");
     }
@@ -2258,11 +2268,11 @@ public final class Documents {
         int width = Integer.toString(Math.max(components.size() - 1, 0)).length();
         List<Line> lines = new ArrayList<>();
         Style dim = Style.EMPTY.dim();
+        String index = "  %" + width + "d  ";
         for (int from = 0; from < components.size(); from += VECTOR_LINE) {
             List<String> line = components.subList(from, Math.min(from + VECTOR_LINE, components.size()));
             lines.add(Line.from(
-                    Span.styled(String.format(Locale.ROOT, "  %" + width + "d  ", from), dim),
-                    Span.raw(String.join("  ", line))));
+                    Span.styled(String.format(Locale.ROOT, index, from), dim), Span.raw(String.join("  ", line))));
         }
         return lines;
     }
@@ -2428,11 +2438,12 @@ public final class Documents {
     }
 
     private static List<Line> docValuesLines(DocumentField field, NumberFormat numbers) {
-        if (field.docValues().isEmpty()) {
+        Optional<DocValues> docValues = field.docValues();
+        if (docValues.isEmpty()) {
             return List.of(labelled("Doc values", "-"));
         }
         List<Line> lines = new ArrayList<>();
-        DocValues values = field.docValues().get();
+        DocValues values = docValues.get();
         String heading = Overview.docValues(values.type());
         if (!values.numbers().isEmpty()) {
             heading += AS + numbers.label() + " (x)";
@@ -2452,11 +2463,12 @@ public final class Documents {
         }
         List<Line> lines = new ArrayList<>();
         lines.add(Line.empty());
-        if (field.vector().isEmpty()) {
+        Optional<KnnVector> knnVector = field.vector();
+        if (knnVector.isEmpty()) {
             lines.add(labelled("Vector", "-"));
             return lines;
         }
-        KnnVector vector = field.vector().get();
+        KnnVector vector = knnVector.get();
         lines.add(labelled(
                 "Vector",
                 vector.dimension() + "d " + Overview.vectorEncoding(vector.encoding()) + ", length "

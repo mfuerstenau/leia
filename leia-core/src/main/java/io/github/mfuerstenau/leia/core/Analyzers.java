@@ -100,11 +100,7 @@ public final class Analyzers {
         Map<String, Analyzer> fields = new TreeMap<>();
         try {
             for (Map.Entry<String, AnalyzerSpec> field : new TreeMap<>(spec.fields()).entrySet()) {
-                try {
-                    fields.put(field.getKey(), build(field.getValue()));
-                } catch (InvalidAnalyzerException e) {
-                    throw new InvalidAnalyzerException("field '" + field.getKey() + "': " + e.getMessage(), e);
-                }
+                fields.put(field.getKey(), fieldAnalyzer(field.getKey(), field.getValue()));
             }
         } catch (InvalidAnalyzerException | RuntimeException e) {
             fields.values().forEach(Analyzer::close);
@@ -112,6 +108,15 @@ public final class Analyzers {
             throw e;
         }
         return new PerFieldAnalyzer(defaultAnalyzer, fields);
+    }
+
+    /** The analyzer of {@code field}, with the field's name in the message of an invalid one. */
+    private static Analyzer fieldAnalyzer(String field, AnalyzerSpec spec) throws InvalidAnalyzerException {
+        try {
+            return build(spec);
+        } catch (InvalidAnalyzerException e) {
+            throw new InvalidAnalyzerException("field '" + field + "': " + e.getMessage(), e);
+        }
     }
 
     /** The analyzer in Lucene's shingle wrapper, then in its token limit (ADR 0023). */

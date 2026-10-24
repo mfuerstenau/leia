@@ -1,7 +1,9 @@
 package io.github.mfuerstenau.leia.server.runtime;
 
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
+import io.github.mfuerstenau.leia.protocol.search.DocSort;
 import io.github.mfuerstenau.leia.protocol.search.FieldSort;
+import io.github.mfuerstenau.leia.protocol.search.ScoreSort;
 import io.github.mfuerstenau.leia.protocol.search.Similarity;
 import io.github.mfuerstenau.leia.protocol.search.SortKey;
 import io.github.mfuerstenau.leia.protocol.search.SortValue;
@@ -89,10 +91,12 @@ final class RuntimeScoring {
                         ErrorCode.INVALID_PARAMS,
                         "Invalid params: a sort key needs exactly one of field, score and doc");
             }
-            if (key.score().isPresent()) {
-                sort.add(new Scoring.SortKey.Score(key.score().get().reverse()));
-            } else if (key.doc().isPresent()) {
-                sort.add(new Scoring.SortKey.Doc(key.doc().get().reverse()));
+            Optional<ScoreSort> score = key.score();
+            Optional<DocSort> doc = key.doc();
+            if (score.isPresent()) {
+                sort.add(new Scoring.SortKey.Score(score.get().reverse()));
+            } else if (doc.isPresent()) {
+                sort.add(new Scoring.SortKey.Doc(doc.get().reverse()));
             } else {
                 sort.add(fieldSort(index, key.field().orElseThrow()));
             }

@@ -255,7 +255,8 @@ public final class JarsPopup {
     }
 
     private Line defaultLine() {
-        if (defaultJars.dir().isEmpty()) {
+        Optional<Path> dir = defaultJars.dir();
+        if (dir.isEmpty()) {
             return Line.from(
                     Span.raw("Default folder: "),
                     Span.raw("none (no home directory)").dim());
@@ -267,12 +268,13 @@ public final class JarsPopup {
         };
         return Line.from(
                 Span.raw("Default folder: "),
-                Span.raw(shorten(defaultJars.dir().get())),
+                Span.raw(shorten(dir.get())),
                 Span.raw(note).dim());
     }
 
     private Line runtimesLine() {
-        if (runtimeFolders.dir().isEmpty()) {
+        Optional<Path> dir = runtimeFolders.dir();
+        if (dir.isEmpty()) {
             return Line.from(
                     Span.raw("Runtimes: "),
                     Span.raw("none (not run from leia.jar)").dim());
@@ -280,7 +282,7 @@ public final class JarsPopup {
         String note = runtimeFolders.exists() ? "" : "  (missing)";
         return Line.from(
                 Span.raw("Runtimes: "),
-                Span.raw(shorten(runtimeFolders.dir().get())),
+                Span.raw(shorten(dir.get())),
                 Span.raw(note).dim());
     }
 

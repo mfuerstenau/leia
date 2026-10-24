@@ -427,7 +427,7 @@ final class PresetAnalyzers {
             try {
                 names.addAll(classNames(location));
             } catch (IOException | UncheckedIOException e) {
-                LOG.log(Level.WARNING, "Cannot read " + location + " for analyzers", e);
+                LOG.log(Level.WARNING, e, () -> "Cannot read " + location + " for analyzers");
             }
         }
         Map<String, Preset> presets = names.stream()
@@ -464,7 +464,7 @@ final class PresetAnalyzers {
         try {
             return Optional.of(Path.of(source.getLocation().toURI()));
         } catch (URISyntaxException | IllegalArgumentException e) {
-            LOG.log(Level.FINE, "Cannot read the location of " + type.getName(), e);
+            LOG.log(Level.FINE, e, () -> "Cannot read the location of " + type.getName());
             return Optional.empty();
         }
     }
@@ -502,7 +502,7 @@ final class PresetAnalyzers {
         try {
             type = Class.forName(className, false, loader);
         } catch (ClassNotFoundException | LinkageError e) {
-            LOG.log(Level.FINE, "Skipping " + className, e);
+            LOG.log(Level.FINE, e, () -> "Skipping " + className);
             return Optional.empty();
         }
         int modifiers = type.getModifiers();

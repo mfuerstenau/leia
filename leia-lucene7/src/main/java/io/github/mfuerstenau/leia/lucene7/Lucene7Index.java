@@ -1059,7 +1059,7 @@ final class Lucene7Index
 
         @Override
         public int numDocs() {
-            return maxDoc();
+            return super.maxDoc();
         }
 
         @Override

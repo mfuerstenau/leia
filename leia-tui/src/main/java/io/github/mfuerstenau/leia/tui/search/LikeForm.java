@@ -305,7 +305,7 @@ public final class LikeForm {
                         : STOP_WORDS_PREFIX
                                 .matcher(LikeSettings.stopWordsText(draft.stopWords))
                                 .replaceFirst("");
-            default -> draft.chosen.get(i - Row.FIELD.ordinal()) ? "[x]" : "[ ]";
+            default -> draft.chosen.get(i - Row.FIELD.ordinal()).booleanValue() ? "[x]" : "[ ]";
         };
     }
 

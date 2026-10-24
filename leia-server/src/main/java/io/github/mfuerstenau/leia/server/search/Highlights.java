@@ -90,8 +90,9 @@ public final class Highlights {
         List<FieldHighlight> hit = new ArrayList<>();
         for (Map.Entry<String, List<StoredValue>> entry : stored.entrySet()) {
             List<Optional<FoundText>> perDoc = byField.get(entry.getKey());
-            if (perDoc != null && perDoc.get(i).isPresent()) {
-                FoundText found = perDoc.get(i).get();
+            Optional<FoundText> inDoc = perDoc == null ? Optional.empty() : perDoc.get(i);
+            if (inDoc.isPresent()) {
+                FoundText found = inDoc.get();
                 List<Passage> passages = passages(found, textIndexes(entry.getValue()));
                 if (!passages.isEmpty()) {
                     hit.add(new FieldHighlight(entry.getKey(), found.source(), passages));
@@ -139,8 +140,9 @@ public final class Highlights {
             OffsetSource source = highlighted.sources().getOrDefault(field, OffsetSource.NONE);
             List<ValueHighlight> valueHighlights = List.of();
             List<Optional<FoundText>> perDoc = highlighted.found().get(field);
-            if (perDoc != null && perDoc.getFirst().isPresent()) {
-                FoundText found = perDoc.getFirst().get();
+            Optional<FoundText> inDoc = perDoc == null ? Optional.empty() : perDoc.getFirst();
+            if (inDoc.isPresent()) {
+                FoundText found = inDoc.get();
                 source = found.source();
                 valueHighlights = valueHighlights(found, indexes, maxSpans);
             }

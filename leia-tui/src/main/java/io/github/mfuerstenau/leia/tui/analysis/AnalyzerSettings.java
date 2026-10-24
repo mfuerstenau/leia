@@ -384,8 +384,9 @@ public final class AnalyzerSettings {
 
     /** The words, separated by commas; {@code none} for no words; or {@code file} and the path. */
     static String wordSetText(WordSet set) {
-        if (set.words().isPresent()) {
-            List<String> words = set.words().get();
+        Optional<List<String>> listed = set.words();
+        if (listed.isPresent()) {
+            List<String> words = listed.get();
             return words.isEmpty() ? "none" : TextFormat.escapeControl(String.join(", ", words));
         }
         return set.file().map(file -> "file " + TextFormat.escapeControl(file)).orElse("");
@@ -396,8 +397,9 @@ public final class AnalyzerSettings {
         if (set.isEmpty()) {
             return "";
         }
-        if (set.get().words().isPresent()) {
-            List<String> words = set.get().words().get();
+        Optional<List<String>> listed = set.get().words();
+        if (listed.isPresent()) {
+            List<String> words = listed.get();
             return words.isEmpty() ? "-" : String.join(", ", words);
         }
         return set.get().file().map(file -> "@" + file).orElse("");
@@ -449,8 +451,9 @@ public final class AnalyzerSettings {
 
     /** The overrides as {@code word → stem}, separated by commas; {@code none} for none; or {@code file} and the path. */
     static String stemDictionaryText(StemDictionary dictionary) {
-        if (dictionary.entries().isPresent()) {
-            Map<String, String> entries = dictionary.entries().get();
+        Optional<Map<String, String>> listed = dictionary.entries();
+        if (listed.isPresent()) {
+            Map<String, String> entries = listed.get();
             if (entries.isEmpty()) {
                 return "none";
             }
@@ -471,8 +474,9 @@ public final class AnalyzerSettings {
         if (dictionary.isEmpty()) {
             return "";
         }
-        if (dictionary.get().entries().isPresent()) {
-            Map<String, String> entries = dictionary.get().entries().get();
+        Optional<Map<String, String>> listed = dictionary.get().entries();
+        if (listed.isPresent()) {
+            Map<String, String> entries = listed.get();
             if (entries.isEmpty()) {
                 return "-";
             }

@@ -123,7 +123,7 @@ public final class AutoStopWordsForm {
     StartAutoStopWordsParams params() {
         List<String> names = new ArrayList<>();
         for (int i = 0; i < fields.size(); i++) {
-            if (chosen.get(i)) {
+            if (chosen.get(i).booleanValue()) {
                 names.add(fields.get(i));
             }
         }

@@ -81,7 +81,8 @@ public final class GetDocumentHandler implements MethodHandler<GetDocumentParams
         }
         long length = 0;
         int end = -1;
-        for (int i = 0; i < text.length(); ) {
+        int i = 0;
+        while (i < text.length()) {
             int codePoint = text.codePointAt(i);
             int bytes = utf8Length(codePoint);
             if (end < 0 && length + bytes > maxLength) {

@@ -1022,11 +1022,10 @@ public final class Commits {
     private static void fieldFormatSection(List<Line> lines, Segment segment, int width) {
         lines.add(Line.empty());
         lines.add(Line.styled("Field formats", Style.EMPTY.bold()));
-        if (segment.fieldInfosError().isPresent()) {
+        Optional<String> fieldInfosError = segment.fieldInfosError();
+        if (fieldInfosError.isPresent()) {
             lines.add(Line.styled(
-                    "Could not be read: "
-                            + TextFormat.escapeControl(segment.fieldInfosError().get()),
-                    Style.EMPTY.red()));
+                    "Could not be read: " + TextFormat.escapeControl(fieldInfosError.get()), Style.EMPTY.red()));
             return;
         }
         Map<String, Function<FieldFormats, Optional<String>>> kinds = new LinkedHashMap<>();

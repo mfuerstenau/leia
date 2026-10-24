@@ -36,6 +36,7 @@ import io.github.mfuerstenau.leia.protocol.knn.StartKnnRecallParams;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
+import io.github.mfuerstenau.leia.protocol.search.DocumentHighlight;
 import io.github.mfuerstenau.leia.protocol.search.Explanation;
 import io.github.mfuerstenau.leia.protocol.search.FieldMatches;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
@@ -1277,12 +1278,13 @@ public final class Search {
         if (!runs(searchId) || submitted == null) {
             return Optional.empty();
         }
-        if (result.results().isEmpty()) {
+        Optional<SearchResults> found = result.results();
+        if (found.isEmpty()) {
             running =
                     new Running(running.id(), running.jobId(), running.more(), running.limit(), result.docsSearched());
             return Optional.empty();
         }
-        SearchResults results = result.results().get();
+        SearchResults results = found.get();
         Running page = running;
         running = null;
         boolean full = results.hits().size() == page.limit();
@@ -1364,8 +1366,8 @@ public final class Search {
     }
 
     public void explainProgress(long explainId, GetExplainResult result) {
-        if (explains(explainId) && result.explanation().isPresent()) {
-            explain.explanation = result.explanation().get();
+        if (explains(explainId)) {
+            result.explanation().ifPresent(explanation -> explain.explanation = explanation);
         }
     }
 
@@ -1402,17 +1404,13 @@ public final class Search {
      */
     private Optional<Request> viewSelected() {
         Optional<Hit> hit = selectedHit();
-        if (hit.isEmpty()
-                || hit.get().highlights().isEmpty()
-                || submitted.params.highlight().isEmpty()) {
+        Optional<HighlightOptions> options = submitted.params.highlight();
+        if (hit.isEmpty() || hit.get().highlights().isEmpty() || options.isEmpty()) {
             return Optional.empty();
         }
         HitHighlight first = hit.get().highlights().getFirst();
         StartHighlightParams params = new StartHighlightParams(
-                submitted.params.query(),
-                hit.get().docId(),
-                Optional.of(first.field()),
-                submitted.params.highlight().get());
+                submitted.params.query(), hit.get().docId(), Optional.of(first.field()), options.get());
         List<Long> cancel = new ArrayList<>();
         highlightJob().ifPresent(job -> cancel.add(job[1]));
         highlighting =
@@ -1438,12 +1436,13 @@ public final class Search {
      * with them marked: the value of the hit's first passage, or else the first with a match.
      */
     public Optional<Request> highlightProgress(long highlightId, GetHighlightResult result) {
-        if (!highlights(highlightId) || result.highlight().isEmpty()) {
+        Optional<DocumentHighlight> highlight = result.highlight();
+        if (!highlights(highlightId) || highlight.isEmpty()) {
             return Optional.empty();
         }
         Highlighting done = highlighting;
         String highlighted = done.params.field().orElseThrow();
-        List<ValueHighlight> values = result.highlight().get().fields().stream()
+        List<ValueHighlight> values = highlight.get().fields().stream()
                 .filter(matches -> matches.field().equals(highlighted))
                 .findFirst()
                 .map(FieldMatches::values)
@@ -2105,7 +2104,7 @@ public final class Search {
     /** The entries of {@code keys} that the index has the features for (ADR 0044). */
     private String available(String keys) {
         List<String> shown = new ArrayList<>();
-        for (String entry : keys.split("   ")) {
+        for (String entry : keys.split(" {3}")) {
             String kept = kept(entry);
             if (!kept.isEmpty()) {
                 shown.add(kept);
@@ -2652,20 +2651,15 @@ public final class Search {
                         .orElse(0),
                 "field".length());
         List<Line> lines = new ArrayList<>();
+        String header = "Terms      %9s  %" + tfWidth + "s  %" + dfWidth + "s  %s  term";
+        String row = "           %9s  %" + tfWidth + "d  %" + dfWidth + "d  %s  %s";
         lines.add(Line.styled(
-                String.format(
-                        Locale.ROOT,
-                        "Terms      %9s  %" + tfWidth + "s  %" + dfWidth + "s  %s  term",
-                        "score",
-                        "tf",
-                        "df",
-                        Form.padded("field", fieldWidth)),
-                Form.dim()));
+                String.format(Locale.ROOT, header, "score", "tf", "df", Form.padded("field", fieldWidth)), Form.dim()));
         for (int i = 0; i < terms.size(); i++) {
             LikeTerm term = terms.get(i);
             lines.add(Line.from(String.format(
                     Locale.ROOT,
-                    "           %9s  %" + tfWidth + "d  %" + dfWidth + "d  %s  %s",
+                    row,
                     TextFormat.score(term.score(), 9),
                     term.tf(),
                     term.docFreq(),

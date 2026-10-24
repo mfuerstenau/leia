@@ -3,6 +3,7 @@ package io.github.mfuerstenau.leia.server.runtime;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.search.DateResolution;
+import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesRange;
 import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
@@ -21,6 +22,7 @@ import io.github.mfuerstenau.leia.server.search.ParserChecks;
 import java.nio.charset.StandardCharsets;
 import java.time.ZoneId;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
@@ -101,12 +103,12 @@ final class RuntimeQueries {
         ParserChecks.fieldDateResolutions(
                         options.fieldDateResolutions(), field -> RuntimeResults.checkField(index, field))
                 .forEach((field, resolution) -> fields.put(field, resolution(resolution)));
-        Optional<Locale> locale = options.locale().isPresent()
-                ? Optional.of(ParserChecks.locale(options.locale().get()))
-                : Optional.empty();
-        Optional<ZoneId> timeZone = options.timeZone().isPresent()
-                ? Optional.of(ParserChecks.timeZone(options.timeZone().get()))
-                : Optional.empty();
+        Optional<String> localeName = options.locale();
+        Optional<Locale> locale =
+                localeName.isPresent() ? Optional.of(ParserChecks.locale(localeName.get())) : Optional.empty();
+        Optional<String> zoneName = options.timeZone();
+        Optional<ZoneId> timeZone =
+                zoneName.isPresent() ? Optional.of(ParserChecks.timeZone(zoneName.get())) : Optional.empty();
         return new Search.Dates(options.dateResolution().map(RuntimeQueries::resolution), fields, locale, timeZone);
     }
 
@@ -139,8 +141,9 @@ final class RuntimeQueries {
         if (like.docId().isPresent()) {
             RuntimeResults.checkDocId(open.index(), like.docId().getAsInt());
         }
-        if (like.text().isPresent()) {
-            int length = like.text().get().getBytes(StandardCharsets.UTF_8).length;
+        Optional<String> text = like.text();
+        if (text.isPresent()) {
+            int length = text.get().getBytes(StandardCharsets.UTF_8).length;
             if (length > MoreLikeThisQuery.MAX_TEXT_LENGTH) {
                 throw new RpcException(
                         ErrorCode.INVALID_PARAMS,
@@ -199,14 +202,16 @@ final class RuntimeQueries {
                     ErrorCode.INVALID_PARAMS,
                     "Invalid params: docValues needs exactly one of values, range and prefix");
         }
+        Optional<BytesValue> prefix = query.prefix();
+        Optional<DocValuesNumber> number = query.number();
         try {
-            if (query.prefix().isPresent()) {
-                if (query.number().isPresent()) {
+            if (prefix.isPresent()) {
+                if (number.isPresent()) {
                     throw new IllegalArgumentException("a prefix matches doc values of bytes, not numbers");
                 }
-                return group.prefix(query.field(), bytes(query.prefix().get()));
+                return group.prefix(query.field(), bytes(prefix.get()));
             }
-            if (query.number().isPresent()) {
+            if (number.isPresent()) {
                 DocValuesSearch.Match<String> match = match(query, value -> {
                     if (value.binary()) {
                         throw new IllegalArgumentException("a number can't be binary: '" + value.value() + "'");
@@ -215,8 +220,7 @@ final class RuntimeQueries {
                 });
                 return group.numbers(
                         query.field(),
-                        DocValuesSearch.NumberEncoding.valueOf(
-                                query.number().get().name()),
+                        DocValuesSearch.NumberEncoding.valueOf(number.get().name()),
                         match);
             }
             return group.bytes(query.field(), match(query, RuntimeQueries::bytes));
@@ -236,9 +240,10 @@ final class RuntimeQueries {
 
     /** @throws IllegalArgumentException if {@code convert} does, or there are no values */
     private static <T> DocValuesSearch.Match<T> match(DocValuesQuery query, Function<BytesValue, T> convert) {
-        if (query.values().isPresent()) {
+        Optional<List<BytesValue>> values = query.values();
+        if (values.isPresent()) {
             return new DocValuesSearch.Match.Values<>(
-                    query.values().get().stream().map(convert).toList());
+                    values.get().stream().map(convert).toList());
         }
         DocValuesRange range = query.range().orElseThrow();
         return new DocValuesSearch.Match.Range<>(

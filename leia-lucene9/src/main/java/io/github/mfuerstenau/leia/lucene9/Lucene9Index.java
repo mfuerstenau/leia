@@ -552,14 +552,15 @@ final class Lucene9Index
      * iterator as doc values are; empty if it has none, as a document of a segment of 8.x never has.
      */
     private static Optional<Vector> vector(LeafReader leaf, int doc, Field field) throws IOException {
-        if (field.vectors().isEmpty()) {
+        Optional<VectorFormat> format = field.vectors();
+        if (format.isEmpty()) {
             return Optional.empty();
         }
         FieldInfo info = leaf.getFieldInfos().fieldInfo(field.name());
         if (info == null || info.getVectorDimension() == 0) {
             return Optional.empty();
         }
-        return switch (field.vectors().get().encoding()) {
+        return switch (format.get().encoding()) {
             case FLOAT32 -> {
                 FloatVectorValues values = leaf.getFloatVectorValues(field.name());
                 yield values == null || values.advance(doc) != doc
@@ -1109,7 +1110,7 @@ final class Lucene9Index
 
         @Override
         public int numDocs() {
-            return maxDoc();
+            return super.maxDoc();
         }
 
         @Override

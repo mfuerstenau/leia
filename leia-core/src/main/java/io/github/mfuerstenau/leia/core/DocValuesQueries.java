@@ -143,8 +143,9 @@ public final class DocValuesQueries {
     private static Query longRange(FieldInfo field, boolean sorted, DocValuesMatch.Range<String> range) {
         long lower = Long.MIN_VALUE;
         long upper = Long.MAX_VALUE;
-        if (range.lower().isPresent()) {
-            lower = DocValuesNumber.parseLong(range.lower().get());
+        Optional<String> from = range.lower();
+        if (from.isPresent()) {
+            lower = DocValuesNumber.parseLong(from.get());
             if (!range.includeLower()) {
                 if (lower == Long.MAX_VALUE) {
                     return none(field);
@@ -152,8 +153,9 @@ public final class DocValuesQueries {
                 lower++;
             }
         }
-        if (range.upper().isPresent()) {
-            upper = DocValuesNumber.parseLong(range.upper().get());
+        Optional<String> to = range.upper();
+        if (to.isPresent()) {
+            upper = DocValuesNumber.parseLong(to.get());
             if (!range.includeUpper()) {
                 if (upper == Long.MIN_VALUE) {
                     return none(field);

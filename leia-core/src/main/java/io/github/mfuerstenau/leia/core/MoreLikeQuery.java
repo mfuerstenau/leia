@@ -145,9 +145,10 @@ final class MoreLikeQuery extends Query {
     @Override
     public boolean equals(Object other) {
         return sameClassAs(other)
-                && source.equals(((MoreLikeQuery) other).source)
-                && options.equals(((MoreLikeQuery) other).options)
-                && analyzer == ((MoreLikeQuery) other).analyzer;
+                && other instanceof MoreLikeQuery that
+                && source.equals(that.source)
+                && options.equals(that.options)
+                && analyzer == that.analyzer;
     }
 
     @Override

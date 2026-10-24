@@ -95,7 +95,7 @@ public final class LikeSettings {
     private List<String> fields() {
         List<String> fields = new ArrayList<>();
         for (int i = 0; i < names.size(); i++) {
-            if (chosen.get(i)) {
+            if (chosen.get(i).booleanValue()) {
                 fields.add(names.get(i));
             }
         }
