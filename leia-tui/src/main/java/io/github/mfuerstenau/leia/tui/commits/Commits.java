@@ -101,6 +101,8 @@ public final class Commits {
     }
 
     /** What a fetch brought: the value, or why there is none. */
+    // Each variant uses T (ADR 0088)
+    @SuppressWarnings("java:S2326")
     private sealed interface Fetched<T> {
 
         record Done<T>(T value) implements Fetched<T> {}

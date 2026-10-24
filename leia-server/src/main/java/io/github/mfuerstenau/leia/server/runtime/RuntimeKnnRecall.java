@@ -113,6 +113,8 @@ public final class RuntimeKnnRecall {
         return targets;
     }
 
+    // Separate options of the call (ADR 0088)
+    @SuppressWarnings("java:S107")
     private static KnnRecallResult check(
             Search search,
             Knn knn,
@@ -158,6 +160,8 @@ public final class RuntimeKnnRecall {
      * The approximate and the exact top k of one target. A sampled document is left out of both:
      * each search asks for one more, and the first k others count.
      */
+    // Separate options of the call (ADR 0088)
+    @SuppressWarnings("java:S107")
     private static Checked checkTarget(
             Search search,
             Knn knn,

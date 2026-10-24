@@ -282,6 +282,8 @@ public interface RuntimeIndex extends Closeable {
     sealed interface StoredValue {
         record Text(String text) implements StoredValue {}
 
+        // Never compared, hashed or used as a key (ADR 0088)
+        @SuppressWarnings("java:S6218")
         record Binary(byte[] bytes) implements StoredValue {}
 
         /** An {@link Integer}, {@link Long}, {@link Float} or {@link Double}. */
@@ -294,6 +296,8 @@ public interface RuntimeIndex extends Closeable {
         /** How many components it has. */
         int dimension();
 
+        // Never compared, hashed or used as a key (ADR 0088)
+        @SuppressWarnings("java:S6218")
         record Floats(float[] values) implements Vector {
             @Override
             public int dimension() {
@@ -302,6 +306,8 @@ public interface RuntimeIndex extends Closeable {
         }
 
         /** Signed bytes. */
+        // Never compared, hashed or used as a key (ADR 0088)
+        @SuppressWarnings("java:S6218")
         record Bytes(byte[] values) implements Vector {
             @Override
             public int dimension() {

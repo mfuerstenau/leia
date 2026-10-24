@@ -127,6 +127,8 @@ public final class RuntimeInstall {
      * @param downloads the Lucene jars that aren't there or don't match
      * @param kept the Lucene jars that are there and match
      */
+    // Never compared, hashed or used as a key (ADR 0088)
+    @SuppressWarnings("java:S6218")
     public record RuntimePlan(
             RuntimeFolders.Known known,
             byte[] adapter,

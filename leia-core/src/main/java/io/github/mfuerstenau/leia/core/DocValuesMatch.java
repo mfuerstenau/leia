@@ -9,6 +9,8 @@ import java.util.Optional;
  *
  * @param <T> the type of a value: a number's decimal text, or bytes
  */
+// Each variant uses T (ADR 0088)
+@SuppressWarnings("java:S2326")
 public sealed interface DocValuesMatch<T> {
 
     /**

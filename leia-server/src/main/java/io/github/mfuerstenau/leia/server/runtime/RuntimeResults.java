@@ -742,6 +742,8 @@ public final class RuntimeResults {
      * as core's {@code TermReader} shows them: the filter and the runtime's pages of postings leapfrog
      * to the next document they share. {@code nextDoc} is the next such document.
      */
+    // Clearer than a loop with one exit (ADR 0088)
+    @SuppressWarnings("java:S135")
     static Terms.PostingsPage matchingPostings(
             Terms terms, String field, byte[] term, int fromDoc, int limit, DocFilter filter) throws IOException {
         List<Terms.Posting> shown = new ArrayList<>();

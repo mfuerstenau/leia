@@ -119,6 +119,8 @@ public final class IndexCheck {
     public static Result check(
             Path dir, DirectoryImpl directoryImpl, int level, Consumer<String> output, ScanProgress progress) {
         CheckIndex.Level.checkIfLevelInBounds(level);
+        // Closed by the PrintStream that wraps it (ADR 0088)
+        @SuppressWarnings("java:S2095")
         Report report = new Report(output, progress);
         try (Directory directory = new CheckDirectory(directoryImpl.open(dir), report);
                 CheckIndex checker = new CheckIndex(directory);

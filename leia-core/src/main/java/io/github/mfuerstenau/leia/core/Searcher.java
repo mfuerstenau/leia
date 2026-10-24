@@ -63,6 +63,8 @@ final class Searcher {
 
     private Searcher() {}
 
+    // Separate options of the call (ADR 0088)
+    @SuppressWarnings("java:S107")
     static SearchResults search(
             IndexReader reader,
             List<DirectoryReader> directoryReaders,
@@ -185,6 +187,8 @@ final class Searcher {
      * Every match of {@code query} in the stored text values of {@code field} of a document, or of
      * each of its stored fields without one (ADR 0042, ADR 0043), up to {@code maxSpans} per value.
      */
+    // Separate options of the call (ADR 0088)
+    @SuppressWarnings("java:S107")
     static DocumentHighlight highlight(
             IndexReader reader,
             List<DirectoryReader> directoryReaders,
@@ -452,6 +456,8 @@ final class Searcher {
      * match too. Never closed, like the {@link ExitableDirectoryReader} around it: closing it would
      * close the index's reader. Nothing may cache by it, since its leaves differ from the reader's.
      */
+    // It extends Lucene's reader hierarchy (ADR 0088)
+    @SuppressWarnings("java:S110")
     private static final class UndeletedReader extends FilterDirectoryReader {
 
         UndeletedReader(DirectoryReader in) throws IOException {

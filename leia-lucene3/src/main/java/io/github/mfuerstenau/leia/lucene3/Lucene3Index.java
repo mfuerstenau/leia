@@ -232,6 +232,8 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
      * {@inheritDoc} The readers are counted, as in leia-core: each index holds a reference to each
      * part's reader, and the {@link MultiReader} of several parts holds one more.
      */
+    // openIfChanged returns null when nothing changed (ADR 0088)
+    @SuppressWarnings("java:S2583")
     @Override
     public Optional<RuntimeIndex> reopen() throws IOException {
         if (!ownsDirectories) {
@@ -242,6 +244,8 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
         for (Part part : parts) {
             try {
                 // Like open, it takes no lock and changes nothing.
+                // Owned by the new part (ADR 0088)
+                @SuppressWarnings("java:S2095")
                 IndexReader changed = IndexReader.openIfChanged(part.reader());
                 if (changed == null) {
                     newParts.add(part);

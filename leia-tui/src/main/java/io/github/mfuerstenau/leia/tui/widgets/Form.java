@@ -20,6 +20,8 @@ public final class Form {
     private Form() {}
 
     /** What a key did to a popup that edits a draft of {@code T}. */
+    // Each variant uses T (ADR 0088)
+    @SuppressWarnings("java:S2326")
     public sealed interface Event<T> {
 
         /** The popup stays open. */

@@ -91,5 +91,7 @@ public interface Documents {
     record Position(OptionalInt position, OptionalInt startOffset, OptionalInt endOffset, Optional<byte[]> payload) {}
 
     /** A term of a term vector. */
+    // Never compared, hashed or used as a key (ADR 0088)
+    @SuppressWarnings("java:S6218")
     record VectorTerm(byte[] term, int freq, List<Position> positions) {}
 }

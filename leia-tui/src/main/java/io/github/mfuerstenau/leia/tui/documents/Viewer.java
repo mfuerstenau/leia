@@ -225,6 +225,8 @@ public final class Viewer {
      * shows them with replacement characters; or a number, its decimal text and the big-endian bytes
      * of its Java type.
      */
+    // Never compared, hashed or used as a key (ADR 0088)
+    @SuppressWarnings("java:S6218")
     record Content(Kind kind, String text, byte[] bytes) {
 
         enum Kind {
@@ -1049,6 +1051,8 @@ public final class Viewer {
      * {@code text}, which must be JSON, pretty-printed as it is written: keys stay in their order,
      * numbers and strings keep their text, and empty objects and arrays stay on one line.
      */
+    // Clearer than a loop with one exit (ADR 0088)
+    @SuppressWarnings("java:S135")
     static List<List<Segment>> jsonLines(String text) {
         List<List<Segment>> lines = new ArrayList<>();
         List<Segment> line = new ArrayList<>();

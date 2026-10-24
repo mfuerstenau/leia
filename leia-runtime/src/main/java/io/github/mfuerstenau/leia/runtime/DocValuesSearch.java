@@ -57,6 +57,8 @@ public interface DocValuesSearch {
      *
      * @param <T> the type of a value: a number's decimal text, or bytes
      */
+    // Each variant uses T (ADR 0088)
+    @SuppressWarnings("java:S2326")
     sealed interface Match<T> {
 
         /**

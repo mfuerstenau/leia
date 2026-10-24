@@ -53,5 +53,7 @@ public interface TextHighlighter {
      * A passage as the highlighter found it, in UTF-16 positions into the content. The matches may
      * overlap and reach past the passage.
      */
+    // Never compared, hashed or used as a key (ADR 0088)
+    @SuppressWarnings("java:S6218")
     record FoundPassage(int start, int end, float score, int[] matchStarts, int[] matchEnds) {}
 }

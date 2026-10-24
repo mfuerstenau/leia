@@ -59,6 +59,8 @@ public interface Points {
      * @param name the segment's name, such as {@code _0}; empty if the leaf isn't a segment reader
      * @param docBase the document id of the segment's first document
      */
+    // Never compared, hashed or used as a key (ADR 0088)
+    @SuppressWarnings("java:S6218")
     record Segment(
             int segment,
             Optional<String> name,
@@ -76,6 +78,8 @@ public interface Points {
      * @param max the box's largest value of each index dimension
      * @param leaf whether the cell holds its points itself
      */
+    // Never compared, hashed or used as a key (ADR 0088)
+    @SuppressWarnings("java:S6218")
     record Cell(byte[] min, byte[] max, long size, boolean leaf) {}
 
     /**
@@ -83,6 +87,8 @@ public interface Points {
      *
      * @param docId the document id in the index
      */
+    // Never compared, hashed or used as a key (ADR 0088)
+    @SuppressWarnings("java:S6218")
     record LeafPoint(int docId, boolean deleted, byte[] value) {}
 
     /**

@@ -9,7 +9,10 @@ import java.util.function.LongConsumer;
  */
 public final class Cancellation {
     private final LongConsumer progress;
+    // An immutable value, published through volatile (ADR 0088)
+    @SuppressWarnings("java:S3077")
     private volatile RuntimeException stopped;
+
     private long lines;
 
     /** {@code progress} gets the number of lines reported so far, and throws to stop. */

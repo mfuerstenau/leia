@@ -67,6 +67,8 @@ public final class RuntimeFolders {
      * Every runtime leia knows, newest first, from the catalog {@value RuntimeCatalog#RESOURCE} (ADR
      * 0078). A new runtime is one more entry there.
      */
+    // A List.copyOf, which is immutable (ADR 0088)
+    @SuppressWarnings("java:S2386")
     public static final List<Known> KNOWN = RuntimeCatalog.load(RuntimeFolders.class.getClassLoader());
 
     /** The runtime that reads the newest indexes, and those whose version can't be detected (ADR 0071). */
@@ -95,9 +97,17 @@ public final class RuntimeFolders {
     }
 
     // Written while holding the class's lock, read without it.
+    // An immutable value, published through volatile (ADR 0088)
+    @SuppressWarnings("java:S3077")
     private static volatile Map<Known, State> states = initialStates();
+
+    @SuppressWarnings("java:S3077")
     private static volatile List<LuceneRuntime> runtimes = List.of();
+
+    @SuppressWarnings("java:S3077")
     private static volatile List<String> chainRefusals = List.of();
+
+    @SuppressWarnings("java:S3077")
     private static volatile Optional<Path> dir = Optional.empty();
 
     private RuntimeFolders() {}

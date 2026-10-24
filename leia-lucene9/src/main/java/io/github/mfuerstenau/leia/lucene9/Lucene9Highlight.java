@@ -170,6 +170,8 @@ final class Lucene9Highlight implements Highlight {
         private final Supplier<FieldOffsetStrategy> analysis;
         private final Runnable started;
 
+        // Separate options of the call (ADR 0088)
+        @SuppressWarnings("java:S107")
         CheckedFieldHighlighter(
                 String field,
                 FieldOffsetStrategy strategy,

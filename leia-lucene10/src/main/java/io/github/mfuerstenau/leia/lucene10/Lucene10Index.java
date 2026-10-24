@@ -105,6 +105,8 @@ final class Lucene10Index
      *
      * @throws IOException if none of them can be read
      */
+    // Ownership passes to the new index (ADR 0088)
+    @SuppressWarnings("java:S2095")
     static Lucene10Index open(List<Path> dirs, DirectoryKind kind) throws IOException {
         ReadOnlyIndex index;
         try {

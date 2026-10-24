@@ -67,6 +67,8 @@ final class Lucene10Highlight implements Highlight {
     }
 
     /** Highlights with {@code query}, built first as a search builds it. */
+    // Separate options of the call (ADR 0088)
+    @SuppressWarnings("java:S107")
     private Highlighted highlight(
             IndexSearcher searcher,
             Query query,

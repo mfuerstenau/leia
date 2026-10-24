@@ -27,6 +27,8 @@ public interface Scoring {
      * @throws IllegalArgumentException if a field of {@code sort} has no doc values that sort as its
      *     type, or with its selector
      */
+    // Separate options of the call (ADR 0088)
+    @SuppressWarnings("java:S107")
     Search.SearchResults search(
             Search.ParsedQuery query,
             Similarity similarity,

@@ -159,6 +159,8 @@ public final class DocValuesSyntax {
     }
 
     /** The whitespace-separated values of {@code text}, a quoted one taking {@code \"} and {@code \\}. */
+    // Clearer than a loop with one exit (ADR 0088)
+    @SuppressWarnings("java:S135")
     private static List<Token> tokens(String text) {
         List<Token> tokens = new ArrayList<>();
         int[] chars = text.codePoints().toArray();

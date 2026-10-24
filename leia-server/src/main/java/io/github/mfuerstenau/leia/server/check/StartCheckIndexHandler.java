@@ -53,6 +53,8 @@ public final class StartCheckIndexHandler implements MethodHandler<StartCheckInd
                             + StartCheckIndexParams.MAX_LEVEL + ", not " + level);
         }
         List<IndexDirectories.IndexDirectory> targets = directories.all();
+        // The current index owns it (ADR 0088)
+        @SuppressWarnings("java:S2095")
         Path path = currentIndex.opened().path();
         CheckLog log = new CheckLog();
         long jobId = jobs.start(

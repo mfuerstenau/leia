@@ -38,7 +38,11 @@ public final class JarChain {
 
     // Written while holding the class's lock, read without it. The jars are written first, so a
     // reader that sees a loader also sees its jars.
+    // An immutable value, published through volatile (ADR 0088)
+    @SuppressWarnings("java:S3077")
     private static volatile ClassLoader classLoader = JarChain.class.getClassLoader();
+
+    @SuppressWarnings("java:S3077")
     private static volatile List<Path> jars = List.of();
 
     private JarChain() {}

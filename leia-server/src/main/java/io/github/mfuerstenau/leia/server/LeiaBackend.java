@@ -117,6 +117,8 @@ public final class LeiaBackend implements AutoCloseable {
         return result;
     }
 
+    // A LinkageError must still complete the future (ADR 0088)
+    @SuppressWarnings("java:S1181")
     private static <P, R> void run(MethodHandler<P, R> handler, P params, CompletableFuture<R> result) {
         String name = handler.method().name();
         try {

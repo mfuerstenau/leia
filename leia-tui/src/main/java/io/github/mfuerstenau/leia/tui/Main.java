@@ -45,6 +45,8 @@ public final class Main {
 
     private Main() {}
 
+    // The CLI's own output (ADR 0088)
+    @SuppressWarnings("java:S106")
     public static void main(String[] args) throws Exception {
         int status = run(args, System.out, System.err, Platform.current());
         if (status != 0) {
@@ -163,6 +165,8 @@ public final class Main {
      *
      * @return the exit status: 1 if something unexpected ended it
      */
+    // Separate options; it keeps the CLI's own streams (ADR 0088)
+    @SuppressWarnings({"java:S106", "java:S107"})
     private static int runTui(
             Cli cli,
             Platform platform,

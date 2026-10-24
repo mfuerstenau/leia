@@ -65,6 +65,8 @@ public final class Runtimes {
     public record Loaded(List<LuceneRuntime> runtimes, List<String> refused) {}
 
     /** Finds the runtimes in the services files that {@code loader} sees. */
+    // Clearer than a loop with one exit (ADR 0088)
+    @SuppressWarnings("java:S135")
     public static Loaded load(ClassLoader loader) {
         List<LuceneRuntime> runtimes = new ArrayList<>();
         List<String> refused = new ArrayList<>();

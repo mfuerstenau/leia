@@ -218,6 +218,8 @@ public final class ScoringForm {
     }
 
     /** The keys for the footer while the popup is open. */
+    // Matches the keys() of the other forms (ADR 0088)
+    @SuppressWarnings("java:S3400")
     public static String keys() {
         return " ⏎ apply   Esc cancel   ↑↓ select   ←→ Space change   0-9 number";
     }

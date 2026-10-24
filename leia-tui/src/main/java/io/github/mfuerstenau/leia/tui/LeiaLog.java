@@ -62,6 +62,8 @@ final class LeiaLog {
     }
 
     /** Logs to stderr, at {@code defaultLevel} without {@code leia.log.level}. */
+    // The fallback for when the log can't be opened (ADR 0088)
+    @SuppressWarnings("java:S106")
     static void toStderr(Level defaultLevel) {
         configure(System.err, defaultLevel);
     }

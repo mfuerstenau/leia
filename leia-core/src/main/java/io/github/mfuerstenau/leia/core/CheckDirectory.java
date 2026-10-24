@@ -137,6 +137,8 @@ final class CheckDirectory extends FilterDirectory {
             return in.length();
         }
 
+        // Lucene's IndexInput.clone contract (ADR 0088)
+        @SuppressWarnings({"java:S2975", "java:S1182"})
         @Override
         public CheckInput clone() {
             tick();

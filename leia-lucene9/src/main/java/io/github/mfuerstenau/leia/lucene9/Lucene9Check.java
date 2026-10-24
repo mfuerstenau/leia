@@ -66,6 +66,8 @@ final class Lucene9Check implements Check {
             Path dir, DirectoryKind kind, OptionalInt level, Consumer<String> line, LongConsumer progress) {
         int checkLevel = level.orElse(2);
         Cancellation cancellation = new Cancellation(progress);
+        // Closed by the PrintStream that wraps it (ADR 0088)
+        @SuppressWarnings("java:S2095")
         CheckReport report = new CheckReport(line, cancellation);
         CheckIndex.Status status;
         List<String> commit;
@@ -326,6 +328,8 @@ final class Lucene9Check implements Check {
             return in.length();
         }
 
+        // Lucene's IndexInput.clone contract (ADR 0088)
+        @SuppressWarnings({"java:S2975", "java:S1182"})
         @Override
         public CancellableInput clone() {
             tick();

@@ -119,6 +119,8 @@ public final class Session {
     private final Optional<RuntimeInstall> runtimeInstall;
 
     /** The thread that downloads runtimes, while one runs (ADR 0080). */
+    // An immutable value, published through volatile (ADR 0088)
+    @SuppressWarnings("java:S3077")
     private volatile Thread installer;
 
     /** Set once leia quits, which cancels a download. */
@@ -237,6 +239,8 @@ public final class Session {
         action.ifPresent(next -> perform(next, runner));
     }
 
+    // The dispatch over the sealed Action (ADR 0088)
+    @SuppressWarnings("java:S1479")
     private void perform(Action action, TuiRunner runner) {
         switch (action) {
             case Action.Quit _ -> runner.quit();

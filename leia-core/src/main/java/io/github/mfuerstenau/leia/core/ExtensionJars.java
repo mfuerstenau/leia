@@ -27,7 +27,11 @@ public final class ExtensionJars {
     // Written while holding the class's lock, read without it: PresetAnalyzers reads them while
     // holding its own lock, which reload() takes while holding this one. The jars are written first,
     // so a reader that sees a loader also sees its jars.
+    // An immutable value, published through volatile (ADR 0088)
+    @SuppressWarnings("java:S3077")
     private static volatile ClassLoader classLoader = ExtensionJars.class.getClassLoader();
+
+    @SuppressWarnings("java:S3077")
     private static volatile List<Path> jars = List.of();
 
     private ExtensionJars() {}

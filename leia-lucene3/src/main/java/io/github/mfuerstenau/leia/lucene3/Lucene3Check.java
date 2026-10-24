@@ -44,6 +44,8 @@ final class Lucene3Check implements Check {
     public CheckResult check(
             Path dir, DirectoryKind kind, OptionalInt level, Consumer<String> line, LongConsumer progress) {
         Cancellation cancellation = new Cancellation(progress);
+        // Closed by the PrintStream that wraps it (ADR 0088)
+        @SuppressWarnings("java:S2095")
         CheckReport report = new CheckReport(line, cancellation);
         CheckIndex.Status status;
         try (Directory directory = new ReadOnlyDirectory(Directories.open(dir, kind), cancellation);
@@ -234,6 +236,8 @@ final class Lucene3Check implements Check {
             delegate.close();
         }
 
+        // Lucene's IndexInput.clone contract (ADR 0088)
+        @SuppressWarnings("java:S2975")
         @Override
         public Object clone() {
             CancellableInput clone = (CancellableInput) super.clone();

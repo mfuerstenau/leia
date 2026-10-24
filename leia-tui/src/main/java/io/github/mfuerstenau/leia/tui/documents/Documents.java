@@ -95,6 +95,8 @@ import java.util.stream.Stream;
  * the others: they would use up the field to select and the value to view that belong to it. Term
  * vectors, positions and whole stored values are checked against the shown document.
  */
+// A screen that wires its own forms and popups (ADR 0088)
+@SuppressWarnings("java:S6539")
 public final class Documents {
 
     private static final String AS = ", as ";
@@ -2306,6 +2308,8 @@ public final class Documents {
      * Everything about the selected field: how it is indexed, then what the document has in it, as
      * far as the index has the {@code features} to read it (ADR 0044).
      */
+    // Separate options of the call (ADR 0088)
+    @SuppressWarnings("java:S107")
     private static List<Line> detailLines(
             Optional<IndexField> schema,
             DocumentField field,

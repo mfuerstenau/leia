@@ -95,6 +95,8 @@ public final class IndexDirectories {
      *
      * @throws RpcException {@code NO_INDEX_OPEN} if no index is open
      */
+    // The current index owns it (ADR 0088)
+    @SuppressWarnings("java:S2095")
     public List<IndexDirectory> all() throws RpcException {
         List<IndexDirectory> all = new ArrayList<>();
         switch (currentIndex.opened()) {

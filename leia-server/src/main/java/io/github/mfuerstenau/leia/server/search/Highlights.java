@@ -152,6 +152,8 @@ public final class Highlights {
     }
 
     /** Every match in each value of a field, up to {@code maxSpans} per value, with UTF-8 offsets. */
+    // Clearer than a loop with one exit (ADR 0088)
+    @SuppressWarnings("java:S135")
     private static List<ValueHighlight> valueHighlights(FoundText raw, List<Integer> textIndexes, int maxSpans) {
         List<ValueHighlight> valueHighlights = new ArrayList<>();
         for (FoundPassage passage : raw.passages()) {

@@ -99,6 +99,8 @@ import java.util.stream.Collectors;
  * So each search, explanation and scan has an id, which its start, its polls and its replies carry: a
  * reply for one that was replaced or stopped is dropped, and a job that starts for one is cancelled.
  */
+// A screen that wires its own forms and popups (ADR 0088)
+@SuppressWarnings("java:S6539")
 public final class Search {
 
     private static final String CANCELLED = "Cancelled.";
