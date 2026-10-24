@@ -17,6 +17,8 @@ import java.util.Optional;
  * @param help {@code -h/--help}
  * @param version {@code -V/--version}
  * @param jars {@code --jar}, in the order given
+ * @param servers {@code --server}, in the order given: Elasticsearch or OpenSearch installations,
+ *     whose Lucene reads the indexes of its majors (ADR 0090)
  * @param noDefaultJars {@code --no-default-jars}
  * @param directory {@code --directory}, {@link DirectoryImpl#FS} without it
  * @param noReader {@code --no-reader}
@@ -30,6 +32,7 @@ record Cli(
         boolean help,
         boolean version,
         List<Path> jars,
+        List<Path> servers,
         boolean noDefaultJars,
         DirectoryImpl directory,
         boolean noReader,
@@ -56,6 +59,13 @@ record Cli(
                       analyzers), codecs or formats of its own, such as one of Lucene's analysis
                       modules, or a directory of such jars. Can be repeated. X adds more while leia
                       runs
+                  --server <PATH>
+                      An Elasticsearch 8 or 9 or OpenSearch 2 or 3 installation, its home or its lib
+                      folder, whose Lucene, codecs and formats read the indexes of its Lucene's
+                      major and the one before, such as the shards in its data folder. Only the jars
+                      directly in lib are loaded. It needs leia's runtime for that Lucene, lucene9
+                      or lucene10, of which only leia's own jars are used. Can be repeated, once per
+                      Lucene major
                   --no-default-jars
                       Don't load the jars of the default folder: $XDG_CONFIG_HOME/leia/jars
                       (~/.config/leia/jars) on Linux, %APPDATA%\\leia\\jars on Windows. Without this
@@ -97,6 +107,7 @@ record Cli(
 
     Cli {
         jars = List.copyOf(jars);
+        servers = List.copyOf(servers);
         runtimes = List.copyOf(runtimes);
     }
 
@@ -127,6 +138,7 @@ record Cli(
         private boolean help;
         private boolean version;
         private final List<Path> jars = new ArrayList<>();
+        private final List<Path> servers = new ArrayList<>();
         private boolean noDefaultJars;
         private DirectoryImpl directory = DirectoryImpl.FS;
         private boolean directoryGiven;
@@ -166,6 +178,7 @@ record Cli(
                 case "--no-reader" -> noReader = flag(name, inline);
                 case "--download-runtimes" -> downloadRuntimes = flag(name, inline);
                 case "--jar" -> jars.add(path(name, value(name, inline, "<PATH>")));
+                case "--server" -> servers.add(path(name, value(name, inline, "<PATH>")));
                 case "--runtime" -> runtimes.add(runtime(value(name, inline, "<FOLDER>")));
                 case "--directory" -> {
                     directory = directory(value(name, inline, "<IMPL>"));
@@ -185,10 +198,14 @@ record Cli(
 
         Cli cli() throws UsageException {
             if (downloadRuntimes
-                    && (indexPath.isPresent() || !jars.isEmpty() || noDefaultJars || directoryGiven || noReader)) {
-                throw new UsageException(
-                        "--download-runtimes takes no INDEX_PATH and none of --jar, --no-default-jars, --directory,"
-                                + " --no-reader");
+                    && (indexPath.isPresent()
+                            || !jars.isEmpty()
+                            || !servers.isEmpty()
+                            || noDefaultJars
+                            || directoryGiven
+                            || noReader)) {
+                throw new UsageException("--download-runtimes takes no INDEX_PATH and none of --jar, --server,"
+                        + " --no-default-jars, --directory, --no-reader");
             }
             if (!runtimes.isEmpty() && !downloadRuntimes) {
                 throw new UsageException("--runtime goes only with --download-runtimes");
@@ -201,6 +218,7 @@ record Cli(
                     help,
                     version,
                     jars,
+                    servers,
                     noDefaultJars,
                     directory,
                     noReader,

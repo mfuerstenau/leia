@@ -172,4 +172,16 @@ public final class IndexDirectories {
         }
         return runtimes.latest().<Route>map(Route.Runtime::new).orElseGet(() -> new Route.Missing(version));
     }
+
+    /**
+     * Leia's own runtime for an index of {@code version} that a server's runtime, which {@link
+     * #route} prefers, fails to read, such as one written by a newer Lucene than the server's (ADR
+     * 0090); empty if none reads it.
+     */
+    public Optional<LuceneRuntime> leiasRuntime(Optional<IndexVersion> version) {
+        if (version.isPresent() && !runtimes.newerThanAll(version.get().major())) {
+            return runtimes.leiasForMajor(version.get().major());
+        }
+        return Optional.empty();
+    }
 }

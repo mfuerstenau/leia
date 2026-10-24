@@ -7,6 +7,7 @@ import io.github.mfuerstenau.leia.protocol.jars.LoadRuntimesResult;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
+import io.github.mfuerstenau.leia.server.runtime.ServerRuntimes;
 import jakarta.inject.Inject;
 import java.util.List;
 
@@ -32,8 +33,9 @@ public final class LoadRuntimesHandler implements MethodHandler<LoadRuntimesPara
     public LoadRuntimesResult handle(LoadRuntimesParams params) {
         List<RuntimeFolders.Known> before = loaded();
         RuntimeFolders.reload();
-        // Lucene 10's folder may have become the chain's first link; job threads inherit this loader.
-        Thread.currentThread().setContextClassLoader(JarChain.classLoader());
+        // Lucene 10's folder may have become the chain's first link; job threads inherit this loader. A
+        // server's stays while its index is open (ADR 0090).
+        ServerRuntimes.chainAsContextLoader();
         List<String> fresh = loaded().stream()
                 .filter(known -> !before.contains(known))
                 .map(RuntimeFolders.Known::folder)

@@ -6,14 +6,19 @@ import io.github.mfuerstenau.leia.protocol.jars.GetRuntimesParams;
 import io.github.mfuerstenau.leia.protocol.jars.GetRuntimesResult;
 import io.github.mfuerstenau.leia.protocol.jars.RuntimeFolder;
 import io.github.mfuerstenau.leia.protocol.jars.RuntimeState;
+import io.github.mfuerstenau.leia.protocol.jars.ServerRuntimeInfo;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
+import io.github.mfuerstenau.leia.server.runtime.ServerRuntime;
 import jakarta.inject.Inject;
 import java.util.List;
 import java.util.Optional;
 
-/** {@code getRuntimes}: every runtime leia knows, and whether it is loaded (ADR 0072, ADR 0073). */
+/**
+ * {@code getRuntimes}: every runtime leia knows, and whether it is loaded (ADR 0072, ADR 0073), and
+ * the servers' runtimes (ADR 0090).
+ */
 public final class GetRuntimesHandler implements MethodHandler<GetRuntimesParams, GetRuntimesResult> {
 
     private final Runtimes runtimes;
@@ -30,7 +35,17 @@ public final class GetRuntimesHandler implements MethodHandler<GetRuntimesParams
 
     @Override
     public GetRuntimesResult handle(GetRuntimesParams params) {
-        return new GetRuntimesResult(folders(runtimes));
+        return new GetRuntimesResult(
+                folders(runtimes),
+                runtimes.servers().stream().map(GetRuntimesHandler::server).toList());
+    }
+
+    static ServerRuntimeInfo server(ServerRuntime server) {
+        return new ServerRuntimeInfo(
+                server.home().toString(),
+                server.label(),
+                server.luceneVersion(),
+                server.indexMajors().stream().sorted().toList());
     }
 
     /** Every runtime leia knows, newest first, as {@code getRuntimes} and {@code loadRuntimes} return them. */

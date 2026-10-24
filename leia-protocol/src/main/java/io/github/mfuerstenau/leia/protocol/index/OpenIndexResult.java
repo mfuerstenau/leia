@@ -1,6 +1,7 @@
 package io.github.mfuerstenau.leia.protocol.index;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
 
@@ -19,6 +20,9 @@ import java.util.Set;
  * @param luceneRuntime the version of the Lucene that reads the index, such as {@code 10.5.2}, or
  *     {@code 3.6.2} for an index written by Lucene 2.x or 3.x (ADR 0044); empty for one opened without
  *     a reader whose runtime isn't loaded (ADR 0071)
+ * @param server the Elasticsearch or OpenSearch installation whose Lucene reads the index, such as
+ *     {@code Elasticsearch 8.15.3}, or {@code the server <home>} if it doesn't say which; empty if
+ *     leia's own runtime reads it (ADR 0090)
  */
 public record OpenIndexResult(
         String path,
@@ -28,4 +32,5 @@ public record OpenIndexResult(
         List<IndexEntry> indexes,
         List<SkippedIndex> skipped,
         Set<Feature> features,
-        String luceneRuntime) {}
+        String luceneRuntime,
+        Optional<String> server) {}

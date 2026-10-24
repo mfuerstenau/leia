@@ -91,6 +91,7 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 | Rebuild (ADR 0059, ADR 0062) | terms only, no points, no total; fields with payloads from the postings, since its term vectors have none; deleted documents through raw postings | terms only: no points | terms, and points through `PointValues.intersect` | terms, and points through the `PointTree` | as 9.12.3 |
 | Point cell sizes | – | – | computed from the tree's shape (ADR 0048 §5) | from the `PointTree` | from the `PointTree` |
 | Norms, decoded by the created major (ADR 0047, ADR 0048 §3) | `floatToByte315(1/√length)` | `floatToByte315(1/√length)` | 6: `floatToByte315(1/√length)`, 7: the length | the length | the length |
+| Fields that conflict between indexes (ADR 0021 §5) | – (merges them; no schema) | skipped on a change of a doc values type or point shape already set; a field that gains them merges | as 5.5.5 | skipped on any change of a field's schema, and on another parent field | as 9.12.3 |
 | Check levels | none | 1 checksums only, 2 default, 3 `crossCheckTermVectors` | as 5.5.5 | as 5.5.5, but 3 is `doSlowChecks`; segments in parallel, as Lucene 10 | Lucene's own `setLevel` |
 | `-fast` hint in the check | – | rewritten to leia's levels | not given | not given | – |
 | Search analyzers | 6 of lucene-core | 42 of analyzers-common (+ `CollationKeyAnalyzer`) | 43 (+ Bengali, `CollationKeyAnalyzer`) | 48 (+ Estonian, Nepali, Serbian, Tamil, Telugu, `CollationKeyAnalyzer`) | every preset of `getAnalysisComponents`, the extension jars' included |
@@ -116,3 +117,23 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 | More-Like-This (ADR 0066, ADR 0074) | – | as 7.7.3, but one count of each term over all the fields, its clause in the first field with the most documents | as 9.12.3, but with the live documents for the idf and each token counted once | built from the reader before the rewrite, its terms worked out as leia-core does | leia-core's |
 | More-Like-This cancellation | – | between fields while the terms are counted, then per segment | as 5.5.5 | between fields while the terms are counted, then through the searcher's `QueryTimeout` | through `ExitableDirectoryReader` |
 | Doc values queries (ADR 0066, ADR 0074) | – | the sandbox's range, terms and numbers queries, and leia-core's for `BINARY`, copied | Lucene's slow queries and the sandbox's for sets, and leia-core's for `BINARY`, copied | Lucene's slow queries, and leia-core's for `BINARY`, copied | leia-core's |
+
+## Servers
+
+`--server` reads the shards of an Elasticsearch or OpenSearch installation with its own Lucene, codecs and formats (ADR 0090): leia's adapter for its Lucene's major, `runtimes/lucene9` or `runtimes/lucene10`, over the jars of its `lib/`. It reads the indexes of that major and the one before, ahead of the runtimes above; an index it fails to open goes to the runtime above. The adapters are built for 9.12.3 and 10.5.2, so a server's older minor may lack what a feature needs, and that feature is `NOT_SUPPORTED`. Tried with single-node servers on Java 25, through the calls of the screens:
+
+| Server | Lucene | With `--server` |
+|---|---|---|
+| Elasticsearch 7.17.28 | 8.11.3 | refused (Lucene 8). Without it, leia's Lucene 9.12.3 reads its shards but one with a `completion` field, whose `Completion84` postings need `lucene-suggest`, which `runtimes/lucene9` lacks |
+| Elasticsearch 8.0.1 | 9.0.0 | the adapter can't open on it (it needs `AbstractKnnVectorQuery` and `FloatVectorValues`, Lucene 9.5); these shards, with Lucene's own formats only, open with leia's Lucene 10.5.2 instead |
+| Elasticsearch 8.6.2 | 9.4.2 | as 8.0.1; the shards with `ES85BloomFilter` on `_id` don't open, with the server's error |
+| Elasticsearch 8.9.2 | 9.7.0 | everything: text, completion, time series |
+| Elasticsearch 8.12.2 | 9.9.2 | everything (`int8_hnsw` included) but the HNSW graph, `NOT_SUPPORTED` (`HnswGraphProvider`, Lucene 9.11) |
+| Elasticsearch 8.19.23 | 9.12.2 | everything: `ES812Postings`, `ES87TSDB`, `ES87BloomFilter`, `int8_hnsw` and `bbq_hnsw`, logsdb with zstd |
+| Elasticsearch 9.0.8 | 10.1.0 | everything but the HNSW graph, `NOT_SUPPORTED` (`HnswGraph.maxConn()`) |
+| Elasticsearch 9.5.5 | 10.5.1 | everything |
+| OpenSearch 2.11.1 | 9.7.0 | everything but the `knn_vector` index (the k-NN plugin's `KNN950Codec`) |
+| OpenSearch 2.19.6 | 9.12.3 | the same (`KNN9120Codec`) |
+| OpenSearch 3.9.0 | 10.5.1 | the same (`KNN1040Codec`) |
+
+So the Lucene 9 adapter needs a server on Lucene 9.5 or later (Elasticsearch 8.7, OpenSearch 2.6; tried from 9.7.0), the Lucene 10 one any 10.x (tried from 10.1.0); older minors lose the HNSW graph.

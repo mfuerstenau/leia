@@ -54,6 +54,7 @@ import io.github.mfuerstenau.leia.protocol.jars.JarComponents;
 import io.github.mfuerstenau.leia.protocol.jars.LoadRuntimesResult;
 import io.github.mfuerstenau.leia.protocol.jars.RuntimeFolder;
 import io.github.mfuerstenau.leia.protocol.jars.RuntimeState;
+import io.github.mfuerstenau.leia.protocol.jars.ServerRuntimeInfo;
 import io.github.mfuerstenau.leia.protocol.points.GetPointTreeResult;
 import io.github.mfuerstenau.leia.protocol.points.PointSegment;
 import io.github.mfuerstenau.leia.protocol.points.PointValue;
@@ -634,24 +635,37 @@ class AppTest {
     @Test
     void theAboutScreenNamesTheLoadedRuntimesAndWhyTheOthersAreNot() {
         App app = app().withRuntimeFolders(new RuntimeFolders(Optional.of(Path.of("/opt/leia/runtimes"))));
-        app.runtimesLoaded(new GetRuntimesResult(List.of(
-                new RuntimeFolder(
-                        "lucene10", List.of(9, 10), RuntimeState.LOADED, Optional.of("10.5.2"), Optional.empty()),
-                new RuntimeFolder("lucene9", List.of(8), RuntimeState.MISSING, Optional.empty(), Optional.empty()),
-                new RuntimeFolder(
-                        "lucene7",
-                        List.of(6, 7),
-                        RuntimeState.INCOMPLETE,
-                        Optional.empty(),
-                        Optional.of("lucene-core-7.7.3.jar")),
-                new RuntimeFolder(
-                        "lucene5", List.of(4, 5), RuntimeState.REFUSED, Optional.empty(), Optional.of("too new")),
-                new RuntimeFolder(
-                        "lucene3", List.of(2, 3), RuntimeState.LOADED, Optional.of("3.6.2"), Optional.empty()))));
+        app.runtimesLoaded(new GetRuntimesResult(
+                List.of(
+                        new RuntimeFolder(
+                                "lucene10",
+                                List.of(9, 10),
+                                RuntimeState.LOADED,
+                                Optional.of("10.5.2"),
+                                Optional.empty()),
+                        new RuntimeFolder(
+                                "lucene9", List.of(8), RuntimeState.MISSING, Optional.empty(), Optional.empty()),
+                        new RuntimeFolder(
+                                "lucene7",
+                                List.of(6, 7),
+                                RuntimeState.INCOMPLETE,
+                                Optional.empty(),
+                                Optional.of("lucene-core-7.7.3.jar")),
+                        new RuntimeFolder(
+                                "lucene5",
+                                List.of(4, 5),
+                                RuntimeState.REFUSED,
+                                Optional.empty(),
+                                Optional.of("too new")),
+                        new RuntimeFolder(
+                                "lucene3", List.of(2, 3), RuntimeState.LOADED, Optional.of("3.6.2"), Optional.empty())),
+                List.of(new ServerRuntimeInfo(
+                        "/opt/elasticsearch", Optional.of("Elasticsearch 8.15.3"), "9.11.1", List.of(8, 9)))));
 
         assertThat(TestScreens.render(app::render, 200, 30))
                 .contains(
                         "Runtimes: Lucene 10.5.2 (9–10), 3.6.2 (2–3)",
+                        "Server: Elasticsearch 8.15.3, Lucene 9.11.1 (8–9), in /opt/elasticsearch",
                         "Missing lucene9 (Lucene 8): press D to download them into /opt/leia/runtimes",
                         "Incomplete runtimes/lucene7: lucene-core-7.7.3.jar is missing; press D to download it",
                         "Refused runtimes/lucene5: too new")
@@ -660,19 +674,27 @@ class AppTest {
 
     /** Every state a runtime can be in, one per folder. */
     private static GetRuntimesResult everyState() {
-        return new GetRuntimesResult(List.of(
-                new RuntimeFolder("lucene10", List.of(9, 10), RuntimeState.RESTART, Optional.empty(), Optional.empty()),
-                new RuntimeFolder("lucene9", List.of(8), RuntimeState.MISSING, Optional.empty(), Optional.empty()),
-                new RuntimeFolder(
-                        "lucene7",
-                        List.of(6, 7),
-                        RuntimeState.INCOMPLETE,
-                        Optional.empty(),
-                        Optional.of("lucene-core-7.7.3.jar")),
-                new RuntimeFolder(
-                        "lucene5", List.of(4, 5), RuntimeState.REFUSED, Optional.empty(), Optional.of("too new")),
-                new RuntimeFolder(
-                        "lucene3", List.of(2, 3), RuntimeState.LOADED, Optional.of("3.6.2"), Optional.empty())));
+        return new GetRuntimesResult(
+                List.of(
+                        new RuntimeFolder(
+                                "lucene10", List.of(9, 10), RuntimeState.RESTART, Optional.empty(), Optional.empty()),
+                        new RuntimeFolder(
+                                "lucene9", List.of(8), RuntimeState.MISSING, Optional.empty(), Optional.empty()),
+                        new RuntimeFolder(
+                                "lucene7",
+                                List.of(6, 7),
+                                RuntimeState.INCOMPLETE,
+                                Optional.empty(),
+                                Optional.of("lucene-core-7.7.3.jar")),
+                        new RuntimeFolder(
+                                "lucene5",
+                                List.of(4, 5),
+                                RuntimeState.REFUSED,
+                                Optional.empty(),
+                                Optional.of("too new")),
+                        new RuntimeFolder(
+                                "lucene3", List.of(2, 3), RuntimeState.LOADED, Optional.of("3.6.2"), Optional.empty())),
+                List.of());
     }
 
     @Test
@@ -828,9 +850,13 @@ class AppTest {
     @Test
     void theAboutScreenSaysWhatWorksWithoutRuntimes() {
         App app = app();
-        app.runtimesLoaded(new GetRuntimesResult(List.of(
-                new RuntimeFolder("lucene10", List.of(9, 10), RuntimeState.MISSING, Optional.empty(), Optional.empty()),
-                new RuntimeFolder("lucene9", List.of(8), RuntimeState.MISSING, Optional.empty(), Optional.empty()))));
+        app.runtimesLoaded(new GetRuntimesResult(
+                List.of(
+                        new RuntimeFolder(
+                                "lucene10", List.of(9, 10), RuntimeState.MISSING, Optional.empty(), Optional.empty()),
+                        new RuntimeFolder(
+                                "lucene9", List.of(8), RuntimeState.MISSING, Optional.empty(), Optional.empty())),
+                List.of()));
 
         assertThat(TestScreens.render(app::render, 200, 30))
                 .contains(
@@ -1086,7 +1112,8 @@ class AppTest {
                 List.of(new IndexEntry("/data/broken", Optional.empty())),
                 List.of(),
                 Feature.withoutReader(),
-                "10.5.2"));
+                "10.5.2",
+                Optional.empty()));
     }
 
     /**

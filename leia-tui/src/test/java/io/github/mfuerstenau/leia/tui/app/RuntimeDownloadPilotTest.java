@@ -74,8 +74,10 @@ class RuntimeDownloadPilotTest {
         app = new App(version, Optional.empty(), History.inMemory(), DirectoryImpl.FS)
                 .withRuntimeFolders(new RuntimeFolders(Optional.of(runtimes)));
         // As if lucene5 were missing: the other tests of this JVM may have loaded it already.
-        app.runtimesLoaded(new GetRuntimesResult(List.of(new RuntimeFolder(
-                "lucene5", List.of(4, 5), RuntimeState.MISSING, Optional.empty(), Optional.empty()))));
+        app.runtimesLoaded(new GetRuntimesResult(
+                List.of(new RuntimeFolder(
+                        "lucene5", List.of(4, 5), RuntimeState.MISSING, Optional.empty(), Optional.empty())),
+                List.of()));
         RuntimeInstall install =
                 new RuntimeInstall(runtimes, repository.base(), RuntimeDownloadPilotTest.class.getClassLoader());
         Session session = new Session(app, backend, Optional.of(install));

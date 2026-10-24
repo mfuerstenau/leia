@@ -116,6 +116,7 @@ leia [OPTIONS] [INDEX_PATH]
 | `INDEX_PATH` | the index directory to open on start, or a directory with indexes below it, which open as one |
 | `-j, --java <PATH>` | the JVM: a `java` executable or a JDK/JRE directory; default `$JAVA_HOME/bin/java`, then `java` on `PATH` |
 | `--jar <PATH>` | a jar with analysis components, codecs or formats of its own, or a directory of such jars; repeatable |
+| `--server <PATH>` | an Elasticsearch 8 or 9 or OpenSearch 2 or 3 installation, or its `lib` folder, whose Lucene reads its indexes (see [Elasticsearch and OpenSearch](#elasticsearch-and-opensearch)); repeatable, once per Lucene major |
 | `--no-default-jars` | don't load the jars of the default folder (see [Extension jars](#extension-jars)) |
 | `--directory <fs\|mmap\|nio>` | the Lucene `Directory` to read through: `fs` (default) lets Lucene choose, `mmap` is `MMapDirectory`, `nio` is `NIOFSDirectory`; `Ctrl+D` in the open prompt changes it |
 | `--no-reader` | open `INDEX_PATH` without a reader, for an index a reader can't open: only its commits and the check work; `Ctrl+N` in the open prompt does the same |
@@ -146,6 +147,24 @@ through `META-INF/services`, as Lucene's are. They must be built for Lucene 10.
 
 If a jar can't be loaded at startup, for instance because a dependency is missing, leia says why
 and doesn't start. A name that is already taken is ignored, so `--jar` wins over the default folder.
+
+## Elasticsearch and OpenSearch
+
+Their shards use codecs and formats of their own, built for the Lucene the server ships, so no
+extension jar helps. `--server` reads them with the server's own Lucene: give it the installation,
+or its `lib` folder. leia loads the jars directly in `lib` with its `lucene9` runtime for
+Elasticsearch 8 and OpenSearch 2 (Lucene 9), or its `lucene10` runtime for Elasticsearch 9 and
+OpenSearch 3 (Lucene 10), which must be installed. The server then reads the indexes of its
+Lucene's major and the one before.
+
+```sh
+leia --server /usr/share/elasticsearch /var/lib/elasticsearch/indices/<uuid>/0/index
+```
+
+A shard's index is `indices/<uuid>/<shard>/index` (`nodes/0/indices/…` for OpenSearch) in the
+server's data folder. The Lucene 9 runtime needs Lucene 9.5 or later (Elasticsearch 8.7). Stop the node or copy
+the shard first. A screen that the server's Lucene can't do, for an older minor than leia's
+runtime is built for, says so. Plugins' formats, such as OpenSearch's k-NN, aren't loaded.
 
 ## Keys
 

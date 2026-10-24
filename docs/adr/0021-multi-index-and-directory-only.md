@@ -26,6 +26,7 @@ Directory choice and recent paths (ADR 0020) and reopen (ADR 0019) are settled. 
 
 4. **Each index found is opened with a `DirectoryReader`,** through the chosen `Directory` (ADR 0020), without locking (rule 1). One index is the open index as before. Several are combined into one `MultiReader`, so documents, terms, search and field statistics cover all of them: document ids run through the indexes in order, and terms and statistics are merged.
 5. **An index that fails to open is skipped and reported.** The others open, and the result lists each skipped directory with the error message. Only if none opens does the open fail, with the error of the first one, and its message names its directory. An index whose fields are indexed differently from those of the indexes before it (other index options, doc values type, point or vector dimensions) can't be combined with them, as Lucene's `FieldInfos.getMergedFieldInfos` refuses, so it is skipped and reported too.
+    - *Amended with the backlog item of ADR 0090:* every runtime but 3.6's skips such an index, its Lucene deciding what conflicts: 9.12 and 10 refuse any change of a field's schema, such as a field that has doc values in one index and none in another, and an index whose parent field (of an index sort over blocks) differs; 5.5 and 7.7 merge a field that gains doc values or points and refuse only a change of a type already set. Lucene 3.6 merges the flags of a field and never refuses (`IndexParts.compatible`, ADR 0050).
 
 ### Opening without a reader
 

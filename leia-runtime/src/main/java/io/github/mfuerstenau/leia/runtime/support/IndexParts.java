@@ -5,7 +5,10 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
+import java.util.function.Function;
 
 /** Opens the directories of an index one by one, as a runtime's {@code open} does (ADR 0045, ADR 0050). */
 public final class IndexParts {
@@ -16,6 +19,13 @@ public final class IndexParts {
     @FunctionalInterface
     public interface Opener<P> {
         P open(Path dir) throws IOException;
+    }
+
+    /** Why the fields of some parts can't be combined (ADR 0021 §5). */
+    @FunctionalInterface
+    public interface Conflict<P> {
+        /** Why the fields of {@code parts} can't be combined; empty if they can. */
+        Optional<String> of(List<P> parts) throws IOException;
     }
 
     /** The parts that opened, in the order given, and the directories that failed to. */
@@ -50,6 +60,62 @@ public final class IndexParts {
             throw failures.getFirst();
         }
         return new Opened<>(parts, skipped);
+    }
+
+    /**
+     * The parts of {@code opened} whose fields can be combined with those of the parts before them
+     * (ADR 0021 §5). The others are closed and added to the skipped directories, which stay in the
+     * order of {@code dirs}. It owns the parts of {@code opened}: if it throws, it has closed them all.
+     *
+     * @param dir the directory of a part
+     * @param conflict why the fields of some parts can't be combined
+     * @param closeables what closes a part, in order
+     */
+    public static <P> Opened<P> compatible(
+            List<Path> dirs,
+            Opened<P> opened,
+            Function<P, Path> dir,
+            Conflict<P> conflict,
+            Function<P, List<Closeable>> closeables)
+            throws IOException {
+        List<P> open = new ArrayList<>(opened.parts());
+        try {
+            if (conflict.of(open).isEmpty()) {
+                return opened;
+            }
+            List<P> accepted = new ArrayList<>();
+            List<P> refused = new ArrayList<>();
+            List<Skipped> skipped = new ArrayList<>(opened.skipped());
+            for (P part : opened.parts()) {
+                List<P> candidates = new ArrayList<>(accepted);
+                candidates.add(part);
+                Optional<String> reason = conflict.of(candidates);
+                if (reason.isEmpty()) {
+                    accepted.add(part);
+                } else {
+                    refused.add(part);
+                    skipped.add(new Skipped(
+                            dir.apply(part),
+                            "Its fields conflict with those of the indexes before it: " + reason.get()));
+                }
+            }
+            // From here on, a failure closes only the accepted parts: closeAll tries every refused one.
+            open = accepted;
+            List<Closeable> release = new ArrayList<>();
+            for (P part : refused) {
+                release.addAll(closeables.apply(part));
+            }
+            closeAll(release);
+            skipped.sort(Comparator.comparingInt(skip -> dirs.indexOf(skip.path())));
+            return new Opened<>(accepted, skipped);
+        } catch (IOException | RuntimeException e) {
+            List<Closeable> release = new ArrayList<>();
+            for (P part : open) {
+                release.addAll(closeables.apply(part));
+            }
+            closeAll(e, release);
+            throw e;
+        }
     }
 
     /** Closes each of {@code closeables}, then throws the first failure, with the others suppressed. */

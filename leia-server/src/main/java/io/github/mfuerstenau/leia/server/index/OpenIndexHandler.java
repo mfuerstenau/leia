@@ -20,6 +20,8 @@ import io.github.mfuerstenau.leia.server.runtime.OpenDirectories;
 import io.github.mfuerstenau.leia.server.runtime.OpenRuntime;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
 import io.github.mfuerstenau.leia.server.runtime.SegmentsHeader;
+import io.github.mfuerstenau.leia.server.runtime.ServerRuntime;
+import io.github.mfuerstenau.leia.server.runtime.ServerRuntimes;
 import jakarta.inject.Inject;
 import java.io.IOException;
 import java.nio.file.InvalidPathException;
@@ -30,6 +32,7 @@ import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.ServiceConfigurationError;
 import java.util.Set;
 import java.util.logging.Logger;
 
@@ -111,9 +114,63 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
                         dir, "Written by Lucene " + dirVersion.get().writtenBy() + "; open it on its own"));
             }
         }
-        RuntimeIndex index;
+        Read read = read(runtime, readable, version, kind);
+        RuntimeIndex index = read.index();
+        skipped.addAll(index.skipped());
+        skipped.sort(Comparator.comparingInt(skippedIndex -> dirs.indexOf(skippedIndex.path())));
+        skipped.forEach(dir -> LOG.info(() -> "Skipped " + dir.path() + ": " + dir.message()));
+        OpenRuntime open = new OpenRuntime(root, read.runtime(), index, skipped);
+        currentIndex.replace(open);
+        LOG.info(() -> "Opened " + root + " (" + RuntimeResults.describe(open) + ", " + kind + ")");
+        return RuntimeResults.opened(open);
+    }
+
+    /** The indexes a runtime opened, and the runtime. */
+    private record Read(LuceneRuntime runtime, RuntimeIndex index) {}
+
+    /**
+     * Opens {@code dirs} with {@code runtime}; if it is a server's and fails, such as for an index
+     * written by a newer Lucene than the server's, with leia's own runtime for the index's major, if
+     * there is one: naming a server never keeps an index from opening that opened without it (ADR
+     * 0090). If that fails too, the server's error is the one reported.
+     */
+    private Read read(LuceneRuntime runtime, List<Path> dirs, Optional<IndexVersion> version, DirectoryKind kind)
+            throws RpcException {
+        if (!(runtime instanceof ServerRuntime server)) {
+            return new Read(runtime, open(runtime, dirs, version, kind));
+        }
         try {
-            index = runtime.open(readable, kind);
+            return new Read(runtime, open(runtime, dirs, version, kind));
+        } catch (RpcException | LinkageError | ServiceConfigurationError e) {
+            Optional<LuceneRuntime> own = directories.leiasRuntime(version);
+            if (own.isEmpty()) {
+                throw serverFailure(e);
+            }
+            try {
+                RuntimeIndex index = open(own.get(), dirs, version, kind);
+                LOG.info(() -> "The Lucene " + server.luceneVersion() + " of " + server.name() + " cannot read "
+                        + dirs.getFirst() + " (" + e.getMessage() + "); read with Lucene "
+                        + own.get().luceneVersion() + " instead");
+                return new Read(own.get(), index);
+            } catch (RpcException | LinkageError | ServiceConfigurationError _) {
+                throw serverFailure(e);
+            }
+        }
+    }
+
+    private static RpcException serverFailure(Throwable failure) {
+        return switch (failure) {
+            case RpcException rpc -> rpc;
+            case Error error -> ServerRuntimes.notSupported(error).orElseThrow(() -> error);
+            default -> throw new IllegalStateException(failure);
+        };
+    }
+
+    private static RuntimeIndex open(
+            LuceneRuntime runtime, List<Path> dirs, Optional<IndexVersion> version, DirectoryKind kind)
+            throws RpcException {
+        try {
+            return runtime.open(dirs, kind);
         } catch (IndexReadException e) {
             throw RuntimeResults.readFailure(e);
         } catch (IOException | RuntimeException e) {
@@ -124,13 +181,6 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
                                     .orElse("") + " with Lucene " + runtime.luceneVersion() + ": " + e,
                     e);
         }
-        skipped.addAll(index.skipped());
-        skipped.sort(Comparator.comparingInt(skippedIndex -> dirs.indexOf(skippedIndex.path())));
-        skipped.forEach(dir -> LOG.info(() -> "Skipped " + dir.path() + ": " + dir.message()));
-        OpenRuntime open = new OpenRuntime(root, runtime, index, skipped);
-        currentIndex.replace(open);
-        LOG.info(() -> "Opened " + root + " (" + RuntimeResults.describe(open) + ", " + kind + ")");
-        return RuntimeResults.opened(open);
     }
 
     /**
@@ -157,6 +207,7 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
                         .toList(),
                 List.of(),
                 features,
-                runtime.map(LuceneRuntime::luceneVersion).orElse(""));
+                runtime.map(LuceneRuntime::luceneVersion).orElse(""),
+                runtime.flatMap(RuntimeResults::server));
     }
 }

@@ -16,7 +16,8 @@ class SessionTest {
         assertThat(Session.describe(error))
                 .isEqualTo(
                         "Missing codec: the index needs the codec 'X', which isn't loaded; add a jar that has it with "
-                                + "X, or start leia with --jar (MISSING_CODEC -32014)");
+                                + "X, or start leia with --jar; for an Elasticsearch or OpenSearch index, start leia with"
+                                + " --server and its installation (MISSING_CODEC -32014)");
     }
 
     @Test

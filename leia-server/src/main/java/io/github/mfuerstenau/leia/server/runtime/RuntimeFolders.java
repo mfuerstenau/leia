@@ -260,13 +260,18 @@ public final class RuntimeFolders {
 
     /** The file names that {@code adapter}'s list names, in order. */
     static List<String> listedJars(Path adapter) throws IOException {
+        return listed(adapter).stream().map(ListedJar::name).toList();
+    }
+
+    /** The jars that {@code adapter}'s list names, in order. */
+    static List<ListedJar> listed(Path adapter) throws IOException {
         try (JarFile jar = new JarFile(adapter.toFile())) {
             ZipEntry entry = jar.getEntry(LIST);
             if (entry == null) {
                 throw new IOException("there is none");
             }
             try (InputStream in = jar.getInputStream(entry)) {
-                return listedJars(in).stream().map(ListedJar::name).toList();
+                return listedJars(in);
             }
         }
     }
@@ -328,11 +333,11 @@ public final class RuntimeFolders {
     }
 
     /**
-     * The parent of an old runtime's class loader: the runtime interface from leia's own loader, and
-     * the JDK from the platform loader. Neither leia's classes nor the jar chain's Lucene are seen,
-     * nor any resource but the JDK's.
+     * The parent of an old runtime's class loader, and of a server's (ADR 0090): the runtime interface
+     * from leia's own loader, and the JDK from the platform loader. Neither leia's classes nor the jar
+     * chain's Lucene are seen, nor any resource but the JDK's.
      */
-    private static final class ApiOnlyLoader extends ClassLoader {
+    static final class ApiOnlyLoader extends ClassLoader {
 
         private final ClassLoader leia;
 

@@ -34,7 +34,8 @@ public interface LuceneRuntime {
     /**
      * Opens the latest commit of each directory of {@code dirs} read-only, with a reader, through a
      * directory without locks, and combines them as one index, in the order given (ADR 0045). A
-     * directory that fails to open is skipped and listed in {@link RuntimeIndex#skipped()}.
+     * directory that fails to open, or whose fields its Lucene can't combine with those of the
+     * directories before it (ADR 0021 §5), is skipped and listed in {@link RuntimeIndex#skipped()}.
      *
      * @param dirs the index directories, at least one
      * @throws IOException if none of them can be read: the error of the first, naming its directory

@@ -206,6 +206,25 @@ class MultiIndexTest {
     }
 
     @Test
+    void skipsAnIndexWithAnotherParentField() throws Exception {
+        writeIndex(tmp.resolve("a"), "a", 1);
+        Path b = tmp.resolve("b");
+        try (FSDirectory directory = FSDirectory.open(b);
+                IndexWriter writer = new IndexWriter(directory, new IndexWriterConfig().setParentField("_parent"))) {
+            writer.addDocument(document("b", 1, _ -> {}));
+            writer.commit();
+        }
+
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(tmp)) {
+            assertThat(index.directories()).containsExactly(tmp.resolve("a"));
+            assertThat(index.skipped()).singleElement().satisfies(skipped -> {
+                assertThat(skipped.path()).isEqualTo(b);
+                assertThat(skipped.message()).contains("parent doc field");
+            });
+        }
+    }
+
+    @Test
     void reopensTheIndexesThatChangedAndSharesTheOthers() throws Exception {
         writeIndex(tmp.resolve("a"), "a", 2);
         Path b = writeIndex(tmp.resolve("b"), "b", 1);

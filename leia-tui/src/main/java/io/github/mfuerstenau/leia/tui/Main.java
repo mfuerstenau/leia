@@ -10,6 +10,7 @@ import io.github.mfuerstenau.leia.protocol.version.VersionParams;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import io.github.mfuerstenau.leia.server.LeiaBackend;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.runtime.ServerRuntimes;
 import io.github.mfuerstenau.leia.tui.app.Action;
 import io.github.mfuerstenau.leia.tui.app.App;
 import io.github.mfuerstenau.leia.tui.app.History;
@@ -32,9 +33,9 @@ import java.util.logging.Logger;
 
 /**
  * Starts leia, after {@link Launcher} has checked the Java version: parses the command line, loads
- * the jars into the backend and runs the TUI (ADR 0034). Until the TUI takes the terminal, problems
- * go to stderr, and exit with a non-zero status; after that, everything goes into {@code leia.log}
- * (§7).
+ * the jars and servers into the backend and runs the TUI (ADR 0034). Until the TUI takes the
+ * terminal, problems go to stderr, and exit with a non-zero status; after that, everything goes into
+ * {@code leia.log} (§7).
  *
  * <p>With {@code -Dleia.exitAfterFirstFrame=true} it quits as soon as the first frame is on
  * the screen and prints the startup times, so that they can be measured without a person.
@@ -91,6 +92,17 @@ public final class Main {
                 return 1;
             }
         }
+        for (Path server : cli.servers()) {
+            if (!Files.isDirectory(server)) {
+                err.println("leia: --server " + server + ": no such directory");
+                return 1;
+            }
+            if (ServerRuntimes.lib(server).isEmpty()) {
+                err.println("leia: --server " + server + ": no lucene-core jar in " + server.resolve("lib") + " or "
+                        + server + "; give an Elasticsearch or OpenSearch installation, or its lib folder");
+                return 1;
+            }
+        }
         // The runtimes beside leia.jar come first (ADR 0044, ADR 0073); the default folder's jars come
         // after those of --jar, which win a clash of names (ADR 0024).
         RuntimeFolders runtimeFolders = new RuntimeFolders(platform.runtimesDir());
@@ -102,7 +114,7 @@ public final class Main {
             LOG.info(() -> "leia started with " + List.of(args));
             LeiaBackend backend;
             try {
-                backend = LeiaBackend.start(runtimeFolders.dir(), jars);
+                backend = LeiaBackend.start(runtimeFolders.dir(), jars, cli.servers());
             } catch (RpcException e) {
                 LOG.log(Level.SEVERE, "Cannot start", e);
                 err.println("leia: " + e.getMessage());

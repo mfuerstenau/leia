@@ -18,6 +18,10 @@ lucene4 = "4.10.4"
 lucene7 = "7.7.3"
 # Only for writing the Lucene 6.x test index (leia-lucene7/build.gradle.kts)
 lucene6 = "6.6.6"
+# Only for leia-test-servers: the Lucene of the fake Elasticsearch or OpenSearch installations,
+# older minors than the runtimes are built for (ADR 0090)
+serverLucene9 = "9.10.0"
+serverLucene10 = "10.2.2"
 dagger = "2.60.1"
 jackson = "3.2.3"
 junit = "6.1.3"

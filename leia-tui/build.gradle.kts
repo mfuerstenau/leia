@@ -116,7 +116,7 @@ tasks.test {
     // LaunchScriptTest runs the leia script from here.
     inputs.dir("src/scripts")
     systemProperty("leia.scripts", file("src/scripts").absolutePath)
-    useJUnitPlatform { excludeTags("jars") }
+    useJUnitPlatform { excludeTags("jars", "server") }
     val indexes: Map<String, FileCollection> = oldTestIndexes
     for ((name, index) in indexes) {
         inputs.files(index).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("${name}Index")
@@ -170,8 +170,41 @@ val jarsTest = tasks.register<Test>("jarsTest") {
     })
 }
 
+// The Pilot test of --server (ADR 0090), with the fake server for Lucene 9 and its index. A server is
+// loaded once per JVM, so each class runs in a JVM of its own.
+val testServer9 = configurations.create("testServer9") { isCanBeConsumed = false }
+val testServer9Index = configurations.create("testServer9Index") { isCanBeConsumed = false }
+
+dependencies {
+    testServer9(project(path = ":leia-test-servers", configuration = "fakeServer9Elements"))
+    testServer9Index(project(path = ":leia-test-servers", configuration = "fakeServer9IndexElements"))
+}
+
+val serverTest = tasks.register<Test>("serverTest") {
+    description = "Runs the Pilot tests of the fake servers, each class in a JVM of its own."
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    forkEvery = 1
+    useJUnitPlatform { includeTags("server") }
+    val server: FileCollection = testServer9
+    val serverIndex: FileCollection = testServer9Index
+    val runtimes: FileCollection = files(testRuntimes)
+    inputs.files(server).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("server")
+    inputs.files(serverIndex).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("serverIndex")
+    inputs.files(runtimes).withPathSensitivity(PathSensitivity.RELATIVE).withPropertyName("runtimes")
+    val projectPath = projectDir.toPath()
+    jvmArgumentProviders.add(CommandLineArgumentProvider {
+        listOf(
+            "-Dleia.test.server9=" + projectPath.relativize(server.singleFile.toPath()),
+            "-Dleia.test.server9.index=" + projectPath.relativize(serverIndex.singleFile.toPath()),
+            "-Dleia.test.runtimes=" + projectPath.relativize(runtimes.singleFile.toPath()),
+        )
+    })
+}
+
 tasks.check {
-    dependsOn(jarsTest)
+    dependsOn(jarsTest, serverTest)
 }
 
 tasks.named<JavaExec>("run") {

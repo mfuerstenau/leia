@@ -43,11 +43,14 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.FieldType;
+import org.apache.lucene.document.NumericDocValuesField;
+import org.apache.lucene.document.SortedDocValuesField;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.IndexOptions;
@@ -55,6 +58,7 @@ import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FSDirectory;
+import org.apache.lucene.util.BytesRef;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -1810,5 +1814,85 @@ class Lucene9IndexTest {
                         .segments())
                 .extracting(Commits.Segment::hasBlocks)
                 .containsExactly(true, false);
+    }
+
+    @Test
+    void skipsADirectoryWhoseFieldsConflict(@TempDir Path dir) throws IOException {
+        Path a = dir.resolve("a");
+        Path b = dir.resolve("b");
+        Path c = dir.resolve("c");
+        writeIndex(
+                a, new IndexWriterConfig(new StandardAnalyzer()), doc -> doc.add(new NumericDocValuesField("rank", 1)));
+        writeIndex(
+                b,
+                new IndexWriterConfig(new StandardAnalyzer()),
+                doc -> doc.add(new SortedDocValuesField("rank", new BytesRef("x"))));
+        writeIndex(
+                c,
+                new IndexWriterConfig(new StandardAnalyzer()),
+                doc -> doc.add(new StringField("id", "c", Field.Store.NO)));
+
+        try (RuntimeIndex index = new Lucene9Runtime().open(List.of(a, b, c), DirectoryKind.FS)) {
+            assertThat(index.directories()).containsExactly(a, c);
+            assertThat(index.skipped()).singleElement().satisfies(skipped -> {
+                assertThat(skipped.path()).isEqualTo(b);
+                assertThat(skipped.message())
+                        .startsWith("Its fields conflict with those of the indexes before it: ")
+                        .contains("rank");
+            });
+            assertThat(index.fields()).extracting(RuntimeIndex.Field::name).contains("rank", "id");
+        }
+    }
+
+    /** Lucene 9 keeps a field's schema: a field that gains doc values in another index conflicts. */
+    @Test
+    void skipsADirectoryWhoseFieldGainsDocValues(@TempDir Path dir) throws IOException {
+        Path a = dir.resolve("a");
+        Path b = dir.resolve("b");
+        writeIndex(
+                a,
+                new IndexWriterConfig(new StandardAnalyzer()),
+                doc -> doc.add(new StringField("rank", "1", Field.Store.NO)));
+        writeIndex(
+                b, new IndexWriterConfig(new StandardAnalyzer()), doc -> doc.add(new NumericDocValuesField("rank", 1)));
+
+        try (RuntimeIndex index = new Lucene9Runtime().open(List.of(a, b), DirectoryKind.FS)) {
+            assertThat(index.directories()).containsExactly(a);
+            assertThat(index.skipped()).extracting(RuntimeIndex.Skipped::path).containsExactly(b);
+        }
+    }
+
+    @Test
+    void skipsADirectoryWithAnotherParentField(@TempDir Path dir) throws IOException {
+        Path a = dir.resolve("a");
+        Path b = dir.resolve("b");
+        writeIndex(
+                a,
+                new IndexWriterConfig(new StandardAnalyzer()),
+                doc -> doc.add(new StringField("id", "1", Field.Store.NO)));
+        writeIndex(
+                b,
+                new IndexWriterConfig(new StandardAnalyzer()).setParentField("_parent"),
+                doc -> doc.add(new StringField("id", "2", Field.Store.NO)));
+
+        try (RuntimeIndex index = new Lucene9Runtime().open(List.of(a, b), DirectoryKind.FS)) {
+            assertThat(index.directories()).containsExactly(a);
+            assertThat(index.skipped()).singleElement().satisfies(skipped -> {
+                assertThat(skipped.path()).isEqualTo(b);
+                assertThat(skipped.message()).contains("parent doc field");
+            });
+        }
+    }
+
+    /** Writes one document, with the fields that {@code fields} adds, in {@code dir}, with Lucene 9. */
+    private static void writeIndex(Path dir, IndexWriterConfig config, Consumer<Document> fields) throws IOException {
+        try (Directory directory = FSDirectory.open(dir);
+                IndexWriter writer = new IndexWriter(directory, config)) {
+            Document doc = new Document();
+            fields.accept(doc);
+            writer.addDocument(doc);
+        }
+        // Gone once the writer is closed: the test opens the index as leia does.
+        Files.deleteIfExists(dir.resolve("write.lock"));
     }
 }

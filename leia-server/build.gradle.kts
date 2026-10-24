@@ -27,7 +27,7 @@ dependencies {
 }
 
 tasks.test {
-    useJUnitPlatform { excludeTags("jars", "runtimeLoad") }
+    useJUnitPlatform { excludeTags("jars", "runtimeLoad", "server") }
 }
 
 fun runtimeTestFiles(runtime: String, name: String, configuration: String) =
@@ -85,6 +85,19 @@ val jarsTestIndexFiles = mapOf(
     "lucene8" to testIndexFiles.getValue("lucene8"),
     "lucene8to9" to testIndexFiles.getValue("lucene8to9"),
 )
+// The fake Elasticsearch or OpenSearch installations and their indexes, for the tests of --server
+// (ADR 0090).
+fun serverTestFiles(name: String, configuration: String) =
+    runtimeTestFiles("leia-test-servers", name, configuration)
+
+val testServerFiles = listOf(9, 10).flatMap { major ->
+    listOf(
+        "leia.test.server$major" to serverTestFiles("testServer$major", "fakeServer${major}Elements"),
+        "leia.test.server$major.index" to serverTestFiles("testServer${major}Index", "fakeServer${major}IndexElements"),
+        "leia.test.server$major.plain" to
+            serverTestFiles("testServer${major}Plain", "fakeServer${major}PlainIndexElements"),
+    )
+}.toMap()
 val testCodecJar = coreTestFiles("testCodecJar", "testCodecJarElements")
 val testAnalysisJars = coreTestFiles("testAnalysisJars", "testAnalysisJarsElements")
 
@@ -122,6 +135,8 @@ fun Test.testFiles(properties: Map<String, FileCollection>) {
 }
 
 tasks.test {
+    // The refusals of ServerRuntimesTest, which load the fake server 9 with runtimes/lucene9.
+    testFiles(mapOf("leia.test.server9" to testServerFiles.getValue("leia.test.server9")))
     // docs/runtimes.md, whose feature table RuntimeFeaturesTest checks against the runtimes, and the
     // user README of the distribution, whose condensed table it checks against that one.
     testFiles(
@@ -167,6 +182,25 @@ val runtimeLoadTest = tasks.register<Test>("runtimeLoadTest") {
             "leia.test.index.lucene9" to testIndexFiles.getValue("lucene9"),
             "leia.test.runtimes" to files(jarsTestRuntimes),
         ),
+    )
+}
+
+val serverTest = tasks.register<Test>("serverTest") {
+    description = "Runs the tests of the fake servers' runtimes, each class in a JVM of its own."
+    group = "verification"
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath - lucene10World
+    // A server is loaded once per JVM (ADR 0090).
+    forkEvery = 1
+    include("**/Server*BackendTest.class")
+    useJUnitPlatform { includeTags("server") }
+    testFiles(
+        testServerFiles +
+            mapOf(
+                "leia.test.index.lucene8" to testIndexFiles.getValue("lucene8"),
+                "leia.test.index.lucene9" to testIndexFiles.getValue("lucene9"),
+                "leia.test.runtimes" to files(jarsTestRuntimes),
+            ),
     )
 }
 
@@ -221,7 +255,7 @@ val runtimeCatalogCheck = tasks.register<RuntimeCatalogCheck>("runtimeCatalogChe
 }
 
 tasks.check {
-    dependsOn(jarsTest, runtimeLoadTest, noLuceneCheck, runtimeCatalogCheck)
+    dependsOn(jarsTest, runtimeLoadTest, serverTest, noLuceneCheck, runtimeCatalogCheck)
 }
 
 // Version and build of leia, read at runtime by BuildInfo. The commit time (not the

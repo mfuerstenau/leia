@@ -52,6 +52,7 @@ import io.github.mfuerstenau.leia.protocol.jars.GetRuntimesResult;
 import io.github.mfuerstenau.leia.protocol.jars.LoadRuntimesResult;
 import io.github.mfuerstenau.leia.protocol.jars.RuntimeFolder;
 import io.github.mfuerstenau.leia.protocol.jars.RuntimeState;
+import io.github.mfuerstenau.leia.protocol.jars.ServerRuntimeInfo;
 import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodeResult;
 import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodesResult;
 import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphResult;
@@ -400,6 +401,20 @@ public final class App {
      */
     public Optional<Action> opened(
             GetIndexStatsResult stats, List<SkippedIndex> skipped, Set<Feature> features, String luceneRuntime) {
+        return opened(stats, skipped, features, luceneRuntime, Optional.empty());
+    }
+
+    /**
+     * As {@link #opened(GetIndexStatsResult, List, Set, String)}, for an index that the Lucene of
+     * {@code server}, an Elasticsearch or OpenSearch installation, reads (ADR 0090), which the tab line
+     * names with it.
+     */
+    public Optional<Action> opened(
+            GetIndexStatsResult stats,
+            List<SkippedIndex> skipped,
+            Set<Feature> features,
+            String luceneRuntime,
+            Optional<String> server) {
         history.add(stats.path());
         overview = new Overview(stats, Logo.aboutLines(version), topN).withSkipped(skipped);
         forgetScans();
@@ -410,10 +425,11 @@ public final class App {
                 stats.indexes().stream().map(IndexCommitStats::path).toList(),
                 skipped.stream().map(SkippedIndex::path).toList(),
                 features,
-                readByTheNewestLucene(luceneRuntime)
+                readByTheNewestLucene(luceneRuntime) && server.isEmpty()
                         ? Optional.empty()
                         : Optional.of("Lucene " + stats.indexes().getFirst().createdVersionMajor() + ".x, read with "
-                                + luceneRuntime));
+                                + luceneRuntime
+                                + server.map(name -> " (" + name + ")").orElse("")));
         if (!supports(screen)) {
             screen = Screen.OVERVIEW;
         }
@@ -805,7 +821,7 @@ public final class App {
 
     /** What the backend made of the new runtimes; the about screen shows their states now. */
     public void runtimesReloaded(LoadRuntimesResult result) {
-        runtimes = new GetRuntimesResult(result.runtimes());
+        runtimes = new GetRuntimesResult(result.runtimes(), runtimes == null ? List.of() : runtimes.servers());
         if (runtimeWindow != null) {
             runtimeWindow.loaded(result);
         }
@@ -2624,6 +2640,11 @@ public final class App {
                                                 .map(runtime -> runtime.luceneVersion()
                                                                 .orElseThrow() + " (" + majors(runtime) + ")")
                                                 .toList()))));
+        for (ServerRuntimeInfo server : runtimes.servers()) {
+            lines.add(Line.from(
+                    "Server: " + server.label().map(label -> label + ", ").orElse("") + "Lucene "
+                            + server.luceneVersion() + " (" + majors(server.indexMajors()) + "), in " + server.home()));
+        }
         Style warning = Style.EMPTY.yellow();
         if (!missing.isEmpty()) {
             String where = runtimeFolders
@@ -2666,8 +2687,13 @@ public final class App {
 
     /** The majors of the indexes a runtime reads, such as {@code 9–10} or {@code 8}. */
     private static String majors(RuntimeFolder runtime) {
-        int first = runtime.indexMajors().getFirst();
-        int last = runtime.indexMajors().getLast();
+        return majors(runtime.indexMajors());
+    }
+
+    /** {@code indexMajors}, oldest first, such as {@code 9–10} or {@code 8}. */
+    private static String majors(List<Integer> indexMajors) {
+        int first = indexMajors.getFirst();
+        int last = indexMajors.getLast();
         return first == last ? Integer.toString(first) : first + "–" + last;
     }
 

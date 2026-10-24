@@ -72,7 +72,8 @@ class OpenIndexHandlerTest {
                                         Optional.of(Version.LATEST.toString()))))),
                         List.of(),
                         TestIndexes.featuresWithoutData(),
-                        Version.LATEST.toString()));
+                        Version.LATEST.toString(),
+                        Optional.empty()));
         assertThat(currentIndex.get())
                 .hasValueSatisfying(index -> assertThat(index.path()).isEqualTo(dir));
     }
@@ -166,7 +167,8 @@ class OpenIndexHandlerTest {
                         List.of(new IndexEntry(dir.toString(), Optional.empty())),
                         List.of(),
                         Feature.withoutReader(),
-                        Version.LATEST.toString()));
+                        Version.LATEST.toString(),
+                        Optional.empty()));
         assertThat(currentIndex.opened()).isInstanceOf(OpenDirectories.class);
         for (ThrowingCallable call : List.<ThrowingCallable>of(
                 () -> new GetIndexStatsHandler(currentIndex).handle(new GetIndexStatsParams()),

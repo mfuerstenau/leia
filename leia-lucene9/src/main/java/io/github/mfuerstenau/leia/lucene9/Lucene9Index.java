@@ -159,16 +159,41 @@ final class Lucene9Index
      * @throws IOException if none of them can be read
      */
     static Lucene9Index open(List<Path> dirs, DirectoryKind kind) throws IOException {
-        IndexParts.Opened<Part> opened = IndexParts.open(dirs, dir -> openPart(dir, kind));
+        IndexParts.Opened<Part> opened = IndexParts.compatible(
+                dirs,
+                IndexParts.open(dirs, dir -> openPart(dir, kind)),
+                Part::dir,
+                Lucene9Index::conflict,
+                Lucene9Index::closeables);
         try {
             return new Lucene9Index(kind, opened.parts(), opened.skipped());
         } catch (IOException | RuntimeException e) {
-            for (Part part : opened.parts()) {
-                part.reader().close();
-                part.directory().close();
-            }
+            IndexParts.closeAll(
+                    e,
+                    opened.parts().stream()
+                            .flatMap(part -> closeables(part).stream())
+                            .toList());
             throw e;
         }
+    }
+
+    /** Why the fields of {@code parts} can't be combined, as {@link FieldInfos#getMergedFieldInfos} refuses them; empty if they can. */
+    private static Optional<String> conflict(List<Part> parts) throws IOException {
+        if (parts.size() < 2) {
+            return Optional.empty();
+        }
+        try (MultiReader multi =
+                new MultiReader(parts.stream().map(Part::reader).toArray(IndexReader[]::new), false)) {
+            FieldInfos.getMergedFieldInfos(multi);
+            return Optional.empty();
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            return Optional.of(e.getMessage());
+        }
+    }
+
+    /** What closes a part that no index holds yet. */
+    private static List<Closeable> closeables(Part part) {
+        return List.of(part.reader(), part.directory());
     }
 
     private static Part openPart(Path dir, DirectoryKind kind) throws IOException {

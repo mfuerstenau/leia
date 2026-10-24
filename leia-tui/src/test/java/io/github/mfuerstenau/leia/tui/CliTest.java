@@ -22,6 +22,7 @@ class CliTest {
                         false,
                         false,
                         java.util.List.of(),
+                        java.util.List.of(),
                         false,
                         DirectoryImpl.FS,
                         false,
@@ -63,6 +64,14 @@ class CliTest {
                 .containsExactly("lucene5", "lucene9");
     }
 
+    @Test
+    void parsesTheServersInOrder() throws Exception {
+        assertThat(Cli.parse("--server", "/opt/es", "--server=/opt/os/lib", "/data/shard")
+                        .servers())
+                .containsExactly(Path.of("/opt/es"), Path.of("/opt/os/lib"));
+        assertThat(Cli.parse().servers()).isEmpty();
+    }
+
     @ParameterizedTest
     @CsvSource({"fs, FS", "mmap, MMAP", "nio, NIO"})
     void parsesTheDirectory(String name, DirectoryImpl directory) throws Exception {
@@ -102,6 +111,8 @@ class CliTest {
             --download-runtimes         | --download-runtimes needs --runtime <FOLDER>; to choose runtimes, start leia and press D on its start screen
             --download-runtimes /a      | --download-runtimes takes no INDEX_PATH
             --download-runtimes --jar a | --download-runtimes takes no INDEX_PATH and none of --jar
+            --download-runtimes --server /opt/es | --download-runtimes takes no INDEX_PATH and none of --jar, --server
+            --server                    | --server needs a value <PATH>
             --no-reader --download-runtimes | --download-runtimes takes no INDEX_PATH
             --download-runtimes --directory nio | --download-runtimes takes no INDEX_PATH
             --download-runtimes --no-default-jars | --download-runtimes takes no INDEX_PATH

@@ -18,10 +18,12 @@ import java.util.Set;
 import java.util.logging.Logger;
 
 /**
- * The runtimes that read the indexes (ADR 0044, ADR 0071): those of the {@link RuntimeFolders}, each
- * in a class loader of its own (ADR 0073), and those found with {@link ServiceLoader} through the
- * loader of the jars, {@link JarChain#classLoader()}, such as Lucene 10's. A runtime built for
- * another version of the interface, or one that can't be loaded, is refused and never used.
+ * The runtimes that read the indexes (ADR 0044, ADR 0071): those of the {@link ServerRuntimes}
+ * first, which read the indexes of their majors with their servers' Lucene (ADR 0090), then those of
+ * the {@link RuntimeFolders}, each in a class loader of its own (ADR 0073), and those found with
+ * {@link ServiceLoader} through the loader of the jars, {@link JarChain#classLoader()}, such as Lucene
+ * 10's. A runtime built for another version of the interface, or one that can't be loaded, is refused
+ * and never used.
  *
  * <p>It is used on the backend thread only, so it needs no locking.
  */
@@ -35,7 +37,9 @@ public final class Runtimes {
 
     private ClassLoader loader;
     private List<LuceneRuntime> folders;
+    private List<ServerRuntime> servers;
     private Loaded loaded;
+    private List<LuceneRuntime> leias;
     private List<LuceneRuntime> all;
     private final Set<String> reported;
 
@@ -43,15 +47,23 @@ public final class Runtimes {
     public Runtimes() {
         loader = JarChain.classLoader();
         folders = RuntimeFolders.runtimes();
+        servers = ServerRuntimes.runtimes();
         loaded = load(loader);
-        all = all(folders, loaded);
+        leias = leias(folders, loaded);
+        all = all(servers, leias);
         // LeiaBackend.start refused these already, or RuntimeFolders reports them.
         reported = new HashSet<>(loaded.refused());
     }
 
-    private static List<LuceneRuntime> all(List<LuceneRuntime> folders, Loaded chain) {
-        List<LuceneRuntime> all = new ArrayList<>(folders);
-        all.addAll(chain.runtimes());
+    private static List<LuceneRuntime> leias(List<LuceneRuntime> folders, Loaded chain) {
+        List<LuceneRuntime> leias = new ArrayList<>(folders);
+        leias.addAll(chain.runtimes());
+        return List.copyOf(leias);
+    }
+
+    private static List<LuceneRuntime> all(List<ServerRuntime> servers, List<LuceneRuntime> leias) {
+        List<LuceneRuntime> all = new ArrayList<>(servers);
+        all.addAll(leias);
         return List.copyOf(all);
     }
 
@@ -121,27 +133,48 @@ public final class Runtimes {
     private Loaded chain() {
         ClassLoader now = JarChain.classLoader();
         List<LuceneRuntime> nowFolders = RuntimeFolders.runtimes();
+        List<ServerRuntime> nowServers = ServerRuntimes.runtimes();
         boolean chainChanged = now != loader;
         if (chainChanged) {
             loader = now;
             loaded = load(now);
         }
-        if (chainChanged || nowFolders != folders) {
+        if (chainChanged || nowFolders != folders || nowServers != servers) {
             folders = nowFolders;
-            all = all(folders, loaded);
+            servers = nowServers;
+            leias = leias(folders, loaded);
+            all = all(servers, leias);
         }
         return loaded;
     }
 
-    /** Every runtime: those of the folders, then those of the jar chain. */
+    /** Every runtime: those of the servers, then those of the folders, then those of the jar chain. */
     private List<LuceneRuntime> current() {
         chain();
         return all;
     }
 
-    /** A runtime that reads indexes of {@code major}, the first one found. */
+    /** Leia's own runtimes: those of the folders, then those of the jar chain; no server's. */
+    private List<LuceneRuntime> leias() {
+        chain();
+        return leias;
+    }
+
+    /** A runtime that reads indexes of {@code major}, the first one found: a server's, if one reads them. */
     public Optional<LuceneRuntime> forMajor(int major) {
-        return current().stream()
+        return forMajor(current(), major);
+    }
+
+    /**
+     * One of leia's own runtimes that reads indexes of {@code major}, for an index that a server's
+     * runtime fails to read, such as one written by a newer Lucene than the server's (ADR 0090).
+     */
+    public Optional<LuceneRuntime> leiasForMajor(int major) {
+        return forMajor(leias(), major);
+    }
+
+    private static Optional<LuceneRuntime> forMajor(List<LuceneRuntime> runtimes, int major) {
+        return runtimes.stream()
                 .filter(runtime -> runtime.indexMajors().contains(major))
                 .findFirst();
     }
@@ -167,7 +200,8 @@ public final class Runtimes {
     }
 
     /**
-     * The analysis tab of the first runtime that has one (ADR 0067), with the runtime it belongs to.
+     * The analysis tab of the first runtime that has one (ADR 0067), with the runtime it belongs to;
+     * never a server's, which has none.
      */
     public Optional<RuntimeAnalysis> analysis() {
         for (LuceneRuntime runtime : current()) {
@@ -181,13 +215,14 @@ public final class Runtimes {
 
     /**
      * Every runtime leia knows, newest first, with the Lucene version of the loaded runtime that reads
-     * its indexes, or empty if none is loaded, and how its folder was found (ADR 0072, ADR 0073).
+     * its indexes, or empty if none is loaded, and how its folder was found (ADR 0072, ADR 0073); a
+     * server's runtime doesn't count.
      */
     public List<KnownState> known() {
         return RuntimeFolders.KNOWN.stream()
                 .map(known -> new KnownState(
                         known,
-                        forMajor(known.indexMajors().getFirst()).map(LuceneRuntime::luceneVersion),
+                        leiasForMajor(known.indexMajors().getFirst()).map(LuceneRuntime::luceneVersion),
                         RuntimeFolders.state(known)))
                 .toList();
     }
@@ -199,6 +234,12 @@ public final class Runtimes {
      * @param folder how its folder was found; a runtime can be loaded without one, through the jars
      */
     public record KnownState(RuntimeFolders.Known known, Optional<String> luceneVersion, RuntimeFolders.State folder) {}
+
+    /** The servers' runtimes, in the order they were given (ADR 0090). */
+    public List<ServerRuntime> servers() {
+        chain();
+        return servers;
+    }
 
     /** The refusals not reported before, for {@code addJars}. */
     public List<String> newlyRefused() {

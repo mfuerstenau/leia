@@ -6,6 +6,8 @@ import io.github.mfuerstenau.leia.server.jars.JarChain;
 import io.github.mfuerstenau.leia.server.jars.JarException;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
+import io.github.mfuerstenau.leia.server.runtime.ServerException;
+import io.github.mfuerstenau.leia.server.runtime.ServerRuntimes;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -63,8 +65,26 @@ public final class LeiaBackend implements AutoCloseable {
      *     leia refuses (ADR 0044); nothing is started then
      */
     public static LeiaBackend start(Optional<Path> runtimesDir, List<Path> jars) throws RpcException {
+        return start(runtimesDir, jars, List.of());
+    }
+
+    /**
+     * As {@link #start(Optional, List)}, and loads the runtimes of the Elasticsearch and OpenSearch
+     * installations at {@code servers} after those of {@code runtimesDir}, whose adapters they use
+     * (ADR 0090).
+     *
+     * @param servers each an installation's home or its {@code lib/}
+     * @throws RpcException {@code INVALID_JAR} also if a server can't be loaded
+     */
+    public static LeiaBackend start(Optional<Path> runtimesDir, List<Path> jars, List<Path> servers)
+            throws RpcException {
         // Lucene 10's folder first: the jars link against its Lucene (ADR 0065).
         runtimesDir.ifPresent(RuntimeFolders::load);
+        try {
+            ServerRuntimes.load(servers, runtimesDir);
+        } catch (ServerException e) {
+            throw new RpcException(ErrorCode.INVALID_JAR, e.getMessage(), e);
+        }
         try {
             List<Path> loaded = JarChain.load(jars);
             if (!loaded.isEmpty()) {
@@ -129,9 +149,16 @@ public final class LeiaBackend implements AutoCloseable {
             LOG.fine(() -> name + " " + params + System.lineSeparator() + "-> " + e.code() + ": " + e.getMessage());
             result.completeExceptionally(e);
         } catch (Error e) {
-            // Such as a LinkageError from a jar; the future must not wait forever.
-            LOG.log(Level.SEVERE, e, () -> "Method " + name + " failed");
-            result.completeExceptionally(e);
+            // A server's Lucene that lacks what the adapter calls, or a class of the server that fails
+            // (ADR 0090); else such as a LinkageError from a jar. The future must not wait forever.
+            Optional<RpcException> notSupported = ServerRuntimes.notSupported(e);
+            if (notSupported.isPresent()) {
+                LOG.log(Level.WARNING, e, () -> name + " " + params + " fails in the server's classes");
+                result.completeExceptionally(notSupported.get());
+            } else {
+                LOG.log(Level.SEVERE, e, () -> "Method " + name + " failed");
+                result.completeExceptionally(e);
+            }
         }
     }
 

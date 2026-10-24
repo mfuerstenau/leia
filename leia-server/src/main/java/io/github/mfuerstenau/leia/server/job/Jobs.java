@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.server.job;
 
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.runtime.ServerRuntimes;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import java.time.Duration;
@@ -207,6 +208,8 @@ public final class Jobs {
             this.attachment = attachment;
         }
 
+        // An Error in a server's classes is an expected failure (ADR 0088, ADR 0090)
+        @SuppressWarnings("java:S1181")
         void run(Work<R> work) {
             long start = System.nanoTime();
             try {
@@ -225,6 +228,18 @@ public final class Jobs {
             } catch (RuntimeException e) {
                 LOG.log(Level.SEVERE, e, () -> "Job " + id + " failed: " + description);
                 outcome.completeExceptionally(e);
+            } catch (Error e) {
+                // A server's Lucene that lacks what the adapter calls, or a class of the server that
+                // fails (ADR 0090); any other ends below.
+                Optional<RpcException> notSupported = ServerRuntimes.notSupported(e);
+                if (notSupported.isEmpty()) {
+                    throw e;
+                }
+                LOG.log(
+                        Level.WARNING,
+                        e,
+                        () -> "Job " + id + " is not supported by the server's Lucene: " + description);
+                outcome.completeExceptionally(notSupported.get());
             } finally {
                 // An Error: the job must still end, or polls would wait forever.
                 if (!outcome.isDone()) {

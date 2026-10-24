@@ -950,7 +950,12 @@ public final class Session {
                 if (statsError == null) {
                     reply(
                             runner,
-                            app -> app.opened(stats, result.skipped(), result.features(), result.luceneRuntime()));
+                            app -> app.opened(
+                                    stats,
+                                    result.skipped(),
+                                    result.features(),
+                                    result.luceneRuntime(),
+                                    result.server()));
                 } else {
                     closeUnseen(statsError, runner);
                 }
@@ -1052,12 +1057,15 @@ public final class Session {
 
     /**
      * A codec or format that isn't loaded can come from a jar that X adds or leia is started with
-     * (ADR 0018, ADR 0024). A runtime, which the message names, comes from its folder in {@code
+     * (ADR 0018, ADR 0024), or from the Elasticsearch or OpenSearch installation of {@code --server}
+     * (ADR 0090). A runtime, which the message names, comes from its folder in {@code
      * runtimes/}, which {@code leia --download-runtimes} installs (ADR 0073).
      */
     static RpcException withJarHint(RpcException error) {
         String hint = switch (error.code()) {
-            case MISSING_CODEC -> "; add a jar that has it with X, or start leia with --jar";
+            case MISSING_CODEC ->
+                "; add a jar that has it with X, or start leia with --jar; for an Elasticsearch or OpenSearch"
+                        + " index, start leia with --server and its installation";
             case MISSING_RUNTIME -> "; close the index (c) and press D on the start screen to download it";
             default -> null;
         };

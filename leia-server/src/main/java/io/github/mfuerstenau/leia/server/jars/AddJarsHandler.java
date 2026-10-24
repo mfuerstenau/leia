@@ -10,6 +10,7 @@ import io.github.mfuerstenau.leia.runtime.Extensions;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
+import io.github.mfuerstenau.leia.server.runtime.ServerRuntimes;
 import jakarta.inject.Inject;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -58,8 +59,9 @@ public final class AddJarsHandler implements MethodHandler<AddJarsParams, AddJar
         }
         if (!added.jars().isEmpty()) {
             LOG.info(() -> "Added the jars " + added.jars());
-            // Job threads are started from this thread, and inherit its loader (as in LeiaBackend.start).
-            Thread.currentThread().setContextClassLoader(JarChain.classLoader());
+            // Job threads are started from this thread, and inherit its loader (as in LeiaBackend.start);
+            // a server's stays while its index is open (ADR 0090).
+            ServerRuntimes.chainAsContextLoader();
             // A loader can't be unloaded, so the jar stays, but its runtime is never used (ADR 0044).
             List<String> refused = runtimes.newlyRefused();
             if (!refused.isEmpty()) {

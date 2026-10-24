@@ -92,6 +92,11 @@ final class RealBackend implements AutoCloseable {
         return new RealBackend(LeiaBackend.start(runtimesDir, jars));
     }
 
+    /** A backend with the servers {@code servers} too (ADR 0090). */
+    static RealBackend start(Optional<Path> runtimesDir, List<Path> jars, List<Path> servers) throws RpcException {
+        return new RealBackend(LeiaBackend.start(runtimesDir, jars, servers));
+    }
+
     /** A test index that leia-core's build writes, given by the system property {@code leia.test.index.<name>}. */
     static Path testIndex(String name) {
         return testFile("leia.test.index." + name);

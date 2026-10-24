@@ -123,6 +123,32 @@ class MainTest {
     }
 
     @Test
+    void reportsAServerThatIsNoInstallation() throws Exception {
+        Path missing = tmp.resolve("elasticsearch");
+
+        assertThat(run("--server", missing.toString())).isEqualTo(1);
+        assertThat(err()).isEqualTo("leia: --server " + missing + ": no such directory" + System.lineSeparator());
+
+        Path empty = Files.createDirectories(missing);
+        err.reset();
+        assertThat(run("--server", empty.toString())).isEqualTo(1);
+        assertThat(err()).startsWith("leia: --server " + empty + ": no lucene-core jar in " + empty.resolve("lib"));
+    }
+
+    @Test
+    void reportsAServerWhoseLuceneLeiaDoesntRead() throws Exception {
+        Path lib = Files.createDirectories(tmp.resolve("elasticsearch-7/lib"));
+        Files.createFile(lib.resolve("lucene-core-8.11.4.jar"));
+
+        assertThat(run("--server", lib.getParent().toString())).isEqualTo(1);
+
+        assertThat(err())
+                .startsWith(
+                        "leia: Cannot read with the server " + lib.getParent() + ": its Lucene is 8.11.4; leia reads"
+                                + " the indexes of Elasticsearch 8 and 9 and OpenSearch 2 and 3");
+    }
+
+    @Test
     void reportsJarsThatCantBeLoaded() throws Exception {
         Path notAJar = Files.writeString(tmp.resolve("notes.txt"), "no jar");
 

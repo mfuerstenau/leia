@@ -96,6 +96,7 @@ leia [OPTIONS] [INDEX_PATH]
 | `-j, --java <PATH>` | the JVM, given as a `java` executable or a JDK/JRE directory; default: `$JAVA_HOME/bin/java`, then `java` on `PATH` |
 | `-V, --version` | print the version and build of leia, and the Java in use |
 | `--jar <PATH>` | a jar with analysis components, codecs or formats of its own, or a directory of such jars; can be repeated (see [Jars](#jars)) |
+| `--server <PATH>` | an Elasticsearch 8 or 9 or OpenSearch 2 or 3 installation, its home or its `lib` folder, whose Lucene, codecs and formats read the indexes of its Lucene's major and the one before; can be repeated, once per Lucene major (see [Elasticsearch and OpenSearch](#elasticsearch-and-opensearch)) |
 | `--no-default-jars` | don't load the jars of the default folder (see [Jars](#jars)) |
 | `--directory <IMPL>` | the Lucene `Directory` to read indexes through: `fs` (default) lets Lucene choose, which is `MMapDirectory` on 64-bit; `mmap` is `MMapDirectory`, `nio` is `NIOFSDirectory`. `Ctrl+D` in the open prompt changes it |
 | `--no-reader` | open `INDEX_PATH` without a reader, for an index that a reader can't open (see [Without a reader](#without-a-reader)); `Ctrl+N` in the open prompt does the same |
@@ -150,8 +151,8 @@ folder are loaded at every start.
 `Completion` postings formats of suggesters) and `lucene-sandbox`. An index with a codec, postings
 format, doc values format or KNN vectors format from elsewhere needs a jar that has it (registered
 through `META-INF/services`, as Lucene's are). Without one, opening the index says which one is
-missing. Indexes written by Elasticsearch or OpenSearch need those servers' classes, and their
-`lib/` folders come with a Lucene version of their own, so they may not open even with those jars.
+missing. Indexes written by Elasticsearch or OpenSearch need those servers' own Lucene, which
+`--server` brings (see [Elasticsearch and OpenSearch](#elasticsearch-and-opensearch)), not `--jar`.
 
 **Analysis.** leia knows the analyzers, char filters, tokenizers and token filters of `lucene-core`
 and `lucene-analysis-common`. Lucene's other analysis modules aren't bundled, since together they
@@ -191,6 +192,39 @@ filters or codecs. A jar that fails to load leaves nothing behind, and a jar tha
 isn't loaded again. When an index fails to open because it needs a codec, `Esc`, `X` to add the
 jar, then `o` brings back the path to open it again. Jars can't be unloaded. A loaded jar must stay
 where it is: if it is deleted or replaced, no more jars can be added until leia is restarted.
+
+### Elasticsearch and OpenSearch
+
+The shards of Elasticsearch and OpenSearch name codecs and formats of their own, such as
+`ES812Postings`, `ES87TSDB`, Elasticsearch's vector formats or the bloom filter on `_id`, built
+against the Lucene the server ships. `--server` reads them with that Lucene: give it the
+installation, or its `lib` folder, and leia loads the jars directly in `lib` (not `modules` or
+`plugins`) with its own runtime for that Lucene's major, of which it needs only leia's own jars:
+
+```sh
+leia --server /usr/share/elasticsearch /var/lib/elasticsearch/indices/<uuid>/0/index
+```
+
+| Server | Lucene | Runtime it needs |
+|---|---|---|
+| Elasticsearch 8.x, OpenSearch 2.x | 9.x | `lucene9` |
+| Elasticsearch 9.x, OpenSearch 3.x | 10.x | `lucene10` |
+
+The server's Lucene then reads the indexes of its major and the one before, also those without
+formats of the server, which open as before if it can't read them, such as an index of a newer
+Lucene minor. The tab line says which server reads the open index, and the about screen lists the
+servers. leia's runtimes are built for Lucene 9.12.3 and 10.5.2; an older minor of a server may
+lack a class or method a screen needs, and that screen then says so. The Lucene 9 runtime needs
+Lucene 9.5 or later (Elasticsearch 8.7, OpenSearch 2.6). Elasticsearch 7 and
+OpenSearch 1 ship Lucene 8, which leia doesn't take as a server: their indexes open with the
+`lucene9` runtime as far as they use Lucene's own formats, but not a `completion` field's. Formats of plugins, such as those of
+OpenSearch's k-NN plugin, need their plugin's jars, which aren't loaded. Which versions were tried
+is in [`docs/runtimes.md`](docs/runtimes.md#servers).
+
+A shard's index is `data/indices/<uuid>/<shard>/index` (`data/nodes/0/indices/…` for
+OpenSearch and Elasticsearch 7), and `data/indices` opens every shard as one, if their fields and
+index sorts agree. Elasticsearch and OpenSearch hold `write.lock` while they run; leia takes no lock, but stop
+the node or copy the shard first, so that it doesn't change while leia reads it.
 
 ### Keys
 

@@ -246,7 +246,13 @@ public final class RuntimeResults {
                 entries(stats),
                 skipped(open),
                 features(open),
-                open.runtime().luceneVersion());
+                open.runtime().luceneVersion(),
+                server(open.runtime()));
+    }
+
+    /** The server whose Lucene {@code runtime} is, for {@code openIndex} (ADR 0090); empty for leia's own. */
+    public static Optional<String> server(LuceneRuntime runtime) {
+        return runtime instanceof ServerRuntime server ? Optional.of(server.name()) : Optional.empty();
     }
 
     /**

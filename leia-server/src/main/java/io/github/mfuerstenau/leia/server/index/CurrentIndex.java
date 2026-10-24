@@ -3,10 +3,12 @@ package io.github.mfuerstenau.leia.server.index;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.filter.Filters;
+import io.github.mfuerstenau.leia.server.jars.JarChain;
 import io.github.mfuerstenau.leia.server.job.Jobs;
 import io.github.mfuerstenau.leia.server.runtime.OpenDirectories;
 import io.github.mfuerstenau.leia.server.runtime.OpenIndex;
 import io.github.mfuerstenau.leia.server.runtime.OpenRuntime;
+import io.github.mfuerstenau.leia.server.runtime.ServerRuntime;
 import jakarta.inject.Inject;
 import jakarta.inject.Singleton;
 import java.io.IOException;
@@ -20,7 +22,10 @@ import java.util.logging.Logger;
  * through a runtime (ADR 0071). There is at most one. Calls are handled one at a time, on the
  * backend thread of {@code LeiaBackend}, so this needs no locking. Jobs read the open index from
  * their own threads, so they are stopped before it is closed (ADR 0005). The kept filter holds
- * document ids of the open index, so it is forgotten with it (ADR 0031).
+ * document ids of the open index, so it is forgotten with it (ADR 0031). While an index of a
+ * server is open, the thread's context class loader is the server's, which the jobs' threads
+ * inherit, since Elasticsearch finds some of its classes through it (ADR 0090); otherwise the jar
+ * chain's (ADR 0024).
  */
 @Singleton
 public final class CurrentIndex {
@@ -75,6 +80,14 @@ public final class CurrentIndex {
         jobs.cancelAll();
         filters.clear();
         previous.ifPresent(CurrentIndex::closeQuietly);
+        Thread.currentThread().setContextClassLoader(contextLoader(newIndex));
+    }
+
+    private static ClassLoader contextLoader(OpenIndex index) {
+        if (index instanceof OpenRuntime open && open.runtime() instanceof ServerRuntime server) {
+            return server.loader();
+        }
+        return JarChain.classLoader();
     }
 
     /** Stops the jobs, forgets the filter, and closes the open index, if any, and returns its path. */
@@ -83,6 +96,7 @@ public final class CurrentIndex {
         index = Optional.empty();
         jobs.cancelAll();
         filters.clear();
+        Thread.currentThread().setContextClassLoader(JarChain.classLoader());
         previous.ifPresent(closed -> {
             closeQuietly(closed);
             LOG.info(() -> "Closed " + closed.path());
