@@ -23,7 +23,6 @@ From the read-only checklist in `docs/luke-features.md` §7. Ordered roughly by 
 - [ ] Tools: export terms with `totalTermFreq` and a marker for binary terms (left out of ADR 0022, which keeps Luke's format). Trie-encoded terms of 4.x to 7.x (7 bits a byte, so valid UTF-8) are written raw today, and one can hold a newline, which breaks the line format
 - [ ] Misc: themes
 - [ ] Misc: about
-- [ ] Build: Gradle dependency verification (`verification-metadata.xml`, SonarQube S6474), as an ADR: what it checks, how the file is kept up to date with the version catalog, and what it costs the build (accepted for now in ADR 0088)
 
 ## Bugs
 

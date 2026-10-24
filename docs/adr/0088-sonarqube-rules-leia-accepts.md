@@ -46,9 +46,9 @@ These were fixed in the code, without a change in behavior:
 | S3400 method returns a constant | `FieldsForm`, `ScoringForm` | `@SuppressWarnings` | Matches the `keys()` of the other forms |
 | S110 inheritance depth | `Searcher` | `@SuppressWarnings` | It extends Lucene's class hierarchy |
 | S1479 many `case`s | `Session` | `@SuppressWarnings` | The dispatch over the sealed `Action` |
-| S6474 dependency verification | the build | open | Accepted for now; a backlog item asks for an ADR on Gradle dependency verification |
+| S6474 dependency verification | the build | settled by ADR 0089 | Was accepted for now; `gradle/verification-metadata.xml` fixes it |
 
-After the fixes, the main code has 524 open issues in 24 rules, all of them in this table. "How" says how each is whitelisted (see "Mechanism"): config is an entry in `.sonar-check.properties`, `@SuppressWarnings` an annotation at each site. S6474 stays open, see below.
+After the fixes, the main code has 524 open issues in 24 rules, all of them in this table. "How" says how each is whitelisted (see "Mechanism"): config is an entry in `.sonar-check.properties`, `@SuppressWarnings` an annotation at each site. S6474 was left open and is settled by ADR 0089, see below.
 
 ### Duplication is measured, not gated
 
@@ -65,7 +65,7 @@ The accepted rules are whitelisted in the repository, in two ways, by the kind o
 
 The `sonar-check` skill passes every `sonar.*` key of `.sonar-check.properties` to the scanner, after its own defaults, so the entries apply in a new container as well; the scanner drops the issues they match before they reach the server, and the report says how many entries there are. A baseline is analyzed with the file of its own commit.
 
-**S6474** (dependency verification) stays open: it is an issue of the project, not of a file, and no `resourceKey` matches it (`**/*` was tried). It can't fail the gate, since a baseline always has it already; the backlog item on Gradle dependency verification will settle it.
+**S6474** (dependency verification) stays open: it is an issue of the project, not of a file, and no `resourceKey` matches it (`**/*` was tried). It can't fail the gate, since a baseline always has it already. ADR 0089 settles it: with `gradle/verification-metadata.xml` in place the issue is gone, and the main code has no open issues.
 
 ## Alternatives considered
 

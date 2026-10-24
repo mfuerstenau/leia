@@ -52,7 +52,7 @@ Dependency direction: `leia-server → leia-protocol` (api), `leia-server → le
 
 ## Tech stack
 
-Java 25 via a Gradle toolchain · Gradle 9 (Kotlin DSL, version catalog in `gradle/libs.versions.toml`) · Lucene 10 (+ backward-codecs, queryparser) · Dagger 2.60 (annotation processor, no reflection DI) · TamboUI 0.5.0, pinned (the Panama backend, with JLine 3 as the fallback) · Jackson 3 (`tools.jackson.*`), only in `leia-tui`, for the viewer's JSON and the document export · JUnit 6 + AssertJ, and TamboUI's Pilot for UI flows · Spotless with Palantir Java Format · Shadow for the fat jar. Base package and group: `io.github.mfuerstenau.leia` (`.core`, `.protocol`, `.server`, `.tui`). Shared build config lives in the `build-logic/` convention plugins (`leia.java-conventions`, `leia.java-library-conventions`, `leia.runtime-folder-conventions` for a runtime's adapter jar with its list and `adapterJarCheck`, and `leia.lucene-runtime-conventions` for an old Lucene runtime with its test indexes); see ADR 0002, ADR 0073. One release zip for Linux and Windows on x86_64, with the user README, `LICENSE` and `NOTICE`, without `runtimes/`; no macOS, no bundled Java (ADR 0004, amended by ADR 0034, ADR 0073, ADR 0082 and ADR 0083).
+Java 25 via a Gradle toolchain · Gradle 9 (Kotlin DSL, version catalog in `gradle/libs.versions.toml`) · Lucene 10 (+ backward-codecs, queryparser) · Dagger 2.60 (annotation processor, no reflection DI) · TamboUI 0.5.0, pinned (the Panama backend, with JLine 3 as the fallback) · Jackson 3 (`tools.jackson.*`), only in `leia-tui`, for the viewer's JSON and the document export · JUnit 6 + AssertJ, and TamboUI's Pilot for UI flows · Spotless with Palantir Java Format · Shadow for the fat jar · Gradle dependency verification by SHA-256, `gradle/verification-metadata.xml` (ADR 0089). Base package and group: `io.github.mfuerstenau.leia` (`.core`, `.protocol`, `.server`, `.tui`). Shared build config lives in the `build-logic/` convention plugins (`leia.java-conventions`, `leia.java-library-conventions`, `leia.runtime-folder-conventions` for a runtime's adapter jar with its list and `adapterJarCheck`, and `leia.lucene-runtime-conventions` for an old Lucene runtime with its test indexes); see ADR 0002, ADR 0073. One release zip for Linux and Windows on x86_64, with the user README, `LICENSE` and `NOTICE`, without `runtimes/`; no macOS, no bundled Java (ADR 0004, amended by ADR 0034, ADR 0073, ADR 0082 and ADR 0083).
 
 ## Commands
 
@@ -63,6 +63,9 @@ Keep these in sync with the build:
 ```sh
 ./gradlew build              # compile, test (also each module's jarsTest), spotlessCheck
 ./gradlew spotlessApply      # format Java
+./gradlew --write-verification-metadata sha256 --refresh-dependencies --no-configuration-cache \
+  build :leia-tui:leiaFolder :leia-server:analysisModules :leia-core:demoIndex
+                             # after a version bump: regenerate gradle/verification-metadata.xml, review the diff (ADR 0089)
 ./gradlew :leia-tui:shadowJar      # fat jar → leia-tui/build/libs/leia.jar
 ./gradlew :leia-tui:leiaFolder     # leia.jar, the leia and leia.cmd scripts and runtimes/ (from Gradle) → leia-tui/build/leia/
 ./gradlew :leia-core:demoIndex     # demo index for manual testing → leia-core/build/test-indexes/demo (docs/demo-index.md)
