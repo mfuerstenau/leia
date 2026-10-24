@@ -18,7 +18,7 @@ The lane is done. What each runtime can do, and how they differ: `docs/runtimes.
 
 From the read-only checklist in `docs/luke-features.md` §7. Ordered roughly by value. Each area will need its own records, handlers and probably an ADR for the cross-cutting parts.
 
-- [ ] Open options: `lucene-suggest` in `runtimes/lucene9`, for the `Completion84` postings of completion fields in Elasticsearch 7 shards, which Lucene 9.12's `lucene-suggest` reads (found with ADR 0090)
+- [ ] Open options: `lucene-suggest` in `runtimes/lucene7` and `runtimes/lucene5`, for the completion fields of Elasticsearch 5 and 6 shards (as `runtimes/lucene9` has it for Elasticsearch 7); untested, no such shards tried
 - [ ] Open options: Elasticsearch 8.0 to 8.6 with `--server`, whose Lucene 9.0 to 9.4 lacks the KNN classes that `Lucene9Index` names throughout (ADR 0090)
 - [ ] Open options: OpenSearch's k-NN indexes, whose codec is in the k-NN plugin, not in `lib/` (left out of ADR 0090)
 - [ ] Tools: check only the selected index or segments, and the thread count (left out of ADR 0022)

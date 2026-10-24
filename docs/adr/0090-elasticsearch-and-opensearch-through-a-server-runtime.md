@@ -43,7 +43,7 @@ Single-node containers (podman) with security off, each with an index of `text`,
 
 | Server | Lucene | With `--server` |
 |---|---|---|
-| Elasticsearch 7.17.28 | 8.11.3 | refused (Lucene 8). Without it, leia's Lucene 9.12.3 reads its shards but one with a `completion` field, whose `Completion84` postings need `lucene-suggest`, which `runtimes/lucene9` lacks |
+| Elasticsearch 7.17.28 | 8.11.3 | refused (Lucene 8). Without it, leia's Lucene 9.12.3 reads its shards but one with a `completion` field, whose `Completion84` postings need `lucene-suggest`, which `runtimes/lucene9` lacks *(Since then, `runtimes/lucene9` has `lucene-suggest`, and those shards open too.)* |
 | Elasticsearch 8.0.1 | 9.0.0 | the adapter can't open on it (it needs `AbstractKnnVectorQuery` and `FloatVectorValues`, Lucene 9.5); these shards, with Lucene's own formats only, open with leia's Lucene 10.5.2 instead |
 | Elasticsearch 8.6.2 | 9.4.2 | as 8.0.1; the shards with `ES85BloomFilter` on `_id` don't open, with the server's error |
 | Elasticsearch 8.9.2 | 9.7.0 | everything: text, completion, time series |

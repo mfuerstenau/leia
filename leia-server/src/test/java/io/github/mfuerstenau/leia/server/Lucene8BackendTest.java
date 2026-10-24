@@ -72,6 +72,9 @@ import io.github.mfuerstenau.leia.protocol.search.SortKey;
 import io.github.mfuerstenau.leia.protocol.search.StandardQuery;
 import io.github.mfuerstenau.leia.protocol.search.StartHighlightParams;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
+import io.github.mfuerstenau.leia.protocol.terms.GetTermsParams;
+import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
+import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -276,6 +279,18 @@ class Lucene8BackendTest {
         OpenIndexResult opened = open(testIndex(name));
 
         RuntimeRebuilds.rebuildsADocument(backend, opened.maxDoc().orElseThrow(), true, true);
+    }
+
+    @Test
+    void readsACompletionFieldThroughTheFoldersSuggest() throws Exception {
+        // Completion84, as in an Elasticsearch 7 shard, comes from the lucene-suggest that the folder's
+        // runtime.txt lists.
+        OpenIndexResult opened = open(testIndex("lucene8completion"));
+        assertThat(opened.luceneRuntime()).isEqualTo("9.12.3");
+        assertThat(opened.numDocs()).hasValue(3);
+        GetTermsResult suggest = backend.call(Methods.GET_TERMS, new GetTermsParams("suggest", Optional.empty(), 10));
+        assertThat(suggest.terms()).extracting(TermEntry::term).containsExactly("apple", "apricot", "banana");
+        assertThat(field(document(2), "id").stored()).isNotEmpty();
     }
 
     @Test

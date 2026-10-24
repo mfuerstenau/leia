@@ -69,6 +69,8 @@ val testIndexFiles = mapOf(
     // own lucene8 stays for its tests that Lucene 10 refuses it.
     "lucene8" to lucene9TestFiles("lucene8TestIndex", "lucene8TestIndexElements"),
     "lucene8to9" to lucene9TestFiles("lucene8to9TestIndex", "lucene8to9TestIndexElements"),
+    // A completion field, whose postings format is in runtimes/lucene9's lucene-suggest.
+    "lucene8completion" to lucene9TestFiles("lucene8completionTestIndex", "lucene8completionTestIndexElements"),
 )
 val jarsTestIndexFiles = mapOf(
     // Opened through the loaded runtimes/lucene10, and before it is loaded, not at all (ADR 0072).
