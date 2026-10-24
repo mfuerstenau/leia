@@ -902,6 +902,12 @@ public final class RuntimeResults {
         }
     }
 
+    /** How a job's description names the sort and the similarity of a search that scores. */
+    private static String scoredText(List<Scoring.SortKey> sort, StartSearchParams params) throws RpcException {
+        String sorted = sort.isEmpty() ? "" : " sorted by " + RuntimeScoring.describe(sort);
+        return sorted + ", scored by " + RuntimeScoring.describe(params.similarity()) + ",";
+    }
+
     /**
      * {@code startSearch}: a classic query, parsed with the analyzer of the params as the runtime has
      * it ({@link RuntimeAnalyzers}), a term query (ADR 0058), a KNN query if the runtime reads vectors
@@ -924,9 +930,7 @@ public final class RuntimeResults {
         Optional<Scoring.Similarity> similarity =
                 scoring.isPresent() ? Optional.of(RuntimeScoring.similarity(params.similarity())) : Optional.empty();
         List<Scoring.SortKey> sort = scoring.isPresent() ? RuntimeScoring.sort(open.index(), params.sort()) : List.of();
-        String sorted = sort.isEmpty() ? "" : " sorted by " + RuntimeScoring.describe(sort);
-        String scored =
-                scoring.isPresent() ? sorted + ", scored by " + RuntimeScoring.describe(params.similarity()) + "," : "";
+        String scored = scoring.isPresent() ? scoredText(sort, params) : "";
         for (String field : params.fields().orElse(List.of())) {
             checkField(open.index(), field);
         }

@@ -2476,12 +2476,7 @@ public final class App {
     /** The footer's keys for the shown screen; they follow the branches of {@link #renderScreen}. */
     private String footerKeys() {
         String reopen = overview != null && opened.supports(Feature.REOPEN) ? "R reopen   " : "";
-        String cancel = "";
-        if (scan != null) {
-            cancel = "Esc cancel scan   ";
-        } else if (export != null) {
-            cancel = "Esc cancel export   ";
-        }
+        String cancel = cancelKeys();
         String screens = "1-7 screen   " + (back.isEmpty() ? "" : "⌫ back   ");
         if (screen == Screen.ANALYSIS) {
             return analysisFooter(cancel, screens);
@@ -2490,8 +2485,7 @@ public final class App {
             return " q quit   o open   6 analysis   X jars   D download runtimes   L log";
         }
         if (screen == Screen.COMMITS) {
-            String keys = commits != null ? commits.keys() : "r read again   ⏎ segments   Tab panel   ↑↓";
-            return " " + cancel + APP_KEYS + reopen + screens + keys;
+            return " " + cancel + APP_KEYS + reopen + screens + commitsKeys();
         }
         if (screen == Screen.CHECK && check != null) {
             return " " + cancel + APP_KEYS + reopen + screens + check.keys();
@@ -2509,6 +2503,18 @@ public final class App {
             return documentsFooter(cancel, screens);
         }
         return overviewFooter(reopen, screens);
+    }
+
+    /** What Esc stops: the scans first, then the export. */
+    private String cancelKeys() {
+        if (scan != null) {
+            return "Esc cancel scan   ";
+        }
+        return export != null ? "Esc cancel export   " : "";
+    }
+
+    private String commitsKeys() {
+        return commits != null ? commits.keys() : "r read again   ⏎ segments   Tab panel   ↑↓";
     }
 
     private String analysisFooter(String cancel, String screens) {

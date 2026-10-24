@@ -1537,9 +1537,9 @@ public final class Documents {
             return Optional.empty();
         }
         if (code == KeyCode.CHAR) {
-            Optional<Request> request = charKey(key, from);
-            if (request != null) {
-                return request;
+            Optional<Optional<Request>> handled = charKey(key, from);
+            if (handled.isPresent()) {
+                return handled.get();
             }
         }
         moveKey(key);
@@ -1606,14 +1606,14 @@ public final class Documents {
         return Optional.of(new Request.TermVector(docId, field.get().name()));
     }
 
-    /** A letter's command, or null for a key that moves the selection. */
-    private Optional<Request> charKey(KeyEvent key, int from) {
+    /** A letter's command; empty for a key that moves the selection. */
+    private Optional<Optional<Request>> charKey(KeyEvent key, int from) {
         switch (key.codePoint()) {
             case 'i' -> {
                 if (maxDoc > 0) {
                     prompt = new DocIdPrompt();
                 }
-                return Optional.empty();
+                return Optional.of(Optional.empty());
             }
             case 'S' -> {
                 if (pinned != null) {
@@ -1621,72 +1621,73 @@ public final class Documents {
                 } else {
                     pinned = segmentOf(from).orElse(null);
                 }
-                return Optional.empty();
+                return Optional.of(Optional.empty());
             }
             case '<', '>' -> {
-                return jumpSegment(key.codePoint() == '>', from);
+                return Optional.of(jumpSegment(key.codePoint() == '>', from));
             }
             case '/' -> {
                 if (!rows.isEmpty()) {
                     seek = new StringBuilder();
                     focus = Focus.FIELDS;
                 }
-                return Optional.empty();
+                return Optional.of(Optional.empty());
             }
             case '[', ']' -> {
                 boolean forward = key.codePoint() == ']';
-                return walk().map(walk -> new Request.Step(walk, forward));
+                return Optional.of(walk().map(walk -> new Request.Step(walk, forward)));
             }
             case 'v' -> {
-                return view();
+                return Optional.of(view());
             }
             case 'r' -> {
-                return reconstruct();
+                return Optional.of(reconstruct());
             }
             case 'b' -> {
-                return clearFilter();
+                return Optional.of(clearFilter());
             }
             case 'a' -> {
-                return analyze();
+                return Optional.of(analyze());
             }
             case 'm' -> {
-                return maxDoc > 0 ? Optional.of(new Request.MoreLikeThis(docId)) : Optional.empty();
+                return Optional.of(maxDoc > 0 ? Optional.of(new Request.MoreLikeThis(docId)) : Optional.empty());
             }
             case 'x' -> {
                 numbers = numbers.next();
-                return Optional.empty();
+                return Optional.of(Optional.empty());
             }
             case 't' -> {
                 selectedField()
                         .map(field -> schema.get(field.name()))
                         .filter(field -> field.pointDimensionCount() > 0)
                         .ifPresent(pointFormats::cycle);
-                return Optional.empty();
+                return Optional.of(Optional.empty());
             }
             case 's' -> {
-                return searchDocValues();
+                return Optional.of(searchDocValues());
             }
             case 'N' -> {
-                return selectedField()
+                return Optional.of(selectedField()
                         .filter(field -> field.vector().isPresent())
-                        .map(field -> new Request.SearchKnn(field.name(), docId));
+                        .map(field -> new Request.SearchKnn(field.name(), docId)));
             }
             case 'E' -> {
-                return Optional.ofNullable(document).map(doc -> new Request.Export(doc.docId()));
+                return Optional.of(Optional.ofNullable(document).map(doc -> new Request.Export(doc.docId())));
             }
             case 'C' -> {
-                return segmentOf(from).map(segment -> new Request.ShowCommit(segment.index(), segment.name()));
+                return Optional.of(
+                        segmentOf(from).map(segment -> new Request.ShowCommit(segment.index(), segment.name())));
             }
             case 'T' -> {
-                return browseTerms();
+                return Optional.of(browseTerms());
             }
             case 'e' -> {
                 hideEmpty = !hideEmpty;
                 updateRows(selectedField().map(DocumentField::name).orElse(null));
-                return Optional.empty();
+                return Optional.of(Optional.empty());
             }
             default -> {
-                return null;
+                return Optional.empty();
             }
         }
     }

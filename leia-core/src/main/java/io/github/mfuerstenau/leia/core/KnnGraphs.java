@@ -234,8 +234,7 @@ public final class KnnGraphs {
 
     /** Adds the first live document of {@code vectors} from ordinal {@code from} on that {@code docs} lacks. */
     private static void addFirstLive(
-            java.util.TreeSet<Integer> docs, LeafReaderContext context, KnnVectorValues vectors, int from)
-            throws IOException {
+            java.util.TreeSet<Integer> docs, LeafReaderContext context, KnnVectorValues vectors, int from) {
         Bits liveDocs = context.reader().getLiveDocs();
         for (int ord = from; ord < vectors.size(); ord++) {
             int doc = vectors.ordToDoc(ord);

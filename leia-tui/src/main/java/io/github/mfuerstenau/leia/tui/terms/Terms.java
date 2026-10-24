@@ -1178,77 +1178,78 @@ public final class Terms {
             return unsupported.map(Request.Unsupported::new);
         }
         if (selectedVectorField().isPresent()) {
-            Optional<Request> request = vectorKey(key);
-            if (request != null) {
-                return request;
+            Optional<Optional<Request>> handled = vectorKey(key);
+            if (handled.isPresent()) {
+                return handled.get();
             }
         }
         Optional<IndexField> pointField = selectedPointField();
         if (pointField.isPresent()) {
-            Optional<Request> request = pointKey(key, pointField.get());
-            if (request != null) {
-                return request;
+            Optional<Optional<Request>> handled = pointKey(key, pointField.get());
+            if (handled.isPresent()) {
+                return handled.get();
             }
         }
         return termsKey(key);
     }
 
-    /** A key on a vector field, or null for one that works as on any field. */
-    private Optional<Request> vectorKey(KeyEvent key) {
+    /** A key on a vector field; empty for one that works as on any field. */
+    private Optional<Optional<Request>> vectorKey(KeyEvent key) {
         if (key.isChar('/') || key.isChar('e') || key.isChar('s')) {
             note = termsOnly(key);
-            return Optional.empty();
+            return Optional.of(Optional.empty());
         }
         if (knnTree != null && knnTree.graph != null) {
-            Optional<Request> request = graphKey(key);
-            if (request != null) {
-                return request;
+            Optional<Optional<Request>> handled = graphKey(key);
+            if (handled.isPresent()) {
+                return handled;
             }
         }
         if (key.code() == KeyCode.ENTER && focus != Column.FIELDS) {
-            return Optional.empty();
+            return Optional.of(Optional.empty());
         }
-        return null;
+        return Optional.empty();
     }
 
-    /** A key on the HNSW graph, or null for one it doesn't take. */
-    private Optional<Request> graphKey(KeyEvent key) {
+    /** A key on the HNSW graph; empty for one it doesn't take. */
+    private Optional<Optional<Request>> graphKey(KeyEvent key) {
         if (key.code() == KeyCode.ENTER && focus == Column.TERMS) {
-            return openGraphRow();
+            return Optional.of(openGraphRow());
         }
         if (key.code() == KeyCode.ENTER && focus == Column.POSTINGS) {
-            return walkOn();
+            return Optional.of(walkOn());
         }
         if (key.isChar('<')) {
             walkBack();
-            return Optional.empty();
+            return Optional.of(Optional.empty());
         }
         if (key.isChar('d')) {
-            return graphDocument();
+            return Optional.of(graphDocument());
         }
-        return null;
+        return Optional.empty();
     }
 
-    /** A key on a point field, or null for one that works as on any field. */
-    private Optional<Request> pointKey(KeyEvent key, IndexField field) {
+    /** A key on a point field; empty for one that works as on any field. */
+    private Optional<Optional<Request>> pointKey(KeyEvent key, IndexField field) {
         if (key.isChar('t')) {
             pointFormats.cycle(field);
-            return Optional.empty();
+            return Optional.of(Optional.empty());
         }
         if (key.isChar('/') || key.isChar('e') || key.isChar('s')) {
             note = termsOnly(key);
-            return Optional.empty();
+            return Optional.of(Optional.empty());
         }
         if (key.code() != KeyCode.ENTER || pointTree == null) {
-            return null;
+            return Optional.empty();
         }
         if (focus == Column.TERMS) {
-            return openCell();
+            return Optional.of(openCell());
         }
         if (focus == Column.POSTINGS) {
-            return pointTree.selectedPoint().map(point -> new Request.PointDocument(pointTree.field, point.docId()));
+            return Optional.of(
+                    pointTree.selectedPoint().map(point -> new Request.PointDocument(pointTree.field, point.docId())));
         }
-        return null;
+        return Optional.empty();
     }
 
     private Optional<Request> termsKey(KeyEvent key) {

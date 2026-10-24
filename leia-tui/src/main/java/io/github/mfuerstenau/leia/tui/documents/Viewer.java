@@ -457,14 +457,13 @@ public final class Viewer {
                 }
                 int from = Math.max(match.from(), pos);
                 int to = Math.min(match.to(), end);
-                if (to <= from || from < 0 || charAt[from] < 0 || charAt[to] < 0) {
-                    continue;
+                if (to > from && from >= 0 && charAt[from] >= 0 && charAt[to] >= 0) {
+                    if (from > pos) {
+                        segments.add(new Segment(Style.EMPTY, text.substring(charAt[pos], charAt[from])));
+                    }
+                    segments.add(new Segment(TextFormat.MATCH, text.substring(charAt[from], charAt[to])));
+                    pos = to;
                 }
-                if (from > pos) {
-                    segments.add(new Segment(Style.EMPTY, text.substring(charAt[pos], charAt[from])));
-                }
-                segments.add(new Segment(TextFormat.MATCH, text.substring(charAt[from], charAt[to])));
-                pos = to;
             }
             if (pos < end || segments.isEmpty()) {
                 segments.add(new Segment(Style.EMPTY, text.substring(charAt[pos], charAt[end])));
@@ -1066,7 +1065,7 @@ public final class Viewer {
             }
             switch (c) {
                 case '{', '[' -> {
-                    char close = c == '{' ? '}' : ']';
+                    char close = closing(c);
                     int next = skipJsonSpace(text, i + 1);
                     if (next < text.length() && text.charAt(next) == close) {
                         line.add(new Segment(Style.EMPTY, "" + c + close));
@@ -1110,6 +1109,11 @@ public final class Viewer {
         }
         lines.add(line);
         return lines;
+    }
+
+    /** The bracket that closes {@code open}. */
+    private static char closing(char open) {
+        return open == '{' ? '}' : ']';
     }
 
     private static int skipJsonSpace(String text, int from) {

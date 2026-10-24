@@ -298,12 +298,10 @@ public final class AutoStopWordsForm {
         int selectedLine = selected < 2 ? selected : 0;
         for (int i = 0; i < fields.size(); i++) {
             String field = fields.get(i);
-            String words = found.isPresent() && hasField(field) ? "   " + count(field) : "";
             if (selected == i + 2) {
                 selectedLine = lines.size();
             }
-            lines.add(Form.row(
-                    TextFormat.escapeControl(field), (chosen.get(i) ? "[x]" : "[ ]") + words, selected == i + 2));
+            lines.add(Form.row(TextFormat.escapeControl(field), fieldValue(i), selected == i + 2));
             if (listed.equals(Optional.of(field)) && found.isPresent()) {
                 lines.addAll(wordLines(field));
             }
@@ -319,6 +317,13 @@ public final class AutoStopWordsForm {
             }
         }
         Form.renderPopup(frame, area, " Auto stop words ", lines, selectedLine, WIDTH);
+    }
+
+    /** Whether field {@code i} is chosen, and how many stop words were found in it. */
+    private String fieldValue(int i) {
+        String field = fields.get(i);
+        String words = found.isPresent() && hasField(field) ? "   " + count(field) : "";
+        return (Boolean.TRUE.equals(chosen.get(i)) ? "[x]" : "[ ]") + words;
     }
 
     /** The first stop words found in {@code field}. */

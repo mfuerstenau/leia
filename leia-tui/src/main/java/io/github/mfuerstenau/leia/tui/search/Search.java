@@ -1666,7 +1666,7 @@ public final class Search {
         KeyCode code = key.code();
         boolean recalls = mode == Mode.KNN && recall != null;
         if (code == KeyCode.ENTER) {
-            return recalls ? openRecallRow() : selectedHit().map(hit -> new Request.Document(hit.docId()));
+            return enter(recalls);
         }
         if (code == KeyCode.TAB) {
             focus = focus == Focus.HITS ? Focus.DETAILS : Focus.HITS;
@@ -1679,6 +1679,11 @@ public final class Search {
             }
         }
         return moveKey(key, recalls);
+    }
+
+    /** Enter opens the selected hit, or the selected row of a recall check. */
+    private Optional<Request> enter(boolean recalls) {
+        return recalls ? openRecallRow() : selectedHit().map(hit -> new Request.Document(hit.docId()));
     }
 
     /** A key while a line of the query is edited: Enter submits, Esc stops. */
