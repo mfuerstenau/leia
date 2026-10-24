@@ -19,14 +19,14 @@ class Server10BackendTest {
 
     @Test
     void readsTheIndexesOfLucene9And10WithTheServersLucene() throws Exception {
-        ServerBackends.missesTheServersFormat(10);
+        ServerBackends.missesTheServersFormat("10");
 
-        try (RealBackend backend = ServerBackends.readsWithTheServer(10, "10.2.2")) {
+        try (RealBackend backend = ServerBackends.readsWithTheServer("10", "10.2.2")) {
             // Lucene 9.x, through the server's backward codecs.
             OpenIndexResult lucene9 = backend.call(
                     Methods.OPEN_INDEX, new OpenIndexParams(testIndex("lucene9").toString()));
             assertThat(lucene9.luceneRuntime()).isEqualTo("10.2.2");
-            assertThat(lucene9.server()).hasValue(ServerBackends.label(10));
+            assertThat(lucene9.server()).hasValue(ServerBackends.label("10"));
 
             // Lucene 8.x isn't the server's: leia's Lucene 9 reads it.
             assertThat(backend.call(

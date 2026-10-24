@@ -18,14 +18,14 @@ class Server9BackendTest {
 
     @Test
     void readsTheIndexesOfLucene8And9WithTheServersLucene() throws Exception {
-        ServerBackends.missesTheServersFormat(9);
+        ServerBackends.missesTheServersFormat("9");
 
-        try (RealBackend backend = ServerBackends.readsWithTheServer(9, "9.10.0")) {
+        try (RealBackend backend = ServerBackends.readsWithTheServer("9", "9.10.0")) {
             // Lucene 8.x too, which the server reads before leia's Lucene 9.12 does.
             OpenIndexResult lucene8 = backend.call(
                     Methods.OPEN_INDEX, new OpenIndexParams(testIndex("lucene8").toString()));
             assertThat(lucene8.luceneRuntime()).isEqualTo("9.10.0");
-            assertThat(lucene8.server()).hasValue(ServerBackends.label(9));
+            assertThat(lucene8.server()).hasValue(ServerBackends.label("9"));
 
             // Written by 9.12, whose postings 9.10 lacks: Lucene 10 reads it, as without the server.
             OpenIndexResult lucene9 = backend.call(

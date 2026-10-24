@@ -192,8 +192,8 @@ final class Lucene9Commits implements Commits {
                 Optional.ofNullable(info.getMinVersion()).map(Object::toString),
                 // Since 6.2.
                 Optional.ofNullable(info.getIndexSort()).map(Object::toString),
-                // Since 9.9; false for a segment written before.
-                info.getHasBlocks());
+                // Since 9.9; false for a segment written before, and on a Lucene before 9.9 (ADR 0091).
+                Lucene9Api.HAS_BLOCKS && info.getHasBlocks());
     }
 
     /**

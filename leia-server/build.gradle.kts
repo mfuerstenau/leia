@@ -92,12 +92,13 @@ val jarsTestIndexFiles = mapOf(
 fun serverTestFiles(name: String, configuration: String) =
     runtimeTestFiles("leia-test-servers", name, configuration)
 
-val testServerFiles = listOf(9, 10).flatMap { major ->
+// By name: 9 and 10 for their Lucene majors, 90 for a server on Lucene 9.0 (ADR 0091).
+val testServerFiles = listOf("9", "10", "90").flatMap { name ->
     listOf(
-        "leia.test.server$major" to serverTestFiles("testServer$major", "fakeServer${major}Elements"),
-        "leia.test.server$major.index" to serverTestFiles("testServer${major}Index", "fakeServer${major}IndexElements"),
-        "leia.test.server$major.plain" to
-            serverTestFiles("testServer${major}Plain", "fakeServer${major}PlainIndexElements"),
+        "leia.test.server$name" to serverTestFiles("testServer$name", "fakeServer${name}Elements"),
+        "leia.test.server$name.index" to serverTestFiles("testServer${name}Index", "fakeServer${name}IndexElements"),
+        "leia.test.server$name.plain" to
+            serverTestFiles("testServer${name}Plain", "fakeServer${name}PlainIndexElements"),
     )
 }.toMap()
 val testCodecJar = coreTestFiles("testCodecJar", "testCodecJarElements")

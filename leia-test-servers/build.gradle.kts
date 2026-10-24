@@ -1,10 +1,11 @@
 // Fake Elasticsearch or OpenSearch installations, for the tests of --server (ADR 0090); in neither
-// leia.jar nor the zip. For each Lucene major the server runtime reads, build/fake-server-<major>/
-// has a lib/ like a server's, with Lucene's jars of an older minor than leia's runtime is built for
-// and the server's jar, whose postings format LeiaServerPostings no Lucene knows, and two indexes
-// written with that Lucene: index, with the postings format, and plain, without. The one for 9 is
-// an OpenSearch; the one for 10 an Elasticsearch, whose postings format needs the setup that
-// Elasticsearch's bootstrap does, and its lib/platform/ of native libraries.
+// leia.jar nor the zip. Each build/fake-server-<name>/ has a lib/ like a server's, with Lucene's jars
+// of an older minor than leia's runtime is built for and the server's jar, whose postings format
+// LeiaServerPostings no Lucene knows, and two indexes written with that Lucene: index, with the
+// postings format, and plain, without. 9 is an OpenSearch on Lucene 9.10; 10 an Elasticsearch on
+// 10.2, whose postings format needs the setup that Elasticsearch's bootstrap does, and its
+// lib/platform/ of native libraries; 90 an Elasticsearch on Lucene 9.0, older than every API of 9.x
+// the Lucene 9 adapter can do without (ADR 0091).
 plugins {
     id("leia.java-conventions")
 }
@@ -25,11 +26,11 @@ val serverModules = listOf(
     "suggest",
 )
 
-fun fakeServer(major: Int, luceneVersion: String, product: String) {
-    val sourceSet = sourceSets.create("server$major")
+fun fakeServer(name: String, luceneVersion: String, product: String) {
+    val sourceSet = sourceSets.create("server$name")
     dependencies.add(sourceSet.implementationConfigurationName, "org.apache.lucene:lucene-core:$luceneVersion")
 
-    val luceneJars = configurations.create("server${major}Lucene") {
+    val luceneJars = configurations.create("server${name}Lucene") {
         isCanBeConsumed = false
         isTransitive = false
     }
@@ -37,18 +38,18 @@ fun fakeServer(major: Int, luceneVersion: String, product: String) {
         dependencies.add(luceneJars.name, "org.apache.lucene:lucene-$module:$luceneVersion")
     }
 
-    val serverJar = tasks.register<Jar>("server${major}Jar") {
-        description = "Builds the fake server's jar with its postings format, for Lucene $major."
+    val serverJar = tasks.register<Jar>("server${name}Jar") {
+        description = "Builds the fake server's jar with its postings format, for Lucene $luceneVersion."
         group = "verification"
         from(sourceSet.output)
         exclude("**/ServerIndexWriter*")
         archiveFileName = "$product-0.0.0-leiatest.jar"
-        destinationDirectory = layout.buildDirectory.dir("server-$major-jar")
+        destinationDirectory = layout.buildDirectory.dir("server-$name-jar")
     }
 
-    val home = layout.buildDirectory.dir("fake-server-$major")
-    val lib = tasks.register<Sync>("fakeServer${major}Lib") {
-        description = "Puts together the lib/ of the fake server for Lucene $major."
+    val home = layout.buildDirectory.dir("fake-server-$name")
+    val lib = tasks.register<Sync>("fakeServer${name}Lib") {
+        description = "Puts together the lib/ of the fake server for Lucene $luceneVersion."
         group = "verification"
         into(home.map { it.dir("lib") })
         from(serverJar)
@@ -59,9 +60,9 @@ fun fakeServer(major: Int, luceneVersion: String, product: String) {
         }
     }
 
-    val indexes = layout.buildDirectory.dir("fake-server-$major-indexes")
-    val writer = tasks.register<JavaExec>("fakeServer${major}Indexes") {
-        description = "Writes the indexes of the fake server for Lucene $major."
+    val indexes = layout.buildDirectory.dir("fake-server-$name-indexes")
+    val writer = tasks.register<JavaExec>("fakeServer${name}Indexes") {
+        description = "Writes the indexes of the fake server for Lucene $luceneVersion."
         group = "verification"
         classpath = sourceSet.runtimeClasspath
         mainClass = "io.github.mfuerstenau.leia.testserver.ServerIndexWriter"
@@ -69,17 +70,17 @@ fun fakeServer(major: Int, luceneVersion: String, product: String) {
         // For the fake Elasticsearch's LoaderHelper.
         systemProperty("es.nativelibs.path", home.get().dir("lib/platform/any").asFile.absolutePath)
         dependsOn(lib)
-        val dirs = listOf("index", "plain").map { name -> indexes.map { it.dir(name) } }
-        for ((name, dir) in listOf("index", "plain").zip(dirs)) {
-            outputs.dir(dir).withPropertyName(name)
+        val dirs = listOf("index", "plain").map { index -> indexes.map { it.dir(index) } }
+        for ((index, dir) in listOf("index", "plain").zip(dirs)) {
+            outputs.dir(dir).withPropertyName(index)
         }
         argumentProviders.add(CommandLineArgumentProvider { dirs.map { it.get().asFile.absolutePath } })
     }
 
     // For leia-server's and leia-tui's tests.
-    val homeElements = configurations.consumable("fakeServer${major}Elements")
-    val indexElements = configurations.consumable("fakeServer${major}IndexElements")
-    val plainElements = configurations.consumable("fakeServer${major}PlainIndexElements")
+    val homeElements = configurations.consumable("fakeServer${name}Elements")
+    val indexElements = configurations.consumable("fakeServer${name}IndexElements")
+    val plainElements = configurations.consumable("fakeServer${name}PlainIndexElements")
     artifacts {
         add(homeElements.name, home) { builtBy(lib) }
         add(indexElements.name, indexes.map { it.dir("index") }) { builtBy(writer) }
@@ -87,5 +88,6 @@ fun fakeServer(major: Int, luceneVersion: String, product: String) {
     }
 }
 
-fakeServer(9, libs.versions.serverLucene9.get(), "opensearch")
-fakeServer(10, libs.versions.serverLucene10.get(), "elasticsearch")
+fakeServer("9", libs.versions.serverLucene9.get(), "opensearch")
+fakeServer("10", libs.versions.serverLucene10.get(), "elasticsearch")
+fakeServer("90", libs.versions.serverLucene90.get(), "elasticsearch")

@@ -120,13 +120,13 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 
 ## Servers
 
-`--server` reads the shards of an Elasticsearch or OpenSearch installation with its own Lucene, codecs and formats (ADR 0090): leia's adapter for its Lucene's major, `runtimes/lucene9` or `runtimes/lucene10`, over the jars of its `lib/`. It reads the indexes of that major and the one before, ahead of the runtimes above; an index it fails to open goes to the runtime above. The adapters are built for 9.12.3 and 10.5.2, so a server's older minor may lack what a feature needs, and that feature is `NOT_SUPPORTED`. Tried with single-node servers on Java 25, through the calls of the screens:
+`--server` reads the shards of an Elasticsearch or OpenSearch installation with its own Lucene, codecs and formats (ADR 0090): leia's adapter for its Lucene's major, `runtimes/lucene9` or `runtimes/lucene10`, over the jars of its `lib/`. It reads the indexes of that major and the one before, ahead of the runtimes above; an index it fails to open goes to the runtime above. The adapters are built for 9.12.3 and 10.5.2, so a server's older minor may lack what a feature needs: the Lucene 9 adapter leaves out KNN vectors, points and highlighting on a Lucene without their APIs (ADR 0091), and any other such feature is `NOT_SUPPORTED`. Tried with single-node servers on Java 25, through the calls of the screens:
 
 | Server | Lucene | With `--server` |
 |---|---|---|
 | Elasticsearch 7.17.28 | 8.11.3 | refused (Lucene 8). Without it, leia's Lucene 9.12.3 reads its shards, those with a `completion` field too, whose `Completion84` postings are in the `lucene-suggest` of `runtimes/lucene9` |
-| Elasticsearch 8.0.1 | 9.0.0 | the adapter can't open on it (it needs `AbstractKnnVectorQuery` and `FloatVectorValues`, Lucene 9.5); these shards, with Lucene's own formats only, open with leia's Lucene 10.5.2 instead |
-| Elasticsearch 8.6.2 | 9.4.2 | as 8.0.1; the shards with `ES85BloomFilter` on `_id` don't open, with the server's error |
+| Elasticsearch 8.0.1 | 9.0.0 | everything but KNN vectors, points and highlighting, which are left out, and sort, `NOT_SUPPORTED` (`Pruning`, Lucene 9.10); a search is cancelled only between segments (ADR 0091) |
+| Elasticsearch 8.6.2 | 9.4.2 | as 8.0.1, but with points; the time series shards with `ES85BloomFilter` on `_id` too |
 | Elasticsearch 8.9.2 | 9.7.0 | everything: text, completion, time series |
 | Elasticsearch 8.12.2 | 9.9.2 | everything (`int8_hnsw` included) but the HNSW graph, `NOT_SUPPORTED` (`HnswGraphProvider`, Lucene 9.11) |
 | Elasticsearch 8.19.23 | 9.12.2 | everything: `ES812Postings`, `ES87TSDB`, `ES87BloomFilter`, `int8_hnsw` and `bbq_hnsw`, logsdb with zstd |
@@ -136,4 +136,4 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 | OpenSearch 2.19.6 | 9.12.3 | the same (`KNN9120Codec`) |
 | OpenSearch 3.9.0 | 10.5.1 | the same (`KNN1040Codec`) |
 
-So the Lucene 9 adapter needs a server on Lucene 9.5 or later (Elasticsearch 8.7, OpenSearch 2.6; tried from 9.7.0), the Lucene 10 one any 10.x (tried from 10.1.0); older minors lose the HNSW graph.
+So the Lucene 9 adapter reads with any 9.x (tried from 9.0.0): below 9.5 without KNN vectors and highlighting, on 9.0 without points either, below 9.10 without sort, below 9.11 without the HNSW graph. The Lucene 10 one takes any 10.x (tried from 10.1.0); older minors lose the HNSW graph.

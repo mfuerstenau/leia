@@ -22,6 +22,8 @@ lucene6 = "6.6.6"
 # older minors than the runtimes are built for (ADR 0090)
 serverLucene9 = "9.10.0"
 serverLucene10 = "10.2.2"
+# Older than every API of 9.x the Lucene 9 adapter can do without (ADR 0091)
+serverLucene90 = "9.0.0"
 dagger = "2.60.1"
 jackson = "3.2.3"
 junit = "6.1.3"

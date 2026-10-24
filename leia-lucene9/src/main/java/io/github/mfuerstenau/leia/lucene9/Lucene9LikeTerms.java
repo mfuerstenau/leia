@@ -98,13 +98,13 @@ final class Lucene9LikeTerms {
         switch (query.source()) {
             case Source.Text(String text) -> analyze(field, text, counts);
             case Source.Doc(int docId) -> {
-                Fields vectors = reader.termVectors().get(docId);
+                Fields vectors = Lucene9Stored.termVectors(reader, docId);
                 Terms vector = vectors != null ? vectors.terms(field) : null;
                 if (vector != null) {
                     count(vector, counts);
                 } else {
                     for (IndexableField value :
-                            reader.storedFields().document(docId).getFields(field)) {
+                            Lucene9Stored.of(reader).document(docId).getFields(field)) {
                         String text = value.stringValue();
                         if (text != null) {
                             check.run();

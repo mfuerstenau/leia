@@ -22,60 +22,66 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * What the tests of a fake server check (ADR 0090), the same for Lucene 9 and 10: the build's
- * {@code leia-test-servers} writes each, with an index that needs its postings format, {@code
- * LeiaServerPostings}, and a plain one. The one for 9 is an OpenSearch, the one for 10 an
- * Elasticsearch, whose postings format needs the setup of Elasticsearch's bootstrap.
+ * What the tests of a fake server check (ADR 0090), the same for each: the build's {@code
+ * leia-test-servers} writes each, with an index that needs its postings format, {@code
+ * LeiaServerPostings}, and a plain one. Each has a name: {@code 9} is an OpenSearch on Lucene 9.10,
+ * {@code 10} an Elasticsearch on 10.2, whose postings format needs the setup of Elasticsearch's
+ * bootstrap, and {@code 90} an Elasticsearch on 9.0 (ADR 0091).
  */
 final class ServerBackends {
 
     private ServerBackends() {}
 
-    /** How leia names the fake server for Lucene {@code major}. */
-    static String label(int major) {
-        return (major == 9 ? "OpenSearch" : "Elasticsearch") + " 0.0.0-leiatest";
+    /** How leia names the fake server {@code name}. */
+    static String label(String name) {
+        return (name.equals("9") ? "OpenSearch" : "Elasticsearch") + " 0.0.0-leiatest";
     }
 
-    /** The fake server for Lucene {@code major}: its home, with {@code lib/}. */
-    static Path server(int major) {
-        return testFile("leia.test.server" + major);
+    /** The Lucene major of the fake server {@code name}. */
+    static int major(String name) {
+        return name.equals("10") ? 10 : 9;
     }
 
-    /** The index of the fake server for {@code major} that needs its postings format. */
-    static String index(int major) {
-        return testFile("leia.test.server" + major + ".index").toString();
+    /** The fake server {@code name}: its home, with {@code lib/}. */
+    static Path server(String name) {
+        return testFile("leia.test.server" + name);
     }
 
-    /** The index of the fake server for {@code major} with Lucene's codec only. */
-    static String plain(int major) {
-        return testFile("leia.test.server" + major + ".plain").toString();
+    /** The index of the fake server {@code name} that needs its postings format. */
+    static String index(String name) {
+        return testFile("leia.test.server" + name + ".index").toString();
+    }
+
+    /** The index of the fake server {@code name} with Lucene's codec only. */
+    static String plain(String name) {
+        return testFile("leia.test.server" + name + ".plain").toString();
     }
 
     /** Without the server, its index lacks a postings format; so this comes before it is loaded. */
-    static void missesTheServersFormat(int major) throws Exception {
+    static void missesTheServersFormat(String name) throws Exception {
         try (RealBackend backend = RealBackend.start()) {
             RpcException missing =
-                    backend.fails(Methods.OPEN_INDEX, new OpenIndexParams(index(major)), ErrorCode.MISSING_CODEC);
+                    backend.fails(Methods.OPEN_INDEX, new OpenIndexParams(index(name)), ErrorCode.MISSING_CODEC);
             assertThat(missing.getMessage()).contains("LeiaServerPostings");
         }
     }
 
-    /** The server for {@code major}, whose Lucene is {@code lucene}, reads its index and its plain one. */
-    static RealBackend readsWithTheServer(int major, String lucene) throws Exception {
+    /** The server {@code name}, whose Lucene is {@code lucene}, reads its index and its plain one. */
+    static RealBackend readsWithTheServer(String name, String lucene) throws Exception {
         RealBackend backend =
-                RealBackend.start(Optional.of(testFile("leia.test.runtimes")), List.of(), List.of(server(major)));
+                RealBackend.start(Optional.of(testFile("leia.test.runtimes")), List.of(), List.of(server(name)));
 
         ServerRuntimeInfo server = backend.call(Methods.GET_RUNTIMES, new GetRuntimesParams())
                 .servers()
                 .getFirst();
-        assertThat(server.home()).isEqualTo(server(major).toString());
-        assertThat(server.label()).hasValue(label(major));
+        assertThat(server.home()).isEqualTo(server(name).toString());
+        assertThat(server.label()).hasValue(label(name));
         assertThat(server.luceneVersion()).isEqualTo(lucene);
-        assertThat(server.indexMajors()).containsExactly(major - 1, major);
+        assertThat(server.indexMajors()).containsExactly(major(name) - 1, major(name));
 
-        OpenIndexResult opened = backend.call(Methods.OPEN_INDEX, new OpenIndexParams(index(major)));
+        OpenIndexResult opened = backend.call(Methods.OPEN_INDEX, new OpenIndexParams(index(name)));
         assertThat(opened.luceneRuntime()).isEqualTo(lucene);
-        assertThat(opened.server()).hasValue(label(major));
+        assertThat(opened.server()).hasValue(label(name));
         assertThat(opened.numDocs()).hasValue(3);
         assertThat(backend.call(Methods.GET_DOCUMENT, new GetDocumentParams(1)).fields())
                 .filteredOn(field -> field.name().equals("title"))
@@ -90,10 +96,10 @@ final class ServerBackends {
                 .singleElement()
                 .satisfies(index -> assertThat(index.clean()).isTrue());
 
-        assertThat(backend.call(Methods.OPEN_INDEX, new OpenIndexParams(plain(major))))
+        assertThat(backend.call(Methods.OPEN_INDEX, new OpenIndexParams(plain(name))))
                 .satisfies(plain -> {
                     assertThat(plain.luceneRuntime()).isEqualTo(lucene);
-                    assertThat(plain.server()).hasValue(label(major));
+                    assertThat(plain.server()).hasValue(label(name));
                 });
         backend.call(Methods.CLOSE_INDEX, new CloseIndexParams());
         return backend;

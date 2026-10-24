@@ -92,7 +92,7 @@ final class Lucene9Rebuild implements Rebuild {
     }
 
     private static Terms termVector(SegmentDoc segmentDoc, String name) throws IOException {
-        Fields vectors = segmentDoc.leaf().termVectors().get(segmentDoc.doc());
+        Fields vectors = Lucene9Stored.termVectors(segmentDoc.leaf(), segmentDoc.doc());
         return vectors == null ? null : vectors.terms(name);
     }
 
@@ -184,10 +184,13 @@ final class Lucene9Rebuild implements Rebuild {
             return List.copyOf(result);
         }
 
-        /** Goes through every point of a field in the segment, and keeps those of the document. */
+        /**
+         * Goes through every point of a field in the segment, and keeps those of the document: through
+         * the {@code PointTree}, or on a Lucene without it (9.0), through {@code PointValues.intersect} (ADR 0091).
+         */
         private List<byte[]> points(PointValues points, int doc) throws IOException {
             List<byte[]> result = new ArrayList<>();
-            points.getPointTree().visitDocValues(new PointValues.IntersectVisitor() {
+            PointValues.IntersectVisitor visitor = new PointValues.IntersectVisitor() {
                 @Override
                 public void visit(int docID) {
                     throw new IllegalStateException("A point without its value");
@@ -205,7 +208,12 @@ final class Lucene9Rebuild implements Rebuild {
                 public PointValues.Relation compare(byte[] minPackedValue, byte[] maxPackedValue) {
                     return PointValues.Relation.CELL_CROSSES_QUERY;
                 }
-            });
+            };
+            if (Lucene9Api.POINT_TREE) {
+                points.getPointTree().visitDocValues(visitor);
+            } else {
+                points.intersect(visitor);
+            }
             result.sort(Arrays::compareUnsigned);
             return List.copyOf(result);
         }

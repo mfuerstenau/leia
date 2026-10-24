@@ -162,9 +162,9 @@ leia --server /usr/share/elasticsearch /var/lib/elasticsearch/indices/<uuid>/0/i
 ```
 
 A shard's index is `indices/<uuid>/<shard>/index` (`nodes/0/indices/…` for OpenSearch) in the
-server's data folder. The Lucene 9 runtime needs Lucene 9.5 or later (Elasticsearch 8.7). Stop the node or copy
-the shard first. A screen that the server's Lucene can't do, for an older minor than leia's
-runtime is built for, says so. Plugins' formats, such as OpenSearch's k-NN, aren't loaded.
+server's data folder. Stop the node or copy the shard first. A screen that the server's Lucene
+can't do, for an older minor than leia's runtime is built for, says so, and below Lucene 9.5
+(Elasticsearch 8.7) there are no KNN vectors or highlighting. Plugins' formats, such as OpenSearch's k-NN, aren't loaded.
 
 ## Keys
 

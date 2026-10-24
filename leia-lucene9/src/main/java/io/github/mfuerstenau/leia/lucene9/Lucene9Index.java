@@ -38,13 +38,11 @@ import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.DocumentStoredFieldVisitor;
 import org.apache.lucene.index.BinaryDocValues;
-import org.apache.lucene.index.ByteVectorValues;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.Fields;
 import org.apache.lucene.index.FilterLeafReader;
-import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.IndexCommit;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.IndexableField;
@@ -63,7 +61,6 @@ import org.apache.lucene.index.SegmentReader;
 import org.apache.lucene.index.SortedDocValues;
 import org.apache.lucene.index.SortedNumericDocValues;
 import org.apache.lucene.index.SortedSetDocValues;
-import org.apache.lucene.index.StoredFields;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.queryparser.classic.ParseException;
@@ -72,8 +69,6 @@ import org.apache.lucene.search.Collector;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.FieldDoc;
 import org.apache.lucene.search.IndexSearcher;
-import org.apache.lucene.search.KnnByteVectorQuery;
-import org.apache.lucene.search.KnnFloatVectorQuery;
 import org.apache.lucene.search.LeafCollector;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.Scorable;
@@ -108,7 +103,6 @@ final class Lucene9Index
                 Documents,
                 Terms,
                 Search,
-                Knn,
                 Scoring,
                 DocValuesSearch,
                 StandardSearch,
@@ -243,19 +237,22 @@ final class Lucene9Index
 
     @Override
     public Optional<Points> points() {
-        return Optional.of(new Lucene9Points(reader, fieldInfos));
+        return Lucene9Api.POINT_TREE ? Optional.of(new Lucene9Points(reader, fieldInfos)) : Optional.empty();
     }
 
-    /** {@inheritDoc} Only segments written by 9.x can have vectors. */
+    /**
+     * {@inheritDoc} Only segments written by 9.x can have vectors, and only a Lucene of 9.5 or later
+     * searches them (ADR 0091).
+     */
     @Override
     public Optional<Knn> knn() {
-        return Optional.of(this);
+        return Lucene9Api.KNN ? Optional.of(new Lucene9Knn(this)) : Optional.empty();
     }
 
     /** {@inheritDoc} Only segments of 9.5's and later HNSW formats have a graph leia reads. */
     @Override
     public Optional<KnnGraph> knnGraph() {
-        return Optional.of(new Lucene9KnnGraph(reader, fieldInfos));
+        return Lucene9Api.KNN ? Optional.of(new Lucene9KnnGraph(reader, fieldInfos)) : Optional.empty();
     }
 
     @Override
@@ -265,7 +262,7 @@ final class Lucene9Index
 
     @Override
     public Optional<Highlight> highlight() {
-        return Optional.of(new Lucene9Highlight(reader));
+        return Lucene9Api.HIGHLIGHTER ? Optional.of(new Lucene9Highlight(reader)) : Optional.empty();
     }
 
     @Override
@@ -434,10 +431,8 @@ final class Lucene9Index
         if (info.getVectorDimension() == 0) {
             return Optional.empty();
         }
-        VectorEncoding encoding = switch (info.getVectorEncoding()) {
-            case BYTE -> VectorEncoding.BYTE;
-            case FLOAT32 -> VectorEncoding.FLOAT32;
-        };
+        // Before 9.4, every vector is of floats.
+        VectorEncoding encoding = Lucene9Api.VECTOR_ENCODING ? Lucene9VectorEncoding.of(info) : VectorEncoding.FLOAT32;
         VectorSimilarity similarity = switch (info.getVectorSimilarityFunction()) {
             case EUCLIDEAN -> VectorSimilarity.EUCLIDEAN;
             case DOT_PRODUCT -> VectorSimilarity.DOT_PRODUCT;
@@ -480,12 +475,12 @@ final class Lucene9Index
     @Override
     public IndexDocument document(int docId) throws IOException {
         checkDoc(docId);
-        Document document = reader.storedFields().document(docId);
+        Document document = Lucene9Stored.of(reader).document(docId);
         Map<String, List<StoredValue>> stored = new HashMap<>();
         for (IndexableField field : document.getFields()) {
             stored.computeIfAbsent(field.name(), _ -> new ArrayList<>()).add(storedValue(field));
         }
-        Fields vectors = reader.termVectors().get(docId);
+        Fields vectors = Lucene9Stored.termVectors(reader, docId);
         LeafReaderContext leaf = leaf(docId);
         int leafDoc = docId - leaf.docBase;
         List<DocumentField> result = new ArrayList<>();
@@ -504,7 +499,7 @@ final class Lucene9Index
                     List.copyOf(stored.getOrDefault(field.name(), List.of())),
                     docValues(leaf.reader(), leafDoc, field),
                     hasTermVector,
-                    vector(leaf.reader(), leafDoc, field)));
+                    Lucene9Api.KNN ? Lucene9Knn.vector(leaf.reader(), leafDoc, field) : Optional.empty()));
         }
         Bits liveDocs = MultiBits.getLiveDocs(reader);
         return new IndexDocument(docId, liveDocs != null && !liveDocs.get(docId), List.copyOf(result));
@@ -570,46 +565,24 @@ final class Lucene9Index
             return Optional.empty();
         }
         List<byte[]> values = new ArrayList<>();
-        for (int i = 0; i < set.docValueCount(); i++) {
-            values.add(BytesRef.deepCopyOf(set.lookupOrd(set.nextOrd())).bytes);
+        if (Lucene9Api.DOC_VALUE_COUNT) {
+            for (int i = 0; i < set.docValueCount(); i++) {
+                values.add(BytesRef.deepCopyOf(set.lookupOrd(set.nextOrd())).bytes);
+            }
+        } else {
+            // Without docValueCount (9.0), the ords end with NO_MORE_ORDS.
+            for (long ord = set.nextOrd(); ord != SortedSetDocValues.NO_MORE_ORDS; ord = set.nextOrd()) {
+                values.add(BytesRef.deepCopyOf(set.lookupOrd(ord)).bytes);
+            }
         }
         return Optional.of(new DocValues(field.docValuesType(), List.of(), List.copyOf(values)));
-    }
-
-    /**
-     * The KNN vector of {@code doc} of {@code leaf} in {@code field}, a copy, read through a fresh
-     * iterator as doc values are; empty if it has none, as a document of a segment of 8.x never has.
-     */
-    private static Optional<Vector> vector(LeafReader leaf, int doc, Field field) throws IOException {
-        Optional<VectorFormat> format = field.vectors();
-        if (format.isEmpty()) {
-            return Optional.empty();
-        }
-        FieldInfo info = leaf.getFieldInfos().fieldInfo(field.name());
-        if (info == null || info.getVectorDimension() == 0) {
-            return Optional.empty();
-        }
-        return switch (format.get().encoding()) {
-            case FLOAT32 -> {
-                FloatVectorValues values = leaf.getFloatVectorValues(field.name());
-                yield values == null || values.advance(doc) != doc
-                        ? Optional.empty()
-                        : Optional.of(new Vector.Floats(values.vectorValue().clone()));
-            }
-            case BYTE -> {
-                ByteVectorValues values = leaf.getByteVectorValues(field.name());
-                yield values == null || values.advance(doc) != doc
-                        ? Optional.empty()
-                        : Optional.of(new Vector.Bytes(values.vectorValue().clone()));
-            }
-        };
     }
 
     @Override
     public List<StoredDocument> storedValues(
             int fromDoc, int toDoc, Optional<Set<String>> fields, boolean includeDeleted) throws IOException {
         checkRange(fromDoc, toDoc);
-        StoredFields storedFields = reader.storedFields();
+        Lucene9Stored.Reader storedFields = Lucene9Stored.of(reader);
         Bits liveDocs = MultiBits.getLiveDocs(reader);
         List<StoredDocument> documents = new ArrayList<>();
         for (int doc = fromDoc; doc < toDoc; doc++) {
@@ -654,7 +627,7 @@ final class Lucene9Index
     @Override
     public List<VectorTerm> termVector(int docId, String field) throws IOException {
         checkDoc(docId);
-        Fields vectors = reader.termVectors().get(docId);
+        Fields vectors = Lucene9Stored.termVectors(reader, docId);
         org.apache.lucene.index.Terms terms = vectors == null ? null : vectors.terms(field);
         if (terms == null) {
             return List.of();
@@ -816,10 +789,10 @@ final class Lucene9Index
     }
 
     /** A query of Lucene 9.12. */
-    private static final class Lucene9Query implements ParsedQuery {
+    static final class Lucene9Query implements ParsedQuery {
         private final Query query;
 
-        private Lucene9Query(Query query) {
+        Lucene9Query(Query query) {
             this.query = query;
         }
 
@@ -1000,7 +973,7 @@ final class Lucene9Index
         }
         progress.accept(reader.maxDoc());
         SortField[] sortFields = sort.map(Sort::getSort).orElse(new SortField[0]);
-        StoredFields storedFields = reader.storedFields();
+        Lucene9Stored.Reader storedFields = Lucene9Stored.of(reader);
         List<Hit> hits = new ArrayList<>();
         for (ScoreDoc scoreDoc : docs.scoreDocs) {
             Map<String, List<StoredValue>> values = new LinkedHashMap<>();
@@ -1027,9 +1000,19 @@ final class Lucene9Index
         searcher.setSimilarity(Lucene9Sorts.similarity(similarity));
         // No cache: a query is run once.
         searcher.setQueryCache(null);
-        // Never a timeout: only a way to ask the progress, which throws to stop the search.
-        searcher.setTimeout(progress);
+        timeout(searcher, progress);
         return searcher;
+    }
+
+    /**
+     * Has {@code searcher} ask {@code progress} from time to time. Never a timeout: only a way to ask
+     * the progress, which throws to stop the search. On 9.0 a searcher has no timeout, and the
+     * progress is asked only at the start of each segment (ADR 0091).
+     */
+    private static void timeout(IndexSearcher searcher, SearchProgress progress) {
+        if (Lucene9Api.SEARCH_TIMEOUT) {
+            searcher.setTimeout(progress);
+        }
     }
 
     /** A value of {@link FieldDoc#fields}: a number, a term, or null for a missing string. */
@@ -1063,8 +1046,7 @@ final class Lucene9Index
         IndexSearcher searcher = new IndexSearcher(includeDeleted ? undeleted(reader) : reader);
         // No cache: a query is run once.
         searcher.setQueryCache(null);
-        // Never a timeout: only a way to ask the progress, which throws to stop the search.
-        searcher.setTimeout(searchProgress);
+        timeout(searcher, searchProgress);
         Query rewritten;
         try (Analyzer analyzer = likeAnalyzer(query)) {
             rewritten = searcher.rewrite(built(searcher, query, analyzer));
@@ -1233,51 +1215,28 @@ final class Lucene9Index
         }
     }
 
-    /** {@inheritDoc} Lucene 9.12's KNN query of the field's encoding; it searches when rewritten. */
-    @Override
-    public ParsedQuery approximate(String field, Vector target, int k, Optional<ParsedQuery> filter) {
-        vectorField(field);
-        Query filterQuery = filter.map(Lucene9Index::query).orElse(null);
-        return new Lucene9Query(
-                switch (target) {
-                    case Vector.Floats floats -> new KnnFloatVectorQuery(field, floats.values(), k, filterQuery);
-                    case Vector.Bytes bytes -> new KnnByteVectorQuery(field, bytes.values(), k, filterQuery);
-                });
-    }
-
-    @Override
-    public ParsedQuery exact(String field, Vector target, Optional<ParsedQuery> filter) {
-        vectorField(field);
-        return new Lucene9Query(new ExactKnnQuery(field, target, filter.map(Lucene9Index::query)));
-    }
-
-    @Override
-    public List<Integer> sample(String field, int n) throws IOException {
-        return new Lucene9KnnGraph(reader, fieldInfos).sample(field, n);
-    }
-
-    @Override
-    public Optional<Vector> vector(int docId, String field) throws IOException {
-        checkDoc(docId);
-        Field info = vectorField(field);
-        LeafReaderContext leaf = leaf(docId);
-        return vector(leaf.reader(), docId - leaf.docBase, info);
-    }
-
     /** The field {@code field}, which has vectors. */
-    private Field vectorField(String field) {
+    Field vectorField(String field) {
         return fields.stream()
                 .filter(info -> info.name().equals(field) && info.vectors().isPresent())
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("No KNN vectors in field " + field));
     }
 
-    private LeafReaderContext leaf(int docId) {
+    IndexReader reader() {
+        return reader;
+    }
+
+    FieldInfos fieldInfos() {
+        return fieldInfos;
+    }
+
+    LeafReaderContext leaf(int docId) {
         List<LeafReaderContext> leaves = reader.leaves();
         return leaves.get(ReaderUtil.subIndex(docId, leaves));
     }
 
-    private void checkDoc(int docId) {
+    void checkDoc(int docId) {
         if (docId < 0 || docId >= reader.maxDoc()) {
             throw new IllegalArgumentException("No document " + docId + ": maxDoc is " + reader.maxDoc());
         }
