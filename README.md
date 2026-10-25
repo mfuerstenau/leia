@@ -3,6 +3,8 @@
 A **read-only Lucene index inspector** for the terminal, as an alternative to
 [Luke](https://github.com/apache/lucene/tree/main/lucene/luke), the Swing tool that ships with Lucene.
 
+![welcome screen](/docs/screenshots/welcome.png?raw=true "welcome creen")
+
 leia never opens an `IndexWriter`, never takes the write lock and never changes a file in the index
 directory, so it is safe to point at a live index.
 
@@ -46,6 +48,14 @@ It opens indexes written by Lucene 2.4 to 10, each with the Lucene that reads it
   its report as it is written and a summary of what is broken. It writes nothing, and works
   without a reader too.
 - **Export terms:** the terms of a field with their document frequencies, written to a file.
+
+*More screenshots:*
+
+![download dialog](/docs/screenshots/download.png?raw=true "download dialog")
+![overview tab](/docs/screenshots/overview.png?raw=true "overview tab")
+![document tab](/docs/screenshots/document.png?raw=true "document tab")
+![value view](/docs/screenshots/document_value_view.png?raw=true "value view")
+![search tab](/docs/screenshots/search.png?raw=true "search tab")
 
 The rest of Luke's read-only features are still to come (see
 [`docs/tasklist.md`](docs/tasklist.md)).
