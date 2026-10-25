@@ -17,10 +17,7 @@ import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
 import io.github.mfuerstenau.leia.protocol.terms.FieldTerms;
 import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
-import io.github.mfuerstenau.leia.protocol.version.JavaRuntime;
-import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import io.github.mfuerstenau.leia.tui.TestScreens;
-import io.github.mfuerstenau.leia.tui.widgets.Logo;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -29,9 +26,6 @@ import org.junit.jupiter.api.Test;
 
 /** The tests of {@code overview.rs}, ported. */
 class OverviewTest {
-
-    private static final VersionResult VERSION =
-            new VersionResult("leia-server", "0.1.0", "9229a55", "2026-10-09 12:00", new JavaRuntime("25", "v", "/h"));
 
     private static IndexField field(String name, int number) {
         return new IndexField(
@@ -100,7 +94,7 @@ class OverviewTest {
     }
 
     private static Overview overview(List<IndexField> fields, int topN) {
-        return new Overview(stats(fields), Logo.aboutLines(VERSION), topN);
+        return new Overview(stats(fields), topN);
     }
 
     private static String render(Overview overview, int width, int height) {
@@ -171,26 +165,19 @@ class OverviewTest {
     }
 
     @Test
-    void showsTheLogoNextToTheSummaryWhereItFits() {
+    void theSummaryHasNoLogo() {
         Overview overview = overview(List.of(field("id", 0)), 50);
 
-        String screen = render(overview, 140, 30);
+        String screen = render(overview, 140, 40);
         List<String> lines = screen.lines().toList();
-        // The summary grows to the logo's height: border, 7 rows, border.
         assertThat(lines.get(0)).contains(" Index ");
         assertThat(lines.get(1)).contains("Path");
-        assertThat(lines.get(2)).contains("▄");
-        assertThat(lines.get(7)).contains("▀");
-        assertThat(lines.get(8)).startsWith("└");
-        // leia's name, version and build next to it.
-        assertThat(lines.get(2)).contains("leia 0.1.0");
-        assertThat(lines.get(3)).contains("Luke Evolved Index Analysis");
-        assertThat(lines.get(4)).contains("build 9229a55");
-        assertThat(lines.get(5)).contains("2026-10-09 12:00");
-
-        // Not where the summary wouldn't fit next to it, nor on a short screen.
-        assertThat(render(overview, 60, 30)).doesNotContain("▀");
-        assertThat(render(overview, 140, 29)).doesNotContain("▀");
+        // The panel ends after the summary: border, its seven rows, border.
+        int bottom = IntStream.range(1, lines.size())
+                .filter(i -> lines.get(i).startsWith("└"))
+                .findFirst()
+                .orElseThrow();
+        assertThat(bottom).isEqualTo(8);
     }
 
     @Test

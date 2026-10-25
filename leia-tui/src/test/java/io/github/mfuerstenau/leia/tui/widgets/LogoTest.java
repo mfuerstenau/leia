@@ -2,65 +2,57 @@ package io.github.mfuerstenau.leia.tui.widgets;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Color;
-import dev.tamboui.style.Modifier;
+import dev.tamboui.style.Style;
 import dev.tamboui.text.Line;
 import dev.tamboui.text.Span;
 import io.github.mfuerstenau.leia.protocol.version.JavaRuntime;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
+import java.util.Collections;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class LogoTest {
 
     @Test
-    void everyPixelHasAKnownCharacter() {
-        for (String row : Logo.SPRITE) {
-            assertThat(row).hasSize(Logo.WIDTH);
-            assertThat(row.chars())
-                    .allMatch(c -> c == 'g' || Logo.color((char) c.intValue()).isPresent());
-        }
-        assertThat((Logo.SPRITE.size() + 1) / 2).isEqualTo(Logo.HEIGHT);
+    void theIconIsTrimmedAtTheRight() {
+        List<Line> lines = Logo.lines();
+        assertThat(Logo.HEIGHT).isEqualTo(30);
+        assertThat(Logo.WIDTH).isEqualTo(37);
+        assertThat(lines).hasSize(Logo.HEIGHT);
+        assertThat(lines).allMatch(line -> line.spans().size() == Logo.WIDTH && line.width() == Logo.WIDTH);
     }
 
     @Test
-    void twoPixelsGoInOneCell() {
+    void everyCharacterHasItsColour() {
         List<Line> lines = Logo.lines();
-        assertThat(lines).hasSize(Logo.HEIGHT);
-        assertThat(lines).allMatch(line -> line.width() == Logo.WIDTH);
-
-        // Top left: transparent above transparent.
+        assertThat(lines.get(13).spans().get(3)).isEqualTo(Span.styled("X", Style.EMPTY.fg(Color.rgb(171, 136, 101))));
+        // A space leaves the background.
         assertThat(lines.getFirst().spans().getFirst()).isEqualTo(Span.raw(" "));
-        // Two colours in one cell.
-        Span both = lines.getFirst().spans().get(4);
-        assertThat(both.content()).isEqualTo("▀");
-        assertThat(both.style().fg()).hasValue(Color.rgb(0xab, 0x9f, 0x90));
-        assertThat(both.style().bg()).hasValue(Color.rgb(0x3c, 0x3c, 0x3c));
-        // Opaque below transparent.
-        Span below = lines.get(1).spans().get(1);
-        assertThat(below.content()).isEqualTo("▄");
-        assertThat(below.style().fg()).hasValue(Color.rgb(0x3c, 0x3c, 0x3c));
-        // Opaque above transparent.
-        Span above = lines.get(4).spans().getFirst();
-        assertThat(above.content()).isEqualTo("▀");
-        assertThat(above.style().fg()).hasValue(Color.rgb(0x3c, 0x3c, 0x3c));
-        assertThat(above.style().bg()).isEmpty();
+    }
+
+    @Test
+    void fitsBesideWithItsTopCutOffDownToTheMinimum() {
+        List<Line> text = List.of(Line.from("leia 1"));
+        int width = Logo.WIDTH + Logo.GAP + Logo.MIN_TEXT_WIDTH;
+
+        assertThat(Logo.fitsBeside(new Rect(0, 0, width, Logo.MIN_HEIGHT), text))
+                .isTrue();
+        assertThat(Logo.fitsBeside(new Rect(0, 0, width, Logo.MIN_HEIGHT - 1), text))
+                .isFalse();
+        assertThat(Logo.fitsBeside(new Rect(0, 0, width - 1, Logo.HEIGHT), text))
+                .isFalse();
+        // Not where the wrapped text is taller than the area.
+        List<Line> tall = Collections.nCopies(Logo.MIN_HEIGHT + 1, Line.from("x"));
+        assertThat(Logo.fitsBeside(new Rect(0, 0, width, Logo.MIN_HEIGHT), tall))
+                .isFalse();
     }
 
     @Test
     void aboutNamesVersionAndBuild() {
         VersionResult version = new VersionResult("leia-server", "1", "abc", "t", new JavaRuntime("25", "v", "/h"));
 
-        assertThat(Logo.aboutLines(version))
-                .extracting(Line::rawContent)
-                .containsExactly("leia 1", "Luke Evolved Index Analysis", "build abc", "t");
-
-        StringBuilder bold = new StringBuilder();
-        for (Span span : Logo.aboutLines(version).get(1).spans()) {
-            if (span.style().addModifiers().contains(Modifier.BOLD)) {
-                bold.append(span.content());
-            }
-        }
-        assertThat(bold).hasToString("LEIA");
+        assertThat(Logo.aboutLines(version)).extracting(Line::rawContent).containsExactly("leia 1", "build abc", "t");
     }
 }

@@ -416,7 +416,7 @@ public final class App {
             String luceneRuntime,
             Optional<String> server) {
         history.add(stats.path());
-        overview = new Overview(stats, Logo.aboutLines(version), topN).withSkipped(skipped);
+        overview = new Overview(stats, topN).withSkipped(skipped);
         forgetScans();
         opened = new Opened(
                 stats.path(),
@@ -2601,14 +2601,14 @@ public final class App {
         Block block = bordered(" leia ");
         Rect inner = block.inner(body);
         frame.renderWidget(block, body);
-        // The logo only where it leaves room for the text, a row below the border and two columns
-        // right of it, which look about the same.
+        // The logo, a row below the border and two columns right of it, which look about the same,
+        // only where it leaves room for the text; its top is cut off where it is too tall.
         Rect padded = new Rect(
                 inner.x() + ABOUT_PADDING_LEFT,
                 inner.y() + ABOUT_PADDING_TOP,
                 Math.max(inner.width() - ABOUT_PADDING_LEFT, 0),
                 Math.max(inner.height() - ABOUT_PADDING_TOP, 0));
-        if (padded.height() >= Logo.HEIGHT && padded.width() >= Logo.WIDTH + 2 + 40) {
+        if (Logo.fitsBeside(padded, lines)) {
             Logo.renderBeside(frame, padded, lines);
         } else {
             frame.renderWidget(wrapped(lines, null, inner), inner);

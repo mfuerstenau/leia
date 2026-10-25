@@ -33,7 +33,6 @@ import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
 import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
-import io.github.mfuerstenau.leia.tui.widgets.Logo;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -69,12 +68,6 @@ public final class Overview {
 
     /** The width of the terms panel next to the fields. */
     static final int TERMS_PANEL_WIDTH = 46;
-
-    /**
-     * From this height on, the logo is at the right of the index summary, which grows to its height,
-     * if the summary still fits next to it.
-     */
-    static final int LOGO_HEIGHT = 30;
 
     /** The index panel shows at most this many index directories, and as many skipped ones. */
     static final int SUMMARY_INDEXES = 8;
@@ -152,9 +145,6 @@ public final class Overview {
 
     private final GetIndexStatsResult stats;
 
-    /** leia's name, version and build, next to the logo. */
-    private final List<Line> about;
-
     /** The index directories that were found below the opened path but left out (ADR 0021). */
     private List<SkippedIndex> skipped = List.of();
 
@@ -179,9 +169,8 @@ public final class Overview {
 
     private Focus focus = Focus.FIELDS;
 
-    public Overview(GetIndexStatsResult stats, List<Line> about, int topN) {
+    public Overview(GetIndexStatsResult stats, int topN) {
         this.stats = stats;
-        this.about = List.copyOf(about);
         this.topN = topN;
         if (!stats.fields().isEmpty()) {
             fields.select(0);
@@ -207,7 +196,7 @@ public final class Overview {
      */
     public Overview reopened(GetIndexStatsResult stats, int topN) {
         Optional<String> selected = selectedField().map(IndexField::name);
-        Overview overview = new Overview(stats, about, topN).withSkipped(skipped);
+        Overview overview = new Overview(stats, topN).withSkipped(skipped);
         overview.sort = sort;
         overview.descending = descending;
         overview.formatRows();
@@ -479,11 +468,7 @@ public final class Overview {
         // Inside the block's left and right border.
         int innerWidth = Math.max(area.width() - 2, 0);
         List<Line> summary = summaryLines(stats, skipped, innerWidth);
-        // The logo with leia's version and a column on either side, if the summary still fits.
-        int logoWidth = Logo.widthBeside(about) + 2;
-        boolean withLogo = area.height() >= LOGO_HEIGHT
-                && summary.stream().allMatch(line -> line.width() + logoWidth <= innerWidth);
-        int rows = withLogo ? Math.max(summary.size(), Logo.HEIGHT) : summary.size();
+        int rows = summary.size();
         List<Rect> parts = Layout.vertical()
                 // The lines plus the block's top and bottom border.
                 .constraints(Constraint.length(rows + 2), Constraint.fill())
@@ -493,19 +478,7 @@ public final class Overview {
         Block block = panel(" Index ", false);
         Rect inner = block.inner(top);
         frame.renderWidget(block, top);
-        if (withLogo) {
-            List<Rect> columns = Layout.horizontal()
-                    .constraints(
-                            Constraint.fill(),
-                            Constraint.length(1),
-                            Constraint.length(logoWidth - 2),
-                            Constraint.length(1))
-                    .split(inner);
-            frame.renderWidget(Paragraph.from(Text.from(summary)), columns.get(0));
-            Logo.renderBeside(frame, columns.get(2), about);
-        } else {
-            frame.renderWidget(Paragraph.from(Text.from(summary)), inner);
-        }
+        frame.renderWidget(Paragraph.from(Text.from(summary)), inner);
 
         List<Rect> panels = bottom.width() >= SIDE_BY_SIDE_WIDTH
                 ? Layout.horizontal()
