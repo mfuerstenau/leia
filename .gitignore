@@ -34,9 +34,6 @@ desktop.ini
 .env.*
 .jdks/
 
-# --- Claude Code (local-only settings; skills under .claude/ are shared) ---
-.claude/settings.local.json
-
 leia.md
 
 # --- Secrets (credentials belong in ~/.gradle/gradle.properties or the environment) ---

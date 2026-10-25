@@ -1,10 +1,10 @@
 # Task list
 
-The work queue for leia. Check items off (`[x]`) as they land, and keep it aligned with the "Remaining / next" section of the latest entry in `docs/SESSION-SUMMARIES.md`. Finished items move to `docs/tasklist-done.md`.
+The work queue for leia. Check items off (`[x]`) as they land. Finished items move to `docs/tasklist-done.md`.
 
 ## SonarQube quality gate
 
-Goal: the quality gate passes on new code. The fix of 2026-10-18 (`88ea82a`, `8b696a4`) skipped rules by choice and left false positives open, and nothing is recorded in SonarQube, so each scan in a fresh docker container counts them again (see that day's entry in `docs/SESSION-SUMMARIES.md`).
+Goal: the quality gate passes on new code. The fix of 2026-10-18 (`88ea82a`, `8b696a4`) skipped rules by choice and left false positives open, and nothing is recorded in SonarQube, so each scan in a fresh docker container counts them again.
 
 The lane is done: on new code the gate passes, and the accepted rules are whitelisted in the repository (ADR 0088).
 
