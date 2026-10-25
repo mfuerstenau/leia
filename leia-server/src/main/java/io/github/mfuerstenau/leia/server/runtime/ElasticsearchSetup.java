@@ -57,7 +57,7 @@ final class ElasticsearchSetup {
             LOG.fine(() -> "Elasticsearch in " + installation + " has no logger factory to set");
         } catch (InvocationTargetException e) {
             LOG.log(Level.WARNING, e.getCause(), () -> "Cannot set up the logging of Elasticsearch in " + installation);
-        } catch (ReflectiveOperationException | LinkageError e) {
+        } catch (ReflectiveOperationException | LinkageError | RuntimeException e) {
             LOG.log(Level.WARNING, e, () -> "Cannot set up the logging of Elasticsearch in " + installation);
         }
         // Read once, as the class initializes; set by the user, it is left alone.

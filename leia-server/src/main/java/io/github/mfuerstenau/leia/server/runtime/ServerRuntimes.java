@@ -13,10 +13,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.ServiceConfigurationError;
+import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Matcher;
@@ -49,7 +51,7 @@ public final class ServerRuntimes {
      * its own in the server and a setup of its own, which leia would have to do for every one (ADR
      * 0090). OpenSearch's k-NN plugin has the codecs of the {@code knn_vector} fields.
      */
-    static final List<String> CODEC_PLUGINS = List.of("opensearch-knn");
+    private static final List<String> CODEC_PLUGINS = List.of("opensearch-knn");
 
     /** What the message of an unknown Lucene names. */
     private static final String SERVERS_LEIA_READS =
@@ -112,7 +114,7 @@ public final class ServerRuntimes {
                     loaded.add(load(path, runtimesDir, loaded, fresh));
                 }
             }
-        } catch (ServerException e) {
+        } catch (ServerException | RuntimeException e) {
             fresh.forEach(ServerRuntimes::close);
             throw e;
         }
@@ -148,7 +150,8 @@ public final class ServerRuntimes {
         List<Path> adapterJars = adapterJars(home, folder, known);
         String builtFor = builtFor(adapterJars.getFirst());
         List<Path> jars = new ArrayList<>(adapterJars);
-        jars.addAll(libJars(home, lib));
+        // Sorted by name; the plugins' jars only as pluginJars says.
+        jars.addAll(jarsIn(home, lib));
         List<Path> plugins = pluginJars(home, lib);
         jars.addAll(plugins);
         String loaderName = "leia-server-" + known.folder();
@@ -230,11 +233,7 @@ public final class ServerRuntimes {
         }
     }
 
-    /** The jars directly in {@code lib/}, sorted by name; those of {@code plugins/} only as {@link #pluginJars} says. */
-    private static List<Path> libJars(Path home, Path lib) throws ServerException {
-        return jarsIn(home, lib);
-    }
-
+    /** The jars directly in {@code folder}, sorted by name. */
     private static List<Path> jarsIn(Path home, Path folder) throws ServerException {
         try (Stream<Path> files = Files.list(folder)) {
             return files.filter(file -> file.getFileName().toString().endsWith(".jar"))
@@ -249,13 +248,15 @@ public final class ServerRuntimes {
     /**
      * The jars of the {@link #CODEC_PLUGINS} that the installation has, sorted by name, each folder
      * followed by those it extends ({@code extended.plugins} of its {@code plugin-descriptor.properties}),
-     * found in {@code modules/} or {@code plugins/}: OpenSearch 3's k-NN plugin gets Guava from the
-     * {@code transport-grpc} module. They go after {@code lib/}, whose classes win. None if the
-     * installation has no such plugin; also for a {@code lib/} that stands alone.
+     * and those they extend in turn, each once, found in {@code modules/} or {@code plugins/}:
+     * OpenSearch 3's k-NN plugin gets Guava from the {@code transport-grpc} module. They go after
+     * {@code lib/}, whose classes win. None if the installation has no such plugin; also for a folder
+     * of jars that isn't named {@code lib}, which has no installation around it.
      */
     static List<Path> pluginJars(Path home, Path lib) throws ServerException {
-        Path installation = lib.toAbsolutePath().getParent();
-        if (installation == null) {
+        Path absolute = lib.toAbsolutePath();
+        Path installation = absolute.getParent();
+        if (installation == null || !absolute.getFileName().toString().equals("lib")) {
             return List.of();
         }
         List<Path> jars = new ArrayList<>();
@@ -265,21 +266,34 @@ public final class ServerRuntimes {
                 continue;
             }
             jars.addAll(jarsIn(home, folder));
-            for (String extended : extendedPlugins(folder)) {
-                Path extendedFolder = Stream.of("modules", "plugins")
-                        .map(parent -> installation.resolve(parent).resolve(extended))
-                        .filter(Files::isDirectory)
-                        .findFirst()
-                        .orElse(null);
-                if (extendedFolder == null) {
-                    LOG.fine(() ->
-                            "The " + plugin + " plugin of " + home + " extends " + extended + ", which isn't there");
-                } else {
-                    jars.addAll(jarsIn(home, extendedFolder));
-                }
-            }
+            addExtended(home, installation, plugin, folder, new HashSet<>(Set.of(plugin)), jars);
         }
         return jars;
+    }
+
+    /**
+     * Adds the jars of the plugins that {@code folder} extends, depth first as OpenSearch follows them;
+     * {@code seen} holds the names taken, so that a plugin extended twice, or in a cycle, is taken once.
+     */
+    private static void addExtended(
+            Path home, Path installation, String plugin, Path folder, Set<String> seen, List<Path> jars)
+            throws ServerException {
+        for (String extended : extendedPlugins(folder)) {
+            if (!seen.add(extended)) {
+                continue;
+            }
+            Path extendedFolder = Stream.of("modules", "plugins")
+                    .map(parent -> installation.resolve(parent).resolve(extended))
+                    .filter(Files::isDirectory)
+                    .findFirst()
+                    .orElse(null);
+            if (extendedFolder == null) {
+                LOG.fine(() -> "The " + plugin + " plugin of " + home + " extends " + extended + ", which isn't there");
+            } else {
+                jars.addAll(jarsIn(home, extendedFolder));
+                addExtended(home, installation, extended, extendedFolder, seen, jars);
+            }
+        }
     }
 
     /** The names in {@code extended.plugins} of the plugin in {@code folder}; none if it can't be read. */

@@ -136,6 +136,6 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 | OpenSearch 2.19.6 | 9.12.3 | everything, the `knn_vector` indexes too, with the plugin (`KNN9120Codec`, ADR 0092): `lucene` engine all; `faiss` and `nmslib` open, but their KNN search is `INTERNAL_ERROR` |
 | OpenSearch 3.9.0 | 10.5.1 | everything, the `knn_vector` indexes of the `lucene` and `faiss` engines too, with the plugin (`KNN1040Codec`) |
 
-OpenSearch's k-NN plugin, `plugins/opensearch-knn`, is loaded with the plugins and modules it extends (`extended.plugins`: Guava in OpenSearch 3's `transport-grpc`), and given a cluster service of its own, so that closing and checking a k-NN index work. The native engines' libraries aren't loaded (ADR 0092).
+OpenSearch's k-NN plugin, `plugins/opensearch-knn`, is loaded with the plugins and modules it extends, and what they extend (`extended.plugins`: Guava in OpenSearch 3's `transport-grpc`), and given a cluster service of its own, so that closing and checking a k-NN index work. The native engines' libraries aren't loaded (ADR 0092).
 
 So the Lucene 9 adapter reads with any 9.x (tried from 9.0.0): below 9.5 without KNN vectors and highlighting, on 9.0 without points either, below 9.10 without sort, below 9.11 without the HNSW graph. The Lucene 10 one takes any 10.x (tried from 10.1.0); older minors lose the HNSW graph.

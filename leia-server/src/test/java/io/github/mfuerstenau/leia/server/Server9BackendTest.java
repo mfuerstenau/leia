@@ -25,7 +25,7 @@ import org.junit.jupiter.api.Test;
 class Server9BackendTest {
 
     @Test
-    void readsTheIndexesOfLucene8And9WithTheServersLucene() throws Exception {
+    void readsTheIndexesOfLucene8And9AndOfTheKnnPluginWithTheServersLucene() throws Exception {
         ServerBackends.missesTheServersFormat("9");
         missesThePluginsCodec();
 

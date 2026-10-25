@@ -17,8 +17,9 @@ import java.util.logging.Logger;
  * fails with a {@code NullPointerException}.
  *
  * <p>leia gives it a {@code ClusterService} of its own, with the default value of every setting: the
- * cluster settings that OpenSearch has built in, the plugin's, and a thread pool without executors,
- * which the {@code ClusterService} needs to be made. No node starts. Done reflectively, since leia
+ * cluster settings that OpenSearch has built in, the plugin's, and a thread pool with OpenSearch's
+ * built-in executors and none of its own, which the {@code ClusterService} needs to be made. Its
+ * threads are daemons. No node starts. Done reflectively, since leia
  * has no OpenSearch to link against.
  *
  * <p>Best effort: what fails is logged, and the calls that need it fail as they would without it.
@@ -51,7 +52,8 @@ final class OpenSearchKnnSetup {
             LOG.fine(() -> "Gave the k-NN plugin of OpenSearch in " + home + " a cluster service");
         } catch (InvocationTargetException e) {
             LOG.log(Level.WARNING, e.getCause(), () -> "Cannot set up the k-NN plugin of OpenSearch in " + home);
-        } catch (ReflectiveOperationException | LinkageError e) {
+        } catch (ReflectiveOperationException | LinkageError | RuntimeException e) {
+            // A plugin unlike the one expected fails in leia's own code: a cast, an unboxing, a call.
             LOG.log(Level.WARNING, e, () -> "Cannot set up the k-NN plugin of OpenSearch in " + home);
         }
     }
@@ -81,7 +83,8 @@ final class OpenSearchKnnSetup {
         Object settings = builder.getClass().getMethod("build").invoke(builder);
         Object clusterSettings =
                 clusterSettingsClass.getConstructor(settingsClass, Set.class).newInstance(settings, registered);
-        // The pool's threads are daemons; it is made once per server and lives as long as the JVM.
+        // The pool starts its built-in executors, a cached-time thread and a scheduler, all daemons; it
+        // is made once per server and lives as long as the JVM.
         Object threadPool = threadPoolClass
                 .getConstructor(settingsClass, executorBuilder.arrayType())
                 .newInstance(settings, Array.newInstance(executorBuilder, 0));

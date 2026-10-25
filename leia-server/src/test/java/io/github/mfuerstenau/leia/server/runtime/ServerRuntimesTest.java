@@ -187,6 +187,12 @@ class ServerRuntimesTest {
         Path module = Files.createDirectories(home.resolve("modules/transport-grpc"));
         Files.createFile(module.resolve("failureaccess.jar"));
         Files.createFile(module.resolve("guava.jar"));
+        // transitive: a module of its own, and the k-NN plugin again, which isn't taken twice
+        Files.writeString(
+                module.resolve("plugin-descriptor.properties"),
+                "name=transport-grpc\nextended.plugins=deep,opensearch-knn\n");
+        Path deep = Files.createDirectories(home.resolve("modules/deep"));
+        Files.createFile(deep.resolve("deep.jar"));
         Path sibling = Files.createDirectories(home.resolve("plugins/sibling"));
         Files.createFile(sibling.resolve("sibling.jar"));
         // Another plugin is left alone.
@@ -201,6 +207,7 @@ class ServerRuntimesTest {
                         plugin.resolve("opensearch-knn-2.19.6.0.jar"),
                         module.resolve("failureaccess.jar"),
                         module.resolve("guava.jar"),
+                        deep.resolve("deep.jar"),
                         sibling.resolve("sibling.jar"));
         // The lib/ alone finds the plugins beside it, and its own jars aren't among them.
         assertThat(ServerRuntimes.pluginJars(home.resolve("lib"), home.resolve("lib")))
@@ -220,6 +227,16 @@ class ServerRuntimesTest {
         Path lonely = fakeLib(tmp.resolve("lone"), "lucene-core-9.12.3.jar");
         assertThat(ServerRuntimes.pluginJars(lonely, lonely.resolve("lib")))
                 .containsExactly(plugin.resolve("opensearch-knn.jar"));
+    }
+
+    @Test
+    void takesNoPluginJarsBesideAFolderOfJarsThatIsNotNamedLib() throws Exception {
+        Path jars = Files.createDirectories(tmp.resolve("jars"));
+        Files.createFile(jars.resolve("lucene-core-9.12.3.jar"));
+        Files.createFile(
+                Files.createDirectories(tmp.resolve("plugins/opensearch-knn")).resolve("opensearch-knn.jar"));
+
+        assertThat(ServerRuntimes.pluginJars(jars, jars)).isEmpty();
     }
 
     private static Path runtimes() {
