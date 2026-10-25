@@ -132,8 +132,10 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 | Elasticsearch 8.19.23 | 9.12.2 | everything: `ES812Postings`, `ES87TSDB`, `ES87BloomFilter`, `int8_hnsw` and `bbq_hnsw`, logsdb with zstd |
 | Elasticsearch 9.0.8 | 10.1.0 | everything but the HNSW graph, `NOT_SUPPORTED` (`HnswGraph.maxConn()`) |
 | Elasticsearch 9.5.5 | 10.5.1 | everything |
-| OpenSearch 2.11.1 | 9.7.0 | everything but the `knn_vector` index (the k-NN plugin's `KNN950Codec`) |
-| OpenSearch 2.19.6 | 9.12.3 | the same (`KNN9120Codec`) |
-| OpenSearch 3.9.0 | 10.5.1 | the same (`KNN1040Codec`) |
+| OpenSearch 2.11.1 | 9.7.0 | everything but the `knn_vector` index (the k-NN plugin's `KNN950Codec`); not tried with the plugin |
+| OpenSearch 2.19.6 | 9.12.3 | everything, the `knn_vector` indexes too, with the plugin (`KNN9120Codec`, ADR 0092): `lucene` engine all; `faiss` and `nmslib` open, but their KNN search is `INTERNAL_ERROR` |
+| OpenSearch 3.9.0 | 10.5.1 | everything, the `knn_vector` indexes of the `lucene` and `faiss` engines too, with the plugin (`KNN1040Codec`) |
+
+OpenSearch's k-NN plugin, `plugins/opensearch-knn`, is loaded with the plugins and modules it extends (`extended.plugins`: Guava in OpenSearch 3's `transport-grpc`), and given a cluster service of its own, so that closing and checking a k-NN index work. The native engines' libraries aren't loaded (ADR 0092).
 
 So the Lucene 9 adapter reads with any 9.x (tried from 9.0.0): below 9.5 without KNN vectors and highlighting, on 9.0 without points either, below 9.10 without sort, below 9.11 without the HNSW graph. The Lucene 10 one takes any 10.x (tried from 10.1.0); older minors lose the HNSW graph.

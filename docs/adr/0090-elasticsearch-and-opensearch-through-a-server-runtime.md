@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-18
 - **Amends:** ADR 0018 (its deferred alternative, Elasticsearch and OpenSearch `lib/` folders), ADR 0073 (a runtime's class loader can also be a server's)
+- **Amended by:** ADR 0091, ADR 0092
 
 ## Context
 
@@ -51,7 +52,7 @@ Single-node containers (podman) with security off, each with an index of `text`,
 | Elasticsearch 8.19.23 | 9.12.2 | everything: `ES812Postings`, `ES87TSDB`, `ES87BloomFilter`, `int8_hnsw` and `bbq_hnsw`, logsdb with zstd |
 | Elasticsearch 9.0.8 | 10.1.0 | everything but the HNSW graph, `NOT_SUPPORTED` (`HnswGraph.maxConn()`) |
 | Elasticsearch 9.5.5 | 10.5.1 | everything |
-| OpenSearch 2.11.1 | 9.7.0 | everything but the `knn_vector` index (the k-NN plugin's `KNN950Codec`) |
+| OpenSearch 2.11.1 | 9.7.0 | everything but the `knn_vector` index (the k-NN plugin's `KNN950Codec`) *(ADR 0092: the plugin is loaded, `lucene` engine and all)* |
 | OpenSearch 2.19.6 | 9.12.3 | the same (`KNN9120Codec`) |
 | OpenSearch 3.9.0 | 10.5.1 | the same (`KNN1040Codec`) |
 
@@ -60,13 +61,13 @@ So the Lucene 9 adapter needs a server on Lucene 9.5 or later (Elasticsearch 8.7
 ### Observed, not changed
 
 - **`data/indices` as one** opens only if its indexes agree with each other: Lucene refuses to combine a `logsdb` index (whose index sort has a parent field) with others, and a field of one type in one index and of another in the next (`cannot change field "v" from doc values type=NONE to …`) fails the open rather than skipping that index as ADR 0021 says. This isn't the server's, it is how leia combines indexes (ADR 0045); a task.
-- **OpenSearch's k-NN indexes** need the k-NN plugin's codec (`KNN950Codec`, `KNN9120Codec`, `KNN1040Codec`), which is in `plugins/`, not `lib/`: still `MISSING_CODEC`.
+- **OpenSearch's k-NN indexes** need the k-NN plugin's codec (`KNN950Codec`, `KNN9120Codec`, `KNN1040Codec`), which is in `plugins/`, not `lib/`: still `MISSING_CODEC`. *(Done by ADR 0092.)*
 - A `RuntimeException` thrown in Elasticsearch's classes, such as the `NullPointerException` of zstd stored fields when its native libraries can't be found, is `INTERNAL_ERROR`.
 
 ## Alternatives considered
 
 - **Skip the server's `lucene-*.jar` and load the rest into the jar chain** (ADR 0018's deferred idea). Elasticsearch 8 and OpenSearch 2 build against Lucene 9, whose codec API differs from 10's, so their formats wouldn't link, and the old runtimes would still not see them. Rejected.
-- **Load `modules/` and `plugins/` too.** They hold the formats of some features (OpenSearch's k-NN, Elasticsearch's x-pack mappers), but each plugin has a class loader of its own in the server, with dependencies that clash, and its own setup. Rejected for now; `lib/` holds the formats of the default mappings.
+- **Load `modules/` and `plugins/` too.** *(Only OpenSearch's k-NN plugin and what it extends, by ADR 0092.)* They hold the formats of some features (OpenSearch's k-NN, Elasticsearch's x-pack mappers), but each plugin has a class loader of its own in the server, with dependencies that clash, and its own setup. Rejected for now; `lib/` holds the formats of the default mappings.
 - **A way in the TUI to add a server, as `X` adds jars.** The server's Lucene must be in place before an index of its major is routed, and a loader can't be unloaded. Rejected; the flag is enough.
 - **Leave routing to the adapters' `indexMajors()`.** `Lucene9Runtime` says {8}, so a Lucene 9 server wouldn't read 9.x shards. Rejected for the wrapper.
 - **Leia's own runtimes first, the server's only for `MISSING_CODEC`.** Every shard of the server would be opened twice, once to fail, and a shard that happens to name only Lucene's formats would be read by another Lucene than the one that wrote it. Rejected for the server first, with the fallback of 4.

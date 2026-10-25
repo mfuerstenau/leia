@@ -5,6 +5,7 @@ import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.jars.JarChain;
 import java.io.IOException;
+import java.io.Reader;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLClassLoader;
@@ -14,6 +15,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.ServiceConfigurationError;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -26,6 +28,8 @@ import java.util.stream.Stream;
  * 0090): for each, leia's adapter for the major of its Lucene, from {@code runtimes/}, in a class
  * loader over the adapter and the top-level jars of the installation's {@code lib/}, whose Lucene,
  * codecs and formats it reads with. Elasticsearch 8 and 9 and OpenSearch 2 and 3 ship Lucene 9 or 10.
+ * OpenSearch's k-NN plugin, whose codecs its {@code knn_vector} indexes name, is loaded from {@code
+ * plugins/} with what it extends (ADR 0092).
  *
  * <p>They are loaded at startup, after the {@link RuntimeFolders} and before the jars of {@code
  * --jar}, once per JVM, like the jar chain; a server that is loaded stays loaded. A server that can't
@@ -38,6 +42,14 @@ public final class ServerRuntimes {
     /** The product's own jar in {@code lib/}, such as {@code elasticsearch-8.15.3.jar}. */
     private static final Pattern PRODUCT_JAR =
             Pattern.compile("(elasticsearch|opensearch)-(\\d+\\.\\d+\\.\\d+(?:-[A-Za-z0-9.]+)?)\\.jar");
+
+    /**
+     * The plugins whose jars are loaded besides {@code lib/} (ADR 0092), each a folder of {@code
+     * plugins/}. Only those that hold the codec of a mapping type: each plugin has a class loader of
+     * its own in the server and a setup of its own, which leia would have to do for every one (ADR
+     * 0090). OpenSearch's k-NN plugin has the codecs of the {@code knn_vector} fields.
+     */
+    static final List<String> CODEC_PLUGINS = List.of("opensearch-knn");
 
     /** What the message of an unknown Lucene names. */
     private static final String SERVERS_LEIA_READS =
@@ -137,11 +149,16 @@ public final class ServerRuntimes {
         String builtFor = builtFor(adapterJars.getFirst());
         List<Path> jars = new ArrayList<>(adapterJars);
         jars.addAll(libJars(home, lib));
+        List<Path> plugins = pluginJars(home, lib);
+        jars.addAll(plugins);
         String loaderName = "leia-server-" + known.folder();
         URLClassLoader loader = new URLClassLoader(
                 loaderName, urls(home, jars), new RuntimeFolders.ApiOnlyLoader(ServerRuntimes.class.getClassLoader()));
         fresh.add(loader);
         ElasticsearchSetup.setUp(loader, lib.toAbsolutePath());
+        if (!plugins.isEmpty()) {
+            OpenSearchKnnSetup.setUp(loader, home);
+        }
         Runtimes.Loaded found = Runtimes.load(loader);
         List<LuceneRuntime> reading = found.runtimes().stream()
                 .filter(runtime -> runtime.luceneVersion().startsWith(lucene.major() + "."))
@@ -213,16 +230,71 @@ public final class ServerRuntimes {
         }
     }
 
-    /** The jars directly in {@code lib/}, sorted by name; not those of {@code modules/} or {@code plugins/}. */
+    /** The jars directly in {@code lib/}, sorted by name; those of {@code plugins/} only as {@link #pluginJars} says. */
     private static List<Path> libJars(Path home, Path lib) throws ServerException {
-        try (Stream<Path> files = Files.list(lib)) {
+        return jarsIn(home, lib);
+    }
+
+    private static List<Path> jarsIn(Path home, Path folder) throws ServerException {
+        try (Stream<Path> files = Files.list(folder)) {
             return files.filter(file -> file.getFileName().toString().endsWith(".jar"))
                     .filter(Files::isRegularFile)
                     .sorted(Comparator.comparing(file -> file.getFileName().toString()))
                     .toList();
         } catch (IOException e) {
-            throw new ServerException(home, "cannot list " + lib + ": " + e.getMessage(), e);
+            throw new ServerException(home, "cannot list " + folder + ": " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * The jars of the {@link #CODEC_PLUGINS} that the installation has, sorted by name, each folder
+     * followed by those it extends ({@code extended.plugins} of its {@code plugin-descriptor.properties}),
+     * found in {@code modules/} or {@code plugins/}: OpenSearch 3's k-NN plugin gets Guava from the
+     * {@code transport-grpc} module. They go after {@code lib/}, whose classes win. None if the
+     * installation has no such plugin; also for a {@code lib/} that stands alone.
+     */
+    static List<Path> pluginJars(Path home, Path lib) throws ServerException {
+        Path installation = lib.toAbsolutePath().getParent();
+        if (installation == null) {
+            return List.of();
+        }
+        List<Path> jars = new ArrayList<>();
+        for (String plugin : CODEC_PLUGINS) {
+            Path folder = installation.resolve("plugins").resolve(plugin);
+            if (!Files.isDirectory(folder)) {
+                continue;
+            }
+            jars.addAll(jarsIn(home, folder));
+            for (String extended : extendedPlugins(folder)) {
+                Path extendedFolder = Stream.of("modules", "plugins")
+                        .map(parent -> installation.resolve(parent).resolve(extended))
+                        .filter(Files::isDirectory)
+                        .findFirst()
+                        .orElse(null);
+                if (extendedFolder == null) {
+                    LOG.fine(() ->
+                            "The " + plugin + " plugin of " + home + " extends " + extended + ", which isn't there");
+                } else {
+                    jars.addAll(jarsIn(home, extendedFolder));
+                }
+            }
+        }
+        return jars;
+    }
+
+    /** The names in {@code extended.plugins} of the plugin in {@code folder}; none if it can't be read. */
+    private static List<String> extendedPlugins(Path folder) {
+        Properties descriptor = new Properties();
+        try (Reader reader = Files.newBufferedReader(folder.resolve("plugin-descriptor.properties"))) {
+            descriptor.load(reader);
+        } catch (IOException e) {
+            LOG.log(Level.FINE, e, () -> "Cannot read the descriptor of the plugin in " + folder);
+            return List.of();
+        }
+        return Stream.of(descriptor.getProperty("extended.plugins", "").split(","))
+                .map(String::strip)
+                .filter(name -> !name.isEmpty())
+                .toList();
     }
 
     private static URL[] urls(Path home, List<Path> jars) throws ServerException {

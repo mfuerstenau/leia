@@ -100,7 +100,9 @@ val testServerFiles = listOf("9", "10", "90").flatMap { name ->
         "leia.test.server$name.plain" to
             serverTestFiles("testServer${name}Plain", "fakeServer${name}PlainIndexElements"),
     )
-}.toMap()
+}.toMap() +
+    // The index of the fake OpenSearch's k-NN plugin (ADR 0092).
+    ("leia.test.server9.knn" to serverTestFiles("testServer9Knn", "fakeServer9KnnIndexElements"))
 val testCodecJar = coreTestFiles("testCodecJar", "testCodecJarElements")
 val testAnalysisJars = coreTestFiles("testAnalysisJars", "testAnalysisJarsElements")
 

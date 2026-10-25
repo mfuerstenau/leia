@@ -164,7 +164,7 @@ leia --server /usr/share/elasticsearch /var/lib/elasticsearch/indices/<uuid>/0/i
 A shard's index is `indices/<uuid>/<shard>/index` (`nodes/0/indices/…` for OpenSearch) in the
 server's data folder. Stop the node or copy the shard first. A screen that the server's Lucene
 can't do, for an older minor than leia's runtime is built for, says so, and below Lucene 9.5
-(Elasticsearch 8.7) there are no KNN vectors or highlighting. Plugins' formats, such as OpenSearch's k-NN, aren't loaded.
+(Elasticsearch 8.7) there are no KNN vectors or highlighting. OpenSearch's k-NN plugin (`plugins/opensearch-knn`) is loaded too, so its `knn_vector` shards read; other plugins' formats aren't.
 
 ## Keys
 

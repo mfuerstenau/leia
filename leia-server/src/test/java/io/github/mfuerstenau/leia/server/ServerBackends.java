@@ -105,7 +105,8 @@ final class ServerBackends {
         return backend;
     }
 
-    private static CheckIndexResult check(RealBackend backend) throws Exception {
+    /** Checks the open index. */
+    static CheckIndexResult check(RealBackend backend) throws Exception {
         long check = backend.call(Methods.START_CHECK_INDEX, new StartCheckIndexParams())
                 .jobId();
         Optional<CheckIndexResult> checked = Optional.empty();

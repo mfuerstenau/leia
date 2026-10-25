@@ -173,6 +173,55 @@ class ServerRuntimesTest {
         assertThat(server.extensions()).isEmpty();
     }
 
+    @Test
+    void takesTheJarsOfTheKnnPluginAndWhatItExtends() throws Exception {
+        Path home = fakeLib(tmp.resolve("os"), "lucene-core-9.12.3.jar");
+        Path plugin = Files.createDirectories(home.resolve("plugins/opensearch-knn"));
+        Files.createFile(plugin.resolve("opensearch-knn-2.19.6.0.jar"));
+        Files.createFile(plugin.resolve("guava.jar"));
+        Files.createFile(plugin.resolve("notes.txt"));
+        Files.writeString(
+                plugin.resolve("plugin-descriptor.properties"),
+                "name=opensearch-knn\nextended.plugins=lang-painless, transport-grpc,sibling\n");
+        // lang-painless isn't there; one extended plugin is a module, the other a plugin.
+        Path module = Files.createDirectories(home.resolve("modules/transport-grpc"));
+        Files.createFile(module.resolve("failureaccess.jar"));
+        Files.createFile(module.resolve("guava.jar"));
+        Path sibling = Files.createDirectories(home.resolve("plugins/sibling"));
+        Files.createFile(sibling.resolve("sibling.jar"));
+        // Another plugin is left alone.
+        Files.createFile(Files.createDirectories(home.resolve("plugins/opensearch-security"))
+                .resolve("security.jar"));
+
+        List<Path> fromHome = ServerRuntimes.pluginJars(home, home.resolve("lib"));
+
+        assertThat(fromHome)
+                .containsExactly(
+                        plugin.resolve("guava.jar"),
+                        plugin.resolve("opensearch-knn-2.19.6.0.jar"),
+                        module.resolve("failureaccess.jar"),
+                        module.resolve("guava.jar"),
+                        sibling.resolve("sibling.jar"));
+        // The lib/ alone finds the plugins beside it, and its own jars aren't among them.
+        assertThat(ServerRuntimes.pluginJars(home.resolve("lib"), home.resolve("lib")))
+                .isEqualTo(fromHome);
+    }
+
+    @Test
+    void takesNoPluginJarsFromAServerWithoutTheKnnPlugin() throws Exception {
+        Path home = fakeLib(tmp.resolve("os"), "lucene-core-9.12.3.jar");
+        Files.createFile(Files.createDirectories(home.resolve("plugins/opensearch-security"))
+                .resolve("security.jar"));
+        Path plugin = Files.createDirectories(tmp.resolve("lone/plugins/opensearch-knn"));
+        Files.createFile(plugin.resolve("opensearch-knn.jar"));
+
+        assertThat(ServerRuntimes.pluginJars(home, home.resolve("lib"))).isEmpty();
+        // A plugin without a descriptor extends nothing.
+        Path lonely = fakeLib(tmp.resolve("lone"), "lucene-core-9.12.3.jar");
+        assertThat(ServerRuntimes.pluginJars(lonely, lonely.resolve("lib")))
+                .containsExactly(plugin.resolve("opensearch-knn.jar"));
+    }
+
     private static Path runtimes() {
         return testFile("leia.test.runtimes");
     }
