@@ -110,7 +110,6 @@ To see every call and its result, start leia with `LEIA_OPTS=-Dleia.log.level=FI
 
 - `docs/tasklist.md` is the work queue. When an item lands, move it to `docs/tasklist-done.md` (the archive).
 - Significant decisions become numbered ADRs in `docs/adr/`.
-- Locally (not in the repository), `docs/SESSION-SUMMARIES.md`, if present, holds an entry per unit of work, which the `/session-summary` skill writes and `/catch-up` reads.
 - Don't commit unless asked.
 - End each task with a proposed commit message of at most 4 lines, without a `Co-Authored-By` trailer.
 
