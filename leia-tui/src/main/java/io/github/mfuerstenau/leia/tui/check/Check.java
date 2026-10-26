@@ -152,9 +152,6 @@ public final class Check {
     /** The threads the next check runs on. */
     private int threads;
 
-    /** The threads of the check shown. */
-    private int checkedThreads;
-
     private Targets targets = new NotLoaded();
 
     /** The marked segments by index path, for the indexes that have segments. */
@@ -168,9 +165,6 @@ public final class Check {
 
     /** The level the next check runs at. */
     private int level = StartCheckIndexParams.DEFAULT_LEVEL;
-
-    /** The level of the check shown. */
-    private int checkedLevel = StartCheckIndexParams.DEFAULT_LEVEL;
 
     private State state = new Idle();
     private final List<String> lines = new ArrayList<>();
@@ -207,7 +201,6 @@ public final class Check {
         this.threadsSupported = threads;
         this.processors = Math.max(processors, 1);
         this.threads = this.processors;
-        this.checkedThreads = this.processors;
     }
 
     /** Fetches the indexes with their segments, the first time the screen is shown. */
@@ -316,8 +309,6 @@ public final class Check {
         if (code == KeyCode.ENTER && !running()) {
             long id = nextId++;
             state = new Running(id, null);
-            checkedLevel = level;
-            checkedThreads = threads;
             lines.clear();
             summaryScroll = 0;
             outputScroll = 0;
@@ -657,15 +648,14 @@ public final class Check {
                 Paragraph.builder().text(Text.from(shown)).block(block).build(), outputArea);
     }
 
-    /** The level and threads of the check, in the panel's title: {@code (level 2, integrity · 4 threads)}. */
+    /** The level and threads of the next check, in the panel's title: {@code (level 2, integrity · 4 threads)}. */
     private String title() {
         List<String> parts = new ArrayList<>();
         if (levels) {
-            int shown = state instanceof Idle ? level : checkedLevel;
-            parts.add("level " + shown + ", " + levelName(shown));
+            parts.add("level " + level + ", " + levelName(level));
         }
         if (threadsSupported) {
-            parts.add(TextFormat.count(state instanceof Idle ? threads : checkedThreads, "thread"));
+            parts.add(TextFormat.count(threads, "thread"));
         }
         return parts.isEmpty() ? "" : " (" + String.join(" · ", parts) + ")";
     }

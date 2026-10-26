@@ -425,10 +425,12 @@ class CheckTest {
         assertThat(render(check, 100, 40)).contains("Check (level 1, checksums · 1 thread)");
         assertThat(check.handleKey(key(KeyCode.ENTER)))
                 .contains(new Check.Request.Start(1, OptionalInt.of(1), OptionalInt.of(1), Optional.empty()));
-        // The check shown keeps its threads while the next is chosen.
+        // The title follows the keys after a check, as it does before one.
         check.cancel();
         check.handleKey(key('t'));
-        assertThat(render(check, 100, 40)).contains("· 1 thread)");
+        assertThat(render(check, 100, 40)).contains("· 2 threads)");
+        check.handleKey(key('l'));
+        assertThat(render(check, 100, 40)).contains("Check (level 2, integrity · 2 threads)");
         assertThat(Check.nextThreads(1, 1)).isEqualTo(1);
         assertThat(Check.nextThreads(8, 8)).isEqualTo(1);
     }
