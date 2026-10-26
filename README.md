@@ -1,3 +1,10 @@
+<p align="center">
+    <img src="https://badgen.net/badge/State/Alpha/red" />
+    <img src="https://badgen.net/badge/License/Apache 2.0/blue" />
+    <img src="https://badgen.net/badge/JDK%2fJRE/25/blue" />
+    <img src="https://badgen.net/badge/Lucene/2-10/blue" />
+</p>
+
 # leia
 
 A **read-only Lucene index inspector** for the terminal, as an alternative to
