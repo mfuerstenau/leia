@@ -78,7 +78,7 @@ class AutoStopWordsTest {
         return sink -> {
             for (String term : docFreqs.keySet().stream().sorted().toList()) {
                 byte[] bytes = ("<" + term + ">").getBytes(StandardCharsets.UTF_8);
-                sink.term(bytes, 1, bytes.length - 2, docFreqs.get(term));
+                sink.term(bytes, 1, bytes.length - 2, docFreqs.get(term), 0);
             }
         };
     }

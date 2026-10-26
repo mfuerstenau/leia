@@ -91,6 +91,7 @@ import io.github.mfuerstenau.leia.protocol.terms.PostingsFilter;
 import io.github.mfuerstenau.leia.protocol.terms.StartExportTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.TermDelimiter;
 import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
+import io.github.mfuerstenau.leia.protocol.terms.TermExportFormat;
 import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
 import io.github.mfuerstenau.leia.protocol.version.JavaRuntime;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
@@ -2876,7 +2877,8 @@ class AppTest {
                                 "id",
                                 dir.resolve("ids.out").toString(),
                                 Optional.of(TermDelimiter.TAB),
-                                Optional.of(false))));
+                                Optional.of(false),
+                                Optional.of(TermExportFormat.LUKE))));
         assertThat(app.exporting()).isTrue();
         assertThat(render(app)).contains("Exporting…");
         assertThat(app.exportStarted(1, 9)).isEmpty();

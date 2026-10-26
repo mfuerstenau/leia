@@ -16,6 +16,7 @@ import dev.tamboui.widgets.block.Title;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import io.github.mfuerstenau.leia.protocol.terms.StartExportTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.TermDelimiter;
+import io.github.mfuerstenau.leia.protocol.terms.TermExportFormat;
 import io.github.mfuerstenau.leia.tui.documents.DocumentExport;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.nio.file.Files;
@@ -80,7 +81,7 @@ public final class ExportPrompt {
     private sealed interface Kind {}
 
     /** The terms of a field. */
-    private record TermsKind(String field, TermDelimiter delimiter) implements Kind {}
+    private record TermsKind(String field, TermDelimiter delimiter, TermExportFormat format) implements Kind {}
 
     /**
      * A document.
@@ -119,7 +120,10 @@ public final class ExportPrompt {
     /** The prompt for the terms of {@code field}, prefilled with {@code terms_<field>_<UTC time>.out}. */
     public static ExportPrompt terms(String field, Optional<Path> home, Optional<Path> cwd) {
         return new ExportPrompt(
-                new TermsKind(field, TermDelimiter.TAB), defaultFile(field, System.currentTimeMillis()), home, cwd);
+                new TermsKind(field, TermDelimiter.TAB, TermExportFormat.LUKE),
+                defaultFile(field, System.currentTimeMillis()),
+                home,
+                cwd);
     }
 
     /**
@@ -181,7 +185,8 @@ public final class ExportPrompt {
                                     case TAB -> TermDelimiter.COMMA;
                                     case COMMA -> TermDelimiter.SPACE;
                                     case SPACE -> TermDelimiter.TAB;
-                                });
+                                },
+                                terms.format());
                     case DocumentKind document ->
                         new DocumentKind(
                                 document.docId(),
@@ -196,6 +201,17 @@ public final class ExportPrompt {
                     if (kind instanceof DocumentKind document) {
                         return new Submit(new ExportRequest.Document(
                                 document.docId(), document.indexedTerms(), new ExportTarget.Clipboard()));
+                    }
+                    return new Nothing();
+                }
+                if (key.hasCtrl() && key.codePoint() == 'f') {
+                    if (kind instanceof TermsKind terms) {
+                        kind = new TermsKind(
+                                terms.field(),
+                                terms.delimiter(),
+                                terms.format() == TermExportFormat.LUKE
+                                        ? TermExportFormat.FULL
+                                        : TermExportFormat.LUKE);
                     }
                     return new Nothing();
                 }
@@ -240,7 +256,11 @@ public final class ExportPrompt {
         return switch (kind) {
             case TermsKind terms ->
                 new Submit(new ExportRequest.Terms(new StartExportTermsParams(
-                        terms.field(), shown, Optional.of(terms.delimiter()), Optional.of(exists))));
+                        terms.field(),
+                        shown,
+                        Optional.of(terms.delimiter()),
+                        Optional.of(exists),
+                        Optional.of(terms.format()))));
             case DocumentKind document ->
                 new Submit(new ExportRequest.Document(
                         document.docId(), document.indexedTerms(), new ExportTarget.File(shown, exists)));
@@ -268,8 +288,9 @@ public final class ExportPrompt {
         switch (kind) {
             case TermsKind terms -> {
                 title = " Export the terms of " + terms.field() + " ";
-                choice = " Tab delimiter: " + delimiterName(terms.delimiter()) + " ";
-                keys = "Enter export   Tab delimiter   Esc cancel";
+                choice = " Tab delimiter: " + delimiterName(terms.delimiter()) + " · Ctrl+F format: "
+                        + (terms.format() == TermExportFormat.FULL ? "full" : "Luke") + " ";
+                keys = "Enter export   Tab delimiter   Ctrl+F format   Esc cancel";
             }
             case DocumentKind document -> {
                 title = " Export document " + document.docId() + " as JSON ";

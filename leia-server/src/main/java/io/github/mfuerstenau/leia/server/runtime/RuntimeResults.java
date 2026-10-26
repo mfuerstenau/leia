@@ -1441,7 +1441,7 @@ public final class RuntimeResults {
             do {
                 Terms.TermsPage page = terms.terms(field, from, pageSize);
                 for (Terms.TermEntry entry : page.terms()) {
-                    sink.term(entry.term(), 0, entry.term().length, entry.docFreq());
+                    sink.term(entry.term(), 0, entry.term().length, entry.docFreq(), entry.totalTermFreq());
                 }
                 from = page.next();
             } while (from.isPresent());

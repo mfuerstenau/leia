@@ -8,6 +8,7 @@ import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
 import io.github.mfuerstenau.leia.protocol.terms.StartExportTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.TermDelimiter;
+import io.github.mfuerstenau.leia.protocol.terms.TermExportFormat;
 import io.github.mfuerstenau.leia.tui.TestScreens;
 import io.github.mfuerstenau.leia.tui.prompt.ExportPrompt.ExportRequest;
 import io.github.mfuerstenau.leia.tui.prompt.ExportPrompt.ExportTarget;
@@ -146,7 +147,8 @@ class ExportPromptTest {
                         "body",
                         dir.resolve("out/t.txt").toString(),
                         Optional.of(TermDelimiter.COMMA),
-                        Optional.of(false)))));
+                        Optional.of(false),
+                        Optional.of(TermExportFormat.LUKE)))));
 
         clear(prompt);
         typed(prompt, "~/t.txt");
@@ -156,6 +158,23 @@ class ExportPromptTest {
         StartExportTermsParams params = ((ExportRequest.Terms) submit.request()).params();
         assertThat(params.path()).isEqualTo(home.resolve("t.txt").toString());
         assertThat(params.delimiter()).contains(TermDelimiter.TAB);
+    }
+
+    @Test
+    void ctrlFTogglesTheTermsFormat() {
+        ExportPrompt prompt = ExportPrompt.terms("body", Optional.empty(), Optional.of(dir));
+        assertThat(render(prompt)).contains("Ctrl+F format: Luke", "Ctrl+F format");
+        clear(prompt);
+        typed(prompt, "t.out");
+
+        assertThat(prompt.handleKey(ctrl('f'))).isEqualTo(new ExportPrompt.Nothing());
+        assertThat(render(prompt)).contains("Ctrl+F format: full");
+        assertThat(prompt.input()).isEqualTo("t.out");
+        ExportPrompt.Submit submit = (ExportPrompt.Submit) prompt.handleKey(key(KeyCode.ENTER));
+        assertThat(((ExportRequest.Terms) submit.request()).params().format()).contains(TermExportFormat.FULL);
+
+        prompt.handleKey(ctrl('f'));
+        assertThat(render(prompt)).contains("Ctrl+F format: Luke");
     }
 
     @Test
@@ -181,6 +200,6 @@ class ExportPromptTest {
     void theTermsPromptHasNoCopy() {
         ExportPrompt prompt = ExportPrompt.terms("body", Optional.empty(), Optional.empty());
         assertThat(prompt.handleKey(ctrl('y'))).isEqualTo(new ExportPrompt.Nothing());
-        assertThat(render(prompt)).contains("Enter export   Tab delimiter   Esc cancel");
+        assertThat(render(prompt)).contains("Enter export   Tab delimiter   Ctrl+F format   Esc cancel");
     }
 }

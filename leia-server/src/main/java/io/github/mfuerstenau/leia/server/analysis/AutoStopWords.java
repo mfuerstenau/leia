@@ -49,7 +49,7 @@ public record AutoStopWords(int maxDocFreq, Map<String, List<String>> words) {
             String field = entry.getKey();
             List<String> fieldWords = new ArrayList<>();
             try {
-                entry.getValue().forEachTerm((bytes, offset, length, docFreq) -> {
+                entry.getValue().forEachTerm((bytes, offset, length, docFreq, _) -> {
                     terms[0]++;
                     if (docFreq > maxDocFreq) {
                         if (fieldWords.size() == maxWords) {

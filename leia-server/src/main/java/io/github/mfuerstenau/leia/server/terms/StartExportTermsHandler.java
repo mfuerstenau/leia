@@ -7,6 +7,7 @@ import io.github.mfuerstenau.leia.protocol.job.JobStarted;
 import io.github.mfuerstenau.leia.protocol.terms.ExportTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.StartExportTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.TermDelimiter;
+import io.github.mfuerstenau.leia.protocol.terms.TermExportFormat;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
@@ -61,10 +62,11 @@ public final class StartExportTermsHandler implements MethodHandler<StartExportT
             throw new RpcException(ErrorCode.OUTPUT_NOT_WRITABLE, e.getMessage(), e);
         }
         TermExport.Delimiter delimiter = delimiter(params.delimiter().orElse(TermDelimiter.TAB));
+        TermExport.Format format = format(params.format().orElse(TermExportFormat.LUKE));
         long jobId = jobs.start(
                 "export of the terms of field " + field + " to " + file + lucene,
                 ExportTermsResult.class,
-                progress -> export(directories, terms, field, file, delimiter, overwrite, progress));
+                progress -> export(directories, terms, field, file, delimiter, format, overwrite, progress));
         return new JobStarted(jobId);
     }
 
@@ -88,17 +90,26 @@ public final class StartExportTermsHandler implements MethodHandler<StartExportT
         };
     }
 
+    private static TermExport.Format format(TermExportFormat format) {
+        return switch (format) {
+            case LUKE -> TermExport.Format.LUKE;
+            case FULL -> TermExport.Format.FULL;
+        };
+    }
+
     private static ExportTermsResult export(
             List<Path> directories,
             TermExport.TermSource terms,
             String field,
             Path file,
             TermExport.Delimiter delimiter,
+            TermExport.Format format,
             boolean overwrite,
             ScanProgress progress)
             throws RpcException {
         try {
-            TermExport.Result result = TermExport.export(directories, terms, file, delimiter, overwrite, progress);
+            TermExport.Result result =
+                    TermExport.export(directories, terms, file, delimiter, format, overwrite, progress);
             return new ExportTermsResult(result.path().toString(), result.terms(), result.bytes());
         } catch (TermExport.OutputException e) {
             throw new RpcException(ErrorCode.OUTPUT_NOT_WRITABLE, e.getMessage(), e);

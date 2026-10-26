@@ -10,6 +10,7 @@ import io.github.mfuerstenau.leia.server.job.ScanProgress;
 import io.github.mfuerstenau.leia.server.runtime.OpenRuntime;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
 import io.github.mfuerstenau.leia.server.terms.TermExport.Delimiter;
+import io.github.mfuerstenau.leia.server.terms.TermExport.Format;
 import io.github.mfuerstenau.leia.server.terms.TermExport.OutputException;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -42,7 +43,7 @@ class TermExportTest {
         Path file = tmp.resolve("terms.out");
 
         try (OpenRuntime index = TestIndexes.open(dir)) {
-            TermExport.Result result = export(index, "tag", file, Delimiter.TAB, false, ScanProgress.NONE);
+            TermExport.Result result = export(index, "tag", file, Delimiter.TAB, Format.LUKE, false, ScanProgress.NONE);
 
             assertThat(result.path()).isEqualTo(file);
             assertThat(result.terms()).isEqualTo(3);
@@ -58,8 +59,8 @@ class TermExportTest {
         Path space = tmp.resolve("space.out");
 
         try (OpenRuntime index = TestIndexes.open(dir)) {
-            export(index, "tag", comma, Delimiter.COMMA, false, ScanProgress.NONE);
-            export(index, "tag", space, Delimiter.SPACE, false, ScanProgress.NONE);
+            export(index, "tag", comma, Delimiter.COMMA, Format.LUKE, false, ScanProgress.NONE);
+            export(index, "tag", space, Delimiter.SPACE, Format.LUKE, false, ScanProgress.NONE);
         }
         assertThat(Files.readString(comma)).isEqualTo("a,b,1\nblue,2\ngrün,1\n");
         assertThat(Files.readString(space)).isEqualTo("a,b 1\nblue 2\ngrün 1\n");
@@ -71,9 +72,56 @@ class TermExportTest {
         Path file = tmp.resolve("raw.out");
 
         try (OpenRuntime index = TestIndexes.open(dir)) {
-            export(index, "raw", file, Delimiter.TAB, false, ScanProgress.NONE);
+            export(index, "raw", file, Delimiter.TAB, Format.LUKE, false, ScanProgress.NONE);
         }
         assertThat(Files.readString(file, StandardCharsets.US_ASCII)).isEqualTo("00ff\t1\n");
+    }
+
+    @Test
+    void theFullFormatHasAMarkerAndBothCounts() throws Exception {
+        Path dir = writeIndex(tmp.resolve("index"));
+        Path file = tmp.resolve("full.out");
+
+        try (OpenRuntime index = TestIndexes.open(dir)) {
+            export(index, "tag", file, Delimiter.TAB, Format.FULL, false, ScanProgress.NONE);
+        }
+        assertThat(Files.readString(file)).isEqualTo("t\t1\t1\ta,b\nt\t2\t2\tblue\nt\t1\t1\tgrün\n");
+    }
+
+    @Test
+    void theFullFormatMarksHexTermsAndSplitsAtTheFirstThreeDelimiters() throws Exception {
+        Path file = tmp.resolve("full.out");
+        TermExport.TermSource terms = sink -> {
+            byte[] comma = "a,b".getBytes(StandardCharsets.UTF_8);
+            sink.term(comma, 0, comma.length, 2, 7);
+            sink.term(new byte[] {0, (byte) 0xff}, 0, 2, 1, 1);
+        };
+
+        TermExport.export(List.of(), terms, file, Delimiter.COMMA, Format.FULL, false, ScanProgress.NONE);
+
+        assertThat(Files.readString(file)).isEqualTo("t,2,7,a,b\nx,1,1,00ff\n");
+    }
+
+    @Test
+    void aTermWithAControlCharacterIsHexInBothFormats() throws Exception {
+        byte[] newline = "a\nb".getBytes(StandardCharsets.UTF_8);
+        byte[] tab = "a\tb".getBytes(StandardCharsets.UTF_8);
+        byte[] nul = {'a', 0};
+        byte[] del = {'a', 0x7f};
+        TermExport.TermSource terms = sink -> {
+            for (byte[] term : List.of(newline, tab, nul, del)) {
+                sink.term(term, 0, term.length, 1, 2);
+            }
+        };
+        Path luke = tmp.resolve("luke.out");
+        Path full = tmp.resolve("full.out");
+
+        TermExport.export(List.of(), terms, luke, Delimiter.TAB, Format.LUKE, false, ScanProgress.NONE);
+        TermExport.export(List.of(), terms, full, Delimiter.TAB, Format.FULL, false, ScanProgress.NONE);
+
+        assertThat(Files.readString(luke)).isEqualTo("610a62\t1\n610962\t1\n6100\t1\n617f\t1\n");
+        assertThat(Files.readString(full))
+                .isEqualTo("x\t1\t2\t610a62\nx\t1\t2\t610962\nx\t1\t2\t6100\nx\t1\t2\t617f\n");
     }
 
     @Test
@@ -82,7 +130,8 @@ class TermExportTest {
         Path file = tmp.resolve("rank.out");
 
         try (OpenRuntime index = TestIndexes.open(dir)) {
-            TermExport.Result result = export(index, "rank", file, Delimiter.TAB, false, ScanProgress.NONE);
+            TermExport.Result result =
+                    export(index, "rank", file, Delimiter.TAB, Format.LUKE, false, ScanProgress.NONE);
 
             assertThat(result.terms()).isZero();
         }
@@ -95,7 +144,7 @@ class TermExportTest {
         Path file = tmp.resolve("terms.out");
 
         try (OpenRuntime index = TestIndexes.open(dir)) {
-            assertThatThrownBy(() -> export(index, "tag", file, Delimiter.TAB, false, _ -> {
+            assertThatThrownBy(() -> export(index, "tag", file, Delimiter.TAB, Format.LUKE, false, _ -> {
                         throw new CancellationException("cancelled");
                     }))
                     .isInstanceOf(CancellationException.class);
@@ -111,7 +160,8 @@ class TermExportTest {
 
         try (OpenRuntime index = TestIndexes.open(dir)) {
             for (Path file : new Path[] {dir.resolve("terms.out"), below.resolve("terms.out"), link.resolve("t.out")}) {
-                assertThatThrownBy(() -> export(index, "tag", file, Delimiter.TAB, true, ScanProgress.NONE))
+                assertThatThrownBy(
+                                () -> export(index, "tag", file, Delimiter.TAB, Format.LUKE, true, ScanProgress.NONE))
                         .isInstanceOf(OutputException.class)
                         .hasMessageContaining("Not writing into the index directory " + dir);
             }
@@ -140,12 +190,12 @@ class TermExportTest {
         Path file = Files.writeString(tmp.resolve("terms.out"), "old");
 
         try (OpenRuntime index = TestIndexes.open(dir)) {
-            assertThatThrownBy(() -> export(index, "tag", file, Delimiter.TAB, false, ScanProgress.NONE))
+            assertThatThrownBy(() -> export(index, "tag", file, Delimiter.TAB, Format.LUKE, false, ScanProgress.NONE))
                     .isInstanceOf(OutputException.class)
                     .hasMessage("File exists: " + file);
             assertThat(file).hasContent("old");
 
-            export(index, "tag", file, Delimiter.TAB, true, ScanProgress.NONE);
+            export(index, "tag", file, Delimiter.TAB, Format.LUKE, true, ScanProgress.NONE);
         }
         assertThat(Files.readString(file)).startsWith("a,b\t1\n");
     }
@@ -169,8 +219,8 @@ class TermExportTest {
                     .hasMessage("Not writing through a symbolic link: " + link);
             assertThatThrownBy(() -> TermExport.checkTarget(directories(index), Path.of("terms.out"), false))
                     .isInstanceOf(IllegalArgumentException.class);
-            assertThatThrownBy(
-                            () -> export(index, "nope", tmp.resolve("x.out"), Delimiter.TAB, false, ScanProgress.NONE))
+            assertThatThrownBy(() -> export(
+                            index, "nope", tmp.resolve("x.out"), Delimiter.TAB, Format.LUKE, false, ScanProgress.NONE))
                     .isInstanceOf(RpcException.class);
         }
         assertThat(target).hasContent("keep");
@@ -183,21 +233,34 @@ class TermExportTest {
         byte[] text = "xxblueyy".getBytes(StandardCharsets.UTF_8);
         byte[] binary = HexFormat.of().parseHex("aa00ffbb");
         TermExport.TermSource terms = sink -> {
-            sink.term(text, 2, 4, 3);
-            sink.term(binary, 1, 2, 1);
+            sink.term(text, 2, 4, 3, 5);
+            sink.term(binary, 1, 2, 1, 1);
         };
 
-        TermExport.Result result = TermExport.export(List.of(), terms, file, Delimiter.TAB, false, ScanProgress.NONE);
+        TermExport.Result result =
+                TermExport.export(List.of(), terms, file, Delimiter.TAB, Format.LUKE, false, ScanProgress.NONE);
 
         assertThat(result.terms()).isEqualTo(2);
         assertThat(Files.readString(file, StandardCharsets.US_ASCII)).isEqualTo("blue\t3\n00ff\t1\n");
     }
 
     private static TermExport.Result export(
-            OpenRuntime index, String field, Path file, Delimiter delimiter, boolean overwrite, ScanProgress progress)
+            OpenRuntime index,
+            String field,
+            Path file,
+            Delimiter delimiter,
+            Format format,
+            boolean overwrite,
+            ScanProgress progress)
             throws Exception {
         return TermExport.export(
-                directories(index), RuntimeResults.exportTerms(index, field), file, delimiter, overwrite, progress);
+                directories(index),
+                RuntimeResults.exportTerms(index, field),
+                file,
+                delimiter,
+                format,
+                overwrite,
+                progress);
     }
 
     /** The opened and the skipped index directories, as the server passes them. */

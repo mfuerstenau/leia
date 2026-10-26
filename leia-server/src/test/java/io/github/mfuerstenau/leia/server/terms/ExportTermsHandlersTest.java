@@ -9,6 +9,7 @@ import io.github.mfuerstenau.leia.protocol.terms.ExportTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetExportTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.StartExportTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.TermDelimiter;
+import io.github.mfuerstenau.leia.protocol.terms.TermExportFormat;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.TestIndexes;
@@ -67,11 +68,28 @@ class ExportTermsHandlersTest {
         Path file = Files.writeString(tmp.resolve("terms.out"), "old");
 
         long jobId = start.handle(new StartExportTermsParams(
-                        "body", file.toString(), Optional.of(TermDelimiter.COMMA), Optional.of(true)))
+                        "body", file.toString(), Optional.of(TermDelimiter.COMMA), Optional.of(true), Optional.empty()))
                 .jobId();
         awaitDone(jobId);
 
         assertThat(Files.readString(file)).isEqualTo("blue,1\ngreen,1\nred,2\n");
+    }
+
+    @Test
+    void theFullFormatHasTheTotalTermFrequency() throws Exception {
+        openIndex();
+        Path file = tmp.resolve("full.out");
+
+        long jobId = start.handle(new StartExportTermsParams(
+                        "body",
+                        file.toString(),
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.of(TermExportFormat.FULL)))
+                .jobId();
+        awaitDone(jobId);
+
+        assertThat(Files.readString(file)).isEqualTo("t\t1\t1\tblue\nt\t1\t1\tgreen\nt\t2\t3\tred\n");
     }
 
     @Test

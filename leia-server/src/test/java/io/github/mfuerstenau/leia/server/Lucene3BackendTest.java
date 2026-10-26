@@ -57,6 +57,7 @@ import io.github.mfuerstenau.leia.protocol.terms.GetTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.StartExportTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.StartFieldTermScanParams;
+import io.github.mfuerstenau.leia.protocol.terms.TermExportFormat;
 import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -346,6 +347,36 @@ class Lucene3BackendTest {
                 Methods.START_EXPORT_TERMS,
                 new StartExportTermsParams("body", Path.of(PATH, "body.tsv").toString()),
                 ErrorCode.OUTPUT_NOT_WRITABLE);
+    }
+
+    @Test
+    void exportsTheFullFormatWithTheTotalTermFrequency() throws Exception {
+        open(Path.of(PATH));
+        Path file = tmp.resolve("body.full");
+        backend.job(
+                Methods.START_EXPORT_TERMS,
+                new StartExportTermsParams(
+                        "body",
+                        file.toString(),
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.of(TermExportFormat.FULL)),
+                Methods.GET_EXPORT_TERMS,
+                GetExportTermsResult::result);
+
+        List<String> expected = new ArrayList<>();
+        Optional<BytesValue> from = Optional.empty();
+        do {
+            GetTermsResult page = backend.call(Methods.GET_TERMS, new GetTermsParams("body", from, 3));
+            page.terms()
+                    .forEach(term ->
+                            expected.add("t\t" + term.docFreq() + "\t" + term.totalTermFreq() + "\t" + term.term()));
+            from = page.next();
+        } while (from.isPresent());
+        assertThat(Files.readAllLines(file)).isEqualTo(expected);
+        assertThat(expected)
+                .contains("t\t7\t6\talpha")
+                .anySatisfy(line -> assertThat(line.split("\t")[2]).isNotEqualTo("0"));
     }
 
     /** The lines an export of {@code field} should write: the terms screen's pages, tab-separated. */

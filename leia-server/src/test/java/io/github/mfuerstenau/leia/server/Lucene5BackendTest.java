@@ -71,7 +71,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -343,10 +342,14 @@ class Lucene5BackendTest {
         ExportTermsResult result = exportTerms("price", file);
         List<String> expected = termLines("price");
         assertThat(expected).isNotEmpty();
-        // Trie terms use 7 bits a byte, so they are UTF-8 and written as they are, a newline too.
-        assertThat(Files.readString(file, StandardCharsets.UTF_8))
-                .isEqualTo(expected.stream().map(line -> line + "\n").collect(Collectors.joining()));
         assertThat(result.terms()).isEqualTo(expected.size());
+        // Trie terms use 7 bits a byte, so they are UTF-8, but their control bytes mustn't break a line (ADR 0094).
+        List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
+        assertThat(lines)
+                .hasSize(expected.size())
+                .allSatisfy(line -> assertThat(line.split("\t", -1)).hasSize(2));
+        assertThat(lines).anySatisfy(line -> assertThat(line.split("\t")[0]).matches("[0-9a-f]+"));
+        assertThat(Files.readString(file, StandardCharsets.UTF_8)).doesNotContainPattern("[\\x00-\\x08\\x0b-\\x1f]");
     }
 
     /** The lines an export of {@code field} should write: the terms screen's pages, tab-separated. */

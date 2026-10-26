@@ -31,10 +31,10 @@ class RuntimeResultsTest {
         List<String> exported = new ArrayList<>();
 
         RuntimeResults.pages(terms, "f", 2)
-                .forEachTerm((bytes, offset, length, docFreq) ->
-                        exported.add(new String(bytes, offset, length, StandardCharsets.UTF_8) + docFreq));
+                .forEachTerm((bytes, offset, length, docFreq, totalTermFreq) -> exported.add(
+                        new String(bytes, offset, length, StandardCharsets.UTF_8) + docFreq + "/" + totalTermFreq));
 
-        assertThat(exported).containsExactly("a1", "b2", "c3", "d4", "e5");
+        assertThat(exported).containsExactly("a1/10", "b2/20", "c3/30", "d4/40", "e5/50");
         assertThat(terms.froms).containsExactly("", "c", "e");
     }
 
@@ -43,7 +43,7 @@ class RuntimeResultsTest {
         PagedTerms terms = new PagedTerms(List.of());
         List<String> exported = new ArrayList<>();
 
-        RuntimeResults.pages(terms, "f", 2).forEachTerm((_, _, _, _) -> exported.add("term"));
+        RuntimeResults.pages(terms, "f", 2).forEachTerm((_, _, _, _, _) -> exported.add("term"));
 
         assertThat(exported).isEmpty();
         assertThat(terms.froms).containsExactly("");
@@ -167,7 +167,7 @@ class RuntimeResultsTest {
             }
             List<TermEntry> page = new ArrayList<>();
             for (int i = first; i < Math.min(first + limit, terms.size()); i++) {
-                page.add(new TermEntry(terms.get(i).getBytes(StandardCharsets.UTF_8), i + 1, i + 1));
+                page.add(new TermEntry(terms.get(i).getBytes(StandardCharsets.UTF_8), i + 1, (i + 1) * 10L));
             }
             int next = first + limit;
             return new TermsPage(

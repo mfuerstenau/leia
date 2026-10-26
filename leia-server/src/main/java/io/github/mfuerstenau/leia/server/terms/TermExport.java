@@ -21,8 +21,8 @@ import java.util.List;
 import java.util.concurrent.CancellationException;
 
 /**
- * Writes the terms of a field to a file, one {@code term<delimiter>docFreq} per line, as Luke's
- * export does (ADR 0022). The file must lie outside every index directory of the opened path, so
+ * Writes the terms of a field to a file, one per line: {@code term<delimiter>docFreq}, as Luke's
+ * export does, or with a marker and {@code totalTermFreq} (ADR 0022, ADR 0094). The file must lie outside every index directory of the opened path, so
  * the index is never written to (AGENTS.md, hard rule 1).
  */
 public final class TermExport {
@@ -51,6 +51,14 @@ public final class TermExport {
         }
     }
 
+    /** The line layout. */
+    public enum Format {
+        /** {@code term<delimiter>docFreq}; a term that isn't text is hex. */
+        LUKE,
+        /** {@code t|x<delimiter>docFreq<delimiter>totalTermFreq<delimiter>term}; {@code x} marks hex. */
+        FULL
+    }
+
     /**
      * The outcome of an export.
      *
@@ -66,9 +74,9 @@ public final class TermExport {
 
         /**
          * One term, as {@code length} bytes of {@code bytes} from {@code offset} on, with its document
-         * frequency. The bytes are valid only during the call.
+         * frequency and total term frequency. The bytes are valid only during the call.
          */
-        void term(byte[] bytes, int offset, int length, int docFreq) throws IOException;
+        void term(byte[] bytes, int offset, int length, int docFreq, long totalTermFreq) throws IOException;
     }
 
     /** The terms of a field, as an export reads them. */
@@ -144,9 +152,11 @@ public final class TermExport {
     }
 
     /**
-     * Writes every term of {@code terms}, in term order, with its document frequency, to {@code
-     * file}, after {@link #checkTarget} against {@code indexDirectories}. A term that isn't valid
-     * UTF-8 is written as lowercase hex. No terms give an empty file. If the export fails or is cancelled, the file is deleted.
+     * Writes every term of {@code terms}, in term order, in {@code format} to {@code file}, after
+     * {@link #checkTarget} against {@code indexDirectories}. A term is written as text only if it is
+     * valid UTF-8 and has no control character (U+0000 to U+001F, U+007F), else as lowercase hex, so
+     * that no term breaks a line (ADR 0094). No terms give an empty file. If the export fails or is
+     * cancelled, the file is deleted.
      *
      * <p>{@code progress} gets the number of terms written every {@value #PROGRESS_INTERVAL} terms and
      * at the end; it can stop the export by throwing a {@link CancellationException}.
@@ -160,6 +170,7 @@ public final class TermExport {
             TermSource terms,
             Path file,
             Delimiter delimiter,
+            Format format,
             boolean overwrite,
             ScanProgress progress)
             throws IOException {
@@ -187,8 +198,8 @@ public final class TermExport {
         try {
             long[] written = {0};
             byte separator = (byte) delimiter.character();
-            terms.forEachTerm((bytes, offset, length, docFreq) -> {
-                lines.write(bytes, offset, length, separator, docFreq);
+            terms.forEachTerm((bytes, offset, length, docFreq, totalTermFreq) -> {
+                lines.write(bytes, offset, length, separator, format, docFreq, totalTermFreq);
                 if (++written[0] % PROGRESS_INTERVAL == 0) {
                     progress.scanned(written[0]);
                 }
@@ -226,9 +237,18 @@ public final class TermExport {
             this.path = path;
         }
 
-        void write(byte[] term, int offset, int length, byte separator, int docFreq) throws OutputException {
+        void write(byte[] term, int offset, int length, byte separator, Format format, int docFreq, long totalTermFreq)
+                throws OutputException {
             try {
-                if (isUtf8(term, offset, length)) {
+                boolean text = isText(term, offset, length);
+                if (format == Format.FULL) {
+                    char d = (char) separator;
+                    byte[] head = ((text ? "t" : "x") + d + docFreq + d + totalTermFreq + d)
+                            .getBytes(StandardCharsets.US_ASCII);
+                    out.write(head);
+                    bytes += head.length;
+                }
+                if (text) {
                     out.write(term, offset, length);
                     bytes += length;
                 } else {
@@ -236,13 +256,23 @@ public final class TermExport {
                     out.write(hex);
                     bytes += hex.length;
                 }
-                byte[] rest =
-                        (((char) separator) + Integer.toString(docFreq) + "\n").getBytes(StandardCharsets.US_ASCII);
+                String tail = format == Format.FULL ? "\n" : ((char) separator) + Integer.toString(docFreq) + "\n";
+                byte[] rest = tail.getBytes(StandardCharsets.US_ASCII);
                 out.write(rest);
                 bytes += rest.length;
             } catch (IOException e) {
                 throw failed(e);
             }
+        }
+
+        /** Valid UTF-8 without a control character; bytes below 0x80 are only ever ASCII in UTF-8. */
+        private boolean isText(byte[] term, int offset, int length) {
+            for (int i = offset; i < offset + length; i++) {
+                if (term[i] >= 0 && (term[i] < 0x20 || term[i] == 0x7F)) {
+                    return false;
+                }
+            }
+            return isUtf8(term, offset, length);
         }
 
         private boolean isUtf8(byte[] term, int offset, int length) {
