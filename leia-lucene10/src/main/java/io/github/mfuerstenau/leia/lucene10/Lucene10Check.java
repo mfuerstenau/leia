@@ -5,7 +5,6 @@ import io.github.mfuerstenau.leia.runtime.Check;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import java.nio.file.Path;
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.function.Consumer;
 import java.util.function.LongConsumer;
 
@@ -20,12 +19,23 @@ final class Lucene10Check implements Check {
         return true;
     }
 
-    /** {@inheritDoc} The level defaults to 2. */
+    @Override
+    public boolean hasThreads() {
+        return true;
+    }
+
+    /** {@inheritDoc} The level defaults to 2, the threads to the processors. */
     @Override
     public CheckResult check(
-            Path dir, DirectoryKind kind, OptionalInt level, Consumer<String> line, LongConsumer progress) {
+            Path dir, DirectoryKind kind, Options options, Consumer<String> line, LongConsumer progress) {
         IndexCheck.Result result = IndexCheck.check(
-                dir, Lucene10Index.directoryImpl(kind), level.orElse(DEFAULT_LEVEL), line, progress::accept);
+                dir,
+                Lucene10Index.directoryImpl(kind),
+                options.level().orElse(DEFAULT_LEVEL),
+                options.threads().orElse(Runtime.getRuntime().availableProcessors()),
+                options.segments().orElse(null),
+                line,
+                progress::accept);
         Optional<String> error = result.error();
         if (error.isPresent()) {
             return CheckResult.failed(error.get());

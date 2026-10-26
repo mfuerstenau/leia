@@ -493,7 +493,7 @@ class Lucene3IndexTest {
         Check.CheckResult result = new Lucene3Runtime()
                 .check()
                 .orElseThrow()
-                .check(testIndex(name), DirectoryKind.FS, OptionalInt.empty(), lines::add, _ -> {});
+                .check(testIndex(name), DirectoryKind.FS, Check.Options.defaults(), lines::add, _ -> {});
         assertThat(result.error()).isEmpty();
         assertThat(result.clean()).isTrue();
         assertThat(result.badSegments()).isZero();
@@ -520,7 +520,7 @@ class Lucene3IndexTest {
         Check.CheckResult result = new Lucene3Runtime()
                 .check()
                 .orElseThrow()
-                .check(dir, DirectoryKind.NIO, OptionalInt.empty(), _ -> {}, _ -> {});
+                .check(dir, DirectoryKind.NIO, Check.Options.defaults(), _ -> {}, _ -> {});
         assertThat(result.clean()).isFalse();
         assertThat(result.badSegments()).isEqualTo(1);
         assertThat(result.lostDocs()).isEqualTo(3);
@@ -537,7 +537,7 @@ class Lucene3IndexTest {
         assertThatThrownBy(() -> new Lucene3Runtime()
                         .check()
                         .orElseThrow()
-                        .check(lucene3(), DirectoryKind.FS, OptionalInt.empty(), _ -> {}, _ -> {
+                        .check(lucene3(), DirectoryKind.FS, Check.Options.defaults(), _ -> {}, _ -> {
                             if (calls.incrementAndGet() > 3) {
                                 throw stop;
                             }
@@ -857,7 +857,7 @@ class Lucene3IndexTest {
             }
             runtime.commits().orElseThrow().commits(dir, directoryKind);
             runtime.commits().orElseThrow().commit(dir, directoryKind, 1);
-            runtime.check().orElseThrow().check(dir, directoryKind, OptionalInt.empty(), _ -> {}, _ -> {});
+            runtime.check().orElseThrow().check(dir, directoryKind, Check.Options.defaults(), _ -> {}, _ -> {});
             assertThat(hashes(dir)).isEqualTo(before);
             assertThat(dir.resolve("write.lock")).doesNotExist();
         }

@@ -8,6 +8,8 @@ import io.github.mfuerstenau.leia.protocol.analysis.GetAutoStopWordsResult;
 import io.github.mfuerstenau.leia.protocol.analysis.StartAutoStopWordsParams;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexParams;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexResult;
+import io.github.mfuerstenau.leia.protocol.check.GetCheckTargetsParams;
+import io.github.mfuerstenau.leia.protocol.check.GetCheckTargetsResult;
 import io.github.mfuerstenau.leia.protocol.check.StartCheckIndexParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
@@ -434,9 +436,21 @@ public final class Methods {
             new RpcMethod<>("getAutoStopWords", JobParams.class, GetAutoStopWordsResult.class);
 
     /**
-     * Starts a job that checks every index of the open path with Lucene's {@code CheckIndex}, with or
-     * without a reader (ADR 0022): the opened indexes, then the skipped ones. Nothing is written.
-     * Fails with {@code NO_INDEX_OPEN}, or {@code INVALID_PARAMS} for a level out of range.
+     * The indexes of the open path with the segments of their latest commit, which {@code
+     * startCheckIndex} can be told to check (ADR 0093): the opened indexes, then the skipped ones,
+     * read from the directories on every call, with or without a reader. An index whose commit can't
+     * be listed has an {@code error} instead of segments. Fails with {@code NO_INDEX_OPEN}.
+     */
+    public static final RpcMethod<GetCheckTargetsParams, GetCheckTargetsResult> GET_CHECK_TARGETS =
+            new RpcMethod<>("getCheckTargets", GetCheckTargetsParams.class, GetCheckTargetsResult.class);
+
+    /**
+     * Starts a job that checks the indexes of the open path with Lucene's {@code CheckIndex}, with or
+     * without a reader (ADR 0022): every one, or those of {@code only} (ADR 0093), the opened indexes
+     * first, then the skipped ones. Nothing is written. Fails with {@code NO_INDEX_OPEN}, or {@code
+     * INVALID_PARAMS} for a level out of range, {@code threads} outside 1 to the server's processors,
+     * an {@code only} path that isn't an index of the open path, a path or a segment twice, or an
+     * empty list of segments.
      */
     public static final RpcMethod<StartCheckIndexParams, JobStarted> START_CHECK_INDEX =
             new RpcMethod<>("startCheckIndex", StartCheckIndexParams.class, JobStarted.class);
@@ -540,6 +554,7 @@ public final class Methods {
             ANALYZE,
             START_AUTO_STOP_WORDS,
             GET_AUTO_STOP_WORDS,
+            GET_CHECK_TARGETS,
             START_CHECK_INDEX,
             GET_CHECK_INDEX,
             START_EXPORT_TERMS,

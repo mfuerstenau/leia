@@ -136,6 +136,7 @@ class RuntimeFeaturesTest {
                     EnumSet.of(Feature.TERMS, Feature.POSTINGS, Feature.POSITIONS, Feature.EXPORT_TERMS));
             rows.put("Commits and check index", EnumSet.of(Feature.COMMITS, Feature.CHECK_INDEX));
             rows.put("Check levels", EnumSet.of(Feature.CHECK_LEVELS));
+            rows.put("Check threads", EnumSet.of(Feature.CHECK_THREADS));
             rows.put("Points", EnumSet.of(Feature.POINTS));
             rows.put("Doc values", EnumSet.of(Feature.DOC_VALUES));
             rows.put("KNN vectors, KNN search and HNSW graphs", EnumSet.of(Feature.KNN_VECTORS, Feature.KNN_GRAPH));

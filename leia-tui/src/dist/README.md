@@ -86,6 +86,7 @@ that runtime; a screen or option the runtime lacks is greyed out:
 | Terms, postings and positions, export terms | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Commits and check index | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Check levels | – | ✓ | ✓ | ✓ | ✓ |
+| Check threads | – | – | – | ✓ | ✓ |
 | Points | – | – | ✓² | ✓² | ✓² |
 | Doc values | – | ✓² | ✓² | ✓² | ✓² |
 | KNN vectors, KNN search and HNSW graphs | – | – | – | ✓²³ | ✓² |
@@ -177,6 +178,7 @@ can't do, for an older minor than leia's runtime is built for, says so, and belo
 | `D` | on the start screen: download the runtimes |
 | `L` | show the log; `-`/`+` change its level, `y` copies it |
 | `1` … `7` | overview, documents, terms, commits, search, analysis, check |
+| `Space` `a` `l` `t` `r` | on the check screen: mark an index or a segment, mark all, change the level, change the threads, list the segments again; `⏎` checks what is marked, or everything if nothing is |
 | `Backspace` | go back to where the last jump came from |
 | `Esc` | stop what is running; with nothing running, quit |
 | `q`, `Ctrl+C` | quit |

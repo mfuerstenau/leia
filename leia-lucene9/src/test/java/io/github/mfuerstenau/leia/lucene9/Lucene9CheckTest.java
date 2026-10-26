@@ -8,6 +8,8 @@ import io.github.mfuerstenau.leia.runtime.Check;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
@@ -51,13 +53,31 @@ class Lucene9CheckTest {
         Check.CheckResult result = check().check(
                         testIndex("lucene8to9"),
                         DirectoryKind.FS,
-                        OptionalInt.of(2),
+                        Check.Options.atLevel(2),
                         _ -> {},
                         _ -> threads.add(Thread.currentThread().getName()));
 
         assertThat(result.clean()).isTrue();
         assertThat(result.segments()).extracting(Check.SegmentCheck::name).containsExactly("_0", "_1", "_2");
         assertThat(threads).anyMatch(name -> name.startsWith("leia-check-"));
+    }
+
+    @Test
+    void oneThreadChecksOnTheCallingThreadAndOnlyTheSegmentsAskedFor() {
+        assertThat(check().hasThreads()).isTrue();
+        Set<String> threads = ConcurrentHashMap.newKeySet();
+
+        Check.CheckResult result = check().check(
+                        testIndex("lucene8to9"),
+                        DirectoryKind.FS,
+                        new Check.Options(OptionalInt.of(2), OptionalInt.of(1), Optional.of(List.of("_2", "_9"))),
+                        _ -> {},
+                        _ -> threads.add(Thread.currentThread().getName()));
+
+        assertThat(result.clean()).isTrue();
+        assertThat(result.segmentCount()).isEqualTo(3);
+        assertThat(result.segments()).extracting(Check.SegmentCheck::name).containsExactly("_2");
+        assertThat(threads).containsOnly(Thread.currentThread().getName());
     }
 
     @Test
@@ -68,7 +88,7 @@ class Lucene9CheckTest {
         Check.CheckResult result = check().check(
                         dir,
                         DirectoryKind.FS,
-                        OptionalInt.of(2),
+                        Check.Options.atLevel(2),
                         _ -> {},
                         _ -> threads.add(Thread.currentThread().getName()));
 
@@ -83,7 +103,7 @@ class Lucene9CheckTest {
         CancellationException stop = new CancellationException("stop");
         AtomicInteger calls = new AtomicInteger();
 
-        assertThatThrownBy(() -> check().check(dir, DirectoryKind.NIO, OptionalInt.of(3), _ -> {}, _ -> {
+        assertThatThrownBy(() -> check().check(dir, DirectoryKind.NIO, Check.Options.atLevel(3), _ -> {}, _ -> {
                     if (calls.incrementAndGet() > 1) {
                         throw stop;
                     }
@@ -95,7 +115,7 @@ class Lucene9CheckTest {
     void listsTheSegmentsInCommitOrderWhenTheyGetSmaller() throws IOException {
         Path dir = writeIndex(tmp.resolve("index"), 200, 20, 2);
 
-        Check.CheckResult result = check().check(dir, DirectoryKind.FS, OptionalInt.of(2), _ -> {}, _ -> {});
+        Check.CheckResult result = check().check(dir, DirectoryKind.FS, Check.Options.atLevel(2), _ -> {}, _ -> {});
 
         assertThat(result.clean()).isTrue();
         assertThat(result.segments()).extracting(Check.SegmentCheck::name).containsExactly("_0", "_1", "_2");

@@ -8,6 +8,7 @@ import io.github.mfuerstenau.leia.server.analysis.GetAnalysisComponentsHandler;
 import io.github.mfuerstenau.leia.server.analysis.GetAutoStopWordsHandler;
 import io.github.mfuerstenau.leia.server.analysis.StartAutoStopWordsHandler;
 import io.github.mfuerstenau.leia.server.check.GetCheckIndexHandler;
+import io.github.mfuerstenau.leia.server.check.GetCheckTargetsHandler;
 import io.github.mfuerstenau.leia.server.check.StartCheckIndexHandler;
 import io.github.mfuerstenau.leia.server.commits.GetCommitHandler;
 import io.github.mfuerstenau.leia.server.commits.GetCommitsHandler;
@@ -220,6 +221,10 @@ interface HandlerModule {
     @Binds
     @IntoSet
     MethodHandler<?, ?> getAutoStopWords(GetAutoStopWordsHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> getCheckTargets(GetCheckTargetsHandler handler);
 
     @Binds
     @IntoSet

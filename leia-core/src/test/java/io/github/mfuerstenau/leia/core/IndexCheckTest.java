@@ -12,9 +12,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.stream.Stream;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
@@ -45,7 +48,7 @@ class IndexCheckTest {
         Map<String, FileTime> before = snapshot(dir);
         List<String> lines = new ArrayList<>();
 
-        IndexCheck.Result result = IndexCheck.check(dir, directoryImpl, 2, lines::add, ScanProgress.NONE);
+        IndexCheck.Result result = check(dir, directoryImpl, 2, lines::add, ScanProgress.NONE);
 
         assertThat(result.error()).isEmpty();
         assertThat(result.clean()).isTrue();
@@ -73,7 +76,7 @@ class IndexCheckTest {
         Path dir = writeIndex(tmp.resolve("index"), 1);
         List<String> threads = new ArrayList<>();
 
-        IndexCheck.Result result = IndexCheck.check(
+        IndexCheck.Result result = check(
                 dir,
                 DirectoryImpl.FS,
                 1,
@@ -85,10 +88,101 @@ class IndexCheckTest {
     }
 
     @Test
+    void checksOnlyTheSegmentsAskedFor() throws Exception {
+        Path dir = writeIndex(tmp.resolve("index"), 3);
+        List<String> lines = new ArrayList<>();
+
+        IndexCheck.Result result =
+                IndexCheck.check(dir, DirectoryImpl.FS, 2, 4, List.of("_1", "_9"), lines::add, ScanProgress.NONE);
+
+        assertThat(result.error()).isEmpty();
+        assertThat(result.clean()).isTrue();
+        // The commit has three segments, and one of them was checked.
+        assertThat(result.segmentCount()).isEqualTo(3);
+        assertThat(result.segments()).extracting(IndexCheck.SegmentResult::name).containsExactly("_1");
+        assertThat(lines).anyMatch(line -> line.contains("Checking only these segments: _1 _9"));
+        assertThat(lines).noneMatch(line -> line.contains("name=_0") || line.contains("name=_2"));
+    }
+
+    @Test
+    void checksOneSelectedSegmentInTheCallingThreadWhateverTheThreads() throws Exception {
+        Path dir = writeIndex(tmp.resolve("index"), 3);
+        List<String> threads = new ArrayList<>();
+
+        IndexCheck.Result result = IndexCheck.check(
+                dir,
+                DirectoryImpl.FS,
+                1,
+                8,
+                List.of("_2"),
+                _ -> threads.add(Thread.currentThread().getName()),
+                ScanProgress.NONE);
+
+        assertThat(result.segments()).extracting(IndexCheck.SegmentResult::name).containsExactly("_2");
+        assertThat(threads).containsOnly(Thread.currentThread().getName());
+    }
+
+    @Test
+    void oneThreadChecksTheSegmentsInOrderInTheCallingThread() throws Exception {
+        Path dir = writeIndex(tmp.resolve("index"), 200, 20, 2);
+        List<String> threads = new ArrayList<>();
+        List<String> lines = new ArrayList<>();
+
+        IndexCheck.Result result = IndexCheck.check(
+                dir,
+                DirectoryImpl.FS,
+                2,
+                1,
+                null,
+                line -> {
+                    threads.add(Thread.currentThread().getName());
+                    lines.add(line);
+                },
+                ScanProgress.NONE);
+
+        assertThat(result.clean()).isTrue();
+        assertThat(threads).containsOnly(Thread.currentThread().getName());
+        // Lucene checks one after the other, in commit order: each segment's report comes in turn.
+        assertThat(result.segments()).extracting(IndexCheck.SegmentResult::name).containsExactly("_0", "_1", "_2");
+        assertThat(lines.stream()
+                        .filter(line -> line.contains("name=_"))
+                        .map(line -> line.replaceAll(".*name=(_\\d).*", "$1")))
+                .containsExactly("_0", "_1", "_2");
+    }
+
+    @Test
+    void usesNoMoreThreadsThanThereAreSegmentsToCheck() throws Exception {
+        Path dir = writeIndex(tmp.resolve("index"), 2);
+        Set<String> threads = ConcurrentHashMap.newKeySet();
+
+        IndexCheck.Result result = IndexCheck.check(
+                dir,
+                DirectoryImpl.FS,
+                2,
+                64,
+                null,
+                _ -> threads.add(Thread.currentThread().getName()),
+                ScanProgress.NONE);
+
+        assertThat(result.clean()).isTrue();
+        assertThat(result.segments()).extracting(IndexCheck.SegmentResult::name).containsExactly("_0", "_1");
+        // The report is written by the calling thread, so the threads that check can't be told apart.
+        assertThat(threads).isNotEmpty();
+    }
+
+    @Test
+    void refusesFewerThanOneThread() throws Exception {
+        Path dir = writeIndex(tmp.resolve("index"), 1);
+        assertThatThrownBy(() -> IndexCheck.check(dir, DirectoryImpl.FS, 1, 0, null, _ -> {}, ScanProgress.NONE))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("threads");
+    }
+
+    @Test
     void listsTheSegmentsInCommitOrderWhenTheyGetSmaller() throws Exception {
         Path dir = writeIndex(tmp.resolve("index"), 200, 20, 2);
 
-        IndexCheck.Result result = IndexCheck.check(dir, DirectoryImpl.FS, 2, _ -> {}, ScanProgress.NONE);
+        IndexCheck.Result result = check(dir, DirectoryImpl.FS, 2, _ -> {}, ScanProgress.NONE);
 
         assertThat(result.clean()).isTrue();
         assertThat(result.segments()).extracting(IndexCheck.SegmentResult::name).containsExactly("_0", "_1", "_2");
@@ -105,7 +199,7 @@ class IndexCheckTest {
         bytes[bytes.length / 2] ^= 0x55;
         Files.write(cfs, bytes);
 
-        IndexCheck.Result result = IndexCheck.check(dir, DirectoryImpl.FS, 1, _ -> {}, ScanProgress.NONE);
+        IndexCheck.Result result = check(dir, DirectoryImpl.FS, 1, _ -> {}, ScanProgress.NONE);
 
         assertThat(result.error()).isEmpty();
         assertThat(result.clean()).isFalse();
@@ -126,7 +220,7 @@ class IndexCheckTest {
         }
         List<String> lines = new ArrayList<>();
 
-        IndexCheck.Result result = IndexCheck.check(dir, DirectoryImpl.FS, 1, lines::add, ScanProgress.NONE);
+        IndexCheck.Result result = check(dir, DirectoryImpl.FS, 1, lines::add, ScanProgress.NONE);
 
         assertThat(result.error()).isEmpty();
         assertThat(result.clean()).isFalse();
@@ -138,8 +232,7 @@ class IndexCheckTest {
     void checksALucene8IndexThatAReaderCantOpen() {
         assertThatThrownBy(() -> ReadOnlyIndex.open(testIndex("lucene8"))).isInstanceOf(IndexOpenException.class);
 
-        IndexCheck.Result result =
-                IndexCheck.check(testIndex("lucene8"), DirectoryImpl.FS, 1, _ -> {}, ScanProgress.NONE);
+        IndexCheck.Result result = check(testIndex("lucene8"), DirectoryImpl.FS, 1, _ -> {}, ScanProgress.NONE);
 
         assertThat(result.error()).isEmpty();
         assertThat(result.clean()).isTrue();
@@ -148,8 +241,7 @@ class IndexCheckTest {
 
     @Test
     void checksALucene9Index() {
-        IndexCheck.Result result =
-                IndexCheck.check(testIndex("lucene9"), DirectoryImpl.FS, 2, _ -> {}, ScanProgress.NONE);
+        IndexCheck.Result result = check(testIndex("lucene9"), DirectoryImpl.FS, 2, _ -> {}, ScanProgress.NONE);
 
         assertThat(result.clean()).isTrue();
         assertThat(result.segments()).isNotEmpty();
@@ -159,7 +251,7 @@ class IndexCheckTest {
     void aDirectoryWithoutACommitCantBeChecked() throws Exception {
         Path dir = Files.createDirectories(tmp.resolve("empty"));
 
-        IndexCheck.Result result = IndexCheck.check(dir, DirectoryImpl.FS, 1, _ -> {}, ScanProgress.NONE);
+        IndexCheck.Result result = check(dir, DirectoryImpl.FS, 1, _ -> {}, ScanProgress.NONE);
 
         assertThat(result.clean()).isFalse();
         assertThat(result.error()).hasValueSatisfying(error -> assertThat(error).contains("no segments* file"));
@@ -168,7 +260,7 @@ class IndexCheckTest {
 
     @Test
     void rejectsALevelOutOfRange() {
-        assertThatThrownBy(() -> IndexCheck.check(tmp, DirectoryImpl.FS, 4, _ -> {}, ScanProgress.NONE))
+        assertThatThrownBy(() -> check(tmp, DirectoryImpl.FS, 4, _ -> {}, ScanProgress.NONE))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -183,7 +275,7 @@ class IndexCheckTest {
             }
         };
 
-        assertThatThrownBy(() -> IndexCheck.check(dir, directoryImpl, 3, _ -> {}, cancelled))
+        assertThatThrownBy(() -> check(dir, directoryImpl, 3, _ -> {}, cancelled))
                 .isInstanceOf(CancellationException.class);
     }
 
@@ -218,6 +310,13 @@ class IndexCheckTest {
             }
             assertThat(checks).hasValue(3);
         }
+    }
+
+    /** Checks everything on every processor. */
+    private static IndexCheck.Result check(
+            Path dir, DirectoryImpl directoryImpl, int level, Consumer<String> output, ScanProgress progress) {
+        return IndexCheck.check(
+                dir, directoryImpl, level, Runtime.getRuntime().availableProcessors(), null, output, progress);
     }
 
     /** Counts the checks, and never stops. */

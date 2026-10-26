@@ -11,7 +11,6 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.LongConsumer;
@@ -140,9 +139,14 @@ public final class ServerRuntime implements LuceneRuntime {
             }
 
             @Override
+            public boolean hasThreads() {
+                return check.hasThreads();
+            }
+
+            @Override
             public CheckResult check(
-                    Path dir, DirectoryKind kind, OptionalInt level, Consumer<String> line, LongConsumer progress) {
-                return inLoader(() -> check.check(dir, kind, level, line, progress));
+                    Path dir, DirectoryKind kind, Options options, Consumer<String> line, LongConsumer progress) {
+                return inLoader(() -> check.check(dir, kind, options, line, progress));
             }
         });
     }

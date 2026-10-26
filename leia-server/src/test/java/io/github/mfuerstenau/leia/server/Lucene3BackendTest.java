@@ -18,9 +18,13 @@ import io.github.mfuerstenau.leia.protocol.analysis.Shingles;
 import io.github.mfuerstenau.leia.protocol.analysis.StandardAnalyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.WordSet;
 import io.github.mfuerstenau.leia.protocol.check.CheckIndexResult;
+import io.github.mfuerstenau.leia.protocol.check.CheckTarget;
+import io.github.mfuerstenau.leia.protocol.check.CheckTargetIndex;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexParams;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexResult;
+import io.github.mfuerstenau.leia.protocol.check.GetCheckTargetsParams;
 import io.github.mfuerstenau.leia.protocol.check.IndexCheck;
+import io.github.mfuerstenau.leia.protocol.check.SegmentCheck;
 import io.github.mfuerstenau.leia.protocol.check.StartCheckIndexParams;
 import io.github.mfuerstenau.leia.protocol.commits.Commit;
 import io.github.mfuerstenau.leia.protocol.commits.CommitFile;
@@ -178,6 +182,29 @@ class Lucene3BackendTest {
             Thread.sleep(5);
         }
         throw new AssertionError("check " + jobId + " did not finish");
+    }
+
+    @Test
+    void checksOnlyTheSegmentsAskedFor() throws Exception {
+        open(Path.of(PATH));
+        CheckTargetIndex target = backend.call(Methods.GET_CHECK_TARGETS, new GetCheckTargetsParams())
+                .indexes()
+                .getFirst();
+        assertThat(target.error()).isEmpty();
+        String last = target.segments().getLast().name();
+
+        Check check = check(new StartCheckIndexParams(
+                OptionalInt.empty(),
+                OptionalInt.of(1),
+                Optional.of(List.of(new CheckTarget(target.path(), Optional.of(List.of(last, "_zz")))))));
+
+        IndexCheck index = check.result().indexes().getFirst();
+        assertThat(index.onlySegments()).contains(List.of(last, "_zz"));
+        assertThat(index.segments()).extracting(SegmentCheck::name).containsExactly(last);
+        assertThat(index.segmentCount()).isEqualTo(target.segments().size());
+        assertThat(index.segmentsNotFound()).containsExactly("_zz");
+        assertThat(index.clean()).isFalse();
+        assertThat(check.lines()).anyMatch(line -> line.contains("only these segments") && line.contains(last));
     }
 
     @Test

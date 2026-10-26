@@ -208,7 +208,7 @@ class SessionPilotTest {
         // Lucene 3.6 checks at its one level, so there is no l.
         pilot.press('7');
         settle();
-        assertThat(screen()).contains("⏎ check   Tab panel").doesNotContain("l level", "Check (level");
+        assertThat(screen()).contains("⏎ check all", "Space mark").doesNotContain("l level", "t threads", "Check (");
         pilot.press('l');
         settle();
         assertThat(screen()).contains("Check level: not for Lucene 2.x");
@@ -717,7 +717,11 @@ class SessionPilotTest {
         settle();
 
         assertThat(screen())
-                .contains("Check (level 2, integrity)", "OK: no problems found in 1 index", "Output: lines");
+                .contains(
+                        "Check (level 2, integrity · ",
+                        "OK: no problems found in 1 index",
+                        "[ ] ✓ _0",
+                        "Output: lines");
     }
 
     @Test

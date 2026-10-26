@@ -44,6 +44,7 @@ The first index of a path decides which Lucene opens it, by the major in its new
 | `STORED_SCAN` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `CHECK_INDEX` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `CHECK_LEVELS` | – | ✓ | ✓ | ✓ | ✓ |
+| `CHECK_THREADS` | – | – | – | ✓ | ✓ |
 | `EXPORT_TERMS` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `REOPEN` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `AUTO_STOP_WORDS` | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -60,7 +61,7 @@ A runtime reports the parts of search it has, such as `CLASSIC_SEARCH`, `TERM_SE
 
 Every runtime reports the open reader's segments in `getIndexStats`, from runtime interface 6 on (ADR 0051), so the documents screen shows and pins segments on every index with a reader.
 
-**Without a reader** (ADR 0021), an index has `COMMITS` and `CHECK_INDEX`, and `CHECK_LEVELS` too if its first index goes to a runtime with levels, which 3.6.2 for 2.x and 3.x isn't (ADR 0045 §4, ADR 0046 §6). An index whose runtime isn't loaded opens too; its commits and check then say which runtime jar is missing (ADR 0071).
+**Without a reader** (ADR 0021), an index has `COMMITS` and `CHECK_INDEX`, and `CHECK_LEVELS` and `CHECK_THREADS` too if its first index goes to a runtime with levels, which 3.6.2 for 2.x and 3.x isn't, or with threads, which only 9.12.3 and 10.5.2 are (ADR 0045 §4, ADR 0046 §6, ADR 0093). An index whose runtime isn't loaded opens too; its commits and check then say which runtime jar is missing (ADR 0071).
 
 ## Differences
 
@@ -93,6 +94,7 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 | Norms, decoded by the created major (ADR 0047, ADR 0048 §3) | `floatToByte315(1/√length)` | `floatToByte315(1/√length)` | 6: `floatToByte315(1/√length)`, 7: the length | the length | the length |
 | Fields that conflict between indexes (ADR 0021 §5) | – (merges them; no schema) | skipped on a change of a doc values type or point shape already set; a field that gains them merges | as 5.5.5 | skipped on any change of a field's schema, and on another parent field | as 9.12.3 |
 | Check levels | none | 1 checksums only, 2 default, 3 `crossCheckTermVectors` | as 5.5.5 | as 5.5.5, but 3 is `doSlowChecks`; segments in parallel, as Lucene 10 | Lucene's own `setLevel` |
+| Check threads and selected segments (ADR 0093) | selected segments (`checkIndex(onlySegments)`); one thread | as 3.6.2 | as 3.6.2 | selected segments, on as many threads as asked for (default all processors, at most one per segment) | as 9.12.3 |
 | `-fast` hint in the check | – | rewritten to leia's levels | not given | not given | – |
 | Search analyzers | 6 of lucene-core | 42 of analyzers-common (+ `CollationKeyAnalyzer`) | 43 (+ Bengali, `CollationKeyAnalyzer`) | 48 (+ Estonian, Nepali, Serbian, Tamil, Telugu, `CollationKeyAnalyzer`) | every preset of `getAnalysisComponents`, the extension jars' included |
 | Custom analyzers, shingles (ADR 0067, ADR 0075) | – | ✓, with 5.5's own components; shingles only within a phrase | ✓, with 7.7's own components | ✓, with 9.12's own components; one only Lucene 10 has is `NOT_SUPPORTED` | ✓ |

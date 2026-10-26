@@ -185,8 +185,8 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
 
     /**
      * Opens the indexes of a path without a reader (ADR 0021): only their directories. The commits and
-     * the check of each go to the runtime that reads it, and say so if it isn't loaded; the levels of
-     * the check follow the runtime of the first index, as the features do (ADR 0046).
+     * the check of each go to the runtime that reads it, and say so if it isn't loaded; the levels and
+     * threads of the check follow the runtime of the first index, as the features do (ADR 0046).
      */
     private OpenIndexResult openDirectories(
             Path root, List<Path> dirs, Optional<LuceneRuntime> runtime, DirectoryKind kind) {
@@ -196,6 +196,9 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
         Set<Feature> features = EnumSet.copyOf(Feature.withoutReader());
         if (!runtime.flatMap(LuceneRuntime::check).map(Check::hasLevels).orElse(false)) {
             features.remove(Feature.CHECK_LEVELS);
+        }
+        if (!runtime.flatMap(LuceneRuntime::check).map(Check::hasThreads).orElse(false)) {
+            features.remove(Feature.CHECK_THREADS);
         }
         return new OpenIndexResult(
                 root.toString(),

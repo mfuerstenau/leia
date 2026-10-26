@@ -9,6 +9,7 @@ import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsParams;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexParams;
+import io.github.mfuerstenau.leia.protocol.check.GetCheckTargetsParams;
 import io.github.mfuerstenau.leia.protocol.check.StartCheckIndexParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
@@ -411,9 +412,17 @@ public final class Session {
                         app -> message -> app.knnRecallFailed(start.recallId(), message));
             }
             case Action.CancelSearch cancel -> cancelJobs(cancel.jobs(), runner);
+            case Action.LoadCheckTargets _ ->
+                complete(
+                        backend.call(Methods.GET_CHECK_TARGETS, new GetCheckTargetsParams()),
+                        runner,
+                        result -> changing(app -> app.checkTargetsLoaded(result)),
+                        message -> changing(app -> app.checkTargetsFailed(message)));
             case Action.StartCheck start ->
                 startJob(
-                        backend.call(Methods.START_CHECK_INDEX, new StartCheckIndexParams(start.level())),
+                        backend.call(
+                                Methods.START_CHECK_INDEX,
+                                new StartCheckIndexParams(start.level(), start.threads(), start.only())),
                         runner,
                         app -> jobId -> app.checkStarted(start.checkId(), jobId),
                         app -> message -> app.checkFailed(start.checkId(), message));

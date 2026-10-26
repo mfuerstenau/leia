@@ -6,9 +6,11 @@ import static org.assertj.core.api.Assertions.tuple;
 
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.check.CheckIndexResult;
+import io.github.mfuerstenau.leia.protocol.check.CheckTarget;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexParams;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexResult;
 import io.github.mfuerstenau.leia.protocol.check.IndexCheck;
+import io.github.mfuerstenau.leia.protocol.check.SegmentCheck;
 import io.github.mfuerstenau.leia.protocol.check.StartCheckIndexParams;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
 import io.github.mfuerstenau.leia.server.RpcException;
@@ -24,6 +26,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.stream.Stream;
 import org.apache.lucene.document.Document;
@@ -31,6 +34,7 @@ import org.apache.lucene.document.Field;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
+import org.apache.lucene.index.NoMergePolicy;
 import org.apache.lucene.store.FSDirectory;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.Test;
@@ -141,6 +145,121 @@ class CheckIndexHandlersTest {
         assertFails(() -> start.handle(new StartCheckIndexParams(OptionalInt.of(level))), ErrorCode.INVALID_PARAMS);
     }
 
+    private static StartCheckIndexParams only(CheckTarget... targets) {
+        return new StartCheckIndexParams(OptionalInt.empty(), OptionalInt.empty(), Optional.of(List.of(targets)));
+    }
+
+    private static CheckTarget target(Path dir, String... segments) {
+        return new CheckTarget(
+                dir.toString(), segments.length == 0 ? Optional.empty() : Optional.of(List.of(segments)));
+    }
+
+    @Test
+    void checksOnlyTheSegmentsAskedFor() throws Exception {
+        Path dir = writeSegments(tmp.resolve("index"), 3);
+        currentIndex.replace(TestIndexes.open(dir));
+
+        long jobId = start.handle(only(target(dir, "_1"))).jobId();
+        List<String> lines = new ArrayList<>();
+        IndexCheck check = awaitDone(jobId, lines).indexes().getFirst();
+
+        assertThat(lines).anyMatch(line -> line.startsWith("Checking with Lucene ") && line.endsWith(", segments _1"));
+        assertThat(check.onlySegments()).contains(List.of("_1"));
+        assertThat(check.segmentsNotFound()).isEmpty();
+        assertThat(check.segmentCount()).isEqualTo(3);
+        assertThat(check.segments()).extracting(SegmentCheck::name).containsExactly("_1");
+        assertThat(check.clean()).isTrue();
+    }
+
+    @Test
+    void aSegmentThatIsNotInTheCommitIsNotFoundAndMakesTheIndexUnclean() throws Exception {
+        Path dir = writeSegments(tmp.resolve("index"), 2);
+        currentIndex.replace(TestIndexes.open(dir));
+
+        IndexCheck check = awaitDone(start.handle(only(target(dir, "_0", "_7"))).jobId(), new ArrayList<>())
+                .indexes()
+                .getFirst();
+
+        assertThat(check.segments()).extracting(SegmentCheck::name).containsExactly("_0");
+        assertThat(check.segmentsNotFound()).containsExactly("_7");
+        assertThat(check.clean()).isFalse();
+    }
+
+    @Test
+    void checksWholeWhenAnIndexHasNoSegmentsListedAndNothingElse() throws Exception {
+        Path a = writeSegments(tmp.resolve("indexes/a"), 2);
+        Path b = corrupt(writeIndex(tmp.resolve("indexes/b")));
+        currentIndex.replace(TestIndexes.open(tmp.resolve("indexes")));
+
+        // The skipped index alone, in the order of the open path whatever the order asked for.
+        CheckIndexResult skipped = awaitDone(start.handle(only(target(b))).jobId(), new ArrayList<>());
+        assertThat(skipped.indexes())
+                .extracting(IndexCheck::path, IndexCheck::skipped, IndexCheck::onlySegments)
+                .containsExactly(tuple(b.toString(), true, Optional.empty()));
+
+        List<String> lines = new ArrayList<>();
+        CheckIndexResult both =
+                awaitDone(start.handle(only(target(b), target(a, "_1"))).jobId(), lines);
+        assertThat(both.indexes()).extracting(IndexCheck::path).containsExactly(a.toString(), b.toString());
+        assertThat(lines).contains("Checking index 1 of 2: " + a, "Checking index 2 of 2: " + b);
+    }
+
+    @Test
+    void runsOnTheThreadsAskedFor() throws Exception {
+        Path dir = writeSegments(tmp.resolve("index"), 3);
+        currentIndex.replace(TestIndexes.open(dir));
+
+        List<String> lines = new ArrayList<>();
+        CheckIndexResult result = awaitDone(
+                start.handle(new StartCheckIndexParams(OptionalInt.of(2), OptionalInt.of(1), Optional.empty()))
+                        .jobId(),
+                lines);
+
+        assertThat(lines).anyMatch(line -> line.startsWith("Checking with Lucene ") && line.endsWith(", 1 threads"));
+        assertThat(result.indexes().getFirst().clean()).isTrue();
+        assertThat(result.indexes().getFirst().segments()).hasSize(3);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, -1})
+    void rejectsTooFewThreads(int threads) throws Exception {
+        currentIndex.replace(TestIndexes.open(writeIndex(tmp.resolve("index"))));
+        assertFails(() -> start.handle(threads(threads)), ErrorCode.INVALID_PARAMS);
+    }
+
+    @Test
+    void rejectsMoreThreadsThanProcessors() throws Exception {
+        currentIndex.replace(TestIndexes.open(writeIndex(tmp.resolve("index"))));
+        assertFails(
+                () -> start.handle(threads(Runtime.getRuntime().availableProcessors() + 1)), ErrorCode.INVALID_PARAMS);
+        // All the processors is the most.
+        assertThat(start.handle(threads(Runtime.getRuntime().availableProcessors())))
+                .isNotNull();
+    }
+
+    private static StartCheckIndexParams threads(int threads) {
+        return new StartCheckIndexParams(OptionalInt.empty(), OptionalInt.of(threads), Optional.empty());
+    }
+
+    @Test
+    void rejectsATargetThatIsNotAnIndexOfThePath() throws Exception {
+        Path dir = writeSegments(tmp.resolve("index"), 2);
+        currentIndex.replace(TestIndexes.open(dir));
+
+        assertFails(() -> start.handle(only(target(tmp.resolve("elsewhere")))), ErrorCode.INVALID_PARAMS);
+        assertFails(() -> start.handle(only(target(dir), target(dir, "_0"))), ErrorCode.INVALID_PARAMS);
+        assertFails(
+                () -> start.handle(only(new CheckTarget(dir.toString(), Optional.of(List.of())))),
+                ErrorCode.INVALID_PARAMS);
+        assertFails(() -> start.handle(only(target(dir, "_0", "_0"))), ErrorCode.INVALID_PARAMS);
+        // The same index spelled another way is still the same.
+        assertFails(
+                () -> start.handle(only(target(dir), new CheckTarget(dir + "/.", Optional.empty()))),
+                ErrorCode.INVALID_PARAMS);
+        assertThat(start.handle(only(new CheckTarget(dir + "/.", Optional.empty()))))
+                .isNotNull();
+    }
+
     @Test
     void rejectsANegativeLine() throws Exception {
         currentIndex.replace(TestIndexes.open(writeIndex(tmp.resolve("index"))));
@@ -190,6 +309,23 @@ class CheckIndexHandlersTest {
                 Document doc = new Document();
                 doc.add(new StringField("id", Integer.toString(id), Field.Store.YES));
                 writer.addDocument(doc);
+            }
+        }
+        return dir;
+    }
+
+    /** A commit and a segment for each of {@code segments}, with two documents each. */
+    private static Path writeSegments(Path dir, int segments) throws IOException {
+        try (FSDirectory directory = FSDirectory.open(dir);
+                IndexWriter writer =
+                        new IndexWriter(directory, new IndexWriterConfig().setMergePolicy(NoMergePolicy.INSTANCE))) {
+            for (int segment = 0; segment < segments; segment++) {
+                for (int id = 1; id <= 2; id++) {
+                    Document doc = new Document();
+                    doc.add(new StringField("id", segment + "-" + id, Field.Store.YES));
+                    writer.addDocument(doc);
+                }
+                writer.commit();
             }
         }
         return dir;

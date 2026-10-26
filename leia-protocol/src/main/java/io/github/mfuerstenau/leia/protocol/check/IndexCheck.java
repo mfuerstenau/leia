@@ -18,7 +18,10 @@ import java.util.Optional;
  * @param badSegments the segments that failed a test
  * @param lostDocs the documents in the bad segments
  * @param validCounter whether the commit's counter for segment names is above every segment's name
- * @param segments each segment of the latest commit, in commit order
+ * @param segments each segment of the latest commit that was checked, in commit order
+ * @param onlySegments the segments that were asked for; absent if the whole index was
+ * @param segmentsNotFound the segments that were asked for and are not in the latest commit; then
+ *     {@code clean} is false (ADR 0093)
  */
 public record IndexCheck(
         String path,
@@ -32,4 +35,6 @@ public record IndexCheck(
         int badSegments,
         int lostDocs,
         boolean validCounter,
-        List<SegmentCheck> segments) {}
+        List<SegmentCheck> segments,
+        Optional<List<String>> onlySegments,
+        List<String> segmentsNotFound) {}

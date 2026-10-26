@@ -19,6 +19,7 @@ import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeResult;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsResult;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAutoStopWordsResult;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexResult;
+import io.github.mfuerstenau.leia.protocol.check.GetCheckTargetsResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
@@ -435,7 +436,7 @@ public final class App {
         }
         back.clear();
         commits = new Commits(indexNames(opened), true);
-        check = new Check(stats.path(), opened.supports(Feature.CHECK_LEVELS));
+        check = new Check(stats.path(), opened.supports(Feature.CHECK_LEVELS), opened.supports(Feature.CHECK_THREADS));
         pointFormats = new PointFormats();
         terms = new Terms(stats.fields()).withPointFormats(pointFormats).withFeatures(opened.features());
         documents = newDocuments(stats, opened);
@@ -495,7 +496,7 @@ public final class App {
                 result.features(),
                 Optional.empty());
         commits = new Commits(indexNames(opened), false);
-        check = new Check(result.path(), opened.supports(Feature.CHECK_LEVELS));
+        check = new Check(result.path(), opened.supports(Feature.CHECK_LEVELS), opened.supports(Feature.CHECK_THREADS));
         analysis.indexChanged(List.of(), autoStopWordsReason(), false);
         if (screen != Screen.ANALYSIS && screen != Screen.CHECK) {
             screen = Screen.COMMITS;
@@ -679,7 +680,24 @@ public final class App {
         if (screen == Screen.ANALYSIS) {
             return analysisAction(analysis.initialRequest());
         }
+        if (screen == Screen.CHECK && check != null) {
+            return checkAction(check.initialRequest());
+        }
         return Optional.empty();
+    }
+
+    /** Turns what the check screen needs into an action. */
+    private Optional<Action> checkAction(Optional<Check.Request> request) {
+        return request.flatMap(next -> switch (next) {
+            case Check.Request.Start start ->
+                Optional.of(new Action.StartCheck(start.checkId(), start.level(), start.threads(), start.only()));
+            case Check.Request.LoadTargets _ -> Optional.of(new Action.LoadCheckTargets());
+            case Check.Request.Unsupported unsupported -> {
+                // Not reason(): an index without a reader may lack levels too.
+                notice = new Notice.NotSupported(unsupported.what(), "not for " + oldLucene());
+                yield Optional.empty();
+            }
+        });
     }
 
     /**
@@ -1813,6 +1831,19 @@ public final class App {
         return check != null && check.running();
     }
 
+    /** Shows the indexes and segments of the check screen. */
+    public void checkTargetsLoaded(GetCheckTargetsResult result) {
+        if (check != null) {
+            check.targetsLoaded(result);
+        }
+    }
+
+    public void checkTargetsFailed(String error) {
+        if (check != null) {
+            check.targetsFailed(error);
+        }
+    }
+
     /** The job of check {@code checkId} has started; the job of a check that was stopped is cancelled. */
     public Optional<Action> checkStarted(long checkId, long jobId) {
         if (check == null) {
@@ -2149,7 +2180,12 @@ public final class App {
                 show(Screen.ANALYSIS);
                 return initialRequest();
             }
-            case '7' -> showIf(check != null && supported(Screen.CHECK), Screen.CHECK);
+            case '7' -> {
+                if (check != null && supported(Screen.CHECK)) {
+                    show(Screen.CHECK);
+                    return initialRequest();
+                }
+            }
             case 'o' -> openPrompt();
             case 'L' -> logWindow = new LogWindow(log, logFilter);
             case 'X' -> {
@@ -2232,14 +2268,7 @@ public final class App {
             return searchAction(search.handleKey(key));
         }
         if (screen == Screen.CHECK && check != null) {
-            return check.handleKey(key).flatMap(request -> switch (request) {
-                case Check.Request.Start start -> Optional.of(new Action.StartCheck(start.checkId(), start.level()));
-                case Check.Request.Unsupported unsupported -> {
-                    // Not reason(): an index without a reader may lack levels too.
-                    notice = new Notice.NotSupported(unsupported.what(), "not for " + oldLucene());
-                    yield Optional.empty();
-                }
-            });
+            return checkAction(check.handleKey(key));
         }
         return Optional.empty();
     }

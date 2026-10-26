@@ -1231,8 +1231,9 @@ class Lucene9IndexTest {
             List<String> lines = new ArrayList<>();
             Check check = new Lucene9Runtime().check().orElseThrow();
             assertThat(check.hasLevels()).isTrue();
+            assertThat(check.hasThreads()).isTrue();
             Check.CheckResult result =
-                    check.check(testIndex(name), DirectoryKind.FS, OptionalInt.of(level), lines::add, _ -> {});
+                    check.check(testIndex(name), DirectoryKind.FS, Check.Options.atLevel(level), lines::add, _ -> {});
             assertThat(result.error()).isEmpty();
             assertThat(result.clean()).isTrue();
             assertThat(result.segmentCount()).isEqualTo(name.equals("lucene8") ? 2 : 3);
@@ -1271,7 +1272,7 @@ class Lucene9IndexTest {
         Check.CheckResult result = new Lucene9Runtime()
                 .check()
                 .orElseThrow()
-                .check(dir, DirectoryKind.NIO, OptionalInt.of(1), _ -> {}, _ -> {});
+                .check(dir, DirectoryKind.NIO, Check.Options.atLevel(1), _ -> {}, _ -> {});
         assertThat(result.clean()).isFalse();
         assertThat(result.badSegments()).isEqualTo(1);
         assertThat(result.segments().get(0).error()).isPresent();
@@ -1287,7 +1288,7 @@ class Lucene9IndexTest {
         assertThatThrownBy(() -> new Lucene9Runtime()
                         .check()
                         .orElseThrow()
-                        .check(testIndex("lucene8to9"), DirectoryKind.FS, OptionalInt.of(3), _ -> {}, _ -> {
+                        .check(testIndex("lucene8to9"), DirectoryKind.FS, Check.Options.atLevel(3), _ -> {}, _ -> {
                             if (calls.incrementAndGet() > 3) {
                                 throw stop;
                             }
@@ -1419,7 +1420,7 @@ class Lucene9IndexTest {
             }
             runtime.commits().orElseThrow().commits(dir, directoryKind);
             runtime.commits().orElseThrow().commit(dir, directoryKind, 2);
-            runtime.check().orElseThrow().check(dir, directoryKind, OptionalInt.of(3), _ -> {}, _ -> {});
+            runtime.check().orElseThrow().check(dir, directoryKind, Check.Options.atLevel(3), _ -> {}, _ -> {});
             assertThat(hashes(dir)).isEqualTo(before);
             assertThat(dir.resolve("write.lock")).doesNotExist();
         }

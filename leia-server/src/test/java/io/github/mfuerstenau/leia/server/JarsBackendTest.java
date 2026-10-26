@@ -21,7 +21,12 @@ import io.github.mfuerstenau.leia.protocol.analysis.PresetOption;
 import io.github.mfuerstenau.leia.protocol.analysis.Shingles;
 import io.github.mfuerstenau.leia.protocol.analysis.WordSetSupport;
 import io.github.mfuerstenau.leia.protocol.check.CheckIndexResult;
+import io.github.mfuerstenau.leia.protocol.check.CheckTarget;
+import io.github.mfuerstenau.leia.protocol.check.CheckTargetIndex;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexParams;
+import io.github.mfuerstenau.leia.protocol.check.GetCheckTargetsParams;
+import io.github.mfuerstenau.leia.protocol.check.IndexCheck;
+import io.github.mfuerstenau.leia.protocol.check.SegmentCheck;
 import io.github.mfuerstenau.leia.protocol.check.StartCheckIndexParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
@@ -98,6 +103,15 @@ class JarsBackendTest {
                                             Optional.of(OpenMode.DIRECTORY_ONLY)))
                             .mode())
                     .isEqualTo(OpenMode.DIRECTORY_ONLY);
+            // The segments of an index whose runtime isn't loaded can't be listed, and say why.
+            assertThat(bare.call(Methods.GET_CHECK_TARGETS, new GetCheckTargetsParams())
+                            .indexes())
+                    .singleElement()
+                    .satisfies(index -> {
+                        assertThat(index.segments()).isEmpty();
+                        assertThat(index.error())
+                                .hasValueSatisfying(error -> assertThat(error).contains("runtimes/lucene10"));
+                    });
             assertThat(bare.call(Methods.GET_RUNTIMES, new GetRuntimesParams()).runtimes())
                     .containsExactly(
                             missing("lucene10", 9, 10),
@@ -158,6 +172,24 @@ class JarsBackendTest {
                         .as(name)
                         .startsWith("10.");
             }
+            // Lucene 10 checks the segments it is asked for, on the threads it is asked for (ADR 0093).
+            CheckTargetIndex demo = backend.call(Methods.GET_CHECK_TARGETS, new GetCheckTargetsParams())
+                    .indexes()
+                    .getFirst();
+            assertThat(demo.error()).isEmpty();
+            String lastSegment = demo.segments().getLast().name();
+            IndexCheck selected = awaitCheck(
+                            backend,
+                            new StartCheckIndexParams(
+                                    OptionalInt.of(2),
+                                    OptionalInt.of(1),
+                                    Optional.of(
+                                            List.of(new CheckTarget(demo.path(), Optional.of(List.of(lastSegment)))))))
+                    .indexes()
+                    .getFirst();
+            assertThat(selected.segments()).extracting(SegmentCheck::name).containsExactly(lastSegment);
+            assertThat(selected.segmentCount()).isEqualTo(demo.segments().size());
+            assertThat(selected.clean()).isTrue();
             assertThat(backend.call(Methods.GET_RUNTIMES, new GetRuntimesParams())
                             .runtimes())
                     .allSatisfy(runtime -> {
@@ -451,5 +483,19 @@ class JarsBackendTest {
                     .findFirst()
                     .orElseThrow();
         }
+    }
+
+    /** Polls a check as the check screen does, until its outcome is there. */
+    private static CheckIndexResult awaitCheck(RealBackend backend, StartCheckIndexParams params) throws Exception {
+        long job = backend.call(Methods.START_CHECK_INDEX, params).jobId();
+        for (int poll = 0; poll < 3000; poll++) {
+            Optional<CheckIndexResult> result = backend.call(Methods.GET_CHECK_INDEX, new GetCheckIndexParams(job, 0))
+                    .result();
+            if (result.isPresent()) {
+                return result.get();
+            }
+            Thread.sleep(10);
+        }
+        throw new AssertionError("check " + job + " did not finish");
     }
 }

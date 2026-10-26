@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.tui.app;
 
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeParams;
 import io.github.mfuerstenau.leia.protocol.analysis.StartAutoStopWordsParams;
+import io.github.mfuerstenau.leia.protocol.check.CheckTarget;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.filter.StartFilterParams;
 import io.github.mfuerstenau.leia.protocol.filter.StepFilterParams;
@@ -265,11 +266,20 @@ public sealed interface Action {
     record CancelSearch(List<Long> jobs) implements Action {}
 
     /**
-     * Start check {@code checkId} of the open path at this level, absent for a Lucene without levels
-     * (ADR 0045), and report back with {@link
-     * App#checkStarted} or {@link App#checkFailed} (ADR 0022).
+     * Fetch the indexes of the open path with the segments of their latest commit, for the check
+     * screen to mark, and report back with {@link App#checkTargetsLoaded} or {@link
+     * App#checkTargetsFailed} (ADR 0093).
      */
-    record StartCheck(long checkId, OptionalInt level) implements Action {}
+    record LoadCheckTargets() implements Action {}
+
+    /**
+     * Start check {@code checkId} of the open path at this level, absent for a Lucene without levels
+     * (ADR 0045), on this many threads, absent for a Lucene without threads or for all the processors
+     * (ADR 0093), of the indexes and segments of {@code only}, absent for everything, and report back
+     * with {@link App#checkStarted} or {@link App#checkFailed} (ADR 0022).
+     */
+    record StartCheck(long checkId, OptionalInt level, OptionalInt threads, Optional<List<CheckTarget>> only)
+            implements Action {}
 
     /** Cancel this check job. The app has stopped the check already, so nothing is reported back. */
     record CancelCheck(long jobId) implements Action {}

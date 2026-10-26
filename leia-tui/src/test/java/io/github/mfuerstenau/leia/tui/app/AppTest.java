@@ -12,7 +12,11 @@ import dev.tamboui.tui.event.KeyModifiers;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeParams;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeResult;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsResult;
+import io.github.mfuerstenau.leia.protocol.check.CheckTarget;
+import io.github.mfuerstenau.leia.protocol.check.CheckTargetIndex;
+import io.github.mfuerstenau.leia.protocol.check.CheckTargetSegment;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexResult;
+import io.github.mfuerstenau.leia.protocol.check.GetCheckTargetsResult;
 import io.github.mfuerstenau.leia.protocol.commits.Commit;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitResult;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
@@ -2724,15 +2728,22 @@ class AppTest {
         assertThat(render(app)).doesNotContain("too late").contains("Exporting…");
     }
 
+    /** The threads of a check on a Lucene that has them: all the processors, the JVM's being the server's. */
+    private static OptionalInt processors() {
+        return OptionalInt.of(Runtime.getRuntime().availableProcessors());
+    }
+
     @Test
     void checksTheIndexOnScreen7() {
         App app = appWithFields();
-        assertThat(app.handleKey(key('7'))).isEmpty();
+        // The first showing fetches the segments, for the list to mark.
+        assertThat(app.handleKey(key('7'))).hasValue(new Action.LoadCheckTargets());
         String screen = render(app);
-        assertThat(screen).contains("Lucene's CheckIndex", "⏎ check   l level: 1 checksums");
+        assertThat(screen).contains("Lucene's CheckIndex", "⏎ check all   Space mark   a all");
 
         app.handleKey(key('l'));
-        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.StartCheck(1, OptionalInt.of(2)));
+        assertThat(app.handleKey(key(KeyCode.ENTER)))
+                .hasValue(new Action.StartCheck(1, OptionalInt.of(2), processors(), Optional.empty()));
         assertThat(app.checking()).isTrue();
         assertThat(app.polls()).isEmpty();
         assertThat(app.checkStarted(1, 5)).isEmpty();
@@ -2750,10 +2761,50 @@ class AppTest {
     }
 
     @Test
+    void theCheckScreenListsTheSegmentsAndChecksWhatIsMarked() {
+        App app = appWithFields();
+        assertThat(app.handleKey(key('7'))).hasValue(new Action.LoadCheckTargets());
+        app.checkTargetsLoaded(new GetCheckTargetsResult(List.of(new CheckTargetIndex(
+                "/data/idx",
+                false,
+                Optional.of("segments_2"),
+                List.of(
+                        new CheckTargetSegment("_0", 3, OptionalLong.of(2048)),
+                        new CheckTargetSegment("_1", 5, OptionalLong.of(4096))),
+                Optional.empty()))));
+        assertThat(wide(app)).contains("[ ] .  segments_2, 2 segments", "[ ] _1  5 docs, 4.0 KiB");
+
+        // Space on the second segment: only it is checked.
+        app.handleKey(key('j'));
+        app.handleKey(key('j'));
+        app.handleKey(key(' '));
+        assertThat(app.handleKey(key(KeyCode.ENTER)))
+                .hasValue(new Action.StartCheck(
+                        1,
+                        OptionalInt.of(1),
+                        processors(),
+                        Optional.of(List.of(new CheckTarget("/data/idx", Optional.of(List.of("_1")))))));
+        app.checkStarted(1, 5);
+        app.handleKey(key(KeyCode.ESCAPE));
+
+        // Showing the screen again doesn't fetch the list again, but a reopen does: at once on the
+        // screen, otherwise when it is shown.
+        app.handleKey(key('1'));
+        assertThat(app.handleKey(key('7'))).isEmpty();
+        assertThat(app.reopened(stats("/data/idx"), Feature.all())).hasValue(new Action.LoadCheckTargets());
+        app.handleKey(key('1'));
+        app.reopened(stats("/data/idx"), Feature.all());
+        assertThat(app.handleKey(key('7'))).hasValue(new Action.LoadCheckTargets());
+        app.checkTargetsFailed("gone");
+        assertThat(wide(app)).contains("Cannot list the segments: gone");
+    }
+
+    @Test
     void escBeforeTheCheckStartsStopsItAndItsJobIsCancelledOnceItStarts() {
         App app = appWithFields();
         app.handleKey(key('7'));
-        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.StartCheck(1, OptionalInt.of(1)));
+        assertThat(app.handleKey(key(KeyCode.ENTER)))
+                .hasValue(new Action.StartCheck(1, OptionalInt.of(1), processors(), Optional.empty()));
         assertThat(app.handleKey(key(KeyCode.ESCAPE))).isEmpty();
         assertThat(app.checking()).isFalse();
         assertThat(app.checkStarted(1, 8)).hasValue(new Action.CancelCheck(8));
@@ -2770,7 +2821,8 @@ class AppTest {
         app.handleKey(key('1'));
         assertThat(render(app)).contains("only the commits (4) and check (7) work");
         app.handleKey(key('7'));
-        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.StartCheck(1, OptionalInt.of(1)));
+        assertThat(app.handleKey(key(KeyCode.ENTER)))
+                .hasValue(new Action.StartCheck(1, OptionalInt.of(1), processors(), Optional.empty()));
         app.checkStarted(1, 1);
 
         // Opening the path again keeps the screen, with a new check.

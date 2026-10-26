@@ -111,14 +111,25 @@ public final class IndexCheck {
      * interrupted.
      *
      * @param level from {@link #MIN_LEVEL} to {@link #MAX_LEVEL}
+     * @param threads at least 1
+     * @param onlySegments the names of the segments to check; null for all of them
      * @return the outcome; one with an {@link Result#error()} if the directory can't be opened or
      *     holds no commit
-     * @throws IllegalArgumentException if {@code level} is out of range
+     * @throws IllegalArgumentException if {@code level} is out of range or {@code threads} below 1
      * @throws CancellationException if {@code progress} stopped the check
      */
     public static Result check(
-            Path dir, DirectoryImpl directoryImpl, int level, Consumer<String> output, ScanProgress progress) {
+            Path dir,
+            DirectoryImpl directoryImpl,
+            int level,
+            int threads,
+            List<String> onlySegments,
+            Consumer<String> output,
+            ScanProgress progress) {
         CheckIndex.Level.checkIfLevelInBounds(level);
+        if (threads < 1) {
+            throw new IllegalArgumentException("threads must be at least 1, not " + threads);
+        }
         // Closed by the PrintStream that wraps it (ADR 0088)
         @SuppressWarnings("java:S2095")
         Report report = new Report(output, progress);
@@ -129,7 +140,7 @@ public final class IndexCheck {
             checker.setFailFast(false);
             checker.setInfoStream(infoStream);
             List<String> commit = segmentNames(directory);
-            CheckIndex.Status status = run(checker, commit.size());
+            CheckIndex.Status status = run(checker, commit, threads, onlySegments);
             infoStream.flush();
             report.end();
             report.check();
@@ -144,16 +155,23 @@ public final class IndexCheck {
         }
     }
 
-    /** Checks segments in parallel if there are several, on an executor that is never interrupted. */
-    private static CheckIndex.Status run(CheckIndex checker, int segments) throws IOException {
-        int threads = Math.min(Runtime.getRuntime().availableProcessors(), segments);
-        if (threads < 2) {
-            return checker.checkIndex(null, null);
+    /**
+     * Checks segments in parallel if there are several to check, on {@code threads} threads at most,
+     * one per segment, on an executor that is never interrupted.
+     */
+    private static CheckIndex.Status run(CheckIndex checker, List<String> commit, int threads, List<String> only)
+            throws IOException {
+        long segments = only == null
+                ? commit.size()
+                : commit.stream().filter(only::contains).count();
+        int used = (int) Math.min(threads, segments);
+        if (used < 2) {
+            return checker.checkIndex(only, null);
         }
         ExecutorService executor = Executors.newFixedThreadPool(
-                threads, Thread.ofPlatform().daemon().name("leia-check-", 1).factory());
+                used, Thread.ofPlatform().daemon().name("leia-check-", 1).factory());
         try {
-            return checker.checkIndex(null, executor);
+            return checker.checkIndex(only, executor);
         } finally {
             // Not shutdownNow: an interrupted thread breaks NIOFSDirectory (AGENTS.md, hard rule 7).
             executor.shutdown();

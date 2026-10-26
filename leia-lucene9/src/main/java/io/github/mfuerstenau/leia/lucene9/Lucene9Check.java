@@ -14,7 +14,6 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
@@ -36,8 +35,8 @@ import org.apache.lucene.store.RandomAccessInput;
  * reads refuses every write, its lock is one that locks nothing, and {@code exorciseIndex} is never
  * called. The levels map to 9.12's modes: 1 checks the checksums only, 2 is the default check, 3 adds
  * the slow checks, which include the term vectors against the postings. A commit with several
- * segments is checked as Lucene 10's (ADR 0022 §5): by as many threads as there are processors, at most
- * one per segment, on an executor leia owns, and each segment's report then comes when the segment is
+ * segments is checked as Lucene 10's (ADR 0022 §5): by as many threads as asked for (ADR 0093), all the processors
+ * by default, at most one per segment, on an executor leia owns, and each segment's report then comes when the segment is
  * done; with one segment, it runs on the job's thread. The segments of the result are in commit order,
  * which 9.12's parallel check doesn't keep. The check stops when {@code progress} throws: each line of
  * the report asks it, and the inputs, their clones and slices ask on positioning and bulk reads.
@@ -60,11 +59,16 @@ final class Lucene9Check implements Check {
         return true;
     }
 
+    @Override
+    public boolean hasThreads() {
+        return true;
+    }
+
     /** {@inheritDoc} The level defaults to 2. */
     @Override
     public CheckResult check(
-            Path dir, DirectoryKind kind, OptionalInt level, Consumer<String> line, LongConsumer progress) {
-        int checkLevel = level.orElse(2);
+            Path dir, DirectoryKind kind, Options options, Consumer<String> line, LongConsumer progress) {
+        int checkLevel = options.level().orElse(2);
         Cancellation cancellation = new Cancellation(progress);
         // Closed by the PrintStream that wraps it (ADR 0088)
         @SuppressWarnings("java:S2095")
@@ -78,7 +82,7 @@ final class Lucene9Check implements Check {
             checker.setChecksumsOnly(checkLevel == 1);
             checker.setDoSlowChecks(checkLevel >= 3);
             commit = segmentNames(directory);
-            status = run(checker, commit.size());
+            status = run(checker, commit, options);
             infoStream.flush();
             report.end();
         } catch (IOException | RuntimeException e) {
@@ -91,16 +95,24 @@ final class Lucene9Check implements Check {
         return result(status, commit);
     }
 
-    /** Checks segments in parallel if there are several, on an executor that is never interrupted. */
-    private static CheckIndex.Status run(CheckIndex checker, int segments) throws IOException {
-        int threads = Math.min(Runtime.getRuntime().availableProcessors(), segments);
+    /**
+     * Checks segments in parallel if there are several to check, on as many threads as {@code options}
+     * allow, at most one per segment, on an executor that is never interrupted.
+     */
+    private static CheckIndex.Status run(CheckIndex checker, List<String> commit, Options options) throws IOException {
+        List<String> only = options.segments().orElse(null);
+        long segments = only == null
+                ? commit.size()
+                : commit.stream().filter(only::contains).count();
+        int threads =
+                (int) Math.min(options.threads().orElse(Runtime.getRuntime().availableProcessors()), segments);
         if (threads < 2) {
-            return checker.checkIndex(null, null);
+            return checker.checkIndex(only, null);
         }
         ExecutorService executor = Executors.newFixedThreadPool(
                 threads, Thread.ofPlatform().daemon().name("leia-check-", 1).factory());
         try {
-            return checker.checkIndex(null, executor);
+            return checker.checkIndex(only, executor);
         } finally {
             // Not shutdownNow: an interrupted thread breaks NIOFSDirectory (AGENTS.md, hard rule 7).
             executor.shutdown();

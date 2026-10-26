@@ -20,16 +20,44 @@ public interface Check {
     boolean hasLevels();
 
     /**
-     * Checks the latest commit of {@code dir}. The report goes to {@code line}, line by line.
+     * Whether the check takes a thread count (ADR 0093): segments are checked in parallel, which
+     * Lucene 9 and 10 do.
+     */
+    boolean hasThreads();
+
+    /**
+     * What to check and how.
      *
      * @param level the level from 1 to 3, if {@link #hasLevels()}; empty for the default, and ignored
      *     without levels
+     * @param threads the threads that check segments at once, at least 1, if {@link #hasThreads()};
+     *     empty for all the processors, and ignored without threads. A runtime uses no more threads
+     *     than it has segments to check
+     * @param segments the names of the segments of the latest commit to check; empty for all of them.
+     *     A name that isn't in the commit is skipped without a word, as Lucene does
+     */
+    record Options(OptionalInt level, OptionalInt threads, Optional<List<String>> segments) {
+
+        /** Every segment at the default level, on every processor. */
+        public static Options defaults() {
+            return new Options(OptionalInt.empty(), OptionalInt.empty(), Optional.empty());
+        }
+
+        /** Every segment at {@code level}, on every processor. */
+        public static Options atLevel(int level) {
+            return new Options(OptionalInt.of(level), OptionalInt.empty(), Optional.empty());
+        }
+    }
+
+    /**
+     * Checks the latest commit of {@code dir}. The report goes to {@code line}, line by line.
+     *
      * @param progress receives the lines written so far, after each line and while the check reads;
      *     it may throw to stop the check, which then throws what it threw
      * @return the outcome; one with an {@link CheckResult#error()} if {@code dir} can't be checked
      *     at all
      */
-    CheckResult check(Path dir, DirectoryKind kind, OptionalInt level, Consumer<String> line, LongConsumer progress);
+    CheckResult check(Path dir, DirectoryKind kind, Options options, Consumer<String> line, LongConsumer progress);
 
     /**
      * The outcome of checking one directory.
@@ -40,7 +68,7 @@ public interface Check {
      * @param badSegments the segments that failed a test
      * @param lostDocs the documents in the bad segments
      * @param validCounter whether the commit's counter for segment names is above every segment's name
-     * @param segments each segment of the latest commit, in commit order
+     * @param segments each segment of the latest commit that was checked, in commit order
      */
     record CheckResult(
             boolean clean,

@@ -13,7 +13,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.function.Consumer;
 import java.util.function.LongConsumer;
 import org.apache.lucene.codecs.Codec;
@@ -48,11 +47,17 @@ final class Lucene7Check implements Check {
         return true;
     }
 
+    /** {@inheritDoc} 7.x checks segments one at a time. */
+    @Override
+    public boolean hasThreads() {
+        return false;
+    }
+
     /** {@inheritDoc} The level defaults to 2. */
     @Override
     public CheckResult check(
-            Path dir, DirectoryKind kind, OptionalInt level, Consumer<String> line, LongConsumer progress) {
-        int checkLevel = level.orElse(2);
+            Path dir, DirectoryKind kind, Options options, Consumer<String> line, LongConsumer progress) {
+        int checkLevel = options.level().orElse(2);
         Cancellation cancellation = new Cancellation(progress);
         // Closed by the PrintStream that wraps it (ADR 0088)
         @SuppressWarnings("java:S2095")
@@ -64,7 +69,7 @@ final class Lucene7Check implements Check {
             checker.setInfoStream(infoStream, false);
             checker.setChecksumsOnly(checkLevel == 1);
             checker.setCrossCheckTermVectors(checkLevel >= 3);
-            status = checker.checkIndex();
+            status = checker.checkIndex(options.segments().orElse(null));
             infoStream.flush();
             report.end();
         } catch (IOException | RuntimeException e) {

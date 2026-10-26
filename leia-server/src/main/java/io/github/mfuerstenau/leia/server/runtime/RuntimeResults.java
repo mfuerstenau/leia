@@ -231,6 +231,9 @@ public final class RuntimeResults {
             if (check.get().hasLevels()) {
                 features.add(Feature.CHECK_LEVELS);
             }
+            if (check.get().hasThreads()) {
+                features.add(Feature.CHECK_THREADS);
+            }
         }
         return features;
     }
@@ -1488,7 +1491,7 @@ public final class RuntimeResults {
             LuceneRuntime runtime,
             Path dir,
             DirectoryKind kind,
-            int level,
+            Check.Options options,
             boolean skipped,
             Consumer<String> line,
             ScanProgress progress) {
@@ -1496,11 +1499,21 @@ public final class RuntimeResults {
         if (check.isEmpty()) {
             return failedCheck(dir, skipped, "Lucene " + runtime.luceneVersion() + " can't check an index here");
         }
-        Check.CheckResult result = check.get().check(dir, kind, OptionalInt.of(level), line, progress::scanned);
+        Check.CheckResult result = check.get().check(dir, kind, options, line, progress::scanned);
+        List<String> notFound = options.segments()
+                .map(only -> only.stream()
+                        .filter(name -> result.segments().stream()
+                                .noneMatch(segment -> segment.name().equals(name)))
+                        .toList())
+                .orElse(List.of());
+        // Nothing is known of a directory that couldn't be checked at all.
+        if (result.error().isPresent()) {
+            notFound = List.of();
+        }
         return new IndexCheck(
                 dir.toString(),
                 skipped,
-                result.clean(),
+                result.clean() && notFound.isEmpty(),
                 result.error(),
                 result.segmentsFile(),
                 result.missingSegments(),
@@ -1520,7 +1533,9 @@ public final class RuntimeResults {
                                 segment.hasDeletions(),
                                 segment.openReaderPassed(),
                                 segment.error()))
-                        .toList());
+                        .toList(),
+                options.segments(),
+                notFound);
     }
 
     /** The outcome for a directory that could not be checked at all. */
@@ -1537,6 +1552,8 @@ public final class RuntimeResults {
                 0,
                 0,
                 false,
+                List.of(),
+                Optional.empty(),
                 List.of());
     }
 

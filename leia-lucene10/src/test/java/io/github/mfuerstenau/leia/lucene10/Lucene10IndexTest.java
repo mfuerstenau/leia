@@ -350,8 +350,9 @@ class Lucene10IndexTest {
 
         Check check = new Lucene10Runtime().check().orElseThrow();
         assertThat(check.hasLevels()).isTrue();
+        assertThat(check.hasThreads()).isTrue();
         List<String> lines = new ArrayList<>();
-        Check.CheckResult result = check.check(dir, DirectoryKind.FS, OptionalInt.of(1), lines::add, _ -> {});
+        Check.CheckResult result = check.check(dir, DirectoryKind.FS, Check.Options.atLevel(1), lines::add, _ -> {});
         assertThat(result.clean()).isTrue();
         assertThat(result.segmentCount()).isEqualTo(3);
         assertThat(lines).isNotEmpty();
@@ -434,7 +435,7 @@ class Lucene10IndexTest {
             new Lucene10Runtime()
                     .check()
                     .orElseThrow()
-                    .check(dir, DirectoryKind.FS, OptionalInt.of(1), _ -> {}, _ -> {});
+                    .check(dir, DirectoryKind.FS, Check.Options.atLevel(1), _ -> {}, _ -> {});
             // No file changed, and none was added, such as a write.lock: lucene9 has the one its writer left.
             assertThat(hashes(dir)).isEqualTo(before);
         }

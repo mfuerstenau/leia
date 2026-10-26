@@ -13,7 +13,6 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.function.Consumer;
 import java.util.function.LongConsumer;
 import org.apache.lucene.index.CheckIndex;
@@ -40,9 +39,15 @@ final class Lucene3Check implements Check {
         return false;
     }
 
+    /** {@inheritDoc} 3.x checks segments one at a time. */
+    @Override
+    public boolean hasThreads() {
+        return false;
+    }
+
     @Override
     public CheckResult check(
-            Path dir, DirectoryKind kind, OptionalInt level, Consumer<String> line, LongConsumer progress) {
+            Path dir, DirectoryKind kind, Options options, Consumer<String> line, LongConsumer progress) {
         Cancellation cancellation = new Cancellation(progress);
         // Closed by the PrintStream that wraps it (ADR 0088)
         @SuppressWarnings("java:S2095")
@@ -52,7 +57,7 @@ final class Lucene3Check implements Check {
                 PrintStream infoStream = new PrintStream(report, true, StandardCharsets.UTF_8)) {
             CheckIndex checker = new CheckIndex(directory);
             checker.setInfoStream(infoStream);
-            status = checker.checkIndex();
+            status = checker.checkIndex(options.segments().orElse(null));
             infoStream.flush();
             report.end();
         } catch (IOException | RuntimeException e) {

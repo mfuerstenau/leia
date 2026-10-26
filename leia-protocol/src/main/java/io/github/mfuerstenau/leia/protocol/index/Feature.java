@@ -6,7 +6,8 @@ import java.util.Set;
 /**
  * What can be done with an opened index (ADR 0044): what the runtime that reads it supports (ADR
  * 0045, ADR 0071). One opened without a reader has only {@link #COMMITS}, {@link #CHECK_INDEX} and,
- * if the runtime of its first index checks at levels, {@link #CHECK_LEVELS}.
+ * if the runtime of its first index checks at levels, {@link #CHECK_LEVELS}, and in threads, {@link
+ * #CHECK_THREADS}.
  */
 public enum Feature {
     /** {@code getIndexStats}. */
@@ -79,6 +80,8 @@ public enum Feature {
     CHECK_INDEX,
     /** The {@code level} of {@code startCheckIndex}; a Lucene without it checks at its one level (ADR 0045). */
     CHECK_LEVELS,
+    /** The {@code threads} of {@code startCheckIndex}; a Lucene without it checks segments one at a time (ADR 0093). */
+    CHECK_THREADS,
     /** {@code startExportTerms}. */
     EXPORT_TERMS,
     /** {@code reopenIndex}. */
@@ -91,8 +94,8 @@ public enum Feature {
         return EnumSet.allOf(Feature.class);
     }
 
-    /** An index opened without a reader (ADR 0021) whose first index's runtime checks at levels. */
+    /** An index opened without a reader (ADR 0021) whose first index's runtime checks at levels and in threads. */
     public static Set<Feature> withoutReader() {
-        return EnumSet.of(COMMITS, CHECK_INDEX, CHECK_LEVELS);
+        return EnumSet.of(COMMITS, CHECK_INDEX, CHECK_LEVELS, CHECK_THREADS);
     }
 }

@@ -10,8 +10,13 @@ import static org.assertj.core.api.Assertions.tuple;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.check.CheckIndexResult;
+import io.github.mfuerstenau.leia.protocol.check.CheckTarget;
+import io.github.mfuerstenau.leia.protocol.check.CheckTargetIndex;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexParams;
 import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexResult;
+import io.github.mfuerstenau.leia.protocol.check.GetCheckTargetsParams;
+import io.github.mfuerstenau.leia.protocol.check.IndexCheck;
+import io.github.mfuerstenau.leia.protocol.check.SegmentCheck;
 import io.github.mfuerstenau.leia.protocol.check.StartCheckIndexParams;
 import io.github.mfuerstenau.leia.protocol.commits.Commit;
 import io.github.mfuerstenau.leia.protocol.commits.FieldFormats;
@@ -153,7 +158,8 @@ class Lucene8BackendTest {
                 Feature.POINTS,
                 Feature.COMMITS,
                 Feature.CHECK_INDEX,
-                Feature.CHECK_LEVELS));
+                Feature.CHECK_LEVELS,
+                Feature.CHECK_THREADS));
         // Only with a field that has vectors, which only 9.x writes.
         if (nine) {
             features.add(Feature.KNN_VECTORS);
@@ -628,6 +634,29 @@ class Lucene8BackendTest {
     }
 
     @Test
+    void checksOnlyTheSegmentsAskedFor() throws Exception {
+        open(testIndex("lucene8to9"));
+        CheckTargetIndex target = backend.call(Methods.GET_CHECK_TARGETS, new GetCheckTargetsParams())
+                .indexes()
+                .getFirst();
+        assertThat(target.error()).isEmpty();
+        String last = target.segments().getLast().name();
+
+        Check check = check(new StartCheckIndexParams(
+                OptionalInt.empty(),
+                OptionalInt.of(1),
+                Optional.of(List.of(new CheckTarget(target.path(), Optional.of(List.of(last, "_zz")))))));
+
+        IndexCheck index = check.result().indexes().getFirst();
+        assertThat(index.onlySegments()).contains(List.of(last, "_zz"));
+        assertThat(index.segments()).extracting(SegmentCheck::name).containsExactly(last);
+        assertThat(index.segmentCount()).isEqualTo(target.segments().size());
+        assertThat(index.segmentsNotFound()).containsExactly("_zz");
+        assertThat(index.clean()).isFalse();
+        assertThat(check.lines()).anyMatch(line -> line.contains("only these segments") && line.contains(last));
+    }
+
+    @Test
     void checksAtTheLevels() throws Exception {
         open(testIndex("lucene8to9"));
         Check fast = check(new StartCheckIndexParams(OptionalInt.of(1)));
@@ -649,7 +678,8 @@ class Lucene8BackendTest {
                 new OpenIndexParams(
                         testIndex("lucene8to9").toString(), Optional.empty(), Optional.of(OpenMode.DIRECTORY_ONLY)));
         assertThat(opened.features())
-                .containsExactlyInAnyOrder(Feature.COMMITS, Feature.CHECK_INDEX, Feature.CHECK_LEVELS);
+                .containsExactlyInAnyOrder(
+                        Feature.COMMITS, Feature.CHECK_INDEX, Feature.CHECK_LEVELS, Feature.CHECK_THREADS);
         assertThat(backend.call(Methods.GET_COMMIT, new GetCommitParams(3, OptionalInt.empty()))
                         .segments())
                 .hasSize(3);
