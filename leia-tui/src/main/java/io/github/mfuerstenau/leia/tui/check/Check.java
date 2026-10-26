@@ -323,14 +323,14 @@ public final class Check {
                     only()));
         }
         if (key.isChar('l') && !levels) {
-            return Optional.of(new Request.Unsupported("Check level"));
+            return Optional.of(new Request.Unsupported("Level"));
         }
         if (key.isChar('l') && !running()) {
             level = level >= StartCheckIndexParams.MAX_LEVEL ? StartCheckIndexParams.MIN_LEVEL : level + 1;
             return Optional.empty();
         }
         if (key.isChar('t') && !threadsSupported) {
-            return Optional.of(new Request.Unsupported("Check threads"));
+            return Optional.of(new Request.Unsupported("Threads"));
         }
         if (key.isChar('t') && !running()) {
             threads = nextThreads(threads, processors);
@@ -579,7 +579,7 @@ public final class Check {
         return "⏎ check " + (anyMarked() ? "marked" : "all") + "   Space mark   a all"
                 + (levels ? "   l level" : "")
                 + (threadsSupported ? "   t threads" : "")
-                + "   Tab panel";
+                + "   r list again   Tab panel";
     }
 
     public void render(Frame frame, Rect area) {

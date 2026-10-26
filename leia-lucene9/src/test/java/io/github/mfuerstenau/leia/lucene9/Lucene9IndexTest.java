@@ -1172,6 +1172,28 @@ class Lucene9IndexTest {
     }
 
     @Test
+    void namesTheMissingFileOfAnUnreadableCommit(@TempDir Path tmp) throws IOException {
+        Path copy = tmp.resolve("lucene8");
+        Files.createDirectories(copy);
+        try (Stream<Path> files = Files.list(testIndex("lucene8"))) {
+            for (Path file : (Iterable<Path>) files::iterator) {
+                Files.copy(file, copy.resolve(file.getFileName()));
+            }
+        }
+        try (Stream<Path> files = Files.list(copy)) {
+            Files.delete(files.filter(file -> file.toString().endsWith(".si"))
+                    .findFirst()
+                    .orElseThrow());
+        }
+
+        Commits.CommitList list = new Lucene9Runtime().commits().orElseThrow().commits(copy, DirectoryKind.NIO);
+
+        assertThat(list.unreadable()).hasSize(1);
+        assertThat(list.unreadable().getFirst().message()).startsWith("Corrupt index, missing file: _");
+        assertThat(list.unreadable().getFirst().message()).endsWith(".si").doesNotContain("/");
+    }
+
+    @Test
     void readsTheCommits() throws IOException {
         Commits commits = new Lucene9Runtime().commits().orElseThrow();
         Commits.CommitList list = commits.commits(testIndex("lucene8to9"), DirectoryKind.FS);

@@ -211,7 +211,7 @@ class SessionPilotTest {
         assertThat(screen()).contains("⏎ check all", "Space mark").doesNotContain("l level", "t threads", "Check (");
         pilot.press('l');
         settle();
-        assertThat(screen()).contains("Check level: not for Lucene 2.x");
+        assertThat(screen()).contains("Level: not for Lucene 2.x");
         pilot.press(KeyCode.ENTER);
         settle();
         assertThat(screen()).contains("OK: no problems found in 1 index");

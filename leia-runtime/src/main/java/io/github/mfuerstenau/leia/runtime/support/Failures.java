@@ -100,6 +100,29 @@ public final class Failures {
         return Optional.empty();
     }
 
+    /**
+     * Why a {@code segments_N} file can't be read, in leia-core's words but with the missing file's
+     * name alone, which is enough in a flat index directory: {@code Corrupt index, missing file: _0.si}
+     * if {@code e} or a cause reports a missing file, else the message of {@code e}.
+     */
+    public static String unreadableCommit(Throwable e) {
+        return missingFile(e)
+                .map(missing -> "Corrupt index, missing file: " + fileName(missing))
+                .orElseGet(() -> message(e));
+    }
+
+    /** The name of the file that {@code e} reports missing: Lucene 3 puts only its path and a reason in the message. */
+    private static String fileName(IOException e) {
+        String path =
+                e instanceof NoSuchFileException missing && missing.getFile() != null ? missing.getFile() : message(e);
+        if (!(e instanceof NoSuchFileException)) {
+            // "/a/b/_0.si (No such file or directory)": the reason is after the name.
+            int reason = path.indexOf(" (");
+            path = reason >= 0 ? path.substring(0, reason) : path;
+        }
+        return path.substring(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1);
+    }
+
     /** {@code failure}, of opening an index, in leia-core's words: its reason in front of its message. */
     public static IndexReadException opening(IndexReadException failure) {
         String message = message(failure);

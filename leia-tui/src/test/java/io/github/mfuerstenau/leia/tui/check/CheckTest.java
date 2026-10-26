@@ -101,8 +101,8 @@ class CheckTest {
     @Test
     void aCheckWithoutLevelsHasNoL() {
         Check check = new Check("/data", false, false);
-        assertThat(check.keys()).isEqualTo("⏎ check all   Space mark   a all   Tab panel");
-        assertThat(check.handleKey(key('l'))).contains(new Check.Request.Unsupported("Check level"));
+        assertThat(check.keys()).isEqualTo("⏎ check all   Space mark   a all   r list again   Tab panel");
+        assertThat(check.handleKey(key('l'))).contains(new Check.Request.Unsupported("Level"));
         assertThat(check.handleKey(key(KeyCode.ENTER)))
                 .contains(new Check.Request.Start(1, OptionalInt.empty(), OptionalInt.empty(), Optional.empty()));
     }
@@ -118,7 +118,7 @@ class CheckTest {
         // No second check while one runs, and the level stays.
         assertThat(check.handleKey(key(KeyCode.ENTER))).isEmpty();
         check.handleKey(key('l'));
-        assertThat(check.keys()).startsWith("Esc cancel");
+        assertThat(check.keys()).startsWith("Esc cancel").doesNotContain("r list again");
 
         assertThat(check.started(1, 7)).isEmpty();
         assertThat(check.job()).hasValueSatisfying(job -> assertThat(job).containsExactly(1, 7));
@@ -439,7 +439,7 @@ class CheckTest {
     void aCheckWithoutThreadsHasNoT() {
         Check check = new Check("/data", true, false, 6);
         assertThat(check.keys()).doesNotContain("t threads");
-        assertThat(check.handleKey(key('t'))).contains(new Check.Request.Unsupported("Check threads"));
+        assertThat(check.handleKey(key('t'))).contains(new Check.Request.Unsupported("Threads"));
         assertThat(check.handleKey(key(KeyCode.ENTER)))
                 .contains(new Check.Request.Start(1, OptionalInt.of(1), OptionalInt.empty(), Optional.empty()));
     }

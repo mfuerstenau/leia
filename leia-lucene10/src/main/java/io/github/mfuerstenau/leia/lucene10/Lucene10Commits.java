@@ -5,6 +5,7 @@ import io.github.mfuerstenau.leia.core.DirectoryOnlyIndex;
 import io.github.mfuerstenau.leia.core.IndexOpenException;
 import io.github.mfuerstenau.leia.runtime.Commits;
 import io.github.mfuerstenau.leia.runtime.DirectoryKind;
+import io.github.mfuerstenau.leia.runtime.support.Failures;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Optional;
@@ -22,10 +23,16 @@ final class Lucene10Commits implements Commits {
             io.github.mfuerstenau.leia.core.CommitList list = index.commits(0);
             return new CommitList(
                     list.commits().stream().map(Lucene10Commits::commit).toList(),
-                    list.unreadable().stream()
-                            .map(unreadable -> new Unreadable(unreadable.segmentsFile(), unreadable.message()))
-                            .toList());
+                    list.unreadable().stream().map(Lucene10Commits::unreadable).toList());
         }
+    }
+
+    /** A missing file by its name alone, as the old runtimes say it; leia-core names its whole path. */
+    private static Unreadable unreadable(io.github.mfuerstenau.leia.core.CommitList.Unreadable unreadable) {
+        String message = Failures.missingFile(unreadable.error()).isPresent()
+                ? Failures.unreadableCommit(unreadable.error())
+                : unreadable.message();
+        return new Unreadable(unreadable.segmentsFile(), message);
     }
 
     @Override

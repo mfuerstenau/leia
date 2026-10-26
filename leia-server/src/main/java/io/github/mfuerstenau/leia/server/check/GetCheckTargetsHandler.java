@@ -74,7 +74,7 @@ public final class GetCheckTargetsHandler implements MethodHandler<GetCheckTarge
             return failed(
                     path,
                     dir.skipped(),
-                    "The latest commit " + newer.get().segmentsFile() + " can't be read: "
+                    newer.get().segmentsFile() + " can't be read: "
                             + newer.get().message());
         }
         if (list.commits().isEmpty()) {

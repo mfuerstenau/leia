@@ -60,7 +60,7 @@ final class Lucene7Commits implements Commits {
                 try {
                     commits.add(commit(SegmentInfos.readCommit(directory, name)));
                 } catch (IOException | RuntimeException e) {
-                    unreadable.add(new Unreadable(name, Failures.message(e)));
+                    unreadable.add(new Unreadable(name, Failures.unreadableCommit(e)));
                 }
             }
             return new CommitList(List.copyOf(commits), List.copyOf(unreadable));

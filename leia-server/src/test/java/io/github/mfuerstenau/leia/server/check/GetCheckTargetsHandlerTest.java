@@ -80,7 +80,9 @@ class GetCheckTargetsHandlerTest {
                 .containsExactly(tuple(a.toString(), false, 1), tuple(b.toString(), true, 0));
         // The check would see the same commit, and report it as broken.
         assertThat(indexes.get(1).error())
-                .hasValueSatisfying(error -> assertThat(error).contains("can't be read", "_0.si"));
+                .hasValueSatisfying(error -> assertThat(error)
+                        .contains("segments_2 can't be read: Corrupt index, missing file: _0.si")
+                        .doesNotContain(tmp.toString()));
     }
 
     @Test

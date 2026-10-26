@@ -7,6 +7,7 @@ import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
+import dev.tamboui.text.CharWidth;
 import dev.tamboui.text.Line;
 import dev.tamboui.text.Span;
 import dev.tamboui.text.Text;
@@ -2787,16 +2788,22 @@ public final class App {
     private void renderTabs(Frame frame, Rect area) {
         Line line = tabsLine();
         // Without padding, the tabs leave the line more room when it needs it.
-        boolean compact = line != null && Math.max(area.width() - TABS_WIDTH, 0) < line.width();
+        boolean compact = line != null && Math.max(area.width() - TABS_WIDTH - 1, 0) < line.width();
         int tabsWidth = compact ? COMPACT_TABS_WIDTH : TABS_WIDTH;
         Rect tabs = area;
         if (line != null) {
             List<Rect> parts = Layout.horizontal()
-                    .constraints(Constraint.length(tabsWidth), Constraint.fill())
+                    .constraints(Constraint.length(tabsWidth), Constraint.length(1), Constraint.fill())
                     .split(area);
             tabs = parts.get(0);
+            Rect room = parts.get(2);
             // TamboUI's paragraph ignores the alignment of a line, only its own counts.
-            frame.renderWidget(Paragraph.builder().text(Text.from(line)).right().build(), parts.get(1));
+            frame.renderWidget(
+                    Paragraph.builder()
+                            .text(Text.from(cut(line, room.width())))
+                            .right()
+                            .build(),
+                    room);
         }
         String padding = compact ? "" : " ";
         List<Span> spans = new ArrayList<>();
@@ -2809,6 +2816,27 @@ public final class App {
             spans.add(Span.raw(padding));
         }
         frame.renderWidget(Paragraph.from(Line.from(spans)), tabs);
+    }
+
+    /** {@code line} cut to {@code width} columns, ending in {@code …} if it was cut, with its styles. */
+    private static Line cut(Line line, int width) {
+        if (line.width() <= width) {
+            return line;
+        }
+        List<Span> spans = new ArrayList<>();
+        int left = Math.max(width - 1, 0);
+        Style last = Style.EMPTY;
+        for (Span span : line.spans()) {
+            String text = CharWidth.substringByWidth(span.content(), left);
+            spans.add(Span.styled(text, span.style()));
+            last = span.style();
+            left -= CharWidth.of(text);
+            if (text.length() < span.content().length()) {
+                break;
+            }
+        }
+        spans.add(Span.styled("…", last));
+        return Line.from(spans);
     }
 
     /** How wide the tabs are: each title with a space on either side, and a divider between two. */

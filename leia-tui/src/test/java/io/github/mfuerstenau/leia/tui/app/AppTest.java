@@ -1185,6 +1185,21 @@ class AppTest {
         assertThat(render(app)).doesNotContain("not for");
     }
 
+    /** A notice keeps a column between it and the tabs, and ends in an ellipsis if it is cut. */
+    @Test
+    void aNoticeKeepsAGapAndShowsThatItWasCut() {
+        App app = oldLuceneApp(Feature.CHECK_INDEX);
+        app.handleKey(key('7'));
+        app.handleKey(key('t'));
+
+        // The tabs and the notice (27 columns) just fit at 96, with the gap between them.
+        assertThat(TestScreens.render(app::render, 96, 20)).contains("7 Check Threads: not for Lucene 2.x");
+        String narrow = TestScreens.render(app::render, 80, 20);
+        assertThat(narrow.lines().findFirst().orElseThrow())
+                .contains("7 Check Threads: ")
+                .endsWith("…");
+    }
+
     /** A new commit that adds KNN vectors to an index that a runtime reads brings the KNN mode (ADR 0060). */
     @Test
     void aReopenOffersWhatTheNewCommitAdds() {
@@ -2582,7 +2597,7 @@ class AppTest {
         assertThat(app.reopened(withDocs(stats("/data/idx"), 3, field("id", 0)), Feature.all()))
                 .isEqualTo(load(1));
 
-        assertThat(render(app)).contains("Reopened: segments_1; rebuilding");
+        assertThat(render(app)).contains("Reopened: segments_1; rebuildi…");
         assertThat(app.rebuildFilter())
                 .hasValue(new Action.StartFilter(2, filterParams(false), OptionalLong.empty(), OptionalLong.empty()));
         // A poll of the old job, which the reopen stopped, changes nothing.
