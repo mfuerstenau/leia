@@ -15,7 +15,6 @@ import dev.tamboui.text.Line;
 import dev.tamboui.text.Span;
 import dev.tamboui.text.Text;
 import dev.tamboui.tui.event.KeyEvent;
-import dev.tamboui.widgets.Clear;
 import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.paragraph.Paragraph;
@@ -40,6 +39,7 @@ import io.github.mfuerstenau.leia.tui.analysis.AnalyzerSettings.Language;
 import io.github.mfuerstenau.leia.tui.analysis.AnalyzerSettings.WordSetKind;
 import io.github.mfuerstenau.leia.tui.prompt.LineInput;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.Form;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.util.ArrayList;
@@ -1144,7 +1144,7 @@ public final class AnalyzerForm {
         if (error != null) {
             lines.add(Line.empty());
             for (String line : TextFormat.wrap(error, width, Integer.MAX_VALUE)) {
-                lines.add(Line.styled(line, Style.EMPTY.red()));
+                lines.add(Line.styled(line, Palette.current().error()));
             }
             selectedLine = lines.size() - 1;
         }
@@ -1179,7 +1179,7 @@ public final class AnalyzerForm {
                 Style style = Form.dim();
                 if (kind == WordSetKind.STOPWORDS && support(kind).orElse(null) == WordSetSupport.REQUIRED) {
                     text = "none: this analyzer needs some";
-                    style = Style.EMPTY.red();
+                    style = Palette.current().error();
                 } else if (kind == WordSetKind.STOPWORDS) {
                     text = "default: the analyzer's own";
                 } else {
@@ -1346,14 +1346,14 @@ public final class AnalyzerForm {
                 new Rect(area.x() + (area.width() - width) / 2, area.y() + (area.height() - height) / 2, width, height);
         Block block = Block.builder().borders(Borders.ALL).title(title).build();
         Rect inner = block.inner(popup);
-        frame.renderWidget(Clear.INSTANCE, popup);
+        Panels.clear(frame, popup);
         frame.renderWidget(block, popup);
         LineInput.Visible visible = edit.input.visible(inner.width());
         frame.renderWidget(Paragraph.from(Line.from(visible.text())), new Rect(inner.x(), inner.y(), inner.width(), 1));
         if (edit.error != null && inner.height() > 1) {
             frame.renderWidget(
-                    Paragraph.from(Text.from(
-                            Panels.wrap(List.of(Line.styled(edit.error, Style.EMPTY.red())), inner.width()))),
+                    Paragraph.from(Text.from(Panels.wrap(
+                            List.of(Line.styled(edit.error, Palette.current().error())), inner.width()))),
                     new Rect(inner.x(), inner.y() + 1, inner.width(), 1));
         }
         frame.setCursorPosition(inner.x() + visible.cursorColumn(), inner.y());

@@ -1,19 +1,19 @@
 package io.github.mfuerstenau.leia.tui.search;
 
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
-import dev.tamboui.widgets.Clear;
 import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
 import io.github.mfuerstenau.leia.tui.prompt.LineInput;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.Form;
+import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -265,7 +265,7 @@ public final class LikeForm {
         }
         lines.add(Line.empty());
         if (noField) {
-            lines.add(Line.styled("Choose at least one field", Style.EMPTY.red()));
+            lines.add(Line.styled("Choose at least one field", Palette.current().error()));
         } else {
             lines.add(Line.styled("Terms: a document's term vector or analyzed", Form.dim()));
             lines.add(Line.styled("stored text, or the text, analyzed", Form.dim()));
@@ -325,7 +325,7 @@ public final class LikeForm {
                 .title(" Stop words, as analyzed terms: a the with ")
                 .build();
         Rect inner = block.inner(popup);
-        frame.renderWidget(Clear.INSTANCE, popup);
+        Panels.clear(frame, popup);
         frame.renderWidget(block, popup);
         LineInput.Visible visible = input.visible(inner.width());
         frame.renderWidget(Paragraph.from(Line.from(visible.text())), inner);

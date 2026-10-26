@@ -121,6 +121,7 @@ leia [OPTIONS] [INDEX_PATH]
 | `--no-default-jars` | don't load the jars of the default folder (see [Extension jars](#extension-jars)) |
 | `--directory <fs\|mmap\|nio>` | the Lucene `Directory` to read through: `fs` (default) lets Lucene choose, `mmap` is `MMapDirectory`, `nio` is `NIOFSDirectory`; `Ctrl+D` in the open prompt changes it |
 | `--no-reader` | open `INDEX_PATH` without a reader, for an index a reader can't open: only its commits and the check work; `Ctrl+N` in the open prompt does the same |
+| `--theme <dark\|light\|mono\|nord>` | the colours: `dark` (default) is the terminal's own, `light` reads on a light background, `mono` has none, `nord` is the Nord palette on its own background and needs a terminal with 24-bit colour. Without it: `mono` if the environment variable `NO_COLOR` is set and not empty, else the theme chosen last with `T`, else `dark` |
 | `--download-runtimes` | install the runtimes of `--runtime` without asking, then exit; takes no other option |
 | `--runtime <FOLDER>` | with `--download-runtimes`, a runtime to install: `lucene10`, `lucene9`, `lucene7`, `lucene5` or `lucene3`; repeatable |
 | `-V, --version` | print the version and build of leia, and the Java in use |
@@ -176,6 +177,7 @@ can't do, for an older minor than leia's runtime is built for, says so, and belo
 | `R` | reopen the index, if another process committed to it since |
 | `X` | list the loaded jars and add more |
 | `D` | on the start screen: download the runtimes |
+| `T` | on the start screen: the next theme, `dark`, `light`, `mono`, `nord`, which leia remembers |
 | `L` | show the log; `-`/`+` change its level, `y` copies it |
 | `1` … `7` | overview, documents, terms, commits, search, analysis, check |
 | `Space` `a` `l` `t` `r` | on the check screen: mark an index or a segment, mark all, change the level, change the threads, list the segments again; `⏎` checks what is marked, or everything if nothing is |
@@ -192,6 +194,8 @@ The footer of each screen shows its own keys.
   leia, and `-` there lowers the level at once: at FINE, every call and its result is logged.
   To start at FINE, run leia with `LEIA_OPTS=-Dleia.log.level=FINE`.
 - **History:** the last 10 opened index paths, in `history` beside the log.
+- **Theme:** the theme chosen last with `T`, in `~/.config/leia/theme` (`$XDG_CONFIG_HOME/leia/theme`
+  if that is set), or `%APPDATA%\leia\theme` on Windows, beside the default folder of jars.
 
 ## License and disclaimer
 

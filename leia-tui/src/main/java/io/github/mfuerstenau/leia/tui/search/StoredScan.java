@@ -23,6 +23,7 @@ import io.github.mfuerstenau.leia.protocol.search.StoredScanHit;
 import io.github.mfuerstenau.leia.protocol.search.StoredScanResult;
 import io.github.mfuerstenau.leia.protocol.search.ValueRef;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.Form;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
@@ -207,7 +208,7 @@ public final class StoredScan {
         if (hits.isEmpty()) {
             Line line;
             if (error != null) {
-                line = Line.styled(error, Style.EMPTY.red());
+                line = Line.styled(error, Palette.current().error());
             } else if (result != null) {
                 line = Line.from("No stored value matches.");
             } else {
@@ -235,7 +236,9 @@ public final class StoredScan {
                     right(Integer.toString(i + 1), rankWidth),
                     Cell.from(Line.from(
                             Span.raw(" ".repeat(Math.max(docWidth - doc.length(), 0)) + doc),
-                            Span.styled(hit.deleted() ? DELETED_MARK : " ", Style.EMPTY.red()))),
+                            Span.styled(
+                                    hit.deleted() ? DELETED_MARK : " ",
+                                    Palette.current().error()))),
                     Cell.from(fields.get(i)),
                     right(Integer.toString(hit.matchCount()), matchesWidth),
                     Cell.from(snippetLine(hit))));
@@ -316,7 +319,7 @@ public final class StoredScan {
             lines.addAll(timedOutLines());
         }
         if (error != null) {
-            lines.add(Line.styled(error, Style.EMPTY.red()));
+            lines.add(Line.styled(error, Palette.current().error()));
         }
         return lines;
     }
@@ -330,7 +333,7 @@ public final class StoredScan {
         lines.add(Line.styled(
                 TextFormat.count(result.timedOutValues(), "value") + " took too long to match and "
                         + (result.timedOutValues() == 1 ? "was" : "were") + " skipped:",
-                Style.EMPTY.yellow()));
+                Palette.current().warning()));
         for (ValueRef value : result.timedOut()) {
             lines.add(Line.from("  doc " + value.docId() + " · " + TextFormat.escapeControl(value.field()) + "["
                     + value.valueIndex() + "]"));

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
+import io.github.mfuerstenau.leia.tui.theme.Theme;
 import java.nio.file.Path;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -28,7 +29,8 @@ class CliTest {
                         false,
                         Optional.empty(),
                         false,
-                        java.util.List.of()));
+                        java.util.List.of(),
+                        Optional.empty()));
     }
 
     @Test
@@ -62,6 +64,12 @@ class CliTest {
         assertThat(Cli.parse("--runtime=lucene5", "--download-runtimes", "--runtime", "lucene9", "--runtime", "lucene5")
                         .runtimes())
                 .containsExactly("lucene5", "lucene9");
+    }
+
+    @Test
+    void parsesTheTheme() throws Exception {
+        assertThat(Cli.parse("--theme", "nord").theme()).hasValue(Theme.NORD);
+        assertThat(Cli.parse("--theme=mono", "/data/index").theme()).hasValue(Theme.MONO);
     }
 
     @Test
@@ -121,6 +129,9 @@ class CliTest {
             --runtime lucene9           | --runtime goes only with --download-runtimes
             --download-runtimes --runtime lucene99 | invalid value 'lucene99' for --runtime <FOLDER>: possible values are lucene10, lucene9, lucene7, lucene5, lucene3
             --download-runtimes --runtime | --runtime needs a value <FOLDER>
+            --theme                     | --theme needs a value <THEME>
+            --theme bogus               | invalid value 'bogus' for --theme <THEME>: possible values are dark, light, mono, nord
+            --download-runtimes --runtime lucene9 --theme nord | --download-runtimes takes no INDEX_PATH and none of --jar, --server, --no-default-jars, --directory, --no-reader, --theme
             -j /opt/jdk                 | -j is taken by the leia script
             --java=/opt/jdk             | --java is taken by the leia script
             """)
@@ -141,6 +152,8 @@ class CliTest {
                         "--no-reader",
                         "--download-runtimes",
                         "--runtime <FOLDER>",
+                        "--theme <THEME>",
+                        "NO_COLOR",
                         "repo1.maven.org",
                         "SHA-256",
                         "-Djava.net.useSystemProxies=true",

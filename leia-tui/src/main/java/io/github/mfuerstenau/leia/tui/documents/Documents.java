@@ -14,7 +14,6 @@ import dev.tamboui.text.Span;
 import dev.tamboui.text.Text;
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
-import dev.tamboui.widgets.Clear;
 import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.block.Title;
@@ -59,6 +58,7 @@ import io.github.mfuerstenau.leia.tui.points.PointFormats;
 import io.github.mfuerstenau.leia.tui.search.Search;
 import io.github.mfuerstenau.leia.tui.terms.Terms.TermHit;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
 import java.util.ArrayDeque;
@@ -1941,11 +1941,14 @@ public final class Documents {
                 .filter(Objects::nonNull)
                 .collect(Collectors.joining(" · "));
         if (!segment.isEmpty()) {
-            spans.add(Span.styled(segment + " ", Style.EMPTY.cyan().bold()));
+            spans.add(Span.styled(segment + " ", Palette.current().accent().bold()));
         }
         if (filter != null) {
             DocFilter.Title title = filter.title(docId, maxDoc);
-            Style style = (title.error() ? Style.EMPTY.red() : Style.EMPTY.yellow()).bold();
+            Style style = (title.error()
+                            ? Palette.current().error()
+                            : Palette.current().warning())
+                    .bold();
             spans.add(Span.styled(title.text() + " ", style));
         }
         return Line.from(spans);
@@ -1968,7 +1971,7 @@ public final class Documents {
             spans.add(Span.raw("   Cannot read it: " + error));
         } else if (document != null && document.deleted()) {
             spans.add(Span.raw("   "));
-            spans.add(Span.styled("deleted", Style.EMPTY.red().bold()));
+            spans.add(Span.styled("deleted", Palette.current().error().bold()));
         }
         if (hit != null) {
             // Dimmed while another document is shown.
@@ -2012,7 +2015,8 @@ public final class Documents {
         for (int i = 0; i < cells.size(); i++) {
             String[] cellRow = cells.get(i);
             Cell name = matched.get(i).booleanValue()
-                    ? Cell.from(Line.from(Span.styled(cellRow[0], TextFormat.MATCH)))
+                    ? Cell.from(
+                            Line.from(Span.styled(cellRow[0], Palette.current().match())))
                     : Cell.from(cellRow[0]);
             Row tableRow = Row.from(name, Cell.from(cellRow[1]), right(cellRow[2], widths[2]), Cell.from(cellRow[3]));
             tableRows.add(empty.get(i).booleanValue() ? tableRow.style(Style.EMPTY.dim()) : tableRow);
@@ -2725,7 +2729,7 @@ public final class Documents {
                 Math.min(height, area.height()));
         String message =
                 prompt.error != null ? prompt.error : "0 to " + (maxDoc - 1) + "; Enter goes there, Esc cancels.";
-        frame.renderWidget(Clear.INSTANCE, popup);
+        Panels.clear(frame, popup);
         frame.renderWidget(
                 Paragraph.builder()
                         .text(Text.from(Line.from(prompt.input + "▏"), Line.styled(message, Style.EMPTY.dim())))

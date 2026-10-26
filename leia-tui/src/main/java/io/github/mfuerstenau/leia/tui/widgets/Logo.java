@@ -11,6 +11,7 @@ import dev.tamboui.text.Span;
 import dev.tamboui.text.Text;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -35,6 +36,12 @@ public final class Logo {
 
     /** The logo's rows, without the columns that are blank in every row at the right. */
     private static final List<Line> LINES = load();
+
+    /** {@link #LINES} without their colours, for a theme without them (ADR 0095). */
+    private static final List<Line> PLAIN = LINES.stream()
+            .map(line -> Line.from(
+                    line.spans().stream().map(span -> Span.raw(span.content())).toList()))
+            .toList();
 
     /** Columns the logo takes. */
     public static final int WIDTH = LINES.getFirst().width();
@@ -154,7 +161,8 @@ public final class Logo {
                 .constraints(Constraint.length(WIDTH), Constraint.length(GAP), Constraint.fill())
                 .split(area);
         int height = Math.min(HEIGHT, area.height());
-        frame.renderWidget(Paragraph.from(Text.from(LINES.subList(HEIGHT - height, HEIGHT))), columns.get(0));
+        List<Line> lines = Palette.current().colouredLogo() ? LINES : PLAIN;
+        frame.renderWidget(Paragraph.from(Text.from(lines.subList(HEIGHT - height, HEIGHT))), columns.get(0));
         int offset = Math.max(height - Panels.wrap(text, columns.get(2).width()).size(), 0) / 2;
         Rect textArea = Layout.vertical()
                 .constraints(Constraint.length(offset), Constraint.fill())

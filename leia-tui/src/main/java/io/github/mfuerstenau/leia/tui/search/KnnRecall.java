@@ -20,6 +20,7 @@ import io.github.mfuerstenau.leia.protocol.knn.KnnRecallResult;
 import io.github.mfuerstenau.leia.protocol.knn.KnnRecallTarget;
 import io.github.mfuerstenau.leia.protocol.knn.StartKnnRecallParams;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.Form;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
@@ -147,7 +148,7 @@ public final class KnnRecall {
         if (rowCount() == 0) {
             Line line;
             if (error != null) {
-                line = Line.styled(error, Style.EMPTY.red());
+                line = Line.styled(error, Palette.current().error());
             } else if (result != null) {
                 line = Line.from("The approximate search found every one of the exact nearest documents.");
             } else {
@@ -273,7 +274,7 @@ public final class KnnRecall {
                 .ifPresent(
                         filter -> lines.add(Line.from("Filter     " + TextFormat.escapeControl(filter.expression()))));
         if (error != null) {
-            lines.add(Line.styled(error, Style.EMPTY.red()));
+            lines.add(Line.styled(error, Palette.current().error()));
         }
         return lines;
     }

@@ -11,7 +11,7 @@ import io.github.mfuerstenau.leia.protocol.search.StartStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.search.StoredScanHit;
 import io.github.mfuerstenau.leia.protocol.search.StoredScanResult;
 import io.github.mfuerstenau.leia.protocol.search.ValueRef;
-import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -109,7 +109,8 @@ class StoredScanTest {
         StoredScanHit hit = hit(1, "a", "ä red\tred", 0, 100, new int[] {3, 6}, new int[] {7, 10}, new int[] {40, 43});
 
         List<Map.Entry<String, Boolean>> parts = StoredScan.snippetLine(hit).spans().stream()
-                .map((Span span) -> Map.entry(span.content(), span.style().equals(TextFormat.MATCH)))
+                .map((Span span) -> Map.entry(
+                        span.content(), span.style().equals(Palette.current().match())))
                 .toList();
 
         assertThat(parts)

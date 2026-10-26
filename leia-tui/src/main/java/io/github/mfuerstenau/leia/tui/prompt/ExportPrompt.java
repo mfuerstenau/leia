@@ -9,7 +9,6 @@ import dev.tamboui.text.Line;
 import dev.tamboui.text.Span;
 import dev.tamboui.text.Text;
 import dev.tamboui.tui.event.KeyEvent;
-import dev.tamboui.widgets.Clear;
 import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.block.Title;
@@ -18,6 +17,7 @@ import io.github.mfuerstenau.leia.protocol.terms.StartExportTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.TermDelimiter;
 import io.github.mfuerstenau.leia.protocol.terms.TermExportFormat;
 import io.github.mfuerstenau.leia.tui.documents.DocumentExport;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
@@ -281,7 +281,7 @@ public final class ExportPrompt {
         // Input, error, hint, and the top and bottom border.
         int height = Math.min(1 + errorLines.size() + 1 + 2, area.height());
         Rect popup = Panels.centered(area, width, height);
-        frame.renderWidget(Clear.INSTANCE, popup);
+        Panels.clear(frame, popup);
         String title;
         String choice;
         String keys;
@@ -348,7 +348,7 @@ public final class ExportPrompt {
 
     /** The error in red, or the question whether to overwrite in yellow, wrapped at {@code width}. */
     private static List<Line> errorLines(String error, boolean question, int width) {
-        Style style = question ? Style.EMPTY.yellow() : Style.EMPTY.red();
+        Style style = question ? Palette.current().warning() : Palette.current().error();
         return Panels.wrap(List.of(Line.styled(error, style)), width);
     }
 }

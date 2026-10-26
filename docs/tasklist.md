@@ -18,7 +18,6 @@ The lane is done. What each runtime can do, and how they differ: `docs/runtimes.
 
 From the read-only checklist in `docs/luke-features.md` §7. Ordered roughly by value. Each area will need its own records, handlers and probably an ADR for the cross-cutting parts.
 
-- [ ] Misc: themes
 - [ ] Misc: about
 
 ## Bugs

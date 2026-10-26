@@ -913,7 +913,7 @@ class AppTest {
                 .containsExactly(
                         " q quit   o open   6 analysis ",
                         " X jars   D download runtimes ",
-                        " L log                        ");
+                        " L log   T theme              ");
         // The screen ends above the footer.
         assertThat(rows.get(16)).startsWith("└").endsWith("┘");
 

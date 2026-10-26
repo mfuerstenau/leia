@@ -33,6 +33,7 @@ import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
 import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -684,7 +685,7 @@ public final class Overview {
         if (indexes.size() > SUMMARY_INDEXES) {
             lines.add(Line.from("  … and " + (indexes.size() - SUMMARY_INDEXES) + " more"));
         }
-        Style red = Style.EMPTY.red();
+        Style error = Palette.current().error();
         for (int i = 0; i < Math.min(skipped.size(), SUMMARY_INDEXES); i++) {
             String prefix = "  " + pad(names.get(indexes.size() + i), width) + "  skipped: ";
             int prefixWidth = CharWidth.of(prefix);
@@ -696,11 +697,11 @@ public final class Overview {
                     SKIPPED_LINES);
             for (int line = 0; line < message.size(); line++) {
                 String text = line == 0 ? prefix + message.get(line) : " ".repeat(indent) + message.get(line);
-                lines.add(Line.styled(text, red));
+                lines.add(Line.styled(text, error));
             }
         }
         if (skipped.size() > SUMMARY_INDEXES) {
-            lines.add(Line.styled("  … and " + (skipped.size() - SUMMARY_INDEXES) + " more skipped", red));
+            lines.add(Line.styled("  … and " + (skipped.size() - SUMMARY_INDEXES) + " more skipped", error));
         }
         return lines;
     }

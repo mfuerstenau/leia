@@ -3,20 +3,19 @@ package io.github.mfuerstenau.leia.tui.prompt;
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
 import dev.tamboui.text.Span;
 import dev.tamboui.text.Text;
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
-import dev.tamboui.widgets.Clear;
 import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.block.Title;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -242,8 +241,10 @@ public final class PathPrompt {
         // Input, candidates, error, hint, and the top and bottom border.
         int height = Math.min(1 + candidateLines + errorLines.size() + 1 + 2, area.height());
         Rect popup = Panels.centered(area, width, height);
-        frame.renderWidget(Clear.INSTANCE, popup);
-        Span reader = mode == OpenMode.READER ? Span.raw("on") : Span.styled("off", Style.EMPTY.yellow());
+        Panels.clear(frame, popup);
+        Span reader = mode == OpenMode.READER
+                ? Span.raw("on")
+                : Span.styled("off", Palette.current().warning());
         Line bottom = Line.from(
                 Span.raw(" ^N reader: "), reader, Span.raw("   ^D directory: " + directoryLabel(directory) + " "));
         Block block = Block.builder()
@@ -287,7 +288,7 @@ public final class PathPrompt {
     private static List<Line> errorLines(String error, int width) {
         List<Line> lines = new ArrayList<>();
         for (String line : error.split("\n", -1)) {
-            lines.add(Line.styled(line, Style.EMPTY.red()));
+            lines.add(Line.styled(line, Palette.current().error()));
         }
         return Panels.wrap(lines, width);
     }

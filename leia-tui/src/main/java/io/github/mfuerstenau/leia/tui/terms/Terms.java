@@ -8,7 +8,6 @@ import static io.github.mfuerstenau.leia.tui.widgets.Panels.tailRow;
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Color;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.CharWidth;
@@ -43,6 +42,7 @@ import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
 import io.github.mfuerstenau.leia.tui.points.PointFormat;
 import io.github.mfuerstenau.leia.tui.points.PointFormats;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
 import java.util.ArrayDeque;
@@ -1661,8 +1661,8 @@ public final class Terms {
                                 ? Integer.toString(posting.freq().getAsInt())
                                 : "-",
                         4),
-                posting.deleted() ? Cell.from("deleted").style(Style.EMPTY.red()) : Cell.from(""));
-        return marked && out ? row.style(Style.EMPTY.fg(Color.DARK_GRAY)) : row;
+                posting.deleted() ? Cell.from("deleted").style(Palette.current().error()) : Cell.from(""));
+        return marked && out ? row.style(Palette.current().muted()) : row;
     }
 
     private void renderPointTree(Frame frame, Rect area) {
@@ -1724,7 +1724,8 @@ public final class Terms {
             if (node.loading) {
                 spans.add(Span.styled("  …", dim));
             }
-            node.error.ifPresent(error -> spans.add(Span.styled("  cannot read it: " + error, Style.EMPTY.red())));
+            node.error.ifPresent(error -> spans.add(
+                    Span.styled("  cannot read it: " + error, Palette.current().error())));
             rows.add(Row.from(Cell.from(Line.from(spans))));
         }
         pointTree.table.select(pointTree.selected);
@@ -1779,7 +1780,7 @@ public final class Terms {
         for (LeafPoint point : leaf.points) {
             Row row =
                     Row.from(right(Integer.toString(point.docId()), docWidth), Cell.from(format.format(point.value())));
-            rows.add(point.deleted() ? row.style(Style.EMPTY.red()) : row);
+            rows.add(point.deleted() ? row.style(Palette.current().error()) : row);
         }
         pointTree.pointTable.select(pointTree.pointSelected);
         Table table = table(rows, focused)
@@ -1839,7 +1840,7 @@ public final class Terms {
         Style dim = Style.EMPTY.dim();
         for (KnnGraphTree.Item item : visible) {
             Row row = Row.from(Cell.from(Line.from(itemSpans(item, dim))));
-            rows.add(deleted(item) ? row.style(Style.EMPTY.red()) : row);
+            rows.add(deleted(item) ? row.style(Palette.current().error()) : row);
         }
         knnTree.table.select(knnTree.selected);
         Table table = table(rows, focused)
@@ -1872,7 +1873,8 @@ public final class Terms {
                 if (level.loading) {
                     spans.add(Span.styled("  …", dim));
                 }
-                level.error.ifPresent(error -> spans.add(Span.styled("  cannot read it: " + error, Style.EMPTY.red())));
+                level.error.ifPresent(error -> spans.add(Span.styled(
+                        "  cannot read it: " + error, Palette.current().error())));
             }
             case KnnGraphTree.Item.NodeItem nodeItem -> {
                 spans.add(Span.raw("      " + nodeText(nodeItem.node())));
@@ -1964,7 +1966,7 @@ public final class Terms {
                         right(Integer.toString(node.node().docId()), docWidth),
                         Cell.from("L" + node.node().topLevel()),
                         Cell.from(""))
-                .style(node.node().deleted() ? Style.EMPTY.red().bold() : Style.EMPTY.bold());
+                .style(node.node().deleted() ? Palette.current().error().bold() : Style.EMPTY.bold());
         rows.add(self);
         int selectedRow = addLevelRows(rows, node, shown.get().selected, ordWidth, docWidth);
         shown.get().table.select(neighbours.isEmpty() ? 0 : selectedRow);
@@ -2007,7 +2009,8 @@ public final class Terms {
                         right(Integer.toString(neighbour.node().docId()), docWidth),
                         Cell.from("L" + neighbour.node().topLevel()),
                         right(TextFormat.score(neighbour.score(), 6), 6));
-                rows.add(neighbour.node().deleted() ? row.style(Style.EMPTY.red()) : row);
+                rows.add(
+                        neighbour.node().deleted() ? row.style(Palette.current().error()) : row);
                 first = false;
                 index++;
             }

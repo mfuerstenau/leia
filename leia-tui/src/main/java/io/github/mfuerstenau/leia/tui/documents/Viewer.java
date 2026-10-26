@@ -8,7 +8,6 @@ import dev.tamboui.text.Line;
 import dev.tamboui.text.Span;
 import dev.tamboui.text.Text;
 import dev.tamboui.tui.event.KeyEvent;
-import dev.tamboui.widgets.Clear;
 import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.block.Title;
@@ -24,6 +23,8 @@ import io.github.mfuerstenau.leia.protocol.search.ValueHighlight;
 import io.github.mfuerstenau.leia.tui.Osc52;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
+import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -59,11 +60,6 @@ public final class Viewer {
     /** Keys up to this display width are aligned in the delimited mode; longer ones are not padded. */
     static final int MAX_KEY_WIDTH = 32;
 
-    static final Style JSON_KEY = Style.EMPTY.cyan();
-    static final Style JSON_STRING = Style.EMPTY.green();
-    static final Style JSON_NUMBER = Style.EMPTY.yellow();
-    static final Style JSON_LITERAL = Style.EMPTY.magenta();
-    static final Style KEY = Style.EMPTY.cyan();
     static final Style DIM = Style.EMPTY.dim();
 
     /** Checks that a value is JSON, and says where it isn't: no more than one value. */
@@ -463,7 +459,7 @@ public final class Viewer {
                     if (from > pos) {
                         segments.add(new Segment(Style.EMPTY, text.substring(charAt[pos], charAt[from])));
                     }
-                    segments.add(new Segment(TextFormat.MATCH, text.substring(charAt[from], charAt[to])));
+                    segments.add(new Segment(Palette.current().match(), text.substring(charAt[from], charAt[to])));
                     pos = to;
                 }
             }
@@ -914,7 +910,7 @@ public final class Viewer {
         String modeLabel = shown != null && shown.detail() != null ? mode.name + " · " + shown.detail() : mode.name;
         String position = " " + modeLabel + " · rows " + (start + 1) + "–" + end + " of " + rows + " ";
         block.titleBottom(Title.from(position).right());
-        frame.renderWidget(Clear.INSTANCE, area);
+        Panels.clear(frame, area);
         frame.renderWidget(
                 Paragraph.builder().text(Text.from(lines)).block(block.build()).build(), area);
         // TamboUI's block has one bottom title: the status goes left of the position by hand.
@@ -991,7 +987,7 @@ public final class Viewer {
                 width,
                 Math.min(height, area.height()));
         String message = form.error != null ? form.error : "Escapes \\t \\n \\xHH \\u{H…}; no key/value: empty";
-        frame.renderWidget(Clear.INSTANCE, popup);
+        Panels.clear(frame, popup);
         frame.renderWidget(
                 Paragraph.builder()
                         .text(Text.from(
@@ -1100,7 +1096,11 @@ public final class Viewer {
                 }
                 case '"' -> {
                     int end = jsonStringEnd(text, i);
-                    line.add(new Segment(expectKey ? JSON_KEY : JSON_STRING, text.substring(i, end + 1)));
+                    line.add(new Segment(
+                            expectKey
+                                    ? Palette.current().jsonKey()
+                                    : Palette.current().jsonString(),
+                            text.substring(i, end + 1)));
                     i = end + 1;
                 }
                 default -> {
@@ -1146,7 +1146,9 @@ public final class Viewer {
     }
 
     private static Style jsonLiteralStyle(char first) {
-        return first == '-' || (first >= '0' && first <= '9') ? JSON_NUMBER : JSON_LITERAL;
+        return first == '-' || (first >= '0' && first <= '9')
+                ? Palette.current().jsonNumber()
+                : Palette.current().jsonLiteral();
     }
 
     private static boolean isJsonSpace(char c) {
@@ -1204,7 +1206,7 @@ public final class Viewer {
                 lines.add(List.of(new Segment(Style.EMPTY, pair[0])));
             } else {
                 lines.add(List.of(
-                        new Segment(KEY, pair[0]),
+                        new Segment(Palette.current().accent(), pair[0]),
                         new Segment(Style.EMPTY, " ".repeat(Math.max(keyWidth - CharWidth.of(pair[0]), 0))),
                         new Segment(DIM, separator),
                         new Segment(Style.EMPTY, pair[1])));
@@ -1255,7 +1257,7 @@ public final class Viewer {
         }
 
         void add(Segment segment) {
-            boolean first = segment.style().equals(TextFormat.MATCH);
+            boolean first = segment.style().equals(Palette.current().match());
             for (int c : segment.text().codePoints().toArray()) {
                 for (int s : shown(c).codePoints().toArray()) {
                     int w = CharWidth.of(s);

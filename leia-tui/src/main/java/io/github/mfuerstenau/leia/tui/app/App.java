@@ -99,6 +99,9 @@ import io.github.mfuerstenau.leia.tui.runtimes.RuntimeWindow;
 import io.github.mfuerstenau.leia.tui.search.Search;
 import io.github.mfuerstenau.leia.tui.terms.Terms;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
+import io.github.mfuerstenau.leia.tui.theme.Theme;
+import io.github.mfuerstenau.leia.tui.theme.ThemeFile;
 import io.github.mfuerstenau.leia.tui.widgets.KeyLegend;
 import io.github.mfuerstenau.leia.tui.widgets.Logo;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
@@ -252,6 +255,8 @@ public final class App {
     /** The default folder of jars, and whether its jars were loaded (ADR 0024). */
     private DefaultJars defaultJars = DefaultJars.none();
 
+    private ThemeFile themeFile = ThemeFile.none();
+
     private RuntimeFolders runtimeFolders = RuntimeFolders.none();
 
     /** The runtime jars leia knows and which of them are loaded (ADR 0072); null until they are known. */
@@ -335,6 +340,12 @@ public final class App {
     /** The jars popup shows the default folder, and marks the jars that came from it. */
     public App withDefaultJars(DefaultJars defaultJars) {
         this.defaultJars = defaultJars;
+        return this;
+    }
+
+    /** {@code T} on the start screen saves the theme it switches to in {@code themeFile} (ADR 0095). */
+    public App withThemeFile(ThemeFile themeFile) {
+        this.themeFile = themeFile;
         return this;
     }
 
@@ -2197,6 +2208,15 @@ public final class App {
                 // Only on the start screen: the analysis tab has a D of its own.
                 return opened == null && screen != Screen.ANALYSIS ? openRuntimeWindow() : screenKey(key);
             }
+            case 'T' -> {
+                // Only on the start screen: the documents tab has a T of its own.
+                if (opened != null || screen == Screen.ANALYSIS) {
+                    return screenKey(key);
+                }
+                Theme theme = Palette.theme().next();
+                Palette.use(theme);
+                themeFile.save(theme);
+            }
             case 'c' -> {
                 if (hasIndex()) {
                     busy = true;
@@ -2464,6 +2484,8 @@ public final class App {
 
     public void render(Frame frame) {
         Rect area = frame.area();
+        // A theme with a background of its own paints it first (ADR 0095).
+        frame.buffer().setStyle(area, Palette.current().base());
         // The analysis screen needs no index, so its tab shows without one.
         boolean tabsShown = hasIndex() || screen == Screen.ANALYSIS;
         List<Line> footer = notice != null && notice.inFooter()
@@ -2530,7 +2552,8 @@ public final class App {
             return analysisFooter(cancel, screens);
         }
         if (opened == null) {
-            return " q quit   o open   6 analysis   X jars   D download runtimes   L log";
+            // Fits 80 columns, on one line.
+            return " q quit   o open   6 analysis   X jars   D download runtimes   L log   T theme";
         }
         if (screen == Screen.COMMITS) {
             return " " + cancel + APP_KEYS + reopen + screens + commitsKeys();
@@ -2675,7 +2698,7 @@ public final class App {
                     "Server: " + server.label().map(label -> label + ", ").orElse("") + "Lucene "
                             + server.luceneVersion() + " (" + majors(server.indexMajors()) + "), in " + server.home()));
         }
-        Style warning = Style.EMPTY.yellow();
+        Style warning = Palette.current().warning();
         if (!missing.isEmpty()) {
             String where = runtimeFolders
                     .dir()
@@ -2870,7 +2893,7 @@ public final class App {
         } else {
             return null;
         }
-        return Line.styled(text, Style.EMPTY.yellow());
+        return Line.styled(text, Palette.current().warning());
     }
 
     /** How the overview names the {@code Directory} that was asked for. */

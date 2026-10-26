@@ -30,6 +30,7 @@ import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.commits.Segment;
 import io.github.mfuerstenau.leia.protocol.commits.UnreadableCommit;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
 import java.util.ArrayList;
@@ -673,7 +674,7 @@ public final class Commits {
                             Cell.from(""),
                             Cell.from(""),
                             Cell.from("unreadable: " + TextFormat.escapeControl(commit.message())))
-                    .style(Style.EMPTY.red()));
+                    .style(Palette.current().error()));
         }
         commitTable.select(commitRow);
         Table table = table(rows, focused)
@@ -886,7 +887,7 @@ public final class Commits {
     /** The details of an unreadable commit: why it could not be read, its line breaks kept. */
     static List<Line> unreadableLines(UnreadableCommit commit) {
         List<Line> lines = new ArrayList<>();
-        lines.add(Line.styled("Could not be read:", Style.EMPTY.red()));
+        lines.add(Line.styled("Could not be read:", Palette.current().error()));
         lines.add(Line.empty());
         commit.message()
                 .lines()
@@ -1027,7 +1028,8 @@ public final class Commits {
         Optional<String> fieldInfosError = segment.fieldInfosError();
         if (fieldInfosError.isPresent()) {
             lines.add(Line.styled(
-                    "Could not be read: " + TextFormat.escapeControl(fieldInfosError.get()), Style.EMPTY.red()));
+                    "Could not be read: " + TextFormat.escapeControl(fieldInfosError.get()),
+                    Palette.current().error()));
             return;
         }
         Map<String, Function<FieldFormats, Optional<String>>> kinds = new LinkedHashMap<>();
@@ -1057,7 +1059,8 @@ public final class Commits {
             lines.add(Line.from(
                     Span.styled(kind, Style.EMPTY.bold()),
                     Span.raw(" ".repeat(kindWidth - kind.length()) + "  "),
-                    Span.styled(TextFormat.escapeControl(format), Style.EMPTY.cyan())));
+                    Span.styled(
+                            TextFormat.escapeControl(format), Palette.current().accent())));
             String names = fields.stream().map(TextFormat::escapeControl).collect(Collectors.joining(", "));
             for (String part : TextFormat.wrap(names, width - 2, Integer.MAX_VALUE)) {
                 lines.add(Line.from("  " + part));

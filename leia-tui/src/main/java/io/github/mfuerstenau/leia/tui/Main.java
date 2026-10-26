@@ -19,6 +19,8 @@ import io.github.mfuerstenau.leia.tui.jars.DefaultJars;
 import io.github.mfuerstenau.leia.tui.jars.RuntimeFolders;
 import io.github.mfuerstenau.leia.tui.runtimes.RuntimeDownload;
 import io.github.mfuerstenau.leia.tui.runtimes.RuntimeInstall;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
+import io.github.mfuerstenau.leia.tui.theme.ThemeFile;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -195,9 +197,12 @@ public final class Main {
         VersionResult version =
                 backend.call(Methods.VERSION, new VersionParams()).get();
         History history = platform.historyFile().map(History::load).orElseGet(History::inMemory);
+        ThemeFile themeFile = new ThemeFile(platform.themeFile());
+        Palette.use(themeFile.resolve(cli.theme(), platform.env().apply("NO_COLOR")));
         App app = new App(version, platform.home(), history, cli.directory())
                 .withCwd(Path.of("").toAbsolutePath())
                 .withDefaultJars(defaultJars)
+                .withThemeFile(themeFile)
                 .withRuntimeFolders(runtimeFolders)
                 .withLog(leiaLog.buffer(), platform.logFile());
         app.runtimesLoaded(

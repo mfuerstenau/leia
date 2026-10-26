@@ -17,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.tamboui.text.Span;
 import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -35,19 +36,19 @@ class TextFormatTest {
         assertThat(ranges).containsExactly(new int[] {0, 5}, new int[] {6, 8}, new int[] {9, 12});
         assertThat(marked(text, 0, text.length(), ranges))
                 .containsExactly(
-                        Span.styled("grüße", TextFormat.MATCH),
+                        Span.styled("grüße", Palette.current().match()),
                         Span.raw(" "),
-                        Span.styled("🦊", TextFormat.MATCH),
+                        Span.styled("🦊", Palette.current().match()),
                         Span.raw(" "),
-                        Span.styled("fox", TextFormat.MATCH));
+                        Span.styled("fox", Palette.current().match()));
         // A part of the text: the spans are cut to it.
         assertThat(marked(text, 3, 10, ranges))
                 .containsExactly(
-                        Span.styled("ße", TextFormat.MATCH),
+                        Span.styled("ße", Palette.current().match()),
                         Span.raw(" "),
-                        Span.styled("🦊", TextFormat.MATCH),
+                        Span.styled("🦊", Palette.current().match()),
                         Span.raw(" "),
-                        Span.styled("f", TextFormat.MATCH));
+                        Span.styled("f", Palette.current().match()));
         // From a later byte offset on, and a span inside a character.
         assertThat(charRanges("fox", 10, List.of(new MatchSpan(8, 11), new MatchSpan(12, 13))))
                 .containsExactly(new int[] {0, 1}, new int[] {2, 3});

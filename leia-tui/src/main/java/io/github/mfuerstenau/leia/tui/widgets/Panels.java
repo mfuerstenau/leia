@@ -2,10 +2,12 @@ package io.github.mfuerstenau.leia.tui.widgets;
 
 import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Style;
+import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.CharWidth;
 import dev.tamboui.text.Line;
 import dev.tamboui.text.Span;
 import dev.tamboui.text.Text;
+import dev.tamboui.widgets.Clear;
 import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.block.BorderType;
 import dev.tamboui.widgets.block.Borders;
@@ -13,6 +15,7 @@ import dev.tamboui.widgets.paragraph.Paragraph;
 import dev.tamboui.widgets.table.Cell;
 import dev.tamboui.widgets.table.Row;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -23,13 +26,26 @@ public final class Panels {
 
     private Panels() {}
 
-    /** A bordered block; the focused one has a thick border. */
+    /** A bordered block; the focused one has a thick border. Its border has the theme's colour. */
     public static Block panel(String title, boolean focused) {
-        Block.Builder block = Block.builder().borders(Borders.ALL).title(title);
+        Palette palette = Palette.current();
+        Block.Builder block = Block.builder()
+                .borders(Borders.ALL)
+                .title(title)
+                .borderStyle(focused ? palette.borderFocused() : palette.border());
         if (focused) {
             block.borderType(BorderType.THICK);
         }
         return block.build();
+    }
+
+    /**
+     * Clears {@code area} for a popup, and paints it with the theme's {@link Palette#base() base}:
+     * {@link Clear} alone resets the cells to the terminal's colours.
+     */
+    public static void clear(Frame frame, Rect area) {
+        frame.renderWidget(Clear.INSTANCE, area);
+        frame.buffer().setStyle(area, Palette.current().base());
     }
 
     /** The selected row: reversed in the focused table, bold in the other. */

@@ -30,6 +30,7 @@ import io.github.mfuerstenau.leia.protocol.analysis.TokenAttribute;
 import io.github.mfuerstenau.leia.protocol.analysis.TokenStage;
 import io.github.mfuerstenau.leia.tui.prompt.LineInput;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.Form;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
@@ -538,7 +539,9 @@ public final class Analysis {
         if (error != null) {
             frame.renderWidget(
                     Panels.wrapped(
-                            List.of(Line.styled(error, Style.EMPTY.red())), panel(" Analysis failed ", false), body),
+                            List.of(Line.styled(error, Palette.current().error())),
+                            panel(" Analysis failed ", false),
+                            body),
                     body);
         } else if (shown == null) {
             List<Line> hint = List.of(
@@ -583,7 +586,9 @@ public final class Analysis {
         List<Line> lines = new ArrayList<>(fieldLines());
         othersLine().ifPresent(lines::add);
         if (componentsError != null) {
-            lines.add(Line.styled("Cannot list the components: " + componentsError, Style.EMPTY.red()));
+            lines.add(Line.styled(
+                    "Cannot list the components: " + componentsError,
+                    Palette.current().error()));
         }
         if (noAnalysis) {
             lines.add(Line.from(NO_ANALYSIS));

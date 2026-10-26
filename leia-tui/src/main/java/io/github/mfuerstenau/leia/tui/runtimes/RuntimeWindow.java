@@ -11,7 +11,6 @@ import dev.tamboui.text.Span;
 import dev.tamboui.text.Text;
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
-import dev.tamboui.widgets.Clear;
 import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.gauge.LineGauge;
@@ -22,6 +21,7 @@ import io.github.mfuerstenau.leia.protocol.jars.RuntimeFolder;
 import io.github.mfuerstenau.leia.protocol.jars.RuntimeState;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.KeyLegend;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
@@ -66,8 +66,6 @@ public final class RuntimeWindow {
     private static final String VIEW_KEYS = "↑↓ move   [/] details   Esc close";
     private static final String NOTHING_CHECKED = "Nothing checked: Space checks a runtime; Esc closes";
     private static final String[] SPINNER = Spinner.dots().frames();
-    private static final Style FAILED = Style.EMPTY.red();
-    private static final Style WARNING = Style.EMPTY.yellow();
 
     private enum Phase {
         PLANNING,
@@ -170,18 +168,20 @@ public final class RuntimeWindow {
                                 + runtime.luceneVersion()
                                         .map(v -> " (Lucene " + v + ")")
                                         .orElse(""),
-                        Style.EMPTY.green()));
+                        Palette.current().success()));
             } else if (runtime.state() == RuntimeState.RESTART) {
                 lines.add(Line.styled(
-                        runtime.folder() + ": restart leia to load it, since jars are loaded already", WARNING));
+                        runtime.folder() + ": restart leia to load it, since jars are loaded already",
+                        Palette.current().warning()));
             } else if (taken && runtime.state() == RuntimeState.REFUSED) {
                 lines.add(Line.styled(
-                        "Refused " + runtime.folder() + ": " + runtime.problem().orElse(""), FAILED));
+                        "Refused " + runtime.folder() + ": " + runtime.problem().orElse(""),
+                        Palette.current().error()));
             } else if (taken && runtime.state() == RuntimeState.INCOMPLETE) {
                 lines.add(Line.styled(
                         runtime.folder() + " is still incomplete: "
                                 + runtime.problem().orElse("") + " is missing",
-                        FAILED));
+                        Palette.current().error()));
             }
         }
         if (!result.loaded().isEmpty()) {
@@ -196,7 +196,8 @@ public final class RuntimeWindow {
         if (phase != Phase.LOADING) {
             return;
         }
-        loadLines = List.of(Line.styled("Cannot load the runtimes: " + message, FAILED));
+        loadLines = List.of(Line.styled(
+                "Cannot load the runtimes: " + message, Palette.current().error()));
         phase = Phase.DONE;
     }
 
@@ -334,7 +335,7 @@ public final class RuntimeWindow {
         int width = Math.clamp((long) area.width() - 4, 0, MAX_WIDTH);
         int height = Math.max(area.height() - 2, 0);
         Rect window = Panels.centered(area, width, height);
-        frame.renderWidget(Clear.INSTANCE, window);
+        Panels.clear(frame, window);
         Block block = Block.builder()
                 .borders(Borders.ALL)
                 .title(" Download runtimes ")
@@ -378,7 +379,10 @@ public final class RuntimeWindow {
     private List<Line> header() {
         return switch (phase) {
             case PLANNING -> List.of(Line.from(SPINNER[ticks % SPINNER.length] + " Reading runtimes/…"));
-            case PLAN_FAILED -> List.of(Line.styled("Cannot plan the download: " + planError, FAILED));
+            case PLAN_FAILED ->
+                List.of(Line.styled(
+                        "Cannot plan the download: " + planError,
+                        Palette.current().error()));
             case CHOOSE -> chooseHeader();
             case INSTALLING ->
                 List.of(Line.from(Span.styled(
@@ -415,7 +419,10 @@ public final class RuntimeWindow {
         List<Line> header = new ArrayList<>();
         header.add(Line.from(Span.styled("Done: " + install.runtimesDir(), Style.EMPTY.bold())));
         for (String line : progress.outcome().summary()) {
-            header.add(line.contains(": failed: ") ? Line.from(Span.styled(line, FAILED)) : Line.from(line));
+            header.add(
+                    line.contains(": failed: ")
+                            ? Line.from(Span.styled(line, Palette.current().error()))
+                            : Line.from(line));
         }
         if (phase == Phase.LOADING) {
             header.add(Line.from(SPINNER[ticks % SPINNER.length] + " Loading the new runtimes…"));
@@ -430,7 +437,8 @@ public final class RuntimeWindow {
             case PLANNING, PLAN_FAILED -> KeyLegend.lines(CLOSE_KEYS, width);
             case CHOOSE -> {
                 List<Line> footer = new ArrayList<>();
-                hint.ifPresent(text -> footer.add(Line.from(Span.styled(" " + text, WARNING))));
+                hint.ifPresent(text -> footer.add(
+                        Line.from(Span.styled(" " + text, Palette.current().warning()))));
                 String keys = CHOOSE_KEYS;
                 if (plan.runtimes().isEmpty()) {
                     keys = present.isEmpty() ? CLOSE_KEYS : VIEW_KEYS;
@@ -565,7 +573,9 @@ public final class RuntimeWindow {
                     + state.luceneVersion().map(v -> " (Lucene " + v + ")").orElse("")
                     + ". Its jars are open, so the download leaves runtimes/" + folder + " alone."));
         } else if (state != null && state.state() == RuntimeState.REFUSED) {
-            lines.add(Line.styled("Refused: " + state.problem().orElse("") + ".", FAILED));
+            lines.add(Line.styled(
+                    "Refused: " + state.problem().orElse("") + ".",
+                    Palette.current().error()));
         } else {
             lines.add(Line.from("Complete; restart leia to load it."));
         }
@@ -582,7 +592,8 @@ public final class RuntimeWindow {
             lines.add(Line.from("• " + jar.name() + ", " + TextFormat.size(jar.size())));
             if (mismatched.contains(jar.name())) {
                 lines.add(Line.styled(
-                        "Not there, or doesn't match the list; the loader checks only that it is there", WARNING));
+                        "Not there, or doesn't match the list; the loader checks only that it is there",
+                        Palette.current().warning()));
             }
             lines.add(Line.from(install.repository().resolve(mavenPath.get()).toString()));
             lines.add(Line.from(Span.styled("SHA-256 " + jar.sha256(), Style.EMPTY.dim())));
@@ -614,7 +625,7 @@ public final class RuntimeWindow {
                 .ratio(ratio)
                 .label(TextFormat.size(done) + " of " + TextFormat.size(total) + " ")
                 .lineSet(LineGauge.THICK)
-                .filledStyle(Style.EMPTY.green())
+                .filledStyle(Palette.current().success())
                 .build();
     }
 
@@ -789,7 +800,8 @@ public final class RuntimeWindow {
                 String folder = runtime.known().folder();
                 lines.add(Line.from(Span.styled(runtime.known().name() + " · runtimes/" + folder, Style.EMPTY.bold())));
                 if (failures.containsKey(folder)) {
-                    lines.add(Line.from(Span.styled("  ✗ " + failures.get(folder), FAILED)));
+                    lines.add(Line.from(Span.styled(
+                            "  ✗ " + failures.get(folder), Palette.current().error())));
                 }
                 for (Jar jar : jars.values()) {
                     if (jar.folder.equals(folder)) {
@@ -806,13 +818,16 @@ public final class RuntimeWindow {
                 case WAITING -> Line.from(Span.styled("  · " + jar.name + ", " + size, Style.EMPTY.dim()));
                 case ACTIVE ->
                     Line.from(
-                            Span.styled("  " + spinner + " ", Style.EMPTY.cyan()),
+                            Span.styled("  " + spinner + " ", Palette.current().accent()),
                             Span.raw(jar.name + ", " + TextFormat.size(jar.bytes) + " / " + size));
                 case DOWNLOADED ->
                     Line.from(
-                            Span.styled("  ✓ ", Style.EMPTY.green()), Span.raw(jar.name + ", " + size + " downloaded"));
+                            Span.styled("  ✓ ", Palette.current().success()),
+                            Span.raw(jar.name + ", " + size + " downloaded"));
                 case KEPT -> Line.from(Span.raw("  = " + jar.name + ", " + size + " kept"));
-                case FAILED -> Line.from(Span.styled("  ✗ " + jar.name + ", " + size, FAILED));
+                case FAILED ->
+                    Line.from(Span.styled(
+                            "  ✗ " + jar.name + ", " + size, Palette.current().error()));
                 case CANCELLED ->
                     Line.from(Span.styled(
                             "  – " + jar.name + ", " + TextFormat.size(jar.bytes) + " / " + size + " cancelled",

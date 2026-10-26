@@ -9,12 +9,12 @@ import dev.tamboui.text.Line;
 import dev.tamboui.text.Span;
 import dev.tamboui.text.Text;
 import dev.tamboui.tui.event.KeyEvent;
-import dev.tamboui.widgets.Clear;
 import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import io.github.mfuerstenau.leia.tui.Osc52;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.KeyLegend;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.time.ZoneId;
@@ -244,10 +244,10 @@ public final class LogWindow {
     /** SEVERE in red, WARNING in yellow, and FINE and below dim. */
     static Style style(Level level) {
         if (level.intValue() >= Level.SEVERE.intValue()) {
-            return Style.EMPTY.red();
+            return Palette.current().error();
         }
         if (level.intValue() >= Level.WARNING.intValue()) {
-            return Style.EMPTY.yellow();
+            return Palette.current().warning();
         }
         return level.intValue() < Level.CONFIG.intValue() ? Style.EMPTY.dim() : Style.EMPTY;
     }
@@ -283,7 +283,7 @@ public final class LogWindow {
         int width = Math.max(area.width() - 4, 0);
         int height = Math.max(area.height() - 2, 0);
         Rect window = Panels.centered(area, width, height);
-        frame.renderWidget(Clear.INSTANCE, window);
+        Panels.clear(frame, window);
         Block probe = Block.builder().borders(Borders.ALL).build();
         Rect inner = probe.inner(window);
         if (inner.width() <= 0 || inner.height() <= 0) {

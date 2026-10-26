@@ -72,6 +72,7 @@ import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.prompt.LineInput;
 import io.github.mfuerstenau.leia.tui.search.LikeSettings.LikeSource;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.Form;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
@@ -2279,7 +2280,12 @@ public final class Search {
         String searching = searchingText();
         if (lineError != null) {
             String what = mode == Mode.KNN ? " Cannot read the target " : " Cannot read the values ";
-            message(frame, area, what, focused, Line.styled(lineError, Style.EMPTY.red()));
+            message(
+                    frame,
+                    area,
+                    what,
+                    focused,
+                    Line.styled(lineError, Palette.current().error()));
             return;
         }
         if (submitted == null) {
@@ -2287,7 +2293,12 @@ public final class Search {
             return;
         }
         if (submitted.error != null) {
-            message(frame, area, " Search failed ", focused, Line.styled(submitted.error, Style.EMPTY.red()));
+            message(
+                    frame,
+                    area,
+                    " Search failed ",
+                    focused,
+                    Line.styled(submitted.error, Palette.current().error()));
             return;
         }
         if (submitted.hits == null) {
@@ -2418,7 +2429,7 @@ public final class Search {
             title = " Explanation of doc " + explained.params.docId() + " ";
             lines = new ArrayList<>();
             if (explained.error != null) {
-                lines.add(Line.styled(explained.error, Style.EMPTY.red()));
+                lines.add(Line.styled(explained.error, Palette.current().error()));
             } else if (explained.explanation != null) {
                 explanationLines(explained.explanation, 0, lines);
             } else {
@@ -2728,7 +2739,9 @@ public final class Search {
                 Span.styled(" · " + highlights.text, Form.dim())));
         for (HitHighlight highlight : hit.get().highlights()) {
             lines.add(Line.from(
-                    Span.styled(TextFormat.escapeControl(highlight.field()), Style.EMPTY.cyan()),
+                    Span.styled(
+                            TextFormat.escapeControl(highlight.field()),
+                            Palette.current().accent()),
                     Span.styled(" · offsets from " + offsetSourceText(highlight.offsetSource()), Form.dim())));
             for (HighlightPassage passage : highlight.passages()) {
                 List<Span> spans = new ArrayList<>();
@@ -2739,7 +2752,9 @@ public final class Search {
         }
         if (highlighting != null && highlighting.params.docId() == hit.get().docId()) {
             if (highlighting.error != null) {
-                lines.add(Line.styled("Cannot view the matches: " + highlighting.error, Style.EMPTY.red()));
+                lines.add(Line.styled(
+                        "Cannot view the matches: " + highlighting.error,
+                        Palette.current().error()));
             } else {
                 lines.add(Line.styled(
                         "Finding every match in "

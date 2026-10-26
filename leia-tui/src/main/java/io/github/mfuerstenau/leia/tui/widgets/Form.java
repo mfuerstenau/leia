@@ -5,7 +5,6 @@ import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
 import dev.tamboui.text.Text;
-import dev.tamboui.widgets.Clear;
 import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.paragraph.Paragraph;
@@ -74,7 +73,7 @@ public final class Form {
                 height);
         int innerHeight = Math.max(height - 2, 0);
         int scroll = Math.max(selectedLine + 1 - innerHeight, 0);
-        frame.renderWidget(Clear.INSTANCE, popup);
+        Panels.clear(frame, popup);
         frame.renderWidget(
                 Paragraph.builder()
                         .text(Text.from(lines))

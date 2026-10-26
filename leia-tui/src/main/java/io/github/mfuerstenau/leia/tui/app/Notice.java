@@ -1,7 +1,7 @@
 package io.github.mfuerstenau.leia.tui.app;
 
-import dev.tamboui.style.Style;
 import dev.tamboui.text.Line;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 
 /** What the tab line says about the last reopen, or the footer about the last export, until the next key. */
 sealed interface Notice {
@@ -39,16 +39,27 @@ sealed interface Notice {
             case Reopening _ -> Line.from("Reopening…");
             case Unchanged unchanged -> Line.from("Unchanged: " + unchanged.segmentsFile());
             case Reopened reopened -> Line.from("Reopened: " + reopened.text());
-            case Failed failed -> Line.styled("Reopen failed: " + failed.error(), Style.EMPTY.red());
+            case Failed failed ->
+                Line.styled(
+                        "Reopen failed: " + failed.error(), Palette.current().error());
             case NotSupported notSupported ->
-                Line.styled(notSupported.what() + ": " + notSupported.reason(), Style.EMPTY.yellow());
-            case Exported exported -> Line.styled(exported.text(), Style.EMPTY.green());
-            case ExportFailed failed -> Line.styled("Export failed: " + failed.error(), Style.EMPTY.red());
+                Line.styled(
+                        notSupported.what() + ": " + notSupported.reason(),
+                        Palette.current().warning());
+            case Exported exported ->
+                Line.styled(exported.text(), Palette.current().success());
+            case ExportFailed failed ->
+                Line.styled(
+                        "Export failed: " + failed.error(), Palette.current().error());
             case ExportRunning _ -> Line.from("An export runs; Esc cancels it");
             case NotOpened notOpened ->
-                Line.styled(notOpened.segment() + " isn't in the opened commit", Style.EMPTY.yellow());
+                Line.styled(
+                        notOpened.segment() + " isn't in the opened commit",
+                        Palette.current().warning());
             case CannotDownload cannot ->
-                Line.styled("Cannot download runtimes: " + cannot.reason(), Style.EMPTY.yellow());
+                Line.styled(
+                        "Cannot download runtimes: " + cannot.reason(),
+                        Palette.current().warning());
         };
     }
 

@@ -2,10 +2,12 @@ package io.github.mfuerstenau.leia.tui;
 
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
+import io.github.mfuerstenau.leia.tui.theme.Theme;
 import java.io.Serial;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -27,6 +29,7 @@ import java.util.Optional;
  *     option, and no {@code INDEX_PATH} (ADR 0080)
  * @param runtimes {@code --runtime}, in the order given: with {@code --download-runtimes}, the
  *     runtimes' folders to install without asking, each one leia knows (ADR 0079, ADR 0080)
+ * @param theme {@code --theme}, the colour theme (ADR 0095)
  */
 record Cli(
         boolean help,
@@ -38,7 +41,8 @@ record Cli(
         boolean noReader,
         Optional<String> indexPath,
         boolean downloadRuntimes,
-        List<String> runtimes) {
+        List<String> runtimes,
+        Optional<Theme> theme) {
 
     static final String USAGE = "Usage: leia [OPTIONS] [INDEX_PATH]";
 
@@ -93,6 +97,12 @@ record Cli(
                   --runtime <FOLDER>
                       With --download-runtimes, a runtime to install: lucene10, lucene9, lucene7,
                       lucene5 or lucene3. Can be repeated
+                  --theme <THEME>
+                      The colours: dark, the terminal's own; light, for a light background; mono,
+                      none at all; nord, the Nord palette on its own background, which needs a
+                      terminal with 24-bit colour. Without it, mono if NO_COLOR is set, else the
+                      theme chosen last with T on the start screen, else dark [possible values:
+                      dark, light, mono, nord]
               -V, --version
                       Print the version and build of leia, and the Java version in use
               -h, --help
@@ -146,6 +156,7 @@ record Cli(
         private Optional<String> indexPath = Optional.empty();
         private boolean downloadRuntimes;
         private final List<String> runtimes = new ArrayList<>();
+        private Optional<Theme> theme = Optional.empty();
 
         Parser(String[] args) {
             this.args = args;
@@ -180,6 +191,7 @@ record Cli(
                 case "--jar" -> jars.add(path(name, value(name, inline, "<PATH>")));
                 case "--server" -> servers.add(path(name, value(name, inline, "<PATH>")));
                 case "--runtime" -> runtimes.add(runtime(value(name, inline, "<FOLDER>")));
+                case "--theme" -> theme = Optional.of(theme(value(name, inline, "<THEME>")));
                 case "--directory" -> {
                     directory = directory(value(name, inline, "<IMPL>"));
                     directoryGiven = true;
@@ -203,9 +215,10 @@ record Cli(
                             || !servers.isEmpty()
                             || noDefaultJars
                             || directoryGiven
-                            || noReader)) {
+                            || noReader
+                            || theme.isPresent())) {
                 throw new UsageException("--download-runtimes takes no INDEX_PATH and none of --jar, --server,"
-                        + " --no-default-jars, --directory, --no-reader");
+                        + " --no-default-jars, --directory, --no-reader, --theme");
             }
             if (!runtimes.isEmpty() && !downloadRuntimes) {
                 throw new UsageException("--runtime goes only with --download-runtimes");
@@ -224,7 +237,8 @@ record Cli(
                     noReader,
                     indexPath,
                     downloadRuntimes,
-                    runtimes.stream().distinct().toList());
+                    runtimes.stream().distinct().toList(),
+                    theme);
         }
 
         private static boolean flag(String name, Optional<String> inline) throws UsageException {
@@ -258,6 +272,15 @@ record Cli(
                         + String.join(", ", known));
             }
             return value;
+        }
+
+        private static Theme theme(String value) throws UsageException {
+            return Theme.parse(value)
+                    .orElseThrow(() -> new UsageException("invalid value '" + value
+                            + "' for --theme <THEME>: possible values are "
+                            + String.join(
+                                    ", ",
+                                    Arrays.stream(Theme.values()).map(Theme::id).toList())));
         }
 
         private static DirectoryImpl directory(String value) throws UsageException {

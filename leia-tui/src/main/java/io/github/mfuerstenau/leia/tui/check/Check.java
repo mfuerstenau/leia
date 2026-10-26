@@ -25,6 +25,7 @@ import io.github.mfuerstenau.leia.protocol.check.SegmentCheck;
 import io.github.mfuerstenau.leia.protocol.check.StartCheckIndexParams;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -691,8 +692,11 @@ public final class Check {
                                 .orElse(null);
                 entries.add(new Entry(segmentRow(index, segment, result), r));
                 if (result != null && result.error().isPresent()) {
-                    entries.add(
-                            new Entry(Line.styled("        " + result.error().get(), Style.EMPTY.red()), r));
+                    entries.add(new Entry(
+                            Line.styled(
+                                    "        " + result.error().get(),
+                                    Palette.current().error()),
+                            r));
                 }
             }
         }
@@ -713,7 +717,10 @@ public final class Check {
         List<Span> spans = new ArrayList<>();
         spans.add(Span.raw(mark(index).box + " "));
         if (outcome != null) {
-            spans.add(outcome.clean() ? Span.styled("✓ ", Style.EMPTY.green()) : Span.styled("✗ ", Style.EMPTY.red()));
+            spans.add(
+                    outcome.clean()
+                            ? Span.styled("✓ ", Palette.current().success())
+                            : Span.styled("✗ ", Palette.current().error()));
         }
         spans.add(Span.styled(Overview.relative(path, index.path()), Style.EMPTY.bold()));
         if (index.skipped()) {
@@ -734,8 +741,8 @@ public final class Check {
         if (outcome != null) {
             spans.add(
                     outcome.error().isEmpty()
-                            ? Span.styled("✓ ", Style.EMPTY.green())
-                            : Span.styled("✗ ", Style.EMPTY.red()));
+                            ? Span.styled("✓ ", Palette.current().success())
+                            : Span.styled("✗ ", Palette.current().error()));
         }
         spans.add(Span.styled(segment.name(), Style.EMPTY.bold()));
         spans.add(Span.raw("  " + TextFormat.count(segment.maxDoc(), "doc")
@@ -749,7 +756,8 @@ public final class Check {
     /** What is wrong with a checked index besides its broken segments, under its row. */
     private static void addProblems(List<Entry> entries, IndexCheck outcome, int row) {
         for (String problem : indexProblems(outcome)) {
-            entries.add(new Entry(Line.styled("    " + problem, Style.EMPTY.red()), row));
+            entries.add(
+                    new Entry(Line.styled("    " + problem, Palette.current().error()), row));
         }
     }
 
@@ -767,7 +775,9 @@ public final class Check {
                     case Running _ ->
                         List.of(Line.from(
                                 "Checking… " + TextFormat.count(lines.size(), "line") + " so far. Esc cancels."));
-                    case Failed(String error) -> List.of(Line.styled("The check failed: " + error, Style.EMPTY.red()));
+                    case Failed(String error) ->
+                        List.of(Line.styled(
+                                "The check failed: " + error, Palette.current().error()));
                     case Stopped(String message) -> List.of(Line.from(message));
                     case Done(CheckIndexResult result) -> headline(result);
                 });
@@ -793,16 +803,19 @@ public final class Check {
                 bad == 0
                         ? Line.styled(
                                 "OK: no problems found in " + indexCount(count) + " (" + took + ")",
-                                Style.EMPTY.green().bold())
+                                Palette.current().success().bold())
                         : Line.styled(
                                 "BAD: problems in " + bad + " of " + indexCount(count) + " (" + took + ")",
-                                Style.EMPTY.red().bold()));
+                                Palette.current().error().bold()));
         return shown;
     }
 
     private List<Line> indexLines(IndexCheck index, boolean named) {
         List<Span> head = new ArrayList<>();
-        head.add(index.clean() ? Span.styled("✓ ", Style.EMPTY.green()) : Span.styled("✗ ", Style.EMPTY.red()));
+        head.add(
+                index.clean()
+                        ? Span.styled("✓ ", Palette.current().success())
+                        : Span.styled("✗ ", Palette.current().error()));
         if (named) {
             head.add(Span.styled(Overview.relative(path, index.path()), Style.EMPTY.bold()));
             if (index.skipped()) {
@@ -814,14 +827,14 @@ public final class Check {
         List<Line> shown = new ArrayList<>();
         shown.add(Line.from(head));
         for (String problem : indexProblems(index)) {
-            shown.add(Line.styled("    " + problem, Style.EMPTY.red()));
+            shown.add(Line.styled("    " + problem, Palette.current().error()));
         }
         for (SegmentCheck segment : index.segments()) {
             segment.error()
                     .ifPresent(error -> shown.add(Line.styled(
                             "    " + segment.name() + " (" + TextFormat.count(segment.maxDoc(), "doc") + ", "
                                     + TextFormat.size(segment.sizeBytes()) + "): " + error,
-                            Style.EMPTY.red())));
+                            Palette.current().error())));
         }
         return shown;
     }
@@ -896,9 +909,9 @@ public final class Check {
     static Style outputStyle(String text) {
         String trimmed = text.stripLeading();
         if (trimmed.startsWith("ERROR") || text.contains("FAILED")) {
-            return Style.EMPTY.red();
+            return Palette.current().error();
         }
-        return trimmed.startsWith("WARNING") ? Style.EMPTY.yellow() : Style.EMPTY;
+        return trimmed.startsWith("WARNING") ? Palette.current().warning() : Style.EMPTY;
     }
 
     /** {@code text} from its code point {@code column} on. */

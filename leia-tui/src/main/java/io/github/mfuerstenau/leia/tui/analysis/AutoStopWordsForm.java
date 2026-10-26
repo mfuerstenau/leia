@@ -10,6 +10,7 @@ import io.github.mfuerstenau.leia.protocol.analysis.FieldStopWords;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAutoStopWordsResult;
 import io.github.mfuerstenau.leia.protocol.analysis.StartAutoStopWordsParams;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.Form;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -313,7 +314,7 @@ public final class AutoStopWordsForm {
         lines.add(stateLine());
         if (message != null) {
             for (String line : TextFormat.wrap(message, WIDTH - 2, Integer.MAX_VALUE)) {
-                lines.add(Line.styled(line, Style.EMPTY.red()));
+                lines.add(Line.styled(line, Palette.current().error()));
             }
         }
         Form.renderPopup(frame, area, " Auto stop words ", lines, selectedLine, WIDTH);

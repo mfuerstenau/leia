@@ -1,9 +1,9 @@
 package io.github.mfuerstenau.leia.tui.text;
 
-import dev.tamboui.style.Style;
 import dev.tamboui.text.CharWidth;
 import dev.tamboui.text.Span;
 import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -18,9 +18,6 @@ import java.util.regex.Pattern;
  * layout, and byte strings that are not UTF-8 as {@code 0x} and their hex.
  */
 public final class TextFormat {
-
-    /** How a match of a pattern is highlighted: black on yellow. */
-    public static final Style MATCH = Style.EMPTY.black().onYellow();
 
     /** The leading zeros of a negative exponent, as {@code %e} writes it. */
     private static final Pattern EXPONENT_ZEROS = Pattern.compile("e-0*");
@@ -124,7 +121,7 @@ public final class TextFormat {
 
     /**
      * The characters {@code from} to {@code to} of {@code text} as spans, escaped, with the parts that
-     * {@code ranges} (from {@link #charRanges}) cover highlighted as {@link #MATCH}.
+     * {@code ranges} (from {@link #charRanges}) cover highlighted as the theme's {@link Palette#match() match}.
      */
     public static List<Span> marked(String text, int from, int to, List<int[]> ranges) {
         List<Span> spans = new ArrayList<>();
@@ -138,7 +135,8 @@ public final class TextFormat {
             if (start > pos) {
                 spans.add(Span.raw(escapeControl(text.substring(pos, start))));
             }
-            spans.add(Span.styled(escapeControl(text.substring(start, end)), MATCH));
+            spans.add(Span.styled(
+                    escapeControl(text.substring(start, end)), Palette.current().match()));
             pos = end;
         }
         if (pos < to) {

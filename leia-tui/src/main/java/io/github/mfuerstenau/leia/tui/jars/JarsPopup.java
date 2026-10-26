@@ -9,7 +9,6 @@ import dev.tamboui.text.Line;
 import dev.tamboui.text.Span;
 import dev.tamboui.text.Text;
 import dev.tamboui.tui.event.KeyEvent;
-import dev.tamboui.widgets.Clear;
 import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.paragraph.Paragraph;
@@ -18,6 +17,7 @@ import io.github.mfuerstenau.leia.protocol.jars.JarComponents;
 import io.github.mfuerstenau.leia.tui.prompt.LineInput;
 import io.github.mfuerstenau.leia.tui.prompt.PathCompletion;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.io.File;
 import java.nio.file.InvalidPathException;
@@ -204,7 +204,7 @@ public final class JarsPopup {
         int height = Math.min(fixed + jarLines.size(), area.height());
         int listHeight = Math.clamp((long) height - fixed, 0, jarLines.size());
         Rect popup = Panels.centered(area, width, height);
-        frame.renderWidget(Clear.INSTANCE, popup);
+        Panels.clear(frame, popup);
         Block block = Block.builder().borders(Borders.ALL).title(" Jars ").build();
         Rect inner = block.inner(popup);
         frame.renderWidget(block, popup);
@@ -289,7 +289,8 @@ public final class JarsPopup {
     /** The line above the list. */
     private Line header() {
         if (jarsError != null) {
-            return Line.styled("Cannot list the jars: " + jarsError, Style.EMPTY.red());
+            return Line.styled(
+                    "Cannot list the jars: " + jarsError, Palette.current().error());
         }
         if (jars == null) {
             return Line.from("Listing the jars…");
@@ -344,7 +345,7 @@ public final class JarsPopup {
     /** What the last addition did, or why it failed, wrapped at {@code width}; no line before one. */
     private List<Line> outcome(int width) {
         if (addError != null) {
-            return Panels.wrap(List.of(Line.styled(addError, Style.EMPTY.red())), width);
+            return Panels.wrap(List.of(Line.styled(addError, Palette.current().error())), width);
         }
         return added != null ? Panels.wrap(outcomeLines(added), width) : List.of();
     }
@@ -352,12 +353,12 @@ public final class JarsPopup {
     /** What an addition did: how many jars were loaded, then the names they added by kind. */
     static List<Line> outcomeLines(AddJarsResult result) {
         int already = result.alreadyLoaded().size();
-        Style yellow = Style.EMPTY.yellow();
+        Style warning = Palette.current().warning();
         if (result.jars().isEmpty()) {
             String text = already == 1
                     ? "The jar is already loaded; nothing was loaded"
                     : "All " + already + " jars are already loaded; nothing was loaded";
-            return List.of(Line.styled(text, yellow));
+            return List.of(Line.styled(text, warning));
         }
         String summary = "Loaded " + TextFormat.count(result.jars().size(), "jar");
         if (already > 0) {
@@ -388,10 +389,10 @@ public final class JarsPopup {
             summary += result.jars().size() == 1
                     ? ", which adds nothing new: each of its names was taken"
                     : ", which add nothing new: each of their names was taken";
-            return List.of(Line.styled(summary, yellow));
+            return List.of(Line.styled(summary, warning));
         }
         List<Line> lines = new ArrayList<>();
-        lines.add(Line.styled(summary + ":", Style.EMPTY.green()));
+        lines.add(Line.styled(summary + ":", Palette.current().success()));
         lines.addAll(details);
         return lines;
     }

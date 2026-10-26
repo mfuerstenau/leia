@@ -24,7 +24,7 @@ import io.github.mfuerstenau.leia.tui.documents.Viewer.Segment;
 import io.github.mfuerstenau.leia.tui.documents.Viewer.Split;
 import io.github.mfuerstenau.leia.tui.documents.Viewer.Value;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
-import io.github.mfuerstenau.leia.tui.text.TextFormat;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -91,7 +91,8 @@ class ViewerTest {
 
         List<List<String>> marked = lines.stream()
                 .map(line -> line.spans().stream()
-                        .map(span -> span.content() + (span.style().equals(TextFormat.MATCH) ? "*" : ""))
+                        .map(span -> span.content()
+                                + (span.style().equals(Palette.current().match()) ? "*" : ""))
                         .toList())
                 .toList();
         assertThat(marked).containsExactly(List.of("a    ", "red*"), List.of("re\\u{1}d*", " x"));
@@ -100,8 +101,10 @@ class ViewerTest {
         Formatted over = Formatted.highlighted("ab\ncd", List.of(new ByteRange(1, 4)));
         assertThat(over.lines())
                 .containsExactly(
-                        List.of(segment(Style.EMPTY, "a"), segment(TextFormat.MATCH, "b")),
-                        List.of(segment(TextFormat.MATCH, "c"), segment(Style.EMPTY, "d")));
+                        List.of(
+                                segment(Style.EMPTY, "a"),
+                                segment(Palette.current().match(), "b")),
+                        List.of(segment(Palette.current().match(), "c"), segment(Style.EMPTY, "d")));
         // Out of range or inside a character: left out.
         Formatted odd = Formatted.highlighted("äx", List.of(new ByteRange(1, 2), new ByteRange(5, 9)));
         assertThat(odd.lines()).containsExactly(List.of(segment(Style.EMPTY, "äx")));
@@ -183,12 +186,12 @@ class ViewerTest {
 
     @Test
     void wrapsAcrossStyles() {
-        List<Segment> line =
-                List.of(segment(Viewer.KEY, "key"), segment(Viewer.DIM, " = "), segment(Style.EMPTY, "value"));
+        List<Segment> line = List.of(
+                segment(Palette.current().accent(), "key"), segment(Viewer.DIM, " = "), segment(Style.EMPTY, "value"));
 
         assertThat(wrap(line, 5, new ArrayList<>()))
                 .containsExactly(
-                        Line.from(Span.styled("key", Viewer.KEY), Span.styled(" =", Viewer.DIM)),
+                        Line.from(Span.styled("key", Palette.current().accent()), Span.styled(" =", Viewer.DIM)),
                         Line.from(Span.styled(" ", Viewer.DIM), Span.styled("valu", Style.EMPTY)),
                         Line.from(Span.styled("e", Style.EMPTY)));
     }
@@ -331,15 +334,15 @@ class ViewerTest {
                         "  \"s\": \"x\\\"y,}\",",
                         "  \"n\": []",
                         "}");
-        assertThat(lines.get(1).get(1)).isEqualTo(segment(Viewer.JSON_KEY, "\"b\""));
-        assertThat(lines.get(1).get(3)).isEqualTo(segment(Viewer.JSON_NUMBER, "1"));
-        assertThat(lines.get(5).get(1)).isEqualTo(segment(Viewer.JSON_LITERAL, "true"));
-        assertThat(lines.get(9).get(3)).isEqualTo(segment(Viewer.JSON_STRING, "\"x\\\"y,}\""));
+        assertThat(lines.get(1).get(1)).isEqualTo(segment(Palette.current().jsonKey(), "\"b\""));
+        assertThat(lines.get(1).get(3)).isEqualTo(segment(Palette.current().jsonNumber(), "1"));
+        assertThat(lines.get(5).get(1)).isEqualTo(segment(Palette.current().jsonLiteral(), "true"));
+        assertThat(lines.get(9).get(3)).isEqualTo(segment(Palette.current().jsonString(), "\"x\\\"y,}\""));
         // Strings in arrays are values, keys of nested objects are keys.
         lines = Viewer.jsonLines("[{\"k\":\"v\"},\"w\"]");
-        assertThat(lines.get(2).get(1)).isEqualTo(segment(Viewer.JSON_KEY, "\"k\""));
-        assertThat(lines.get(2).get(3)).isEqualTo(segment(Viewer.JSON_STRING, "\"v\""));
-        assertThat(lines.get(4).get(1)).isEqualTo(segment(Viewer.JSON_STRING, "\"w\""));
+        assertThat(lines.get(2).get(1)).isEqualTo(segment(Palette.current().jsonKey(), "\"k\""));
+        assertThat(lines.get(2).get(3)).isEqualTo(segment(Palette.current().jsonString(), "\"v\""));
+        assertThat(lines.get(4).get(1)).isEqualTo(segment(Palette.current().jsonString(), "\"w\""));
 
         assertThat(plain(Viewer.jsonLines("-1.5e3"))).containsExactly("-1.5e3");
         assertThat(Viewer.jsonError("{\"a\":1,}")).get().asString().contains("line 1 column 8");
@@ -405,7 +408,8 @@ class ViewerTest {
         Formatted formatted = Viewer.delimited(text, split(";", "="));
         assertThat(plain(formatted.lines()))
                 .containsExactly("id    = 7", "name  = a=b", "junk", longKey + " = x", "tab\\t = y");
-        assertThat(formatted.lines().getFirst().get(0)).isEqualTo(segment(Viewer.KEY, "id"));
+        assertThat(formatted.lines().getFirst().get(0))
+                .isEqualTo(segment(Palette.current().accent(), "id"));
         assertThat(formatted.lines().getFirst().get(2)).isEqualTo(segment(Viewer.DIM, " = "));
     }
 
