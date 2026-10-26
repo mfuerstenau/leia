@@ -73,8 +73,10 @@ lucene7-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene
 lucene7-backward-codecs = { module = "org.apache.lucene:lucene-backward-codecs", version.ref = "lucene7" }
 lucene7-queryparser = { module = "org.apache.lucene:lucene-queryparser", version.ref = "lucene7" }
 lucene7-analyzers-common = { module = "org.apache.lucene:lucene-analyzers-common", version.ref = "lucene7" }
+lucene7-suggest = { module = "org.apache.lucene:lucene-suggest", version.ref = "lucene7" }
 lucene6-core = { module = "org.apache.lucene:lucene-core", version.ref = "lucene6" }
 lucene6-analyzers-common = { module = "org.apache.lucene:lucene-analyzers-common", version.ref = "lucene6" }
+lucene6-suggest = { module = "org.apache.lucene:lucene-suggest", version.ref = "lucene6" }
 dagger = { module = "com.google.dagger:dagger", version.ref = "dagger" }
 dagger-compiler = { module = "com.google.dagger:dagger-compiler", version.ref = "dagger" }
 jackson-bom = { module = "tools.jackson:jackson-bom", version.ref = "jackson" }

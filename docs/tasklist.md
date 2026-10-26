@@ -18,7 +18,6 @@ The lane is done. What each runtime can do, and how they differ: `docs/runtimes.
 
 From the read-only checklist in `docs/luke-features.md` §7. Ordered roughly by value. Each area will need its own records, handlers and probably an ADR for the cross-cutting parts.
 
-- [ ] Open options: `lucene-suggest` in `runtimes/lucene7` and `runtimes/lucene5`, for the completion fields of Elasticsearch 5 and 6 shards (as `runtimes/lucene9` has it for Elasticsearch 7); untested, no such shards tried
 - [ ] Tools: check only the selected index or segments, and the thread count (left out of ADR 0022)
 - [ ] Tools: export terms with `totalTermFreq` and a marker for binary terms (left out of ADR 0022, which keeps Luke's format). Trie-encoded terms of 4.x to 7.x (7 bits a byte, so valid UTF-8) are written raw today, and one can hold a newline, which breaks the line format
 - [ ] Misc: themes

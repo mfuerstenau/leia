@@ -186,6 +186,22 @@ class Lucene7IndexTest {
                 .orElseThrow();
     }
 
+    @Test
+    void readsACompletionFieldOfLuceneSuggest() throws IOException {
+        // Its postings format, Completion50, is in lucene-suggest, as in an Elasticsearch 5 or 6 shard.
+        try (RuntimeIndex index = open("lucene6completion")) {
+            assertThat(index.stats().fields())
+                    .extracting(RuntimeIndex.Field::name)
+                    .containsExactly("id", "suggest");
+            Terms.TermsPage suggest = index.terms().orElseThrow().terms("suggest", Optional.empty(), 10);
+            assertThat(suggest.terms())
+                    .extracting(term -> text(term.term()), Terms.TermEntry::docFreq)
+                    .containsExactly(tuple("apple", 1), tuple("apricot", 1), tuple("banana", 1));
+            Documents.IndexDocument second = index.documents().orElseThrow().document(1);
+            assertThat(field(second, "id").stored()).containsExactly(new RuntimeIndex.StoredValue.Text("2"));
+        }
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"lucene6", "lucene7"})
     void readsDocumentsWithDocValues(String name) throws IOException {

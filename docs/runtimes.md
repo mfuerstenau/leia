@@ -124,6 +124,7 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 
 | Server | Lucene | With `--server` |
 |---|---|---|
+| Elasticsearch 6.8.23 (5.x alike) | 7.7.3 (6.x) | not tried with a server (Lucene 7 is refused). Without `--server`, `runtimes/lucene7` reads their shards, those with a `completion` field too, whose `Completion50` postings are in its `lucene-suggest`: a 6.8.23 shard with a `text` and a `completion` field (3 documents, a compound segment) opened, listed the completion terms, showed `_source` and passed check index; also tested with the `lucene6completion` index (6.6, a `SuggestField`). No 5.x shard tried. The `completion090` shards of Elasticsearch 1.x and 2.x stay unreadable: that format is in Elasticsearch's own jar |
 | Elasticsearch 7.17.28 | 8.11.3 | refused (Lucene 8). Without it, leia's Lucene 9.12.3 reads its shards, those with a `completion` field too, whose `Completion84` postings are in the `lucene-suggest` of `runtimes/lucene9` |
 | Elasticsearch 8.0.1 | 9.0.0 | everything but KNN vectors, points and highlighting, which are left out, and sort, `NOT_SUPPORTED` (`Pruning`, Lucene 9.10); a search is cancelled only between segments (ADR 0091) |
 | Elasticsearch 8.6.2 | 9.4.2 | as 8.0.1, but with points; the time series shards with `ES85BloomFilter` on `_id` too |

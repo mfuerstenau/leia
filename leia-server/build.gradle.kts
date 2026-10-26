@@ -65,6 +65,8 @@ val testIndexFiles = mapOf(
     // Written by leia-lucene7's build, read with its Lucene 7.7 (ADR 0048).
     "lucene6" to lucene7TestFiles("lucene6TestIndex", "lucene6TestIndexElements"),
     "lucene7" to lucene7TestFiles("lucene7TestIndex", "lucene7TestIndexElements"),
+    // A completion field, whose postings format is in runtimes/lucene7's lucene-suggest.
+    "lucene6completion" to lucene7TestFiles("lucene6completionTestIndex", "lucene6completionTestIndexElements"),
     // Written by leia-lucene9's build, read with its Lucene 9.12 (ADR 0049); leia-core's
     // own lucene8 stays for its tests that Lucene 10 refuses it.
     "lucene8" to lucene9TestFiles("lucene8TestIndex", "lucene8TestIndexElements"),

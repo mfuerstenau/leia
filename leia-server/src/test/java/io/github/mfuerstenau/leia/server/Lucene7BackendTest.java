@@ -34,6 +34,9 @@ import io.github.mfuerstenau.leia.protocol.points.PointSegment;
 import io.github.mfuerstenau.leia.protocol.points.PointValue;
 import io.github.mfuerstenau.leia.protocol.search.HighlightOptions;
 import io.github.mfuerstenau.leia.protocol.search.StartHighlightParams;
+import io.github.mfuerstenau.leia.protocol.terms.GetTermsParams;
+import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
+import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -220,6 +223,21 @@ class Lucene7BackendTest {
         OpenIndexResult opened = open(testIndex(name));
 
         RuntimeRebuilds.rebuildsADocument(backend, opened.maxDoc().orElseThrow(), true, true);
+    }
+
+    @Test
+    void readsACompletionFieldThroughTheFoldersSuggest() throws Exception {
+        // Completion50, as in an Elasticsearch 5 or 6 shard, comes from the lucene-suggest that the folder's
+        // runtime.txt lists.
+        OpenIndexResult opened = open(testIndex("lucene6completion"));
+        assertThat(opened.luceneRuntime()).isEqualTo("7.7.3");
+        assertThat(opened.numDocs()).hasValue(3);
+        GetTermsResult suggest = backend.call(Methods.GET_TERMS, new GetTermsParams("suggest", Optional.empty(), 10));
+        assertThat(suggest.terms()).extracting(TermEntry::term).containsExactly("apple", "apricot", "banana");
+        assertThat(backend.call(Methods.GET_DOCUMENT, new GetDocumentParams(1)).fields())
+                .filteredOn(field -> field.name().equals("id"))
+                .singleElement()
+                .satisfies(id -> assertThat(id.stored()).isNotEmpty());
     }
 
     @ParameterizedTest
