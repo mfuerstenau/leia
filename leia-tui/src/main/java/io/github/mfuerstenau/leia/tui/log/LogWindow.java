@@ -10,7 +10,6 @@ import dev.tamboui.text.Span;
 import dev.tamboui.text.Text;
 import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.widgets.block.Block;
-import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import io.github.mfuerstenau.leia.tui.Osc52;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
@@ -284,7 +283,7 @@ public final class LogWindow {
         int height = Math.max(area.height() - 2, 0);
         Rect window = Panels.centered(area, width, height);
         Panels.clear(frame, window);
-        Block probe = Block.builder().borders(Borders.ALL).build();
+        Block probe = Panels.box().build();
         Rect inner = probe.inner(window);
         if (inner.width() <= 0 || inner.height() <= 0) {
             frame.renderWidget(probe, window);
@@ -317,7 +316,7 @@ public final class LogWindow {
         for (Row row : all.subList(scroll, Math.min(scroll + rows, all.size()))) {
             lines.add(Line.styled(fromColumn(row.text(), column), row.style()));
         }
-        frame.renderWidget(Block.builder().borders(Borders.ALL).title(title()).build(), window);
+        frame.renderWidget(Panels.box().title(title()).build(), window);
         frame.renderWidget(Paragraph.from(Text.from(lines)), list);
         frame.renderWidget(Paragraph.from(Text.from(footer)), parts.get(1));
     }

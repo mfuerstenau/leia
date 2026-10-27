@@ -29,14 +29,28 @@ public final class Panels {
     /** A bordered block; the focused one has a thick border. Its border has the theme's colour. */
     public static Block panel(String title, boolean focused) {
         Palette palette = Palette.current();
-        Block.Builder block = Block.builder()
-                .borders(Borders.ALL)
-                .title(title)
-                .borderStyle(focused ? palette.borderFocused() : palette.border());
+        Block.Builder block = box().title(title).borderStyle(focused ? palette.borderFocused() : palette.border());
         if (focused) {
             block.borderType(BorderType.THICK);
         }
         return block.build();
+    }
+
+    /**
+     * A block with a border all round, for a popup or a frame, in the theme's {@link Palette#base()
+     * base}. TamboUI draws a border and its titles in the border style's foreground alone, not the
+     * cell's, so without it {@code nord} would show them in the terminal's foreground on its own
+     * background, which on a light terminal hardly shows.
+     */
+    public static Block.Builder box() {
+        return Block.builder()
+                .borders(Borders.ALL)
+                .borderStyle(Palette.current().base());
+    }
+
+    /** A {@link #box()} with {@code title}. */
+    public static Block box(String title) {
+        return box().title(title).build();
     }
 
     /**

@@ -16,7 +16,6 @@ import dev.tamboui.text.Span;
 import dev.tamboui.text.Text;
 import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.widgets.block.Block;
-import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalysisComponent;
 import io.github.mfuerstenau.leia.protocol.analysis.AvailableAnalyzer;
@@ -1344,7 +1343,7 @@ public final class AnalyzerForm {
         int height = Math.min(edit.error != null ? 4 : 3, area.height());
         Rect popup =
                 new Rect(area.x() + (area.width() - width) / 2, area.y() + (area.height() - height) / 2, width, height);
-        Block block = Block.builder().borders(Borders.ALL).title(title).build();
+        Block block = Panels.box(title);
         Rect inner = block.inner(popup);
         Panels.clear(frame, popup);
         frame.renderWidget(block, popup);

@@ -10,7 +10,6 @@ import dev.tamboui.text.Span;
 import dev.tamboui.text.Text;
 import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.widgets.block.Block;
-import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsResult;
 import io.github.mfuerstenau.leia.protocol.jars.JarComponents;
@@ -205,7 +204,7 @@ public final class JarsPopup {
         int listHeight = Math.clamp((long) height - fixed, 0, jarLines.size());
         Rect popup = Panels.centered(area, width, height);
         Panels.clear(frame, popup);
-        Block block = Block.builder().borders(Borders.ALL).title(" Jars ").build();
+        Block block = Panels.box(" Jars ");
         Rect inner = block.inner(popup);
         frame.renderWidget(block, popup);
 

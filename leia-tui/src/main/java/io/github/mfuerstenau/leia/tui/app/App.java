@@ -14,7 +14,6 @@ import dev.tamboui.text.Text;
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.widgets.block.Block;
-import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeResult;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsResult;
@@ -2913,7 +2912,7 @@ public final class App {
     }
 
     private static Block bordered(String title) {
-        return Block.builder().borders(Borders.ALL).title(title).build();
+        return Panels.box(title);
     }
 
     /** {@code lines} wrapped at word boundaries to fit {@code area}, in a bordered block if {@code title} isn't null. */

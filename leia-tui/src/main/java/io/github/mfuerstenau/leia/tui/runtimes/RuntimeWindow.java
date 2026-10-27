@@ -12,7 +12,6 @@ import dev.tamboui.text.Text;
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.widgets.block.Block;
-import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.gauge.LineGauge;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import dev.tamboui.widgets.spinner.Spinner;
@@ -336,10 +335,7 @@ public final class RuntimeWindow {
         int height = Math.max(area.height() - 2, 0);
         Rect window = Panels.centered(area, width, height);
         Panels.clear(frame, window);
-        Block block = Block.builder()
-                .borders(Borders.ALL)
-                .title(" Download runtimes ")
-                .build();
+        Block block = Panels.box(" Download runtimes ");
         Rect inner = block.inner(window);
         frame.renderWidget(block, window);
         if (inner.width() <= 0 || inner.height() <= 0) {

@@ -10,7 +10,6 @@ import dev.tamboui.text.Span;
 import dev.tamboui.text.Text;
 import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.widgets.block.Block;
-import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.block.Title;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import io.github.mfuerstenau.leia.protocol.terms.StartExportTermsParams;
@@ -303,8 +302,7 @@ public final class ExportPrompt {
                         : "Enter export   Ctrl+Y copy   Esc cancel";
             }
         }
-        Block block = Block.builder()
-                .borders(Borders.ALL)
+        Block block = Panels.box()
                 .title(title)
                 .titleBottom(Title.from(Line.from(choice)).right())
                 .build();

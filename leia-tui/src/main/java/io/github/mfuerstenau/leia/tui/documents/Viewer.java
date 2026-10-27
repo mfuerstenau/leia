@@ -9,7 +9,6 @@ import dev.tamboui.text.Span;
 import dev.tamboui.text.Text;
 import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.widgets.block.Block;
-import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.block.Title;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
@@ -880,7 +879,8 @@ public final class Viewer {
         Value value = values.get(current);
         String title = " " + field + " · " + (current + 1) + " of " + values.size() + " · " + value.kind + " · "
                 + TextFormat.size(value.size()) + " ";
-        Block.Builder block = Block.builder().borders(Borders.ALL).title(title).borderStyle(Style.EMPTY.bold());
+        Block.Builder block =
+                Panels.box().title(title).borderStyle(Palette.current().base().bold());
         Rect inner = block.build().inner(area);
         int height = inner.height();
         page = Math.max(height - 1, 1);
@@ -994,10 +994,7 @@ public final class Viewer {
                                 formLine("Items", form.items.toString(), !form.onKeyValue),
                                 formLine("Key/value", form.keyValue.toString(), form.onKeyValue),
                                 Line.from(Span.styled(message, DIM))))
-                        .block(Block.builder()
-                                .borders(Borders.ALL)
-                                .title(" Delimited ")
-                                .build())
+                        .block(Panels.box(" Delimited "))
                         .build(),
                 popup);
     }

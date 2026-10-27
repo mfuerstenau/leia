@@ -15,7 +15,6 @@ import dev.tamboui.text.Text;
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.widgets.block.Block;
-import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.block.Title;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import dev.tamboui.widgets.table.Cell;
@@ -1909,10 +1908,7 @@ public final class Documents {
         frame.renderWidget(
                 Paragraph.builder()
                         .text(Text.from(header()))
-                        .block(Block.builder()
-                                .borders(Borders.ALL)
-                                .title(Title.from(title()))
-                                .build())
+                        .block(Panels.box().title(Title.from(title())).build())
                         .build(),
                 parts.get(0));
         Rect bottom = parts.get(1);
@@ -2733,10 +2729,7 @@ public final class Documents {
         frame.renderWidget(
                 Paragraph.builder()
                         .text(Text.from(Line.from(prompt.input + "▏"), Line.styled(message, Style.EMPTY.dim())))
-                        .block(Block.builder()
-                                .borders(Borders.ALL)
-                                .title(" Go to document ")
-                                .build())
+                        .block(Panels.box(" Go to document "))
                         .build(),
                 popup);
     }

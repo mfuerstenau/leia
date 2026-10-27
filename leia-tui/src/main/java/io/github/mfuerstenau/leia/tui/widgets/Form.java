@@ -5,8 +5,6 @@ import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
 import dev.tamboui.text.Text;
-import dev.tamboui.widgets.block.Block;
-import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import java.util.List;
 
@@ -78,7 +76,7 @@ public final class Form {
                 Paragraph.builder()
                         .text(Text.from(lines))
                         .scroll(scroll)
-                        .block(Block.builder().borders(Borders.ALL).title(title).build())
+                        .block(Panels.box(title))
                         .build(),
                 popup);
         return popup;

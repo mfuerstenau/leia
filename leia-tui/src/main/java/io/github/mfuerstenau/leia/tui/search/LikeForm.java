@@ -6,7 +6,6 @@ import dev.tamboui.text.Line;
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.widgets.block.Block;
-import dev.tamboui.widgets.block.Borders;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import io.github.mfuerstenau.leia.protocol.search.MoreLikeThisQuery;
 import io.github.mfuerstenau.leia.tui.prompt.LineInput;
@@ -320,10 +319,7 @@ public final class LikeForm {
         int height = Math.min(3, area.height());
         Rect popup =
                 new Rect(area.x() + (area.width() - width) / 2, area.y() + (area.height() - height) / 2, width, height);
-        Block block = Block.builder()
-                .borders(Borders.ALL)
-                .title(" Stop words, as analyzed terms: a the with ")
-                .build();
+        Block block = Panels.box(" Stop words, as analyzed terms: a the with ");
         Rect inner = block.inner(popup);
         Panels.clear(frame, popup);
         frame.renderWidget(block, popup);

@@ -4,16 +4,42 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.tamboui.buffer.Buffer;
 import dev.tamboui.layout.Rect;
+import dev.tamboui.style.Color;
 import dev.tamboui.style.Style;
 import dev.tamboui.text.Line;
 import dev.tamboui.text.Span;
 import dev.tamboui.text.Text;
 import dev.tamboui.widgets.paragraph.Paragraph;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
+import io.github.mfuerstenau.leia.tui.theme.Themes;
 import java.util.ArrayList;
 import java.util.List;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 class PanelsTest {
+
+    @AfterEach
+    void resetTheme() {
+        Palette.use(Themes.bundled().dark());
+    }
+
+    @Test
+    void aBoxDrawsItsBorderAndTitleInTheThemesText() {
+        // TamboUI keeps only a cell's background under a border: without the box's own style, nord's
+        // borders and titles took the terminal's foreground, which hardly shows on a light terminal.
+        Palette.use(Themes.bundled().find("nord").orElseThrow());
+        Rect area = new Rect(0, 0, 10, 3);
+        Buffer buffer = Buffer.empty(area);
+        buffer.setStyle(area, Palette.current().base());
+
+        Panels.box(" t ").render(area, buffer);
+
+        Color text = Palette.current().base().fg().orElseThrow();
+        assertThat(buffer.get(2, 0).symbol()).isEqualTo("t");
+        assertThat(List.of(buffer.get(0, 0), buffer.get(2, 0), buffer.get(0, 1), buffer.get(9, 2)))
+                .allSatisfy(cell -> assertThat(cell.style().fg()).contains(text));
+    }
 
     @Test
     void showsTheColumnsThatFitWhole() {
