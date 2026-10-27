@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.tamboui.style.Color;
 import dev.tamboui.style.Style;
+import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -100,7 +101,7 @@ class ThemesTest {
                         fg("#C7905D"),
                         fg("#E4CDA5")));
         Color background = Color.hex("#2E3440");
-        Color grey = Color.hex("#4C566A");
+        Color grey = Color.hex("#7B88A1");
         Color frost = Color.hex("#88C0D0");
         Color yellow = Color.hex("#EBCB8B");
         Color green = Color.hex("#A3BE8C");
@@ -143,6 +144,41 @@ class ThemesTest {
             assertThat(style.fg()).isEmpty();
             assertThat(style.bg()).isEmpty();
         });
+    }
+
+    @ParameterizedTest
+    @FieldSource("BUNDLED")
+    void aMatchStandsOutInTheSelectedRow(String id) {
+        // The selected row is reversed, so a match that is only reversed would vanish in it (mono did).
+        Style selected = Panels.highlight(true);
+
+        assertThat(selected.patch(bundled(id).match())).isNotEqualTo(selected);
+    }
+
+    @Test
+    void nordKeepsMutedTextAndBordersReadable() {
+        // Panel titles take the border's colour; #4C566A on #2E3440 is 1.7:1 and all but vanished.
+        Palette nord = bundled("nord");
+        Color background = nord.base().bg().orElseThrow();
+
+        assertThat(contrast(nord.muted().fg().orElseThrow(), background)).isGreaterThanOrEqualTo(3.0);
+        assertThat(contrast(nord.border().fg().orElseThrow(), background)).isGreaterThanOrEqualTo(3.0);
+    }
+
+    private static double contrast(Color a, Color b) {
+        double la = luminance(a);
+        double lb = luminance(b);
+        return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+    }
+
+    private static double luminance(Color colour) {
+        Color.Rgb rgb = colour.toRgb();
+        return 0.2126 * linear(rgb.r()) + 0.7152 * linear(rgb.g()) + 0.0722 * linear(rgb.b());
+    }
+
+    private static double linear(int channel) {
+        double c = channel / 255.0;
+        return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
     }
 
     @ParameterizedTest

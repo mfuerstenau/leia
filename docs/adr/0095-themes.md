@@ -2,6 +2,7 @@
 
 - **Status:** Accepted, amended by ADR 0096 (theme files, user themes, `T` names the theme) and ADR 0097 (the logo's roles)
 - **Date:** 2026-10-22
+- **Revised 2026-10-23** after looking at every screen in all four themes: `nord`'s `muted` and `border` went from `#4C566A` (1.7:1 on `#2E3440`, panel titles all but vanished) to `#7B88A1` (3.5:1), and `mono`'s `match` from `reversed` to `bold underlined`, since the selected row is reversed and hid the match
 
 ## Context
 
@@ -22,9 +23,9 @@ The themes are a matter of the TUI only: no protocol, server or runtime change.
    | success | green | 28 | none | `#A3BE8C` |
    | accent | cyan | 25 | none | `#88C0D0` |
    | JSON key, string, number, literal | cyan, green, yellow, magenta | 25, 28, 130, 90 | none, dim, none, none | `#8FBCBB`, `#A3BE8C`, `#B48EAD`, `#81A1C1` |
-   | match | black on yellow | black on 229 | reversed | `#2E3440` on `#EBCB8B` |
-   | muted | dark grey | 245 | dim | `#4C566A` |
-   | border, focused | none | none | none | `#4C566A`, `#88C0D0` |
+   | match | black on yellow | black on 229 | bold underlined | `#2E3440` on `#EBCB8B` |
+   | muted | dark grey | 245 | dim | `#7B88A1` |
+   | border, focused | none | none | none | `#7B88A1`, `#88C0D0` |
    | logo | coloured | coloured | plain | coloured |
 
    `dark` is the look leia had before, and the default.
