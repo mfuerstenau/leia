@@ -2,12 +2,6 @@
 
 The work queue for leia. Check items off (`[x]`) as they land. Finished items move to `docs/tasklist-done.md`.
 
-## User folders — next
-
-Where leia keeps its files. The item changes accepted ADRs, so it needs a new ADR. The theme files are done (ADR 0096).
-
-- [ ] Runtimes in the user folder: today `runtimes/` sits beside `leia.jar` (ADR 0044, ADR 0072, ADR 0073), not in `~/.local`. Move it to `$XDG_DATA_HOME/leia/runtimes` (`~/.local/share/leia/runtimes`, `%LOCALAPPDATA%\leia\runtimes` on Windows), so a read-only or shared install of `leia.jar` works and a new version of leia keeps the downloaded runtimes. To settle: whether `runtimes/` beside the jar still counts as a fallback or override, `-Dleia.runtimes` under Gradle, `--download-runtimes` and `D` writing there, how a Lucene 10 runtime whose version doesn't match the adapter in `leia.jar` is treated, and the docs (AGENTS.md CLI contract, README, `build-dist.sh`).
-
 ## SonarQube quality gate
 
 Goal: the quality gate passes on new code. The fix of 2026-10-18 (`88ea82a`, `8b696a4`) skipped rules by choice and left false positives open, and nothing is recorded in SonarQube, so each scan in a fresh docker container counts them again.

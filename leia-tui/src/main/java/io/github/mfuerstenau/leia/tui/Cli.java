@@ -79,9 +79,11 @@ record Cli(
                       Don't load the jars of the default folder: $XDG_CONFIG_HOME/leia/jars
                       (~/.config/leia/jars) on Linux, %APPDATA%\\leia\\jars on Windows. Without this
                       flag, they are loaded after those of --jar. The runtimes, a folder for each
-                      Lucene from 3.6 to 10 in the folder runtimes beside leia.jar, are loaded
-                      always, before all others; without them, an index opens only without a
-                      reader. D on the start screen downloads them
+                      Lucene from 3.6 to 10 in the folder runtimes, are loaded always, before all
+                      others; without them, an index opens only without a reader. D on the start
+                      screen downloads them. The folder runtimes is the one beside leia.jar, if
+                      there is one, else $XDG_DATA_HOME/leia/runtimes (~/.local/share/leia/runtimes)
+                      on Linux, %LOCALAPPDATA%\\leia\\runtimes on Windows
                   --directory <IMPL>
                       The Lucene Directory to read indexes through: fs lets Lucene choose
                       (MMapDirectory on 64-bit), mmap is MMapDirectory, nio is NIOFSDirectory.
@@ -91,14 +93,15 @@ record Cli(
                       Open INDEX_PATH without a reader, for an index that a reader can't open: only
                       its commits can be read. Ctrl+N in the open prompt does the same
                   --download-runtimes
-                      Install the runtimes of --runtime into the folder runtimes beside leia.jar
-                      without asking, as for a script, then exit: leia's own jars from leia.jar,
-                      Lucene's from Maven Central (https://repo1.maven.org/maven2/), each checked
-                      against its SHA-256. It lists the Lucene jars with their URLs and SHA-256s,
-                      then downloads them; a jar that is there and matches is kept. Behind a proxy,
-                      start it with LEIA_OPTS=-Djava.net.useSystemProxies=true. Takes no other
-                      option but --runtime. To choose runtimes instead, start leia and press D on
-                      its start screen
+                      Install the runtimes of --runtime into the folder runtimes (see
+                      --no-default-jars) without asking, as for a script, then exit: leia's own
+                      jars from leia.jar, Lucene's from Maven Central
+                      (https://repo1.maven.org/maven2/), each checked against its SHA-256. It
+                      lists the Lucene jars with their URLs and SHA-256s, then downloads them; a
+                      jar that is there and matches is kept. Behind a proxy, start it with
+                      LEIA_OPTS=-Djava.net.useSystemProxies=true. Takes no other option but
+                      --runtime. To choose runtimes instead, start leia and press D on its start
+                      screen
                   --runtime <FOLDER>
                       With --download-runtimes, a runtime to install: lucene10, lucene9, lucene7,
                       lucene5 or lucene3. Can be repeated

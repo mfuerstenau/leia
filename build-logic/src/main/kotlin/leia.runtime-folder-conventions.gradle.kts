@@ -1,6 +1,6 @@
 // Shared setup for a runtime module leia-luceneN (ADR 0073): its plain jar, leia-luceneN.jar, is the
 // adapter between the runtime interface and the official Lucene jars. It sits with them, and with
-// the other jars of its runtime classpath, in a folder runtimes/luceneN beside leia.jar, which leia
+// the other jars of its runtime classpath, in a folder runtimes/luceneN (ADR 0098 says where), which leia
 // loads through a class loader of its own. The adapter carries the folder's list,
 // META-INF/leia/runtime.txt (RuntimeListTask), and holds nothing but leia's code (AdapterJarCheck).
 // A consumer takes the folder's content by resolving the module's runtimeElements, transitively.

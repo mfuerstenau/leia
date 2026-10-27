@@ -13,8 +13,8 @@ import java.util.function.Function;
 
 /**
  * Where leia keeps its files on this platform: the state folder, with the log (ADR 0034 §7) and the
- * history (ADR 0020), the default folder of jars (ADR 0024), and the folder of runtimes beside
- * {@code leia.jar} (ADR 0044).
+ * history (ADR 0020), the default folder of jars (ADR 0024), and the folder of runtimes, beside
+ * {@code leia.jar} or in the data folder (ADR 0044, ADR 0098).
  *
  * @param env the environment variables
  * @param home the user's home directory, if known
@@ -51,15 +51,35 @@ record Platform(Function<String, String> env, Optional<Path> home, boolean windo
     }
 
     /**
-     * The folder of runtimes, {@code runtimes} beside {@code leia.jar} (ADR 0044, ADR 0073), or the
-     * folder that {@code -Dleia.runtimes} names, as under Gradle.
+     * The folder of runtimes (ADR 0098): the folder that {@code -Dleia.runtimes} names, as under
+     * Gradle; else {@code runtimes} beside {@code leia.jar} if it is a directory, as in a portable
+     * install (ADR 0044, ADR 0073); else {@code runtimes} in the {@linkplain #dataDir() data folder}.
+     * Empty without {@code leia.jar}, which brings the adapters, or if the platform's variables don't
+     * say where.
      */
     Optional<Path> runtimesDir() {
         String property = System.getProperty("leia.runtimes", "");
         if (!property.isEmpty()) {
             return Optional.of(Path.of(property).toAbsolutePath());
         }
-        return leiaJar.map(jar -> jar.resolveSibling("runtimes"));
+        if (leiaJar.isEmpty()) {
+            return Optional.empty();
+        }
+        return leiaJar.map(jar -> jar.resolveSibling("runtimes"))
+                .filter(Files::isDirectory)
+                .or(() -> dataDir().map(dir -> dir.resolve("runtimes")));
+    }
+
+    /**
+     * {@code %LOCALAPPDATA%\leia} on Windows; elsewhere {@code $XDG_DATA_HOME/leia}, or {@code
+     * ~/.local/share/leia} without it. Empty if the platform's variables don't say where.
+     */
+    Optional<Path> dataDir() {
+        return windows
+                ? absolute("LOCALAPPDATA").map(dir -> dir.resolve("leia"))
+                : absolute("XDG_DATA_HOME")
+                        .or(() -> home.map(dir -> dir.resolve(".local").resolve("share")))
+                        .map(dir -> dir.resolve("leia"));
     }
 
     /**

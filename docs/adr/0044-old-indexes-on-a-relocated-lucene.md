@@ -2,7 +2,7 @@
 
 - **Status:** Accepted on 2026-10-12, after the spike ("What the spike showed"); decisions 1, 3 and 5 changed and 7 added: the old runtimes are optional jars, not part of `leia.jar`
 - **Date:** 2026-10-12
-- **Amended by:** ADR 0071 (the runtimes read every major: Lucene 9 and 10, and an unknown version, through leia-lucene10; Lucene 10 is no longer read by the server itself); ADR 0073 (supersedes §1: no relocation, each old runtime has the official Lucene jars in a class loader of its own, in a folder of `runtimes/`, which `--download-runtimes` installs and the release folders leave out)
+- **Amended by:** ADR 0071 (the runtimes read every major: Lucene 9 and 10, and an unknown version, through leia-lucene10; Lucene 10 is no longer read by the server itself); ADR 0073 (supersedes §1: no relocation, each old runtime has the official Lucene jars in a class loader of its own, in a folder of `runtimes/`, which `--download-runtimes` installs and the release folders leave out); ADR 0098 (`runtimes/` is beside `leia.jar` only if it is there, else in the user's data folder)
 - **Amends:** ADR 0021 (`openIndex` reports the features of the opened index), ADR 0024 (a `runtimes/` folder beside `leia.jar` is loaded too), ADR 0034 §9 (the release folder gets `runtimes/`), AGENTS.md hard rule 5 (a second Lucene on the classpath)
 
 ## Context

@@ -80,7 +80,8 @@ class MainTest {
     void downloadsTheRuntimesOnlyFromLeiaJar() throws Exception {
         assertThat(run("--download-runtimes", "--runtime", "lucene9")).isEqualTo(1);
 
-        assertThat(err()).contains("leia: --download-runtimes installs into the folder runtimes beside leia.jar");
+        assertThat(err())
+                .contains("leia: --download-runtimes installs into the folder runtimes, which leia has only when it");
         assertThat(logFile).doesNotExist();
     }
 

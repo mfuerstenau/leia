@@ -116,7 +116,7 @@ public final class Session {
     private final App ui;
     private final LeiaBackend backend;
 
-    /** Installs into {@code runtimes/} beside {@code leia.jar}; empty if leia doesn't run from it. */
+    /** Installs into the runtimes folder (ADR 0098); empty if leia doesn't run from {@code leia.jar}. */
     private final Optional<RuntimeInstall> runtimeInstall;
 
     /** The thread that downloads runtimes, while one runs (ADR 0080). */
@@ -588,7 +588,7 @@ public final class Session {
     private void planRuntimes(Action.PlanRuntimes plan, TuiRunner runner) {
         if (runtimeInstall.isEmpty()) {
             reply(runner, app -> {
-                app.runtimesPlanFailed("leia doesn't run from leia.jar, so there is no runtimes/ beside it");
+                app.runtimesPlanFailed("leia doesn't run from leia.jar, so it has no runtimes folder");
                 return Optional.empty();
             });
             return;

@@ -146,7 +146,9 @@ public final class ServerRuntimes {
         Path folder = runtimesDir
                 .map(dir -> dir.resolve(known.folder()))
                 .orElseThrow(() -> new ServerException(
-                        home, "it needs leia's adapter in runtimes/" + known.folder() + ", and there is no runtimes/"));
+                        home,
+                        "it needs leia's adapter in runtimes/" + known.folder()
+                                + ", and leia has no runtimes folder, since it doesn't run from leia.jar"));
         List<Path> adapterJars = adapterJars(home, folder, known);
         String builtFor = builtFor(adapterJars.getFirst());
         List<Path> jars = new ArrayList<>(adapterJars);
@@ -198,6 +200,10 @@ public final class ServerRuntimes {
                 + " --download-runtimes --runtime " + known.folder();
         if (!Files.isRegularFile(adapter)) {
             throw new ServerException(home, "it needs leia's adapter " + adapter + ", which isn't there; " + install);
+        }
+        Optional<String> outdated = RuntimeFolders.outdated(adapter, known, ServerRuntimes.class.getClassLoader());
+        if (outdated.isPresent()) {
+            throw new ServerException(home, "it needs leia's adapter, which is " + outdated.get());
         }
         List<Path> jars = new ArrayList<>();
         jars.add(adapter);

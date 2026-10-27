@@ -1,6 +1,6 @@
 // Lucene 10 behind the runtime interface (ADR 0065), through leia-core: the runtime that reads
 // indexes of Lucene 9 and 10 and those of an unknown version (ADR 0071). Its folder runtimes/lucene10
-// beside leia.jar, which holds no Lucene (ADR 0072), has the adapter jar, leia-core's jar and the
+// (not in leia.jar, which holds no Lucene, ADR 0072) has the adapter jar, leia-core's jar and the
 // official Lucene jars (ADR 0073); leia loads them as the first link of the jar chain, since the jars
 // of --jar link against org.apache.lucene (ADR 0016, ADR 0018, ADR 0065).
 plugins {

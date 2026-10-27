@@ -77,12 +77,15 @@ The rest of Luke's read-only features are still to come (see
 ## Install
 
 Unzip `leia-<version>.zip`, start leia (`leia-<version>/leia`, or `leia.cmd` on Windows), and
-press `D` on its start screen to download the runtimes once. This fills the folder `runtimes` beside `leia.jar` with a folder per
+press `D` on its start screen to download the runtimes once. This fills the folder `runtimes` with a folder per
 Lucene (`lucene3`, `lucene5`, `lucene7`, `lucene9`, `lucene10`): leia's own jars come from
 `leia.jar`, Lucene's from Maven Central (`https://repo1.maven.org/maven2/`), each checked against
-the SHA-256 that the build recorded. It needs the network once, about 32 MB in all. After an update
-of leia, a runtime that lacks the jars of its new Lucene shows as incomplete, and `D` offers it
-again. Behind a proxy, start leia as `LEIA_OPTS=-Djava.net.useSystemProxies=true leia`.
+the SHA-256 that the build recorded. It needs the network once, about 32 MB in all. The folder
+`runtimes` is `~/.local/share/leia/runtimes` (`$XDG_DATA_HOME/leia/runtimes` if that is set), or
+`%LOCALAPPDATA%\leia\runtimes` on Windows, so it outlives an update of leia; a folder `runtimes`
+beside `leia.jar`, if there is one, is used instead (ADR 0098). After an update of leia, leia
+rewrites its own jars there at the next start, and a runtime that lacks the jars of its new Lucene
+shows as incomplete, and `D` offers it again; one whose jars leia can't rewrite shows as outdated. Behind a proxy, start leia as `LEIA_OPTS=-Djava.net.useSystemProxies=true leia`.
 
 The window that `D` opens offers the runtimes that are missing or incomplete, none of them checked.
 Space checks a runtime, `a` checks all and `n` none; beside the list, each runtime shows the Lucene
@@ -117,7 +120,7 @@ leia [OPTIONS] [INDEX_PATH]
 | `--no-default-jars` | don't load the jars of the default folder (see [Jars](#jars)) |
 | `--directory <IMPL>` | the Lucene `Directory` to read indexes through: `fs` (default) lets Lucene choose, which is `MMapDirectory` on 64-bit; `mmap` is `MMapDirectory`, `nio` is `NIOFSDirectory`. `Ctrl+D` in the open prompt changes it |
 | `--no-reader` | open `INDEX_PATH` without a reader, for an index that a reader can't open (see [Without a reader](#without-a-reader)); `Ctrl+N` in the open prompt does the same |
-| `--download-runtimes` | install the runtimes of `--runtime` into `runtimes` beside `leia.jar` without asking, as for a script, then exit (see [Install](#install)); takes no other option but `--runtime`, which it needs |
+| `--download-runtimes` | install the runtimes of `--runtime` into the folder `runtimes` without asking, as for a script, then exit (see [Install](#install)); takes no other option but `--runtime`, which it needs |
 | `--runtime <FOLDER>` | with `--download-runtimes`, a runtime to install (`lucene10`, `lucene9`, `lucene7`, `lucene5` or `lucene3`); can be repeated |
 
 `leia` (or `leia.cmd` on Windows) is a script that finds the JVM and runs the `leia.jar` next to

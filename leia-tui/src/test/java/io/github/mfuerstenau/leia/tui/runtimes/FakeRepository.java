@@ -108,7 +108,7 @@ public final class FakeRepository implements AutoCloseable {
 
     /** The list in the embedded adapter of {@code known}. */
     static List<RuntimeFolders.ListedJar> listed(RuntimeFolders.Known known) throws IOException {
-        String name = RuntimeInstall.RESOURCES + known.folder() + "/" + known.adapterJar();
+        String name = RuntimeFolders.EMBEDDED + known.folder() + "/" + known.adapterJar();
         try (InputStream adapter = FakeRepository.class.getClassLoader().getResourceAsStream(name);
                 JarInputStream jar = new JarInputStream(adapter)) {
             for (JarEntry entry = jar.getNextJarEntry(); entry != null; entry = jar.getNextJarEntry()) {

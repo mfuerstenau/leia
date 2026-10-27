@@ -2,14 +2,20 @@ package io.github.mfuerstenau.leia.tui;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class PlatformTest {
 
     private static final Optional<Path> HOME = Optional.of(Path.of("/home/u"));
+
+    @TempDir
+    Path tmp;
 
     @Test
     void usesTheXdgVariables() {
@@ -69,12 +75,56 @@ class PlatformTest {
     }
 
     @Test
-    void findsTheRuntimesBesideLeiaJar() {
-        Platform platform =
-                new Platform(Map.<String, String>of()::get, HOME, false, Optional.of(Path.of("/opt/leia/leia.jar")));
+    void findsTheRuntimesBesideLeiaJarIfTheyAreThere() throws IOException {
+        Path jar = tmp.resolve("leia.jar");
+        Path runtimes = Files.createDirectories(tmp.resolve("runtimes"));
 
-        assertThat(platform.runtimesDir()).hasValue(Path.of("/opt/leia/runtimes"));
-        assertThat(linux(Map.of(), HOME).runtimesDir()).isEmpty();
+        assertThat(withJar(Map.of("XDG_DATA_HOME", "/data"), jar).runtimesDir()).hasValue(runtimes);
+    }
+
+    @Test
+    void findsTheRuntimesInTheDataFolderOtherwise() {
+        Path jar = tmp.resolve("leia.jar");
+
+        assertThat(withJar(Map.of("XDG_DATA_HOME", "/data"), jar).runtimesDir())
+                .hasValue(Path.of("/data/leia/runtimes"));
+        assertThat(withJar(Map.of(), jar).runtimesDir()).hasValue(Path.of("/home/u/.local/share/leia/runtimes"));
+        assertThat(withJar(Map.of("XDG_DATA_HOME", "data"), jar).runtimesDir())
+                .hasValue(Path.of("/home/u/.local/share/leia/runtimes"));
+        assertThat(new Platform(
+                                Map.of("LOCALAPPDATA", "/local", "XDG_DATA_HOME", "/data")::get,
+                                HOME,
+                                true,
+                                Optional.of(jar))
+                        .runtimesDir())
+                .hasValue(Path.of("/local/leia/runtimes"));
+        assertThat(new Platform(Map.<String, String>of()::get, Optional.empty(), false, Optional.of(jar)).runtimesDir())
+                .isEmpty();
+    }
+
+    @Test
+    void findsNoRuntimesWithoutLeiaJar() throws IOException {
+        Files.createDirectories(tmp.resolve("runtimes"));
+
+        assertThat(linux(Map.of("XDG_DATA_HOME", "/data"), HOME).runtimesDir()).isEmpty();
+    }
+
+    @Test
+    void findsTheRuntimesThatThePropertyNames() {
+        String before = System.getProperty("leia.runtimes");
+        System.setProperty("leia.runtimes", tmp.resolve("elsewhere").toString());
+        try {
+            assertThat(withJar(Map.of("XDG_DATA_HOME", "/data"), tmp.resolve("leia.jar"))
+                            .runtimesDir())
+                    .hasValue(tmp.resolve("elsewhere"));
+            assertThat(linux(Map.of(), HOME).runtimesDir()).hasValue(tmp.resolve("elsewhere"));
+        } finally {
+            if (before == null) {
+                System.clearProperty("leia.runtimes");
+            } else {
+                System.setProperty("leia.runtimes", before);
+            }
+        }
     }
 
     @Test
@@ -86,6 +136,10 @@ class PlatformTest {
                         jar -> assertThat(jar.getFileName().toString()).endsWith(".jar"));
         // From the boot class path, without a code source.
         assertThat(Platform.jarOf(String.class)).isEmpty();
+    }
+
+    private static Platform withJar(Map<String, String> env, Path jar) {
+        return new Platform(env::get, HOME, false, Optional.of(jar));
     }
 
     private static Platform linux(Map<String, String> env, Optional<Path> home) {

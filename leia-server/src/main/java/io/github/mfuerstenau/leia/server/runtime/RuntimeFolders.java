@@ -7,12 +7,16 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.DigestInputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -25,16 +29,18 @@ import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
 
 /**
- * The folders of {@code runtimes/} beside {@code leia.jar}, one per runtime, each with the runtime's
- * adapter jar and the jars it lists in {@value #LIST} (ADR 0073): the official Lucene jars and, for
- * Lucene 10, leia-core's.
+ * The folders of the runtimes folder, one per runtime, each with the runtime's adapter jar and the
+ * jars it lists in {@value #LIST} (ADR 0073): the official Lucene jars and, for Lucene 10,
+ * leia-core's. The runtimes folder is {@code runtimes/} beside {@code leia.jar}, or the user's data
+ * folder (ADR 0098).
  *
  * <p>An old runtime gets a class loader of its own, whose parent sees only the JDK and the runtime
  * interface, so that its Lucene meets no other. Lucene 10's folder becomes the first link of the
  * {@link JarChain} instead, since the jars of {@code --jar} link against its Lucene (ADR 0065).
  *
  * <p>A folder that is missing, incomplete or refused is not fatal: leia starts, and {@code
- * getRuntimes} says what is wrong. The folders are loaded per JVM, like the jar chain: at startup, and
+ * getRuntimes} says what is wrong. A folder whose adapter isn't the one {@code leia.jar} embeds is
+ * another leia's, and is refused as outdated (ADR 0098). The folders are loaded per JVM, like the jar chain: at startup, and
  * again by {@code loadRuntimes} after a download (ADR 0080); a folder that is loaded stays loaded.
  */
 public final class RuntimeFolders {
@@ -43,6 +49,9 @@ public final class RuntimeFolders {
 
     /** The list of the jars beside the adapter, in the adapter jar. */
     public static final String LIST = "META-INF/leia/runtime.txt";
+
+    /** Where {@code leia.jar} holds each runtime's own jars: {@code leia-runtimes/<folder>/<jar>}. */
+    public static final String EMBEDDED = "leia-runtimes/";
 
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
 
@@ -170,9 +179,21 @@ public final class RuntimeFolders {
      * old runtime's through a class loader of its own, Lucene 10's into the jar chain.
      */
     static State loadFolder(Path folder, Known known, List<LuceneRuntime> loaded) {
+        return loadFolder(folder, known, loaded, RuntimeFolders.class.getClassLoader());
+    }
+
+    /**
+     * {@link #loadFolder(Path, Known, List)}, with {@code embedded} the class loader that sees the
+     * adapters that {@code leia.jar} embeds under {@value #EMBEDDED}.
+     */
+    static State loadFolder(Path folder, Known known, List<LuceneRuntime> loaded, ClassLoader embedded) {
         Path adapter = folder.resolve(known.adapterJar());
         if (!Files.isRegularFile(adapter)) {
             return new State.Missing();
+        }
+        Optional<String> outdated = outdated(adapter, known, embedded);
+        if (outdated.isPresent()) {
+            return new State.Refused(outdated.get());
         }
         List<String> listed;
         try {
@@ -239,6 +260,45 @@ public final class RuntimeFolders {
         }
         loaded.addAll(reading);
         return new State.Loaded();
+    }
+
+    /**
+     * Why {@code adapter}, the adapter jar of {@code known}, isn't leia's own: it differs from the one
+     * that {@code embedded} sees under {@value #EMBEDDED}, so it is another leia's (ADR 0098). The
+     * adapter alone is enough, since its list carries the SHA-256 of leia's other own jars. Empty if it
+     * matches, or if there is no embedded adapter to compare, as under Gradle.
+     */
+    static Optional<String> outdated(Path adapter, Known known, ClassLoader embedded) {
+        String name = EMBEDDED + known.folder() + "/" + known.adapterJar();
+        try (InputStream own = embedded.getResourceAsStream(name)) {
+            if (own == null) {
+                return Optional.empty();
+            }
+            byte[] ownHash = sha256(own);
+            byte[] hash;
+            try (InputStream in = Files.newInputStream(adapter)) {
+                hash = sha256(in);
+            }
+            return MessageDigest.isEqual(ownHash, hash)
+                    ? Optional.empty()
+                    : Optional.of("outdated: " + adapter + " is another leia's, and couldn't be refreshed;"
+                            + " close any other leia that uses it, make its folder writable, and restart leia");
+        } catch (IOException e) {
+            return Optional.of("cannot compare " + adapter + " with leia's own: " + e.getMessage());
+        }
+    }
+
+    private static byte[] sha256(InputStream in) throws IOException {
+        MessageDigest digest;
+        try {
+            digest = MessageDigest.getInstance("SHA-256");
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("Every Java has SHA-256", e);
+        }
+        try (DigestInputStream digesting = new DigestInputStream(in, digest)) {
+            digesting.transferTo(OutputStream.nullOutputStream());
+        }
+        return digest.digest();
     }
 
     private static boolean reads(LuceneRuntime runtime, Known known) {

@@ -4,7 +4,8 @@
 # with leia.jar, leia (executable), leia.cmd, the user README.md, LICENSE and NOTICE (ADR 0082,
 # ADR 0083). The jar runs anywhere with Java 25 (ADR 0034). The zip has no runtimes/: the first
 # `leia --download-runtimes` or `D` on the start screen installs it, with leia's own jars from
-# leia.jar and Lucene's from Maven Central (ADR 0073, ADR 0080). The same holds for a SNAPSHOT and a release version.
+# leia.jar and Lucene's from Maven Central, into the user's data folder, not beside leia.jar
+# (ADR 0073, ADR 0080, ADR 0098). The same holds for a SNAPSHOT and a release version.
 #
 # Needs: a Java 17+ runtime for the Gradle wrapper (JAVA_HOME or `java` on PATH; Gradle provisions
 # the Java 25 toolchain itself). No macOS build and no bundled Java (ADR 0004).

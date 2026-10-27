@@ -892,7 +892,7 @@ public final class App {
      */
     private Optional<Action> openRuntimeWindow() {
         if (runtimeFolders.dir().isEmpty()) {
-            notice = new Notice.CannotDownload("leia doesn't run from leia.jar, so there is no runtimes/ beside it");
+            notice = new Notice.CannotDownload("leia doesn't run from leia.jar, so it has no runtimes folder");
             return Optional.empty();
         }
         List<RuntimeFolder> states = runtimes == null ? List.of() : runtimes.runtimes();

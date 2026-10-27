@@ -35,12 +35,14 @@ import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.jar.JarEntry;
 import java.util.jar.JarInputStream;
+import java.util.logging.Logger;
 
 /**
- * {@code leia --download-runtimes} (ADR 0073): installs runtimes' folders into {@code runtimes/}
- * beside {@code leia.jar}. leia's own jars, the adapter and for Lucene 10 leia-core's, come from
- * {@code leia.jar}, which embeds them under {@value #RESOURCES}; Lucene's come from Maven Central,
- * as the adapter's list names them, each checked against the list's SHA-256 and size.
+ * {@code leia --download-runtimes} (ADR 0073): installs runtimes' folders into the runtimes folder,
+ * beside {@code leia.jar} or in the user's data folder (ADR 0098). leia's own jars, the adapter and
+ * for Lucene 10 leia-core's, come from {@code leia.jar}, which embeds them under {@value
+ * RuntimeFolders#EMBEDDED}; Lucene's come from Maven Central, as the adapter's list names them, each
+ * checked against the list's SHA-256 and size.
  *
  * <p>It works in two steps (ADR 0079). {@link #plan} reads what {@code leia.jar} has and what is
  * there, and writes and downloads nothing; {@link #install} then installs the runtimes that need
@@ -52,9 +54,6 @@ import java.util.jar.JarInputStream;
  * that its list doesn't name, such as those of an older Lucene, are removed.
  */
 public final class RuntimeInstall {
-
-    /** Where {@code leia.jar} holds each runtime's own jars: {@code leia-runtimes/<folder>/<jar>}. */
-    public static final String RESOURCES = "leia-runtimes/";
 
     /** Maven Central. */
     public static final URI CENTRAL = URI.create("https://repo1.maven.org/maven2/");
@@ -71,9 +70,9 @@ public final class RuntimeInstall {
     private final ClassLoader resourceLoader;
 
     /**
-     * @param runtimesDir the folder {@code runtimes} beside {@code leia.jar}
+     * @param runtimesDir the runtimes folder (ADR 0098)
      * @param base the repository the Lucene jars are downloaded from, such as {@link #CENTRAL}
-     * @param resources the class loader that sees {@value #RESOURCES}
+     * @param resources the class loader that sees {@value RuntimeFolders#EMBEDDED}
      */
     public RuntimeInstall(Path runtimesDir, URI base, ClassLoader resources) {
         this.runtimesDir = runtimesDir;
@@ -262,6 +261,23 @@ public final class RuntimeInstall {
                 }
             };
         }
+
+        /** A line per jar written to {@code log}, and a warning per failure. */
+        static Listener logging(Logger log) {
+            return new Listener() {
+                @Override
+                public void jarDone(String folder, String jar, JarDone how, long size) {
+                    if (how == JarDone.WRITTEN) {
+                        log.info(() -> "Refreshed the runtime's jar " + folder + "/" + jar + " from leia.jar");
+                    }
+                }
+
+                @Override
+                public void runtimeFailed(String folder, String message) {
+                    log.warning(() -> "Cannot refresh the runtime " + folder + ": " + message);
+                }
+            };
+        }
     }
 
     /**
@@ -413,9 +429,41 @@ public final class RuntimeInstall {
         removeStale(folder, names, listener);
     }
 
+    /**
+     * Rewrites leia's own jars in each runtime's folder that has an adapter, where they differ from
+     * those of {@code leia.jar}, as after an upgrade of leia (ADR 0098): the jars that the list names
+     * without a Maven path, then the adapter, so that a failure leaves the old adapter, which the
+     * backend refuses as outdated. Creates no folder, downloads nothing and removes nothing; a Lucene
+     * jar that the new list names and that isn't there leaves the runtime incomplete, for {@code D}.
+     *
+     * @return the runtimes that failed, with why, in the order of {@link RuntimeFolders#KNOWN}
+     */
+    public Map<RuntimeFolders.Known, String> refreshOwnJars(Listener listener) {
+        Map<RuntimeFolders.Known, String> failed = new LinkedHashMap<>();
+        for (RuntimeFolders.Known known : RuntimeFolders.KNOWN) {
+            Path folder = runtimesDir.resolve(known.folder());
+            if (!Files.isRegularFile(folder.resolve(known.adapterJar()))) {
+                continue;
+            }
+            try {
+                byte[] adapter = resource(known.folder(), known.adapterJar());
+                for (RuntimeFolders.ListedJar jar : list(known.folder(), known.adapterJar(), adapter)) {
+                    if (jar.mavenPath().isEmpty()) {
+                        writeOwn(folder, jar.name(), resource(known.folder(), jar.name()), listener);
+                    }
+                }
+                writeOwn(folder, known.adapterJar(), adapter, listener);
+            } catch (InstallException e) {
+                failed.put(known, e.getMessage());
+                listener.runtimeFailed(known.folder(), e.getMessage());
+            }
+        }
+        return failed;
+    }
+
     /** One of leia's jars, embedded in {@code leia.jar}. */
     private byte[] resource(String folder, String jar) throws InstallException {
-        String name = RESOURCES + folder + "/" + jar;
+        String name = RuntimeFolders.EMBEDDED + folder + "/" + jar;
         try (InputStream in = resourceLoader.getResourceAsStream(name)) {
             if (in == null) {
                 throw new InstallException(

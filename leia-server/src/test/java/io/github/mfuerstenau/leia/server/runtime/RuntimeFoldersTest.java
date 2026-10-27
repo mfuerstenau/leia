@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URL;
+import java.net.URLClassLoader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -82,6 +84,49 @@ class RuntimeFoldersTest {
                 .isInstanceOfSatisfying(
                         RuntimeFolders.State.Refused.class,
                         refused -> assertThat(refused.reason()).startsWith("cannot read " + RuntimeFolders.LIST));
+    }
+
+    @Test
+    void refusesAnAdapterThatIsNotTheOneLeiaJarEmbedsAsOutdated() throws IOException {
+        Path folder = Files.createDirectories(tmp.resolve("lucene3"));
+        adapter(folder.resolve("leia-lucene3.jar"), true);
+        Path embedded = Files.createDirectories(tmp.resolve("embedded/" + RuntimeFolders.EMBEDDED + "lucene3"));
+        adapter(embedded.resolve("leia-lucene3.jar"), false);
+        List<LuceneRuntime> loaded = new ArrayList<>();
+
+        try (URLClassLoader resources = embedded(tmp.resolve("embedded"))) {
+            assertThat(RuntimeFolders.loadFolder(folder, LUCENE3, loaded, resources))
+                    .isInstanceOfSatisfying(
+                            RuntimeFolders.State.Refused.class,
+                            refused -> assertThat(refused.reason())
+                                    .startsWith(
+                                            "outdated: " + folder.resolve("leia-lucene3.jar") + " is another leia's"));
+        }
+        assertThat(loaded).isEmpty();
+    }
+
+    @Test
+    void loadsAnAdapterThatIsTheOneLeiaJarEmbedsOrWithoutOne() throws IOException {
+        Path folder = Files.createDirectories(tmp.resolve("lucene3"));
+        adapter(folder.resolve("leia-lucene3.jar"), true);
+        Path embedded = Files.createDirectories(tmp.resolve("embedded/" + RuntimeFolders.EMBEDDED + "lucene3"));
+        Files.copy(folder.resolve("leia-lucene3.jar"), embedded.resolve("leia-lucene3.jar"));
+
+        // Past the comparison, to the runtime's own refusal.
+        try (URLClassLoader same = embedded(tmp.resolve("embedded"));
+                URLClassLoader none = embedded(tmp.resolve("none"))) {
+            for (ClassLoader resources : List.of(same, none)) {
+                assertThat(RuntimeFolders.loadFolder(folder, LUCENE3, new ArrayList<>(), resources))
+                        .isInstanceOfSatisfying(
+                                RuntimeFolders.State.Refused.class,
+                                refused -> assertThat(refused.reason()).contains("is built for runtime interface 99"));
+            }
+        }
+    }
+
+    /** A class loader that sees the resources in {@code dir}, as leia.jar's loader sees its own. */
+    private static URLClassLoader embedded(Path dir) throws IOException {
+        return new URLClassLoader(new URL[] {dir.toUri().toURL()}, null);
     }
 
     /**

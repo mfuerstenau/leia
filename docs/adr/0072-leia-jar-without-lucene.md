@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-14
-- **Amended by:** ADR 0073 (`runtimes/` holds a folder per runtime with the official Lucene jars; `RuntimeJar` becomes `RuntimeFolder` with a state; `:leia-tui:run` takes `-Dleia.runtimes`)
+- **Amended by:** ADR 0073 (`runtimes/` holds a folder per runtime with the official Lucene jars; `RuntimeJar` becomes `RuntimeFolder` with a state; `:leia-tui:run` takes `-Dleia.runtimes`); ADR 0098 (`runtimes/` is beside `leia.jar` only if it is there, else in the user's data folder)
 - **Amends:** ADR 0034 (what `leia.jar` holds); ADR 0044 (`runtimes/` holds every runtime); ADR 0065 (step 4 lands); ADR 0071 §2 (leia-lucene10 is no runtime dependency of the server); AGENTS.md hard rule 5 and the CLI contract
 
 ## Context

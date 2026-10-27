@@ -5,8 +5,8 @@ import java.nio.file.Path;
 import java.util.Optional;
 
 /**
- * The folder {@code runtimes} beside {@code leia.jar}, with a folder for each runtime, such as {@code
- * lucene9} (ADR 0044, ADR 0073). The backend loads it at every start, before the jars of {@code
+ * The runtimes folder, {@code runtimes} beside {@code leia.jar} or in the user's data folder (ADR
+ * 0098), with a folder for each runtime, such as {@code lucene9} (ADR 0044, ADR 0073). The backend loads it at every start, before the jars of {@code
  * --jar} and the default folder, whatever {@code --no-default-jars} says; {@code getRuntimes} says
  * which runtimes it loaded.
  *

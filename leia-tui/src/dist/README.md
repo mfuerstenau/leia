@@ -37,9 +37,14 @@ the folder on `PATH`.
 
 ## Runtimes
 
-leia reads every index through a **runtime**: a folder in `runtimes/` beside `leia.jar` with the
-official Lucene jars of one Lucene version and leia's small adapter jar for it. The zip comes
-without `runtimes/`, so on the first start it is empty. Install the runtimes once:
+leia reads every index through a **runtime**: a folder in `runtimes/` with the official Lucene
+jars of one Lucene version and leia's small adapter jar for it. `runtimes/` is in your data folder,
+`~/.local/share/leia/runtimes` (`$XDG_DATA_HOME/leia/runtimes`) on Linux and
+`%LOCALAPPDATA%\leia\runtimes` on Windows, so a new version of leia finds the runtimes that an
+older one downloaded, and leia's own folder may be read-only. If there is a folder `runtimes`
+beside `leia.jar`, leia uses that one instead, as for a portable install or one that an
+administrator fills for all users. The zip comes without `runtimes/`, so on the first start there
+are none. Install the runtimes once:
 
 - **Interactively:** start leia and press `D` on its start screen. The window lists the runtimes
   that are missing or incomplete, with the jars each would fetch, their URLs, SHA-256s and sizes.
@@ -56,6 +61,12 @@ without `runtimes/`, so on the first start it is empty. Install the runtimes onc
   It lists the jars, then downloads them without asking. Running it again keeps the jars that
   match, replaces those that don't and removes those that don't belong, such as an older Lucene's
   after an update of leia. The exit status is 1 if a runtime failed.
+
+**After an update of leia.** At each start, leia rewrites its own adapter jars in `runtimes/` with
+those of its `leia.jar`. If the new version needs another Lucene, the runtime shows as incomplete,
+and `D` downloads it. If leia can't write a jar, because the folder is read-only or another leia
+that is running holds it open on Windows, the runtime shows as *outdated* on the about screen:
+close the other leia, or make the folder writable, and start leia again.
 
 **What is downloaded.** Only the official Lucene jars, from Maven Central
 (`https://repo1.maven.org/maven2/`; `LEIA_OPTS=-Dleia.download.url=<URL>` names a mirror), each

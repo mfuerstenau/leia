@@ -6,6 +6,7 @@ import static io.github.mfuerstenau.leia.tui.runtimes.FakeRepository.known;
 import static io.github.mfuerstenau.leia.tui.runtimes.FakeRepository.listed;
 import static io.github.mfuerstenau.leia.tui.runtimes.FakeRepository.lucene;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
 import java.io.ByteArrayOutputStream;
@@ -169,7 +170,7 @@ class RuntimeInstallTest {
         for (RuntimeFolders.Known known : RuntimeFolders.KNOWN) {
             assertThat(RuntimeInstallTest.class
                             .getClassLoader()
-                            .getResource(RuntimeInstall.RESOURCES + known.folder() + "/" + known.adapterJar()))
+                            .getResource(RuntimeFolders.EMBEDDED + known.folder() + "/" + known.adapterJar()))
                     .as(known.folder())
                     .isNotNull();
         }
@@ -299,6 +300,88 @@ class RuntimeInstallTest {
 
         assertThat(output()).contains("nothing to download", "lucene9/lucene-core-9.12.3.jar: kept");
         assertThat(repository.requests).hasValue(requests);
+    }
+
+    @Test
+    void refreshesLeiasOwnJarsThatDifferAndKeepsTheRest() throws Exception {
+        assertThat(RuntimeDownload.run(install(), List.of("lucene10", "lucene9"), print(out), print(err)))
+                .isZero();
+        Path leiaCore = ownJar(known("lucene10"), "leia-core-");
+        Files.writeString(runtimes.resolve("lucene10/leia-lucene10.jar"), "an older leia's");
+        Files.writeString(leiaCore, "an older leia's");
+        Path lucene9Core = runtimes.resolve("lucene9/lucene-core-9.12.3.jar");
+        Files.writeString(lucene9Core, "corrupt");
+        Map<String, String> lucene9 = snapshot(runtimes.resolve("lucene9"));
+        out.reset();
+        repository.requests.set(0);
+
+        assertThat(install().refreshOwnJars(listener())).isEmpty();
+
+        for (RuntimeFolders.Known known : List.of(known("lucene10"), known("lucene9"))) {
+            for (String own :
+                    install().plan(List.of(known)).runtimes().getFirst().ownJars()) {
+                assertThat(Files.mismatch(
+                                runtimes.resolve(known.folder()).resolve(own),
+                                built(known).resolve(own)))
+                        .as(own)
+                        .isEqualTo(-1L);
+            }
+        }
+        // Lucene's jars aren't touched, nor is a matching adapter rewritten.
+        assertThat(snapshot(runtimes.resolve("lucene9"))).isEqualTo(lucene9);
+        assertThat(output())
+                .contains("lucene10/leia-lucene10.jar: written, ", "lucene10/" + leiaCore.getFileName() + ": written, ")
+                .contains("lucene9/leia-lucene9.jar: kept")
+                .doesNotContain("downloaded", "removed");
+        assertThat(repository.requests).hasValue(0);
+    }
+
+    @Test
+    void refreshesNoFolderWithoutAnAdapterAndCreatesNone() throws Exception {
+        Path lucene7 = Files.createDirectories(runtimes.resolve("lucene7"));
+        Files.writeString(lucene7.resolve("lucene-core-7.7.3.jar"), "a Lucene");
+
+        assertThat(install().refreshOwnJars(listener())).isEmpty();
+
+        assertThat(snapshot(lucene7)).containsOnlyKeys("lucene-core-7.7.3.jar");
+        try (Stream<Path> folders = Files.list(runtimes)) {
+            assertThat(folders).map(folder -> folder.getFileName().toString()).containsExactly("lucene7");
+        }
+        assertThat(output()).isEmpty();
+
+        runtimes = tmp.resolve("none");
+        assertThat(install().refreshOwnJars(listener())).isEmpty();
+        assertThat(runtimes).doesNotExist();
+    }
+
+    @Test
+    void reportsAFolderItCannotRefresh() throws Exception {
+        assertThat(RuntimeDownload.run(install(), List.of("lucene9"), print(out), print(err)))
+                .isZero();
+        Path lucene9 = runtimes.resolve("lucene9");
+        Files.writeString(lucene9.resolve("leia-lucene9.jar"), "an older leia's");
+        assertThat(lucene9.toFile().setWritable(false)).isTrue();
+        try {
+            assumeFalse(Files.isWritable(lucene9), "a folder that root can still write");
+
+            Map<RuntimeFolders.Known, String> failed = install().refreshOwnJars(listener());
+
+            assertThat(failed).containsOnlyKeys(known("lucene9"));
+            assertThat(failed.get(known("lucene9"))).contains("cannot write " + lucene9.resolve("leia-lucene9.jar"));
+            assertThat(error()).contains("leia: cannot write ");
+            assertThat(lucene9.resolve("leia-lucene9.jar")).hasContent("an older leia's");
+        } finally {
+            assertThat(lucene9.toFile().setWritable(true)).isTrue();
+        }
+    }
+
+    /** The own jar of {@code known}'s installed folder whose name starts with {@code prefix}. */
+    private Path ownJar(RuntimeFolders.Known known, String prefix) throws IOException {
+        try (Stream<Path> files = Files.list(runtimes.resolve(known.folder()))) {
+            return files.filter(file -> file.getFileName().toString().startsWith(prefix))
+                    .findFirst()
+                    .orElseThrow();
+        }
     }
 
     /** {@code --download-runtimes} with every runtime named. */

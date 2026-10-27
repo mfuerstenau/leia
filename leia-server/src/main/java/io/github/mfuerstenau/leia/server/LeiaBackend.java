@@ -57,7 +57,7 @@ public final class LeiaBackend implements AutoCloseable {
      * Loads the runtimes of {@code runtimesDir} (ADR 0073) and the jars with analysis components,
      * codecs or formats of their own (ADR 0016, ADR 0018), and starts the backend thread.
      *
-     * @param runtimesDir the folder {@code runtimes/} beside {@code leia.jar}, if there is one; a
+     * @param runtimesDir the runtimes folder (ADR 0098), if there is one; a
      *     runtime in it that is missing, incomplete or refused is not fatal, but {@code getRuntimes}
      *     reports it
      * @param jars jars, or directories of jars

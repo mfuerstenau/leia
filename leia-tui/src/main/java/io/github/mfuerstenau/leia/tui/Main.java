@@ -107,7 +107,7 @@ public final class Main {
                 return 1;
             }
         }
-        // The runtimes beside leia.jar come first (ADR 0044, ADR 0073); the default folder's jars come
+        // The runtimes come first (ADR 0044, ADR 0073, ADR 0098); the default folder's jars come
         // after those of --jar, which win a clash of names (ADR 0024).
         RuntimeFolders runtimeFolders = new RuntimeFolders(platform.runtimesDir());
         DefaultJars defaultJars = DefaultJars.find(platform.defaultJarsDir(), cli.noDefaultJars());
@@ -129,6 +129,7 @@ public final class Main {
                     return 2;
                 }
             }
+            refreshOwnJars(platform);
             LeiaBackend backend;
             try {
                 backend = LeiaBackend.start(runtimeFolders.dir(), jars, cli.servers());
@@ -146,6 +147,20 @@ public final class Main {
                         cli, platform, runtimeFolders, defaultJars, themes, theme, backend, log, out, err, started);
             }
         }
+    }
+
+    /**
+     * Brings leia's own jars in the runtimes folder in line with {@code leia.jar}, before the backend
+     * loads them, since the folder outlives an upgrade (ADR 0098). Only from {@code leia.jar}, which
+     * embeds them; into the log, as is a failure, whose runtime the backend then refuses as outdated.
+     */
+    private static void refreshOwnJars(Platform platform) {
+        if (platform.leiaJar().isEmpty()) {
+            return;
+        }
+        platform.runtimesDir()
+                .map(dir -> new RuntimeInstall(dir, RuntimeInstall.base(), Main.class.getClassLoader()))
+                .ifPresent(install -> install.refreshOwnJars(RuntimeInstall.Listener.logging(LOG)));
     }
 
     /**
@@ -178,8 +193,8 @@ public final class Main {
         LeiaLog.toStderr(Level.WARNING);
         Optional<Path> runtimesDir = platform.runtimesDir();
         if (runtimesDir.isEmpty()) {
-            err.println("leia: --download-runtimes installs into the folder runtimes beside leia.jar, but leia doesn't"
-                    + " run from leia.jar");
+            err.println("leia: --download-runtimes installs into the folder runtimes, which leia has only when it"
+                    + " runs from leia.jar");
             return 1;
         }
         return RuntimeDownload.run(

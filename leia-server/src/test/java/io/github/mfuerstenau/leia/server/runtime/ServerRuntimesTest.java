@@ -96,7 +96,7 @@ class ServerRuntimesTest {
                 .hasMessageContaining("--download-runtimes --runtime lucene9");
         assertThatThrownBy(() -> ServerRuntimes.load(List.of(home), Optional.empty()))
                 .isInstanceOf(ServerException.class)
-                .hasMessageContaining("there is no runtimes/");
+                .hasMessageContaining("leia has no runtimes folder");
     }
 
     @Test
