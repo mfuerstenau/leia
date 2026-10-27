@@ -23,7 +23,12 @@ import dev.tamboui.style.Style;
  * @param muted what is there but out of the way
  * @param border a panel's border
  * @param borderFocused the focused panel's border
- * @param colouredLogo whether the start screen's logo has its colours
+ * @param logo0 the logo's cells of slot 0, the space around the gazelle: its background is the transparency (ADR 0097)
+ * @param logo1 the logo's cells of slot 1
+ * @param logo2 the logo's cells of slot 2
+ * @param logo3 the logo's cells of slot 3
+ * @param logo4 the logo's cells of slot 4
+ * @param logo5 the logo's cells of slot 5
  */
 public record Palette(
         Style base,
@@ -39,9 +44,27 @@ public record Palette(
         Style muted,
         Style border,
         Style borderFocused,
-        boolean colouredLogo) {
+        Style logo0,
+        Style logo1,
+        Style logo2,
+        Style logo3,
+        Style logo4,
+        Style logo5) {
 
     private static volatile Theme current;
+
+    /** The style of the logo's cells of {@code slot}, 0 to 5 (ADR 0097). */
+    public Style logo(int slot) {
+        return switch (slot) {
+            case 0 -> logo0;
+            case 1 -> logo1;
+            case 2 -> logo2;
+            case 3 -> logo3;
+            case 4 -> logo4;
+            case 5 -> logo5;
+            default -> throw new IllegalArgumentException("logo slot " + slot + ": 0 to 5");
+        };
+    }
 
     /** The palette in use; {@code dark}'s until {@link #use} says otherwise. */
     public static Palette current() {

@@ -3,7 +3,6 @@ package io.github.mfuerstenau.leia.tui.widgets;
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Color;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
@@ -18,36 +17,29 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /**
- * leia's logo: ASCII art with a colour per character, read from the resource {@code leia.icon},
- * which holds a row per line, each character after an ANSI escape that sets its 24-bit foreground
- * colour. Next to it go leia's name, version and build.
+ * leia's logo (ADR 0097): characters and slots, read from the resource {@code leia.logo}, which
+ * holds a row of characters per line, a blank line, then a row of digits {@code 0} to {@code 5} per
+ * line, the slot of each cell. The theme colours the slots through {@link Palette#logo}. Next to
+ * the logo go leia's name, version and build.
  */
 public final class Logo {
 
-    /** An ANSI escape that sets a 24-bit foreground colour, and the character it colours. */
-    private static final Pattern CELL = Pattern.compile("\u001b\\[38;2;(\\d+);(\\d+);(\\d+)m(.)");
+    /** The slots, which {@link Palette} has a role for each. */
+    private static final int SLOTS = 6;
 
-    /** The ANSI escape that ends a row. */
-    private static final String RESET = "\u001b[0m";
+    /** What {@code leia.logo} holds: a row of characters and a row of slots per line, as read. */
+    record Grid(List<String> characters, List<String> slots) {}
 
-    /** The logo's rows, without the columns that are blank in every row at the right. */
-    private static final List<Line> LINES = load();
-
-    /** {@link #LINES} without their colours, for a theme without them (ADR 0095). */
-    private static final List<Line> PLAIN = LINES.stream()
-            .map(line -> Line.from(
-                    line.spans().stream().map(span -> Span.raw(span.content())).toList()))
-            .toList();
+    /** The logo's characters and slots, without the columns that are blank in every row at the right. */
+    private static final Grid GRID = load();
 
     /** Columns the logo takes. */
-    public static final int WIDTH = LINES.getFirst().width();
+    public static final int WIDTH = GRID.characters().getFirst().length();
 
     /** Rows the logo takes. */
-    public static final int HEIGHT = LINES.size();
+    public static final int HEIGHT = GRID.characters().size();
 
     /**
      * The fewest rows the logo is drawn with. Where there are fewer than {@link #HEIGHT}, its top
@@ -63,70 +55,83 @@ public final class Logo {
 
     private Logo() {}
 
-    /** The logo as {@link #HEIGHT} lines of {@link #WIDTH} cells. Blank cells leave the background. */
-    static List<Line> lines() {
-        return LINES;
+    /** The logo as {@link #HEIGHT} lines of {@link #WIDTH} cells, in the styles of {@code palette}. */
+    static List<Line> lines(Palette palette) {
+        List<Line> lines = new ArrayList<>();
+        for (int row = 0; row < HEIGHT; row++) {
+            String characters = GRID.characters().get(row);
+            String slots = GRID.slots().get(row);
+            List<Span> spans = new ArrayList<>();
+            for (int column = 0; column < WIDTH; column++) {
+                spans.add(Span.styled(
+                        String.valueOf(characters.charAt(column)), palette.logo(slots.charAt(column) - '0')));
+            }
+            lines.add(Line.from(spans));
+        }
+        return lines;
     }
 
-    private static List<Line> load() {
-        List<String> rows;
-        try (InputStream in = Logo.class.getResourceAsStream("leia.icon")) {
+    private static Grid load() {
+        try (InputStream in = Logo.class.getResourceAsStream("leia.logo")) {
             if (in == null) {
-                throw new IllegalStateException("leia.icon is missing");
+                throw new IllegalStateException("leia.logo is missing");
             }
-            rows = new String(in.readAllBytes(), StandardCharsets.UTF_8).lines().toList();
+            return parse(new String(in.readAllBytes(), StandardCharsets.UTF_8));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-        List<List<Span>> cells = new ArrayList<>();
-        for (String row : rows) {
-            cells.add(parse(row));
+    }
+
+    /**
+     * Reads the text of a {@code leia.logo}, and cuts the columns that are blank in every row at the
+     * right.
+     *
+     * @throws IllegalStateException if the blocks differ in size, a slot is not 0 to 5, or a space
+     *     is not exactly the cells of slot 0: a bug of the build, as a broken bundled theme is
+     */
+    static Grid parse(String text) {
+        List<String> rows = text.lines().toList();
+        int blank = rows.indexOf("");
+        if (blank <= 0) {
+            throw new IllegalStateException("leia.logo: no characters before a blank line");
+        }
+        List<String> characters = rows.subList(0, blank);
+        List<String> slots = rows.subList(blank + 1, rows.size());
+        if (slots.size() != characters.size()) {
+            throw new IllegalStateException(
+                    "leia.logo: " + characters.size() + " rows of characters, " + slots.size() + " of slots");
         }
         int width = 0;
-        for (List<Span> row : cells) {
-            for (int column = 0; column < row.size(); column++) {
-                if (!row.get(column).content().isBlank()) {
+        for (int row = 0; row < characters.size(); row++) {
+            String cells = characters.get(row);
+            String slotRow = slots.get(row);
+            if (slotRow.length() != cells.length()) {
+                throw new IllegalStateException("leia.logo: row " + (row + 1) + " has " + cells.length()
+                        + " characters and " + slotRow.length() + " slots");
+            }
+            for (int column = 0; column < cells.length(); column++) {
+                int slot = slotRow.charAt(column) - '0';
+                if (slot < 0 || slot >= SLOTS) {
+                    throw new IllegalStateException(
+                            "leia.logo: row " + (row + 1) + ", column " + (column + 1) + ": slot is 0 to 5");
+                }
+                boolean space = cells.charAt(column) == ' ';
+                if (space != (slot == 0)) {
+                    throw new IllegalStateException("leia.logo: row " + (row + 1) + ", column " + (column + 1)
+                            + ": a space is slot 0 and nothing else is");
+                }
+                if (!space) {
                     width = Math.max(width, column + 1);
                 }
             }
         }
-        List<Line> lines = new ArrayList<>();
-        for (List<Span> row : cells) {
-            List<Span> spans = new ArrayList<>(row.subList(0, Math.min(width, row.size())));
-            while (spans.size() < width) {
-                spans.add(Span.raw(" "));
-            }
-            lines.add(Line.from(spans));
+        if (width == 0) {
+            throw new IllegalStateException("leia.logo is empty");
         }
-        if (lines.isEmpty() || width == 0) {
-            throw new IllegalStateException("leia.icon is empty");
-        }
-        return List.copyOf(lines);
-    }
-
-    /** The cells of one row of {@code leia.icon}; a space is uncoloured. */
-    private static List<Span> parse(String row) {
-        List<Span> spans = new ArrayList<>();
-        Matcher matcher = CELL.matcher(row);
-        int end = 0;
-        while (matcher.find() && matcher.start() == end) {
-            String character = matcher.group(4);
-            spans.add(
-                    character.equals(" ")
-                            ? Span.raw(" ")
-                            : Span.styled(
-                                    character,
-                                    Style.EMPTY.fg(Color.rgb(
-                                            Integer.parseInt(matcher.group(1)),
-                                            Integer.parseInt(matcher.group(2)),
-                                            Integer.parseInt(matcher.group(3))))));
-            end = matcher.end();
-        }
-        String rest = row.substring(end);
-        if (!rest.isEmpty() && !rest.equals(RESET)) {
-            throw new IllegalStateException("leia.icon: unexpected " + rest);
-        }
-        return spans;
+        int cut = width;
+        return new Grid(
+                characters.stream().map(row -> row.substring(0, cut)).toList(),
+                slots.stream().map(row -> row.substring(0, cut)).toList());
     }
 
     /**
@@ -161,7 +166,7 @@ public final class Logo {
                 .constraints(Constraint.length(WIDTH), Constraint.length(GAP), Constraint.fill())
                 .split(area);
         int height = Math.min(HEIGHT, area.height());
-        List<Line> lines = Palette.current().colouredLogo() ? LINES : PLAIN;
+        List<Line> lines = lines(Palette.current());
         frame.renderWidget(Paragraph.from(Text.from(lines.subList(HEIGHT - height, HEIGHT))), columns.get(0));
         int offset = Math.max(height - Panels.wrap(text, columns.get(2).width()).size(), 0) / 2;
         Rect textArea = Layout.vertical()

@@ -1,6 +1,6 @@
 # ADR 0096 — Theme files
 
-- **Status:** Accepted
+- **Status:** Accepted, amended by ADR 0097 (the logo's roles)
 - **Date:** 2026-10-22
 - **Amends:** ADR 0095 §2, §5 and its alternatives "user-defined themes" and "the theme's name in the footer"
 

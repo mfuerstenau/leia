@@ -68,7 +68,12 @@ class ThemesTest {
                         Style.EMPTY.fg(Color.DARK_GRAY),
                         Style.EMPTY,
                         Style.EMPTY,
-                        true));
+                        Style.EMPTY,
+                        fg("#1A0D0D"),
+                        fg("#563F38"),
+                        fg("#9E6038"),
+                        fg("#C7905D"),
+                        fg("#E4CDA5")));
     }
 
     @Test
@@ -88,7 +93,12 @@ class ThemesTest {
                         indexed(245),
                         Style.EMPTY,
                         Style.EMPTY,
-                        true));
+                        Style.EMPTY,
+                        fg("#1A0D0D"),
+                        fg("#563F38"),
+                        fg("#9E6038"),
+                        fg("#C7905D"),
+                        fg("#E4CDA5")));
         Color background = Color.hex("#2E3440");
         Color grey = Color.hex("#4C566A");
         Color frost = Color.hex("#88C0D0");
@@ -109,7 +119,16 @@ class ThemesTest {
                         Style.EMPTY.fg(grey),
                         Style.EMPTY.fg(grey),
                         Style.EMPTY.fg(frost),
-                        true));
+                        Style.EMPTY,
+                        fg("#BF616A"),
+                        fg("#B48EAD"),
+                        fg("#A3BE8C"),
+                        fg("#EBCB8B"),
+                        fg("#D08770")));
+    }
+
+    private static Style fg(String hex) {
+        return Style.EMPTY.fg(Color.hex(hex));
     }
 
     private static Style indexed(int colour) {
@@ -124,7 +143,6 @@ class ThemesTest {
             assertThat(style.fg()).isEmpty();
             assertThat(style.bg()).isEmpty();
         });
-        assertThat(mono.colouredLogo()).isFalse();
     }
 
     @ParameterizedTest

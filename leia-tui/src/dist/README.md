@@ -220,7 +220,12 @@ match         = #2E3440 on #EBCB8B
 muted         = #4C566A
 border        = #4C566A
 borderFocused = #88C0D0
-logo          = coloured
+logo0         = none
+logo1         = #BF616A
+logo2         = #B48EAD
+logo3         = #A3BE8C
+logo4         = #EBCB8B
+logo5         = #D08770
 ```
 
 A file sets every role once; a line starting with `#` is a comment. A style is `none`, the
@@ -229,7 +234,8 @@ is a name (`black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`
 `dark-gray`, `light-red`, `light-green`, `light-yellow`, `light-blue`, `light-magenta`,
 `light-cyan`, `bright-white`), a number from 0 to 255 of the 256-colour palette, or `#RRGGBB`,
 which needs a terminal with 24-bit colour. The modifiers are `bold`, `dim`, `italic`, `underlined`
-and `reversed`. `logo` is `coloured` or `plain`. A file leia can't read is left out, and the log
+and `reversed`. `logo0` to `logo5` colour the start screen's logo, slot by slot: `logo0` is the
+space around the gazelle, and `none` leaves it the terminal's own. A file leia can't read is left out, and the log
 says which line is wrong and why.
 
 ## License and disclaimer

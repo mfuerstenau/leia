@@ -1,6 +1,6 @@
 # ADR 0095 — Themes
 
-- **Status:** Accepted, amended by ADR 0096 (theme files, user themes, `T` names the theme)
+- **Status:** Accepted, amended by ADR 0096 (theme files, user themes, `T` names the theme) and ADR 0097 (the logo's roles)
 - **Date:** 2026-10-22
 
 ## Context

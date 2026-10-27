@@ -4,7 +4,6 @@ import dev.tamboui.style.Color;
 import dev.tamboui.style.Modifier;
 import dev.tamboui.style.Style;
 import java.lang.reflect.RecordComponent;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -16,7 +15,7 @@ import java.util.regex.Pattern;
  * Reads a theme file (ADR 0096): a {@code role = value} per line, where a role is a component of
  * {@link Palette} and every one must be set. A style is {@code none}, or {@code [colour] [on colour]
  * [modifier…]}; a colour is a name such as {@code dark-gray}, an index of the 256 colours or
- * {@code #RRGGBB}. The logo is {@code coloured} or {@code plain}. A line starting with {@code #} is
+ * {@code #RRGGBB}. A line starting with {@code #} is
  * a comment.
  */
 public final class ThemeParser {
@@ -30,7 +29,9 @@ public final class ThemeParser {
         }
     }
 
-    private static final String LOGO = "logo";
+    /** The role that ADR 0095 and ADR 0096 had for the logo, which {@code logo0} to {@code logo5} replace. */
+    private static final String OLD_LOGO = "logo";
+
     private static final Pattern HEX = Pattern.compile("#[0-9A-Fa-f]{6}");
     private static final Pattern INDEX = Pattern.compile("[0-9]{1,3}");
 
@@ -76,7 +77,6 @@ public final class ThemeParser {
      */
     public static Palette parse(String source, String text) throws Invalid {
         Map<String, Style> styles = new HashMap<>();
-        Boolean colouredLogo = null;
         List<String> lines = text.lines().toList();
         for (int i = 0; i < lines.size(); i++) {
             String line = lines.get(i).strip();
@@ -90,15 +90,8 @@ public final class ThemeParser {
             }
             String key = line.substring(0, equals).strip();
             String value = line.substring(equals + 1).strip();
-            if (key.equals(LOGO)) {
-                if (colouredLogo != null) {
-                    throw new Invalid(where + "logo is set twice");
-                }
-                colouredLogo = switch (value) {
-                    case "coloured" -> true;
-                    case "plain" -> false;
-                    default -> throw new Invalid(where + "logo is coloured or plain, not '" + value + "'");
-                };
+            if (key.equals(OLD_LOGO)) {
+                throw new Invalid(where + "unknown role 'logo': the logo's colours are logo0 to logo5");
             } else if (ROLES.contains(key)) {
                 if (styles.containsKey(key)) {
                     throw new Invalid(where + key + " is set twice");
@@ -108,11 +101,8 @@ public final class ThemeParser {
                 throw new Invalid(where + "unknown role '" + key + "'");
             }
         }
-        List<String> missing = new ArrayList<>(
-                ROLES.stream().filter(role -> !styles.containsKey(role)).toList());
-        if (colouredLogo == null) {
-            missing.add(LOGO);
-        }
+        List<String> missing =
+                ROLES.stream().filter(role -> !styles.containsKey(role)).toList();
         if (!missing.isEmpty()) {
             throw new Invalid(source + ": missing " + String.join(", ", missing));
         }
@@ -130,7 +120,12 @@ public final class ThemeParser {
                 styles.get("muted"),
                 styles.get("border"),
                 styles.get("borderFocused"),
-                colouredLogo);
+                styles.get("logo0"),
+                styles.get("logo1"),
+                styles.get("logo2"),
+                styles.get("logo3"),
+                styles.get("logo4"),
+                styles.get("logo5"));
     }
 
     private static Style style(String where, String value) throws Invalid {

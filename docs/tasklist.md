@@ -2,10 +2,6 @@
 
 The work queue for leia. Check items off (`[x]`) as they land. Finished items move to `docs/tasklist-done.md`.
 
-## Logo colours from the theme — next
-
-- [ ] Draw the logo in the theme's colours (ADR 0097): `Logo` reads and checks `leia.logo` (already in `…tui/widgets/`) in place of `leia.icon`; the roles `logo0`–`logo5` in place of `colouredLogo` in `Palette` and of `logo` in `ThemeParser`, with a message that names them for a file that still has `logo`; the four bundled `.theme` files with the colours of ADR 0097 §4; the tests (`ThemesTest` against ADR 0097's table, `ThemeParserTest`, `ThemeFileTest`, the logo's); then remove `gazelle-default.go`, `gazelle-aurora.go` (staged, not committed) and `leia.icon`, and update the user README's sample theme and its line on `logo` (`leia-tui/src/dist/README.md`).
-
 ## User folders — next
 
 Where leia keeps its files. The item changes accepted ADRs, so it needs a new ADR. The theme files are done (ADR 0096).
