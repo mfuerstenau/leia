@@ -1,0 +1,15 @@
+# dark: the terminal's own colours, as leia had them before themes (ADR 0095, ADR 0096)
+base          = none
+error         = red
+warning       = yellow
+success       = green
+accent        = cyan
+jsonKey       = cyan
+jsonString    = green
+jsonNumber    = yellow
+jsonLiteral   = magenta
+match         = black on yellow
+muted         = dark-gray
+border        = none
+borderFocused = none
+logo          = coloured

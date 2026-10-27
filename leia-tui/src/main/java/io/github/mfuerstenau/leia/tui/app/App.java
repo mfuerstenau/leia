@@ -102,6 +102,7 @@ import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.theme.Theme;
 import io.github.mfuerstenau.leia.tui.theme.ThemeFile;
+import io.github.mfuerstenau.leia.tui.theme.Themes;
 import io.github.mfuerstenau.leia.tui.widgets.KeyLegend;
 import io.github.mfuerstenau.leia.tui.widgets.Logo;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
@@ -255,6 +256,7 @@ public final class App {
     /** The default folder of jars, and whether its jars were loaded (ADR 0024). */
     private DefaultJars defaultJars = DefaultJars.none();
 
+    private Themes themes = Themes.bundled();
     private ThemeFile themeFile = ThemeFile.none();
 
     private RuntimeFolders runtimeFolders = RuntimeFolders.none();
@@ -343,8 +345,12 @@ public final class App {
         return this;
     }
 
-    /** {@code T} on the start screen saves the theme it switches to in {@code themeFile} (ADR 0095). */
-    public App withThemeFile(ThemeFile themeFile) {
+    /**
+     * {@code T} on the start screen cycles {@code themes} and saves the theme it switches to in
+     * {@code themeFile} (ADR 0095, ADR 0096).
+     */
+    public App withThemes(Themes themes, ThemeFile themeFile) {
+        this.themes = themes;
         this.themeFile = themeFile;
         return this;
     }
@@ -2213,9 +2219,10 @@ public final class App {
                 if (opened != null || screen == Screen.ANALYSIS) {
                     return screenKey(key);
                 }
-                Theme theme = Palette.theme().next();
+                Theme theme = themes.next(Palette.theme());
                 Palette.use(theme);
                 themeFile.save(theme);
+                notice = new Notice.ThemeChanged(theme.id());
             }
             case 'c' -> {
                 if (hasIndex()) {

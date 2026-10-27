@@ -114,6 +114,33 @@ class MainTest {
     }
 
     @Test
+    void reportsAnUnknownTheme() throws Exception {
+        assertThat(run("--theme", "bogus")).isEqualTo(2);
+
+        assertThat(err())
+                .contains(
+                        "leia: invalid value 'bogus' for --theme <THEME>: possible values are dark, light, mono, nord",
+                        Cli.USAGE);
+        assertThat(out()).isEmpty();
+    }
+
+    @Test
+    void namesTheUsersThemesAmongThePossibleValues() throws Exception {
+        Path themes = Files.createDirectories(configDir.resolve("leia/themes"));
+        Files.writeString(themes.resolve("broken.theme"), "base = none\n");
+        try (var nord = Main.class.getResourceAsStream("/io/github/mfuerstenau/leia/tui/theme/nord.theme")) {
+            Files.copy(nord, themes.resolve("solar.theme"));
+        }
+
+        assertThat(run("--theme", "bogus")).isEqualTo(2);
+
+        assertThat(err()).contains("possible values are dark, light, mono, nord, solar" + System.lineSeparator());
+        // A broken theme goes to the log, not the terminal.
+        assertThat(err()).doesNotContain("broken");
+        assertThat(Files.readString(logFile)).contains("broken.theme: missing error");
+    }
+
+    @Test
     void reportsAJarThatDoesNotExist() throws Exception {
         Path missing = tmp.resolve("missing.jar");
 

@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
-import io.github.mfuerstenau.leia.tui.theme.Theme;
 import java.nio.file.Path;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -68,8 +67,10 @@ class CliTest {
 
     @Test
     void parsesTheTheme() throws Exception {
-        assertThat(Cli.parse("--theme", "nord").theme()).hasValue(Theme.NORD);
-        assertThat(Cli.parse("--theme=mono", "/data/index").theme()).hasValue(Theme.MONO);
+        assertThat(Cli.parse("--theme", "nord").theme()).hasValue("nord");
+        // A theme of the user's own is known only once Main reads their folder (ADR 0096).
+        assertThat(Cli.parse("--theme=solar", "/data/index").theme()).hasValue("solar");
+        assertThat(Cli.parse().theme()).isEmpty();
     }
 
     @Test
@@ -130,7 +131,6 @@ class CliTest {
             --download-runtimes --runtime lucene99 | invalid value 'lucene99' for --runtime <FOLDER>: possible values are lucene10, lucene9, lucene7, lucene5, lucene3
             --download-runtimes --runtime | --runtime needs a value <FOLDER>
             --theme                     | --theme needs a value <THEME>
-            --theme bogus               | invalid value 'bogus' for --theme <THEME>: possible values are dark, light, mono, nord
             --download-runtimes --runtime lucene9 --theme nord | --download-runtimes takes no INDEX_PATH and none of --jar, --server, --no-default-jars, --directory, --no-reader, --theme
             -j /opt/jdk                 | -j is taken by the leia script
             --java=/opt/jdk             | --java is taken by the leia script

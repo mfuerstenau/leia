@@ -436,3 +436,6 @@ Goal: the runtimes are downloaded from within leia's UI, and `--download-runtime
 ## Misc — done
 
 - [x] Misc: themes (ADR 0095): `dark` (the look before), `light`, `mono` and `nord`, as roles of a `Palette` in `…tui.theme` that every screen takes its colours from. `--theme`, `NO_COLOR` (mono), the theme file `~/.config/leia/theme`, and `T` on the start screen, which cycles them and saves the choice. `nord` paints its background on the whole screen and in every popup (`Panels.clear`), and colours the borders; `mono` has no colour, and its logo is plain
+- [x] Misc: theme files (ADR 0096): the four themes as `.theme` resources beside `Themes`, read by `ThemeParser` (`role = value`, colours by name, 256-colour index or `#RRGGBB`, `on` a background, modifiers), and `ThemesTest` checks every bundled file against ADR 0095's colours
+- [x] Misc: themes of the user's own (ADR 0096): `*.theme` in `~/.config/leia/themes` (`%APPDATA%\leia\themes`), after the bundled ones, a bundled name replaced in place; a broken file or bad name is logged and left out. `--theme` takes any name and `Main` checks it once the folder is read (exit 2 with the list)
+- [x] Misc: `T` names the theme: `Theme: <id>` in the footer until the next key (`Notice.ThemeChanged`)

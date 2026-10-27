@@ -20,7 +20,9 @@ import io.github.mfuerstenau.leia.tui.jars.RuntimeFolders;
 import io.github.mfuerstenau.leia.tui.runtimes.RuntimeDownload;
 import io.github.mfuerstenau.leia.tui.runtimes.RuntimeInstall;
 import io.github.mfuerstenau.leia.tui.theme.Palette;
+import io.github.mfuerstenau.leia.tui.theme.Theme;
 import io.github.mfuerstenau.leia.tui.theme.ThemeFile;
+import io.github.mfuerstenau.leia.tui.theme.Themes;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -114,6 +116,19 @@ public final class Main {
 
         try (LeiaLog.Opened log = LeiaLog.toFile(platform.logFile())) {
             LOG.info(() -> "leia started with " + List.of(args));
+            // In the log, which a broken theme of the user's goes to (ADR 0096).
+            Themes themes = Themes.bundled().withUserDir(platform.themesDir());
+            Optional<Theme> theme = Optional.empty();
+            if (cli.theme().isPresent()) {
+                theme = themes.find(cli.theme().get());
+                if (theme.isEmpty()) {
+                    err.println("leia: "
+                            + Cli.unknownTheme(cli.theme().get(), themes.ids()).getMessage());
+                    err.println(Cli.USAGE);
+                    err.println("For more information, try '--help'.");
+                    return 2;
+                }
+            }
             LeiaBackend backend;
             try {
                 backend = LeiaBackend.start(runtimeFolders.dir(), jars, cli.servers());
@@ -127,7 +142,8 @@ public final class Main {
                 return 1;
             }
             try (backend) {
-                return runTui(cli, platform, runtimeFolders, defaultJars, backend, log, out, err, started);
+                return runTui(
+                        cli, platform, runtimeFolders, defaultJars, themes, theme, backend, log, out, err, started);
             }
         }
     }
@@ -177,6 +193,7 @@ public final class Main {
      * Runs the TUI until the user quits. Opens {@code cli}'s index path, if any, once the first frame
      * is on the screen.
      *
+     * @param theme the theme of {@code --theme}, among {@code themes}
      * @return the exit status: 1 if something unexpected ended it
      */
     // Separate options; it keeps the CLI's own streams (ADR 0088)
@@ -186,6 +203,8 @@ public final class Main {
             Platform platform,
             RuntimeFolders runtimeFolders,
             DefaultJars defaultJars,
+            Themes themes,
+            Optional<Theme> theme,
             LeiaBackend backend,
             LeiaLog.Opened leiaLog,
             PrintStream out,
@@ -198,11 +217,11 @@ public final class Main {
                 backend.call(Methods.VERSION, new VersionParams()).get();
         History history = platform.historyFile().map(History::load).orElseGet(History::inMemory);
         ThemeFile themeFile = new ThemeFile(platform.themeFile());
-        Palette.use(themeFile.resolve(cli.theme(), platform.env().apply("NO_COLOR")));
+        Palette.use(themeFile.resolve(theme, platform.env().apply("NO_COLOR"), themes));
         App app = new App(version, platform.home(), history, cli.directory())
                 .withCwd(Path.of("").toAbsolutePath())
                 .withDefaultJars(defaultJars)
-                .withThemeFile(themeFile)
+                .withThemes(themes, themeFile)
                 .withRuntimeFolders(runtimeFolders)
                 .withLog(leiaLog.buffer(), platform.logFile());
         app.runtimesLoaded(

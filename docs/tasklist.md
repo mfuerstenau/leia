@@ -2,13 +2,10 @@
 
 The work queue for leia. Check items off (`[x]`) as they land. Finished items move to `docs/tasklist-done.md`.
 
-## Themes and user folders — next
+## User folders — next
 
-Follow-ups to ADR 0095 (themes) and to where leia keeps its files. Each changes an accepted ADR, so it needs a new ADR.
+Where leia keeps its files. The item changes accepted ADRs, so it needs a new ADR. The theme files are done (ADR 0096).
 
-- [ ] Themes as resource files: the four palettes of `Palette` (`dark`, `light`, `mono`, `nord`) move out of the code into files under `leia-tui/src/main/resources`, one file per theme, holding its roles. This needs a file format and a parser for colours (named, 256-colour index, `#RRGGBB`) and modifiers (bold, dim, reversed), and a test that every bundled file sets every role.
-- [ ] Show the theme's name when `T` cycles: a short notice such as `Theme: nord`, for example through `Notice`, since the footer has no room for it on 80 columns (ADR 0095).
-- [ ] External theme files: themes of the user's own, in the same format, from a user folder (the request names `~/.local`: `$XDG_DATA_HOME/leia/themes`, `~/.local/share/leia/themes`, or `%APPDATA%\leia\themes` on Windows; settle `.local/share` against `.config` in the ADR). `--theme` and `T` include them, a user theme with the name of a bundled one replaces it or is refused (to decide), and a broken file is reported in the log and skipped, not fatal.
 - [ ] Runtimes in the user folder: today `runtimes/` sits beside `leia.jar` (ADR 0044, ADR 0072, ADR 0073), not in `~/.local`. Move it to `$XDG_DATA_HOME/leia/runtimes` (`~/.local/share/leia/runtimes`, `%LOCALAPPDATA%\leia\runtimes` on Windows), so a read-only or shared install of `leia.jar` works and a new version of leia keeps the downloaded runtimes. To settle: whether `runtimes/` beside the jar still counts as a fallback or override, `-Dleia.runtimes` under Gradle, `--download-runtimes` and `D` writing there, how a Lucene 10 runtime whose version doesn't match the adapter in `leia.jar` is treated, and the docs (AGENTS.md CLI contract, README, `build-dist.sh`).
 
 ## SonarQube quality gate

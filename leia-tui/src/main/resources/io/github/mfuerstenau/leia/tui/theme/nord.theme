@@ -1,0 +1,15 @@
+# nord: the Nord palette (nordtheme.com) on its own background; needs a truecolor terminal
+base          = #D8DEE9 on #2E3440
+error         = #BF616A
+warning       = #EBCB8B
+success       = #A3BE8C
+accent        = #88C0D0
+jsonKey       = #8FBCBB
+jsonString    = #A3BE8C
+jsonNumber    = #B48EAD
+jsonLiteral   = #81A1C1
+match         = #2E3440 on #EBCB8B
+muted         = #4C566A
+border        = #4C566A
+borderFocused = #88C0D0
+logo          = coloured

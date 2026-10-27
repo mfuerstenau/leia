@@ -1,0 +1,15 @@
+# light: darker colours of the 256-colour palette, which read on a light background
+base          = none
+error         = red
+warning       = 130
+success       = 28
+accent        = 25
+jsonKey       = 25
+jsonString    = 28
+jsonNumber    = 130
+jsonLiteral   = 90
+match         = black on 229
+muted         = 245
+border        = none
+borderFocused = none
+logo          = coloured

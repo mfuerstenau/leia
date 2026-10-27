@@ -1,0 +1,15 @@
+# mono: no colour at all, for NO_COLOR and monochrome terminals
+base          = none
+error         = bold
+warning       = bold
+success       = none
+accent        = none
+jsonKey       = none
+jsonString    = dim
+jsonNumber    = none
+jsonLiteral   = none
+match         = reversed
+muted         = dim
+border        = none
+borderFocused = none
+logo          = plain

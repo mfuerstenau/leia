@@ -104,6 +104,14 @@ record Platform(Function<String, String> env, Optional<Path> home, boolean windo
         return defaultJarsDir().map(dir -> dir.resolveSibling("theme"));
     }
 
+    /**
+     * The user's own themes (ADR 0096), {@code themes} beside the {@linkplain #defaultJarsDir()
+     * default folder of jars}.
+     */
+    Optional<Path> themesDir() {
+        return defaultJarsDir().map(dir -> dir.resolveSibling("themes"));
+    }
+
     /** The XDG Base Directory spec says that a relative path in its variables is to be ignored. */
     private Optional<Path> absolute(String variable) {
         String value = env.apply(variable);

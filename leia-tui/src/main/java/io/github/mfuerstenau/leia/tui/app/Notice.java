@@ -3,7 +3,10 @@ package io.github.mfuerstenau.leia.tui.app;
 import dev.tamboui.text.Line;
 import io.github.mfuerstenau.leia.tui.theme.Palette;
 
-/** What the tab line says about the last reopen, or the footer about the last export, until the next key. */
+/**
+ * What the tab line says about the last reopen, or the footer about the last export or theme, until
+ * the next key.
+ */
 sealed interface Notice {
 
     record Reopening() implements Notice {}
@@ -34,6 +37,9 @@ sealed interface Notice {
     /** {@code D} on the start screen, when there is no {@code runtimes/} to download into (ADR 0080). */
     record CannotDownload(String reason) implements Notice {}
 
+    /** {@code T} on the start screen switched to the theme {@code id} (ADR 0096). */
+    record ThemeChanged(String id) implements Notice {}
+
     default Line line() {
         return switch (this) {
             case Reopening _ -> Line.from("Reopening…");
@@ -60,6 +66,7 @@ sealed interface Notice {
                 Line.styled(
                         "Cannot download runtimes: " + cannot.reason(),
                         Palette.current().warning());
+            case ThemeChanged changed -> Line.from("Theme: " + changed.id());
         };
     }
 
@@ -68,6 +75,9 @@ sealed interface Notice {
      * names its file, and the start screen has no tab line.
      */
     default boolean inFooter() {
-        return this instanceof Exported || this instanceof ExportFailed || this instanceof CannotDownload;
+        return this instanceof Exported
+                || this instanceof ExportFailed
+                || this instanceof CannotDownload
+                || this instanceof ThemeChanged;
     }
 }
