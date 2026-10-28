@@ -135,6 +135,10 @@ import java.util.logging.Level;
  */
 public final class App {
 
+    /**
+     * The keys that every footer starts with. {@code X}, {@code L} and {@code ?} work on every screen
+     * too, but only the start screen's footer lists them: the others' are long enough already.
+     */
     private static final String APP_KEYS = "q quit   o open   c close   ";
 
     private static final String INDEXES = " indexes";

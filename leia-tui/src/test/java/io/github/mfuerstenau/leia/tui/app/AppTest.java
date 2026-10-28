@@ -828,6 +828,27 @@ class AppTest {
     }
 
     @Test
+    void theAboutAndLogWindowsOpenOnEveryScreenButOnlyTheStartFooterListsTheirKeys() {
+        App app = appWithDocuments();
+        app.handleKey(key('2'));
+        app.documentLoaded(document(0));
+        for (char screen : new char[] {'1', '2', '6'}) {
+            app.handleKey(key(screen));
+            String footer = TestScreens.render(app::render, 230, 30);
+            assertThat(footer).doesNotContain("? about", "L log", "X jars");
+
+            app.handleKey(key('?'));
+            assertThat(TestScreens.render(app::render, 160, 60)).contains(" About leia");
+            app.handleKey(key(KeyCode.ESCAPE));
+            app.handleKey(key('L'));
+            assertThat(TestScreens.render(app::render, 160, 60)).contains(" Log: ");
+            app.handleKey(key(KeyCode.ESCAPE));
+            assertThat(render(app)).doesNotContain(" About leia", " Log: ");
+        }
+        assertThat(render(app())).contains("L log", "? about");
+    }
+
+    @Test
     void questionMarkInTheOpenPromptIsTyped() {
         App app = app();
         app.handleKey(key('o'));

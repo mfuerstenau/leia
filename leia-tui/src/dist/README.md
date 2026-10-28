@@ -197,7 +197,7 @@ can't do, for an older minor than leia's runtime is built for, says so, and belo
 | `Esc` | stop what is running; with nothing running, quit |
 | `q`, `Ctrl+C` | quit |
 
-The footer of each screen shows its own keys.
+The footer of each screen shows its own keys. `X`, `L` and `?` work on every screen, but only the start screen's footer lists them.
 
 ## Files
 
