@@ -20,6 +20,10 @@ From the read-only checklist in `docs/luke-features.md` §7. Ordered roughly by 
 
 None open.
 
+## Open prompt
+
+- [ ] Completion in the open prompt (`tui.prompt.PathPrompt`): `Tab` lists the candidates on one line, joined by two spaces, so a long list is cut off at the window's edge. Make the candidates scrollable (they can't all be seen now), and show them as a drop-down list under the input that `↑` `↓` choose from, if that fits the prompt's keys (`↑` `↓` step through the recent paths now).
+
 ## Bugs
 
 None open.
