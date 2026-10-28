@@ -19,6 +19,7 @@ The lane is done. What each runtime can do, and how they differ: `docs/runtimes.
 From the read-only checklist in `docs/luke-features.md` §7. Ordered roughly by value. Each area will need its own records, handlers and probably an ADR for the cross-cutting parts.
 
 - [ ] Misc: about
+- [ ] Themes: `solarized-dark` and `solarized-light`, after Ethan Schoonover's Solarized (https://github.com/altercation/solarized). Two bundled `.theme` files with the palette as `#RRGGBB`, painting their own background as `nord` does (`base`, so a truecolor terminal), and a gazelle recoloured for each (`.colours` beside the shared `gazelle.chars`, ADR 0099). Check the muted and border roles for contrast on `base03` and `base3`, and the match style. Add them to `Themes.BUNDLED` (the order of `T`), `ThemesTest`, the README's list of themes and ADR 0095's table, and look at them in a terminal with Solarized's own scheme and with another.
 
 ## Bugs
 
