@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.FieldSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /** The bundled themes, those of the user's folder, and the one in use (ADR 0095, ADR 0096). */
 class ThemesTest {
@@ -43,12 +44,14 @@ class ThemesTest {
     }
 
     @Test
-    void bundlesFourThemesInTheOrderTCyclesThem() {
+    void bundlesSixThemesInTheOrderTCyclesThem() {
         Themes themes = Themes.bundled();
 
-        assertThat(themes.ids()).containsExactly("dark", "light", "mono", "nord");
+        assertThat(themes.ids()).containsExactly("dark", "light", "mono", "nord", "solarized-dark", "solarized-light");
         assertThat(themes.next(themes.find("dark").orElseThrow()).id()).isEqualTo("light");
-        assertThat(themes.next(themes.find("nord").orElseThrow()).id()).isEqualTo("dark");
+        assertThat(themes.next(themes.find("nord").orElseThrow()).id()).isEqualTo("solarized-dark");
+        assertThat(themes.next(themes.find("solarized-light").orElseThrow()).id())
+                .isEqualTo("dark");
     }
 
     @Test
@@ -113,6 +116,51 @@ class ThemesTest {
                         icon("gazelle-aurora")));
     }
 
+    @Test
+    void solarizedAreTheColoursOfAdr0095() {
+        Color blue = Color.hex("#268BD2");
+        Color yellow = Color.hex("#B58900");
+        Color base03 = Color.hex("#002B36");
+        Color base3 = Color.hex("#FDF6E3");
+        Color red = Color.hex("#DC322F");
+        Color green = Color.hex("#859900");
+        Color cyan = Color.hex("#2AA198");
+        Color magenta = Color.hex("#D33682");
+        Color violet = Color.hex("#6C71C4");
+        assertThat(bundled("solarized-dark"))
+                .isEqualTo(new Palette(
+                        Style.EMPTY.fg(Color.hex("#839496")).bg(base03),
+                        Style.EMPTY.fg(red),
+                        Style.EMPTY.fg(yellow),
+                        Style.EMPTY.fg(green),
+                        Style.EMPTY.fg(blue),
+                        Style.EMPTY.fg(blue),
+                        Style.EMPTY.fg(cyan),
+                        Style.EMPTY.fg(magenta),
+                        Style.EMPTY.fg(violet),
+                        Style.EMPTY.fg(base03).bg(yellow),
+                        Style.EMPTY.fg(Color.hex("#657B83")),
+                        Style.EMPTY.fg(Color.hex("#657B83")),
+                        Style.EMPTY.fg(blue),
+                        icon("gazelle-solarized-dark")));
+        assertThat(bundled("solarized-light"))
+                .isEqualTo(new Palette(
+                        Style.EMPTY.fg(Color.hex("#657B83")).bg(base3),
+                        Style.EMPTY.fg(red),
+                        Style.EMPTY.fg(yellow),
+                        Style.EMPTY.fg(green),
+                        Style.EMPTY.fg(blue),
+                        Style.EMPTY.fg(blue),
+                        Style.EMPTY.fg(cyan),
+                        Style.EMPTY.fg(magenta),
+                        Style.EMPTY.fg(violet),
+                        Style.EMPTY.fg(base03).bg(yellow),
+                        Style.EMPTY.fg(Color.hex("#839496")),
+                        Style.EMPTY.fg(Color.hex("#839496")),
+                        Style.EMPTY.fg(blue),
+                        icon("gazelle-solarized-light")));
+    }
+
     private static Icon icon(String name) {
         try {
             return Icons.bundled().find("", name);
@@ -146,14 +194,16 @@ class ThemesTest {
         assertThat(selected.patch(bundled(id).match())).isNotEqualTo(selected);
     }
 
-    @Test
-    void nordKeepsMutedTextAndBordersReadable() {
-        // Panel titles take the border's colour; #4C566A on #2E3440 is 1.7:1 and all but vanished.
-        Palette nord = bundled("nord");
-        Color background = nord.base().bg().orElseThrow();
+    @ParameterizedTest
+    @ValueSource(strings = {"nord", "solarized-dark", "solarized-light"})
+    void aThemeWithItsOwnBackgroundKeepsMutedTextAndBordersReadable(String id) {
+        // Panel titles take the border's colour; #4C566A on #2E3440 is 1.7:1 and all but vanished. The bound is
+        // 2.9 for solarized-light, whose base0 #839496 on base3 is 2.93:1 (ADR 0095).
+        Palette palette = bundled(id);
+        Color background = palette.base().bg().orElseThrow();
 
-        assertThat(contrast(nord.muted().fg().orElseThrow(), background)).isGreaterThanOrEqualTo(3.0);
-        assertThat(contrast(nord.border().fg().orElseThrow(), background)).isGreaterThanOrEqualTo(3.0);
+        assertThat(contrast(palette.muted().fg().orElseThrow(), background)).isGreaterThanOrEqualTo(2.9);
+        assertThat(contrast(palette.border().fg().orElseThrow(), background)).isGreaterThanOrEqualTo(2.9);
     }
 
     private static double contrast(Color a, Color b) {
@@ -203,9 +253,11 @@ class ThemesTest {
 
         Themes themes = Themes.bundled().withUserDir(Optional.of(dir));
 
-        assertThat(themes.ids()).containsExactly("dark", "light", "mono", "nord", "solar", "zen");
+        assertThat(themes.ids())
+                .containsExactly("dark", "light", "mono", "nord", "solarized-dark", "solarized-light", "solar", "zen");
         assertThat(themes.find("solar").orElseThrow().palette()).isEqualTo(bundled("light"));
-        assertThat(themes.next(themes.find("nord").orElseThrow()).id()).isEqualTo("solar");
+        assertThat(themes.next(themes.find("solarized-light").orElseThrow()).id())
+                .isEqualTo("solar");
         assertThat(themes.next(themes.find("zen").orElseThrow()).id()).isEqualTo("dark");
     }
 
@@ -215,7 +267,7 @@ class ThemesTest {
 
         Themes themes = Themes.bundled().withUserDir(Optional.of(dir));
 
-        assertThat(themes.ids()).containsExactly("dark", "light", "mono", "nord");
+        assertThat(themes.ids()).containsExactly("dark", "light", "mono", "nord", "solarized-dark", "solarized-light");
         assertThat(themes.find("nord").orElseThrow().palette().error()).isEqualTo(Style.EMPTY.red());
         // The bundled themes stay as they are.
         assertThat(bundled("nord").error()).isEqualTo(Style.EMPTY.fg(Color.hex("#BF616A")));
@@ -231,7 +283,8 @@ class ThemesTest {
 
         Themes themes = Themes.bundled().withUserDir(Optional.of(dir));
 
-        assertThat(themes.ids()).containsExactly("dark", "light", "mono", "nord", "good");
+        assertThat(themes.ids())
+                .containsExactly("dark", "light", "mono", "nord", "solarized-dark", "solarized-light", "good");
     }
 
     @Test

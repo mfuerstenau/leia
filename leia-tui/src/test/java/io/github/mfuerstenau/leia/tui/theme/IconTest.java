@@ -119,6 +119,38 @@ class IconTest {
     }
 
     @Test
+    void theSolarizedGazellesAreTheGazelleWithThePngPalettesColours() throws Exception {
+        // gazelle_solarized_{dark,light}.png have the pixels of gazelle_default.png and only another palette.
+        assertThat(recoloured("#586E75", "#FDF6E3", "#B58900", "#859900", "#2AA198"))
+                .isEqualTo(Icons.bundled().find("", "gazelle-solarized-dark").rows());
+        assertThat(recoloured("#002B36", "#EEE8D5", "#839496", "#586E75", "#073642"))
+                .isEqualTo(Icons.bundled().find("", "gazelle-solarized-light").rows());
+    }
+
+    private static List<List<Icon.Cell>> recoloured(String... palette) throws Exception {
+        List<String> original = List.of("#14070C", "#E5CFA7", "#C7905D", "#9E6038", "#523D38");
+        java.util.function.UnaryOperator<Color> map = colour -> Color.hex(palette[
+                original.indexOf("#%06X"
+                        .formatted(colour.toRgb().r() << 16
+                                | colour.toRgb().g() << 8
+                                | colour.toRgb().b()))]);
+        return Icons.bundled().find("", "gazelle").rows().stream()
+                .map(row -> row.stream()
+                        .map(cell -> {
+                            Style style = Style.EMPTY;
+                            if (cell.style().fg().isPresent()) {
+                                style = style.fg(map.apply(cell.style().fg().get()));
+                            }
+                            if (cell.style().bg().isPresent()) {
+                                style = style.bg(map.apply(cell.style().bg().get()));
+                            }
+                            return new Icon.Cell(cell.character(), style);
+                        })
+                        .toList())
+                .toList();
+    }
+
+    @Test
     void refusesAMissingIconOrABadName() {
         Icons icons = Icons.bundled().withUserDir(dir);
 

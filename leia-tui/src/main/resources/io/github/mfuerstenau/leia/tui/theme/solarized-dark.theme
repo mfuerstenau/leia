@@ -1,0 +1,15 @@
+# solarized-dark: Ethan Schoonover's Solarized (ethanschoonover.com/solarized) on base03; needs a truecolor terminal
+base          = #839496 on #002B36
+error         = #DC322F
+warning       = #B58900
+success       = #859900
+accent        = #268BD2
+jsonKey       = #268BD2
+jsonString    = #2AA198
+jsonNumber    = #D33682
+jsonLiteral   = #6C71C4
+match         = #002B36 on #B58900
+muted         = #657B83
+border        = #657B83
+borderFocused = #268BD2
+logo          = gazelle-solarized-dark

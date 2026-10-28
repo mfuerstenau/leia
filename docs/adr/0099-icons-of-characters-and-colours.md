@@ -6,10 +6,11 @@
 
 ## Context
 
-On a white terminal the `light` logo is poor: its colours were made for a black canvas (ADR 0097, Consequences). There is a new drawing of the gazelle in three colourings, each a PNG of 38 × 60 pixels with an indexed palette:
+On a white terminal the `light` logo is poor: its colours were made for a black canvas (ADR 0097, Consequences). There is a new drawing of the gazelle in five colourings, each a PNG of 38 × 60 pixels with an indexed palette:
 
 - `gazelle_default.png`: five colours (`#14070C`, `#523D38`, `#9E6038`, `#C7905D`, `#E5CFA7`) and a fully transparent one, the background.
 - `gazelle_aurora.png`: the same pixels, in Nord's Aurora colours (`#BF616A`, `#D08770`, `#EBCB8B`, `#A3BE8C`, `#B48EAD`) and transparent.
+- `gazelle_solarized_dark.png` and `gazelle_solarized_light.png`: the same pixels and the same transparency, in Solarized's colours: `#586E75`, `#2AA198`, `#859900`, `#B58900`, `#FDF6E3` for the dark theme, `#002B36`, `#073642`, `#586E75`, `#839496`, `#EEE8D5` for the light one, each in the place of the default's colour at the same rank.
 - `gazelle_mono.png`: black and transparent, a drawing of its own; 277 of its pixels are drawn where the others are transparent or the other way round.
 
 Drawn with half blocks, two pixels to a cell, each is 38 cells by 30 rows, the size of the old gazelle.
@@ -41,9 +42,11 @@ ADR 0097 can't hold it. A logo there is one grid of characters with a slot per c
    |---|---|---|---|---|
    | `gazelle` | `gazelle_default.png` | its own | its palette colours | `dark`, `light` |
    | `gazelle-aurora` | `gazelle_aurora.png` | `chars = gazelle` | its palette colours | `nord` |
+   | `gazelle-solarized-dark` | `gazelle_solarized_dark.png` | `chars = gazelle` | its palette colours | `solarized-dark` |
+   | `gazelle-solarized-light` | `gazelle_solarized_light.png` | `chars = gazelle` | its palette colours | `solarized-light` |
    | `gazelle-mono` | `gazelle_mono.png` | its own | every cell `-` | `mono` |
 
-   Each was converted once, by pixel, two to a cell, without scaling. The *canvas* is the transparent pixels; they are not set. `gazelle_aurora.png` has the transparent pixels of `gazelle_default.png`, so its characters are the same, and its colours file says `chars = gazelle`. Each cell of `gazelle` and `gazelle-aurora` is:
+   Each was converted once, by pixel, two to a cell, without scaling. The *canvas* is the transparent pixels; they are not set. `gazelle_aurora.png` and the two Solarized PNGs have the transparent pixels of `gazelle_default.png`, so their characters are the same, and their colours files say `chars = gazelle`. Each cell of `gazelle`, `gazelle-aurora` and the Solarized gazelles is:
    - both halves canvas → a space, `-`;
    - only the upper half canvas → `▄` in the lower colour;
    - only the lower half canvas → `▀` in the upper colour, without a background;
@@ -58,7 +61,7 @@ ADR 0097 can't hold it. A logo there is one grid of characters with a slot per c
 
 - An icon can be a half-block picture with two colours per cell, or characters in one colour each, as the gazelle is.
 - A user theme can bring its own logo, or recolour the gazelle, with no change to the code.
-- A logo cell whose upper half is drawn has that half's colour as its background, so under `nord` not every cell has Nord's background; the test that every cell is painted allows the icon's colours.
+- A logo cell whose upper half is drawn has that half's colour as its background, so under `nord` and the Solarized themes not every cell has the theme's background; the test that every cell is painted allows the icon's colours.
 - `Logo` takes its width and height from the icon in use. `MIN_HEIGHT`, the 18 rows the top of the logo is cut down to on a short screen, is still one number for all icons. For the gazelles of this ADR it drops the tips of the horns, where ADR 0097's gazelle had only sparse dots.
 - The colours files are larger: `gazelle.colours` is about 9 KB.
 

@@ -16,7 +16,7 @@ import java.util.stream.Stream;
 
 /**
  * The themes leia knows, in the order {@code T} cycles them (ADR 0096): the bundled {@code dark},
- * {@code light}, {@code mono} and {@code nord}, then the user's own from the themes folder.
+ * {@code light}, {@code mono}, {@code nord}, {@code solarized-dark} and {@code solarized-light}, then the user's own from the themes folder.
  *
  * @param themes the themes; never empty, and {@code dark} among them
  */
@@ -25,7 +25,7 @@ public record Themes(List<Theme> themes) {
     private static final Logger LOG = Logger.getLogger(Themes.class.getName());
 
     /** The bundled themes, resource files beside this class. */
-    static final List<String> BUNDLED = List.of("dark", "light", "mono", "nord");
+    static final List<String> BUNDLED = List.of("dark", "light", "mono", "nord", "solarized-dark", "solarized-light");
 
     /** The default theme. */
     public static final String DARK = "dark";

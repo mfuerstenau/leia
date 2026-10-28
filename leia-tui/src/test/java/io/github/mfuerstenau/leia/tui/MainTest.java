@@ -120,7 +120,7 @@ class MainTest {
 
         assertThat(err())
                 .contains(
-                        "leia: invalid value 'bogus' for --theme <THEME>: possible values are dark, light, mono, nord",
+                        "leia: invalid value 'bogus' for --theme <THEME>: possible values are dark, light, mono, nord, solarized-dark, solarized-light",
                         Cli.USAGE);
         assertThat(out()).isEmpty();
     }
@@ -135,7 +135,9 @@ class MainTest {
 
         assertThat(run("--theme", "bogus")).isEqualTo(2);
 
-        assertThat(err()).contains("possible values are dark, light, mono, nord, solar" + System.lineSeparator());
+        assertThat(err())
+                .contains("possible values are dark, light, mono, nord, solarized-dark, solarized-light, solar"
+                        + System.lineSeparator());
         // A broken theme goes to the log, not the terminal.
         assertThat(err()).doesNotContain("broken");
         assertThat(Files.readString(logFile)).contains("broken.theme: missing error");

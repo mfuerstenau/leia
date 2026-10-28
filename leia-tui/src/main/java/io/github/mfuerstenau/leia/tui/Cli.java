@@ -107,11 +107,12 @@ record Cli(
                       lucene5 or lucene3. Can be repeated
                   --theme <THEME>
                       The colours: dark, the terminal's own; light, for a light background; mono,
-                      none at all; nord, the Nord palette on its own background, which needs a
+                      none at all; nord, the Nord palette, and solarized-dark and
+                      solarized-light, Solarized, each on its own background, which needs a
                       terminal with 24-bit colour; or a theme of your own, <THEME>.theme in
                       ~/.config/leia/themes. Without it, mono if NO_COLOR is set, else the theme
                       chosen last with T on the start screen, else dark [possible values: dark,
-                      light, mono, nord, or a theme of your own]
+                      light, mono, nord, solarized-dark, solarized-light, or a theme of your own]
               -V, --version
                       Print the version and build of leia, and the Java version in use
               -h, --help

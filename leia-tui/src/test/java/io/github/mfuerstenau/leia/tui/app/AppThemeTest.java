@@ -21,10 +21,13 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /** The themes (ADR 0095, ADR 0096): {@code T} on the start screen, and how a theme paints the screen. */
@@ -56,13 +59,13 @@ class AppThemeTest {
         assertThat(TestScreens.render(app::render, 160, 30)).contains("T theme");
 
         List<String> seen = new ArrayList<>();
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 6; i++) {
             assertThat(app.handleKey(key('T'))).isEmpty();
             seen.add(Palette.theme().id());
             assertThat(themeFile.load(Themes.bundled())).hasValue(Palette.theme());
         }
 
-        assertThat(seen).containsExactly("light", "mono", "nord", "dark");
+        assertThat(seen).containsExactly("light", "mono", "nord", "solarized-dark", "solarized-light", "dark");
     }
 
     @Test
@@ -86,7 +89,7 @@ class AppThemeTest {
             Files.copy(nord, themesDir.resolve("solar.theme"));
         }
         App app = app().withThemes(Themes.bundled().withUserDir(Optional.of(themesDir)), ThemeFile.none());
-        Palette.use(bundled("nord"));
+        Palette.use(bundled("solarized-light"));
 
         app.handleKey(key('T'));
 
@@ -117,18 +120,23 @@ class AppThemeTest {
         assertThat(Palette.theme().id()).isEqualTo("dark");
     }
 
+    static Stream<Arguments> paintedThemesAndPopups() {
+        return Stream.of("nord", "solarized-dark", "solarized-light")
+                .flatMap(theme -> Stream.of("", "o", "L", "X", "D").map(key -> Arguments.of(theme, key)));
+    }
+
     @ParameterizedTest
-    @ValueSource(strings = {"", "o", "L", "X", "D"})
-    void nordPaintsEveryCellWithItsBackground(String popupKey) {
-        Palette.use(bundled("nord"));
+    @MethodSource("paintedThemesAndPopups")
+    void aThemeWithItsOwnBackgroundPaintsEveryCellWithIt(String theme, String popupKey) {
+        Palette.use(bundled(theme));
         App app = app();
         popupKey.chars().forEach(c -> app.handleKey(key((char) c)));
 
         Buffer buffer = TestScreens.buffer(app::render, 160, 30);
 
-        // Nord's own, or where the logo's upper half is drawn, the colour of that half (ADR 0099).
+        // The theme's own, or where the logo's upper half is drawn, the colour of that half (ADR 0099).
         Set<Color> backgrounds = new HashSet<>();
-        backgrounds.add(Color.hex("#2E3440"));
+        backgrounds.add(Palette.current().base().bg().orElseThrow());
         Palette.current()
                 .logo()
                 .rows()
