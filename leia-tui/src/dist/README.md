@@ -190,6 +190,7 @@ can't do, for an older minor than leia's runtime is built for, says so, and belo
 | `D` | on the start screen: download the runtimes |
 | `T` | on the start screen: the next theme, `dark`, `light`, `mono`, `nord`, `solarized-dark`, `solarized-light`, then your own; the footer names it, and leia remembers it |
 | `L` | show the log; `-`/`+` change its level, `y` copies it |
+| `?` | about leia: version, author, project link, the Java and runtimes in use, the open index, and the licence with the NOTICE; `↑` `↓` scroll, `y` copies the link |
 | `1` … `7` | overview, documents, terms, commits, search, analysis, check |
 | `Space` `a` `l` `t` `r` | on the check screen: mark an index or a segment, mark all, change the level, change the threads, list the segments again; `⏎` checks what is marked, or everything if nothing is |
 | `Backspace` | go back to where the last jump came from |

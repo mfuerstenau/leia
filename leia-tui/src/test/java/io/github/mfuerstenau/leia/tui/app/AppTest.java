@@ -709,7 +709,7 @@ class AppTest {
 
         assertThat(TestScreens.render(app::render, 200, 30))
                 .contains("runtimes/lucene10 is installed; restart leia to load it")
-                .contains("D download runtimes");
+                .contains("D runtimes");
     }
 
     @Test
@@ -784,6 +784,57 @@ class AppTest {
                         .isInstanceOfSatisfying(
                                 Action.Copy.class,
                                 copy -> assertThat(copy.text()).contains("[leia.Test] opened")));
+    }
+
+    @Test
+    void questionMarkShowsTheAboutWindowOnTheStartScreenAndEscClosesIt() {
+        App app = app();
+
+        assertThat(app.handleKey(key('?'))).isEmpty();
+        assertThat(TestScreens.render(app::render, 160, 60))
+                .contains(" About leia", "by ", "Java 25")
+                .doesNotContain("Read with");
+
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).isEmpty();
+        assertThat(render(app)).doesNotContain(" About leia");
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.Quit());
+    }
+
+    @Test
+    void questionMarkShowsTheAboutWindowWithTheOpenIndex() {
+        App app = app();
+        app.opened(stats("/data/idx"), List.of());
+
+        app.handleKey(key('?'));
+
+        assertThat(TestScreens.render(app::render, 160, 60))
+                .contains(" About leia", "/data/idx", "Read with", "Lucene 10");
+        assertThat(app.handleKey(key('y')))
+                .hasValueSatisfying(action -> assertThat(action).isInstanceOf(Action.Copy.class));
+        app.handleKey(key('?'));
+        assertThat(render(app)).doesNotContain(" About leia");
+    }
+
+    @Test
+    void lShowsTheLogOverTheAboutWindow() {
+        App app = appWithLog(LogBuffer.detached());
+        app.handleKey(key('?'));
+
+        app.handleKey(key('L'));
+        assertThat(render(app)).contains(" Log: ");
+
+        app.handleKey(key(KeyCode.ESCAPE));
+        assertThat(render(app)).doesNotContain(" Log: ").contains(" About leia");
+    }
+
+    @Test
+    void questionMarkInTheOpenPromptIsTyped() {
+        App app = app();
+        app.handleKey(key('o'));
+
+        typed(app, "/data/*?");
+
+        assertThat(render(app)).contains("/data/*?").doesNotContain(" About leia");
     }
 
     @Test
@@ -914,8 +965,8 @@ class AppTest {
         assertThat(rows.subList(17, 20))
                 .containsExactly(
                         " q quit   o open   6 analysis ",
-                        " X jars   D download runtimes ",
-                        " L log   T theme              ");
+                        " X jars   D runtimes   L log  ",
+                        " T theme   ? about            ");
         // The screen ends above the footer.
         assertThat(rows.get(16)).startsWith("└").endsWith("┘");
 

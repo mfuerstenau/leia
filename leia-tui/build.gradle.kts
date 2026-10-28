@@ -93,6 +93,14 @@ sourceSets.main {
     resources.srcDir(runtimeAdapters)
 }
 
+// NOTICE at a path of leia's own for the about window: shadow keeps only the first META-INF/NOTICE*,
+// which could be a dependency's.
+tasks.processResources {
+    from(rootProject.file("NOTICE")) {
+        into("io/github/mfuerstenau/leia/tui/about")
+    }
+}
+
 // The old runtimes' folders for the tests, whose classpath has Lucene 10.
 val testRuntimes = tasks.register<Sync>("testRuntimes") {
     description = "Puts the old runtimes' folders together for the tests."

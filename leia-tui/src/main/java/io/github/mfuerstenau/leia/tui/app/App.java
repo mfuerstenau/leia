@@ -53,7 +53,6 @@ import io.github.mfuerstenau.leia.protocol.jars.GetRuntimesResult;
 import io.github.mfuerstenau.leia.protocol.jars.LoadRuntimesResult;
 import io.github.mfuerstenau.leia.protocol.jars.RuntimeFolder;
 import io.github.mfuerstenau.leia.protocol.jars.RuntimeState;
-import io.github.mfuerstenau.leia.protocol.jars.ServerRuntimeInfo;
 import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodeResult;
 import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphNodesResult;
 import io.github.mfuerstenau.leia.protocol.knn.GetKnnGraphResult;
@@ -72,6 +71,8 @@ import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders.Known;
+import io.github.mfuerstenau.leia.tui.about.AboutWindow;
+import io.github.mfuerstenau.leia.tui.about.RuntimeLines;
 import io.github.mfuerstenau.leia.tui.analysis.Analysis;
 import io.github.mfuerstenau.leia.tui.analysis.AutoStopWordsForm;
 import io.github.mfuerstenau.leia.tui.check.Check;
@@ -274,6 +275,9 @@ public final class App {
 
     /** The log window, while it is open; or null. */
     private LogWindow logWindow;
+
+    /** The about window, while it is open; or null. */
+    private AboutWindow aboutWindow;
 
     /** The level the log window shows; it outlasts the window. */
     private Level logFilter = log.logged();
@@ -2019,6 +2023,9 @@ public final class App {
         if (logWindow != null) {
             return logWindowKey(key);
         }
+        if (aboutWindow != null) {
+            return aboutWindowKey(key);
+        }
         if (busy) {
             return Optional.empty();
         }
@@ -2060,6 +2067,39 @@ public final class App {
             }
             case LogWindow.Nothing _ -> Optional.empty();
         };
+    }
+
+    private Optional<Action> aboutWindowKey(KeyEvent key) {
+        if (key.code() == KeyCode.CHAR && key.codePoint() == 'L' && !key.hasCtrl()) {
+            // The log opens over the about window, which stays under it.
+            logWindow = new LogWindow(log, logFilter);
+            return Optional.empty();
+        }
+        return switch (aboutWindow.handleKey(key)) {
+            case AboutWindow.Copy copy -> Optional.of(new Action.Copy(copy.text()));
+            case AboutWindow.Close _ -> {
+                aboutWindow = null;
+                yield Optional.empty();
+            }
+            case AboutWindow.Nothing _ -> Optional.empty();
+        };
+    }
+
+    /** The lines of the about window about the Java, the runtimes and the open index. */
+    private List<Line> aboutEnvironment() {
+        List<Line> lines = new ArrayList<>();
+        lines.add(RuntimeLines.java(version));
+        lines.add(Line.empty());
+        lines.addAll(RuntimeLines.runtimes(runtimes, runtimeFolders));
+        if (opened != null) {
+            lines.add(labelLine("Index", opened.path()));
+            lines.add(labelLine(
+                    "Read with",
+                    opened.noReader()
+                            ? "nothing: opened without a reader"
+                            : opened.oldLucene().orElse("Lucene " + NEWEST_LUCENE_MAJOR + " (leia-lucene10)")));
+        }
+        return lines;
     }
 
     private Optional<Action> runtimeWindowKey(KeyEvent key) {
@@ -2205,6 +2245,7 @@ public final class App {
             }
             case 'o' -> openPrompt();
             case 'L' -> logWindow = new LogWindow(log, logFilter);
+            case '?' -> aboutWindow = new AboutWindow(version, aboutEnvironment());
             case 'X' -> {
                 jars = new JarsPopup(defaultJars, runtimeFolders, home);
                 return Optional.of(new Action.LoadJars());
@@ -2521,6 +2562,9 @@ public final class App {
         if (runtimeWindow != null) {
             runtimeWindow.render(frame, body);
         }
+        if (aboutWindow != null) {
+            aboutWindow.render(frame, body);
+        }
         if (logWindow != null) {
             logWindow.render(frame, body);
         }
@@ -2559,7 +2603,7 @@ public final class App {
         }
         if (opened == null) {
             // Fits 80 columns, on one line.
-            return " q quit   o open   6 analysis   X jars   D download runtimes   L log   T theme";
+            return " q quit   o open   6 analysis   X jars   D runtimes   L log   T theme   ? about";
         }
         if (screen == Screen.COMMITS) {
             return " " + cancel + APP_KEYS + reopen + screens + commitsKeys();
@@ -2649,10 +2693,9 @@ public final class App {
     private void renderAbout(Frame frame, Rect body) {
         List<Line> lines = new ArrayList<>(Logo.aboutLines(version));
         lines.add(Line.empty());
-        lines.add(Line.from("Java " + version.java().version() + " ("
-                + version.java().vendor() + ") in " + version.java().home()));
+        lines.add(RuntimeLines.java(version));
         lines.add(Line.empty());
-        lines.addAll(runtimesLines());
+        lines.addAll(RuntimeLines.runtimes(runtimes, runtimeFolders));
         lines.add(Line.from(
                 "No index open. Press o to open one, 6 to try an analyzer, X to add jars, or D to download runtimes."));
         lines.add(Line.from("L shows the log"
@@ -2672,88 +2715,6 @@ public final class App {
         } else {
             frame.renderWidget(wrapped(lines, null, inner), inner);
         }
-    }
-
-    /**
-     * The loaded runtimes, the missing ones with where to put them, the incomplete and refused ones
-     * with why (ADR 0072, ADR 0073), and an empty line after them; none until they are known.
-     */
-    private List<Line> runtimesLines() {
-        if (runtimes == null) {
-            return List.of();
-        }
-        List<RuntimeFolder> loaded = runtimes.runtimes().stream()
-                .filter(runtime -> runtime.state() == RuntimeState.LOADED)
-                .toList();
-        List<RuntimeFolder> missing = runtimes.runtimes().stream()
-                .filter(runtime -> runtime.state() == RuntimeState.MISSING)
-                .toList();
-        List<Line> lines = new ArrayList<>();
-        lines.add(Line.from("Runtimes: "
-                + (loaded.isEmpty()
-                        ? "none"
-                        : "Lucene "
-                                + String.join(
-                                        ", ",
-                                        loaded.stream()
-                                                .map(runtime -> runtime.luceneVersion()
-                                                                .orElseThrow() + " (" + majors(runtime) + ")")
-                                                .toList()))));
-        for (ServerRuntimeInfo server : runtimes.servers()) {
-            lines.add(Line.from(
-                    "Server: " + server.label().map(label -> label + ", ").orElse("") + "Lucene "
-                            + server.luceneVersion() + " (" + majors(server.indexMajors()) + "), in " + server.home()));
-        }
-        Style warning = Palette.current().warning();
-        if (!missing.isEmpty()) {
-            String where = runtimeFolders
-                    .dir()
-                    .map(dir -> "press D to download them into " + dir)
-                    .orElse("(not run from leia.jar)");
-            lines.add(Line.styled(
-                    "Missing "
-                            + String.join(
-                                    ", ",
-                                    missing.stream()
-                                            .map(runtime -> runtime.folder() + " (Lucene " + majors(runtime) + ")")
-                                            .toList())
-                            + ": " + where,
-                    warning));
-        }
-        for (RuntimeFolder runtime : runtimes.runtimes()) {
-            String problem = runtime.problem().orElse("");
-            switch (runtime.state()) {
-                case INCOMPLETE ->
-                    lines.add(Line.styled(
-                            "Incomplete runtimes/" + runtime.folder() + ": " + problem
-                                    + " is missing; press D to download it",
-                            warning));
-                case REFUSED ->
-                    lines.add(Line.styled("Refused runtimes/" + runtime.folder() + ": " + problem, warning));
-                case RESTART ->
-                    lines.add(Line.styled(
-                            "runtimes/" + runtime.folder() + " is installed; restart leia to load it", warning));
-                case LOADED, MISSING -> {}
-            }
-        }
-        if (loaded.isEmpty()) {
-            lines.add(Line.styled(
-                    "Without runtimes, indexes open only without a reader, and the analysis tab is off.", warning));
-        }
-        lines.add(Line.empty());
-        return lines;
-    }
-
-    /** The majors of the indexes a runtime reads, such as {@code 9–10} or {@code 8}. */
-    private static String majors(RuntimeFolder runtime) {
-        return majors(runtime.indexMajors());
-    }
-
-    /** {@code indexMajors}, oldest first, such as {@code 9–10} or {@code 8}. */
-    private static String majors(List<Integer> indexMajors) {
-        int first = indexMajors.getFirst();
-        int last = indexMajors.getLast();
-        return first == last ? Integer.toString(first) : first + "–" + last;
     }
 
     /**
