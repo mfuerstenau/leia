@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.tui.prompt;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.github.mfuerstenau.leia.tui.prompt.PathCompletion.Candidate;
 import io.github.mfuerstenau.leia.tui.prompt.PathCompletion.Completion;
 import java.io.File;
 import java.io.IOException;
@@ -40,14 +41,18 @@ class PathCompletionTest {
         String base = tmp + SEPARATOR;
 
         assertThat(PathCompletion.complete(base + "o", Optional.empty()))
-                .isEqualTo(new Completion(base + "orders" + SEPARATOR, List.of()));
+                .isEqualTo(new Completion(base + "orders" + SEPARATOR, base, List.of()));
         assertThat(PathCompletion.complete(base + "pr", Optional.empty()))
-                .isEqualTo(new Completion(base + "product", List.of("production", "products")));
+                .isEqualTo(new Completion(
+                        base + "product",
+                        base,
+                        List.of(new Candidate("production", true), new Candidate("products", true))));
         assertThat(PathCompletion.complete(base + "x", Optional.empty()))
-                .isEqualTo(new Completion(base + "x", List.of()));
+                .isEqualTo(new Completion(base + "x", base, List.of()));
         assertThat(PathCompletion.complete(base + ".", Optional.empty()))
-                .isEqualTo(new Completion(base + ".hidden" + SEPARATOR, List.of()));
+                .isEqualTo(new Completion(base + ".hidden" + SEPARATOR, base, List.of()));
         assertThat(PathCompletion.complete(base, Optional.empty()).candidates())
+                .extracting(Candidate::name)
                 .containsExactly("orders", "production", "products");
     }
 
@@ -59,7 +64,33 @@ class PathCompletionTest {
         String base = tmp + SEPARATOR;
 
         assertThat(PathCompletion.completeWithFiles(base + "lu", Optional.empty(), name -> name.endsWith(".jar")))
-                .isEqualTo(new Completion(base + "lucene.jar", List.of()));
+                .isEqualTo(new Completion(base + "lucene.jar", base, List.of()));
+    }
+
+    @Test
+    void listsTheMatchesOfTheLastComponentWithoutChangingTheInput() throws IOException {
+        for (String dir : List.of("alpha", "alps", "beta", ".hidden", ".hat")) {
+            Files.createDirectory(tmp.resolve(dir));
+        }
+        Files.writeString(tmp.resolve("alpine.jar"), "");
+        Files.writeString(tmp.resolve("alpine.txt"), "");
+        String base = tmp + SEPARATOR;
+
+        assertThat(PathCompletion.matches(base + "al", Optional.empty(), name -> name.endsWith(".jar")))
+                .containsExactly(
+                        new Candidate("alpha", true), new Candidate("alpine.jar", false), new Candidate("alps", true));
+        assertThat(PathCompletion.matches(base, Optional.empty(), name -> false))
+                .extracting(Candidate::name)
+                .containsExactly("alpha", "alps", "beta");
+        assertThat(PathCompletion.matches(base + ".h", Optional.empty(), name -> false))
+                .extracting(Candidate::name)
+                .containsExactly(".hat", ".hidden");
+        assertThat(PathCompletion.matches(base + "nope" + SEPARATOR + "x", Optional.empty(), name -> false))
+                .isEmpty();
+        assertThat(new Candidate("alpha", true).text()).isEqualTo("alpha" + SEPARATOR);
+        assertThat(new Candidate("a.jar", false).text()).isEqualTo("a.jar");
+        assertThat(PathCompletion.base(base + "al")).isEqualTo(base);
+        assertThat(PathCompletion.base("al")).isEmpty();
     }
 
     @Test
@@ -67,9 +98,9 @@ class PathCompletionTest {
         Files.createDirectory(tmp.resolve("indexes"));
 
         assertThat(PathCompletion.complete("~", Optional.of(tmp)))
-                .isEqualTo(new Completion("~" + SEPARATOR, List.of()));
+                .isEqualTo(new Completion("~" + SEPARATOR, "", List.of()));
         assertThat(PathCompletion.complete("~/ind", Optional.of(tmp)))
-                .isEqualTo(new Completion("~/indexes" + SEPARATOR, List.of()));
+                .isEqualTo(new Completion("~/indexes" + SEPARATOR, "~/", List.of()));
     }
 
     @Test

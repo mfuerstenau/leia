@@ -132,9 +132,120 @@ class PathPromptTest {
         prompt.handleKey(key(KeyCode.TAB));
 
         assertThat(prompt.input()).isEqualTo(base + "alp");
-        assertThat(render(prompt, 200, 10)).contains("alpha  alps");
+        assertThat(render(prompt, 80, 12)).contains("alpha" + File.separator, "alps" + File.separator);
         typed(prompt, "h");
-        assertThat(render(prompt, 200, 10)).doesNotContain("alpha  alps");
+        assertThat(prompt.input()).isEqualTo(base + "alph");
+        assertThat(render(prompt, 80, 12)).doesNotContain("alps" + File.separator);
+    }
+
+    /** A prompt on {@code tmp} with {@code count} directories named d01, d02, …, after a Tab. */
+    private PathPrompt promptWithDirectories(int count) throws IOException {
+        for (int i = 1; i <= count; i++) {
+            Files.createDirectories(tmp.resolve(String.format("d%02d", i)));
+        }
+        PathPrompt prompt = prompt(tmp + File.separator + "d").withRecent(List.of("/recent/a", "/recent/b"));
+        prompt.handleKey(key(KeyCode.TAB));
+        return prompt;
+    }
+
+    private static String sep(String name) {
+        return name + File.separator;
+    }
+
+    @Test
+    void upAndDownMoveInTheListNotThroughTheRecentPaths() throws IOException {
+        PathPrompt prompt = promptWithDirectories(3);
+        String typed = prompt.input();
+
+        prompt.handleKey(key(KeyCode.DOWN));
+        prompt.handleKey(key(KeyCode.DOWN));
+        prompt.handleKey(key(KeyCode.UP));
+        assertThat(prompt.input()).isEqualTo(typed);
+        prompt.handleKey(key(KeyCode.ENTER));
+        assertThat(prompt.input()).isEqualTo(tmp + File.separator + sep("d02"));
+
+        prompt = promptWithDirectories(3);
+        prompt.handleKey(key(KeyCode.ESCAPE));
+        prompt.handleKey(key(KeyCode.UP));
+        assertThat(prompt.input()).isEqualTo("/recent/a");
+    }
+
+    @Test
+    void enterAndTabChooseInsteadOfSubmitting() throws IOException {
+        PathPrompt prompt = promptWithDirectories(3);
+
+        assertThat(prompt.handleKey(key(KeyCode.ENTER))).isEqualTo(new PathPrompt.Nothing());
+        assertThat(prompt.input()).isEqualTo(tmp + File.separator + sep("d01"));
+        assertThat(render(prompt, 80, 12)).doesNotContain(sep("d02"));
+        assertThat(prompt.handleKey(key(KeyCode.ENTER))).isEqualTo(new PathPrompt.Submit(prompt.input()));
+
+        prompt = promptWithDirectories(3);
+        prompt.handleKey(key(KeyCode.DOWN));
+        prompt.handleKey(key(KeyCode.TAB));
+        assertThat(prompt.input()).isEqualTo(tmp + File.separator + sep("d02"));
+    }
+
+    @Test
+    void escClosesTheListAndASecondEscCancels() throws IOException {
+        PathPrompt prompt = promptWithDirectories(3);
+
+        assertThat(prompt.handleKey(key(KeyCode.ESCAPE))).isEqualTo(new PathPrompt.Nothing());
+        assertThat(render(prompt, 80, 12)).doesNotContain(sep("d02"));
+        assertThat(prompt.handleKey(key(KeyCode.ESCAPE))).isEqualTo(new PathPrompt.Cancel());
+    }
+
+    @Test
+    void typingNarrowsTheListAndClosesItAtOneMatchOrAnotherDirectory() throws IOException {
+        PathPrompt prompt = promptWithDirectories(12);
+        assertThat(render(prompt, 80, 14)).contains(sep("d01"), sep("d08")).doesNotContain(sep("d10"));
+
+        typed(prompt, "1");
+        assertThat(render(prompt, 80, 14)).contains(sep("d10"), sep("d12")).doesNotContain(sep("d01"));
+        typed(prompt, "2");
+        assertThat(render(prompt, 80, 14)).as("one match left").doesNotContain(sep("d12"), "Enter choose");
+
+        prompt = promptWithDirectories(12);
+        prompt.handleKey(key(KeyCode.BACKSPACE));
+        assertThat(render(prompt, 80, 14)).as("d is a prefix of all").contains(sep("d01"));
+        for (int i = 0; i < 2; i++) {
+            prompt.handleKey(key(KeyCode.BACKSPACE));
+        }
+        assertThat(render(prompt, 80, 14)).as("typing past the directory").doesNotContain(sep("d01"), "Enter choose");
+    }
+
+    @Test
+    void theListScrollsToTheLastNameAndTheHintCountsThem() throws IOException {
+        PathPrompt prompt = promptWithDirectories(30);
+        assertThat(render(prompt, 80, 20)).contains("1/30", sep("d08")).doesNotContain(sep("d09"));
+
+        for (int i = 0; i < 3; i++) {
+            prompt.handleKey(key(KeyCode.PAGE_DOWN));
+        }
+
+        String screen = render(prompt, 80, 20);
+        assertThat(screen).contains("30/30", sep("d30")).doesNotContain(sep("d01"));
+    }
+
+    @Test
+    void theListShrinksInAShortWindow() throws IOException {
+        PathPrompt prompt = promptWithDirectories(30);
+
+        String screen = render(prompt, 80, 7);
+
+        assertThat(screen)
+                .contains("Open index", "Enter choose", "1/30", sep("d01"))
+                .doesNotContain(sep("d04"));
+        for (int i = 0; i < 29; i++) {
+            prompt.handleKey(key(KeyCode.DOWN));
+        }
+        assertThat(render(prompt, 80, 7)).contains("30/30", sep("d30"));
+    }
+
+    @Test
+    void theHintOfTheListFits() throws IOException {
+        PathPrompt prompt = promptWithDirectories(3);
+
+        assertThat(render(prompt, 60, 12)).contains("Enter choose   ↑↓ move   Esc close");
     }
 
     @Test

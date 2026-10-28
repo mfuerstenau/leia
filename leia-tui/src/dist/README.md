@@ -183,10 +183,10 @@ can't do, for an older minor than leia's runtime is built for, says so, and belo
 
 | Key | Action |
 |---|---|
-| `o` | open an index: `Tab` completes directories, `↑` `↓` step through the last opened paths, `Ctrl+D` switches the `Directory`, `Ctrl+N` the reader |
+| `o` | open an index: `Tab` completes directories, and lists several matches below the input (`↑` `↓` `PgUp` `PgDn` choose, `Enter` or `Tab` take one, typing narrows the list, `Esc` closes it); without a list `↑` `↓` step through the last opened paths, `Ctrl+D` switches the `Directory`, `Ctrl+N` the reader |
 | `c` | close the open index |
 | `R` | reopen the index, if another process committed to it since |
-| `X` | list the loaded jars and add more |
+| `X` | list the loaded jars and add more: `Tab` completes directories and jars, and lists several matches below the input (`↑` `↓` `PgUp` `PgDn` choose, `Enter` or `Tab` take one, typing narrows the list, `Esc` closes it) |
 | `D` | on the start screen: download the runtimes |
 | `T` | on the start screen: the next theme, `dark`, `light`, `mono`, `nord`, `solarized-dark`, `solarized-light`, then your own; the footer names it, and leia remembers it |
 | `L` | show the log; `-`/`+` change its level, `y` copies it |

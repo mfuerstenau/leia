@@ -45,8 +45,8 @@ public final class PathPrompt {
     private final LineInput input;
     private final Optional<Path> home;
 
-    /** The directories that the last Tab found, if it found more than one. */
-    private List<String> candidates = List.of();
+    /** The drop-down of the directories that the last Tab found, if it found more than one; else null. */
+    private CompletionList list;
 
     /** Why the last open failed, or null. */
     private String error;
@@ -112,7 +112,7 @@ public final class PathPrompt {
     public void setBusy() {
         busy = true;
         error = null;
-        candidates = List.of();
+        list = null;
     }
 
     public void setError(String error) {
@@ -133,6 +133,12 @@ public final class PathPrompt {
     }
 
     public Event handleKey(KeyEvent key) {
+        if (list != null) {
+            Optional<Event> inList = handleListKey(key);
+            if (inList.isPresent()) {
+                return inList.get();
+            }
+        }
         boolean ctrl = key.hasCtrl() && key.code() == KeyCode.CHAR;
         switch (key.code()) {
             case ENTER -> {
@@ -162,20 +168,40 @@ public final class PathPrompt {
             }
         }
         if (input.handleKey(key, PathCompletion::componentStart) == LineInput.Edit.CHANGED) {
-            // The error and the candidates describe the input before the edit. The next Up starts
-            // from the edited input.
+            // The error describes the input before the edit, and the list narrows to what still
+            // matches. The next Up starts from the edited input.
             error = null;
-            candidates = List.of();
+            if (list != null && !list.narrow(input.text())) {
+                list = null;
+            }
             browsing = null;
         }
         return new Nothing();
+    }
+
+    /** What a key does while the list is open; empty if the input handles it. */
+    private Optional<Event> handleListKey(KeyEvent key) {
+        switch (key.code()) {
+            case UP, DOWN, PAGE_UP, PAGE_DOWN -> list.move(key);
+            case ENTER, TAB -> {
+                input.set(list.chosen());
+                list = null;
+                error = null;
+                browsing = null;
+            }
+            case ESCAPE -> list = null;
+            default -> {
+                return Optional.empty();
+            }
+        }
+        return Optional.of(new Nothing());
     }
 
     /** Completes the input as far as its candidates agree. */
     private void complete() {
         browsing = null;
         PathCompletion.Completion completion = PathCompletion.complete(input.text(), home);
-        candidates = completion.candidates();
+        list = completion.candidates().size() > 1 ? new CompletionList(completion, home, name -> false) : null;
         if (!completion.input().equals(input.text())) {
             error = null;
         }
@@ -213,7 +239,7 @@ public final class PathPrompt {
             String text = next == null ? typed : entries.get(next);
             if (!text.equals(input.text())) {
                 error = null;
-                candidates = List.of();
+                list = null;
             }
             input.set(text);
         }
@@ -236,9 +262,10 @@ public final class PathPrompt {
         int width = Math.clamp((long) area.width() - 4, 0, MAX_WIDTH);
         int innerWidth = Math.max(width - 2, 1);
         List<Line> errorLines = error == null ? List.of() : errorLines(error, innerWidth);
-        int candidateLines = candidates.isEmpty() ? 0 : 1;
-        // Input, candidates, error, hint, and the top and bottom border.
-        int height = Math.min(1 + candidateLines + errorLines.size() + 1 + 2, area.height());
+        // Input, error, hint, and the top and bottom border; the list takes the rows that are left.
+        int fixed = 1 + errorLines.size() + 1 + 2;
+        int listRows = list == null ? 0 : list.rows(area.height() - fixed);
+        int height = Math.min(fixed + listRows, area.height());
         Rect popup = Panels.centered(area, width, height);
         Panels.clear(frame, popup);
         Span reader = mode == OpenMode.READER
@@ -254,11 +281,7 @@ public final class PathPrompt {
         frame.renderWidget(block, popup);
 
         List<Rect> parts = Layout.vertical()
-                .constraints(
-                        Constraint.length(1),
-                        Constraint.length(candidateLines),
-                        Constraint.fill(),
-                        Constraint.length(1))
+                .constraints(Constraint.length(1), Constraint.length(listRows), Constraint.fill(), Constraint.length(1))
                 .split(inner);
         Rect inputArea = parts.get(0);
         LineInput.Visible visible = input.visible(inputArea.width());
@@ -266,16 +289,20 @@ public final class PathPrompt {
         if (!busy) {
             frame.setCursorPosition(inputArea.x() + visible.cursorColumn(), inputArea.y());
         }
-        frame.renderWidget(
-                Paragraph.from(Line.from(Span.styled(
-                        String.join("  ", candidates), Palette.current().muted()))),
-                parts.get(1));
+        if (list != null) {
+            list.render(frame, parts.get(1));
+        }
         if (!errorLines.isEmpty()) {
             frame.renderWidget(Paragraph.from(Text.from(errorLines)), parts.get(2));
         }
         String hint;
         if (busy) {
             hint = "Opening…";
+        } else if (list != null) {
+            hint = "Enter choose   ↑↓ move   Esc close";
+            if (list.scrolls(area.height() - fixed)) {
+                hint += "   " + list.position();
+            }
         } else if (browsing != null || recent.stream().anyMatch(path -> !path.equals(input.text()))) {
             hint = "Enter open   Tab complete   ↑↓ recent   Esc cancel";
         } else {

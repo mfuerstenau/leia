@@ -13,6 +13,7 @@ import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsResult;
 import io.github.mfuerstenau.leia.protocol.jars.JarComponents;
+import io.github.mfuerstenau.leia.tui.prompt.CompletionList;
 import io.github.mfuerstenau.leia.tui.prompt.LineInput;
 import io.github.mfuerstenau.leia.tui.prompt.PathCompletion;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
@@ -64,8 +65,8 @@ public final class JarsPopup {
 
     private final LineInput input = new LineInput("");
 
-    /** The names that the last Tab found, if it found more than one. */
-    private List<String> candidates = List.of();
+    /** The drop-down of the names that the last Tab found, if it found more than one; else null. */
+    private CompletionList list;
 
     /** What the last addition did; null before one, or if it failed. */
     private AddJarsResult added;
@@ -114,7 +115,7 @@ public final class JarsPopup {
         busy = true;
         added = null;
         addError = null;
-        candidates = List.of();
+        list = null;
     }
 
     /** Shows what the addition did, lists the new jars and empties the input. */
@@ -142,6 +143,9 @@ public final class JarsPopup {
         if (busy) {
             return new Nothing();
         }
+        if (list != null && handleListKey(key)) {
+            return new Nothing();
+        }
         switch (key.code()) {
             case ENTER -> {
                 if (!input.text().isBlank()) {
@@ -158,7 +162,9 @@ public final class JarsPopup {
             case TAB -> {
                 PathCompletion.Completion completion =
                         PathCompletion.completeWithFiles(input.text(), home, DefaultJars::isJarName);
-                candidates = completion.candidates();
+                list = completion.candidates().size() > 1
+                        ? new CompletionList(completion, home, DefaultJars::isJarName)
+                        : null;
                 if (!completion.input().equals(input.text())) {
                     clearOutcome();
                 }
@@ -166,13 +172,33 @@ public final class JarsPopup {
             }
             default -> {
                 if (input.handleKey(key, PathCompletion::componentStart) == LineInput.Edit.CHANGED) {
-                    // The outcome and the candidates describe the input before the edit.
+                    // The outcome describes the input before the edit, and the list narrows to
+                    // what still matches.
                     clearOutcome();
-                    candidates = List.of();
+                    if (list != null && !list.narrow(input.text())) {
+                        list = null;
+                    }
                 }
             }
         }
         return new Nothing();
+    }
+
+    /** What a key does while the list is open; returns false if the popup handles it. */
+    private boolean handleListKey(KeyEvent key) {
+        switch (key.code()) {
+            case UP, DOWN, PAGE_UP, PAGE_DOWN -> list.move(key);
+            case ENTER, TAB -> {
+                input.set(list.chosen());
+                list = null;
+                clearOutcome();
+            }
+            case ESCAPE -> list = null;
+            default -> {
+                return false;
+            }
+        }
+        return true;
     }
 
     private void clearOutcome() {
@@ -194,12 +220,13 @@ public final class JarsPopup {
         int width = Math.clamp((long) area.width() - 4, 0, MAX_WIDTH);
         int innerWidth = Math.max(width - 2, 1);
         List<Line> outcome = outcome(innerWidth);
-        int candidateLines = candidates.isEmpty() ? 0 : 1;
         Line header = header();
         List<Line> jarLines = jarLines();
-        // Default folder, runtimes, header, input, candidates, outcome, hint, and the top and bottom
-        // border.
-        int fixed = 1 + 1 + 1 + 1 + candidateLines + outcome.size() + 1 + 2;
+        // Default folder, runtimes, header, input, outcome, hint, and the top and bottom border. The
+        // list of names takes the rows that are left, ahead of the jars.
+        int fixedWithoutList = 1 + 1 + 1 + 1 + outcome.size() + 1 + 2;
+        int listRows = list == null ? 0 : list.rows(area.height() - fixedWithoutList);
+        int fixed = fixedWithoutList + listRows;
         int height = Math.min(fixed + jarLines.size(), area.height());
         int listHeight = Math.clamp((long) height - fixed, 0, jarLines.size());
         Rect popup = Panels.centered(area, width, height);
@@ -215,7 +242,7 @@ public final class JarsPopup {
                         Constraint.length(1),
                         Constraint.length(listHeight),
                         Constraint.length(1),
-                        Constraint.length(candidateLines),
+                        Constraint.length(listRows),
                         Constraint.fill(),
                         Constraint.length(1))
                 .split(inner);
@@ -237,16 +264,20 @@ public final class JarsPopup {
         if (!busy) {
             frame.setCursorPosition(inputArea.x() + visible.cursorColumn(), inputArea.y());
         }
-        frame.renderWidget(
-                Paragraph.from(Line.from(Span.styled(
-                        String.join("  ", candidates), Palette.current().muted()))),
-                parts.get(5));
+        if (list != null) {
+            list.render(frame, parts.get(5));
+        }
         if (!outcome.isEmpty()) {
             frame.renderWidget(Paragraph.from(Text.from(outcome)), parts.get(6));
         }
         String hint;
         if (busy) {
             hint = "Loading…";
+        } else if (list != null) {
+            hint = "Enter choose   ↑↓ move   Esc close";
+            if (list.scrolls(area.height() - fixedWithoutList)) {
+                hint += "   " + list.position();
+            }
         } else if (maxScroll > 0) {
             hint = "Enter add   Tab complete   ↑↓ scroll   Esc close";
         } else {

@@ -120,7 +120,56 @@ class JarsPopupTest {
         clear(popup);
         typed(popup, base);
         popup.handleKey(key(KeyCode.TAB));
-        assertThat(render(popup, 100, 12)).contains("mine.jar  modules");
+        assertThat(render(popup, 100, 12)).contains("mine.jar", "modules" + File.separator, "Enter choose");
+    }
+
+    @Test
+    void theListTakesTheArrowsAndEscBeforeThePopupAndAChosenJarIsAdded() throws Exception {
+        Files.createFile(tmp.resolve("a1.jar"));
+        Files.createFile(tmp.resolve("a2.jar"));
+        String base = tmp + File.separator;
+        JarsPopup popup = popup();
+        popup.jarsLoaded(IntStream.range(0, 30)
+                .mapToObj(i -> String.format("/jars/j%02d.jar", i))
+                .toList());
+        typed(popup, base + "a");
+
+        popup.handleKey(key(KeyCode.TAB));
+        popup.handleKey(key(KeyCode.DOWN));
+        assertThat(render(popup, 100, 20)).contains("j00.jar", "Enter choose   ↑↓ move   Esc close");
+        popup.handleKey(key(KeyCode.PAGE_DOWN));
+        assertThat(render(popup, 100, 20)).as("the jars did not scroll").contains("j00.jar");
+
+        popup.handleKey(key(KeyCode.ENTER));
+        assertThat(popup.input()).isEqualTo(base + "a2.jar");
+        assertThat(popup.handleKey(key(KeyCode.ENTER))).isEqualTo(new JarsPopup.Submit(base + "a2.jar"));
+
+        clear(popup);
+        typed(popup, base + "a");
+        popup.handleKey(key(KeyCode.TAB));
+        assertThat(popup.handleKey(key(KeyCode.ESCAPE))).isEqualTo(new JarsPopup.Nothing());
+        assertThat(render(popup, 100, 20)).contains("Enter add").doesNotContain("Enter choose");
+        popup.handleKey(key(KeyCode.PAGE_DOWN));
+        assertThat(render(popup, 100, 20)).as("the jars scroll again").doesNotContain("j00.jar");
+        assertThat(popup.handleKey(key(KeyCode.ESCAPE))).isEqualTo(new JarsPopup.Close());
+    }
+
+    @Test
+    void theListGivesTheJarsTheirRowsLast() throws Exception {
+        for (int i = 0; i < 12; i++) {
+            Files.createFile(tmp.resolve(String.format("a%02d.jar", i)));
+        }
+        JarsPopup popup = popup();
+        popup.jarsLoaded(IntStream.range(0, 30)
+                .mapToObj(i -> String.format("/jars/j%02d.jar", i))
+                .toList());
+        typed(popup, tmp + File.separator + "a");
+
+        popup.handleKey(key(KeyCode.TAB));
+
+        String screen = render(popup, 100, 16);
+        assertThat(screen).contains("a00.jar", "a07.jar", "1/12", "Add: ").doesNotContain("a08.jar");
+        assertThat(render(popup, 100, 10)).contains("Add: ", "Enter choose");
     }
 
     private static void clear(JarsPopup popup) {
