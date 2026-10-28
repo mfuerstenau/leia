@@ -3,8 +3,8 @@ package io.github.mfuerstenau.leia.tui.theme;
 import dev.tamboui.style.Style;
 
 /**
- * The styles of a {@link Theme}, one per role (ADR 0095), as a theme file sets them (ADR 0096), and its logo (ADR 0099). Bold, dim and reversed, as the selection
- * and the focused tab use them, are no roles: they read well under every theme.
+ * The styles of a {@link Theme}, one per role (ADR 0095), as a theme file sets them (ADR 0096), and its logo (ADR 0099). Bold and reversed, as the selection
+ * and the focused tab use them, are no roles: they read well under every theme. Faint text is not used: {@code muted} does its work.
  *
  * <p>The palette in use is {@link #current()}, read at render time. The TUI renders on one thread,
  * and a theme passed through every screen's render call would change dozens of signatures for

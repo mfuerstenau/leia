@@ -119,7 +119,7 @@ public final class Panels {
         } else {
             return Optional.empty();
         }
-        return Optional.of(Row.from(Cell.from(text)).style(Style.EMPTY.dim()));
+        return Optional.of(Row.from(Cell.from(text)).style(Palette.current().muted()));
     }
 
     /**

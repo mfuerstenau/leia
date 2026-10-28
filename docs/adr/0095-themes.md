@@ -4,6 +4,7 @@
 - **Date:** 2026-10-22
 - **Revised 2026-10-23** after looking at every screen in all four themes: `nord`'s `muted` and `border` went from `#4C566A` (1.7:1 on `#2E3440`, panel titles all but vanished) to `#7B88A1` (3.5:1), and `mono`'s `match` from `reversed` to `bold underlined`, since the selected row is reversed and hid the match
 - **Revised 2026-10-24** after a look in Windows Terminal with a light scheme: `nord` drew the borders and titles of popups and frames in the terminal's foreground, dark on its own background. They now take `base` through `Panels.box` (point 4)
+- **Revised 2026-10-24** after the same look: faint text (SGR 2) was drawn like normal text under One Half Light, so the hints, labels, line numbers and "none" lines that were `dim` weren't out of the way. They now take `muted` (point 1), which every theme sets: dark grey in `dark`, 245 in `light`, `#7B88A1` in `nord`, `dim` in `mono`
 
 ## Context
 
@@ -13,7 +14,7 @@ The themes are a matter of the TUI only: no protocol, server or runtime change.
 
 ## Decision
 
-1. **Roles, not colours.** `…tui.theme.Palette` is a record of `Style`s, one per role: `base` (the whole screen), `error`, `warning`, `success`, `accent` (segment names, field names, formats, the spinner), `jsonKey`, `jsonString`, `jsonNumber`, `jsonLiteral`, `match` (a highlighted match), `muted`, `border`, `borderFocused`, and whether the logo has its colours. No code outside `…tui.theme` and the logo names a colour. Bold, dim and reversed (the selection, the focused tab) are no roles: they read well under every theme.
+1. **Roles, not colours.** `…tui.theme.Palette` is a record of `Style`s, one per role: `base` (the whole screen), `error`, `warning`, `success`, `accent` (segment names, field names, formats, the spinner), `jsonKey`, `jsonString`, `jsonNumber`, `jsonLiteral`, `match` (a highlighted match), `muted`, `border`, `borderFocused`, and whether the logo has its colours. No code outside `…tui.theme` and the logo names a colour. Bold and reversed (the selection, the focused tab) are no roles: they read well under every theme. Dim is none either, but only because `muted` replaces it: no screen asks for the terminal's faint text, which some terminals draw like normal text.
 2. **Four themes**, `Theme` `dark`, `light`, `mono` and `nord`:
 
    | role | dark | light | mono | nord |

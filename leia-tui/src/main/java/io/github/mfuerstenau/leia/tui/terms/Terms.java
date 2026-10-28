@@ -1546,7 +1546,10 @@ public final class Terms {
                     }
                     String name = TextFormat.escapeControl(row.field().name());
                     return Row.from(Cell.from(Line.from(
-                            Span.raw(name), Span.styled(fieldLabel(row).substring(name.length()), Style.EMPTY.dim()))));
+                            Span.raw(name),
+                            Span.styled(
+                                    fieldLabel(row).substring(name.length()),
+                                    Palette.current().muted()))));
                 })
                 .toList();
         fieldTable.select(fieldRow);
@@ -1704,7 +1707,7 @@ public final class Terms {
         List<PointTree.Node> visible = pointTree.visible();
         pointTree.selected = Math.min(pointTree.selected, visible.size() - 1);
         List<Row> rows = new ArrayList<>();
-        Style dim = Style.EMPTY.dim();
+        Style dim = Palette.current().muted();
         for (PointTree.Node node : visible) {
             String marker;
             if (node.leaf.orElse(false)) {
@@ -1837,7 +1840,7 @@ public final class Terms {
         List<KnnGraphTree.Item> visible = knnTree.visible();
         knnTree.selected = Math.min(knnTree.selected, visible.size() - 1);
         List<Row> rows = new ArrayList<>();
-        Style dim = Style.EMPTY.dim();
+        Style dim = Palette.current().muted();
         for (KnnGraphTree.Item item : visible) {
             Row row = Row.from(Cell.from(Line.from(itemSpans(item, dim))));
             rows.add(deleted(item) ? row.style(Palette.current().error()) : row);
@@ -1989,7 +1992,7 @@ public final class Terms {
      */
     private static int addLevelRows(
             List<Row> rows, GetKnnGraphNodeResult node, int selected, int ordWidth, int docWidth) {
-        Style dim = Style.EMPTY.dim();
+        Style dim = Palette.current().muted();
         int selectedRow = 0;
         int index = 0;
         for (KnnGraphLevel level : node.levels()) {

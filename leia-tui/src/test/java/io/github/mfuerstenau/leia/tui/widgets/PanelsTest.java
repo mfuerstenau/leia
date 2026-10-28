@@ -42,6 +42,19 @@ class PanelsTest {
     }
 
     @Test
+    void textOutOfTheWayTakesTheThemesMutedStyleNotFaintText() {
+        // A terminal may draw faint text (SGR 2) like normal text, as Windows Terminal does under One
+        // Half Light, so the hints take the theme's muted style.
+        for (String id : Themes.bundled().ids()) {
+            Palette.use(Themes.bundled().find(id).orElseThrow());
+
+            assertThat(Form.dim()).isEqualTo(Palette.current().muted());
+        }
+        Palette.use(Themes.bundled().find("light").orElseThrow());
+        assertThat(Form.dim().fg()).contains(Color.indexed(245));
+    }
+
+    @Test
     void showsTheColumnsThatFitWhole() {
         int[] widths = {4, 3, 5};
 

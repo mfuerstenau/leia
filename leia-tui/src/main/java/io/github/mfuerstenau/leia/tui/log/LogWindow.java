@@ -248,7 +248,7 @@ public final class LogWindow {
         if (level.intValue() >= Level.WARNING.intValue()) {
             return Palette.current().warning();
         }
-        return level.intValue() < Level.CONFIG.intValue() ? Style.EMPTY.dim() : Style.EMPTY;
+        return level.intValue() < Level.CONFIG.intValue() ? Palette.current().muted() : Style.EMPTY;
     }
 
     /** The window's title, for the rows that the last frame showed. */
@@ -290,7 +290,8 @@ public final class LogWindow {
             return;
         }
         List<Line> footer = new ArrayList<>();
-        message.ifPresent(text -> footer.add(Line.from(Span.raw(" " + text).dim())));
+        message.ifPresent(text ->
+                footer.add(Line.from(Span.styled(" " + text, Palette.current().muted()))));
         footer.addAll(KeyLegend.lines(KEYS, inner.width()));
         int footerCap = Math.max(inner.height() / 3, 1);
         int footerHeight = Math.min(footer.size(), footerCap);
@@ -310,8 +311,9 @@ public final class LogWindow {
         column = Math.clamp(column, 0, Math.max(widest - list.width(), 0));
         List<Line> lines = new ArrayList<>();
         if (all.isEmpty()) {
-            lines.add(Line.from(Span.raw("No records at " + filter.getName() + " and above yet")
-                    .dim()));
+            lines.add(Line.from(Span.styled(
+                    "No records at " + filter.getName() + " and above yet",
+                    Palette.current().muted())));
         }
         for (Row row : all.subList(scroll, Math.min(scroll + rows, all.size()))) {
             lines.add(Line.styled(fromColumn(row.text(), column), row.style()));

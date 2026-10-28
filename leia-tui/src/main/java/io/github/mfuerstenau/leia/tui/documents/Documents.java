@@ -1978,7 +1978,7 @@ public final class Documents {
                                             hit.term().value(), hit.term().binary()),
                                     40)
                             + "  " + (hit.index() + 1) + " of " + hit.docFreq() + "  [ ] steps",
-                    shows(hit.docId()) ? Style.EMPTY : Style.EMPTY.dim()));
+                    shows(hit.docId()) ? Style.EMPTY : Palette.current().muted()));
         }
         return Line.from(spans);
     }
@@ -2015,7 +2015,10 @@ public final class Documents {
                             Line.from(Span.styled(cellRow[0], Palette.current().match())))
                     : Cell.from(cellRow[0]);
             Row tableRow = Row.from(name, Cell.from(cellRow[1]), right(cellRow[2], widths[2]), Cell.from(cellRow[3]));
-            tableRows.add(empty.get(i).booleanValue() ? tableRow.style(Style.EMPTY.dim()) : tableRow);
+            tableRows.add(
+                    empty.get(i).booleanValue()
+                            ? tableRow.style(Palette.current().muted())
+                            : tableRow);
         }
         String title = fieldsTitle();
         if (row >= 0) {
@@ -2269,7 +2272,7 @@ public final class Documents {
         List<String> components = vectorTexts(vector);
         int width = Integer.toString(Math.max(components.size() - 1, 0)).length();
         List<Line> lines = new ArrayList<>();
-        Style dim = Style.EMPTY.dim();
+        Style dim = Palette.current().muted();
         String index = "  %" + width + "d  ";
         for (int from = 0; from < components.size(); from += VECTOR_LINE) {
             List<String> line = components.subList(from, Math.min(from + VECTOR_LINE, components.size()));
@@ -2410,7 +2413,7 @@ public final class Documents {
      */
     private static List<Line> storedValueLines(StoredValue value, int v, Optional<FieldMatches> matches) {
         List<Line> lines = new ArrayList<>();
-        Style dim = Style.EMPTY.dim();
+        Style dim = Palette.current().muted();
         String text = storedText(value);
         String shown = TextFormat.firstChars(text, DETAIL_VALUE_CHARS);
         boolean more = !shown.equals(text);
@@ -2558,7 +2561,7 @@ public final class Documents {
             List<Span> spans = new ArrayList<>();
             spans.add(Span.raw("  " + TextFormat.bytesText(term.term(), term.binary())));
             if (freqs) {
-                spans.add(Span.styled(" ×" + term.freq(), Style.EMPTY.dim()));
+                spans.add(Span.styled(" ×" + term.freq(), Palette.current().muted()));
             }
             if (!term.positions().isEmpty()) {
                 spans.add(Span.raw("  "
@@ -2575,7 +2578,8 @@ public final class Documents {
         heading.add(label("Term"));
         heading.add(Span.raw(TextFormat.bytesText(hit.term().value(), hit.term().binary())));
         if (hit.freq().isPresent()) {
-            heading.add(Span.styled(" ×" + hit.freq().getAsInt(), Style.EMPTY.dim()));
+            heading.add(
+                    Span.styled(" ×" + hit.freq().getAsInt(), Palette.current().muted()));
         }
         heading.add(Span.raw(", doc " + (hit.index() + 1) + " of " + hit.docFreq() + " ([ ])"));
         List<Line> lines = new ArrayList<>();
@@ -2728,7 +2732,9 @@ public final class Documents {
         Panels.clear(frame, popup);
         frame.renderWidget(
                 Paragraph.builder()
-                        .text(Text.from(Line.from(prompt.input + "▏"), Line.styled(message, Style.EMPTY.dim())))
+                        .text(Text.from(
+                                Line.from(prompt.input + "▏"),
+                                Line.styled(message, Palette.current().muted())))
                         .block(Panels.box(" Go to document "))
                         .build(),
                 popup);

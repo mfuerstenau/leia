@@ -6,6 +6,7 @@ import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
 import dev.tamboui.text.Text;
 import dev.tamboui.widgets.paragraph.Paragraph;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import java.util.List;
 
 /**
@@ -83,6 +84,6 @@ public final class Form {
     }
 
     public static Style dim() {
-        return Style.EMPTY.dim();
+        return Palette.current().muted();
     }
 }

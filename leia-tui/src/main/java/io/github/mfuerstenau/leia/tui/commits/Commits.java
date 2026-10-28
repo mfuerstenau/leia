@@ -997,7 +997,7 @@ public final class Commits {
         lines.add(Line.empty());
         lines.add(Line.styled(heading, Style.EMPTY.bold()));
         if (pairs.isEmpty()) {
-            lines.add(Line.styled("none", Style.EMPTY.dim()));
+            lines.add(Line.styled("none", Palette.current().muted()));
             return;
         }
         int width = Math.min(
@@ -1050,7 +1050,7 @@ public final class Commits {
             }
         });
         if (formatsOfKind.isEmpty()) {
-            lines.add(Line.styled("none", Style.EMPTY.dim()));
+            lines.add(Line.styled("none", Palette.current().muted()));
             return;
         }
         int kindWidth =
@@ -1083,7 +1083,7 @@ public final class Commits {
         lines.add(
                 Line.styled("Files (" + files.size() + ", " + sizeOr(total, "size unknown") + ")", Style.EMPTY.bold()));
         if (files.isEmpty()) {
-            lines.add(Line.styled("none", Style.EMPTY.dim()));
+            lines.add(Line.styled("none", Palette.current().muted()));
             return;
         }
         List<String> names = files.stream()

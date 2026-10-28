@@ -59,7 +59,10 @@ public final class Viewer {
     /** Keys up to this display width are aligned in the delimited mode; longer ones are not padded. */
     static final int MAX_KEY_WIDTH = 32;
 
-    static final Style DIM = Style.EMPTY.dim();
+    /** What is there but out of the way: line numbers, labels, separators (the theme's {@code muted}). */
+    static Style dim() {
+        return Palette.current().muted();
+    }
 
     /** Checks that a value is JSON, and says where it isn't: no more than one value. */
     private static final JsonMapper JSON = JsonMapper.builder()
@@ -993,7 +996,7 @@ public final class Viewer {
                         .text(Text.from(
                                 formLine("Items", form.items.toString(), !form.onKeyValue),
                                 formLine("Key/value", form.keyValue.toString(), form.onKeyValue),
-                                Line.from(Span.styled(message, DIM))))
+                                Line.from(Span.styled(message, dim()))))
                         .block(Panels.box(" Delimited "))
                         .build(),
                 popup);
@@ -1001,7 +1004,7 @@ public final class Viewer {
 
     private static Line formLine(String label, String input, boolean active) {
         return Line.from(
-                Span.styled(String.format(Locale.ROOT, "%-10s ", label), active ? Style.EMPTY.bold() : DIM),
+                Span.styled(String.format(Locale.ROOT, "%-10s ", label), active ? Style.EMPTY.bold() : dim()),
                 Span.raw(input + (active ? "▏" : "")));
     }
 
@@ -1173,7 +1176,7 @@ public final class Viewer {
             String number = "%" + Integer.toString(items.size()).length() + "d  ";
             for (int i = 0; i < items.size(); i++) {
                 lines.add(List.of(
-                        new Segment(DIM, String.format(Locale.ROOT, number, i + 1)),
+                        new Segment(dim(), String.format(Locale.ROOT, number, i + 1)),
                         new Segment(Style.EMPTY, TextFormat.escapeControl(items.get(i)))));
             }
             return new Formatted(lines, detail, null);
@@ -1205,7 +1208,7 @@ public final class Viewer {
                 lines.add(List.of(
                         new Segment(Palette.current().accent(), pair[0]),
                         new Segment(Style.EMPTY, " ".repeat(Math.max(keyWidth - CharWidth.of(pair[0]), 0))),
-                        new Segment(DIM, separator),
+                        new Segment(dim(), separator),
                         new Segment(Style.EMPTY, pair[1])));
             }
         }
@@ -1316,11 +1319,11 @@ public final class Viewer {
             }
         }
         return Line.from(
-                Span.styled(String.format(Locale.ROOT, "%08x  ", start), DIM),
+                Span.styled(String.format(Locale.ROOT, "%08x  ", start), dim()),
                 Span.raw(hex.toString()),
-                Span.styled(" |", DIM),
+                Span.styled(" |", dim()),
                 Span.raw(ascii.toString()),
-                Span.styled("|", DIM));
+                Span.styled("|", dim()));
     }
 
     /** {@link GetDocumentResult#MAX_VALUE_LENGTH} for messages. */

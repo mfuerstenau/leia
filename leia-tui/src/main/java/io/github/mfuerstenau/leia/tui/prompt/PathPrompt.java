@@ -267,7 +267,9 @@ public final class PathPrompt {
             frame.setCursorPosition(inputArea.x() + visible.cursorColumn(), inputArea.y());
         }
         frame.renderWidget(
-                Paragraph.from(Line.from(Span.raw(String.join("  ", candidates)).dim())), parts.get(1));
+                Paragraph.from(Line.from(Span.styled(
+                        String.join("  ", candidates), Palette.current().muted()))),
+                parts.get(1));
         if (!errorLines.isEmpty()) {
             frame.renderWidget(Paragraph.from(Text.from(errorLines)), parts.get(2));
         }
@@ -279,7 +281,8 @@ public final class PathPrompt {
         } else {
             hint = "Enter open   Tab complete   Esc cancel";
         }
-        frame.renderWidget(Paragraph.from(Line.from(Span.raw(hint).dim())), parts.get(3));
+        frame.renderWidget(
+                Paragraph.from(Line.from(Span.styled(hint, Palette.current().muted()))), parts.get(3));
     }
 
     /** The error in red, wrapped at {@code width}. */

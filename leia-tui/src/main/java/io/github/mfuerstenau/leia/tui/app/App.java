@@ -2798,7 +2798,9 @@ public final class App {
         if (tab == screen) {
             return Span.styled(tab.title(), Style.EMPTY.reversed());
         }
-        return supports(tab) ? Span.raw(tab.title()) : Span.styled(tab.title(), Style.EMPTY.dim());
+        return supports(tab)
+                ? Span.raw(tab.title())
+                : Span.styled(tab.title(), Palette.current().muted());
     }
 
     /** What the tabs show after them, if anything: the notice, the running export or the index. */

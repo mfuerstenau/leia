@@ -238,7 +238,9 @@ public final class JarsPopup {
             frame.setCursorPosition(inputArea.x() + visible.cursorColumn(), inputArea.y());
         }
         frame.renderWidget(
-                Paragraph.from(Line.from(Span.raw(String.join("  ", candidates)).dim())), parts.get(5));
+                Paragraph.from(Line.from(Span.styled(
+                        String.join("  ", candidates), Palette.current().muted()))),
+                parts.get(5));
         if (!outcome.isEmpty()) {
             frame.renderWidget(Paragraph.from(Text.from(outcome)), parts.get(6));
         }
@@ -250,7 +252,8 @@ public final class JarsPopup {
         } else {
             hint = "Enter add   Tab complete   Esc close";
         }
-        frame.renderWidget(Paragraph.from(Line.from(Span.raw(hint).dim())), parts.get(7));
+        frame.renderWidget(
+                Paragraph.from(Line.from(Span.styled(hint, Palette.current().muted()))), parts.get(7));
     }
 
     private Line defaultLine() {
@@ -258,7 +261,7 @@ public final class JarsPopup {
         if (dir.isEmpty()) {
             return Line.from(
                     Span.raw("Default folder: "),
-                    Span.raw("none (no home directory)").dim());
+                    Span.styled("none (no home directory)", Palette.current().muted()));
         }
         String note = switch (defaultJars.state()) {
             case LOADED -> "";
@@ -268,7 +271,7 @@ public final class JarsPopup {
         return Line.from(
                 Span.raw("Default folder: "),
                 Span.raw(shorten(dir.get())),
-                Span.raw(note).dim());
+                Span.styled(note, Palette.current().muted()));
     }
 
     private Line runtimesLine() {
@@ -276,13 +279,14 @@ public final class JarsPopup {
         if (dir.isEmpty()) {
             return Line.from(
                     Span.raw("Runtimes: "),
-                    Span.raw("none (not run from leia.jar)").dim());
+                    Span.styled(
+                            "none (not run from leia.jar)", Palette.current().muted()));
         }
         String note = runtimeFolders.exists() ? "" : "  (missing)";
         return Line.from(
                 Span.raw("Runtimes: "),
                 Span.raw(shorten(dir.get())),
-                Span.raw(note).dim());
+                Span.styled(note, Palette.current().muted()));
     }
 
     /** The line above the list. */
@@ -327,7 +331,9 @@ public final class JarsPopup {
             } catch (InvalidPathException _) {
                 // Shown as it came.
             }
-            lines.add(Line.from(Span.raw("  " + name + "  "), Span.raw(place).dim()));
+            lines.add(Line.from(
+                    Span.raw("  " + name + "  "),
+                    Span.styled(place, Palette.current().muted())));
         }
         return lines;
     }

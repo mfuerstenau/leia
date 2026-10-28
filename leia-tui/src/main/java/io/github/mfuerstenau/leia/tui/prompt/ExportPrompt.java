@@ -322,7 +322,8 @@ public final class ExportPrompt {
             frame.renderWidget(Paragraph.from(Text.from(errorLines)), parts.get(1));
         }
         String hint = busy ? "Exporting…" : keys;
-        frame.renderWidget(Paragraph.from(Line.from(Span.raw(hint).dim())), parts.get(2));
+        frame.renderWidget(
+                Paragraph.from(Line.from(Span.styled(hint, Palette.current().muted()))), parts.get(2));
     }
 
     public static String delimiterName(TermDelimiter delimiter) {

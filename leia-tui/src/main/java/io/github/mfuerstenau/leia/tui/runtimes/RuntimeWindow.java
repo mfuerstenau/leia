@@ -501,7 +501,7 @@ public final class RuntimeWindow {
         List<Line> rows = new ArrayList<>();
         for (int i = 0; i < texts.size(); i++) {
             // A present runtime's row is greyed out: it can't be chosen.
-            Style style = i < offered.size() ? Style.EMPTY : Style.EMPTY.dim();
+            Style style = i < offered.size() ? Style.EMPTY : Palette.current().muted();
             rows.add(Line.from(Span.styled(
                     texts.get(i), i == cursor ? Panels.highlight(true).patch(style) : style)));
         }
@@ -545,7 +545,8 @@ public final class RuntimeWindow {
             lines.add(Line.from("• " + download.jar().name() + ", "
                     + TextFormat.size(download.jar().size())));
             lines.add(Line.from(download.uri().toString()));
-            lines.add(Line.from(Span.styled("SHA-256 " + download.jar().sha256(), Style.EMPTY.dim())));
+            lines.add(Line.from(Span.styled(
+                    "SHA-256 " + download.jar().sha256(), Palette.current().muted())));
         }
         if (!runtime.kept().isEmpty()) {
             lines.add(Line.empty());
@@ -592,7 +593,8 @@ public final class RuntimeWindow {
                         Palette.current().warning()));
             }
             lines.add(Line.from(install.repository().resolve(mavenPath.get()).toString()));
-            lines.add(Line.from(Span.styled("SHA-256 " + jar.sha256(), Style.EMPTY.dim())));
+            lines.add(Line.from(
+                    Span.styled("SHA-256 " + jar.sha256(), Palette.current().muted())));
         }
         ownJars(runtime, lines);
         return lines;
@@ -811,7 +813,9 @@ public final class RuntimeWindow {
         private static Line line(Jar jar, String spinner) {
             String size = TextFormat.size(jar.size);
             return switch (jar.state) {
-                case WAITING -> Line.from(Span.styled("  · " + jar.name + ", " + size, Style.EMPTY.dim()));
+                case WAITING ->
+                    Line.from(Span.styled(
+                            "  · " + jar.name + ", " + size, Palette.current().muted()));
                 case ACTIVE ->
                     Line.from(
                             Span.styled("  " + spinner + " ", Palette.current().accent()),
@@ -827,7 +831,7 @@ public final class RuntimeWindow {
                 case CANCELLED ->
                     Line.from(Span.styled(
                             "  – " + jar.name + ", " + TextFormat.size(jar.bytes) + " / " + size + " cancelled",
-                            Style.EMPTY.dim()));
+                            Palette.current().muted()));
             };
         }
     }
