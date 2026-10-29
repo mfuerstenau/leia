@@ -97,9 +97,10 @@ final class GetDocumentTool implements McpTool<GetDocumentTool.Arguments, GetDoc
             DocValuesType type,
             @Description("How many values the document has") int count,
 
-            @Description("The raw numbers of a NUMERIC or SORTED_NUMERIC field, at most " + MAX_DOC_VALUES
+            @Description("The raw numbers of a NUMERIC or SORTED_NUMERIC field, in decimal as strings (a JSON number"
+                    + " loses digits beyond 2^53), at most " + MAX_DOC_VALUES
                     + "; absent for the other types, and with asStored")
-            Optional<List<Long>> numbers,
+            Optional<List<String>> numbers,
 
             @Description("Present if the numbers are the field's stored values in this encoding (a double's bits,"
                     + " say); numbers is then left out, and the stored values are the numbers")
@@ -234,6 +235,7 @@ final class GetDocumentTool implements McpTool<GetDocumentTool.Arguments, GetDoc
                         ? Optional.empty()
                         : Absent.nonEmpty(docValues.numbers().stream()
                                 .limit(MAX_DOC_VALUES)
+                                .map(String::valueOf)
                                 .toList()),
                 asStored,
                 Absent.nonEmpty(docValues.values().stream()

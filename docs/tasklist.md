@@ -24,8 +24,6 @@ None open.
 
 Goal: the tools cost an agent few tokens, then they answer why a query matches or not. Measured on the demo index (compact JSON, the text item): a default `search` of 10 hits is 45.6 KB (about 13k tokens), with `fields: [id, title]` 2.5 KB; `get_document` 6.2 KB, `index_info` 5.7 KB, `reconstruct_fields` of every field 7.3 KB; `tools/list` 5 KB of descriptions and input schemas. The first five checks and changes are done (ADR 0103); the output size comes first, in this order; each change updates `tools.json`.
 
-- [ ] Longs beyond 2^53 reach the model rounded (Claude Code 2.1.310 re-serializes `structuredContent` through a JavaScript number: `4644231034843976172` became `4644231034843976000`). Raw doc values `numbers` and large stored longs are affected; `asStored` spares the former where the stored value confirms them. Decide: send such longs as strings in the schema, or accept it (ADR 0103 §5).
-
 Then the tools, each over a method the backend has; each checks the runtime's `features` and answers `NOT_SUPPORTED` without them. Short descriptions keep the cost of `tools/list` down.
 
 - [ ] `search` with the index's analyzer: an optional `analyzer` (a class name from `getAnalysisComponents`) and analyzers per field (`Analyzer.fields`), instead of `StandardAnalyzer` always, which finds nothing or the wrong documents on a field indexed with another analyzer.

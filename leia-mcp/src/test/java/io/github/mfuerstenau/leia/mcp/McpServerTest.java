@@ -257,6 +257,10 @@ class McpServerTest {
         // Nothing stored to confirm the encoding: the raw numbers stay.
         assertThat(byName.get("weight").has("asStored")).isFalse();
         assertThat(byName.get("weight").path("numbers")).hasSize(1);
+        // A string, so that a client's JSON number can't round digits beyond 2^53.
+        JsonNode weight = byName.get("weight").path("numbers").get(0);
+        assertThat(weight.isString()).isTrue();
+        assertThat(Long.parseLong(weight.asString())).isGreaterThan(1L << 53);
     }
 
     @Test

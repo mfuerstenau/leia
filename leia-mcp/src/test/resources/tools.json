@@ -677,9 +677,9 @@
                     "numbers": {
                       "type": "array",
                       "items": {
-                        "type": "integer"
+                        "type": "string"
                       },
-                      "description": "The raw numbers of a NUMERIC or SORTED_NUMERIC field, at most 100; absent for the other types, and with asStored"
+                      "description": "The raw numbers of a NUMERIC or SORTED_NUMERIC field, in decimal as strings (a JSON number loses digits beyond 2^53), at most 100; absent for the other types, and with asStored"
                     },
                     "asStored": {
                       "type": "string",
