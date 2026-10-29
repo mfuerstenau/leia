@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-25
 - **Amends:** ADR 0034 (§7, where stdout and stderr go); AGENTS.md, hard rules 2 and 4 and the CLI contract
-- **Amended by:** ADR 0101 (§5, concurrent tool calls)
+- **Amended by:** ADR 0101 (§5, concurrent tool calls), ADR 0102 (§7 and §8, the indexes `open_index` may open)
 
 ## Context
 

@@ -60,12 +60,21 @@ public final class McpServer {
     /** How long the end of stdin waits for the requests that run to stop. */
     private static final Duration STOP_TIMEOUT = Duration.ofMinutes(1);
 
+    /** What the instructions say of the tools that read the open index. */
+    private static final String TOOLS_INSTRUCTIONS = """
+            search finds documents with a query of Lucene's classic syntax, or one exact term; \
+            get_document shows a document's fields, get_field_value a whole stored value in slices, and \
+            reconstruct_fields the terms a document was indexed with, also in the fields that aren't \
+            stored.""";
+
     static final String INSTRUCTIONS = """
             leia reads Lucene indexes, never writes them. Call index_info to see the open index and its \
-            fields, or open_index to open one. search finds documents with a query of Lucene's classic \
-            syntax, or one exact term; get_document shows a document's fields, get_field_value a whole \
-            stored value in slices, and reconstruct_fields the terms a document was indexed with, also \
-            in the fields that aren't stored.""";
+            fields, or open_index to open one.\s""" + TOOLS_INSTRUCTIONS;
+
+    /** The instructions without {@code open_index}, with {@code --mcp-pin} (ADR 0102). */
+    static final String PINNED_INSTRUCTIONS = """
+            leia reads a Lucene index, never writes it. It serves one index, which the user chose; call \
+            index_info to see it and its fields.\s""" + TOOLS_INSTRUCTIONS;
 
     private final LeiaBackend backend;
     private final VersionResult version;
@@ -88,9 +97,18 @@ public final class McpServer {
      * @param version what {@code version} says, for {@code serverInfo}
      * @param defaultDirectory the {@code Directory} of {@code --directory}, {@code open_index}'s default
      * @param home the user's home, for a path with a leading {@code ~}
+     * @param roots the real paths of {@code --mcp-root}, below which alone {@code open_index} opens;
+     *     none for any path (ADR 0102)
+     * @param pinned {@code --mcp-pin}: without {@code open_index}, so that the index stays (ADR 0102)
      */
-    public McpServer(LeiaBackend backend, VersionResult version, DirectoryImpl defaultDirectory, Optional<Path> home) {
-        this(backend, version, new Session(defaultDirectory, home), Tools.ALL);
+    public McpServer(
+            LeiaBackend backend,
+            VersionResult version,
+            DirectoryImpl defaultDirectory,
+            Optional<Path> home,
+            List<Path> roots,
+            boolean pinned) {
+        this(backend, version, new Session(defaultDirectory, home, roots), pinned ? Tools.PINNED : Tools.ALL);
     }
 
     McpServer(LeiaBackend backend, VersionResult version, Session session, List<McpTool<?, ?>> tools) {
@@ -108,7 +126,8 @@ public final class McpServer {
      */
     public OpenIndexResult open(String path) throws RpcException, InterruptedException {
         try {
-            OpenIndexResult result = backend.call(Methods.OPEN_INDEX, openParams(session, path, Optional.empty()))
+            OpenIndexResult result = backend.call(
+                            Methods.OPEN_INDEX, openParams(session, session.expandHome(path), Optional.empty()))
                     .get();
             session.opened(result);
             return result;
@@ -123,9 +142,7 @@ public final class McpServer {
     /** The params of {@code openIndex} for {@code path} with a reader, through {@code directory} or the default. */
     public static OpenIndexParams openParams(Session session, String path, Optional<DirectoryImpl> directory) {
         return new OpenIndexParams(
-                session.expandHome(path),
-                Optional.of(directory.orElse(session.defaultDirectory())),
-                Optional.of(OpenMode.READER));
+                path, Optional.of(directory.orElse(session.defaultDirectory())), Optional.of(OpenMode.READER));
     }
 
     /**
@@ -234,7 +251,7 @@ public final class McpServer {
                 answered,
                 new Messages.ServerCapabilities(new Messages.ToolsCapability(false)),
                 new Messages.ServerInfo("leia", version.version()),
-                INSTRUCTIONS);
+                tools.stream().anyMatch(tool -> tool.name().equals("open_index")) ? INSTRUCTIONS : PINNED_INSTRUCTIONS);
     }
 
     /**

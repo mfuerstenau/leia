@@ -14,5 +14,9 @@ public final class Tools {
             new GetFieldValueTool(),
             new ReconstructFieldsTool());
 
+    /** The tools of {@code --mcp-pin}: all but {@code open_index}, so that the index stays (ADR 0102). */
+    public static final List<McpTool<?, ?>> PINNED =
+            ALL.stream().filter(tool -> !(tool instanceof OpenIndexTool)).toList();
+
     private Tools() {}
 }

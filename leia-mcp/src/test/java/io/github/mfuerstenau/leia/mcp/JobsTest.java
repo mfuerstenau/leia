@@ -36,7 +36,7 @@ class JobsTest {
 
         @Override
         public Session session() {
-            return new Session(DirectoryImpl.FS, Optional.empty());
+            return new Session(DirectoryImpl.FS, Optional.empty(), List.of());
         }
 
         @Override

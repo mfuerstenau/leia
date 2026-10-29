@@ -30,6 +30,8 @@ class CliTest {
                         false,
                         java.util.List.of(),
                         Optional.empty(),
+                        false,
+                        java.util.List.of(),
                         false));
     }
 
@@ -43,6 +45,17 @@ class CliTest {
                 });
         assertThat(Cli.parse("--mcp").indexPath()).isEmpty();
         assertThat(Cli.parse().mcp()).isFalse();
+    }
+
+    @Test
+    void parsesTheRootsAndThePinOfMcpMode() throws Exception {
+        Cli roots = Cli.parse("--mcp", "--mcp-root", "/data", "--mcp-root=/srv/indexes");
+        assertThat(roots.mcpRoots()).containsExactly(Path.of("/data"), Path.of("/srv/indexes"));
+        assertThat(roots.mcpPin()).isFalse();
+
+        Cli pinned = Cli.parse("--mcp", "--mcp-pin", "/data/index");
+        assertThat(pinned.mcpPin()).isTrue();
+        assertThat(pinned.mcpRoots()).isEmpty();
     }
 
     @Test
@@ -150,6 +163,12 @@ class CliTest {
             --mcp --theme nord          | --mcp takes none of
             --mcp --runtime lucene9     | --mcp takes none of
             --mcp --download-runtimes --runtime lucene9 | --mcp takes none of
+            --mcp-root /data /a         | --mcp-root and --mcp-pin go only with --mcp
+            --mcp-pin /a                | --mcp-root and --mcp-pin go only with --mcp
+            --mcp --mcp-root            | --mcp-root needs a value <PATH>
+            --mcp --mcp-pin=yes /a      | --mcp-pin takes no value
+            --mcp --mcp-pin             | --mcp-pin needs the INDEX_PATH to serve
+            --mcp --mcp-pin --mcp-root /data /a | --mcp-pin takes no --mcp-root
             -j /opt/jdk                 | -j is taken by the leia script
             --java=/opt/jdk             | --java is taken by the leia script
             """)
@@ -172,6 +191,8 @@ class CliTest {
                         "--runtime <FOLDER>",
                         "--theme <THEME>",
                         "--mcp",
+                        "--mcp-root <PATH>",
+                        "--mcp-pin",
                         "NO_COLOR",
                         "repo1.maven.org",
                         "SHA-256",

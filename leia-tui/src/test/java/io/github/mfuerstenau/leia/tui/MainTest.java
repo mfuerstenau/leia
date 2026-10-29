@@ -210,6 +210,16 @@ class MainTest {
     }
 
     @Test
+    void refusesAnMcpRootThatIsntADirectory() throws Exception {
+        Path missing = tmp.resolve("missing");
+
+        assertThat(run("--mcp", "--mcp-root", missing.toString())).isEqualTo(1);
+
+        assertThat(err()).contains("leia: --mcp-root " + missing + ": no such directory");
+        assertThat(out()).isEmpty();
+    }
+
+    @Test
     void speaksOnlyMcpOnStdoutAndEndsWithStdin() throws Exception {
         String initialize = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":"
                 + "{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},"

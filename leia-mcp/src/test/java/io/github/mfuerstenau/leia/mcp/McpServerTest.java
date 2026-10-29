@@ -16,6 +16,7 @@ import io.github.mfuerstenau.leia.protocol.search.TermQuery;
 import io.github.mfuerstenau.leia.protocol.version.VersionParams;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import io.github.mfuerstenau.leia.server.LeiaBackend;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -30,6 +31,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.io.TempDir;
 import tools.jackson.databind.JsonNode;
 
 /**
@@ -64,7 +66,8 @@ class McpServerTest {
         blocking = new BlockingTool();
         List<McpTool<?, ?>> tools = new ArrayList<>(Tools.ALL);
         tools.add(blocking);
-        McpServer server = new McpServer(backend, version, new Session(DirectoryImpl.FS, Optional.empty()), tools);
+        McpServer server =
+                new McpServer(backend, version, new Session(DirectoryImpl.FS, Optional.empty(), List.of()), tools);
         server.open(demo);
         client = new McpClient(server);
     }
@@ -318,6 +321,64 @@ class McpServerTest {
     }
 
     @Test
+    void opensOnlyBelowTheRootsAndRefusesTheRestAlike(@TempDir Path tmp) throws Exception {
+        Path index = Path.of(demo).toRealPath();
+        Path root = Files.createDirectory(tmp.resolve("root"));
+        Path outside = Files.createDirectory(tmp.resolve("outside"));
+        Files.createSymbolicLink(root.resolve("escape"), outside);
+        List<Path> roots = List.of(index.getParent(), root.toRealPath());
+        String refusal =
+                "open_index opens only paths below " + roots.get(0) + ", " + roots.get(1) + " (INVALID_PARAMS)";
+
+        McpClient rooted = serve(new Session(DirectoryImpl.FS, Optional.empty(), roots), Tools.ALL);
+        try {
+            assertThat(rooted.structured(1, "open_index", "{\"path\":\"" + demo + "\"}")
+                            .path("path")
+                            .asString())
+                    .isEqualTo(index.toString());
+            // A path outside, one through a link out of a root, one that climbs out, and one that
+            // doesn't exist: refused alike, so the refusal says nothing of what is there.
+            for (Path path : List.of(
+                    outside,
+                    root.resolve("escape"),
+                    index.getParent().resolve(".."),
+                    root.resolve("missing"),
+                    tmp.resolve("missing"))) {
+                assertThat(rooted.error(2, "open_index", "{\"path\":\"" + path + "\"}"))
+                        .isEqualTo(refusal);
+            }
+            assertThat(rooted.structured(3, "index_info", "{}").path("path").asString())
+                    .isEqualTo(index.toString());
+        } finally {
+            rooted.close();
+        }
+    }
+
+    @Test
+    void servesThePinnedIndexWithoutOpenIndex() throws Exception {
+        McpClient pinned = serve(new Session(DirectoryImpl.FS, Optional.empty(), List.of()), Tools.PINNED);
+        try {
+            JsonNode initialized = pinned.request(1, "initialize", initialize("2025-06-18"));
+            JsonNode tools =
+                    pinned.request(2, "tools/list", "{}").path("result").path("tools");
+            JsonNode open = pinned.request(3, "tools/call", "{\"name\":\"open_index\",\"arguments\":{\"path\":\"/\"}}");
+
+            assertThat(initialized.path("result").path("instructions").asString())
+                    .isEqualTo(McpServer.PINNED_INSTRUCTIONS)
+                    .doesNotContain("open_index");
+            assertThat(StreamSupport.stream(tools.spliterator(), false)
+                            .map(tool -> tool.path("name").asString())
+                            .toList())
+                    .containsExactly("index_info", "search", "get_document", "get_field_value", "reconstruct_fields");
+            assertThat(open.path("error").path("code").asInt()).isEqualTo(Messages.INVALID_PARAMS);
+            assertThat(pinned.structured(4, "index_info", "{}").path("numDocs").asInt())
+                    .isEqualTo(487);
+        } finally {
+            pinned.close();
+        }
+    }
+
+    @Test
     void answersNothingToACancelledRequestAndCancelsItsJob() throws Exception {
         client.send(call(1, "blocking", "{\"_meta\":{\"progressToken\":\"p\"}}"));
         assertThat(blocking.polled.await(30, TimeUnit.SECONDS)).isTrue();
@@ -394,6 +455,13 @@ class McpServerTest {
         assertThat(second.path("result").path("isError").asBoolean())
                 .as(second.toString())
                 .isFalse();
+    }
+
+    /** A server of its own over the backend, with {@code session} and {@code tools}, and the demo index open. */
+    private static McpClient serve(Session session, List<McpTool<?, ?>> tools) throws Exception {
+        McpServer server = new McpServer(backend, version, session, tools);
+        server.open(demo);
+        return new McpClient(server);
     }
 
     private static String initialize(String protocolVersion) {

@@ -134,6 +134,8 @@ leia [OPTIONS] [INDEX_PATH]
 | `--no-reader` | open `INDEX_PATH` without a reader, for an index a reader can't open: only its commits and the check work; `Ctrl+N` in the open prompt does the same |
 | `--theme <NAME>` | the colours: `dark` (default) is the terminal's own, `light` reads on a light background, `mono` has none, `nord` is the Nord palette and `solarized-dark` and `solarized-light` are Solarized, each on its own background, and they need a terminal with 24-bit colour; or a theme of your own (see [Themes of your own](#themes-of-your-own)). Without it: `mono` if the environment variable `NO_COLOR` is set and not empty, else the theme chosen last with `T`, else `dark` |
 | `--mcp` | serve `INDEX_PATH` to an MCP client, such as a coding agent, instead of starting the terminal UI (see [MCP mode](#mcp-mode)) |
+| `--mcp-root <PATH>` | with `--mcp`, a folder below which alone the agent opens indexes; repeatable (see [Which indexes the agent can open](#which-indexes-the-agent-can-open)) |
+| `--mcp-pin` | with `--mcp` and `INDEX_PATH`, serve only that index: the agent can't open another |
 | `--download-runtimes` | install the runtimes of `--runtime` without asking, then exit; takes no other option |
 | `--runtime <FOLDER>` | with `--download-runtimes`, a runtime to install: `lucene10`, `lucene9`, `lucene7`, `lucene5` or `lucene3`; repeatable |
 | `-V, --version` | print the version and build of leia, and the Java in use |
@@ -207,6 +209,30 @@ tools:
 can't be opened, leia says why and exits with 1. Each result is bounded: a page has at most 100
 hits, a value shows 2,048 characters unless the agent asks for more, and a search or rebuild that
 takes longer than 5 minutes is cancelled.
+
+### Which indexes the agent can open
+
+Without more options, `open_index` opens any index your account can read, at any path the agent
+gives it. Two options narrow that:
+
+```sh
+# only indexes below these folders; any other path is refused alike, also through a symbolic link
+claude mcp add leia -- /path/to/leia --mcp --mcp-root ~/indexes --mcp-root /srv/search
+# only this one index: the agent gets no open_index
+claude mcp add leia -- /path/to/leia --mcp --mcp-pin /path/to/index
+```
+
+`--mcp-root` can be repeated. `INDEX_PATH` opens wherever it is, since you named it.
+
+Beyond that:
+- Everything in an index the agent opens goes to the agent, and from there wherever its other
+  tools send it. Mind which network tools share the session with an index of private data.
+- The text of a document is data, not instructions. A stored value can be written to look like
+  instructions to the agent.
+- `--no-default-jars` keeps the jars of the default folder out of the process, and `--jar` and
+  `--server` should name only jars and installations you trust.
+- leia runs as you. To keep it from the rest of the machine, run it as another user, or in a
+  container or sandbox with the index folders mounted read-only.
 
 ## Keys
 

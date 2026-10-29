@@ -12,7 +12,7 @@ import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import java.util.Optional;
 
-/** {@code open_index}: opens an index in place of the open one (ADR 0100 §7). */
+/** {@code open_index}: opens an index in place of the open one (ADR 0100 §7), below the roots if any (ADR 0102). */
 final class OpenIndexTool implements McpTool<OpenIndexTool.Arguments, IndexInfoTool.Result> {
 
     record Arguments(
@@ -53,8 +53,9 @@ final class OpenIndexTool implements McpTool<OpenIndexTool.Arguments, IndexInfoT
 
     @Override
     public IndexInfoTool.Result call(Arguments arguments, Call call) throws ToolException, Jobs.Cancelled {
-        OpenIndexResult opened = call.call(
-                Methods.OPEN_INDEX, McpServer.openParams(call.session(), arguments.path(), arguments.directory()));
+        String path = call.session().allowed(arguments.path());
+        OpenIndexResult opened =
+                call.call(Methods.OPEN_INDEX, McpServer.openParams(call.session(), path, arguments.directory()));
         call.session().opened(opened);
         return IndexInfoTool.info(opened, call.call(Methods.GET_INDEX_STATS, new GetIndexStatsParams()));
     }

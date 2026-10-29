@@ -32,6 +32,10 @@ import java.util.Optional;
  * @param mcp {@code --mcp}: serve {@code INDEX_PATH} to an MCP client on stdin and stdout instead
  *     of starting the TUI (ADR 0100); with neither {@code --download-runtimes}, {@code --runtime},
  *     {@code --theme} nor {@code --no-reader}
+ * @param mcpRoots {@code --mcp-root}, in the order given: with {@code --mcp}, the directories below
+ *     which alone {@code open_index} opens (ADR 0102)
+ * @param mcpPin {@code --mcp-pin}: with {@code --mcp} and {@code INDEX_PATH}, and without {@code
+ *     --mcp-root}, serve that index without {@code open_index} (ADR 0102)
  */
 record Cli(
         boolean help,
@@ -45,7 +49,9 @@ record Cli(
         boolean downloadRuntimes,
         List<String> runtimes,
         Optional<String> theme,
-        boolean mcp) {
+        boolean mcp,
+        List<Path> mcpRoots,
+        boolean mcpPin) {
 
     static final String USAGE = "Usage: leia [OPTIONS] [INDEX_PATH]";
 
@@ -123,6 +129,13 @@ record Cli(
                       documents and their whole values, and rebuild the fields that aren't
                       stored. Without INDEX_PATH, the client opens one with open_index. Goes with
                       --jar, --server, --no-default-jars and --directory; logs go to leia.log
+                  --mcp-root <PATH>
+                      With --mcp, a directory below which open_index opens indexes; any other
+                      path is refused, also through a symbolic link. Can be repeated. Without it,
+                      open_index opens any path. INDEX_PATH is opened wherever it is
+                  --mcp-pin
+                      With --mcp and INDEX_PATH, serve only that index: the client gets no
+                      open_index
               -V, --version
                       Print the version and build of leia, and the Java version in use
               -h, --help
@@ -139,6 +152,7 @@ record Cli(
         jars = List.copyOf(jars);
         servers = List.copyOf(servers);
         runtimes = List.copyOf(runtimes);
+        mcpRoots = List.copyOf(mcpRoots);
     }
 
     /** A wrong command line: an unknown option, a missing or bad value, a second index path. */
@@ -178,6 +192,8 @@ record Cli(
         private final List<String> runtimes = new ArrayList<>();
         private Optional<String> theme = Optional.empty();
         private boolean mcp;
+        private final List<Path> mcpRoots = new ArrayList<>();
+        private boolean mcpPin;
 
         Parser(String[] args) {
             this.args = args;
@@ -210,6 +226,8 @@ record Cli(
                 case "--no-reader" -> noReader = flag(name, inline);
                 case "--download-runtimes" -> downloadRuntimes = flag(name, inline);
                 case "--mcp" -> mcp = flag(name, inline);
+                case "--mcp-pin" -> mcpPin = flag(name, inline);
+                case "--mcp-root" -> mcpRoots.add(path(name, value(name, inline, "<PATH>")));
                 case "--jar" -> jars.add(path(name, value(name, inline, "<PATH>")));
                 case "--server" -> servers.add(path(name, value(name, inline, "<PATH>")));
                 case "--runtime" -> runtimes.add(runtime(value(name, inline, "<FOLDER>")));
@@ -246,6 +264,15 @@ record Cli(
                 throw new UsageException("--mcp takes none of --download-runtimes, --runtime, --theme, --no-reader:"
                         + " an MCP client reads an index only with a reader");
             }
+            if ((!mcpRoots.isEmpty() || mcpPin) && !mcp) {
+                throw new UsageException("--mcp-root and --mcp-pin go only with --mcp");
+            }
+            if (mcpPin && indexPath.isEmpty() && !help && !version) {
+                throw new UsageException("--mcp-pin needs the INDEX_PATH to serve");
+            }
+            if (mcpPin && !mcpRoots.isEmpty()) {
+                throw new UsageException("--mcp-pin takes no --mcp-root: the client opens no other index");
+            }
             if (!runtimes.isEmpty() && !downloadRuntimes) {
                 throw new UsageException("--runtime goes only with --download-runtimes");
             }
@@ -265,7 +292,9 @@ record Cli(
                     downloadRuntimes,
                     runtimes.stream().distinct().toList(),
                     theme,
-                    mcp);
+                    mcp,
+                    mcpRoots,
+                    mcpPin);
         }
 
         private static boolean flag(String name, Optional<String> inline) throws UsageException {

@@ -117,6 +117,15 @@ public final class Main {
                 return 1;
             }
         }
+        // Real paths, which open_index compares the real path of an index with (ADR 0102).
+        List<Path> mcpRoots = new ArrayList<>();
+        for (Path root : cli.mcpRoots()) {
+            if (!Files.isDirectory(root)) {
+                err.println("leia: --mcp-root " + root + ": no such directory");
+                return 1;
+            }
+            mcpRoots.add(root.toRealPath());
+        }
         // The runtimes come first (ADR 0044, ADR 0073, ADR 0098); the default folder's jars come
         // after those of --jar, which win a clash of names (ADR 0024).
         RuntimeFolders runtimeFolders = new RuntimeFolders(platform.runtimesDir());
@@ -127,7 +136,7 @@ public final class Main {
         try (LeiaLog.Opened log = LeiaLog.toFile(platform.logFile())) {
             LOG.info(() -> "leia started with " + List.of(args));
             if (cli.mcp()) {
-                return runMcp(cli, platform, runtimeFolders, defaultJars, jars, log, in, out, err);
+                return runMcp(cli, platform, runtimeFolders, defaultJars, jars, mcpRoots, log, in, out, err);
             }
             // In the log, which a broken theme of the user's goes to (ADR 0096).
             Themes themes = Themes.bundled().withUserDir(platform.themesDir());
@@ -189,6 +198,7 @@ public final class Main {
             RuntimeFolders runtimeFolders,
             DefaultJars defaultJars,
             List<Path> jars,
+            List<Path> mcpRoots,
             LeiaLog.Opened log,
             InputStream in,
             PrintStream out,
@@ -207,7 +217,8 @@ public final class Main {
             try (LeiaBackend started = backend.get()) {
                 VersionResult version =
                         started.call(Methods.VERSION, new VersionParams()).get();
-                McpServer server = new McpServer(started, version, cli.directory(), platform.home());
+                McpServer server =
+                        new McpServer(started, version, cli.directory(), platform.home(), mcpRoots, cli.mcpPin());
                 if (cli.indexPath().isPresent()) {
                     String path = cli.indexPath().get();
                     try {
