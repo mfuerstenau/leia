@@ -157,6 +157,40 @@ class McpServerTest {
     }
 
     @Test
+    void searchesWithTheAnalyzerOfTheField() throws Exception {
+        String keyword = "\"query\":\"id:doc-0042\",\"defaultField\":\"body\",\"fields\":[\"id\"]";
+
+        JsonNode standard = client.structured(1, "search", "{" + keyword + "}");
+        JsonNode named = client.structured(2, "search", "{" + keyword + ",\"analyzer\":\"KeywordAnalyzer\"}");
+        JsonNode perField = client.structured(
+                3,
+                "search",
+                "{" + keyword + ",\"fieldAnalyzers\":[{\"field\":\"id\",\"analyzer\":\"KeywordAnalyzer\"}]}");
+        JsonNode qualified = client.structured(
+                4, "search", "{" + keyword + ",\"analyzer\":\"org.apache.lucene.analysis.core.KeywordAnalyzer\"}");
+
+        assertThat(standard.path("totalHits").asLong()).isNotEqualTo(1);
+        assertThat(docIds(named)).containsExactly(42);
+        assertThat(docIds(perField)).containsExactly(42);
+        assertThat(docIds(qualified)).containsExactly(42);
+    }
+
+    @Test
+    void refusesAnUnknownAnalyzerAndOneWithATerm() throws Exception {
+        assertThat(client.error(
+                        1, "search", "{\"query\":\"lamp\",\"defaultField\":\"title\",\"analyzer\":\"NoSuchAnalyzer\"}"))
+                .startsWith("No analyzer NoSuchAnalyzer; there are ")
+                .contains("KeywordAnalyzer")
+                .endsWith("(INVALID_PARAMS)");
+        assertThat(client.error(
+                        2,
+                        "search",
+                        "{\"term\":{\"field\":\"id\",\"value\":\"doc-0042\"},\"analyzer\":\"KeywordAnalyzer\"}"))
+                .contains("go with query only")
+                .endsWith("(INVALID_PARAMS)");
+    }
+
+    @Test
     void searchesAnExactTerm() throws Exception {
         JsonNode result = client.structured(1, "search", "{\"term\":{\"field\":\"id\",\"value\":\"doc-0042\"}}");
 

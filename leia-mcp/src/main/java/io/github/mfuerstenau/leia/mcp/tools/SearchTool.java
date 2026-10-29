@@ -8,6 +8,9 @@ import io.github.mfuerstenau.leia.mcp.ToolError;
 import io.github.mfuerstenau.leia.mcp.ToolException;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.AvailableAnalyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsParams;
+import io.github.mfuerstenau.leia.protocol.analysis.PresetAnalyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.StandardAnalyzer;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.StoredType;
@@ -29,11 +32,14 @@ import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
+import java.util.stream.Collectors;
 
 /**
  * {@code search}: a page of the hits of a classic query or a term query, best score first, with
- * their stored values brief (ADR 0100). The parser, analyzer and similarity are the ones the search
- * screen starts with: Lucene's defaults, {@code StandardAnalyzer} and BM25.
+ * their stored values brief (ADR 0100). The parser and similarity are the ones the search screen
+ * starts with: Lucene's defaults and BM25. A query is analyzed with {@code StandardAnalyzer} unless
+ * {@code analyzer} and {@code fieldAnalyzers} name others, by class name with their default
+ * settings (ADR 0104).
  */
 final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Result> {
 
@@ -57,21 +63,16 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
 
     private static final int FUZZY_MAX_EDITS = 2;
 
-    private static final Analyzer STANDARD = new Analyzer(
-            Optional.of(new StandardAnalyzer()),
-            Optional.empty(),
-            Optional.empty(),
-            Optional.empty(),
-            Optional.empty(),
-            List.of(),
-            List.of());
+    private static final String STANDARD_ANALYZER = "StandardAnalyzer";
+
+    private static final Analyzer STANDARD = analyzer(Optional.of(new StandardAnalyzer()), Optional.empty(), List.of());
 
     private static final Similarity BM25 =
             new Similarity(Optional.of(new Bm25Similarity(1.2f, 0.75f)), Optional.empty(), Optional.empty());
 
     record Arguments(
-            @Description("A query in Lucene's classic syntax, such as title:lamp AND body:qu*, analyzed with"
-                    + " StandardAnalyzer. Give exactly one of query and term")
+            @Description("A query in Lucene's classic syntax, such as title:lamp AND body:qu*. Give"
+                    + " exactly one of query and term")
             Optional<String> query,
 
             @Description("A query for exactly one term, neither analyzed nor split: for keyword fields such as ids."
@@ -80,6 +81,13 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
 
             @Description("The field of the query's terms that name none; needed with query")
             Optional<String> defaultField,
+
+            @Description("The analyzer of query, by simple or class name, such as EnglishAnalyzer or KeywordAnalyzer;"
+                    + " StandardAnalyzer by default. Fields indexed with another need theirs")
+            Optional<String> analyzer,
+
+            @Description("Fields with an analyzer of their own, such as KeywordAnalyzer for ids")
+            Optional<List<FieldAnalyzer>> fieldAnalyzers,
 
             @Description("How clauses of the query without an operator combine; OR by default")
             Optional<QueryOperator> defaultOperator,
@@ -100,6 +108,8 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
 
             @Description("Whether to count every hit; otherwise counting stops after 1000; false by default")
             Optional<Boolean> exactTotalHits) {}
+
+    record FieldAnalyzer(String field, String analyzer) {}
 
     record Term(
             String field,
@@ -179,7 +189,7 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
 
     @Override
     public Result call(Arguments arguments, Call call) throws ToolException, Jobs.Cancelled {
-        SearchQuery query = query(arguments);
+        SearchQuery query = query(arguments, call);
         int offset = Slices.bounded("offset", arguments.offset(), 0, 0, StartSearchParams.MAX_WINDOW - 1);
         int limit = Slices.bounded("limit", arguments.limit(), DEFAULT_LIMIT, 1, MAX_LIMIT);
         int maxValueLength = Slices.bounded(
@@ -210,11 +220,14 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
         return result(results, offset, limit, maxValueLength, arguments.fields().isEmpty());
     }
 
-    private static SearchQuery query(Arguments arguments) throws ToolException {
+    private static SearchQuery query(Arguments arguments, Call call) throws ToolException, Jobs.Cancelled {
         if (arguments.query().isPresent() == arguments.term().isPresent()) {
             throw ToolError.invalid("Give exactly one of query and term");
         }
         if (arguments.term().isPresent()) {
+            if (arguments.analyzer().isPresent() || arguments.fieldAnalyzers().isPresent()) {
+                throw ToolError.invalid("analyzer and fieldAnalyzers go with query only: a term isn't analyzed");
+            }
             Term term = arguments.term().get();
             return new SearchQuery(
                     Optional.empty(),
@@ -238,7 +251,7 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
                 FUZZY_MAX_EDITS,
                 false,
                 false,
-                STANDARD);
+                analyzer(arguments, call));
         return new SearchQuery(
                 Optional.of(classic),
                 Optional.empty(),
@@ -246,6 +259,94 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty());
+    }
+
+    private static Analyzer analyzer(Arguments arguments, Call call) throws ToolException, Jobs.Cancelled {
+        if (arguments.analyzer().isEmpty() && arguments.fieldAnalyzers().isEmpty()) {
+            return STANDARD;
+        }
+        ClassNames names = new ClassNames(call);
+        Analyzer base =
+                arguments.analyzer().isPresent() ? preset(arguments.analyzer().get(), names) : STANDARD;
+        List<io.github.mfuerstenau.leia.protocol.analysis.FieldAnalyzer> fields = new ArrayList<>();
+        for (FieldAnalyzer field : arguments.fieldAnalyzers().orElse(List.of())) {
+            fields.add(new io.github.mfuerstenau.leia.protocol.analysis.FieldAnalyzer(
+                    field.field(), preset(field.analyzer(), names)));
+        }
+        return analyzer(base.standard(), base.preset(), fields);
+    }
+
+    private static Analyzer analyzer(
+            Optional<StandardAnalyzer> standard,
+            Optional<PresetAnalyzer> preset,
+            List<io.github.mfuerstenau.leia.protocol.analysis.FieldAnalyzer> fields) {
+        return new Analyzer(standard, preset, Optional.empty(), Optional.empty(), Optional.empty(), fields, List.of());
+    }
+
+    /** The analyzer of {@code name} with its default settings; {@code StandardAnalyzer} is the standard one. */
+    private static Analyzer preset(String name, ClassNames names) throws ToolException, Jobs.Cancelled {
+        if (name.equals(STANDARD_ANALYZER)) {
+            return STANDARD;
+        }
+        String className = name.indexOf('.') >= 0 ? name : names.resolve(name);
+        return analyzer(
+                Optional.empty(),
+                Optional.of(new PresetAnalyzer(
+                        className,
+                        Optional.empty(),
+                        Optional.empty(),
+                        OptionalInt.empty(),
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.empty(),
+                        Optional.empty())),
+                List.of());
+    }
+
+    /**
+     * The class names of the analyzers that {@code getAnalysisComponents} lists, fetched on first use
+     * (ADR 0104).
+     */
+    private static final class ClassNames {
+
+        private final Call call;
+        private List<AvailableAnalyzer> available;
+
+        ClassNames(Call call) {
+            this.call = call;
+        }
+
+        String resolve(String name) throws ToolException, Jobs.Cancelled {
+            if (available == null) {
+                try {
+                    available = call.call(Methods.GET_ANALYSIS_COMPONENTS, new GetAnalysisComponentsParams())
+                            .analyzers();
+                } catch (ToolException e) {
+                    if (e.getMessage().endsWith("(NOT_SUPPORTED)")) {
+                        // No Lucene 10 runtime to list them: the older runtimes take the simple name.
+                        available = List.of();
+                    } else {
+                        throw e;
+                    }
+                }
+            }
+            if (available.isEmpty()) {
+                return name;
+            }
+            List<AvailableAnalyzer> matches = available.stream()
+                    .filter(analyzer -> analyzer.name().equalsIgnoreCase(name))
+                    .toList();
+            if (matches.size() == 1) {
+                return matches.get(0).className();
+            }
+            if (matches.isEmpty()) {
+                throw ToolError.invalid("No analyzer " + name + "; there are "
+                        + available.stream().map(AvailableAnalyzer::name).collect(Collectors.joining(", ")));
+            }
+            throw ToolError.invalid("Several analyzers are called " + name + "; give the class name of one of "
+                    + matches.stream().map(AvailableAnalyzer::className).collect(Collectors.joining(", ")));
+        }
     }
 
     private static Result result(SearchResults results, int offset, int limit, int maxValueLength, boolean withBudget) {

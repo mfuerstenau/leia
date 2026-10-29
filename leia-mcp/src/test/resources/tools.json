@@ -373,7 +373,7 @@
         "properties": {
           "query": {
             "type": "string",
-            "description": "A query in Lucene's classic syntax, such as title:lamp AND body:qu*, analyzed with StandardAnalyzer. Give exactly one of query and term"
+            "description": "A query in Lucene's classic syntax, such as title:lamp AND body:qu*. Give exactly one of query and term"
           },
           "term": {
             "type": "object",
@@ -400,6 +400,30 @@
           "defaultField": {
             "type": "string",
             "description": "The field of the query's terms that name none; needed with query"
+          },
+          "analyzer": {
+            "type": "string",
+            "description": "The analyzer of query, by simple or class name, such as EnglishAnalyzer or KeywordAnalyzer; StandardAnalyzer by default. Fields indexed with another need theirs"
+          },
+          "fieldAnalyzers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "analyzer": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "field",
+                "analyzer"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Fields with an analyzer of their own, such as KeywordAnalyzer for ids"
           },
           "defaultOperator": {
             "type": "string",
