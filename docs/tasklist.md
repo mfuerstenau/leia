@@ -20,6 +20,30 @@ From the read-only checklist in `docs/luke-features.md` §7. Ordered roughly by 
 
 None open.
 
+## MCP mode — output size, then tools
+
+Goal: the tools cost an agent few tokens, then they answer why a query matches or not. Measured on the demo index (compact JSON, the text item): a default `search` of 10 hits is 45.6 KB (about 13k tokens), with `fields: [id, title]` 2.5 KB; `get_document` 6.2 KB, `index_info` 5.7 KB, `reconstruct_fields` of every field 7.3 KB; `tools/list` 5 KB of descriptions and input schemas. The output size comes first, in this order; each change updates `tools.json`.
+
+- [ ] Leave defaults out of the results: a value's `binary` and `cut` only when true and its `type` only when not `STRING` (`search`, `get_document`); `hasTermVector` only when true, and no empty `stored`, `numbers` and `values` (`get_document`); `docValuesType` `NONE`, a `pointDimensionCount` or `vectorDimension` of 0 and `hasTermVectors` false left out (`index_info`). They become `Optional*`, which `NON_ABSENT` leaves out (hard rule 3). Measured: search 45.6 → 32.6 KB, `index_info` about half.
+- [ ] A cheaper default of `search`'s `fields`: hits are for finding, `get_document` and `get_field_value` for reading. Cut a hit's values shorter than the backend's 256 bytes (about 100 characters), or bound a hit's fields by a budget with a `fieldsCut` flag; the description points to `fields`. Target: a default page of 10 hits at about 3k tokens.
+- [ ] `reconstruct_fields` without the terms when the text has them: `terms` (with freqs and positions) only with `withTerms`, or for a field without positions, where there is no `text`.
+- [ ] `get_document`'s numeric doc values decoded: a double or float field shows its sortable bits as a long (`price` 20.51 as `4626466269454464451`). Decode them when the stored type tells the encoding, or leave them out when they repeat the stored value.
+- [ ] Check which of `structuredContent` and the `text` item Claude Code gives the model; if both, the duplicate costs tokens too (ADR 0100 §3).
+
+Then the tools, each over a method the backend has; each checks the runtime's `features` and answers `NOT_SUPPORTED` without them. Short descriptions keep the cost of `tools/list` down.
+
+- [ ] `search` with the index's analyzer: an optional `analyzer` (a class name from `getAnalysisComponents`) and analyzers per field (`Analyzer.fields`), instead of `StandardAnalyzer` always, which finds nothing or the wrong documents on a field indexed with another analyzer.
+- [ ] `analyze`: the tokens of a text for an analyzer, or a field's (`analyze`, `getAnalysisComponents`).
+- [ ] `terms`: a field's terms a page at a time from a prefix (`getTerms`), or its top terms by document frequency (`startFieldTermScan`, a job). One tool, not two, for `tools/list`.
+- [ ] Numeric and date ranges in `search`: the classic parser makes no point queries, so `price:[10 TO 20]` on a point field finds nothing. `points` through the standard parser (`StandardQuery`, `PointField`), and a doc-values query (`DocValuesQuery`: values, range, prefix).
+- [ ] `sort` in `search`, by fields' doc values or the score (`SortKey`).
+- [ ] `explain`: why a document scores as it does, or doesn't match, with the search's query and similarity (`startExplain`).
+- [ ] `scan_stored`: a regular expression over the stored values (`startStoredScan`), for documents by fields that aren't indexed.
+- [ ] KNN in `search`: the nearest documents to a vector or a document's vector, with a filter (`KnnQuery`).
+- [ ] `check_index` (`startCheckIndex`), and the latest commit's user data in `index_info` (`getCommit`), such as Elasticsearch's history UUID and sequence numbers.
+
+Not planned: highlighting, the point tree and the KNN graph, the term export, filters, `addJars` and the runtimes, resources and prompts.
+
 ## Open prompt
 
 None open.
