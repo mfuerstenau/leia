@@ -29,6 +29,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -39,8 +42,10 @@ import tools.jackson.databind.node.ObjectNode;
 
 /**
  * MCP mode (ADR 0100): reads JSON-RPC requests from stdin, one per line, and answers on stdout.
- * The main thread reads and answers what needs no backend; the tool calls run one after the other
- * on the worker thread {@code leia-mcp}, through {@link LeiaBackend#call} as the UI's calls do.
+ * The main thread reads and answers what needs no backend; the tool calls run up to {@link
+ * #MAX_CALLS} at a time on the worker threads {@code leia-mcp-N}, through {@link LeiaBackend#call}
+ * as the UI's calls do, and a tool that is {@link McpTool#exclusive} alone (ADR 0101). Their calls
+ * of the backend take turns on its thread, and their jobs run side by side.
  */
 public final class McpServer {
 
@@ -49,7 +54,10 @@ public final class McpServer {
     /** The protocol versions leia knows, the latest last (ADR 0100 §1). */
     static final List<String> PROTOCOL_VERSIONS = List.of("2025-03-26", "2025-06-18", "2025-11-25");
 
-    /** How long the end of stdin waits for the request that runs to stop. */
+    /** The most tool calls that run at once; more wait for one of them to end (ADR 0101). */
+    static final int MAX_CALLS = 4;
+
+    /** How long the end of stdin waits for the requests that run to stop. */
     private static final Duration STOP_TIMEOUT = Duration.ofMinutes(1);
 
     static final String INSTRUCTIONS = """
@@ -67,8 +75,14 @@ public final class McpServer {
     /** The tool calls that wait or run, by the JSON of their id. */
     private final Map<String, Request> requests = new ConcurrentHashMap<>();
 
-    private final ExecutorService worker = Executors.newSingleThreadExecutor(
-            Thread.ofPlatform().daemon().name("leia-mcp").factory());
+    private final ExecutorService worker = Executors.newFixedThreadPool(
+            MAX_CALLS, Thread.ofPlatform().daemon().name("leia-mcp-", 1).factory());
+
+    /**
+     * Read by the tool calls, written by an exclusive one, which so runs while no other does; fair,
+     * so that a stream of calls doesn't keep it waiting.
+     */
+    private final ReadWriteLock calls = new ReentrantReadWriteLock(true);
 
     /**
      * @param version what {@code version} says, for {@code serverInfo}
@@ -115,8 +129,8 @@ public final class McpServer {
     }
 
     /**
-     * Answers the requests of {@code in} on {@code out} until {@code in} ends. Then the request that
-     * runs is cancelled, and those that wait are dropped (ADR 0100 §5).
+     * Answers the requests of {@code in} on {@code out} until {@code in} ends. Then the requests that
+     * run are cancelled, and those that wait are dropped (ADR 0100 §5).
      *
      * @return the exit status: 0
      */
@@ -136,7 +150,7 @@ public final class McpServer {
         requests.values().forEach(request -> request.cancelled.set(true));
         worker.shutdown();
         if (!worker.awaitTermination(STOP_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {
-            LOG.warning(() -> "The last request did not stop within " + STOP_TIMEOUT.toSeconds() + " s");
+            LOG.warning(() -> "The last requests did not stop within " + STOP_TIMEOUT.toSeconds() + " s");
         }
         return 0;
     }
@@ -223,9 +237,10 @@ public final class McpServer {
                 INSTRUCTIONS);
     }
 
-    /** Runs a {@code tools/call} on the worker thread, and answers it unless it was cancelled. */
-    // A LinkageError of a runtime must still be answered (ADR 0088)
-    @SuppressWarnings("java:S1181")
+    /**
+     * Runs a {@code tools/call} on a worker thread, once no exclusive tool runs, or for an exclusive
+     * one once no other runs, and answers it unless it was cancelled.
+     */
     private void callTool(Request request, JsonNode params, Output output) {
         String name = params.path("name").asString("");
         Optional<McpTool<?, ?>> tool = tools.stream()
@@ -235,12 +250,30 @@ public final class McpServer {
             output.send(Messages.error(request.id, Messages.INVALID_PARAMS, "Unknown tool: " + name));
             return;
         }
-        JsonNode arguments = params.path("arguments");
+        Lock lock = tool.get().exclusive() ? calls.writeLock() : calls.readLock();
+        lock.lock();
+        try {
+            // It may have been cancelled while it waited for the lock.
+            if (request.cancelled.get()) {
+                LOG.info(() -> "Request " + request.id + " cancelled; no answer");
+                return;
+            }
+            callTool(request, tool.get(), params.path("arguments"), output);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** Runs {@code tool} under its lock. */
+    // A LinkageError of a runtime must still be answered (ADR 0088)
+    @SuppressWarnings("java:S1181")
+    private void callTool(Request request, McpTool<?, ?> tool, JsonNode arguments, Output output) {
+        String name = tool.name();
         LOG.info(() -> "tools/call " + name + " " + (arguments.isMissingNode() ? "{}" : arguments));
         Messages.CallToolResult result;
         try {
             JsonNode given = arguments.isMissingNode() ? Messages.MAPPER.createObjectNode() : arguments;
-            result = success(run(tool.get(), given, new RequestCall(request, output)));
+            result = success(run(tool, given, new RequestCall(request, output)));
         } catch (ToolException e) {
             result = failure(e.getMessage());
         } catch (Jobs.Cancelled _) {

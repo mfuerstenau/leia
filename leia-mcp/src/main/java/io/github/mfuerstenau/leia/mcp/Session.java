@@ -16,7 +16,7 @@ public final class Session {
     private final DirectoryImpl defaultDirectory;
     private final Optional<Path> home;
 
-    /** Set by the worker thread, or before the loop starts. */
+    /** Set by {@code open_index}, which runs alone (ADR 0101), or before the loop starts. */
     // An immutable value, published through volatile (ADR 0088)
     @SuppressWarnings("java:S3077")
     private volatile Optional<OpenIndexResult> opened = Optional.empty();

@@ -19,6 +19,14 @@ public interface McpTool<A extends Record, R extends Record> {
     Class<R> result();
 
     /**
+     * Whether the tool changes what the other calls read, such as the open index, and so runs while
+     * no other call does (ADR 0101).
+     */
+    default boolean exclusive() {
+        return false;
+    }
+
+    /**
      * Calls the backend for {@code arguments}.
      *
      * @throws ToolException for an expected failure or bad arguments, which the agent sees

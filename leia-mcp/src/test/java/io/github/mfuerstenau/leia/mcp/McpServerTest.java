@@ -7,6 +7,7 @@ import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.index.CloseIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
+import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.search.Bm25Similarity;
 import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
 import io.github.mfuerstenau.leia.protocol.search.Similarity;
@@ -336,7 +337,8 @@ class McpServerTest {
                                 .path("progressToken")
                                 .asString("")
                                 .equals("p"));
-        assertThat(blocking.cancelled).isTrue();
+        // index_info doesn't wait for it: the calls run side by side (ADR 0101).
+        assertThat(blocking.cancelled.await(30, TimeUnit.SECONDS)).isTrue();
     }
 
     @Test
@@ -354,12 +356,54 @@ class McpServerTest {
 
         assertThat(client.end()).isZero();
         assertThat(client.received()).isEmpty();
-        assertThat(blocking.cancelled).isTrue();
+        assertThat(blocking.cancelled.await(30, TimeUnit.SECONDS)).isTrue();
+    }
+
+    @Test
+    void answersACallWhileAnotherWaitsForItsJob() throws Exception {
+        client.send(call(1, "blocking", "{}"));
+        assertThat(blocking.polled.await(30, TimeUnit.SECONDS)).isTrue();
+
+        JsonNode found = client.structured(
+                2, "search", "{\"term\":{\"field\":\"id\",\"value\":\"doc-0001\"},\"fields\":[\"id\"]}");
+
+        assertThat(found.path("totalHits").asLong()).isEqualTo(1);
+        assertThat(client.received())
+                .noneMatch(message -> message.path("id").isIntegralNumber()
+                        && message.path("id").asInt() == 1);
+    }
+
+    @Test
+    void opensAnIndexOnlyOnceTheOtherCallsHaveEnded() throws Exception {
+        client.send(callWithArguments(1, "blocking", "{\"finish\":true}"));
+        assertThat(blocking.polled.await(30, TimeUnit.SECONDS)).isTrue();
+        client.send(callWithArguments(2, "open_index", "{\"path\":\"" + demo + "\"}"));
+        // Time for open_index to replace the index, and so stop the job of 1, if it didn't wait.
+        Thread.sleep(200);
+        blocking.release.countDown();
+
+        JsonNode first = client.answer(1);
+        assertThat(client.received())
+                .noneMatch(message -> message.path("id").isIntegralNumber()
+                        && message.path("id").asInt() == 2);
+        JsonNode second = client.answer(2);
+
+        assertThat(first.path("result").path("isError").asBoolean())
+                .as(first.toString())
+                .isFalse();
+        assertThat(second.path("result").path("isError").asBoolean())
+                .as(second.toString())
+                .isFalse();
     }
 
     private static String initialize(String protocolVersion) {
         return "{\"protocolVersion\":\"" + protocolVersion
                 + "\",\"capabilities\":{},\"clientInfo\":{\"name\":\"test\",\"version\":\"0\"}}";
+    }
+
+    private static String callWithArguments(int id, String tool, String arguments) {
+        return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"method\":\"tools/call\",\"params\":{\"name\":\"" + tool
+                + "\",\"arguments\":" + arguments + "}}";
     }
 
     private static String call(int id, String tool, String extra) {
@@ -376,17 +420,18 @@ class McpServerTest {
 
     /**
      * A tool over a search job whose first poll waits for {@link #release}, and which is never done:
-     * it ends only by cancellation.
+     * it ends only by cancellation. With {@code finish}, it waits for {@link #release} between
+     * starting the job and polling it once, and is done then; the poll fails if the job was stopped.
      */
     static final class BlockingTool implements McpTool<BlockingTool.Arguments, BlockingTool.Result> {
 
-        record Arguments() {}
+        record Arguments(Optional<Boolean> finish) {}
 
         record Result() {}
 
         final CountDownLatch polled = new CountDownLatch(1);
         final CountDownLatch release = new CountDownLatch(1);
-        volatile boolean cancelled;
+        final CountDownLatch cancelled = new CountDownLatch(1);
 
         @Override
         public String name() {
@@ -425,6 +470,17 @@ class McpServerTest {
                     false,
                     Optional.of(List.of()),
                     Optional.empty());
+            if (arguments.finish().orElse(false)) {
+                long jobId = call.call(Methods.START_SEARCH, params).jobId();
+                polled.countDown();
+                try {
+                    release.await();
+                } catch (InterruptedException _) {
+                    Thread.currentThread().interrupt();
+                }
+                call.call(Methods.GET_SEARCH, new JobParams(jobId));
+                return new Result();
+            }
             try {
                 return call.job(
                         Methods.START_SEARCH,
@@ -441,7 +497,7 @@ class McpServerTest {
                         },
                         poll -> new Jobs.Progress(poll.docsSearched(), OptionalLong.empty()));
             } catch (Jobs.Cancelled e) {
-                cancelled = true;
+                cancelled.countDown();
                 throw e;
             }
         }

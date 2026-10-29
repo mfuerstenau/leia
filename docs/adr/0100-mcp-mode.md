@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-25
 - **Amends:** ADR 0034 (§7, where stdout and stderr go); AGENTS.md, hard rules 2 and 4 and the CLI contract
+- **Amended by:** ADR 0101 (§5, concurrent tool calls)
 
 ## Context
 
@@ -35,7 +36,7 @@ A coding agent that works on code using Lucene, Elasticsearch or OpenSearch ofte
    - A cancelled request gets no answer, as MCP has it. One past the limit gets `isError`.
 5. **Threads.**
    - The main thread reads stdin, and handles `notifications/cancelled` itself.
-   - Requests run one at a time, in order, on one worker thread `leia-mcp`. The backend serializes its calls anyway.
+   - Requests run one at a time, in order, on one worker thread `leia-mcp`. The backend serializes its calls anyway. *Amended by ADR 0101: up to four tool calls run at a time, on a pool of workers, and `open_index` alone; the backend keeps its one thread.*
    - Writes to stdout are synchronized, and flushed after each line.
    - On stdin EOF, the job of the request that runs is cancelled, the requests that wait are dropped, the backend is closed, and leia exits with 0.
 6. **Limits.** Every tool bounds its output, by the limits below. Each is a named constant in its tool's class. A value over a maximum is refused with `isError`, not cut down silently.

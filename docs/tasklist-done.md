@@ -452,3 +452,4 @@ Goal: the runtimes are downloaded from within leia's UI, and `--download-runtime
   - [x] `search`: a classic query or an exact term, hits brief with their stored values, paging by `offset` and `nextOffset`, at most 100 a page.
   - [x] `get_document`: a document by id, values cut at 2,048 characters by default with their full length, doc values and vectors bounded.
   - [x] `get_field_value` and `reconstruct_fields`: a stored value whole in slices (`getStoredValue`), and the terms and points of the fields that aren't stored, with their text in position order (`startReconstruct` / `getReconstruct`).
+- [x] Concurrent tool calls (ADR 0101): up to four tool calls run at a time on the workers `leia-mcp-N`, so that parallel subagents don't wait for each other's jobs; `open_index`, `McpTool.exclusive()`, runs alone behind a fair read/write lock, since replacing the index stops every job. `LeiaBackend` keeps its one thread.

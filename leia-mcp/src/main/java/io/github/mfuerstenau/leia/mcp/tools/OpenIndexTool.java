@@ -45,6 +45,12 @@ final class OpenIndexTool implements McpTool<OpenIndexTool.Arguments, IndexInfoT
         return IndexInfoTool.Result.class;
     }
 
+    /** It replaces the index, which stops the jobs of the other calls. */
+    @Override
+    public boolean exclusive() {
+        return true;
+    }
+
     @Override
     public IndexInfoTool.Result call(Arguments arguments, Call call) throws ToolException, Jobs.Cancelled {
         OpenIndexResult opened = call.call(
