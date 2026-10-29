@@ -20,15 +20,6 @@ From the read-only checklist in `docs/luke-features.md` §7. Ordered roughly by 
 
 None open.
 
-## MCP mode
-
-Goal: `leia --mcp` serves an index to an MCP client (a coding agent) instead of starting the TUI, through the same backend and protocol records as the UI (`LeiaBackend.call`). Read-only like the rest; on stdio, stdout belongs to the MCP protocol, so logs stay in `leia.log`. Needs an ADR (transport, tool shapes, jobs behind one call, limits on result size).
-
-- [ ] Start an MCP server with `--mcp` (`leia --mcp [INDEX_PATH]`), with the first capabilities:
-  - [ ] Search with a query and browse the results: hits brief, as the documents screen shows them, with paging (`startSearch` / `getSearch`).
-  - [ ] Query documents by id (`getDocument`).
-  - [ ] Query a document's field values, and reconstruct the fields that aren't stored (`getStoredValue`, `startReconstruct` / `getReconstruct`).
-
 ## Open prompt
 
 None open.

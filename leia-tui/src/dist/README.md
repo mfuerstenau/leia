@@ -133,6 +133,7 @@ leia [OPTIONS] [INDEX_PATH]
 | `--directory <fs\|mmap\|nio>` | the Lucene `Directory` to read through: `fs` (default) lets Lucene choose, `mmap` is `MMapDirectory`, `nio` is `NIOFSDirectory`; `Ctrl+D` in the open prompt changes it |
 | `--no-reader` | open `INDEX_PATH` without a reader, for an index a reader can't open: only its commits and the check work; `Ctrl+N` in the open prompt does the same |
 | `--theme <NAME>` | the colours: `dark` (default) is the terminal's own, `light` reads on a light background, `mono` has none, `nord` is the Nord palette and `solarized-dark` and `solarized-light` are Solarized, each on its own background, and they need a terminal with 24-bit colour; or a theme of your own (see [Themes of your own](#themes-of-your-own)). Without it: `mono` if the environment variable `NO_COLOR` is set and not empty, else the theme chosen last with `T`, else `dark` |
+| `--mcp` | serve `INDEX_PATH` to an MCP client, such as a coding agent, instead of starting the terminal UI (see [MCP mode](#mcp-mode)) |
 | `--download-runtimes` | install the runtimes of `--runtime` without asking, then exit; takes no other option |
 | `--runtime <FOLDER>` | with `--download-runtimes`, a runtime to install: `lucene10`, `lucene9`, `lucene7`, `lucene5` or `lucene3`; repeatable |
 | `-V, --version` | print the version and build of leia, and the Java in use |
@@ -178,6 +179,34 @@ A shard's index is `indices/<uuid>/<shard>/index` (`nodes/0/indices/…` for Ope
 server's data folder. Stop the node or copy the shard first. A screen that the server's Lucene
 can't do, for an older minor than leia's runtime is built for, says so, and below Lucene 9.5
 (Elasticsearch 8.7) there are no KNN vectors or highlighting. OpenSearch's k-NN plugin (`plugins/opensearch-knn`) is loaded too, so its `knn_vector` shards read; other plugins' formats aren't.
+
+## MCP mode
+
+`leia --mcp [INDEX_PATH]` serves an index to an MCP client, such as a coding agent, instead of
+starting the terminal UI. The client starts leia and speaks the Model Context Protocol with it on
+stdin and stdout; leia's log goes to `leia.log`, as always. It reads only, like the UI, and opens
+every index the UI opens. For Claude Code:
+
+```sh
+claude mcp add leia -- /path/to/leia --mcp /path/to/index
+```
+
+Other clients take the same command and arguments in their configuration of an MCP server. The
+tools:
+
+| Tool | What it does |
+|---|---|
+| `open_index` | opens an index in place of the open one; without `INDEX_PATH`, the agent opens one with it |
+| `index_info` | the open index: the Lucene that reads it, its document counts, its fields and how each is indexed |
+| `search` | a page of hits, best score first, with their stored values brief: a query in Lucene's classic syntax, or one exact term, such as an id |
+| `get_document` | a document by its id: per field its stored values, cut when long, doc values, norm and KNN vector |
+| `get_field_value` | one stored value whole, in slices |
+| `reconstruct_fields` | the terms and points a document was indexed with, also in the fields that aren't stored, with the terms in position order |
+
+`--jar`, `--server`, `--no-default-jars` and `--directory` work as for the UI. If `INDEX_PATH`
+can't be opened, leia says why and exits with 1. Each result is bounded: a page has at most 100
+hits, a value shows 2,048 characters unless the agent asks for more, and a search or rebuild that
+takes longer than 5 minutes is cancelled.
 
 ## Keys
 

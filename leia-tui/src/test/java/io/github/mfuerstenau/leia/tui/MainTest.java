@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.tui;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -196,6 +197,43 @@ class MainTest {
         assertThat(run()).isEqualTo(1);
 
         assertThat(err()).contains("leia: Cannot load the jars: ", jarsDir.toString(), "--no-default-jars");
+    }
+
+    @Test
+    void reportsAnIndexPathThatMcpModeCantOpen() throws Exception {
+        Path missing = tmp.resolve("missing");
+
+        assertThat(run("--mcp", missing.toString())).isEqualTo(1);
+
+        assertThat(err()).contains("leia: cannot open " + missing, "INDEX_NOT_FOUND");
+        assertThat(out()).isEmpty();
+    }
+
+    @Test
+    void speaksOnlyMcpOnStdoutAndEndsWithStdin() throws Exception {
+        String initialize = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":"
+                + "{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},"
+                + "\"clientInfo\":{\"name\":\"test\",\"version\":\"0\"}}}\n"
+                + "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n"
+                + "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\"}\n";
+
+        int status = Main.run(
+                new String[] {"--mcp"},
+                new ByteArrayInputStream(initialize.getBytes(StandardCharsets.UTF_8)),
+                new PrintStream(out, true, StandardCharsets.UTF_8),
+                new PrintStream(err, true, StandardCharsets.UTF_8),
+                platform);
+
+        assertThat(status).isZero();
+        assertThat(out().lines().toList())
+                .hasSize(2)
+                .allSatisfy(line -> assertThat(line).startsWith("{\"jsonrpc\":\"2.0\",\"id\":"))
+                .satisfies(lines -> {
+                    assertThat(lines.get(0)).contains("\"protocolVersion\":\"2025-06-18\"");
+                    assertThat(lines.get(1)).isEqualTo("{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}");
+                });
+        assertThat(err()).isEmpty();
+        assertThat(Files.readString(logFile)).contains("MCP mode", "stdin ended");
     }
 
     private int run(String... args) throws Exception {

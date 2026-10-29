@@ -1,0 +1,261 @@
+package io.github.mfuerstenau.leia.mcp.tools;
+
+import io.github.mfuerstenau.leia.mcp.Call;
+import io.github.mfuerstenau.leia.mcp.Description;
+import io.github.mfuerstenau.leia.mcp.Jobs;
+import io.github.mfuerstenau.leia.mcp.McpTool;
+import io.github.mfuerstenau.leia.mcp.ToolError;
+import io.github.mfuerstenau.leia.mcp.ToolException;
+import io.github.mfuerstenau.leia.protocol.Methods;
+import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
+import io.github.mfuerstenau.leia.protocol.analysis.StandardAnalyzer;
+import io.github.mfuerstenau.leia.protocol.document.BytesValue;
+import io.github.mfuerstenau.leia.protocol.document.StoredType;
+import io.github.mfuerstenau.leia.protocol.document.StoredValue;
+import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
+import io.github.mfuerstenau.leia.protocol.search.Bm25Similarity;
+import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
+import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
+import io.github.mfuerstenau.leia.protocol.search.ParserOptions;
+import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
+import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
+import io.github.mfuerstenau.leia.protocol.search.SearchResults;
+import io.github.mfuerstenau.leia.protocol.search.Similarity;
+import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
+import io.github.mfuerstenau.leia.protocol.search.TermQuery;
+import io.github.mfuerstenau.leia.protocol.search.TotalHitsRelation;
+import java.util.List;
+import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.OptionalLong;
+
+/**
+ * {@code search}: a page of the hits of a classic query or a term query, best score first, with
+ * their stored values brief (ADR 0100). The parser, analyzer and similarity are the ones the search
+ * screen starts with: Lucene's defaults, {@code StandardAnalyzer} and BM25.
+ */
+final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Result> {
+
+    static final int DEFAULT_LIMIT = 10;
+
+    /** The most hits of a page. */
+    static final int MAX_LIMIT = 100;
+
+    /** Lucene's defaults of the classic parser, as the search screen starts with them. */
+    private static final ParserOptions PARSER_DEFAULTS =
+            new ParserOptions(false, 0, 0, true, Optional.empty(), List.of(), Optional.empty(), Optional.empty());
+
+    private static final int FUZZY_MAX_EDITS = 2;
+
+    private static final Analyzer STANDARD = new Analyzer(
+            Optional.of(new StandardAnalyzer()),
+            Optional.empty(),
+            Optional.empty(),
+            Optional.empty(),
+            Optional.empty(),
+            List.of(),
+            List.of());
+
+    private static final Similarity BM25 =
+            new Similarity(Optional.of(new Bm25Similarity(1.2f, 0.75f)), Optional.empty(), Optional.empty());
+
+    record Arguments(
+            @Description("A query in Lucene's classic syntax, such as title:lamp AND body:qu*, analyzed with"
+                    + " StandardAnalyzer. Give exactly one of query and term")
+            Optional<String> query,
+
+            @Description("A query for exactly one term, neither analyzed nor split: for keyword fields such as ids."
+                    + " Give exactly one of query and term")
+            Optional<Term> term,
+
+            @Description("The field of the query's terms that name none; needed with query")
+            Optional<String> defaultField,
+
+            @Description("How clauses of the query without an operator combine; OR by default")
+            Optional<QueryOperator> defaultOperator,
+
+            @Description("The stored fields to show per hit; all of them by default, [] for none")
+            Optional<List<String>> fields,
+
+            @Description("How many hits to skip, for the next page: the nextOffset of the last page; 0 by default")
+            OptionalInt offset,
+
+            @Description("The most hits of the page, from 1 to " + MAX_LIMIT + "; " + DEFAULT_LIMIT + " by default")
+            OptionalInt limit,
+
+            @Description("Whether to count every hit; otherwise counting stops after 1000; false by default")
+            Optional<Boolean> exactTotalHits) {}
+
+    record Term(
+            String field,
+
+            @Description("The term as text, or in hex with binary")
+            String value,
+
+            @Description("Whether value is the term's bytes in hex; false by default")
+            Optional<Boolean> binary) {}
+
+    record Result(
+            @Description("The query as Lucene writes it") String query,
+            @Description("The query after rewriting") String rewrittenQuery,
+            long totalHits,
+
+            @Description("Whether totalHits is exact (EQUAL_TO) or a lower bound")
+            TotalHitsRelation totalHitsRelation,
+
+            int offset,
+
+            @Description("The offset of the next page; absent on the last page")
+            OptionalInt nextOffset,
+
+            long tookMillis,
+
+            @Description("The hits of the page, best score first")
+            List<Hit> hits) {}
+
+    record Hit(
+            @Description("The document id, for get_document")
+            int docId,
+
+            float score,
+
+            @Description("The hit's stored values, in the order of each field's first value")
+            List<HitField> fields) {}
+
+    record HitField(String name, List<HitValue> values) {}
+
+    record HitValue(
+            StoredType type,
+
+            @Description("The value; numbers in decimal; binary values as text if they are UTF-8, else in hex")
+            String value,
+
+            @Description("Whether value is in hex") boolean binary,
+
+            @Description("Whether value is cut at 256 bytes; get_field_value has it whole")
+            boolean cut) {}
+
+    @Override
+    public String name() {
+        return "search";
+    }
+
+    @Override
+    public String description() {
+        return "Search the open index, best score first, a page at a time: each hit with its document id, score and"
+                + " stored values brief. Give a query in Lucene's classic syntax with a defaultField, or a term for an"
+                + " exact keyword. For the next page, call it again with the result's nextOffset.";
+    }
+
+    @Override
+    public Class<Arguments> arguments() {
+        return Arguments.class;
+    }
+
+    @Override
+    public Class<Result> result() {
+        return Result.class;
+    }
+
+    @Override
+    public Result call(Arguments arguments, Call call) throws ToolException, Jobs.Cancelled {
+        SearchQuery query = query(arguments);
+        int offset = Slices.bounded("offset", arguments.offset(), 0, 0, StartSearchParams.MAX_WINDOW - 1);
+        int limit = Slices.bounded("limit", arguments.limit(), DEFAULT_LIMIT, 1, MAX_LIMIT);
+        if (offset + limit > StartSearchParams.MAX_WINDOW) {
+            throw ToolError.invalid("offset + limit must be at most " + StartSearchParams.MAX_WINDOW
+                    + ": a search pages that far only");
+        }
+        StartSearchParams params = new StartSearchParams(
+                query,
+                BM25,
+                List.of(),
+                offset,
+                limit,
+                arguments.exactTotalHits().orElse(false),
+                arguments.fields(),
+                Optional.empty());
+        // The documents of the index, of which the search goes through the segments' share.
+        OptionalInt maxDoc =
+                call.session().opened().map(OpenIndexResult::maxDoc).orElseGet(OptionalInt::empty);
+        OptionalLong total = maxDoc.isPresent() ? OptionalLong.of(maxDoc.getAsInt()) : OptionalLong.empty();
+        SearchResults results = call.job(
+                Methods.START_SEARCH,
+                params,
+                Methods.GET_SEARCH,
+                GetSearchResult::results,
+                poll -> new Jobs.Progress(poll.docsSearched(), total));
+        return result(results, offset, limit);
+    }
+
+    private static SearchQuery query(Arguments arguments) throws ToolException {
+        if (arguments.query().isPresent() == arguments.term().isPresent()) {
+            throw ToolError.invalid("Give exactly one of query and term");
+        }
+        if (arguments.term().isPresent()) {
+            Term term = arguments.term().get();
+            return new SearchQuery(
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.of(new TermQuery(
+                            term.field(),
+                            new BytesValue(term.value(), term.binary().orElse(false)))),
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.empty());
+        }
+        String defaultField = arguments
+                .defaultField()
+                .orElseThrow(
+                        () -> ToolError.invalid("A query needs a defaultField: the field of terms that name none"));
+        ClassicQuery classic = new ClassicQuery(
+                arguments.query().get(),
+                defaultField,
+                arguments.defaultOperator().orElse(QueryOperator.OR),
+                PARSER_DEFAULTS,
+                FUZZY_MAX_EDITS,
+                false,
+                false,
+                STANDARD);
+        return new SearchQuery(
+                Optional.of(classic),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.empty());
+    }
+
+    private static Result result(SearchResults results, int offset, int limit) {
+        int next = offset + results.hits().size();
+        boolean more = results.hits().size() == limit
+                && next < StartSearchParams.MAX_WINDOW
+                && (results.totalHitsRelation() == TotalHitsRelation.GREATER_THAN_OR_EQUAL_TO
+                        || next < results.totalHits());
+        return new Result(
+                results.query(),
+                results.rewrittenQuery(),
+                results.totalHits(),
+                results.totalHitsRelation(),
+                offset,
+                more ? OptionalInt.of(next) : OptionalInt.empty(),
+                results.tookMillis(),
+                results.hits().stream()
+                        .map(hit -> new Hit(
+                                hit.docId(),
+                                hit.score(),
+                                hit.fields().stream()
+                                        .map(field -> new HitField(
+                                                field.name(),
+                                                field.values().stream()
+                                                        .map(SearchTool::value)
+                                                        .toList()))
+                                        .toList()))
+                        .toList());
+    }
+
+    private static HitValue value(StoredValue value) {
+        return new HitValue(
+                value.type(), value.value(), value.binary(), value.fullLength().isPresent());
+    }
+}

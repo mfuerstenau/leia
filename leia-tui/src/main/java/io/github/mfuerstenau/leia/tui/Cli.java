@@ -29,6 +29,9 @@ import java.util.Optional;
  *     runtimes' folders to install without asking, each one leia knows (ADR 0079, ADR 0080)
  * @param theme {@code --theme}, the colour theme (ADR 0095): a name that {@link Main} checks
  *     against the themes, since the user's own are known only once their folder is read (ADR 0096)
+ * @param mcp {@code --mcp}: serve {@code INDEX_PATH} to an MCP client on stdin and stdout instead
+ *     of starting the TUI (ADR 0100); with neither {@code --download-runtimes}, {@code --runtime},
+ *     {@code --theme} nor {@code --no-reader}
  */
 record Cli(
         boolean help,
@@ -41,7 +44,8 @@ record Cli(
         Optional<String> indexPath,
         boolean downloadRuntimes,
         List<String> runtimes,
-        Optional<String> theme) {
+        Optional<String> theme,
+        boolean mcp) {
 
     static final String USAGE = "Usage: leia [OPTIONS] [INDEX_PATH]";
 
@@ -113,6 +117,12 @@ record Cli(
                       ~/.config/leia/themes. Without it, mono if NO_COLOR is set, else the theme
                       chosen last with T on the start screen, else dark [possible values: dark,
                       light, mono, nord, solarized-dark, solarized-light, or a theme of your own]
+                  --mcp
+                      Serve INDEX_PATH to an MCP client, such as a coding agent, on stdin and
+                      stdout instead of starting the terminal UI: tools that search, show
+                      documents and their whole values, and rebuild the fields that aren't
+                      stored. Without INDEX_PATH, the client opens one with open_index. Goes with
+                      --jar, --server, --no-default-jars and --directory; logs go to leia.log
               -V, --version
                       Print the version and build of leia, and the Java version in use
               -h, --help
@@ -167,6 +177,7 @@ record Cli(
         private boolean downloadRuntimes;
         private final List<String> runtimes = new ArrayList<>();
         private Optional<String> theme = Optional.empty();
+        private boolean mcp;
 
         Parser(String[] args) {
             this.args = args;
@@ -198,6 +209,7 @@ record Cli(
                 case "--no-default-jars" -> noDefaultJars = flag(name, inline);
                 case "--no-reader" -> noReader = flag(name, inline);
                 case "--download-runtimes" -> downloadRuntimes = flag(name, inline);
+                case "--mcp" -> mcp = flag(name, inline);
                 case "--jar" -> jars.add(path(name, value(name, inline, "<PATH>")));
                 case "--server" -> servers.add(path(name, value(name, inline, "<PATH>")));
                 case "--runtime" -> runtimes.add(runtime(value(name, inline, "<FOLDER>")));
@@ -230,6 +242,10 @@ record Cli(
                 throw new UsageException("--download-runtimes takes no INDEX_PATH and none of --jar, --server,"
                         + " --no-default-jars, --directory, --no-reader, --theme");
             }
+            if (mcp && (downloadRuntimes || !runtimes.isEmpty() || theme.isPresent() || noReader)) {
+                throw new UsageException("--mcp takes none of --download-runtimes, --runtime, --theme, --no-reader:"
+                        + " an MCP client reads an index only with a reader");
+            }
             if (!runtimes.isEmpty() && !downloadRuntimes) {
                 throw new UsageException("--runtime goes only with --download-runtimes");
             }
@@ -248,7 +264,8 @@ record Cli(
                     indexPath,
                     downloadRuntimes,
                     runtimes.stream().distinct().toList(),
-                    theme);
+                    theme,
+                    mcp);
         }
 
         private static boolean flag(String name, Optional<String> inline) throws UsageException {

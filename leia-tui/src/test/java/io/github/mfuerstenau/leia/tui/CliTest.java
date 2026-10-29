@@ -29,7 +29,20 @@ class CliTest {
                         Optional.empty(),
                         false,
                         java.util.List.of(),
-                        Optional.empty()));
+                        Optional.empty(),
+                        false));
+    }
+
+    @Test
+    void parsesMcpMode() throws Exception {
+        assertThat(Cli.parse("--mcp", "--directory", "nio", "--jar", "icu", "/data/index"))
+                .satisfies(cli -> {
+                    assertThat(cli.mcp()).isTrue();
+                    assertThat(cli.indexPath()).hasValue("/data/index");
+                    assertThat(cli.directory()).isEqualTo(DirectoryImpl.NIO);
+                });
+        assertThat(Cli.parse("--mcp").indexPath()).isEmpty();
+        assertThat(Cli.parse().mcp()).isFalse();
     }
 
     @Test
@@ -132,6 +145,11 @@ class CliTest {
             --download-runtimes --runtime | --runtime needs a value <FOLDER>
             --theme                     | --theme needs a value <THEME>
             --download-runtimes --runtime lucene9 --theme nord | --download-runtimes takes no INDEX_PATH and none of --jar, --server, --no-default-jars, --directory, --no-reader, --theme
+            --mcp=yes                   | --mcp takes no value
+            --mcp --no-reader /a        | --mcp takes none of --download-runtimes, --runtime, --theme, --no-reader
+            --mcp --theme nord          | --mcp takes none of
+            --mcp --runtime lucene9     | --mcp takes none of
+            --mcp --download-runtimes --runtime lucene9 | --mcp takes none of
             -j /opt/jdk                 | -j is taken by the leia script
             --java=/opt/jdk             | --java is taken by the leia script
             """)
@@ -153,6 +171,7 @@ class CliTest {
                         "--download-runtimes",
                         "--runtime <FOLDER>",
                         "--theme <THEME>",
+                        "--mcp",
                         "NO_COLOR",
                         "repo1.maven.org",
                         "SHA-256",

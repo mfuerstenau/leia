@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.tui;
 
 import dev.tamboui.tui.TuiConfig;
 import dev.tamboui.tui.TuiRunner;
+import io.github.mfuerstenau.leia.mcp.McpServer;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
 import io.github.mfuerstenau.leia.protocol.jars.GetRuntimesParams;
@@ -23,6 +24,7 @@ import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.theme.Theme;
 import io.github.mfuerstenau.leia.tui.theme.ThemeFile;
 import io.github.mfuerstenau.leia.tui.theme.Themes;
+import java.io.InputStream;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -37,9 +39,10 @@ import java.util.logging.Logger;
 
 /**
  * Starts leia, after {@link Launcher} has checked the Java version: parses the command line, loads
- * the jars and servers into the backend and runs the TUI (ADR 0034). Until the TUI takes the
- * terminal, problems go to stderr, and exit with a non-zero status; after that, everything goes into
- * {@code leia.log} (§7).
+ * the jars and servers into the backend and runs the TUI (ADR 0034), or with {@code --mcp} serves
+ * the index to an MCP client on stdin and stdout (ADR 0100). Until the TUI takes the terminal, or
+ * the MCP loop starts, problems go to stderr, and exit with a non-zero status; after that,
+ * everything goes into {@code leia.log} (§7).
  *
  * <p>With {@code -Dleia.exitAfterFirstFrame=true} it quits as soon as the first frame is on
  * the screen and prints the startup times, so that they can be measured without a person.
@@ -53,18 +56,25 @@ public final class Main {
     // The CLI's own output (ADR 0088)
     @SuppressWarnings("java:S106")
     public static void main(String[] args) throws Exception {
-        int status = run(args, System.out, System.err, Platform.current());
+        int status = run(args, System.in, System.out, System.err, Platform.current());
         if (status != 0) {
             System.exit(status);
         }
     }
 
+    /** As {@link #run(String[], InputStream, PrintStream, PrintStream, Platform)}, with an empty stdin. */
+    static int run(String[] args, PrintStream out, PrintStream err, Platform platform) throws Exception {
+        return run(args, InputStream.nullInputStream(), out, err, platform);
+    }
+
     /**
      * Runs leia with the command line {@code args}.
      *
+     * @param in stdin, which only MCP mode reads (ADR 0100)
      * @return the exit status: 0, 1 for a failure, 2 for a wrong command line
      */
-    static int run(String[] args, PrintStream out, PrintStream err, Platform platform) throws Exception {
+    static int run(String[] args, InputStream in, PrintStream out, PrintStream err, Platform platform)
+            throws Exception {
         // From the launcher, not ProcessHandle's start instant, which is off by hundreds of
         // milliseconds on WSL. The JVM's own start before the launcher (some 40 ms) is not in it.
         // Set by Launcher, which Main cannot see: it is in its own source set.
@@ -116,6 +126,9 @@ public final class Main {
 
         try (LeiaLog.Opened log = LeiaLog.toFile(platform.logFile())) {
             LOG.info(() -> "leia started with " + List.of(args));
+            if (cli.mcp()) {
+                return runMcp(cli, platform, runtimeFolders, defaultJars, jars, log, in, out, err);
+            }
             // In the log, which a broken theme of the user's goes to (ADR 0096).
             Themes themes = Themes.bundled().withUserDir(platform.themesDir());
             Optional<Theme> theme = Optional.empty();
@@ -130,22 +143,88 @@ public final class Main {
                 }
             }
             refreshOwnJars(platform);
-            LeiaBackend backend;
-            try {
-                backend = LeiaBackend.start(runtimeFolders.dir(), jars, cli.servers());
-            } catch (RpcException e) {
-                LOG.log(Level.SEVERE, "Cannot start", e);
-                err.println("leia: " + e.getMessage());
-                defaultJars
-                        .loadedDir()
-                        .ifPresent(dir -> err.println("The jars of the default folder " + dir
-                                + " are loaded too; --no-default-jars leaves them out."));
+            Optional<LeiaBackend> backend = startBackend(cli, runtimeFolders, defaultJars, jars, err);
+            if (backend.isEmpty()) {
                 return 1;
             }
-            try (backend) {
+            try (LeiaBackend running = backend.get()) {
                 return runTui(
-                        cli, platform, runtimeFolders, defaultJars, themes, theme, backend, log, out, err, started);
+                        cli, platform, runtimeFolders, defaultJars, themes, theme, running, log, out, err, started);
             }
+        }
+    }
+
+    /**
+     * Starts the backend with the runtimes, the jars and the servers; if that fails, says why on
+     * {@code err}.
+     */
+    private static Optional<LeiaBackend> startBackend(
+            Cli cli, RuntimeFolders runtimeFolders, DefaultJars defaultJars, List<Path> jars, PrintStream err) {
+        try {
+            return Optional.of(LeiaBackend.start(runtimeFolders.dir(), jars, cli.servers()));
+        } catch (RpcException e) {
+            LOG.log(Level.SEVERE, "Cannot start", e);
+            err.println("leia: " + e.getMessage());
+            defaultJars
+                    .loadedDir()
+                    .ifPresent(dir -> err.println("The jars of the default folder " + dir
+                            + " are loaded too; --no-default-jars leaves them out."));
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * {@code --mcp} (ADR 0100): serves {@code cli}'s index path, if any, to an MCP client on {@code
+     * in} and {@code out} until {@code in} ends. stdout carries the protocol only, so {@code
+     * System.out} and {@code System.err} go into the log from here on, before anything is loaded;
+     * {@code err} is the real stderr, for what fails before the loop starts.
+     *
+     * @return the exit status: 1 if the backend can't start or the index path can't be opened
+     */
+    // Separate parts of the start; it keeps the CLI's own streams (ADR 0088)
+    @SuppressWarnings({"java:S106", "java:S107"})
+    private static int runMcp(
+            Cli cli,
+            Platform platform,
+            RuntimeFolders runtimeFolders,
+            DefaultJars defaultJars,
+            List<Path> jars,
+            LeiaLog.Opened log,
+            InputStream in,
+            PrintStream out,
+            PrintStream err)
+            throws Exception {
+        PrintStream stdout = System.out;
+        PrintStream stderr = System.err;
+        System.setOut(log.stream());
+        System.setErr(log.stream());
+        try {
+            refreshOwnJars(platform);
+            Optional<LeiaBackend> backend = startBackend(cli, runtimeFolders, defaultJars, jars, err);
+            if (backend.isEmpty()) {
+                return 1;
+            }
+            try (LeiaBackend started = backend.get()) {
+                VersionResult version =
+                        started.call(Methods.VERSION, new VersionParams()).get();
+                McpServer server = new McpServer(started, version, cli.directory(), platform.home());
+                if (cli.indexPath().isPresent()) {
+                    String path = cli.indexPath().get();
+                    try {
+                        server.open(path);
+                    } catch (RpcException e) {
+                        LOG.log(Level.SEVERE, e, () -> "Cannot open " + path);
+                        err.println("leia: cannot open " + path + ": " + e.getMessage() + " ("
+                                + e.code().name() + ")");
+                        return 1;
+                    }
+                }
+                LOG.info("MCP mode: serving on stdin and stdout");
+                return server.serve(in, out);
+            }
+        } finally {
+            System.setOut(stdout);
+            System.setErr(stderr);
         }
     }
 

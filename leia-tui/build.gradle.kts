@@ -25,6 +25,8 @@ dependencies {
     // 10 comes from runtimes/lucene10 like every other runtime (ADR 0072, ADR 0073).
     implementation(project(":leia-server"))
     implementation(project(":leia-protocol"))
+    // MCP mode, which Main hands --mcp over to (ADR 0100).
+    implementation(project(":leia-mcp"))
     // The viewer checks JSON with it, and the document export writes it (ADR 0034 §10).
     implementation(platform(libs.jackson.bom))
     implementation(libs.jackson.databind)
