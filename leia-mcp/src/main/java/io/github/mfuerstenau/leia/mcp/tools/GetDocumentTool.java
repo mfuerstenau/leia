@@ -17,6 +17,7 @@ import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
+import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -97,8 +98,12 @@ final class GetDocumentTool implements McpTool<GetDocumentTool.Arguments, GetDoc
             @Description("How many values the document has") int count,
 
             @Description("The raw numbers of a NUMERIC or SORTED_NUMERIC field, at most " + MAX_DOC_VALUES
-                    + "; absent for the other types")
+                    + "; absent for the other types, and with asStored")
             Optional<List<Long>> numbers,
+
+            @Description("Present if the numbers are the field's stored values in this encoding (a double's bits,"
+                    + " say); numbers is then left out, and the stored values are the numbers")
+            Optional<DocValuesNumber> asStored,
 
             @Description("The values of a BINARY, SORTED or SORTED_SET field, at most " + MAX_DOC_VALUES
                     + "; absent for the other types")
@@ -186,7 +191,7 @@ final class GetDocumentTool implements McpTool<GetDocumentTool.Arguments, GetDoc
                     field.name(),
                     field.norm(),
                     Absent.nonEmpty(stored),
-                    field.docValues().map(docValues -> docValues(docValues, maxLength)),
+                    field.docValues().map(docValues -> docValues(docValues, field.stored(), maxLength)),
                     Absent.flag(field.hasTermVector()),
                     field.vector().map(vector -> vector(vector, withVectors))));
         }
@@ -214,18 +219,23 @@ final class GetDocumentTool implements McpTool<GetDocumentTool.Arguments, GetDoc
     }
 
     private static DocValues docValues(
-            io.github.mfuerstenau.leia.protocol.document.DocValues docValues, int maxLength) {
+            io.github.mfuerstenau.leia.protocol.document.DocValues docValues, List<StoredValue> stored, int maxLength) {
         Function<BytesValue, Bytes> bytes = value -> value.value().length() <= maxLength
                 ? new Bytes(value.value(), Absent.flag(value.binary()), OptionalInt.empty())
                 : new Bytes(
                         Slices.head(value.value(), value.binary(), maxLength),
                         Absent.flag(value.binary()),
                         OptionalInt.of(value.value().length()));
+        Optional<DocValuesNumber> asStored = StoredNumbers.encoding(docValues.type(), docValues.numbers(), stored);
         return new DocValues(
                 docValues.type(),
                 docValues.numbers().size() + docValues.values().size(),
-                Absent.nonEmpty(
-                        docValues.numbers().stream().limit(MAX_DOC_VALUES).toList()),
+                asStored.isPresent()
+                        ? Optional.empty()
+                        : Absent.nonEmpty(docValues.numbers().stream()
+                                .limit(MAX_DOC_VALUES)
+                                .toList()),
+                asStored,
                 Absent.nonEmpty(docValues.values().stream()
                         .limit(MAX_DOC_VALUES)
                         .map(bytes)

@@ -679,7 +679,18 @@
                       "items": {
                         "type": "integer"
                       },
-                      "description": "The raw numbers of a NUMERIC or SORTED_NUMERIC field, at most 100; absent for the other types"
+                      "description": "The raw numbers of a NUMERIC or SORTED_NUMERIC field, at most 100; absent for the other types, and with asStored"
+                    },
+                    "asStored": {
+                      "type": "string",
+                      "enum": [
+                        "LONG",
+                        "DOUBLE",
+                        "SORTABLE_DOUBLE",
+                        "FLOAT",
+                        "SORTABLE_FLOAT"
+                      ],
+                      "description": "Present if the numbers are the field's stored values in this encoding (a double's bits, say); numbers is then left out, and the stored values are the numbers"
                     },
                     "values": {
                       "type": "array",

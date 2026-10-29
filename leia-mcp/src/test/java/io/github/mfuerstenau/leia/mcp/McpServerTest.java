@@ -235,6 +235,31 @@ class McpServerTest {
     }
 
     @Test
+    void namesTheEncodingOfNumericDocValuesThatRepeatTheStoredValue() throws Exception {
+        JsonNode fields = client.structured(
+                        1,
+                        "get_document",
+                        "{\"docId\":1,\"fields\":[\"price\",\"rating\",\"quantity\",\"timestamp\",\"weight\"]}")
+                .path("fields");
+        java.util.Map<String, JsonNode> byName = new java.util.HashMap<>();
+        for (JsonNode field : fields) {
+            byName.put(field.path("name").asString(), field.path("docValues"));
+        }
+
+        assertThat(byName.get("price").path("asStored").asString()).isEqualTo("DOUBLE");
+        assertThat(byName.get("rating").path("asStored").asString()).isEqualTo("FLOAT");
+        assertThat(byName.get("quantity").path("asStored").asString()).isEqualTo("LONG");
+        assertThat(byName.get("timestamp").path("asStored").asString()).isEqualTo("LONG");
+        for (String name : List.of("price", "rating", "quantity", "timestamp")) {
+            assertThat(byName.get(name).has("numbers")).as(name).isFalse();
+            assertThat(byName.get(name).path("count").asInt()).as(name).isEqualTo(1);
+        }
+        // Nothing stored to confirm the encoding: the raw numbers stay.
+        assertThat(byName.get("weight").has("asStored")).isFalse();
+        assertThat(byName.get("weight").path("numbers")).hasSize(1);
+    }
+
+    @Test
     void refusesABadQueryOrBadArguments() throws Exception {
         assertThat(client.error(1, "search", "{\"query\":\"title:(lamp\",\"defaultField\":\"body\"}"))
                 .endsWith("(INVALID_QUERY)");
