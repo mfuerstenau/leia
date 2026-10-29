@@ -200,10 +200,10 @@ tools:
 |---|---|
 | `open_index` | opens an index in place of the open one; without `INDEX_PATH`, the agent opens one with it |
 | `index_info` | the open index: the Lucene that reads it, its document counts, its fields and how each is indexed |
-| `search` | a page of hits, best score first, with their stored values brief: a query in Lucene's classic syntax, or one exact term, such as an id |
+| `search` | a page of hits, best score first, with a few brief stored values, to find documents: a query in Lucene's classic syntax, or one exact term, such as an id |
 | `get_document` | a document by its id: per field its stored values, cut when long, doc values, norm and KNN vector |
 | `get_field_value` | one stored value whole, in slices |
-| `reconstruct_fields` | the terms and points a document was indexed with, also in the fields that aren't stored, with the terms in position order |
+| `reconstruct_fields` | the terms and points a document was indexed with, also in the fields that aren't stored, with the terms in position order; the terms with freqs and positions only on request |
 
 `--jar`, `--server`, `--no-default-jars` and `--directory` work as for the UI. If `INDEX_PATH`
 can't be opened, leia says why and exits with 1. Each result is bounded: a page has at most 100

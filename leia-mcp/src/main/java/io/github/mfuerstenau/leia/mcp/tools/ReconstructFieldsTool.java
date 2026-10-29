@@ -50,8 +50,12 @@ final class ReconstructFieldsTool implements McpTool<ReconstructFieldsTool.Argum
             @Description("The fields with postings or points to rebuild, in this order; by default every such field")
             Optional<List<String>> fields,
 
-            @Description("The most terms per field, up to " + MAX_TERMS + "; " + DEFAULT_TERMS + " by default")
-            OptionalInt maxTerms) {}
+            @Description("The most terms per field in terms, up to " + MAX_TERMS + "; " + DEFAULT_TERMS + " by default")
+            OptionalInt maxTerms,
+
+            @Description("Whether to list the terms with their freqs and positions also where text has them; false"
+                    + " by default")
+            Optional<Boolean> withTerms) {}
 
     record Result(
             @Description("The fields in the order they were asked for")
@@ -72,35 +76,36 @@ final class ReconstructFieldsTool implements McpTool<ReconstructFieldsTool.Argum
                     + " with |, a gap of positions as " + GAP + "; absent without positions")
             Optional<String> text,
 
-            @Description("Whether text is cut at " + MAX_TEXT_LENGTH + " characters")
-            boolean textCut,
+            @Description("Present, and true, only if text is cut at " + MAX_TEXT_LENGTH + " characters")
+            Optional<Boolean> textCut,
 
-            @Description("The terms in term order, at most maxTerms")
-            List<Term> terms,
+            @Description("The terms in term order, at most maxTerms; absent where text has them, unless withTerms")
+            Optional<List<Term>> terms,
 
             @Description("How many terms the document has in the field")
             int termCount,
 
-            @Description("Whether terms holds fewer than termCount")
-            boolean cut,
+            @Description("Present, and true, only if terms holds fewer than termCount")
+            Optional<Boolean> cut,
 
-            @Description("The document's points, at most " + MAX_POINTS + ", in unsigned byte order")
-            List<Point> points,
+            @Description("The document's points, at most " + MAX_POINTS + ", in unsigned byte order; absent without")
+            Optional<List<Point>> points,
 
-            @Description("How many points the document has in the field")
-            int pointCount) {}
+            @Description("How many points the document has in the field; absent without")
+            OptionalInt pointCount) {}
 
     record Term(
             @Description("The term as text, or in hex with binary")
             String term,
 
-            boolean binary,
+            @Description("Present, and true, only if term is in hex")
+            Optional<Boolean> binary,
 
             @Description("How often the term occurs in the field of the document")
             int freq,
 
-            @Description("Its positions, at most " + MAX_POSITIONS + "; empty without positions")
-            List<Integer> positions) {}
+            @Description("Its positions, at most " + MAX_POSITIONS + "; absent without positions")
+            Optional<List<Integer>> positions) {}
 
     record Point(
             @Description("The bytes of each dimension in lowercase hex, as Lucene packs them: sortable and"
@@ -116,7 +121,7 @@ final class ReconstructFieldsTool implements McpTool<ReconstructFieldsTool.Argum
     public String description() {
         return "Rebuild the terms and points a document was indexed with, field by field, from its term vectors or"
                 + " the postings: what an indexed field holds even if it isn't stored. With positions, text gives the"
-                + " terms in order. It goes through every term of a field without a term vector, which can take a"
+                + " terms in order, and stands for the terms unless withTerms is set. It goes through every term of a field without a term vector, which can take a"
                 + " while in a large index.";
     }
 
@@ -139,43 +144,50 @@ final class ReconstructFieldsTool implements McpTool<ReconstructFieldsTool.Argum
                 Methods.GET_RECONSTRUCT,
                 GetReconstructResult::result,
                 poll -> new Jobs.Progress(poll.scanned(), poll.total()));
+        boolean withTerms = arguments.withTerms().orElse(false);
         return new Result(
-                result.fields().stream().map(field -> field(field, maxTerms)).toList(), result.tookMillis());
+                result.fields().stream()
+                        .map(field -> field(field, maxTerms, withTerms))
+                        .toList(),
+                result.tookMillis());
     }
 
-    private static Field field(ReconstructedField field, int maxTerms) {
+    private static Field field(ReconstructedField field, int maxTerms, boolean withTerms) {
         Optional<String> text = text(field.terms());
         boolean textCut = text.isPresent() && text.get().length() > MAX_TEXT_LENGTH;
+        boolean listTerms = withTerms || text.isEmpty();
         return new Field(
                 field.field(),
                 field.indexOptions(),
                 field.source(),
                 textCut ? Optional.of(Slices.head(text.get(), false, MAX_TEXT_LENGTH)) : text,
-                textCut,
-                field.terms().stream()
-                        .limit(maxTerms)
-                        .map(ReconstructFieldsTool::term)
-                        .toList(),
+                Absent.flag(textCut),
+                listTerms
+                        ? Optional.of(field.terms().stream()
+                                .limit(maxTerms)
+                                .map(ReconstructFieldsTool::term)
+                                .toList())
+                        : Optional.empty(),
                 field.terms().size(),
-                field.terms().size() > maxTerms,
-                field.points().stream()
+                Absent.flag(listTerms && field.terms().size() > maxTerms),
+                Absent.nonEmpty(field.points().stream()
                         .limit(MAX_POINTS)
                         .map(point -> new Point(point.dimensions()))
-                        .toList(),
-                field.points().size());
+                        .toList()),
+                Absent.nonZero(field.points().size()));
     }
 
     private static Term term(TermVectorTerm term) {
         return new Term(
                 term.term(),
-                term.binary(),
+                Absent.flag(term.binary()),
                 term.freq(),
-                term.positions().stream()
+                Absent.nonEmpty(term.positions().stream()
                         .map(TermPosition::position)
                         .filter(OptionalInt::isPresent)
                         .map(OptionalInt::getAsInt)
                         .limit(MAX_POSITIONS)
-                        .toList());
+                        .toList()));
     }
 
     /** A term at a position. */

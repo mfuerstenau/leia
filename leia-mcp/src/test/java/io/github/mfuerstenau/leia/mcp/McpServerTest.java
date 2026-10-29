@@ -165,8 +165,73 @@ class McpServerTest {
         assertThat(result.has("nextOffset")).isFalse();
         JsonNode id = result.path("hits").get(0).path("fields").get(0);
         assertThat(id.path("name").asString()).isEqualTo("id");
-        assertThat(id.path("values").get(0).toString())
-                .isEqualTo("{\"type\":\"STRING\",\"value\":\"doc-0042\",\"binary\":false,\"cut\":false}");
+        assertThat(id.path("values").get(0).toString()).isEqualTo("{\"value\":\"doc-0042\"}");
+    }
+
+    @Test
+    void showsBriefValuesWithinABudgetByDefault() throws Exception {
+        JsonNode result = client.structured(1, "search", "{\"term\":{\"field\":\"id\",\"value\":\"doc-0042\"}}");
+
+        JsonNode hit = result.path("hits").get(0);
+        assertThat(hit.path("moreFields")).isNotEmpty();
+        boolean cut = false;
+        for (JsonNode field : hit.path("fields")) {
+            for (JsonNode value : field.path("values")) {
+                assertThat(value.path("value").asString().length()).isLessThanOrEqualTo(100);
+                cut |= value.path("cut").asBoolean();
+            }
+        }
+        assertThat(cut).isTrue();
+    }
+
+    @Test
+    void showsTheAskedFieldsWithoutABudget() throws Exception {
+        JsonNode result = client.structured(
+                1,
+                "search",
+                "{\"term\":{\"field\":\"id\",\"value\":\"doc-0042\"},\"fields\":[\"body\",\"_source\"],"
+                        + "\"maxValueLength\":200}");
+
+        JsonNode hit = result.path("hits").get(0);
+        assertThat(hit.has("moreFields")).isFalse();
+        assertThat(hit.path("fields")).hasSize(2);
+        for (JsonNode field : hit.path("fields")) {
+            JsonNode value = field.path("values").get(0);
+            assertThat(value.path("value").asString()).hasSize(200);
+            assertThat(value.path("cut").asBoolean()).isTrue();
+        }
+        assertThat(client.error(
+                        2, "search", "{\"term\":{\"field\":\"id\",\"value\":\"doc-0042\"},\"maxValueLength\":257}"))
+                .contains("maxValueLength must be from 1 to 256");
+    }
+
+    @Test
+    void leavesOutWhatIsTheDefaultInADocumentAndTheFields() throws Exception {
+        JsonNode plain = client.structured(1, "get_document", "{\"docId\":0}")
+                .path("fields")
+                .get(0);
+        assertThat(plain.has("hasTermVector")).isFalse();
+        assertThat(plain.path("stored").get(0).has("type")).isFalse();
+        assertThat(plain.path("stored").get(0).has("binary")).isFalse();
+
+        JsonNode blob = client.structured(2, "get_document", "{\"docId\":42,\"fields\":[\"blob\"]}")
+                .path("fields")
+                .get(0)
+                .path("stored")
+                .get(0);
+        assertThat(blob.path("binary").asBoolean()).isTrue();
+        assertThat(blob.path("type").asString()).isEqualTo("BINARY");
+
+        JsonNode fields = client.structured(3, "index_info", "{}").path("fields");
+        for (JsonNode field : fields) {
+            if (field.path("name").asString().equals("id")) {
+                assertThat(field.has("docValuesType")).isFalse();
+                assertThat(field.has("pointDimensionCount")).isFalse();
+            }
+            if (field.path("name").asString().equals("category")) {
+                assertThat(field.path("docValuesType").asString()).isEqualTo("SORTED");
+            }
+        }
     }
 
     @Test
@@ -262,10 +327,14 @@ class McpServerTest {
         assertThat(keywords.path("indexOptions").asString()).isEqualTo("DOCS");
         assertThat(keywords.path("termCount").asInt()).isPositive();
         assertThat(keywords.has("text")).isFalse();
+        assertThat(keywords.path("terms")).isNotEmpty();
         assertThat(fields.get(1).path("indexOptions").asString()).isEqualTo("DOCS_AND_FREQS");
         assertThat(fields.get(1).path("terms").get(0).path("freq").asInt()).isPositive();
         JsonNode title = fields.get(2);
         assertThat(title.path("text").asString()).isNotBlank();
+        // text stands for the terms.
+        assertThat(title.has("terms")).isFalse();
+        assertThat(title.path("termCount").asInt()).isPositive();
         String stored = client.structured(2, "get_document", "{\"docId\":1,\"fields\":[\"title\"]}")
                 .path("fields")
                 .get(0)
@@ -280,7 +349,9 @@ class McpServerTest {
     @Test
     void cutsTheTermsAtMaxTerms() throws Exception {
         JsonNode body = client.structured(
-                        1, "reconstruct_fields", "{\"docId\":42,\"fields\":[\"body\"],\"maxTerms\":5}")
+                        1,
+                        "reconstruct_fields",
+                        "{\"docId\":42,\"fields\":[\"body\"],\"maxTerms\":5,\"withTerms\":true}")
                 .path("fields")
                 .get(0);
 

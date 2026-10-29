@@ -67,25 +67,26 @@ final class GetDocumentTool implements McpTool<GetDocumentTool.Arguments, GetDoc
             @Description("The document's norm; absent without norms")
             OptionalLong norm,
 
-            @Description("The stored values, in the order they were added; empty if none are stored")
-            List<Value> stored,
+            @Description("The stored values, in the order they were added; absent if none are stored")
+            Optional<List<Value>> stored,
 
             @Description("The document's doc values; absent if it has none in the field")
             Optional<DocValues> docValues,
 
-            @Description("Whether the document has a term vector in the field")
-            boolean hasTermVector,
+            @Description("Present, and true, only if the document has a term vector in the field")
+            Optional<Boolean> hasTermVector,
 
             @Description("The document's KNN vector; absent if it has none in the field")
             Optional<Vector> vector) {}
 
     record Value(
-            StoredType type,
+            @Description("STRING if absent") Optional<StoredType> type,
 
             @Description("The value; numbers in decimal; binary values as text if they are UTF-8, else in hex")
             String value,
 
-            @Description("Whether value is in hex") boolean binary,
+            @Description("Present, and true, only if value is in hex")
+            Optional<Boolean> binary,
 
             @Description("Present if value is cut: the length of the whole value in characters; get_field_value"
                     + " has the rest")
@@ -95,17 +96,20 @@ final class GetDocumentTool implements McpTool<GetDocumentTool.Arguments, GetDoc
             DocValuesType type,
             @Description("How many values the document has") int count,
 
-            @Description("The raw numbers of a NUMERIC or SORTED_NUMERIC field, at most " + MAX_DOC_VALUES)
-            List<Long> numbers,
+            @Description("The raw numbers of a NUMERIC or SORTED_NUMERIC field, at most " + MAX_DOC_VALUES
+                    + "; absent for the other types")
+            Optional<List<Long>> numbers,
 
-            @Description("The values of a BINARY, SORTED or SORTED_SET field, at most " + MAX_DOC_VALUES)
-            List<Bytes> values) {}
+            @Description("The values of a BINARY, SORTED or SORTED_SET field, at most " + MAX_DOC_VALUES
+                    + "; absent for the other types")
+            Optional<List<Bytes>> values) {}
 
     record Bytes(
             @Description("The bytes as text if they are UTF-8, else in hex")
             String value,
 
-            boolean binary,
+            @Description("Present, and true, only if value is in hex")
+            Optional<Boolean> binary,
 
             @Description("Present if value is cut: the length of the whole value in characters")
             OptionalInt fullLength) {}
@@ -181,9 +185,9 @@ final class GetDocumentTool implements McpTool<GetDocumentTool.Arguments, GetDoc
             shown.add(new Field(
                     field.name(),
                     field.norm(),
-                    stored,
+                    Absent.nonEmpty(stored),
                     field.docValues().map(docValues -> docValues(docValues, maxLength)),
-                    field.hasTermVector(),
+                    Absent.flag(field.hasTermVector()),
                     field.vector().map(vector -> vector(vector, withVectors))));
         }
         return new Result(document.docId(), document.deleted(), shown);
@@ -200,28 +204,32 @@ final class GetDocumentTool implements McpTool<GetDocumentTool.Arguments, GetDoc
     private static Value value(StoredValue value, int maxLength) {
         String text = value.value();
         if (text.length() <= maxLength) {
-            return new Value(value.type(), text, value.binary(), OptionalInt.empty());
+            return new Value(Absent.type(value.type()), text, Absent.flag(value.binary()), OptionalInt.empty());
         }
         return new Value(
-                value.type(),
+                Absent.type(value.type()),
                 Slices.head(text, value.binary(), maxLength),
-                value.binary(),
+                Absent.flag(value.binary()),
                 OptionalInt.of(text.length()));
     }
 
     private static DocValues docValues(
             io.github.mfuerstenau.leia.protocol.document.DocValues docValues, int maxLength) {
         Function<BytesValue, Bytes> bytes = value -> value.value().length() <= maxLength
-                ? new Bytes(value.value(), value.binary(), OptionalInt.empty())
+                ? new Bytes(value.value(), Absent.flag(value.binary()), OptionalInt.empty())
                 : new Bytes(
                         Slices.head(value.value(), value.binary(), maxLength),
-                        value.binary(),
+                        Absent.flag(value.binary()),
                         OptionalInt.of(value.value().length()));
         return new DocValues(
                 docValues.type(),
                 docValues.numbers().size() + docValues.values().size(),
-                docValues.numbers().stream().limit(MAX_DOC_VALUES).toList(),
-                docValues.values().stream().limit(MAX_DOC_VALUES).map(bytes).toList());
+                Absent.nonEmpty(
+                        docValues.numbers().stream().limit(MAX_DOC_VALUES).toList()),
+                Absent.nonEmpty(docValues.values().stream()
+                        .limit(MAX_DOC_VALUES)
+                        .map(bytes)
+                        .toList()));
     }
 
     private static Vector vector(KnnVector vector, boolean withVectors) {

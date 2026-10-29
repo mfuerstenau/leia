@@ -144,18 +144,20 @@
                     "SORTED",
                     "SORTED_NUMERIC",
                     "SORTED_SET"
-                  ]
+                  ],
+                  "description": "The kind of doc values; absent without"
                 },
                 "pointDimensionCount": {
                   "type": "integer",
-                  "description": "Dimensions of the point values; 0 without points"
+                  "description": "Dimensions of the point values; absent without points"
                 },
                 "vectorDimension": {
                   "type": "integer",
-                  "description": "Dimensions of the KNN vectors; 0 without vectors"
+                  "description": "Dimensions of the KNN vectors; absent without vectors"
                 },
                 "hasTermVectors": {
-                  "type": "boolean"
+                  "type": "boolean",
+                  "description": "Present, and true, only if the field has term vectors"
                 },
                 "docCount": {
                   "type": "integer",
@@ -164,11 +166,7 @@
               },
               "required": [
                 "name",
-                "indexOptions",
-                "docValuesType",
-                "pointDimensionCount",
-                "vectorDimension",
-                "hasTermVectors"
+                "indexOptions"
               ],
               "additionalProperties": false
             },
@@ -320,18 +318,20 @@
                     "SORTED",
                     "SORTED_NUMERIC",
                     "SORTED_SET"
-                  ]
+                  ],
+                  "description": "The kind of doc values; absent without"
                 },
                 "pointDimensionCount": {
                   "type": "integer",
-                  "description": "Dimensions of the point values; 0 without points"
+                  "description": "Dimensions of the point values; absent without points"
                 },
                 "vectorDimension": {
                   "type": "integer",
-                  "description": "Dimensions of the KNN vectors; 0 without vectors"
+                  "description": "Dimensions of the KNN vectors; absent without vectors"
                 },
                 "hasTermVectors": {
-                  "type": "boolean"
+                  "type": "boolean",
+                  "description": "Present, and true, only if the field has term vectors"
                 },
                 "docCount": {
                   "type": "integer",
@@ -340,11 +340,7 @@
               },
               "required": [
                 "name",
-                "indexOptions",
-                "docValuesType",
-                "pointDimensionCount",
-                "vectorDimension",
-                "hasTermVectors"
+                "indexOptions"
               ],
               "additionalProperties": false
             },
@@ -371,7 +367,7 @@
     },
     {
       "name": "search",
-      "description": "Search the open index, best score first, a page at a time: each hit with its document id, score and stored values brief. Give a query in Lucene's classic syntax with a defaultField, or a term for an exact keyword. For the next page, call it again with the result's nextOffset.",
+      "description": "Search the open index, best score first, a page at a time: each hit with its document id, score and a few brief stored values, to find documents; get_document and get_field_value read them. Give a query in Lucene's classic syntax with a defaultField, or a term for an exact keyword. For the next page, call it again with the result's nextOffset.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -418,7 +414,11 @@
             "items": {
               "type": "string"
             },
-            "description": "The stored fields to show per hit; all of them by default, [] for none"
+            "description": "The stored fields to show per hit; by default as many as fit about 250 characters per hit, the rest named in moreFields; [] for none"
+          },
+          "maxValueLength": {
+            "type": "integer",
+            "description": "The longest value shown, in characters, from 1 to 256; 100 by default. get_field_value has a value whole"
           },
           "offset": {
             "type": "integer",
@@ -501,7 +501,8 @@
                                 "LONG",
                                 "FLOAT",
                                 "DOUBLE"
-                              ]
+                              ],
+                              "description": "STRING if absent"
                             },
                             "value": {
                               "type": "string",
@@ -509,18 +510,15 @@
                             },
                             "binary": {
                               "type": "boolean",
-                              "description": "Whether value is in hex"
+                              "description": "Present, and true, only if value is in hex"
                             },
                             "cut": {
                               "type": "boolean",
-                              "description": "Whether value is cut at 256 bytes; get_field_value has it whole"
+                              "description": "Present, and true, only if value is cut; get_field_value has it whole"
                             }
                           },
                           "required": [
-                            "type",
-                            "value",
-                            "binary",
-                            "cut"
+                            "value"
                           ],
                           "additionalProperties": false
                         }
@@ -533,6 +531,13 @@
                     "additionalProperties": false
                   },
                   "description": "The hit's stored values, in the order of each field's first value"
+                },
+                "moreFields": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "Stored fields left out to keep the page short; name them in fields, or read them with get_document. Absent if none was"
                 }
               },
               "required": [
@@ -628,7 +633,8 @@
                           "LONG",
                           "FLOAT",
                           "DOUBLE"
-                        ]
+                        ],
+                        "description": "STRING if absent"
                       },
                       "value": {
                         "type": "string",
@@ -636,7 +642,7 @@
                       },
                       "binary": {
                         "type": "boolean",
-                        "description": "Whether value is in hex"
+                        "description": "Present, and true, only if value is in hex"
                       },
                       "fullLength": {
                         "type": "integer",
@@ -644,13 +650,11 @@
                       }
                     },
                     "required": [
-                      "type",
-                      "value",
-                      "binary"
+                      "value"
                     ],
                     "additionalProperties": false
                   },
-                  "description": "The stored values, in the order they were added; empty if none are stored"
+                  "description": "The stored values, in the order they were added; absent if none are stored"
                 },
                 "docValues": {
                   "type": "object",
@@ -675,7 +679,7 @@
                       "items": {
                         "type": "integer"
                       },
-                      "description": "The raw numbers of a NUMERIC or SORTED_NUMERIC field, at most 100"
+                      "description": "The raw numbers of a NUMERIC or SORTED_NUMERIC field, at most 100; absent for the other types"
                     },
                     "values": {
                       "type": "array",
@@ -687,7 +691,8 @@
                             "description": "The bytes as text if they are UTF-8, else in hex"
                           },
                           "binary": {
-                            "type": "boolean"
+                            "type": "boolean",
+                            "description": "Present, and true, only if value is in hex"
                           },
                           "fullLength": {
                             "type": "integer",
@@ -695,26 +700,23 @@
                           }
                         },
                         "required": [
-                          "value",
-                          "binary"
+                          "value"
                         ],
                         "additionalProperties": false
                       },
-                      "description": "The values of a BINARY, SORTED or SORTED_SET field, at most 100"
+                      "description": "The values of a BINARY, SORTED or SORTED_SET field, at most 100; absent for the other types"
                     }
                   },
                   "required": [
                     "type",
-                    "count",
-                    "numbers",
-                    "values"
+                    "count"
                   ],
                   "additionalProperties": false,
                   "description": "The document's doc values; absent if it has none in the field"
                 },
                 "hasTermVector": {
                   "type": "boolean",
-                  "description": "Whether the document has a term vector in the field"
+                  "description": "Present, and true, only if the document has a term vector in the field"
                 },
                 "vector": {
                   "type": "object",
@@ -753,9 +755,7 @@
                 }
               },
               "required": [
-                "name",
-                "stored",
-                "hasTermVector"
+                "name"
               ],
               "additionalProperties": false
             },
@@ -863,7 +863,7 @@
     },
     {
       "name": "reconstruct_fields",
-      "description": "Rebuild the terms and points a document was indexed with, field by field, from its term vectors or the postings: what an indexed field holds even if it isn't stored. With positions, text gives the terms in order. It goes through every term of a field without a term vector, which can take a while in a large index.",
+      "description": "Rebuild the terms and points a document was indexed with, field by field, from its term vectors or the postings: what an indexed field holds even if it isn't stored. With positions, text gives the terms in order, and stands for the terms unless withTerms is set. It goes through every term of a field without a term vector, which can take a while in a large index.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -880,7 +880,11 @@
           },
           "maxTerms": {
             "type": "integer",
-            "description": "The most terms per field, up to 10000; 500 by default"
+            "description": "The most terms per field in terms, up to 10000; 500 by default"
+          },
+          "withTerms": {
+            "type": "boolean",
+            "description": "Whether to list the terms with their freqs and positions also where text has them; false by default"
           }
         },
         "required": [
@@ -925,7 +929,7 @@
                 },
                 "textCut": {
                   "type": "boolean",
-                  "description": "Whether text is cut at 65536 characters"
+                  "description": "Present, and true, only if text is cut at 65536 characters"
                 },
                 "terms": {
                   "type": "array",
@@ -937,7 +941,8 @@
                         "description": "The term as text, or in hex with binary"
                       },
                       "binary": {
-                        "type": "boolean"
+                        "type": "boolean",
+                        "description": "Present, and true, only if term is in hex"
                       },
                       "freq": {
                         "type": "integer",
@@ -948,18 +953,16 @@
                         "items": {
                           "type": "integer"
                         },
-                        "description": "Its positions, at most 1000; empty without positions"
+                        "description": "Its positions, at most 1000; absent without positions"
                       }
                     },
                     "required": [
                       "term",
-                      "binary",
-                      "freq",
-                      "positions"
+                      "freq"
                     ],
                     "additionalProperties": false
                   },
-                  "description": "The terms in term order, at most maxTerms"
+                  "description": "The terms in term order, at most maxTerms; absent where text has them, unless withTerms"
                 },
                 "termCount": {
                   "type": "integer",
@@ -967,7 +970,7 @@
                 },
                 "cut": {
                   "type": "boolean",
-                  "description": "Whether terms holds fewer than termCount"
+                  "description": "Present, and true, only if terms holds fewer than termCount"
                 },
                 "points": {
                   "type": "array",
@@ -987,23 +990,18 @@
                     ],
                     "additionalProperties": false
                   },
-                  "description": "The document's points, at most 100, in unsigned byte order"
+                  "description": "The document's points, at most 100, in unsigned byte order; absent without"
                 },
                 "pointCount": {
                   "type": "integer",
-                  "description": "How many points the document has in the field"
+                  "description": "How many points the document has in the field; absent without"
                 }
               },
               "required": [
                 "field",
                 "indexOptions",
                 "source",
-                "textCut",
-                "terms",
-                "termCount",
-                "cut",
-                "points",
-                "pointCount"
+                "termCount"
               ],
               "additionalProperties": false
             },

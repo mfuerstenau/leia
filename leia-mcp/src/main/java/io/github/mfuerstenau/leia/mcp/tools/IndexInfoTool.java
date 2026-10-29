@@ -63,15 +63,17 @@ final class IndexInfoTool implements McpTool<IndexInfoTool.Arguments, IndexInfoT
             @Description("What the postings hold; NONE if the field isn't indexed")
             IndexOptions indexOptions,
 
-            DocValuesType docValuesType,
+            @Description("The kind of doc values; absent without")
+            Optional<DocValuesType> docValuesType,
 
-            @Description("Dimensions of the point values; 0 without points")
-            int pointDimensionCount,
+            @Description("Dimensions of the point values; absent without points")
+            OptionalInt pointDimensionCount,
 
-            @Description("Dimensions of the KNN vectors; 0 without vectors")
-            int vectorDimension,
+            @Description("Dimensions of the KNN vectors; absent without vectors")
+            OptionalInt vectorDimension,
 
-            boolean hasTermVectors,
+            @Description("Present, and true, only if the field has term vectors")
+            Optional<Boolean> hasTermVectors,
 
             @Description("Documents with at least one term in the field, deleted ones included; absent without"
                     + " postings")
@@ -130,10 +132,10 @@ final class IndexInfoTool implements McpTool<IndexInfoTool.Arguments, IndexInfoT
         return new Field(
                 field.name(),
                 field.indexOptions(),
-                field.docValuesType(),
-                field.pointDimensionCount(),
-                field.vectorDimension(),
-                field.hasTermVectors(),
+                field.docValuesType() == DocValuesType.NONE ? Optional.empty() : Optional.of(field.docValuesType()),
+                Absent.nonZero(field.pointDimensionCount()),
+                Absent.nonZero(field.vectorDimension()),
+                Absent.flag(field.hasTermVectors()),
                 field.terms().map(TermStats::docCount).map(OptionalInt::of).orElseGet(OptionalInt::empty));
     }
 }

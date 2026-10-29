@@ -22,11 +22,8 @@ None open.
 
 ## MCP mode — output size, then tools
 
-Goal: the tools cost an agent few tokens, then they answer why a query matches or not. Measured on the demo index (compact JSON, the text item): a default `search` of 10 hits is 45.6 KB (about 13k tokens), with `fields: [id, title]` 2.5 KB; `get_document` 6.2 KB, `index_info` 5.7 KB, `reconstruct_fields` of every field 7.3 KB; `tools/list` 5 KB of descriptions and input schemas. The output size comes first, in this order; each change updates `tools.json`.
+Goal: the tools cost an agent few tokens, then they answer why a query matches or not. Measured on the demo index (compact JSON, the text item): a default `search` of 10 hits is 45.6 KB (about 13k tokens), with `fields: [id, title]` 2.5 KB; `get_document` 6.2 KB, `index_info` 5.7 KB, `reconstruct_fields` of every field 7.3 KB; `tools/list` 5 KB of descriptions and input schemas. The first three changes are done (ADR 0103); the output size comes first, in this order; each change updates `tools.json`.
 
-- [ ] Leave defaults out of the results: a value's `binary` and `cut` only when true and its `type` only when not `STRING` (`search`, `get_document`); `hasTermVector` only when true, and no empty `stored`, `numbers` and `values` (`get_document`); `docValuesType` `NONE`, a `pointDimensionCount` or `vectorDimension` of 0 and `hasTermVectors` false left out (`index_info`). They become `Optional*`, which `NON_ABSENT` leaves out (hard rule 3). Measured: search 45.6 → 32.6 KB, `index_info` about half.
-- [ ] A cheaper default of `search`'s `fields`: hits are for finding, `get_document` and `get_field_value` for reading. Cut a hit's values shorter than the backend's 256 bytes (about 100 characters), or bound a hit's fields by a budget with a `fieldsCut` flag; the description points to `fields`. Target: a default page of 10 hits at about 3k tokens.
-- [ ] `reconstruct_fields` without the terms when the text has them: `terms` (with freqs and positions) only with `withTerms`, or for a field without positions, where there is no `text`.
 - [ ] `get_document`'s numeric doc values decoded: a double or float field shows its sortable bits as a long (`price` 20.51 as `4626466269454464451`). Decode them when the stored type tells the encoding, or leave them out when they repeat the stored value.
 - [ ] Check which of `structuredContent` and the `text` item Claude Code gives the model; if both, the duplicate costs tokens too (ADR 0100 §3).
 

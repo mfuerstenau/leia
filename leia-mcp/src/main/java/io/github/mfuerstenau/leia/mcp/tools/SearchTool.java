@@ -24,6 +24,7 @@ import io.github.mfuerstenau.leia.protocol.search.Similarity;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.TermQuery;
 import io.github.mfuerstenau.leia.protocol.search.TotalHitsRelation;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -37,6 +38,15 @@ import java.util.OptionalLong;
 final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Result> {
 
     static final int DEFAULT_LIMIT = 10;
+
+    /** The longest value shown, in characters, unless {@code maxValueLength} says otherwise. */
+    static final int DEFAULT_VALUE_LENGTH = 100;
+
+    /**
+     * The characters of values a hit shows when {@code fields} is absent: fields are taken whole
+     * until the sum passes it, and the rest are named in {@code moreFields}.
+     */
+    static final int HIT_BUDGET = 250;
 
     /** The most hits of a page. */
     static final int MAX_LIMIT = 100;
@@ -74,8 +84,13 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
             @Description("How clauses of the query without an operator combine; OR by default")
             Optional<QueryOperator> defaultOperator,
 
-            @Description("The stored fields to show per hit; all of them by default, [] for none")
+            @Description("The stored fields to show per hit; by default as many as fit about " + HIT_BUDGET
+                    + " characters per hit, the rest named in moreFields; [] for none")
             Optional<List<String>> fields,
+
+            @Description("The longest value shown, in characters, from 1 to " + SearchResults.MAX_VALUE_LENGTH + "; "
+                    + DEFAULT_VALUE_LENGTH + " by default. get_field_value has a value whole")
+            OptionalInt maxValueLength,
 
             @Description("How many hits to skip, for the next page: the nextOffset of the last page; 0 by default")
             OptionalInt offset,
@@ -120,20 +135,25 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
             float score,
 
             @Description("The hit's stored values, in the order of each field's first value")
-            List<HitField> fields) {}
+            List<HitField> fields,
+
+            @Description("Stored fields left out to keep the page short; name them in fields, or read them with"
+                    + " get_document. Absent if none was")
+            Optional<List<String>> moreFields) {}
 
     record HitField(String name, List<HitValue> values) {}
 
     record HitValue(
-            StoredType type,
+            @Description("STRING if absent") Optional<StoredType> type,
 
             @Description("The value; numbers in decimal; binary values as text if they are UTF-8, else in hex")
             String value,
 
-            @Description("Whether value is in hex") boolean binary,
+            @Description("Present, and true, only if value is in hex")
+            Optional<Boolean> binary,
 
-            @Description("Whether value is cut at 256 bytes; get_field_value has it whole")
-            boolean cut) {}
+            @Description("Present, and true, only if value is cut; get_field_value has it whole")
+            Optional<Boolean> cut) {}
 
     @Override
     public String name() {
@@ -143,7 +163,7 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
     @Override
     public String description() {
         return "Search the open index, best score first, a page at a time: each hit with its document id, score and"
-                + " stored values brief. Give a query in Lucene's classic syntax with a defaultField, or a term for an"
+                + " a few brief stored values, to find documents; get_document and get_field_value read them. Give a query in Lucene's classic syntax with a defaultField, or a term for an"
                 + " exact keyword. For the next page, call it again with the result's nextOffset.";
     }
 
@@ -162,6 +182,8 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
         SearchQuery query = query(arguments);
         int offset = Slices.bounded("offset", arguments.offset(), 0, 0, StartSearchParams.MAX_WINDOW - 1);
         int limit = Slices.bounded("limit", arguments.limit(), DEFAULT_LIMIT, 1, MAX_LIMIT);
+        int maxValueLength = Slices.bounded(
+                "maxValueLength", arguments.maxValueLength(), DEFAULT_VALUE_LENGTH, 1, SearchResults.MAX_VALUE_LENGTH);
         if (offset + limit > StartSearchParams.MAX_WINDOW) {
             throw ToolError.invalid("offset + limit must be at most " + StartSearchParams.MAX_WINDOW
                     + ": a search pages that far only");
@@ -185,7 +207,7 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
                 Methods.GET_SEARCH,
                 GetSearchResult::results,
                 poll -> new Jobs.Progress(poll.docsSearched(), total));
-        return result(results, offset, limit);
+        return result(results, offset, limit, maxValueLength, arguments.fields().isEmpty());
     }
 
     private static SearchQuery query(Arguments arguments) throws ToolException {
@@ -226,7 +248,7 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
                 Optional.empty());
     }
 
-    private static Result result(SearchResults results, int offset, int limit) {
+    private static Result result(SearchResults results, int offset, int limit, int maxValueLength, boolean withBudget) {
         int next = offset + results.hits().size();
         boolean more = results.hits().size() == limit
                 && next < StartSearchParams.MAX_WINDOW
@@ -241,21 +263,41 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
                 more ? OptionalInt.of(next) : OptionalInt.empty(),
                 results.tookMillis(),
                 results.hits().stream()
-                        .map(hit -> new Hit(
-                                hit.docId(),
-                                hit.score(),
-                                hit.fields().stream()
-                                        .map(field -> new HitField(
-                                                field.name(),
-                                                field.values().stream()
-                                                        .map(SearchTool::value)
-                                                        .toList()))
-                                        .toList()))
+                        .map(hit -> hit(hit, maxValueLength, withBudget))
                         .toList());
     }
 
-    private static HitValue value(StoredValue value) {
+    /**
+     * The hit with its values cut at {@code maxValueLength}; with {@code withBudget}, as many
+     * fields as it takes to pass {@link #HIT_BUDGET} characters, the value that passes it included.
+     */
+    private static Hit hit(io.github.mfuerstenau.leia.protocol.search.Hit hit, int maxValueLength, boolean withBudget) {
+        List<HitField> shown = new ArrayList<>();
+        List<String> left = new ArrayList<>();
+        int characters = 0;
+        for (var field : hit.fields()) {
+            if (withBudget && characters >= HIT_BUDGET) {
+                left.add(field.name());
+                continue;
+            }
+            List<HitValue> values = new ArrayList<>();
+            for (StoredValue value : field.values()) {
+                HitValue shownValue = value(value, maxValueLength);
+                characters += shownValue.value().length();
+                values.add(shownValue);
+            }
+            shown.add(new HitField(field.name(), values));
+        }
+        return new Hit(hit.docId(), hit.score(), shown, Absent.nonEmpty(left));
+    }
+
+    private static HitValue value(StoredValue value, int maxValueLength) {
+        String text = value.value();
+        boolean cut = value.fullLength().isPresent() || text.length() > maxValueLength;
         return new HitValue(
-                value.type(), value.value(), value.binary(), value.fullLength().isPresent());
+                Absent.type(value.type()),
+                text.length() > maxValueLength ? Slices.head(text, value.binary(), maxValueLength) : text,
+                Absent.flag(value.binary()),
+                Absent.flag(cut));
     }
 }
