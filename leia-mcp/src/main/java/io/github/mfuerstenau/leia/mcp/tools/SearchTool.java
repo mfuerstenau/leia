@@ -11,30 +11,44 @@ import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
+import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
+import io.github.mfuerstenau.leia.protocol.index.Feature;
+import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
+import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
+import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.search.Bm25Similarity;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
+import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
+import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
+import io.github.mfuerstenau.leia.protocol.search.DocValuesRange;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
 import io.github.mfuerstenau.leia.protocol.search.ParserOptions;
+import io.github.mfuerstenau.leia.protocol.search.PointField;
+import io.github.mfuerstenau.leia.protocol.search.PointType;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
 import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
 import io.github.mfuerstenau.leia.protocol.search.SearchResults;
 import io.github.mfuerstenau.leia.protocol.search.Similarity;
+import io.github.mfuerstenau.leia.protocol.search.StandardQuery;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.TermQuery;
 import io.github.mfuerstenau.leia.protocol.search.TotalHitsRelation;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 
 /**
- * {@code search}: a page of the hits of a classic query or a term query, best score first, with
- * their stored values brief (ADR 0100). The parser and similarity are the ones the search screen
- * starts with: Lucene's defaults and BM25. A query is analyzed with {@code StandardAnalyzer} unless
- * {@code analyzer} and {@code fieldAnalyzers} name others, by class name with their default
- * settings (ADR 0104).
+ * {@code search}: a page of the hits of a query, a term query or a doc values query, best score
+ * first, with their stored values brief (ADR 0100). The parser and similarity are the ones the
+ * search screen starts with: Lucene's defaults and BM25. A query is analyzed with {@code
+ * StandardAnalyzer} unless {@code analyzer} and {@code fieldAnalyzers} name others, by class name
+ * with their default settings (ADR 0104). It goes through the standard parser where the runtime
+ * has one, so that it makes point queries (ADR 0107).
  */
 final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Result> {
 
@@ -62,13 +76,24 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
             new Similarity(Optional.of(new Bm25Similarity(1.2f, 0.75f)), Optional.empty(), Optional.empty());
 
     record Arguments(
-            @Description("A query in Lucene's classic syntax, such as title:lamp AND body:qu*. Give"
-                    + " exactly one of query and term")
+            @Description("A query in Lucene's syntax, such as title:lamp AND body:qu*. Ranges on point fields work,"
+                    + " such as price:[10 TO 20]; dates on point fields are epoch milliseconds, and dates indexed as"
+                    + " text are written as they are indexed, such as published:[20260131 TO 20260228]. Give exactly"
+                    + " one of query, term and docValues")
             Optional<String> query,
 
             @Description("A query for exactly one term, neither analyzed nor split: for keyword fields such as ids."
-                    + " Give exactly one of query and term")
+                    + " Give exactly one of query, term and docValues")
             Optional<Term> term,
+
+            @Description("A query on the doc values of a field, for fields that have only those. Give exactly one of"
+                    + " query, term and docValues")
+            Optional<DocValues> docValues,
+
+            @Description("The type of point fields in query, when the guess is wrong: a point field of 4 bytes is"
+                    + " taken as INT and one of 8 bytes as LONG, so FLOAT and DOUBLE fields need it (index_info shows"
+                    + " pointBytes). Goes with query")
+            Optional<List<PointFieldType>> pointTypes,
 
             @Description("The field of the query's terms that name none; needed with query")
             Optional<String> defaultField,
@@ -101,6 +126,41 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
             Optional<Boolean> exactTotalHits) {}
 
     record FieldAnalyzer(String field, String analyzer) {}
+
+    record PointFieldType(String field, PointType type) {}
+
+    record DocValues(
+            String field,
+
+            @Description("How a numeric field's values are encoded; LONG by default. DOUBLE and FLOAT are raw bits,"
+                    + " SORTABLE_DOUBLE and SORTABLE_FLOAT as Lucene's DoubleField and FloatField write them;"
+                    + " get_document's asStored says which. Absent for a field of bytes")
+            Optional<DocValuesNumber> number,
+
+            @Description("Match documents with a value equal to one of these: decimal text for a number. Give"
+                    + " exactly one of values, range and prefix")
+            Optional<List<String>> values,
+
+            @Description("Match documents with a value in this range. Give exactly one of values, range and prefix")
+            Optional<Range> range,
+
+            @Description("Match documents with a value that starts with this, for a field of bytes. Give exactly one"
+                    + " of values, range and prefix")
+            Optional<String> prefix,
+
+            @Description("Whether values, the bounds and prefix are bytes in hex; false by default")
+            Optional<Boolean> binary) {}
+
+    record Range(
+            @Description("The lower bound; absent for none") Optional<String> lower,
+
+            @Description("The upper bound; absent for none") Optional<String> upper,
+
+            @Description("Whether the lower bound matches; true by default")
+            Optional<Boolean> includeLower,
+
+            @Description("Whether the upper bound matches; true by default")
+            Optional<Boolean> includeUpper) {}
 
     record Term(
             String field,
@@ -164,8 +224,9 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
     @Override
     public String description() {
         return "Search the open index, best score first, a page at a time: each hit with its document id, score and"
-                + " a few brief stored values, to find documents; get_document and get_field_value read them. Give a query in Lucene's classic syntax with a defaultField, or a term for an"
-                + " exact keyword. For the next page, call it again with the result's nextOffset.";
+                + " a few brief stored values, to find documents; get_document and get_field_value read them. Give a"
+                + " query in Lucene's syntax with a defaultField, a term for an exact keyword, or docValues for a"
+                + " field that has only those. For the next page, call it again with the result's nextOffset.";
     }
 
     @Override
@@ -212,13 +273,22 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
     }
 
     private static SearchQuery query(Arguments arguments, Call call) throws ToolException, Jobs.Cancelled {
-        if (arguments.query().isPresent() == arguments.term().isPresent()) {
-            throw ToolError.invalid("Give exactly one of query and term");
+        int given = (arguments.query().isPresent() ? 1 : 0)
+                + (arguments.term().isPresent() ? 1 : 0)
+                + (arguments.docValues().isPresent() ? 1 : 0);
+        if (given != 1) {
+            throw ToolError.invalid("Give exactly one of query, term and docValues");
+        }
+        if (arguments.pointTypes().isPresent() && arguments.query().isEmpty()) {
+            throw ToolError.invalid("pointTypes goes with query only");
+        }
+        if (arguments.term().isPresent() || arguments.docValues().isPresent()) {
+            if (arguments.analyzer().isPresent() || arguments.fieldAnalyzers().isPresent()) {
+                throw ToolError.invalid(
+                        "analyzer and fieldAnalyzers go with query only: a term or doc values aren't analyzed");
+            }
         }
         if (arguments.term().isPresent()) {
-            if (arguments.analyzer().isPresent() || arguments.fieldAnalyzers().isPresent()) {
-                throw ToolError.invalid("analyzer and fieldAnalyzers go with query only: a term isn't analyzed");
-            }
             Term term = arguments.term().get();
             return new SearchQuery(
                     Optional.empty(),
@@ -230,19 +300,39 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
                     Optional.empty(),
                     Optional.empty());
         }
+        if (arguments.docValues().isPresent()) {
+            return new SearchQuery(
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.of(docValues(arguments.docValues().get(), call)),
+                    Optional.empty());
+        }
         String defaultField = arguments
                 .defaultField()
                 .orElseThrow(
                         () -> ToolError.invalid("A query needs a defaultField: the field of terms that name none"));
+        String text = arguments.query().get();
+        QueryOperator operator = arguments.defaultOperator().orElse(QueryOperator.OR);
+        Analyzer analyzer = analyzer(arguments, call);
+        Optional<OpenIndexResult> opened = call.session().opened();
+        if (opened.isPresent() && opened.get().features().contains(Feature.STANDARD_SEARCH)) {
+            StandardQuery standard = new StandardQuery(
+                    text, defaultField, operator, PARSER_DEFAULTS, points(arguments, opened.get(), call), analyzer);
+            return new SearchQuery(
+                    Optional.empty(),
+                    Optional.of(standard),
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.empty(),
+                    Optional.empty());
+        }
+        if (arguments.pointTypes().isPresent()) {
+            throw ToolError.invalid("pointTypes needs the standard parser, which the Lucene of this index lacks");
+        }
         ClassicQuery classic = new ClassicQuery(
-                arguments.query().get(),
-                defaultField,
-                arguments.defaultOperator().orElse(QueryOperator.OR),
-                PARSER_DEFAULTS,
-                FUZZY_MAX_EDITS,
-                false,
-                false,
-                analyzer(arguments, call));
+                text, defaultField, operator, PARSER_DEFAULTS, FUZZY_MAX_EDITS, false, false, analyzer);
         return new SearchQuery(
                 Optional.of(classic),
                 Optional.empty(),
@@ -250,6 +340,60 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
                 Optional.empty(),
                 Optional.empty(),
                 Optional.empty());
+    }
+
+    /**
+     * The point fields of the query: every field of one dimension and 4 or 8 bytes, as INT or LONG
+     * as the search screen guesses (ADR 0107), and {@code pointTypes} as it says.
+     */
+    private static List<PointField> points(Arguments arguments, OpenIndexResult opened, Call call)
+            throws ToolException, Jobs.Cancelled {
+        Map<String, PointType> types = new LinkedHashMap<>();
+        if (opened.features().contains(Feature.POINTS)) {
+            for (IndexField field : call.call(Methods.GET_INDEX_STATS, new GetIndexStatsParams())
+                    .fields()) {
+                if (field.pointDimensionCount() == 1 && field.pointNumBytes() == Integer.BYTES) {
+                    types.put(field.name(), PointType.INT);
+                } else if (field.pointDimensionCount() == 1 && field.pointNumBytes() == Long.BYTES) {
+                    types.put(field.name(), PointType.LONG);
+                }
+            }
+        }
+        for (PointFieldType given : arguments.pointTypes().orElse(List.of())) {
+            types.put(given.field(), given.type());
+        }
+        return types.entrySet().stream()
+                .map(entry -> new PointField(entry.getKey(), entry.getValue()))
+                .toList();
+    }
+
+    private static DocValuesQuery docValues(DocValues docValues, Call call) throws ToolException, Jobs.Cancelled {
+        boolean hex = docValues.binary().orElse(false);
+        Optional<DocValuesNumber> number = docValues.number();
+        if (number.isEmpty()) {
+            GetIndexStatsResult stats = call.call(Methods.GET_INDEX_STATS, new GetIndexStatsParams());
+            boolean numeric = stats.fields().stream()
+                    .filter(field -> field.name().equals(docValues.field()))
+                    .anyMatch(field -> field.docValuesType() == DocValuesType.NUMERIC
+                            || field.docValuesType() == DocValuesType.SORTED_NUMERIC);
+            number = numeric ? Optional.of(DocValuesNumber.LONG) : Optional.empty();
+        }
+        return new DocValuesQuery(
+                docValues.field(),
+                number,
+                docValues
+                        .values()
+                        .map(values -> values.stream()
+                                .map(value -> new BytesValue(value, hex))
+                                .toList()),
+                docValues
+                        .range()
+                        .map(range -> new DocValuesRange(
+                                range.lower().map(value -> new BytesValue(value, hex)),
+                                range.upper().map(value -> new BytesValue(value, hex)),
+                                range.includeLower().orElse(true),
+                                range.includeUpper().orElse(true))),
+                docValues.prefix().map(value -> new BytesValue(value, hex)));
     }
 
     private static Analyzer analyzer(Arguments arguments, Call call) throws ToolException, Jobs.Cancelled {

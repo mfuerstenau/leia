@@ -11,6 +11,7 @@ public final class Tools {
             new IndexInfoTool(),
             new SearchTool(),
             new AnalyzeTool(),
+            new TermsTool(),
             new GetDocumentTool(),
             new GetFieldValueTool(),
             new ReconstructFieldsTool());

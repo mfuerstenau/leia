@@ -151,6 +151,10 @@
                   "type": "integer",
                   "description": "Dimensions of the point values; absent without points"
                 },
+                "pointBytes": {
+                  "type": "integer",
+                  "description": "Bytes per dimension of the point values: 4 for an int or float, 8 for a long or double; absent without points"
+                },
                 "vectorDimension": {
                   "type": "integer",
                   "description": "Dimensions of the KNN vectors; absent without vectors"
@@ -325,6 +329,10 @@
                   "type": "integer",
                   "description": "Dimensions of the point values; absent without points"
                 },
+                "pointBytes": {
+                  "type": "integer",
+                  "description": "Bytes per dimension of the point values: 4 for an int or float, 8 for a long or double; absent without points"
+                },
                 "vectorDimension": {
                   "type": "integer",
                   "description": "Dimensions of the KNN vectors; absent without vectors"
@@ -367,13 +375,13 @@
     },
     {
       "name": "search",
-      "description": "Search the open index, best score first, a page at a time: each hit with its document id, score and a few brief stored values, to find documents; get_document and get_field_value read them. Give a query in Lucene's classic syntax with a defaultField, or a term for an exact keyword. For the next page, call it again with the result's nextOffset.",
+      "description": "Search the open index, best score first, a page at a time: each hit with its document id, score and a few brief stored values, to find documents; get_document and get_field_value read them. Give a query in Lucene's syntax with a defaultField, a term for an exact keyword, or docValues for a field that has only those. For the next page, call it again with the result's nextOffset.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "query": {
             "type": "string",
-            "description": "A query in Lucene's classic syntax, such as title:lamp AND body:qu*. Give exactly one of query and term"
+            "description": "A query in Lucene's syntax, such as title:lamp AND body:qu*. Ranges on point fields work, such as price:[10 TO 20]; dates on point fields are epoch milliseconds, and dates indexed as text are written as they are indexed, such as published:[20260131 TO 20260228]. Give exactly one of query, term and docValues"
           },
           "term": {
             "type": "object",
@@ -395,7 +403,95 @@
               "value"
             ],
             "additionalProperties": false,
-            "description": "A query for exactly one term, neither analyzed nor split: for keyword fields such as ids. Give exactly one of query and term"
+            "description": "A query for exactly one term, neither analyzed nor split: for keyword fields such as ids. Give exactly one of query, term and docValues"
+          },
+          "docValues": {
+            "type": "object",
+            "properties": {
+              "field": {
+                "type": "string"
+              },
+              "number": {
+                "type": "string",
+                "enum": [
+                  "LONG",
+                  "DOUBLE",
+                  "SORTABLE_DOUBLE",
+                  "FLOAT",
+                  "SORTABLE_FLOAT"
+                ],
+                "description": "How a numeric field's values are encoded; LONG by default. DOUBLE and FLOAT are raw bits, SORTABLE_DOUBLE and SORTABLE_FLOAT as Lucene's DoubleField and FloatField write them; get_document's asStored says which. Absent for a field of bytes"
+              },
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Match documents with a value equal to one of these: decimal text for a number. Give exactly one of values, range and prefix"
+              },
+              "range": {
+                "type": "object",
+                "properties": {
+                  "lower": {
+                    "type": "string",
+                    "description": "The lower bound; absent for none"
+                  },
+                  "upper": {
+                    "type": "string",
+                    "description": "The upper bound; absent for none"
+                  },
+                  "includeLower": {
+                    "type": "boolean",
+                    "description": "Whether the lower bound matches; true by default"
+                  },
+                  "includeUpper": {
+                    "type": "boolean",
+                    "description": "Whether the upper bound matches; true by default"
+                  }
+                },
+                "additionalProperties": false,
+                "description": "Match documents with a value in this range. Give exactly one of values, range and prefix"
+              },
+              "prefix": {
+                "type": "string",
+                "description": "Match documents with a value that starts with this, for a field of bytes. Give exactly one of values, range and prefix"
+              },
+              "binary": {
+                "type": "boolean",
+                "description": "Whether values, the bounds and prefix are bytes in hex; false by default"
+              }
+            },
+            "required": [
+              "field"
+            ],
+            "additionalProperties": false,
+            "description": "A query on the doc values of a field, for fields that have only those. Give exactly one of query, term and docValues"
+          },
+          "pointTypes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "INT",
+                    "LONG",
+                    "FLOAT",
+                    "DOUBLE"
+                  ]
+                }
+              },
+              "required": [
+                "field",
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            "description": "The type of point fields in query, when the guess is wrong: a point field of 4 bytes is taken as INT and one of 8 bytes as LONG, so FLOAT and DOUBLE fields need it (index_info shows pointBytes). Goes with query"
           },
           "defaultField": {
             "type": "string",
@@ -672,6 +768,120 @@
           "analyzer",
           "tokens",
           "tokenCount"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "terms",
+      "description": "List the terms of a field, as the index holds them after analysis: the values to search for, and why a term query misses. A page in term order, optionally from a prefix, or with top the terms in the most documents. Counts include deleted documents. For the next page, call it again with the result's next as from and the same prefix.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "prefix": {
+            "type": "string",
+            "description": "Only terms that start with this text; a binary term never does"
+          },
+          "from": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "string",
+                "description": "The term as text, or in hex with binary"
+              },
+              "binary": {
+                "type": "boolean",
+                "description": "Whether value is the term's bytes in hex; false by default"
+              }
+            },
+            "required": [
+              "value"
+            ],
+            "additionalProperties": false,
+            "description": "Where the page starts: the next of the last page, which continues it with the same prefix"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "The most terms of the page, from 1 to 1000; 50 by default"
+          },
+          "top": {
+            "type": "integer",
+            "description": "Instead of a page, the N terms in the most documents, from 1 to 1000, most first: it scans every term of the field, which takes long on a large one. Excludes prefix, from and limit"
+          }
+        },
+        "required": [
+          "field"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "terms": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "term": {
+                  "type": "string"
+                },
+                "binary": {
+                  "type": "boolean",
+                  "description": "Present, and true, only if term is the term's bytes in hex"
+                },
+                "docFreq": {
+                  "type": "integer",
+                  "description": "The documents with the term, deleted ones included"
+                },
+                "totalTermFreq": {
+                  "type": "integer",
+                  "description": "The occurrences of the term in all documents; absent if equal to docFreq"
+                }
+              },
+              "required": [
+                "term",
+                "docFreq"
+              ],
+              "additionalProperties": false
+            },
+            "description": "The terms, in term order, or with top, most documents first"
+          },
+          "next": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "string",
+                "description": "The term as text, or in hex with binary"
+              },
+              "binary": {
+                "type": "boolean",
+                "description": "Whether value is the term's bytes in hex; false by default"
+              }
+            },
+            "required": [
+              "value"
+            ],
+            "additionalProperties": false,
+            "description": "The from of the next page; absent after the last term, and with top"
+          },
+          "uniqueTerms": {
+            "type": "integer",
+            "description": "How many distinct terms the field has; with top only"
+          }
+        },
+        "required": [
+          "field",
+          "terms"
         ],
         "additionalProperties": false
       },

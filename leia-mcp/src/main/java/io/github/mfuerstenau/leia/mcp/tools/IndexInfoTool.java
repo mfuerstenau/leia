@@ -69,6 +69,10 @@ final class IndexInfoTool implements McpTool<IndexInfoTool.Arguments, IndexInfoT
             @Description("Dimensions of the point values; absent without points")
             OptionalInt pointDimensionCount,
 
+            @Description("Bytes per dimension of the point values: 4 for an int or float, 8 for a long or double;"
+                    + " absent without points")
+            OptionalInt pointBytes,
+
             @Description("Dimensions of the KNN vectors; absent without vectors")
             OptionalInt vectorDimension,
 
@@ -134,6 +138,7 @@ final class IndexInfoTool implements McpTool<IndexInfoTool.Arguments, IndexInfoT
                 field.indexOptions(),
                 field.docValuesType() == DocValuesType.NONE ? Optional.empty() : Optional.of(field.docValuesType()),
                 Absent.nonZero(field.pointDimensionCount()),
+                Absent.nonZero(field.pointNumBytes()),
                 Absent.nonZero(field.vectorDimension()),
                 Absent.flag(field.hasTermVectors()),
                 field.terms().map(TermStats::docCount).map(OptionalInt::of).orElseGet(OptionalInt::empty));

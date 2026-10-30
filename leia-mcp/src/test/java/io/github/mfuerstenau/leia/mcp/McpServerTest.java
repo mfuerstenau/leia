@@ -135,6 +135,7 @@ class McpServerTest {
                         "index_info",
                         "search",
                         "analyze",
+                        "terms",
                         "get_document",
                         "get_field_value",
                         "reconstruct_fields");
@@ -366,7 +367,8 @@ class McpServerTest {
                 .contains("bogus")
                 .endsWith("(INVALID_PARAMS)");
         assertThat(client.error(3, "search", "{\"query\":\"lamp\"}")).contains("defaultField");
-        assertThat(client.error(4, "search", "{\"defaultField\":\"title\"}")).contains("exactly one of query and term");
+        assertThat(client.error(4, "search", "{\"defaultField\":\"title\"}"))
+                .contains("exactly one of query, term and docValues");
         assertThat(client.error(5, "search", "{\"query\":\"lamp\",\"defaultField\":\"title\",\"limit\":101}"))
                 .contains("limit must be from 1 to 100");
         assertThat(client.error(6, "search", "{\"term\":{\"value\":\"doc-0042\"}}"))
@@ -565,7 +567,13 @@ class McpServerTest {
                             .map(tool -> tool.path("name").asString())
                             .toList())
                     .containsExactly(
-                            "index_info", "search", "analyze", "get_document", "get_field_value", "reconstruct_fields");
+                            "index_info",
+                            "search",
+                            "analyze",
+                            "terms",
+                            "get_document",
+                            "get_field_value",
+                            "reconstruct_fields");
             assertThat(open.path("error").path("code").asInt()).isEqualTo(Messages.INVALID_PARAMS);
             assertThat(pinned.structured(4, "index_info", "{}").path("numDocs").asInt())
                     .isEqualTo(487);
@@ -674,6 +682,160 @@ class McpServerTest {
         String meta = extra.equals("{}") ? "" : "," + extra.substring(1, extra.length() - 1);
         return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"method\":\"tools/call\",\"params\":{\"name\":\"" + tool
                 + "\",\"arguments\":{}" + meta + "}}";
+    }
+
+    @Test
+    void listsTheTermsAPageAtATime() throws Exception {
+        JsonNode first = client.structured(1, "terms", "{\"field\":\"id\",\"limit\":3}");
+        JsonNode second = client.structured(
+                2,
+                "terms",
+                "{\"field\":\"id\",\"limit\":3,\"from\":" + first.path("next").toString() + "}");
+
+        assertThat(terms(first)).containsExactly("doc-0000", "doc-0001", "doc-0002");
+        assertThat(first.path("terms").get(0).path("docFreq").asInt()).isEqualTo(1);
+        assertThat(first.path("terms").get(0).has("totalTermFreq")).isFalse();
+        assertThat(first.path("next").path("value").asString()).isEqualTo("doc-0003");
+        assertThat(terms(second)).containsExactly("doc-0003", "doc-0004", "doc-0005");
+    }
+
+    @Test
+    void listsTheTermsWithAPrefixAndEndsWithThem() throws Exception {
+        JsonNode first = client.structured(1, "terms", "{\"field\":\"id\",\"prefix\":\"doc-04\",\"limit\":60}");
+        JsonNode second = client.structured(
+                2,
+                "terms",
+                "{\"field\":\"id\",\"prefix\":\"doc-04\",\"limit\":60,\"from\":"
+                        + first.path("next").toString() + "}");
+        JsonNode all = client.structured(3, "terms", "{\"field\":\"id\",\"prefix\":\"doc-04\",\"limit\":1000}");
+
+        assertThat(terms(first)).hasSize(60).startsWith("doc-0400").endsWith("doc-0459");
+        assertThat(terms(second)).hasSize(40).startsWith("doc-0460").endsWith("doc-0499");
+        assertThat(second.has("next")).isFalse();
+        assertThat(terms(all)).hasSize(100);
+        assertThat(all.has("next")).isFalse();
+    }
+
+    @Test
+    void listsTheTermsInTheMostDocuments() throws Exception {
+        JsonNode result = client.structured(1, "terms", "{\"field\":\"category\",\"top\":5}");
+
+        assertThat(result.path("terms")).hasSize(5);
+        assertThat(result.path("uniqueTerms").asLong()).isEqualTo(6);
+        assertThat(result.has("next")).isFalse();
+        assertThat(result.path("terms").get(0).path("docFreq").asInt())
+                .isGreaterThanOrEqualTo(
+                        result.path("terms").get(4).path("docFreq").asInt());
+    }
+
+    @Test
+    void flagsBinaryTerms() throws Exception {
+        JsonNode result = client.structured(1, "terms", "{\"field\":\"binary_key\",\"limit\":2}");
+        JsonNode prefixed = client.structured(2, "terms", "{\"field\":\"binary_key\",\"prefix\":\"a\"}");
+
+        assertThat(result.path("terms").get(0).path("binary").asBoolean()).isTrue();
+        assertThat(result.path("next").path("binary").asBoolean()).isTrue();
+        assertThat(prefixed.path("terms")).isEmpty();
+    }
+
+    @Test
+    void refusesTermsOfAnUnknownFieldAndBadArguments() throws Exception {
+        assertThat(client.error(1, "terms", "{\"field\":\"nope\"}")).endsWith("(FIELD_NOT_FOUND)");
+        assertThat(client.error(2, "terms", "{\"field\":\"id\",\"top\":3,\"prefix\":\"doc\"}"))
+                .contains("top excludes")
+                .endsWith("(INVALID_PARAMS)");
+        assertThat(client.error(3, "terms", "{\"field\":\"id\",\"limit\":1001}"))
+                .contains("limit must be from 1 to 1000");
+        assertThat(client.error(4, "terms", "{\"field\":\"id\",\"top\":0}")).contains("top must be from 1");
+    }
+
+    @Test
+    void searchesARangeOfPoints() throws Exception {
+        String quantity = "\"defaultField\":\"title\",\"exactTotalHits\":true,\"limit\":1";
+        JsonNode points = client.structured(1, "search", "{\"query\":\"quantity:[-5 TO 5]\"," + quantity + "}");
+        JsonNode values = client.structured(
+                2,
+                "search",
+                "{\"docValues\":{\"field\":\"quantity\",\"range\":{\"lower\":\"-5\",\"upper\":\"5\"}}," + quantity
+                        + "}");
+        long from = 1768003200000L;
+        long to = 1768953599999L;
+        JsonNode timestamps = client.structured(
+                3, "search", "{\"query\":\"timestamp:[" + from + " TO " + to + "]\"," + quantity + "}");
+        JsonNode timestampValues = client.structured(
+                4,
+                "search",
+                "{\"docValues\":{\"field\":\"timestamp\",\"range\":{\"lower\":\"" + from + "\",\"upper\":\"" + to
+                        + "\"}}," + quantity + "}");
+
+        assertThat(points.path("totalHits").asLong())
+                .isEqualTo(9)
+                .isEqualTo(values.path("totalHits").asLong());
+        assertThat(timestamps.path("totalHits").asLong())
+                .isPositive()
+                .isEqualTo(timestampValues.path("totalHits").asLong());
+    }
+
+    @Test
+    void searchesADoublePointOnceItsTypeIsGiven() throws Exception {
+        String query = "\"query\":\"title:lamp AND price:[10 TO 20]\",\"defaultField\":\"title\"";
+
+        JsonNode guessed = client.structured(1, "search", "{" + query + "}");
+        JsonNode typed = client.structured(
+                2, "search", "{" + query + ",\"pointTypes\":[{\"field\":\"price\",\"type\":\"DOUBLE\"}]}");
+
+        assertThat(guessed.path("totalHits").asLong()).isZero();
+        assertThat(docIds(typed)).containsExactly(196);
+        assertThat(client.error(3, "search", "{" + query + ",\"pointTypes\":[{\"field\":\"price\",\"type\":\"INT\"}]}"))
+                .endsWith("(INVALID_PARAMS)");
+        assertThat(client.error(4, "search", "{\"term\":{\"field\":\"id\",\"value\":\"doc-0042\"},\"pointTypes\":[]}"))
+                .contains("pointTypes goes with query")
+                .endsWith("(INVALID_PARAMS)");
+    }
+
+    @Test
+    void searchesTheDocValuesOfAField() throws Exception {
+        String rest = ",\"exactTotalHits\":true,\"limit\":1}";
+
+        JsonNode scores = client.structured(
+                1, "search", "{\"docValues\":{\"field\":\"scores\",\"range\":{\"lower\":\"90\"}}" + rest);
+        JsonNode kitchen = client.structured(
+                2, "search", "{\"docValues\":{\"field\":\"category\",\"values\":[\"kitchen\"]}" + rest);
+        JsonNode prefix =
+                client.structured(3, "search", "{\"docValues\":{\"field\":\"category\",\"prefix\":\"o\"}" + rest);
+        JsonNode weight = client.structured(
+                4,
+                "search",
+                "{\"docValues\":{\"field\":\"weight\",\"number\":\"SORTABLE_DOUBLE\",\"range\":{\"lower\":\"0\"}}"
+                        + rest);
+
+        assertThat(scores.path("totalHits").asLong()).isPositive();
+        assertThat(kitchen.path("totalHits").asLong()).isEqualTo(80);
+        assertThat(prefix.path("totalHits").asLong()).isEqualTo(158);
+        assertThat(weight.path("totalHits").asLong()).isPositive();
+    }
+
+    @Test
+    void refusesMoreThanOneKindOfQuery() throws Exception {
+        assertThat(client.error(
+                        1,
+                        "search",
+                        "{\"query\":\"lamp\",\"defaultField\":\"title\",\"docValues\":{\"field\":\"category\","
+                                + "\"prefix\":\"o\"}}"))
+                .contains("exactly one of query, term and docValues")
+                .endsWith("(INVALID_PARAMS)");
+        assertThat(client.error(
+                        2,
+                        "search",
+                        "{\"docValues\":{\"field\":\"category\",\"prefix\":\"o\"},\"analyzer\":\"KeywordAnalyzer\"}"))
+                .contains("go with query only")
+                .endsWith("(INVALID_PARAMS)");
+    }
+
+    private static List<String> terms(JsonNode result) {
+        return StreamSupport.stream(result.path("terms").spliterator(), false)
+                .map(term -> term.path("term").asString())
+                .toList();
     }
 
     private static List<Integer> docIds(JsonNode result) {
