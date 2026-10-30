@@ -131,7 +131,13 @@ class McpServerTest {
                         .map(tool -> tool.path("name").asString())
                         .toList())
                 .startsWith(
-                        "open_index", "index_info", "search", "get_document", "get_field_value", "reconstruct_fields");
+                        "open_index",
+                        "index_info",
+                        "search",
+                        "analyze",
+                        "get_document",
+                        "get_field_value",
+                        "reconstruct_fields");
     }
 
     @Test
@@ -188,6 +194,61 @@ class McpServerTest {
                         "{\"term\":{\"field\":\"id\",\"value\":\"doc-0042\"},\"analyzer\":\"KeywordAnalyzer\"}"))
                 .contains("go with query only")
                 .endsWith("(INVALID_PARAMS)");
+    }
+
+    @Test
+    void analyzesATextWithStandardAndNamedAnalyzers() throws Exception {
+        JsonNode standard = client.structured(1, "analyze", "{\"text\":\"doc-0042 The Lamp\"}");
+        JsonNode keyword =
+                client.structured(2, "analyze", "{\"text\":\"doc-0042 The Lamp\",\"analyzer\":\"KeywordAnalyzer\"}");
+
+        assertThat(standard.path("analyzer").asString()).endsWith("StandardAnalyzer");
+        assertThat(standard.path("tokenCount").asInt()).isEqualTo(4);
+        assertThat(standard.has("cut")).isFalse();
+        JsonNode tokens = standard.path("tokens");
+        assertThat(StreamSupport.stream(tokens.spliterator(), false)
+                        .map(token -> token.path("term").asString())
+                        .toList())
+                .containsExactly("doc", "0042", "the", "lamp");
+        assertThat(tokens.get(1).path("position").asInt()).isEqualTo(1);
+        assertThat(tokens.get(1).path("startOffset").asInt()).isEqualTo(4);
+        assertThat(tokens.get(1).path("endOffset").asInt()).isEqualTo(8);
+        assertThat(tokens.get(1).has("positionLength")).isFalse();
+        assertThat(keyword.path("tokens")).hasSize(1);
+        assertThat(keyword.path("tokens").get(0).path("term").asString()).isEqualTo("doc-0042 The Lamp");
+    }
+
+    @Test
+    void cutsTheTokensOfAnAnalysisAtMaxTokens() throws Exception {
+        JsonNode result = client.structured(1, "analyze", "{\"text\":\"doc-0042 The Lamp\",\"maxTokens\":2}");
+
+        assertThat(result.path("tokens")).hasSize(2);
+        assertThat(result.path("tokenCount").asInt()).isEqualTo(4);
+        assertThat(result.path("cut").asBoolean()).isTrue();
+    }
+
+    @Test
+    void refusesAnUnknownAnalyzerAndBadLimitsOfAnAnalysis() throws Exception {
+        assertThat(client.error(1, "analyze", "{\"text\":\"lamp\",\"analyzer\":\"NoSuchAnalyzer\"}"))
+                .startsWith("No analyzer NoSuchAnalyzer; there are ")
+                .endsWith("(INVALID_PARAMS)");
+        assertThat(client.error(2, "analyze", "{\"text\":\"lamp\",\"maxTokens\":0}"))
+                .startsWith("maxTokens must be from 1 to 10000, not 0");
+    }
+
+    @Test
+    void analyzesWithoutAnOpenIndex() throws Exception {
+        McpServer server =
+                new McpServer(backend, version, new Session(DirectoryImpl.FS, Optional.empty(), List.of()), Tools.ALL);
+        McpClient closed = new McpClient(server);
+        try {
+            assertThat(closed.structured(1, "analyze", "{\"text\":\"The Lamp\"}")
+                            .path("tokenCount")
+                            .asInt())
+                    .isEqualTo(2);
+        } finally {
+            closed.close();
+        }
     }
 
     @Test
@@ -503,7 +564,8 @@ class McpServerTest {
             assertThat(StreamSupport.stream(tools.spliterator(), false)
                             .map(tool -> tool.path("name").asString())
                             .toList())
-                    .containsExactly("index_info", "search", "get_document", "get_field_value", "reconstruct_fields");
+                    .containsExactly(
+                            "index_info", "search", "analyze", "get_document", "get_field_value", "reconstruct_fields");
             assertThat(open.path("error").path("code").asInt()).isEqualTo(Messages.INVALID_PARAMS);
             assertThat(pinned.structured(4, "index_info", "{}").path("numDocs").asInt())
                     .isEqualTo(487);

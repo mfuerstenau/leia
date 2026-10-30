@@ -26,7 +26,6 @@ Goal: the tools cost an agent few tokens, then they answer why a query matches o
 
 Then the tools, each over a method the backend has; each checks the runtime's `features` and answers `NOT_SUPPORTED` without them. Short descriptions keep the cost of `tools/list` down.
 
-- [ ] `analyze`: the tokens of a text for an analyzer, or a field's (`analyze`, `getAnalysisComponents`).
 - [ ] `terms`: a field's terms a page at a time from a prefix (`getTerms`), or its top terms by document frequency (`startFieldTermScan`, a job). One tool, not two, for `tools/list`.
 - [ ] Numeric and date ranges in `search`: the classic parser makes no point queries, so `price:[10 TO 20]` on a point field finds nothing. `points` through the standard parser (`StandardQuery`, `PointField`), and a doc-values query (`DocValuesQuery`: values, range, prefix).
 - [ ] `sort` in `search`, by fields' doc values or the score (`SortKey`).

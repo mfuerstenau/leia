@@ -201,6 +201,7 @@ tools:
 | `open_index` | opens an index in place of the open one; without `INDEX_PATH`, the agent opens one with it |
 | `index_info` | the open index: the Lucene that reads it, its document counts, its fields and how each is indexed |
 | `search` | a page of hits, best score first, with a few brief stored values, to find documents: a query in Lucene's classic syntax, analyzed with `StandardAnalyzer` or the analyzers it names, or one exact term, such as an id |
+| `analyze` | the tokens an analyzer makes of a text, with positions, offsets and types, to see why a query matches or not; needs no open index |
 | `get_document` | a document by its id: per field its stored values, cut when long, doc values, norm and KNN vector |
 | `get_field_value` | one stored value whole, in slices |
 | `reconstruct_fields` | the terms and points a document was indexed with, also in the fields that aren't stored, with the terms in position order; the terms with freqs and positions only on request |

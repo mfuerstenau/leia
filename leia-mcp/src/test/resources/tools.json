@@ -591,6 +591,96 @@
       }
     },
     {
+      "name": "analyze",
+      "description": "What an analyzer makes of a text: its tokens with positions, offsets and types, to see why a query matches or not and which analyzer a field needs. Needs no open index.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "The text to analyze, at most 10000 characters"
+          },
+          "analyzer": {
+            "type": "string",
+            "description": "By simple or class name, as in search; StandardAnalyzer by default"
+          },
+          "maxTokens": {
+            "type": "integer",
+            "description": "The most tokens shown, from 1 to 10000; 200 by default"
+          }
+        },
+        "required": [
+          "text"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "analyzer": {
+            "type": "string",
+            "description": "The analyzer's class name"
+          },
+          "tokens": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "term": {
+                  "type": "string"
+                },
+                "position": {
+                  "type": "integer"
+                },
+                "startOffset": {
+                  "type": "integer",
+                  "description": "Where the token starts in the text"
+                },
+                "endOffset": {
+                  "type": "integer",
+                  "description": "Where the token ends in the text"
+                },
+                "type": {
+                  "type": "string"
+                },
+                "positionLength": {
+                  "type": "integer",
+                  "description": "How many positions the token spans; absent if 1"
+                }
+              },
+              "required": [
+                "term",
+                "position",
+                "startOffset",
+                "endOffset",
+                "type"
+              ],
+              "additionalProperties": false
+            },
+            "description": "The tokens in order"
+          },
+          "tokenCount": {
+            "type": "integer",
+            "description": "The tokens the text makes, counted up to 10000"
+          },
+          "cut": {
+            "type": "boolean",
+            "description": "Present, and true, only if tokens are left out"
+          }
+        },
+        "required": [
+          "analyzer",
+          "tokens",
+          "tokenCount"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
       "name": "get_document",
       "description": "Show a document of the open index by its id: per field its stored values, doc values, norm, KNN vector and whether it has a term vector. Long values are cut, with their full length; get_field_value reads one whole. Fields that are only indexed show no value: reconstruct_fields rebuilds them.",
       "inputSchema": {
