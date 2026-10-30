@@ -44,4 +44,9 @@ public final class ToolError {
     public static ToolException invalid(String message) {
         return new ToolException(message + " (" + ErrorCode.INVALID_PARAMS.name() + ")");
     }
+
+    /** A feature that the runtime that reads the index lacks. */
+    public static ToolException notSupported(String message) {
+        return new ToolException(message + " (" + ErrorCode.NOT_SUPPORTED.name() + ")");
+    }
 }

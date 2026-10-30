@@ -159,6 +159,24 @@
                   "type": "integer",
                   "description": "Dimensions of the KNN vectors; absent without vectors"
                 },
+                "vectorEncoding": {
+                  "type": "string",
+                  "enum": [
+                    "BYTE",
+                    "FLOAT32"
+                  ],
+                  "description": "How the KNN vectors are encoded, FLOAT32 or BYTE; absent without vectors"
+                },
+                "vectorSimilarity": {
+                  "type": "string",
+                  "enum": [
+                    "EUCLIDEAN",
+                    "DOT_PRODUCT",
+                    "COSINE",
+                    "MAXIMUM_INNER_PRODUCT"
+                  ],
+                  "description": "How the KNN vectors are compared; COSINE refuses a vector of zeros; absent without vectors"
+                },
                 "hasTermVectors": {
                   "type": "boolean",
                   "description": "Present, and true, only if the field has term vectors"
@@ -337,6 +355,24 @@
                   "type": "integer",
                   "description": "Dimensions of the KNN vectors; absent without vectors"
                 },
+                "vectorEncoding": {
+                  "type": "string",
+                  "enum": [
+                    "BYTE",
+                    "FLOAT32"
+                  ],
+                  "description": "How the KNN vectors are encoded, FLOAT32 or BYTE; absent without vectors"
+                },
+                "vectorSimilarity": {
+                  "type": "string",
+                  "enum": [
+                    "EUCLIDEAN",
+                    "DOT_PRODUCT",
+                    "COSINE",
+                    "MAXIMUM_INNER_PRODUCT"
+                  ],
+                  "description": "How the KNN vectors are compared; COSINE refuses a vector of zeros; absent without vectors"
+                },
                 "hasTermVectors": {
                   "type": "boolean",
                   "description": "Present, and true, only if the field has term vectors"
@@ -375,13 +411,13 @@
     },
     {
       "name": "search",
-      "description": "Search the open index, best score first unless sort says otherwise, a page at a time: each hit with its document id, score and a few brief stored values, to find documents; get_document and get_field_value read them. Give a query in Lucene's syntax with a defaultField, a term for an exact keyword, or docValues for a field that has only those. For the next page, call it again with the result's nextOffset.",
+      "description": "Search the open index, best score first unless sort says otherwise, a page at a time: each hit with its document id, score and a few brief stored values, to find documents; get_document and get_field_value read them. Give a query in Lucene's syntax with a defaultField, a term for an exact keyword, docValues for a field that has only those, or knn for the nearest documents to a vector or a document's. For the next page, call it again with the result's nextOffset.",
       "inputSchema": {
         "type": "object",
         "properties": {
           "query": {
             "type": "string",
-            "description": "A query in Lucene's syntax, such as title:lamp AND body:qu*. Ranges on point fields work, such as price:[10 TO 20]; dates on point fields are epoch milliseconds, and dates indexed as text are written as they are indexed, such as published:[20260131 TO 20260228]. Give exactly one of query, term and docValues"
+            "description": "A query in Lucene's syntax, such as title:lamp AND body:qu*. Ranges on point fields work, such as price:[10 TO 20]; dates on point fields are epoch milliseconds, and dates indexed as text are written as they are indexed, such as published:[20260131 TO 20260228]. Give exactly one of query, term, docValues and knn"
           },
           "term": {
             "type": "object",
@@ -403,7 +439,7 @@
               "value"
             ],
             "additionalProperties": false,
-            "description": "A query for exactly one term, neither analyzed nor split: for keyword fields such as ids. Give exactly one of query, term and docValues"
+            "description": "A query for exactly one term, neither analyzed nor split: for keyword fields such as ids. Give exactly one of query, term, docValues and knn"
           },
           "docValues": {
             "type": "object",
@@ -465,7 +501,44 @@
               "field"
             ],
             "additionalProperties": false,
-            "description": "A query on the doc values of a field, for fields that have only those. Give exactly one of query, term and docValues"
+            "description": "A query on the doc values of a field, for fields that have only those. Give exactly one of query, term, docValues and knn"
+          },
+          "knn": {
+            "type": "object",
+            "properties": {
+              "field": {
+                "type": "string",
+                "description": "A field with KNN vectors; index_info shows vectorDimension, vectorEncoding and vectorSimilarity"
+              },
+              "vector": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "description": "The target vector. For a BYTE field the values are whole numbers from -128 to 127. Give exactly one of vector and docId"
+              },
+              "docId": {
+                "type": "integer",
+                "description": "A document whose vector in field is the target, such as a hit's docId; it may be deleted. Give exactly one of vector and docId"
+              },
+              "k": {
+                "type": "integer",
+                "description": "How many nearest documents to find, from 1 to 10000; in search offset + limit by default, so a page is the k nearest and a higher k lets later pages follow; in explain the most, so pass the search's k to explain a hit as ranked. Not with exact"
+              },
+              "exact": {
+                "type": "boolean",
+                "description": "Whether to score every document with a vector instead of searching the graph, and so find all of them as hits; false by default"
+              },
+              "filter": {
+                "type": "string",
+                "description": "Search only documents that match this query in Lucene's syntax, parsed with defaultField, analyzer, fieldAnalyzers and defaultOperator; ranges on point fields don't work"
+              }
+            },
+            "required": [
+              "field"
+            ],
+            "additionalProperties": false,
+            "description": "The nearest documents to a vector or to a document's vector, by KNN vectors; the score is the similarity. Give exactly one of query, term, docValues and knn"
           },
           "pointTypes": {
             "type": "array",
@@ -763,7 +836,7 @@
         "properties": {
           "query": {
             "type": "string",
-            "description": "A query in Lucene's syntax, such as title:lamp AND body:qu*. Ranges on point fields work, such as price:[10 TO 20]; dates on point fields are epoch milliseconds, and dates indexed as text are written as they are indexed, such as published:[20260131 TO 20260228]. Give exactly one of query, term and docValues"
+            "description": "A query in Lucene's syntax, such as title:lamp AND body:qu*. Ranges on point fields work, such as price:[10 TO 20]; dates on point fields are epoch milliseconds, and dates indexed as text are written as they are indexed, such as published:[20260131 TO 20260228]. Give exactly one of query, term, docValues and knn"
           },
           "term": {
             "type": "object",
@@ -785,7 +858,7 @@
               "value"
             ],
             "additionalProperties": false,
-            "description": "A query for exactly one term, neither analyzed nor split: for keyword fields such as ids. Give exactly one of query, term and docValues"
+            "description": "A query for exactly one term, neither analyzed nor split: for keyword fields such as ids. Give exactly one of query, term, docValues and knn"
           },
           "docValues": {
             "type": "object",
@@ -847,7 +920,44 @@
               "field"
             ],
             "additionalProperties": false,
-            "description": "A query on the doc values of a field, for fields that have only those. Give exactly one of query, term and docValues"
+            "description": "A query on the doc values of a field, for fields that have only those. Give exactly one of query, term, docValues and knn"
+          },
+          "knn": {
+            "type": "object",
+            "properties": {
+              "field": {
+                "type": "string",
+                "description": "A field with KNN vectors; index_info shows vectorDimension, vectorEncoding and vectorSimilarity"
+              },
+              "vector": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                },
+                "description": "The target vector. For a BYTE field the values are whole numbers from -128 to 127. Give exactly one of vector and docId"
+              },
+              "docId": {
+                "type": "integer",
+                "description": "A document whose vector in field is the target, such as a hit's docId; it may be deleted. Give exactly one of vector and docId"
+              },
+              "k": {
+                "type": "integer",
+                "description": "How many nearest documents to find, from 1 to 10000; in search offset + limit by default, so a page is the k nearest and a higher k lets later pages follow; in explain the most, so pass the search's k to explain a hit as ranked. Not with exact"
+              },
+              "exact": {
+                "type": "boolean",
+                "description": "Whether to score every document with a vector instead of searching the graph, and so find all of them as hits; false by default"
+              },
+              "filter": {
+                "type": "string",
+                "description": "Search only documents that match this query in Lucene's syntax, parsed with defaultField, analyzer, fieldAnalyzers and defaultOperator; ranges on point fields don't work"
+              }
+            },
+            "required": [
+              "field"
+            ],
+            "additionalProperties": false,
+            "description": "The nearest documents to a vector or to a document's vector, by KNN vectors; the score is the similarity. Give exactly one of query, term, docValues and knn"
           },
           "pointTypes": {
             "type": "array",

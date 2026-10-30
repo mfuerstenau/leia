@@ -31,7 +31,7 @@ import java.util.OptionalInt;
 import java.util.OptionalLong;
 
 /**
- * {@code search}: a page of the hits of a query, a term query or a doc values query, best score
+ * {@code search}: a page of the hits of a query, a term query, a doc values query or a KNN query, best score
  * first or sorted by doc values (ADR 0108), with their stored values brief (ADR 0100). The parser and similarity are the ones the
  * search screen starts with: Lucene's defaults and BM25. A query is analyzed with {@code
  * StandardAnalyzer} unless {@code analyzer} and {@code fieldAnalyzers} name others, by class name
@@ -58,16 +58,20 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
             @Description("A query in Lucene's syntax, such as title:lamp AND body:qu*. Ranges on point fields work,"
                     + " such as price:[10 TO 20]; dates on point fields are epoch milliseconds, and dates indexed as"
                     + " text are written as they are indexed, such as published:[20260131 TO 20260228]. Give exactly"
-                    + " one of query, term and docValues")
+                    + " one of query, term, docValues and knn")
             Optional<String> query,
 
             @Description("A query for exactly one term, neither analyzed nor split: for keyword fields such as ids."
-                    + " Give exactly one of query, term and docValues")
+                    + " Give exactly one of query, term, docValues and knn")
             Optional<Queries.Term> term,
 
             @Description("A query on the doc values of a field, for fields that have only those. Give exactly one of"
-                    + " query, term and docValues")
+                    + " query, term, docValues and knn")
             Optional<Queries.DocValues> docValues,
+
+            @Description("The nearest documents to a vector or to a document's vector, by KNN vectors; the score is"
+                    + " the similarity. Give exactly one of query, term, docValues and knn")
+            Optional<Queries.Knn> knn,
 
             @Description("The type of point fields in query, when the guess is wrong: a point field of 4 bytes is"
                     + " taken as INT and one of 8 bytes as LONG, so FLOAT and DOUBLE fields need it (index_info shows"
@@ -192,8 +196,8 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
     public String description() {
         return "Search the open index, best score first unless sort says otherwise, a page at a time: each hit with its document id, score and"
                 + " a few brief stored values, to find documents; get_document and get_field_value read them. Give a"
-                + " query in Lucene's syntax with a defaultField, a term for an exact keyword, or docValues for a"
-                + " field that has only those. For the next page, call it again with the result's nextOffset.";
+                + " query in Lucene's syntax with a defaultField, a term for an exact keyword, docValues for a"
+                + " field that has only those, or knn for the nearest documents to a vector or a document's. For the next page, call it again with the result's nextOffset.";
     }
 
     @Override
@@ -208,9 +212,6 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
 
     @Override
     public Result call(Arguments arguments, Call call) throws ToolException, Jobs.Cancelled {
-        Queries.Stats stats = new Queries.Stats(call);
-        SearchQuery query = Queries.query(arguments, call, stats);
-        List<SortKey> sort = sort(arguments, stats);
         int offset = Slices.bounded("offset", arguments.offset(), 0, 0, StartSearchParams.MAX_WINDOW - 1);
         int limit = Slices.bounded("limit", arguments.limit(), DEFAULT_LIMIT, 1, MAX_LIMIT);
         int maxValueLength = Slices.bounded(
@@ -219,6 +220,9 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
             throw ToolError.invalid("offset + limit must be at most " + StartSearchParams.MAX_WINDOW
                     + ": a search pages that far only");
         }
+        Queries.Stats stats = new Queries.Stats(call);
+        SearchQuery query = Queries.query(arguments, call, stats, offset + limit);
+        List<SortKey> sort = sort(arguments, stats);
         StartSearchParams params = new StartSearchParams(
                 query,
                 Queries.BM25,

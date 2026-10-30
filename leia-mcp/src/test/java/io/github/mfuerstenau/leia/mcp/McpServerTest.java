@@ -7,6 +7,8 @@ import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.index.CloseIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
+import io.github.mfuerstenau.leia.protocol.index.Feature;
+import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.search.Bm25Similarity;
 import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
@@ -371,7 +373,7 @@ class McpServerTest {
                 .endsWith("(INVALID_PARAMS)");
         assertThat(client.error(3, "search", "{\"query\":\"lamp\"}")).contains("defaultField");
         assertThat(client.error(4, "search", "{\"defaultField\":\"title\"}"))
-                .contains("exactly one of query, term and docValues");
+                .contains("exactly one of query, term, docValues and knn");
         assertThat(client.error(5, "search", "{\"query\":\"lamp\",\"defaultField\":\"title\",\"limit\":101}"))
                 .contains("limit must be from 1 to 100");
         assertThat(client.error(6, "search", "{\"term\":{\"value\":\"doc-0042\"}}"))
@@ -939,7 +941,7 @@ class McpServerTest {
                         "search",
                         "{\"query\":\"lamp\",\"defaultField\":\"title\",\"docValues\":{\"field\":\"category\","
                                 + "\"prefix\":\"o\"}}"))
-                .contains("exactly one of query, term and docValues")
+                .contains("exactly one of query, term, docValues and knn")
                 .endsWith("(INVALID_PARAMS)");
         assertThat(client.error(
                         2,
@@ -947,6 +949,155 @@ class McpServerTest {
                         "{\"docValues\":{\"field\":\"category\",\"prefix\":\"o\"},\"analyzer\":\"KeywordAnalyzer\"}"))
                 .contains("go with query only")
                 .endsWith("(INVALID_PARAMS)");
+    }
+
+    private static final String NO_FIELDS = ",\"fields\":[]";
+
+    private static String knn(String body) {
+        return "{\"knn\":{\"field\":\"embedding\"," + body + "}" + NO_FIELDS;
+    }
+
+    @Test
+    void findsTheNearestDocumentsToADocumentsVector() throws Exception {
+        JsonNode result = client.structured(1, "search", knn("\"docId\":42") + ",\"limit\":4}");
+
+        assertThat(docIds(result)).containsExactly(42, 411, 98, 491);
+        assertThat(result.path("hits").get(0).path("score").floatValue()).isEqualTo(1.0f);
+        assertThat(result.path("totalHits").asLong()).isEqualTo(4);
+        assertThat(result.has("nextOffset")).isFalse();
+    }
+
+    @Test
+    void pagesPastTheDefaultKWithAHigherK() throws Exception {
+        JsonNode result = client.structured(1, "search", knn("\"docId\":42,\"k\":10") + ",\"limit\":4}");
+
+        assertThat(docIds(result)).containsExactly(42, 411, 98, 491);
+        assertThat(result.path("nextOffset").asInt()).isEqualTo(4);
+    }
+
+    @Test
+    void scoresEveryDocumentWithAVectorExactly() throws Exception {
+        JsonNode result = client.structured(
+                1, "search", knn("\"docId\":42,\"exact\":true") + ",\"limit\":10,\"exactTotalHits\":true}");
+
+        assertThat(result.path("totalHits").asLong()).isEqualTo(486);
+        assertThat(docIds(result)).startsWith(42, 411, 98, 491).hasSize(10);
+        assertThat(result.path("nextOffset").asInt()).isEqualTo(10);
+    }
+
+    @Test
+    void filtersTheKnnSearch() throws Exception {
+        String filter = "\"docId\":42,\"filter\":\"category:kitchen\"";
+        String field = ",\"defaultField\":\"title\"";
+        JsonNode exact = client.structured(
+                1, "search", knn(filter + ",\"exact\":true") + field + ",\"limit\":1,\"exactTotalHits\":true}");
+        JsonNode three = client.structured(2, "search", knn(filter + ",\"k\":3") + field + ",\"limit\":10}");
+
+        assertThat(exact.path("totalHits").asLong()).isEqualTo(80);
+        assertThat(docIds(three)).containsExactly(42, 98, 278);
+    }
+
+    @Test
+    void searchesAVectorWithoutADocument() throws Exception {
+        JsonNode document = client.structured(1, "get_document", "{\"docId\":42,\"withVectors\":true}");
+        String floats = document.findValue("floats").toString();
+
+        JsonNode result = client.structured(2, "search", knn("\"vector\":" + floats) + ",\"limit\":1}");
+
+        assertThat(docIds(result)).containsExactly(42);
+    }
+
+    @Test
+    void searchesAVectorOfBytesAndRefusesWhatIsNotAByte() throws Exception {
+        String sixteen = "[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16]";
+        String fingerprint = "{\"knn\":{\"field\":\"fingerprint\",\"vector\":";
+
+        JsonNode result = client.structured(1, "search", fingerprint + sixteen + "}" + NO_FIELDS + ",\"limit\":3}");
+
+        assertThat(docIds(result)).hasSize(3);
+        assertThat(client.error(2, "search", fingerprint + "[0.5,2]}}")).endsWith("(INVALID_PARAMS)");
+        assertThat(client.error(3, "search", fingerprint + "[200,2]}}")).contains("-128 to 127");
+    }
+
+    @Test
+    void refusesABadKnn() throws Exception {
+        assertThat(client.error(1, "search", knn("\"vector\":[1,2]") + "}"))
+                .contains("8")
+                .endsWith("(INVALID_PARAMS)");
+        assertThat(client.error(2, "search", knn("\"docId\":42,\"k\":3,\"exact\":true") + "}"))
+                .contains("k doesn't go with exact")
+                .endsWith("(INVALID_PARAMS)");
+        assertThat(client.error(3, "search", knn("\"docId\":42,\"filter\":\"category:kitchen\"") + "}"))
+                .contains("defaultField")
+                .endsWith("(INVALID_PARAMS)");
+        assertThat(client.error(4, "search", knn("\"docId\":42") + ",\"analyzer\":\"KeywordAnalyzer\"}"))
+                .contains("go with a knn filter only");
+        assertThat(client.error(5, "search", "{\"knn\":{\"field\":\"title\",\"docId\":42}" + NO_FIELDS + "}"))
+                .contains("title")
+                .endsWith("(INVALID_PARAMS)");
+        assertThat(client.error(6, "search", knn("\"docId\":42") + ",\"query\":\"lamp\",\"defaultField\":\"title\"}"))
+                .contains("exactly one of query, term, docValues and knn");
+        assertThat(client.error(7, "search", knn("\"docId\":42,\"vector\":[1]") + "}"))
+                .endsWith("(INVALID_PARAMS)");
+    }
+
+    @Test
+    void refusesKnnWithoutTheFeature() throws Exception {
+        Session session = new Session(DirectoryImpl.FS, Optional.empty(), List.of());
+        McpClient plain = serve(session, Tools.ALL);
+        OpenIndexResult opened = session.opened().orElseThrow();
+        session.opened(new OpenIndexResult(
+                opened.path(),
+                opened.mode(),
+                opened.numDocs(),
+                opened.maxDoc(),
+                opened.indexes(),
+                opened.skipped(),
+                opened.features().stream()
+                        .filter(feature -> feature != Feature.KNN_VECTORS)
+                        .collect(java.util.stream.Collectors.toSet()),
+                opened.luceneRuntime(),
+                opened.server()));
+
+        assertThat(plain.error(1, "search", knn("\"docId\":42") + "}"))
+                .contains("Lucene 9 or 10")
+                .endsWith("(NOT_SUPPORTED)");
+        plain.close();
+    }
+
+    @Test
+    void explainsAKnnHit() throws Exception {
+        JsonNode hit =
+                client.structured(1, "explain", "{\"knn\":{\"field\":\"embedding\",\"docId\":42},\"docId\":411}");
+        JsonNode outside = client.structured(
+                2,
+                "explain",
+                "{\"knn\":{\"field\":\"embedding\",\"docId\":42,\"filter\":\"category:kitchen\"},"
+                        + "\"defaultField\":\"title\",\"docId\":411}");
+
+        assertThat(hit.path("matches").asBoolean()).isTrue();
+        assertThat(hit.path("score").floatValue()).isPositive();
+        assertThat(outside.path("matches").asBoolean()).isFalse();
+    }
+
+    @Test
+    void showsHowTheVectorsOfAFieldAreEncoded() throws Exception {
+        JsonNode fields = client.structured(1, "index_info", "{}").path("fields");
+        JsonNode embedding = field(fields, "embedding");
+        JsonNode fingerprint = field(fields, "fingerprint");
+
+        assertThat(embedding.path("vectorEncoding").asString()).isEqualTo("FLOAT32");
+        assertThat(embedding.path("vectorSimilarity").asString()).isEqualTo("COSINE");
+        assertThat(fingerprint.path("vectorEncoding").asString()).isEqualTo("BYTE");
+        assertThat(fingerprint.path("vectorSimilarity").asString()).isEqualTo("EUCLIDEAN");
+        assertThat(field(fields, "title").has("vectorEncoding")).isFalse();
+    }
+
+    private static JsonNode field(JsonNode fields, String name) {
+        return StreamSupport.stream(fields.spliterator(), false)
+                .filter(field -> field.path("name").asString().equals(name))
+                .findFirst()
+                .orElseThrow();
     }
 
     private static final String LAMP_QUERY = "\"query\":\"title:lamp AND body:qu*\",\"defaultField\":\"body\"";
@@ -1010,7 +1161,7 @@ class McpServerTest {
                         2,
                         "explain",
                         "{" + LAMP_QUERY + ",\"term\":{\"field\":\"id\",\"value\":\"doc-0042\"},\"docId\":1}"))
-                .contains("exactly one of query, term and docValues");
+                .contains("exactly one of query, term, docValues and knn");
         assertThat(client.error(3, "explain", "{\"query\":\"lamp\",\"docId\":1}"))
                 .contains("defaultField");
         assertThat(client.error(4, "explain", "{" + LAMP_QUERY + ",\"docId\":1,\"maxLines\":0}"))

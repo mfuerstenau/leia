@@ -8,6 +8,7 @@ import io.github.mfuerstenau.leia.mcp.ToolException;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.search.Explanation;
 import io.github.mfuerstenau.leia.protocol.search.GetExplainResult;
+import io.github.mfuerstenau.leia.protocol.search.KnnQuery;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
 import io.github.mfuerstenau.leia.protocol.search.StartExplainParams;
 import java.util.ArrayList;
@@ -33,16 +34,20 @@ final class ExplainTool implements McpTool<ExplainTool.Arguments, ExplainTool.Re
             @Description("A query in Lucene's syntax, such as title:lamp AND body:qu*. Ranges on point fields work,"
                     + " such as price:[10 TO 20]; dates on point fields are epoch milliseconds, and dates indexed as"
                     + " text are written as they are indexed, such as published:[20260131 TO 20260228]. Give exactly"
-                    + " one of query, term and docValues")
+                    + " one of query, term, docValues and knn")
             Optional<String> query,
 
             @Description("A query for exactly one term, neither analyzed nor split: for keyword fields such as ids."
-                    + " Give exactly one of query, term and docValues")
+                    + " Give exactly one of query, term, docValues and knn")
             Optional<Queries.Term> term,
 
             @Description("A query on the doc values of a field, for fields that have only those. Give exactly one of"
-                    + " query, term and docValues")
+                    + " query, term, docValues and knn")
             Optional<Queries.DocValues> docValues,
+
+            @Description("The nearest documents to a vector or to a document's vector, by KNN vectors; the score is"
+                    + " the similarity. Give exactly one of query, term, docValues and knn")
+            Optional<Queries.Knn> knn,
 
             @Description("The type of point fields in query, when the guess is wrong: a point field of 4 bytes is"
                     + " taken as INT and one of 8 bytes as LONG, so FLOAT and DOUBLE fields need it (index_info shows"
@@ -109,8 +114,8 @@ final class ExplainTool implements McpTool<ExplainTool.Arguments, ExplainTool.Re
     public Result call(Arguments arguments, Call call) throws ToolException, Jobs.Cancelled {
         int maxLines = Slices.bounded("maxLines", arguments.maxLines(), DEFAULT_MAX_LINES, 1, MAX_LINES);
         Queries.Stats stats = new Queries.Stats(call);
-        StartExplainParams params =
-                new StartExplainParams(Queries.query(arguments, call, stats), Queries.BM25, arguments.docId());
+        StartExplainParams params = new StartExplainParams(
+                Queries.query(arguments, call, stats, KnnQuery.MAX_K), Queries.BM25, arguments.docId());
         Explanation explanation = call.job(
                 Methods.START_EXPLAIN,
                 params,

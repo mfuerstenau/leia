@@ -14,6 +14,8 @@ import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.TermStats;
+import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
+import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -75,6 +77,12 @@ final class IndexInfoTool implements McpTool<IndexInfoTool.Arguments, IndexInfoT
 
             @Description("Dimensions of the KNN vectors; absent without vectors")
             OptionalInt vectorDimension,
+
+            @Description("How the KNN vectors are encoded, FLOAT32 or BYTE; absent without vectors")
+            Optional<VectorEncoding> vectorEncoding,
+
+            @Description("How the KNN vectors are compared; COSINE refuses a vector of zeros; absent without vectors")
+            Optional<VectorSimilarity> vectorSimilarity,
 
             @Description("Present, and true, only if the field has term vectors")
             Optional<Boolean> hasTermVectors,
@@ -140,6 +148,8 @@ final class IndexInfoTool implements McpTool<IndexInfoTool.Arguments, IndexInfoT
                 Absent.nonZero(field.pointDimensionCount()),
                 Absent.nonZero(field.pointNumBytes()),
                 Absent.nonZero(field.vectorDimension()),
+                field.vectorEncoding(),
+                field.vectorSimilarity(),
                 Absent.flag(field.hasTermVectors()),
                 field.terms().map(TermStats::docCount).map(OptionalInt::of).orElseGet(OptionalInt::empty));
     }
