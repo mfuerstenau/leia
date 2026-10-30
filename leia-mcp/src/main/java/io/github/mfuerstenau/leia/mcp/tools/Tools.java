@@ -10,6 +10,7 @@ public final class Tools {
             new OpenIndexTool(),
             new IndexInfoTool(),
             new SearchTool(),
+            new ExplainTool(),
             new AnalyzeTool(),
             new TermsTool(),
             new GetDocumentTool(),

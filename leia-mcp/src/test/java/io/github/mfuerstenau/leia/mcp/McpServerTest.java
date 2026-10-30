@@ -135,6 +135,7 @@ class McpServerTest {
                         "open_index",
                         "index_info",
                         "search",
+                        "explain",
                         "analyze",
                         "terms",
                         "get_document",
@@ -570,6 +571,7 @@ class McpServerTest {
                     .containsExactly(
                             "index_info",
                             "search",
+                            "explain",
                             "analyze",
                             "terms",
                             "get_document",
@@ -943,6 +945,76 @@ class McpServerTest {
                         "{\"docValues\":{\"field\":\"category\",\"prefix\":\"o\"},\"analyzer\":\"KeywordAnalyzer\"}"))
                 .contains("go with query only")
                 .endsWith("(INVALID_PARAMS)");
+    }
+
+    private static final String LAMP_QUERY = "\"query\":\"title:lamp AND body:qu*\",\"defaultField\":\"body\"";
+
+    @Test
+    void explainsAHitWithItsScore() throws Exception {
+        JsonNode search = client.structured(1, "search", "{" + LAMP_QUERY + ",\"fields\":[],\"limit\":1}");
+        JsonNode hit = search.path("hits").get(0);
+
+        JsonNode result = client.structured(
+                2,
+                "explain",
+                "{" + LAMP_QUERY + ",\"docId\":" + hit.path("docId").asInt() + "}");
+
+        assertThat(result.path("matches").asBoolean()).isTrue();
+        assertThat(result.path("score").floatValue())
+                .isEqualTo(hit.path("score").floatValue());
+        String explanation = result.path("explanation").asString();
+        assertThat(explanation).contains("BM25Similarity").contains("title:lamp");
+        assertThat(explanation.lines()).anyMatch(line -> line.startsWith("  "));
+        assertThat(result.has("cut")).isFalse();
+    }
+
+    @Test
+    void explainsWhyADocumentDoesNotMatch() throws Exception {
+        JsonNode search = client.structured(1, "search", "{" + LAMP_QUERY + ",\"fields\":[],\"limit\":100}");
+        int miss = 0;
+        while (docIds(search).contains(miss)) {
+            miss++;
+        }
+
+        JsonNode result = client.structured(2, "explain", "{" + LAMP_QUERY + ",\"docId\":" + miss + "}");
+
+        assertThat(result.path("matches").asBoolean()).isFalse();
+        assertThat(result.has("score")).isFalse();
+        assertThat(result.path("explanation").asString()).isNotEmpty();
+    }
+
+    @Test
+    void explainsATermQuery() throws Exception {
+        JsonNode result =
+                client.structured(1, "explain", "{\"term\":{\"field\":\"id\",\"value\":\"doc-0042\"},\"docId\":42}");
+
+        assertThat(result.path("matches").asBoolean()).isTrue();
+        assertThat(result.path("explanation").asString()).contains("id:doc-0042");
+    }
+
+    @Test
+    void cutsAnExplanationAtMaxLines() throws Exception {
+        JsonNode result = client.structured(1, "explain", "{" + LAMP_QUERY + ",\"docId\":223,\"maxLines\":2}");
+
+        assertThat(result.path("explanation").asString().lines()).hasSize(2);
+        assertThat(result.path("cut").asBoolean()).isTrue();
+    }
+
+    @Test
+    void refusesABadExplain() throws Exception {
+        assertThat(client.error(1, "explain", "{" + LAMP_QUERY + ",\"docId\":500}"))
+                .endsWith("(DOC_NOT_FOUND)");
+        assertThat(client.error(
+                        2,
+                        "explain",
+                        "{" + LAMP_QUERY + ",\"term\":{\"field\":\"id\",\"value\":\"doc-0042\"},\"docId\":1}"))
+                .contains("exactly one of query, term and docValues");
+        assertThat(client.error(3, "explain", "{\"query\":\"lamp\",\"docId\":1}"))
+                .contains("defaultField");
+        assertThat(client.error(4, "explain", "{" + LAMP_QUERY + ",\"docId\":1,\"maxLines\":0}"))
+                .contains("maxLines must be from 1 to 10000");
+        assertThat(client.error(5, "explain", "{" + LAMP_QUERY + "}"))
+                .isEqualTo("Missing argument docId (INVALID_PARAMS)");
     }
 
     private static List<String> terms(JsonNode result) {
