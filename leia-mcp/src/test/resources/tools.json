@@ -375,7 +375,7 @@
     },
     {
       "name": "search",
-      "description": "Search the open index, best score first, a page at a time: each hit with its document id, score and a few brief stored values, to find documents; get_document and get_field_value read them. Give a query in Lucene's syntax with a defaultField, a term for an exact keyword, or docValues for a field that has only those. For the next page, call it again with the result's nextOffset.",
+      "description": "Search the open index, best score first unless sort says otherwise, a page at a time: each hit with its document id, score and a few brief stored values, to find documents; get_document and get_field_value read them. Give a query in Lucene's syntax with a defaultField, a term for an exact keyword, or docValues for a field that has only those. For the next page, call it again with the result's nextOffset.",
       "inputSchema": {
         "type": "object",
         "properties": {
@@ -529,6 +529,57 @@
             ],
             "description": "How clauses of the query without an operator combine; OR by default"
           },
+          "sort": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "field": {
+                  "type": "string",
+                  "description": "A field with doc values (not BINARY), or _score or _doc"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "INT",
+                    "LONG",
+                    "FLOAT",
+                    "DOUBLE",
+                    "STRING"
+                  ],
+                  "description": "How a field's doc values are read: STRING for SORTED and SORTED_SET, else LONG by default. DoubleDocValuesField and FloatDocValuesField need DOUBLE or FLOAT; get_document's asStored says which. Not for _score and _doc"
+                },
+                "reverse": {
+                  "type": "boolean",
+                  "description": "Largest first, or for _score lowest first; false by default"
+                },
+                "selector": {
+                  "type": "string",
+                  "enum": [
+                    "MIN",
+                    "MAX",
+                    "MIDDLE_MIN",
+                    "MIDDLE_MAX"
+                  ],
+                  "description": "Which value of a multi-valued field sorts: MIN by default; SORTED_NUMERIC takes MIN or MAX. Not for _score and _doc"
+                },
+                "missing": {
+                  "type": "string",
+                  "enum": [
+                    "DEFAULT",
+                    "FIRST",
+                    "LAST"
+                  ],
+                  "description": "Where documents without a value go: LAST by default. Not for _score and _doc"
+                }
+              },
+              "required": [
+                "field"
+              ],
+              "additionalProperties": false
+            },
+            "description": "The order of the hits, one key after the other; best score first by default. Needs a runtime with SCORING"
+          },
           "fields": {
             "type": "array",
             "items": {
@@ -599,6 +650,24 @@
                 "score": {
                   "type": "number"
                 },
+                "sortValues": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "value": {
+                        "type": "string",
+                        "description": "The value; absent for a document without one"
+                      },
+                      "binary": {
+                        "type": "boolean",
+                        "description": "Present, and true, only if value is in hex"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "description": "The values the hit sorted by, one per sort key; absent without sort"
+                },
                 "fields": {
                   "type": "array",
                   "items": {
@@ -667,7 +736,7 @@
               ],
               "additionalProperties": false
             },
-            "description": "The hits of the page, best score first"
+            "description": "The hits of the page, best score first unless sort says otherwise"
           }
         },
         "required": [

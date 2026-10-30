@@ -26,7 +26,6 @@ Goal: the tools cost an agent few tokens, then they answer why a query matches o
 
 Then the tools, each over a method the backend has; each checks the runtime's `features` and answers `NOT_SUPPORTED` without them. Short descriptions keep the cost of `tools/list` down.
 
-- [ ] `sort` in `search`, by fields' doc values or the score (`SortKey`).
 - [ ] `explain`: why a document scores as it does, or doesn't match, with the search's query and similarity (`startExplain`).
 - [ ] `scan_stored`: a regular expression over the stored values (`startStoredScan`), for documents by fields that aren't indexed.
 - [ ] KNN in `search`: the nearest documents to a vector or a document's vector, with a filter (`KnnQuery`).

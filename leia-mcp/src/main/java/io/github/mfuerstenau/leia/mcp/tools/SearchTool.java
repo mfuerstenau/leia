@@ -19,17 +19,24 @@ import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.search.Bm25Similarity;
 import io.github.mfuerstenau.leia.protocol.search.ClassicQuery;
+import io.github.mfuerstenau.leia.protocol.search.DocSort;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesQuery;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesRange;
+import io.github.mfuerstenau.leia.protocol.search.FieldSort;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
 import io.github.mfuerstenau.leia.protocol.search.ParserOptions;
 import io.github.mfuerstenau.leia.protocol.search.PointField;
 import io.github.mfuerstenau.leia.protocol.search.PointType;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
+import io.github.mfuerstenau.leia.protocol.search.ScoreSort;
 import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
 import io.github.mfuerstenau.leia.protocol.search.SearchResults;
 import io.github.mfuerstenau.leia.protocol.search.Similarity;
+import io.github.mfuerstenau.leia.protocol.search.SortKey;
+import io.github.mfuerstenau.leia.protocol.search.SortMissing;
+import io.github.mfuerstenau.leia.protocol.search.SortSelector;
+import io.github.mfuerstenau.leia.protocol.search.SortType;
 import io.github.mfuerstenau.leia.protocol.search.StandardQuery;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.TermQuery;
@@ -44,7 +51,7 @@ import java.util.OptionalLong;
 
 /**
  * {@code search}: a page of the hits of a query, a term query or a doc values query, best score
- * first, with their stored values brief (ADR 0100). The parser and similarity are the ones the
+ * first or sorted by doc values (ADR 0108), with their stored values brief (ADR 0100). The parser and similarity are the ones the
  * search screen starts with: Lucene's defaults and BM25. A query is analyzed with {@code
  * StandardAnalyzer} unless {@code analyzer} and {@code fieldAnalyzers} name others, by class name
  * with their default settings (ADR 0104). It goes through the standard parser where the runtime
@@ -108,6 +115,10 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
             @Description("How clauses of the query without an operator combine; OR by default")
             Optional<QueryOperator> defaultOperator,
 
+            @Description("The order of the hits, one key after the other; best score first by default. Needs a"
+                    + " runtime with SCORING")
+            Optional<List<Sort>> sort,
+
             @Description("The stored fields to show per hit; by default as many as fit about " + HIT_BUDGET
                     + " characters per hit, the rest named in moreFields; [] for none")
             Optional<List<String>> fields,
@@ -124,6 +135,32 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
 
             @Description("Whether to count every hit; otherwise counting stops after 1000; false by default")
             Optional<Boolean> exactTotalHits) {}
+
+    record Sort(
+            @Description("A field with doc values (not BINARY), or _score or _doc")
+            String field,
+
+            @Description("How a field's doc values are read: STRING for SORTED and SORTED_SET, else LONG by default."
+                    + " DoubleDocValuesField and FloatDocValuesField need DOUBLE or FLOAT; get_document's asStored"
+                    + " says which. Not for _score and _doc")
+            Optional<SortType> type,
+
+            @Description("Largest first, or for _score lowest first; false by default")
+            Optional<Boolean> reverse,
+
+            @Description("Which value of a multi-valued field sorts: MIN by default; SORTED_NUMERIC takes MIN or MAX."
+                    + " Not for _score and _doc")
+            Optional<SortSelector> selector,
+
+            @Description("Where documents without a value go: LAST by default. Not for _score and _doc")
+            Optional<SortMissing> missing) {}
+
+    record SortValue(
+            @Description("The value; absent for a document without one")
+            Optional<String> value,
+
+            @Description("Present, and true, only if value is in hex")
+            Optional<Boolean> binary) {}
 
     record FieldAnalyzer(String field, String analyzer) {}
 
@@ -186,7 +223,7 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
 
             long tookMillis,
 
-            @Description("The hits of the page, best score first")
+            @Description("The hits of the page, best score first unless sort says otherwise")
             List<Hit> hits) {}
 
     record Hit(
@@ -194,6 +231,9 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
             int docId,
 
             float score,
+
+            @Description("The values the hit sorted by, one per sort key; absent without sort")
+            Optional<List<SortValue>> sortValues,
 
             @Description("The hit's stored values, in the order of each field's first value")
             List<HitField> fields,
@@ -223,7 +263,7 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
 
     @Override
     public String description() {
-        return "Search the open index, best score first, a page at a time: each hit with its document id, score and"
+        return "Search the open index, best score first unless sort says otherwise, a page at a time: each hit with its document id, score and"
                 + " a few brief stored values, to find documents; get_document and get_field_value read them. Give a"
                 + " query in Lucene's syntax with a defaultField, a term for an exact keyword, or docValues for a"
                 + " field that has only those. For the next page, call it again with the result's nextOffset.";
@@ -241,7 +281,9 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
 
     @Override
     public Result call(Arguments arguments, Call call) throws ToolException, Jobs.Cancelled {
-        SearchQuery query = query(arguments, call);
+        Stats stats = new Stats(call);
+        SearchQuery query = query(arguments, call, stats);
+        List<SortKey> sort = sort(arguments, stats);
         int offset = Slices.bounded("offset", arguments.offset(), 0, 0, StartSearchParams.MAX_WINDOW - 1);
         int limit = Slices.bounded("limit", arguments.limit(), DEFAULT_LIMIT, 1, MAX_LIMIT);
         int maxValueLength = Slices.bounded(
@@ -253,7 +295,7 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
         StartSearchParams params = new StartSearchParams(
                 query,
                 BM25,
-                List.of(),
+                sort,
                 offset,
                 limit,
                 arguments.exactTotalHits().orElse(false),
@@ -269,10 +311,34 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
                 Methods.GET_SEARCH,
                 GetSearchResult::results,
                 poll -> new Jobs.Progress(poll.docsSearched(), total));
-        return result(results, offset, limit, maxValueLength, arguments.fields().isEmpty());
+        return result(results, offset, limit, maxValueLength, arguments.fields().isEmpty(), !sort.isEmpty());
     }
 
-    private static SearchQuery query(Arguments arguments, Call call) throws ToolException, Jobs.Cancelled {
+    /** The index's fields, fetched by the first who asks. */
+    private static final class Stats {
+        private final Call call;
+        private GetIndexStatsResult stats;
+
+        Stats(Call call) {
+            this.call = call;
+        }
+
+        List<IndexField> fields() throws ToolException, Jobs.Cancelled {
+            if (stats == null) {
+                stats = call.call(Methods.GET_INDEX_STATS, new GetIndexStatsParams());
+            }
+            return stats.fields();
+        }
+
+        Optional<DocValuesType> docValuesType(String field) throws ToolException, Jobs.Cancelled {
+            return fields().stream()
+                    .filter(candidate -> candidate.name().equals(field))
+                    .map(IndexField::docValuesType)
+                    .findFirst();
+        }
+    }
+
+    private static SearchQuery query(Arguments arguments, Call call, Stats stats) throws ToolException, Jobs.Cancelled {
         int given = (arguments.query().isPresent() ? 1 : 0)
                 + (arguments.term().isPresent() ? 1 : 0)
                 + (arguments.docValues().isPresent() ? 1 : 0);
@@ -306,7 +372,7 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
                     Optional.empty(),
                     Optional.empty(),
                     Optional.empty(),
-                    Optional.of(docValues(arguments.docValues().get(), call)),
+                    Optional.of(docValues(arguments.docValues().get(), stats)),
                     Optional.empty());
         }
         String defaultField = arguments
@@ -319,7 +385,7 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
         Optional<OpenIndexResult> opened = call.session().opened();
         if (opened.isPresent() && opened.get().features().contains(Feature.STANDARD_SEARCH)) {
             StandardQuery standard = new StandardQuery(
-                    text, defaultField, operator, PARSER_DEFAULTS, points(arguments, opened.get(), call), analyzer);
+                    text, defaultField, operator, PARSER_DEFAULTS, points(arguments, opened.get(), stats), analyzer);
             return new SearchQuery(
                     Optional.empty(),
                     Optional.of(standard),
@@ -346,12 +412,11 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
      * The point fields of the query: every field of one dimension and 4 or 8 bytes, as INT or LONG
      * as the search screen guesses (ADR 0107), and {@code pointTypes} as it says.
      */
-    private static List<PointField> points(Arguments arguments, OpenIndexResult opened, Call call)
+    private static List<PointField> points(Arguments arguments, OpenIndexResult opened, Stats stats)
             throws ToolException, Jobs.Cancelled {
         Map<String, PointType> types = new LinkedHashMap<>();
         if (opened.features().contains(Feature.POINTS)) {
-            for (IndexField field : call.call(Methods.GET_INDEX_STATS, new GetIndexStatsParams())
-                    .fields()) {
+            for (IndexField field : stats.fields()) {
                 if (field.pointDimensionCount() == 1 && field.pointNumBytes() == Integer.BYTES) {
                     types.put(field.name(), PointType.INT);
                 } else if (field.pointDimensionCount() == 1 && field.pointNumBytes() == Long.BYTES) {
@@ -367,15 +432,13 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
                 .toList();
     }
 
-    private static DocValuesQuery docValues(DocValues docValues, Call call) throws ToolException, Jobs.Cancelled {
+    private static DocValuesQuery docValues(DocValues docValues, Stats stats) throws ToolException, Jobs.Cancelled {
         boolean hex = docValues.binary().orElse(false);
         Optional<DocValuesNumber> number = docValues.number();
         if (number.isEmpty()) {
-            GetIndexStatsResult stats = call.call(Methods.GET_INDEX_STATS, new GetIndexStatsParams());
-            boolean numeric = stats.fields().stream()
-                    .filter(field -> field.name().equals(docValues.field()))
-                    .anyMatch(field -> field.docValuesType() == DocValuesType.NUMERIC
-                            || field.docValuesType() == DocValuesType.SORTED_NUMERIC);
+            boolean numeric = stats.docValuesType(docValues.field())
+                    .filter(type -> type == DocValuesType.NUMERIC || type == DocValuesType.SORTED_NUMERIC)
+                    .isPresent();
             number = numeric ? Optional.of(DocValuesNumber.LONG) : Optional.empty();
         }
         return new DocValuesQuery(
@@ -396,6 +459,48 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
                 docValues.prefix().map(value -> new BytesValue(value, hex)));
     }
 
+    /**
+     * The sort keys: {@code _score} and {@code _doc} by name, any other field by its doc values,
+     * with the type guessed from {@code docValuesType} as the search screen does (ADR 0108).
+     */
+    private static List<SortKey> sort(Arguments arguments, Stats stats) throws ToolException, Jobs.Cancelled {
+        List<SortKey> keys = new ArrayList<>();
+        for (Sort sort : arguments.sort().orElse(List.of())) {
+            boolean reverse = sort.reverse().orElse(false);
+            if (sort.field().equals("_score") || sort.field().equals("_doc")) {
+                if (sort.type().isPresent()
+                        || sort.selector().isPresent()
+                        || sort.missing().isPresent()) {
+                    throw ToolError.invalid("type, selector and missing don't go with " + sort.field());
+                }
+                keys.add(
+                        sort.field().equals("_score")
+                                ? new SortKey(Optional.empty(), Optional.of(new ScoreSort(reverse)), Optional.empty())
+                                : new SortKey(Optional.empty(), Optional.empty(), Optional.of(new DocSort(reverse))));
+                continue;
+            }
+            SortType type = sort.type().isPresent() ? sort.type().get() : guessType(sort.field(), stats);
+            keys.add(new SortKey(
+                    Optional.of(new FieldSort(
+                            sort.field(),
+                            type,
+                            reverse,
+                            sort.selector().orElse(SortSelector.MIN),
+                            sort.missing().orElse(SortMissing.LAST))),
+                    Optional.empty(),
+                    Optional.empty()));
+        }
+        return keys;
+    }
+
+    /** STRING for sorted doc values, else LONG: the server answers for a field that has none. */
+    private static SortType guessType(String field, Stats stats) throws ToolException, Jobs.Cancelled {
+        boolean text = stats.docValuesType(field)
+                .filter(type -> type == DocValuesType.SORTED || type == DocValuesType.SORTED_SET)
+                .isPresent();
+        return text ? SortType.STRING : SortType.LONG;
+    }
+
     private static Analyzer analyzer(Arguments arguments, Call call) throws ToolException, Jobs.Cancelled {
         if (arguments.analyzer().isEmpty() && arguments.fieldAnalyzers().isEmpty()) {
             return Analyzers.STANDARD;
@@ -412,7 +517,8 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
         return Analyzers.of(base.standard(), base.preset(), fields);
     }
 
-    private static Result result(SearchResults results, int offset, int limit, int maxValueLength, boolean withBudget) {
+    private static Result result(
+            SearchResults results, int offset, int limit, int maxValueLength, boolean withBudget, boolean sorted) {
         int next = offset + results.hits().size();
         boolean more = results.hits().size() == limit
                 && next < StartSearchParams.MAX_WINDOW
@@ -427,7 +533,7 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
                 more ? OptionalInt.of(next) : OptionalInt.empty(),
                 results.tookMillis(),
                 results.hits().stream()
-                        .map(hit -> hit(hit, maxValueLength, withBudget))
+                        .map(hit -> hit(hit, maxValueLength, withBudget, sorted))
                         .toList());
     }
 
@@ -435,7 +541,11 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
      * The hit with its values cut at {@code maxValueLength}; with {@code withBudget}, as many
      * fields as it takes to pass {@link #HIT_BUDGET} characters, the value that passes it included.
      */
-    private static Hit hit(io.github.mfuerstenau.leia.protocol.search.Hit hit, int maxValueLength, boolean withBudget) {
+    private static Hit hit(
+            io.github.mfuerstenau.leia.protocol.search.Hit hit,
+            int maxValueLength,
+            boolean withBudget,
+            boolean sorted) {
         List<HitField> shown = new ArrayList<>();
         List<String> left = new ArrayList<>();
         int characters = 0;
@@ -452,7 +562,20 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
             }
             shown.add(new HitField(field.name(), values));
         }
-        return new Hit(hit.docId(), hit.score(), shown, Absent.nonEmpty(left));
+        Optional<List<SortValue>> sortValues = sorted
+                ? Optional.of(
+                        hit.sortValues().stream().map(SearchTool::sortValue).toList())
+                : Optional.empty();
+        return new Hit(hit.docId(), hit.score(), sortValues, shown, Absent.nonEmpty(left));
+    }
+
+    private static SortValue sortValue(io.github.mfuerstenau.leia.protocol.search.SortValue value) {
+        if (value.number().isPresent()) {
+            return new SortValue(value.number(), Optional.empty());
+        }
+        return value.term()
+                .map(term -> new SortValue(Optional.of(term.value()), Absent.flag(term.binary())))
+                .orElseGet(() -> new SortValue(Optional.empty(), Optional.empty()));
     }
 
     private static HitValue value(StoredValue value, int maxValueLength) {

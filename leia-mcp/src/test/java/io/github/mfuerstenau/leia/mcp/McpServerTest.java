@@ -19,6 +19,7 @@ import io.github.mfuerstenau.leia.server.LeiaBackend;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
@@ -791,6 +792,118 @@ class McpServerTest {
         assertThat(client.error(4, "search", "{\"term\":{\"field\":\"id\",\"value\":\"doc-0042\"},\"pointTypes\":[]}"))
                 .contains("pointTypes goes with query")
                 .endsWith("(INVALID_PARAMS)");
+    }
+
+    @Test
+    void sortsByADoubleField() throws Exception {
+        JsonNode result = client.structured(
+                1,
+                "search",
+                "{\"query\":\"title:lamp\",\"defaultField\":\"title\",\"fields\":[],"
+                        + "\"sort\":[{\"field\":\"price\",\"type\":\"DOUBLE\",\"reverse\":true}]}");
+
+        List<Double> prices = sortNumbers(result, 0);
+        assertThat(docIds(result)).first().isEqualTo(51);
+        assertThat(prices).first().isEqualTo(495.49);
+        assertThat(prices).isSortedAccordingTo(Comparator.reverseOrder());
+    }
+
+    @Test
+    void guessesAStringSortOfSortedDocValues() throws Exception {
+        JsonNode result = client.structured(
+                1,
+                "search",
+                "{\"query\":\"*:*\",\"defaultField\":\"title\",\"fields\":[],\"limit\":100,"
+                        + "\"sort\":[{\"field\":\"category\"}]}");
+
+        List<String> categories = StreamSupport.stream(result.path("hits").spliterator(), false)
+                .map(hit -> hit.path("sortValues").get(0).path("value").asString())
+                .toList();
+        assertThat(categories).isNotEmpty().isSorted();
+    }
+
+    @Test
+    void sortsByTwoKeys() throws Exception {
+        JsonNode result = client.structured(
+                1,
+                "search",
+                "{\"query\":\"*:*\",\"defaultField\":\"title\",\"fields\":[],\"sort\":["
+                        + "{\"field\":\"scores\",\"selector\":\"MAX\",\"reverse\":true},{\"field\":\"_doc\"}]}");
+
+        assertThat(docIds(result)).first().isEqualTo(64);
+        result.path("hits").forEach(hit -> assertThat(hit.path("sortValues")).hasSize(2));
+        assertThat(result.path("hits")
+                        .get(0)
+                        .path("sortValues")
+                        .get(0)
+                        .path("value")
+                        .asString())
+                .isEqualTo("100");
+    }
+
+    @Test
+    void putsDocumentsWithoutAValueLast() throws Exception {
+        JsonNode result = client.structured(
+                1,
+                "search",
+                "{\"query\":\"*:*\",\"defaultField\":\"title\",\"fields\":[],\"offset\":350,\"limit\":100,"
+                        + "\"sort\":[{\"field\":\"tags\"}]}");
+
+        List<Boolean> missing = StreamSupport.stream(result.path("hits").spliterator(), false)
+                .map(hit -> hit.path("sortValues").get(0).has("value"))
+                .toList();
+        assertThat(missing).contains(true).contains(false);
+        assertThat(missing.indexOf(false)).isGreaterThan(missing.lastIndexOf(true));
+        result.path("hits").forEach(hit -> {
+            if (!hit.path("sortValues").get(0).has("value")) {
+                assertThat(hit.path("sortValues").get(0)).isEmpty();
+            }
+        });
+    }
+
+    @Test
+    void sortsByTheScoreLowestFirst() throws Exception {
+        JsonNode result = client.structured(
+                1,
+                "search",
+                "{\"query\":\"title:lamp\",\"defaultField\":\"title\",\"fields\":[],"
+                        + "\"sort\":[{\"field\":\"_score\",\"reverse\":true}]}");
+
+        List<Double> scores = StreamSupport.stream(result.path("hits").spliterator(), false)
+                .map(hit -> hit.path("score").asDouble())
+                .toList();
+        assertThat(scores).isSorted();
+        assertThat(scores.get(0)).isLessThan(scores.get(scores.size() - 1));
+    }
+
+    @Test
+    void hasNoSortValuesWithoutSort() throws Exception {
+        JsonNode result =
+                client.structured(1, "search", "{\"query\":\"title:lamp\",\"defaultField\":\"title\",\"fields\":[]}");
+
+        result.path("hits").forEach(hit -> assertThat(hit.has("sortValues")).isFalse());
+    }
+
+    @Test
+    void refusesASortThatDoesNotFit() throws Exception {
+        String query = "\"query\":\"*:*\",\"defaultField\":\"title\"";
+
+        assertThat(client.error(1, "search", "{" + query + ",\"sort\":[{\"field\":\"checksum\"}]}"))
+                .endsWith("(INVALID_PARAMS)");
+        assertThat(client.error(2, "search", "{" + query + ",\"sort\":[{\"field\":\"nothing\"}]}"))
+                .endsWith("(FIELD_NOT_FOUND)");
+        assertThat(client.error(3, "search", "{" + query + ",\"sort\":[{\"field\":\"_doc\",\"selector\":\"MAX\"}]}"))
+                .contains("don't go with _doc")
+                .endsWith("(INVALID_PARAMS)");
+        assertThat(client.error(
+                        4, "search", "{" + query + ",\"sort\":[{\"field\":\"scores\",\"selector\":\"MIDDLE_MIN\"}]}"))
+                .endsWith("(INVALID_PARAMS)");
+    }
+
+    private static List<Double> sortNumbers(JsonNode result, int key) {
+        return StreamSupport.stream(result.path("hits").spliterator(), false)
+                .map(hit -> hit.path("sortValues").get(key).path("value").asDouble())
+                .toList();
     }
 
     @Test
