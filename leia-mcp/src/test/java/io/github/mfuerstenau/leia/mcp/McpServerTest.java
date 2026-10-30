@@ -136,6 +136,7 @@ class McpServerTest {
                         "index_info",
                         "search",
                         "explain",
+                        "scan_stored",
                         "analyze",
                         "terms",
                         "get_document",
@@ -572,6 +573,7 @@ class McpServerTest {
                             "index_info",
                             "search",
                             "explain",
+                            "scan_stored",
                             "analyze",
                             "terms",
                             "get_document",
@@ -1015,6 +1017,109 @@ class McpServerTest {
                 .contains("maxLines must be from 1 to 10000");
         assertThat(client.error(5, "explain", "{" + LAMP_QUERY + "}"))
                 .isEqualTo("Missing argument docId (INVALID_PARAMS)");
+    }
+
+    @Test
+    void scansStoredValuesAndStopsOnceThePageIsFull() throws Exception {
+        JsonNode first = client.structured(1, "scan_stored", "{\"pattern\":\"sku\\\\d{4}\",\"limit\":5}");
+        JsonNode second = client.structured(2, "scan_stored", "{\"pattern\":\"sku\\\\d{4}\",\"limit\":5,\"offset\":5}");
+
+        assertThat(first.path("hits")).hasSize(5);
+        assertThat(first.path("stopped").asBoolean()).isTrue();
+        assertThat(first.path("nextOffset").asInt()).isEqualTo(5);
+        assertThat(first.has("matchedDocs")).isFalse();
+        assertThat(first.path("scannedDocs").asLong()).isBetween(1L, 499L);
+        for (JsonNode hit : first.path("hits")) {
+            assertThat(hit.path("field").asString()).isIn("body", "tagged", "note");
+            assertThat(hit.path("match").asString()).matches("sku\\d{4}");
+            assertThat(hit.path("snippet").asString())
+                    .contains(hit.path("match").asString());
+        }
+        assertThat(second.path("offset").asInt()).isEqualTo(5);
+        assertThat(second.path("hits").get(0)).isNotEqualTo(first.path("hits").get(0));
+    }
+
+    @Test
+    void scansTheWholeIndexForAFewHits() throws Exception {
+        JsonNode result = client.structured(
+                1, "scan_stored", "{\"pattern\":\"sku\\\\d{4}\",\"fields\":[\"note\"],\"limit\":100}");
+
+        assertThat(result.has("stopped")).isFalse();
+        assertThat(result.has("nextOffset")).isFalse();
+        assertThat(result.path("scannedDocs").asInt()).isEqualTo(500);
+        assertThat(result.path("matchedDocs").asInt()).isPositive();
+        assertThat(result.path("matchedValues").asInt())
+                .isEqualTo(result.path("hits").size());
+        for (JsonNode hit : result.path("hits")) {
+            assertThat(hit.path("field").asString()).isEqualTo("note");
+        }
+    }
+
+    @Test
+    void countsTheMatchesOfAValueInTheSource() throws Exception {
+        JsonNode result =
+                client.structured(1, "scan_stored", "{\"pattern\":\"\\\"event\\\":\",\"fields\":[\"_source\"]}");
+
+        assertThat(result.path("hits")).hasSize(1);
+        JsonNode hit = result.path("hits").get(0);
+        assertThat(hit.path("docId").asInt()).isEqualTo(42);
+        assertThat(hit.path("matchCount").asInt()).isEqualTo(3000);
+        assertThat(hit.path("match").asString()).isEqualTo("\"event\":");
+        assertThat(hit.has("valueIndex")).isFalse();
+    }
+
+    @Test
+    void scansDeletedDocumentsOnlyOnRequest() throws Exception {
+        JsonNode with = client.structured(
+                1, "scan_stored", "{\"pattern\":\"DELETED\",\"caseInsensitive\":true,\"includeDeleted\":true}");
+        JsonNode without = client.structured(2, "scan_stored", "{\"pattern\":\"DELETED\",\"caseInsensitive\":true}");
+
+        assertThat(with.path("hits")).hasSize(1);
+        JsonNode hit = with.path("hits").get(0);
+        assertThat(hit.path("docId").asInt()).isEqualTo(74);
+        assertThat(hit.path("deleted").asBoolean()).isTrue();
+        assertThat(hit.path("field").asString()).isEqualTo("deleted_only");
+        assertThat(without.path("hits")).isEmpty();
+    }
+
+    @Test
+    void cutsTheMatchOutOfTheSnippetAfterMultiByteCharacters() throws Exception {
+        JsonNode result = client.structured(
+                1,
+                "scan_stored",
+                "{\"pattern\":\"\ud83e\udd8a\ud83d\udc36|\u65e5\u672c\u8a9e\u30c6\u30ad\u30b9\u30c8\",\"fields\":[\"odd_text\"]}");
+
+        JsonNode hit = result.path("hits").get(0);
+        assertThat(hit.path("docId").asInt()).isEqualTo(7);
+        assertThat(hit.path("matchCount").asInt()).isEqualTo(2);
+        // The first match, after the tab, bell, NUL and CRLF; the byte offsets differ from the char ones.
+        assertThat(hit.path("match").asString()).isEqualTo("\ud83e\udd8a\ud83d\udc36");
+        result = client.structured(
+                2,
+                "scan_stored",
+                "{\"pattern\":\"\u65e5\u672c\u8a9e\u30c6\u30ad\u30b9\u30c8\",\"fields\":[\"odd_text\"]}");
+        assertThat(result.path("hits").get(0).path("match").asString())
+                .isEqualTo("\u65e5\u672c\u8a9e\u30c6\u30ad\u30b9\u30c8");
+    }
+
+    @Test
+    void countsTheValuesWhoseMatchingTimedOut() throws Exception {
+        JsonNode result = client.structured(1, "scan_stored", "{\"pattern\":\"(.*.){30}x\",\"fields\":[\"odd_text\"]}");
+
+        assertThat(result.path("hits")).isEmpty();
+        assertThat(result.path("timedOutValues").asLong()).isEqualTo(1);
+    }
+
+    @Test
+    void refusesABadScan() throws Exception {
+        assertThat(client.error(1, "scan_stored", "{\"pattern\":\"(\"}")).endsWith("(INVALID_QUERY)");
+        assertThat(client.error(2, "scan_stored", "{\"pattern\":\"a\",\"limit\":0}"))
+                .contains("limit must be from 1 to 100");
+        assertThat(client.error(3, "scan_stored", "{\"pattern\":\"a\",\"offset\":9950,\"limit\":100}"))
+                .contains("offset + limit must be at most 10000");
+        assertThat(client.error(4, "scan_stored", "{}")).isEqualTo("Missing argument pattern (INVALID_PARAMS)");
+        assertThat(client.error(5, "scan_stored", "{\"pattern\":\"a\",\"fields\":[\"nope\"]}"))
+                .isNotEmpty();
     }
 
     private static List<String> terms(JsonNode result) {

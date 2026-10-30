@@ -11,6 +11,8 @@ import java.util.OptionalLong;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.LongFunction;
+import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -50,19 +52,24 @@ public final class Jobs {
     private Jobs() {}
 
     /**
-     * Starts the job and polls it until {@code done} gives its outcome.
+     * Starts the job and polls it until {@code done} gives its outcome. If the outcome comes from a
+     * poll that isn't {@code finished}, the job is still running and is cancelled.
      *
+     * @param poll the params of {@code get} for the job
+     * @param finished whether a poll holds the job's own outcome
      * @param onProgress gets the progress after each poll that changed it
      * @param cancelled whether the request is cancelled, asked before each poll
      */
     // The parts of one job (ADR 0088)
     @SuppressWarnings("java:S107")
-    static <P, G, T> T run(
+    static <P, Q, G, T> T run(
             Call call,
             RpcMethod<P, JobStarted> start,
             P params,
-            RpcMethod<JobParams, G> get,
+            RpcMethod<Q, G> get,
+            LongFunction<Q> poll,
             Function<G, Optional<T>> done,
+            Predicate<G> finished,
             Function<G, Progress> progress,
             Consumer<Progress> onProgress,
             BooleanSupplier cancelled)
@@ -70,7 +77,7 @@ public final class Jobs {
         long jobId = call.call(start, params).jobId();
         long deadline = System.nanoTime() + LIMIT.toNanos();
         Progress last = null;
-        for (int poll = 0; ; poll++) {
+        for (int polls = 0; ; polls++) {
             if (cancelled.getAsBoolean()) {
                 cancel(call, jobId);
                 throw new Cancelled();
@@ -80,9 +87,12 @@ public final class Jobs {
                 throw new ToolException("The job took longer than " + LIMIT.toMinutes()
                         + " minutes and was cancelled; narrow it down, such as with fewer fields");
             }
-            G result = call.call(get, new JobParams(jobId));
+            G result = call.call(get, poll.apply(jobId));
             Optional<T> outcome = done.apply(result);
             if (outcome.isPresent()) {
+                if (!finished.test(result)) {
+                    cancel(call, jobId);
+                }
                 return outcome.get();
             }
             Progress now = progress.apply(result);
@@ -90,7 +100,7 @@ public final class Jobs {
                 onProgress.accept(now);
                 last = now;
             }
-            sleep(poll < FIRST_POLLS ? FIRST_POLL_INTERVAL : POLL_INTERVAL, call, jobId);
+            sleep(polls < FIRST_POLLS ? FIRST_POLL_INTERVAL : POLL_INTERVAL, call, jobId);
         }
     }
 

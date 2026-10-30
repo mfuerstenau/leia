@@ -11,6 +11,7 @@ public final class Tools {
             new IndexInfoTool(),
             new SearchTool(),
             new ExplainTool(),
+            new ScanStoredTool(),
             new AnalyzeTool(),
             new TermsTool(),
             new GetDocumentTool(),

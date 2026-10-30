@@ -17,6 +17,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.function.Function;
+import java.util.function.LongFunction;
+import java.util.function.Predicate;
 import org.junit.jupiter.api.Test;
 
 /** The polling of a job behind one tool call, against a backend of the test's own. */
@@ -58,11 +60,13 @@ class JobsTest {
         }
 
         @Override
-        public <P, G, T> T job(
+        public <P, Q, G, T> T job(
                 RpcMethod<P, JobStarted> start,
                 P params,
-                RpcMethod<JobParams, G> get,
+                RpcMethod<Q, G> get,
+                LongFunction<Q> poll,
                 Function<G, Optional<T>> done,
+                Predicate<G> finished,
                 Function<G, Jobs.Progress> progress) {
             throw new UnsupportedOperationException();
         }
@@ -78,7 +82,9 @@ class JobsTest {
                 Methods.START_RECONSTRUCT,
                 PARAMS,
                 Methods.GET_RECONSTRUCT,
+                JobParams::new,
                 GetReconstructResult::result,
+                poll -> true,
                 poll -> new Jobs.Progress(poll.scanned(), poll.total()),
                 progress::add,
                 () -> false);
@@ -102,13 +108,35 @@ class JobsTest {
                         Methods.START_RECONSTRUCT,
                         PARAMS,
                         Methods.GET_RECONSTRUCT,
+                        JobParams::new,
                         GetReconstructResult::result,
+                        poll -> true,
                         poll -> new Jobs.Progress(poll.scanned(), poll.total()),
                         _ -> {},
                         () -> call.polls >= 3))
                 .isInstanceOf(Jobs.Cancelled.class);
 
         assertThat(call.polls).isEqualTo(3);
+        assertThat(call.calls).last().isEqualTo("cancelJob " + new JobParams(7));
+    }
+
+    @Test
+    void cancelsTheJobWhenAnOutcomeComesBeforeItIsFinished() throws Exception {
+        FakeCall call = new FakeCall(-1);
+
+        Integer outcome = Jobs.run(
+                call,
+                Methods.START_RECONSTRUCT,
+                PARAMS,
+                Methods.GET_RECONSTRUCT,
+                JobParams::new,
+                poll -> poll.scanned() >= 1 ? Optional.of(42) : Optional.empty(),
+                poll -> poll.result().isPresent(),
+                poll -> new Jobs.Progress(poll.scanned(), poll.total()),
+                _ -> {},
+                () -> false);
+
+        assertThat(outcome).isEqualTo(42);
         assertThat(call.calls).last().isEqualTo("cancelJob " + new JobParams(7));
     }
 }

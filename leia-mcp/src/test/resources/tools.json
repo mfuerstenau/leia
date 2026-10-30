@@ -957,6 +957,141 @@
       }
     },
     {
+      "name": "scan_stored",
+      "description": "Find stored values by a Java regex, also in fields that aren't indexed, such as _source. Scans documents in id order and stops once the page is full; for the next page, call again with nextOffset. Slow on large indexes: narrow it with fields.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "A Java regular expression, found anywhere in a value; flags go inline, such as (?s)"
+          },
+          "caseInsensitive": {
+            "type": "boolean",
+            "description": "Whether case doesn't matter; false by default"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The stored fields to scan; all of them by default, which takes long on a large index"
+          },
+          "includeDeleted": {
+            "type": "boolean",
+            "description": "Whether to scan deleted documents too; false by default"
+          },
+          "offset": {
+            "type": "integer",
+            "description": "The hits to skip: the nextOffset of the last page; 0 by default. Every page scans from the first document again"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "The most hits of the page, from 1 to 100; 20 by default"
+          }
+        },
+        "required": [
+          "pattern"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "hits": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "docId": {
+                  "type": "integer",
+                  "description": "The document, for get_document"
+                },
+                "deleted": {
+                  "type": "boolean",
+                  "description": "Present, and true, only for a deleted document"
+                },
+                "field": {
+                  "type": "string"
+                },
+                "valueIndex": {
+                  "type": "integer",
+                  "description": "Which of the document's stored values in the field, as get_field_value takes it; absent if 0"
+                },
+                "length": {
+                  "type": "integer",
+                  "description": "The length of the whole value in bytes"
+                },
+                "matchCount": {
+                  "type": "integer",
+                  "description": "How many matches the value has; absent if 1"
+                },
+                "snippet": {
+                  "type": "string",
+                  "description": "The value around the first match: about 40 characters before it, 160 after"
+                },
+                "match": {
+                  "type": "string",
+                  "description": "The text of the first match, cut at the end of the snippet if it runs past it"
+                }
+              },
+              "required": [
+                "docId",
+                "field",
+                "length",
+                "snippet",
+                "match"
+              ],
+              "additionalProperties": false
+            },
+            "description": "The values with a match, in document order"
+          },
+          "offset": {
+            "type": "integer"
+          },
+          "nextOffset": {
+            "type": "integer",
+            "description": "The offset of the next page, which has hits; absent on the last page"
+          },
+          "scannedDocs": {
+            "type": "integer",
+            "description": "The document ids gone through, deleted ones included; with stopped, at least that many"
+          },
+          "stopped": {
+            "type": "boolean",
+            "description": "Present, and true, only if the scan stopped once the page was full: the counts cover scannedDocs only"
+          },
+          "matchedValues": {
+            "type": "integer",
+            "description": "The values with a match among the scanned documents"
+          },
+          "matchedDocs": {
+            "type": "integer",
+            "description": "The documents with a match; absent unless the scan went through the whole index"
+          },
+          "timedOutValues": {
+            "type": "integer",
+            "description": "The values that were skipped because matching them took more than a second: simplify the pattern. Absent unless the scan went through the whole index, and if there were none"
+          },
+          "tookMillis": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "hits",
+          "offset",
+          "scannedDocs",
+          "matchedValues",
+          "tookMillis"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
       "name": "analyze",
       "description": "What an analyzer makes of a text: its tokens with positions, offsets and types, to see why a query matches or not and which analyzer a field needs. Needs no open index.",
       "inputSchema": {

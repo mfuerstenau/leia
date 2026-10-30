@@ -202,6 +202,7 @@ tools:
 | `index_info` | the open index: the Lucene that reads it, its document counts, its fields and how each is indexed |
 | `search` | a page of hits, best score first or sorted by fields, with a few brief stored values, to find documents: a query in Lucene's syntax, with ranges on number fields, analyzed with `StandardAnalyzer` or the analyzers it names, one exact term, such as an id, or the doc values of a field |
 | `explain` | how a document scores for a query, or why it doesn't match: the arguments of `search` plus a hit's `docId`; Lucene's explanation as text, one line per part, indented |
+| `scan_stored` | the stored values a Java regular expression matches, also in fields that aren't indexed such as `_source`, with a snippet and the match; stops once the page is full, `nextOffset` for the next |
 | `analyze` | the tokens an analyzer makes of a text, with positions, offsets and types, to see why a query matches or not; needs no open index |
 | `terms` | the terms of a field a page at a time, from a prefix, or those in the most documents, to see which values a field holds and why a term query misses |
 | `get_document` | a document by its id: per field its stored values, cut when long, doc values, norm and KNN vector |

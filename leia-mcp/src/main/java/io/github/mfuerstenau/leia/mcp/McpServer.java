@@ -7,7 +7,6 @@ import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.OpenMode;
-import io.github.mfuerstenau.leia.protocol.job.JobParams;
 import io.github.mfuerstenau.leia.protocol.job.JobStarted;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import io.github.mfuerstenau.leia.server.LeiaBackend;
@@ -33,6 +32,8 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Function;
+import java.util.function.LongFunction;
+import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import tools.jackson.core.JacksonException;
@@ -380,14 +381,19 @@ public final class McpServer {
         }
 
         @Override
-        public <P, G, T> T job(
+        // The parts of one job (ADR 0088)
+        @SuppressWarnings("java:S107")
+        public <P, Q, G, T> T job(
                 RpcMethod<P, JobStarted> start,
                 P params,
-                RpcMethod<JobParams, G> get,
+                RpcMethod<Q, G> get,
+                LongFunction<Q> poll,
                 Function<G, Optional<T>> done,
+                Predicate<G> finished,
                 Function<G, Jobs.Progress> progress)
                 throws ToolException, Jobs.Cancelled {
-            return Jobs.run(this, start, params, get, done, progress, this::progress, request.cancelled::get);
+            return Jobs.run(
+                    this, start, params, get, poll, done, finished, progress, this::progress, request.cancelled::get);
         }
 
         private void progress(Jobs.Progress progress) {

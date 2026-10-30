@@ -26,7 +26,6 @@ Goal: the tools cost an agent few tokens, then they answer why a query matches o
 
 Then the tools, each over a method the backend has; each checks the runtime's `features` and answers `NOT_SUPPORTED` without them. Short descriptions keep the cost of `tools/list` down.
 
-- [ ] `scan_stored`: a regular expression over the stored values (`startStoredScan`), for documents by fields that aren't indexed.
 - [ ] KNN in `search`: the nearest documents to a vector or a document's vector, with a filter (`KnnQuery`).
 - [ ] `check_index` (`startCheckIndex`), and the latest commit's user data in `index_info` (`getCommit`), such as Elasticsearch's history UUID and sequence numbers.
 
