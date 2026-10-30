@@ -199,7 +199,8 @@ tools:
 | Tool | What it does |
 |---|---|
 | `open_index` | opens an index in place of the open one; without `INDEX_PATH`, the agent opens one with it |
-| `index_info` | the open index: the Lucene that reads it, its document counts, its fields and how each is indexed |
+| `index_info` | the open index: the Lucene that reads it, its document counts, its index directories with their commit's user data, its fields and how each is indexed |
+| `check_index` | Lucene's `CheckIndex` on the open index, read-only: whether it is corrupt and which segments failed and why; `level` 1 to 3, `only` to narrow a large index |
 | `search` | a page of hits, best score first or sorted by fields, with a few brief stored values, to find documents: a query in Lucene's syntax, with ranges on number fields, analyzed with `StandardAnalyzer` or the analyzers it names, one exact term, such as an id, the doc values of a field, or the nearest documents to a vector or a document's vector |
 | `explain` | how a document scores for a query, or why it doesn't match: the arguments of `search` plus a hit's `docId`; Lucene's explanation as text, one line per part, indented |
 | `scan_stored` | the stored values a Java regular expression matches, also in fields that aren't indexed such as `_source`, with a snippet and the match; stops once the page is full, `nextOffset` for the next |

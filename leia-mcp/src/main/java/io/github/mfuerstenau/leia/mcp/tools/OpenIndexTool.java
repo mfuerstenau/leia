@@ -57,6 +57,6 @@ final class OpenIndexTool implements McpTool<OpenIndexTool.Arguments, IndexInfoT
         OpenIndexResult opened =
                 call.call(Methods.OPEN_INDEX, McpServer.openParams(call.session(), path, arguments.directory()));
         call.session().opened(opened);
-        return IndexInfoTool.info(opened, call.call(Methods.GET_INDEX_STATS, new GetIndexStatsParams()));
+        return IndexInfoTool.info(opened, call.call(Methods.GET_INDEX_STATS, new GetIndexStatsParams()), call);
     }
 }

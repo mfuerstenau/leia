@@ -72,6 +72,41 @@
             },
             "description": "Index directories below the path that were left out, and why"
           },
+          "indexCount": {
+            "type": "integer",
+            "description": "How many index directories were opened"
+          },
+          "indexes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "segmentsFile": {
+                  "type": "string",
+                  "description": "The segments_N file of the commit that was opened, the latest one: what the other tools read. Absent without a reader"
+                },
+                "luceneVersion": {
+                  "type": "string",
+                  "description": "The Lucene version that wrote that commit; absent if its commit can't be read"
+                },
+                "userData": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "description": "The user data of that commit, sorted by key, such as Elasticsearch's history_uuid, max_seq_no and local_checkpoint; absent if there is none"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "additionalProperties": false
+            },
+            "description": "The opened index directories, at most 100, in order. Their paths are the ones check_index takes in only"
+          },
           "features": {
             "type": "array",
             "items": {
@@ -202,6 +237,8 @@
           "maxDoc",
           "segmentCount",
           "skipped",
+          "indexCount",
+          "indexes",
           "features",
           "fieldCount",
           "fields"
@@ -215,7 +252,7 @@
     },
     {
       "name": "index_info",
-      "description": "Describe the open index: its path, the Lucene that reads it, its document counts and its fields with how each is indexed. Fails with NO_INDEX_OPEN if no index is open; open_index opens one.",
+      "description": "Describe the open index: its path, the Lucene that reads it, its document counts, its index directories with their commit's user data, and its fields with how each is indexed. Fails with NO_INDEX_OPEN if no index is open; open_index opens one.",
       "inputSchema": {
         "type": "object",
         "properties": { },
@@ -268,6 +305,41 @@
             },
             "description": "Index directories below the path that were left out, and why"
           },
+          "indexCount": {
+            "type": "integer",
+            "description": "How many index directories were opened"
+          },
+          "indexes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "segmentsFile": {
+                  "type": "string",
+                  "description": "The segments_N file of the commit that was opened, the latest one: what the other tools read. Absent without a reader"
+                },
+                "luceneVersion": {
+                  "type": "string",
+                  "description": "The Lucene version that wrote that commit; absent if its commit can't be read"
+                },
+                "userData": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "description": "The user data of that commit, sorted by key, such as Elasticsearch's history_uuid, max_seq_no and local_checkpoint; absent if there is none"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "additionalProperties": false
+            },
+            "description": "The opened index directories, at most 100, in order. Their paths are the ones check_index takes in only"
+          },
           "features": {
             "type": "array",
             "items": {
@@ -398,9 +470,174 @@
           "maxDoc",
           "segmentCount",
           "skipped",
+          "indexCount",
+          "indexes",
           "features",
           "fieldCount",
           "fields"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "check_index",
+      "description": "Check the open index for corruption with Lucene's CheckIndex, read-only. Level 1 verifies checksums; 2 and 3 go deeper and take longer. Narrow a large index with only: paths and segments.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "level": {
+            "type": "integer",
+            "description": "How thoroughly, from 1 to 3: 1 verifies the checksums of every file (the default), 2 also checks every part of each segment, 3 also runs the slow checks"
+          },
+          "only": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "The index directory, as index_info lists it in indexes or skipped"
+                },
+                "segments": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "The segments of its commit to check, such as _0, not empty; all of them by default"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "additionalProperties": false
+            },
+            "description": "The indexes, and in them the segments, to check; all of them by default. Narrow a large index down: a check of every segment can take long"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "clean": {
+            "type": "boolean",
+            "description": "Whether no problem was found in any index"
+          },
+          "indexes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "path": {
+                  "type": "string",
+                  "description": "The index directory"
+                },
+                "skipped": {
+                  "type": "boolean",
+                  "description": "Present, and true, only for an index that was left out when the path was opened"
+                },
+                "clean": {
+                  "type": "boolean",
+                  "description": "Whether no problem was found"
+                },
+                "error": {
+                  "type": "string",
+                  "description": "Why the index couldn't be checked at all, such as no segments_N; then the rest says nothing"
+                },
+                "segmentsFile": {
+                  "type": "string",
+                  "description": "The segments_N file of the latest commit, which is the one checked"
+                },
+                "missingSegments": {
+                  "type": "boolean",
+                  "description": "Present, and true, only if the latest commit or an older one couldn't be read"
+                },
+                "toolOutOfDate": {
+                  "type": "boolean",
+                  "description": "Present, and true, only if a newer Lucene than leia's wrote the index"
+                },
+                "invalidCounter": {
+                  "type": "boolean",
+                  "description": "Present, and true, only if the commit's counter for segment names is not above every segment's name"
+                },
+                "segmentCount": {
+                  "type": "integer",
+                  "description": "The segments of the latest commit"
+                },
+                "badSegments": {
+                  "type": "integer",
+                  "description": "The segments that failed a test; absent if 0"
+                },
+                "lostDocs": {
+                  "type": "integer",
+                  "description": "The documents in the bad segments; absent if 0"
+                },
+                "failedSegments": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string"
+                      },
+                      "maxDoc": {
+                        "type": "integer",
+                        "description": "Documents including deleted ones"
+                      },
+                      "codec": {
+                        "type": "string",
+                        "description": "The segment's codec, if its .si file could be read"
+                      },
+                      "error": {
+                        "type": "string",
+                        "description": "The test it failed and why, with the causes"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "maxDoc",
+                      "error"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "description": "The segments that failed, with why; the ones that passed aren't listed. Absent if none"
+                },
+                "onlySegments": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "The segments that were asked for with only; absent if the whole index was"
+                },
+                "segmentsNotFound": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "The segments asked for that aren't in the latest commit; then clean is false. Absent if none"
+                }
+              },
+              "required": [
+                "path",
+                "clean",
+                "segmentCount"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Each index checked: the opened ones in order, then the skipped ones"
+          },
+          "tookMillis": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "clean",
+          "indexes",
+          "tookMillis"
         ],
         "additionalProperties": false
       },

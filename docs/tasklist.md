@@ -26,8 +26,6 @@ Goal: the tools cost an agent few tokens, then they answer why a query matches o
 
 Then the tools, each over a method the backend has; each checks the runtime's `features` and answers `NOT_SUPPORTED` without them. Short descriptions keep the cost of `tools/list` down.
 
-- [ ] `check_index` (`startCheckIndex`), and the latest commit's user data in `index_info` (`getCommit`), such as Elasticsearch's history UUID and sequence numbers.
-
 Not planned: highlighting, the point tree and the KNN graph, the term export, filters, `addJars` and the runtimes, resources and prompts.
 
 ## Open prompt

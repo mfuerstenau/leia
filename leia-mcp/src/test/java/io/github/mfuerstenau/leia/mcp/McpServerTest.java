@@ -136,6 +136,7 @@ class McpServerTest {
                 .startsWith(
                         "open_index",
                         "index_info",
+                        "check_index",
                         "search",
                         "explain",
                         "scan_stored",
@@ -573,6 +574,7 @@ class McpServerTest {
                             .toList())
                     .containsExactly(
                             "index_info",
+                            "check_index",
                             "search",
                             "explain",
                             "scan_stored",
@@ -1271,6 +1273,130 @@ class McpServerTest {
         assertThat(client.error(4, "scan_stored", "{}")).isEqualTo("Missing argument pattern (INVALID_PARAMS)");
         assertThat(client.error(5, "scan_stored", "{\"pattern\":\"a\",\"fields\":[\"nope\"]}"))
                 .isNotEmpty();
+    }
+
+    @Test
+    void checksTheIndexAndListsOnlyWhatFailed() throws Exception {
+        JsonNode result = client.structured(1, "check_index", "{}");
+        JsonNode index = result.path("indexes").get(0);
+
+        assertThat(result.path("clean").asBoolean()).isTrue();
+        assertThat(result.path("indexes")).hasSize(1);
+        assertThat(index.path("path").asString()).isEqualTo(demo);
+        assertThat(index.path("clean").asBoolean()).isTrue();
+        assertThat(index.path("segmentsFile").asString()).isEqualTo("segments_4");
+        assertThat(index.path("segmentCount").asInt()).isEqualTo(3);
+        assertThat(index.has("failedSegments")).isFalse();
+        assertThat(index.has("skipped")).isFalse();
+        assertThat(index.has("invalidCounter")).isFalse();
+        assertThat(client.structured(2, "check_index", "{\"level\":2}")
+                        .path("clean")
+                        .asBoolean())
+                .isTrue();
+    }
+
+    @Test
+    void checksOnlyTheSegmentsAskedFor() throws Exception {
+        JsonNode one =
+                client.structured(1, "check_index", "{\"only\":[{\"path\":\"" + demo + "\",\"segments\":[\"_1\"]}]}");
+        JsonNode missing =
+                client.structured(2, "check_index", "{\"only\":[{\"path\":\"" + demo + "\",\"segments\":[\"_9\"]}]}");
+
+        assertThat(one.path("clean").asBoolean()).isTrue();
+        assertThat(one.path("indexes").get(0).path("onlySegments").toString()).isEqualTo("[\"_1\"]");
+        assertThat(missing.path("clean").asBoolean()).isFalse();
+        assertThat(missing.path("indexes").get(0).path("segmentsNotFound").toString())
+                .isEqualTo("[\"_9\"]");
+    }
+
+    @Test
+    void reportsAnIndexThatCantBeOpenedAsSkippedAndNotClean(@TempDir Path tmp) throws Exception {
+        copy(Path.of(demo), tmp.resolve("a"));
+        copy(Path.of(demo), tmp.resolve("b"));
+        try (var files = Files.list(tmp.resolve("b"))) {
+            for (Path si : files.filter(file -> file.toString().endsWith(".si")).toList()) {
+                Files.delete(si);
+            }
+        }
+        String b = tmp.resolve("b").toRealPath().toString();
+
+        JsonNode opened = client.structured(1, "open_index", "{\"path\":\"" + tmp + "\"}");
+        JsonNode result = client.structured(2, "check_index", "{}");
+
+        assertThat(opened.path("indexes")).hasSize(1);
+        assertThat(opened.path("indexes").get(0).path("path").asString()).endsWith("/a");
+        assertThat(result.path("clean").asBoolean()).isFalse();
+        assertThat(result.path("indexes")).hasSize(2);
+        assertThat(result.path("indexes").get(0).path("clean").asBoolean()).isTrue();
+        JsonNode skipped = result.path("indexes").get(1);
+        assertThat(skipped.path("path").asString()).isEqualTo(b);
+        assertThat(skipped.path("skipped").asBoolean()).isTrue();
+        assertThat(skipped.path("clean").asBoolean()).isFalse();
+    }
+
+    @Test
+    void refusesABadCheck() throws Exception {
+        assertThat(client.error(1, "check_index", "{\"level\":0}")).endsWith("(INVALID_PARAMS)");
+        assertThat(client.error(2, "check_index", "{\"level\":4}")).endsWith("(INVALID_PARAMS)");
+        assertThat(client.error(3, "check_index", "{\"only\":[{\"path\":\"" + demo + "/nope\"}]}"))
+                .endsWith("(INVALID_PARAMS)");
+    }
+
+    @Test
+    void refusesACheckWithoutTheFeatures() throws Exception {
+        Session session = new Session(DirectoryImpl.FS, Optional.empty(), List.of());
+        McpClient plain = serve(session, Tools.ALL);
+        withoutFeature(session, Feature.CHECK_LEVELS);
+
+        assertThat(plain.error(1, "check_index", "{\"level\":2}")).endsWith("(NOT_SUPPORTED)");
+        assertThat(plain.structured(2, "check_index", "{}").path("clean").asBoolean())
+                .isTrue();
+
+        withoutFeature(session, Feature.CHECK_INDEX);
+        assertThat(plain.error(3, "check_index", "{}")).endsWith("(NOT_SUPPORTED)");
+        plain.close();
+    }
+
+    @Test
+    void showsTheUserDataOfTheCommitPerIndex(@TempDir Path tmp) throws Exception {
+        copy(Path.of(demo), tmp.resolve("a"));
+        JsonNode info = client.structured(1, "index_info", "{}");
+        JsonNode index = info.path("indexes").get(0);
+
+        assertThat(info.path("indexCount").asInt()).isEqualTo(1);
+        assertThat(index.path("path").asString()).isEqualTo(demo);
+        assertThat(index.path("segmentsFile").asString()).isEqualTo("segments_4");
+        assertThat(index.path("luceneVersion").asString()).startsWith("10.");
+        assertThat(index.path("userData").toString())
+                .isEqualTo("{\"docs\":\"500\",\"source\":\"demo product catalogue\","
+                        + "\"writer\":\"leia DemoIndexWriter\"}");
+
+        JsonNode below = client.structured(2, "open_index", "{\"path\":\"" + tmp + "\"}");
+        assertThat(below.path("indexCount").asInt()).isEqualTo(1);
+        assertThat(below.path("indexes").get(0).path("path").asString()).endsWith("/a");
+    }
+
+    private static void withoutFeature(Session session, Feature feature) {
+        OpenIndexResult opened = session.opened().orElseThrow();
+        session.opened(new OpenIndexResult(
+                opened.path(),
+                opened.mode(),
+                opened.numDocs(),
+                opened.maxDoc(),
+                opened.indexes(),
+                opened.skipped(),
+                opened.features().stream().filter(f -> f != feature).collect(java.util.stream.Collectors.toSet()),
+                opened.luceneRuntime(),
+                opened.server()));
+    }
+
+    private static void copy(Path from, Path to) throws java.io.IOException {
+        Files.createDirectories(to);
+        try (var files = Files.list(from)) {
+            for (Path file : files.toList()) {
+                Files.copy(file, to.resolve(file.getFileName()));
+            }
+        }
     }
 
     private static List<String> terms(JsonNode result) {

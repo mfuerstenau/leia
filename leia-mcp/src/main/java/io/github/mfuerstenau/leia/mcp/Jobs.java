@@ -85,7 +85,7 @@ public final class Jobs {
             if (System.nanoTime() - deadline > 0) {
                 cancel(call, jobId);
                 throw new ToolException("The job took longer than " + LIMIT.toMinutes()
-                        + " minutes and was cancelled; narrow it down, such as with fewer fields");
+                        + " minutes and was cancelled; narrow it down, such as with fewer fields or segments");
             }
             G result = call.call(get, poll.apply(jobId));
             Optional<T> outcome = done.apply(result);

@@ -9,6 +9,7 @@ public final class Tools {
     public static final List<McpTool<?, ?>> ALL = List.of(
             new OpenIndexTool(),
             new IndexInfoTool(),
+            new CheckIndexTool(),
             new SearchTool(),
             new ExplainTool(),
             new ScanStoredTool(),

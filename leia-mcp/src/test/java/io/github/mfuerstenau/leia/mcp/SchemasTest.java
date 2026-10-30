@@ -57,6 +57,19 @@ class SchemasTest {
                         "additionalProperties":false}""");
     }
 
+    record Labelled(Map<String, String> labels, Optional<Map<String, Inner>> inners) {}
+
+    @Test
+    void describesAMapAsAnObjectOfItsValues() {
+        assertThat(Schemas.of(Labelled.class).toString()).isEqualTo("""
+                        {"type":"object","properties":{\
+                        "labels":{"type":"object","additionalProperties":{"type":"string"}},\
+                        "inners":{"type":"object","additionalProperties":{"type":"object","properties":{\
+                        "field":{"type":"string","description":"The field"},\
+                        "binary":{"type":"boolean"}},"required":["field"],"additionalProperties":false}}},\
+                        "required":["labels"],"additionalProperties":false}""");
+    }
+
     @Test
     void givesARecordWithoutComponentsNoRequiredList() {
         assertThat(Schemas.of(Empty.class).toString())

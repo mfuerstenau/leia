@@ -5,6 +5,7 @@ import java.lang.reflect.RecordComponent;
 import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.OptionalInt;
@@ -19,7 +20,7 @@ import tools.jackson.databind.node.ObjectNode;
  * The JSON Schema of a tool's arguments or result, generated from its record (ADR 0100 §2). A
  * component is required exactly when it isn't {@code Optional*}, as hard rule 3 of AGENTS.md has
  * it, and {@link Description} gives its description. It knows strings, the numbers, booleans,
- * enums, lists, the {@code Optional}s and records, and no other type.
+ * enums, lists, maps with string keys, the {@code Optional}s and records, and no other type.
  */
 public final class Schemas {
 
@@ -97,6 +98,11 @@ public final class Schemas {
         if (unwrapped instanceof ParameterizedType parameterized && parameterized.getRawType() == List.class) {
             schema.put("type", "array");
             schema.set("items", schema(parameterized.getActualTypeArguments()[0]));
+            return schema;
+        }
+        if (unwrapped instanceof ParameterizedType parameterized && parameterized.getRawType() == Map.class) {
+            schema.put("type", "object");
+            schema.set("additionalProperties", schema(parameterized.getActualTypeArguments()[1]));
             return schema;
         }
         if (!(unwrapped instanceof Class<?> raw)) {
