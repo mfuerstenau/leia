@@ -1771,7 +1771,7 @@
           },
           "totalTermFreq": {
             "type": "integer",
-            "description": "The occurrences of the term in all documents; absent if equal to docFreq"
+            "description": "The occurrences of the term in all documents, on Lucene 3 in the live ones only, or with DOCS_AND_CUSTOM_FREQS the sum of the freqs; absent if equal to docFreq"
           },
           "postings": {
             "type": "array",
@@ -1787,7 +1787,7 @@
                 },
                 "freq": {
                   "type": "integer",
-                  "description": "How often the term occurs in the document; absent where frequencies aren't indexed"
+                  "description": "How often the term occurs in the document; with the index options DOCS_AND_CUSTOM_FREQS a value of its own, such as a FeatureField's score. Absent where frequencies aren't indexed"
                 },
                 "positions": {
                   "type": "array",

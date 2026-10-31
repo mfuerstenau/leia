@@ -771,7 +771,11 @@ class McpServerTest {
                 .asString();
         String arguments = "{\"field\":\"category\",\"term\":\"" + category + "\",\"limit\":3";
         JsonNode first = client.structured(2, "postings", arguments + "}");
-        JsonNode second = client.structured(3, "postings", arguments + ",\"fromDoc\":" + first.path("nextDoc") + "}");
+        assertThat(first.path("nextDoc").isInt()).isTrue();
+        JsonNode second = client.structured(
+                3,
+                "postings",
+                arguments + ",\"fromDoc\":" + first.path("nextDoc").asInt() + "}");
 
         assertThat(first.path("postings")).hasSize(3);
         assertThat(postingIds(first)).isSorted();
@@ -851,6 +855,10 @@ class McpServerTest {
                         .get(0)
                         .has("freq"))
                 .isFalse();
+        // A field that isn't indexed has no such term, whether or not positions are asked for.
+        assertThat(client.error(4, "postings", "{\"field\":\"_source\",\"term\":\"a\",\"positions\":true}"))
+                .doesNotContain("leave positions out")
+                .endsWith("(TERM_NOT_FOUND)");
     }
 
     @Test

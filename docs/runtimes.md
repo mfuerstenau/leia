@@ -72,6 +72,7 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 |---|---|---|---|---|---|
 | Terms | strings, as UTF-8 | bytes | bytes | bytes | bytes |
 | Postings of deleted documents | skipped, though `docFreq` counts them | marked | marked | marked | marked |
+| `totalTermFreq` | counted from the postings of the live documents, since Lucene 3 doesn't record it: it can be below `docFreq` | as the index records it, deleted documents included | as 5.5.5 | as 5.5.5 | as 5.5.5 |
 | Query filter with deleted documents (ADR 0056) | refused | ✓, through leaves without deletions | as 5.5.5 | as 5.5.5 | ✓, through readers without deletions |
 | Filter cancellation | per segment and every 1024 matches | per segment and every 1024 matches | as 5.5.5 | through the searcher's `QueryTimeout` | through `ExitableDirectoryReader` |
 | Term query (ADR 0058) | the bytes decoded as UTF-8 | the bytes | the bytes | the bytes | the bytes |

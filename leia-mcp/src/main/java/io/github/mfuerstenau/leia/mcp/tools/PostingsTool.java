@@ -67,7 +67,8 @@ final class PostingsTool implements McpTool<PostingsTool.Arguments, PostingsTool
             @Description("The documents with the term, deleted ones included")
             int docFreq,
 
-            @Description("The occurrences of the term in all documents; absent if equal to docFreq")
+            @Description("The occurrences of the term in all documents, on Lucene 3 in the live ones only, or with"
+                    + " DOCS_AND_CUSTOM_FREQS the sum of the freqs; absent if equal to docFreq")
             OptionalLong totalTermFreq,
 
             @Description("The documents of the page, in document order")
@@ -82,7 +83,8 @@ final class PostingsTool implements McpTool<PostingsTool.Arguments, PostingsTool
             @Description("Present, and true, only if the document is deleted")
             Optional<Boolean> deleted,
 
-            @Description("How often the term occurs in the document; absent where frequencies aren't indexed")
+            @Description("How often the term occurs in the document; with the index options DOCS_AND_CUSTOM_FREQS a"
+                    + " value of its own, such as a FeatureField's score. Absent where frequencies aren't indexed")
             OptionalInt freq,
 
             @Description("The occurrences in order; only with positions")
@@ -168,13 +170,14 @@ final class PostingsTool implements McpTool<PostingsTool.Arguments, PostingsTool
                 page.nextDoc());
     }
 
-    /** Refuses a field whose postings hold no positions, which the agent would see as empty lists. */
+    /**
+     * Refuses a field whose postings hold no positions, which the agent would see as empty lists. A
+     * field without postings is left to the server, which says that it has no such term.
+     */
     private static void requirePositions(String field, Queries.Stats stats) throws ToolException, Jobs.Cancelled {
-        Optional<IndexOptions> options = stats.fields().stream()
-                .filter(candidate -> candidate.name().equals(field))
-                .map(candidate -> candidate.indexOptions())
-                .findFirst();
+        Optional<IndexOptions> options = stats.indexOptions(field);
         if (options.isPresent()
+                && options.get() != IndexOptions.NONE
                 && options.get() != IndexOptions.DOCS_AND_FREQS_AND_POSITIONS
                 && options.get() != IndexOptions.DOCS_AND_FREQS_AND_POSITIONS_AND_OFFSETS) {
             throw ToolError.invalid("The field " + field + " is indexed with " + options.get()

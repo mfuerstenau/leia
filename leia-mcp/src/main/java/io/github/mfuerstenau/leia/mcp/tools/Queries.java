@@ -14,6 +14,7 @@ import io.github.mfuerstenau.leia.protocol.index.Feature;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
+import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.search.Bm25Similarity;
@@ -168,6 +169,13 @@ final class Queries {
             return fields().stream()
                     .filter(candidate -> candidate.name().equals(field))
                     .map(IndexField::docValuesType)
+                    .findFirst();
+        }
+
+        Optional<IndexOptions> indexOptions(String field) throws ToolException, Jobs.Cancelled {
+            return fields().stream()
+                    .filter(candidate -> candidate.name().equals(field))
+                    .map(IndexField::indexOptions)
                     .findFirst();
         }
     }
