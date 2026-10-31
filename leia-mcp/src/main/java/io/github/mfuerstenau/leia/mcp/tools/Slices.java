@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.mcp.tools;
 
 import io.github.mfuerstenau.leia.mcp.ToolError;
 import io.github.mfuerstenau.leia.mcp.ToolException;
+import io.github.mfuerstenau.leia.server.document.ValueSlices;
 import java.util.OptionalInt;
 
 /**
@@ -18,14 +19,7 @@ final class Slices {
      * ends. It is one character longer only where a shorter one would be empty.
      */
     static int end(String value, boolean hex, int offset, int length) {
-        int end = (int) Math.min((long) offset + length, value.length());
-        boolean split = end < value.length()
-                && end > offset
-                && (hex ? (end - offset) % 2 != 0 : Character.isHighSurrogate(value.charAt(end - 1)));
-        if (split) {
-            end = end - 1 > offset ? end - 1 : end + 1;
-        }
-        return end;
+        return ValueSlices.end(value, hex, offset, length);
     }
 
     /** The first {@code length} characters of {@code value}, or all of it. */

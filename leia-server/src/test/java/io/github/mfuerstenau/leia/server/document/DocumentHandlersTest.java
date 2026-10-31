@@ -18,18 +18,23 @@ import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.document.TermPosition;
 import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
+import io.github.mfuerstenau.leia.runtime.Documents;
 import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.TestIndexes;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
+import io.github.mfuerstenau.leia.server.runtime.OpenRuntime;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
@@ -155,6 +160,104 @@ class DocumentHandlersTest {
         // Numbers are never cut.
         assertThat(GetDocumentHandler.storedValue(new RuntimeIndex.StoredValue.Numeric(-123456L), 2))
                 .isEqualTo(new StoredValue(StoredType.LONG, "-123456", false));
+    }
+
+    @Test
+    void slicesAStoredValueWithoutSplittingACharacter() throws Exception {
+        // 5 chars, the emoji being a surrogate pair at 1-2.
+        String text = "a\uD83D\uDE00bc";
+        openIndex(doc -> {
+            doc.add(new StoredField("big", text));
+            doc.add(new StoredField("big", new BytesRef(new byte[] {(byte) 0xff, 1, 2, 3})));
+        });
+
+        GetStoredValueResult head = slice(0, 0, 2);
+        assertThat(head.value().value()).isEqualTo("a");
+        assertThat(slice(0, 0, 3).value().value()).isEqualTo("a\uD83D\uDE00");
+        assertThat(head.offset()).isZero();
+        assertThat(head.totalLength()).isEqualTo(5);
+        assertThat(head.value().fullLength()).isEmpty();
+        assertThat(slice(0, 3, 10).value().value()).isEqualTo("bc");
+        assertThat(slice(0, 1, 1).value().value()).isEqualTo("\uD83D\uDE00");
+        assertThat(slice(0, 3, 0).value().value()).isEmpty();
+        assertThat(slice(0, 5, 5).value().value()).isEmpty();
+        assertThat(slice(0, 0, 0).totalLength()).isEqualTo(5);
+
+        GetStoredValueResult hex = slice(1, 2, 3);
+        assertThat(hex.value().value()).isEqualTo("01");
+        assertThat(slice(1, 2, 4).value().value()).isEqualTo("0102");
+        assertThat(hex.value().binary()).isTrue();
+        assertThat(hex.offset()).isEqualTo(2);
+        assertThat(hex.totalLength()).isEqualTo(8);
+        assertThat(slice(1, 0, 1).value().value()).isEqualTo("ff");
+    }
+
+    @Test
+    void refusesASliceOutsideTheValue() throws Exception {
+        openIndex(doc -> doc.add(new StoredField("big", new BytesRef(new byte[] {(byte) 0xff, 1}))));
+
+        assertFails(() -> slice(0, 5, 1), ErrorCode.INVALID_PARAMS);
+        assertFails(() -> slice(0, 1, 1), ErrorCode.INVALID_PARAMS);
+        assertFails(() -> slice(0, -1, 1), ErrorCode.INVALID_PARAMS);
+        assertFails(() -> slice(0, 0, -1), ErrorCode.INVALID_PARAMS);
+        assertThatThrownBy(() -> slice(0, 5, 1)).hasMessageContaining("past the end");
+        assertThatThrownBy(() -> slice(0, 1, 1)).hasMessageContaining("even");
+    }
+
+    @Test
+    void readsTheValueOnceForItsSlices() throws Exception {
+        openIndex(doc -> doc.add(new StoredField("big", "abcdef")));
+        AtomicInteger reads = new AtomicInteger();
+        OpenRuntime counted = counting(reads);
+        currentIndex.replace(counted);
+
+        assertThat(slice(0, 0, 2).value().value()).isEqualTo("ab");
+        assertThat(slice(0, 2, 2).value().value()).isEqualTo("cd");
+        assertThat(slice(0, 4, 2).value().value()).isEqualTo("ef");
+        assertThat(reads).hasValue(1);
+
+        // Another field of the document, and another open index, read again.
+        getStoredValue.handle(new GetStoredValueParams(0, "id", 0));
+        assertThat(reads).hasValue(2);
+        slice(0, 0, 2);
+        assertThat(reads).hasValue(3);
+        currentIndex.replace(counting(reads));
+        slice(0, 0, 2);
+        assertThat(reads).hasValue(4);
+    }
+
+    private GetStoredValueResult slice(int index, int offset, int length) throws RpcException {
+        return getStoredValue.handle(
+                new GetStoredValueParams(0, "big", index, OptionalInt.of(offset), OptionalInt.of(length)));
+    }
+
+    /** The open index of {@link #tmp}, counting the reads of stored values in {@code reads}. */
+    private OpenRuntime counting(AtomicInteger reads) throws Exception {
+        OpenRuntime real = TestIndexes.open(tmp.resolve("index"));
+        Documents documents = real.index().documents().orElseThrow();
+        Documents counting = (Documents) Proxy.newProxyInstance(
+                Documents.class.getClassLoader(), new Class<?>[] {Documents.class}, (_, method, args) -> {
+                    if (method.getName().equals("storedValues") && args.length == 4) {
+                        reads.incrementAndGet();
+                    }
+                    try {
+                        return method.invoke(documents, args);
+                    } catch (InvocationTargetException e) {
+                        throw e.getCause();
+                    }
+                });
+        RuntimeIndex index = (RuntimeIndex) Proxy.newProxyInstance(
+                RuntimeIndex.class.getClassLoader(), new Class<?>[] {RuntimeIndex.class}, (_, method, args) -> {
+                    if (method.getName().equals("documents")) {
+                        return Optional.of(counting);
+                    }
+                    try {
+                        return method.invoke(real.index(), args);
+                    } catch (InvocationTargetException e) {
+                        throw e.getCause();
+                    }
+                });
+        return new OpenRuntime(real.path(), real.runtime(), index, real.skipped());
     }
 
     @Test

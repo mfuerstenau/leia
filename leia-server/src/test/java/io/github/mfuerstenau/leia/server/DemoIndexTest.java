@@ -32,6 +32,7 @@ import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
 import io.github.mfuerstenau.leia.protocol.document.GetStoredValueParams;
+import io.github.mfuerstenau.leia.protocol.document.GetStoredValueResult;
 import io.github.mfuerstenau.leia.protocol.document.GetTermVectorParams;
 import io.github.mfuerstenau.leia.protocol.document.KnnVector;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructSource;
@@ -279,6 +280,24 @@ class DemoIndexTest {
             // In hex.
             assertThat(blob.value()).hasSize(200_000);
             assertThat(stored(document, "blob").fullLength()).hasValue(100_000);
+
+            assertThat(sliced(42, "_source", 7_000)).isEqualTo(whole.value());
+            assertThat(sliced(42, "blob", 6_000)).isEqualTo(blob.value());
+        }
+
+        /** The value of {@code field} in slices of {@code length} characters, put together. */
+        private String sliced(int docId, String field, int length) throws Exception {
+            StringBuilder value = new StringBuilder();
+            GetStoredValueResult slice;
+            do {
+                slice = backend.call(
+                        Methods.GET_STORED_VALUE,
+                        new GetStoredValueParams(
+                                docId, field, 0, OptionalInt.of(value.length()), OptionalInt.of(length)));
+                assertThat(slice.offset()).isEqualTo(value.length());
+                value.append(slice.value().value());
+            } while (value.length() < slice.totalLength());
+            return value.toString();
         }
 
         @Test

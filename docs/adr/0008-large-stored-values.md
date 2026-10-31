@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-06
 - **Supersedes:** ADR 0006, decision 6
+- **Amended by:** ADR 0117 (§5, `getStoredValue` takes an optional slice and reads only its field)
 
 ## Context
 
@@ -20,7 +21,7 @@ Doc values and term vectors are not the problem. Sorted doc values are limited t
 2. **Lengths are in bytes,** UTF-8 for text. That is how Lucene stores the value, and it is the same unit for text and bytes.
 3. **Text is cut between two characters**, so the cut text is still valid UTF-8 and stays text on the wire. A surrogate pair is never split.
 4. **Bytes that are not UTF-8 stay hex when cut.** The cut is made after the whole value has been checked. Otherwise the first 64 KiB could happen to be valid UTF-8 and go as text, while the whole value goes as hex.
-5. **`getStoredValue {docId, field, index}` sends one stored value whole**, however long. `index` counts the document's stored values in the field, in the order `getDocument` lists them. The core reads only that field's stored values (`StoredFieldVisitor.needsField`). It is synchronous: one value of one document is bounded, so ADR 0005 does not apply.
+5. **`getStoredValue {docId, field, index}` sends one stored value whole**, however long. *Amended by ADR 0117: with an optional `offset` and `length` it sends a slice of the value, and reads only that field.* `index` counts the document's stored values in the field, in the order `getDocument` lists them. The core reads only that field's stored values (`StoredFieldVisitor.needsField`). It is synchronous: one value of one document is bounded, so ADR 0005 does not apply.
 6. **New error `VALUE_NOT_FOUND` (-32010)** for an `index` outside the document's values in the field. A deleted document is readable, as in ADR 0006.
 7. **The cap is a server constant, not a parameter.** Nothing needs another limit yet, and the TUI does not depend on its exact value.
 

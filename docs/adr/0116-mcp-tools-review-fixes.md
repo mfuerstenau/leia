@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-27
+- **Amended by:** ADR 0117 (the first of the deferred costs, `getStoredValue` with an offset and a length)
 - **Amends:** ADR 0100 (§2, the check of the required arguments), ADR 0106 (§2, a prefix and binary terms), ADR 0110 (§2, when the scan stops), ADR 0112 (§7, where the user data comes from)
 
 ## Context

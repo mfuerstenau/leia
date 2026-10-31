@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-25
 - **Amends:** ADR 0034 (§7, where stdout and stderr go); AGENTS.md, hard rules 2 and 4 and the CLI contract
-- **Amended by:** ADR 0101 (§5, concurrent tool calls), ADR 0102 (§7 and §8, the indexes `open_index` may open), ADR 0103 (§6, the size of the results), ADR 0115 (§6, the `postings` tool), ADR 0116 (§2, the check of the required arguments)
+- **Amended by:** ADR 0101 (§5, concurrent tool calls), ADR 0102 (§7 and §8, the indexes `open_index` may open), ADR 0103 (§6, the size of the results), ADR 0115 (§6, the `postings` tool), ADR 0116 (§2, the check of the required arguments), ADR 0117 (the row of `get_field_value`)
 
 ## Context
 
@@ -74,7 +74,7 @@ The records are in `io.github.mfuerstenau.leia.mcp.tools`, one class per tool.
 | `terms` | `field`, and a page of `prefix?`, `from?` (the previous `next`) and `limit?` (50, at most 1,000), or instead `top` (at most 1,000) | `getTerms`, or `startFieldTermScan`, polled `getFieldTermScan` | `field`, the `terms` with `term`, `binary?`, `docFreq` and `totalTermFreq?`, `next?` or `uniqueTerms?` *(ADR 0106)* |
 | `postings` | `field`, `term`, `binary?`, `fromDoc?` (0), `limit?` (50, at most 1,000; 100 with `positions`), `positions?` (false) | `getPostings`, and with `positions` `getPositions` per posting | `field`, `term`, `binary?`, `docFreq`, `totalTermFreq?`, the `postings` with `docId`, `deleted?`, `freq?`, `positions?` and `positionsCut?`, `nextDoc?` *(ADR 0115)* |
 | `get_document` | `docId`, `fields?`, `maxValueLength?` (2,048 characters, at most 65,536), `withVectors?` (false) | `getDocument`, and `getStoredValue` for the length of a value the backend cut | `docId`, `deleted`, and the `fields` the document has something in, with `norm?`, `stored?` (`type?`, `value`, `binary?`, `fullLength?` when cut), `docValues?` (at most 100 entries, and their count; the numbers of a field that repeats its stored value are `asStored?`, the encoding, instead of `numbers?`, decimal strings, ADR 0103), `hasTermVector?`, `vector?` (its dimension, and its components only with `withVectors`) |
-| `get_field_value` | `docId`, `field`, `index?` (0), `offset?` (0), `length?` (16,384, at most 65,536) | `getStoredValue` | `field`, `index`, `type`, `binary`, `value` (the slice), `offset`, `totalLength`, `nextOffset?` |
+| `get_field_value` | `docId`, `field`, `index?` (0), `offset?` (0), `length?` (16,384, at most 65,536) | `getStoredValue` (with its `offset` and `length`, ADR 0117) | `field`, `index`, `type`, `binary`, `value` (the slice), `offset`, `totalLength`, `nextOffset?` |
 | `reconstruct_fields` | `docId`, `fields?` (every field with postings or points), `maxTerms?` (500 per field, at most 10,000), `withTerms?` (false) | `startReconstruct`, polled `getReconstruct` | per field `field`, `source` (`TERM_VECTOR` or `POSTINGS`), `text?`, `textCut?`, the `terms?` (`term`, `binary?`, `freq`, `positions?`; only with `withTerms` or without `text`), `termCount`, `cut?`, the `points?` (hex, at most 100) and `pointCount?`; `tookMillis` |
 
 Lengths and offsets of values count the characters of `value`, as Java's `String` has them, and never split a surrogate pair. A binary value that isn't UTF-8 is lowercase hex, and its slices keep whole bytes. `text` is the terms in position order, the terms at one position joined with `|`, a gap of positions shown as `…`; it is present only when the terms have positions, and cut at 65,536 characters.

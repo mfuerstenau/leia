@@ -18,7 +18,6 @@ import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
 import io.github.mfuerstenau.leia.protocol.document.GetStoredValueParams;
-import io.github.mfuerstenau.leia.protocol.document.GetStoredValueResult;
 import io.github.mfuerstenau.leia.protocol.document.GetTermVectorParams;
 import io.github.mfuerstenau.leia.protocol.document.GetTermVectorResult;
 import io.github.mfuerstenau.leia.protocol.document.KnnVector;
@@ -628,22 +627,22 @@ public final class RuntimeResults {
                         .toList());
     }
 
-    /** {@code getStoredValue}. */
-    public static GetStoredValueResult storedValue(OpenRuntime open, GetStoredValueParams params) throws RpcException {
+    /** The whole stored value that {@code getStoredValue} asks for, read with no other field (ADR 0117). */
+    public static StoredValue storedValue(OpenRuntime open, GetStoredValueParams params) throws RpcException {
         Documents documents = open.index().documents().orElseThrow(open::notSupported);
         checkDocId(open.index(), params.docId());
         checkField(open.index(), params.field());
-        Documents.IndexDocument whole;
+        List<Documents.StoredDocument> read;
         try {
-            whole = documents.document(params.docId());
+            read = documents.storedValues(
+                    params.docId(), params.docId() + 1, Optional.of(Set.of(params.field())), true);
         } catch (IOException e) {
             throw new RpcException(
                     ErrorCode.INDEX_NOT_READABLE, "Cannot read document " + params.docId() + ": " + e.getMessage(), e);
         }
-        List<RuntimeIndex.StoredValue> values = whole.fields().stream()
-                .filter(field -> field.name().equals(params.field()))
+        List<RuntimeIndex.StoredValue> values = read.stream()
                 .findFirst()
-                .map(Documents.DocumentField::stored)
+                .map(doc -> doc.values().getOrDefault(params.field(), List.of()))
                 .orElse(List.of());
         int i = params.index();
         if (i < 0 || i >= values.size()) {
@@ -652,7 +651,7 @@ public final class RuntimeResults {
                     "No stored value " + i + " in field '" + params.field() + "' of document " + params.docId()
                             + ": it has " + values.size());
         }
-        return new GetStoredValueResult(storedValue(values.get(i), Integer.MAX_VALUE));
+        return storedValue(values.get(i), Integer.MAX_VALUE);
     }
 
     /** {@code getTermVector}. */

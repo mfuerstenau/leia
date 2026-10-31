@@ -4,10 +4,10 @@ import io.github.mfuerstenau.leia.mcp.Call;
 import io.github.mfuerstenau.leia.mcp.Description;
 import io.github.mfuerstenau.leia.mcp.Jobs;
 import io.github.mfuerstenau.leia.mcp.McpTool;
-import io.github.mfuerstenau.leia.mcp.ToolError;
 import io.github.mfuerstenau.leia.mcp.ToolException;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.document.GetStoredValueParams;
+import io.github.mfuerstenau.leia.protocol.document.GetStoredValueResult;
 import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import java.util.OptionalInt;
@@ -78,26 +78,20 @@ final class GetFieldValueTool implements McpTool<GetFieldValueTool.Arguments, Ge
         int index = Slices.bounded("index", arguments.index(), 0, 0, Integer.MAX_VALUE);
         int offset = Slices.bounded("offset", arguments.offset(), 0, 0, Integer.MAX_VALUE);
         int length = Slices.bounded("length", arguments.length(), DEFAULT_LENGTH, 1, MAX_LENGTH);
-        StoredValue stored = call.call(
-                        Methods.GET_STORED_VALUE, new GetStoredValueParams(arguments.docId(), arguments.field(), index))
-                .value();
-        String value = stored.value();
-        if (offset > value.length()) {
-            throw ToolError.invalid(
-                    "offset " + offset + " is past the end of the value, " + value.length() + " characters long");
-        }
-        if (stored.binary() && offset % 2 != 0) {
-            throw ToolError.invalid("offset must be even in a value in hex, which has two characters per byte");
-        }
-        int end = Slices.end(value, stored.binary(), offset, length);
+        GetStoredValueResult slice = call.call(
+                Methods.GET_STORED_VALUE,
+                new GetStoredValueParams(
+                        arguments.docId(), arguments.field(), index, OptionalInt.of(offset), OptionalInt.of(length)));
+        StoredValue stored = slice.value();
+        int end = slice.offset() + stored.value().length();
         return new Result(
                 arguments.field(),
                 index,
                 stored.type(),
                 stored.binary(),
-                value.substring(offset, end),
-                offset,
-                value.length(),
-                end < value.length() ? OptionalInt.of(end) : OptionalInt.empty());
+                stored.value(),
+                slice.offset(),
+                slice.totalLength(),
+                end < slice.totalLength() ? OptionalInt.of(end) : OptionalInt.empty());
     }
 }

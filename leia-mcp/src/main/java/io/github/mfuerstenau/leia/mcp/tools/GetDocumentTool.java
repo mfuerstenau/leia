@@ -12,6 +12,7 @@ import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
 import io.github.mfuerstenau.leia.protocol.document.GetStoredValueParams;
+import io.github.mfuerstenau.leia.protocol.document.GetStoredValueResult;
 import io.github.mfuerstenau.leia.protocol.document.KnnVector;
 import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
@@ -180,13 +181,19 @@ final class GetDocumentTool implements McpTool<GetDocumentTool.Arguments, GetDoc
             for (int index = 0; index < field.stored().size(); index++) {
                 StoredValue value = field.stored().get(index);
                 if (value.fullLength().isPresent()) {
-                    // Cut by the backend: the whole value gives the length in characters.
-                    value = call.call(
-                                    Methods.GET_STORED_VALUE,
-                                    new GetStoredValueParams(document.docId(), field.name(), index))
-                            .value();
+                    // Cut by the backend: the head of the value, with its length in characters.
+                    GetStoredValueResult head = call.call(
+                            Methods.GET_STORED_VALUE,
+                            new GetStoredValueParams(
+                                    document.docId(),
+                                    field.name(),
+                                    index,
+                                    OptionalInt.of(0),
+                                    OptionalInt.of(maxLength)));
+                    stored.add(value(head.value(), head.totalLength(), maxLength));
+                } else {
+                    stored.add(value(value, value.value().length(), maxLength));
                 }
-                stored.add(value(value, maxLength));
             }
             shown.add(new Field(
                     field.name(),
@@ -207,16 +214,17 @@ final class GetDocumentTool implements McpTool<GetDocumentTool.Arguments, GetDoc
                 || field.norm().isPresent();
     }
 
-    private static Value value(StoredValue value, int maxLength) {
+    /** {@code value}, which is the head of a value {@code totalLength} characters long, cut to {@code maxLength}. */
+    private static Value value(StoredValue value, int totalLength, int maxLength) {
         String text = value.value();
-        if (text.length() <= maxLength) {
+        if (totalLength <= maxLength) {
             return new Value(Absent.type(value.type()), text, Absent.flag(value.binary()), OptionalInt.empty());
         }
         return new Value(
                 Absent.type(value.type()),
                 Slices.head(text, value.binary(), maxLength),
                 Absent.flag(value.binary()),
-                OptionalInt.of(text.length()));
+                OptionalInt.of(totalLength));
     }
 
     private static DocValues docValues(
