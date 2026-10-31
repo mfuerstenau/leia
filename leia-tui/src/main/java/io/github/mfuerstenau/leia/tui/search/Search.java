@@ -1081,7 +1081,7 @@ public final class Search {
             default -> text;
         };
         return Optional.of(new Request.Filter(
-                new StartFilterParams(query, Optional.empty(), withDeleted),
+                new StartFilterParams(query, Optional.empty(), Optional.empty(), withDeleted),
                 label,
                 selectedHit().map(Hit::docId).orElse(0)));
     }
@@ -1099,6 +1099,7 @@ public final class Search {
                 new StartFilterParams(
                         Optional.empty(),
                         Optional.of(new FilterPattern(pattern, caseInsensitive, hitFields.param())),
+                        Optional.empty(),
                         withDeleted),
                 "/" + pattern + "/" + (caseInsensitive ? "i" : ""),
                 scan == null ? 0 : scan.selected().map(StoredScanHit::docId).orElse(0)));

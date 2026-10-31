@@ -35,6 +35,8 @@ import java.util.OptionalLong;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.Consumer;
+import java.util.function.IntUnaryOperator;
 import java.util.function.LongConsumer;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.document.Document;
@@ -612,6 +614,38 @@ final class Lucene9Index
             documents.add(new StoredDocument(doc, deleted, storedValues(document)));
         }
         return List.copyOf(documents);
+    }
+
+    @Override
+    public void storedValues(
+            int segment,
+            Optional<Set<String>> fields,
+            boolean includeDeleted,
+            IntUnaryOperator next,
+            Consumer<StoredDocument> sink,
+            LongConsumer progress)
+            throws IOException {
+        LeafReader leaf = segmentLeaf(segment);
+        Lucene9Stored.Reader stored = Lucene9Stored.sequential(leaf);
+        Bits liveDocs = leaf.getLiveDocs();
+        int maxDoc = leaf.maxDoc();
+        int reported = 0;
+        progress.accept(0);
+        for (int doc = next.applyAsInt(0); doc < maxDoc; doc = next.applyAsInt(doc + 1)) {
+            if (doc - reported >= PROGRESS_INTERVAL) {
+                progress.accept(doc);
+                reported = doc;
+            }
+            boolean deleted = liveDocs != null && !liveDocs.get(doc);
+            if (deleted && !includeDeleted) {
+                continue;
+            }
+            DocumentStoredFieldVisitor visitor =
+                    fields.map(DocumentStoredFieldVisitor::new).orElseGet(DocumentStoredFieldVisitor::new);
+            stored.document(doc, visitor);
+            sink.accept(new StoredDocument(doc, deleted, storedValues(visitor.getDocument())));
+        }
+        progress.accept(maxDoc);
     }
 
     /** A document's stored values by field, in stored order. */

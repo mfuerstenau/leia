@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.concurrent.CancellationException;
+import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -42,7 +43,7 @@ public final class StoredScan {
     static final int SNIPPET_BEFORE = 40;
     /** How many characters (UTF-16 units) from the start of the first match the snippet ends. */
     static final int SNIPPET_AFTER = 160;
-    /** How many documents the scan reads between two progress reports. */
+    /** How many documents the scan reads between two progress reports of its own. */
     static final int PROGRESS_INTERVAL = 64;
     /** How many characters the matcher reads between two checks of the time limit and progress. */
     static final int CHECK_INTERVAL = 4096;
@@ -137,6 +138,9 @@ public final class StoredScan {
             .onUnmappableCharacter(CodingErrorAction.REPORT);
 
     private int scannedDocs;
+    /** The documents gone through as last reported, -1 before the first report. */
+    private int reported = -1;
+
     private int matchedDocs;
     private long matchedValues;
     private int hits;
@@ -166,8 +170,9 @@ public final class StoredScan {
     public record Document(int docId, boolean deleted, Map<String, List<StoredValue>> values) {}
 
     /**
-     * The stored values of an index, read a range of document ids at a time (ADR 0055). Its creator
-     * decides which fields it reads and whether it reads deleted documents.
+     * The stored values of an index, read a segment at a time (ADR 0055, ADR 0114). Its creator
+     * decides which fields it reads, whether it reads deleted documents, and which documents it can
+     * pass over.
      */
     public interface StoredSource {
 
@@ -175,10 +180,11 @@ public final class StoredScan {
         int maxDoc();
 
         /**
-         * The documents from {@code fromDoc} up to {@code toDoc} (exclusive) that the source reads,
-         * in document id order.
+         * Passes the documents the source reads to {@code sink}, in document id order, and the
+         * document ids gone through to {@code goneThrough} now and then, ascending, the last {@link
+         * #maxDoc()}. Both may throw to stop the read, which passes the exception on.
          */
-        List<Document> read(int fromDoc, int toDoc) throws IOException;
+        void read(Consumer<Document> sink, IntConsumer goneThrough) throws IOException;
     }
 
     /**
@@ -218,19 +224,24 @@ public final class StoredScan {
 
     private Summary run(StoredSource source) throws IOException {
         long start = System.nanoTime();
-        int maxDoc = source.maxDoc();
-        for (int from = 0; from < maxDoc; from += PROGRESS_INTERVAL) {
-            progress.scanned(scannedDocs);
-            int to = Math.min(maxDoc, from + PROGRESS_INTERVAL);
-            for (Document document : source.read(from, to)) {
-                if (scanDocument(document.docId(), document.deleted(), document.values())) {
-                    matchedDocs++;
-                    matchedDoc.accept(document.docId());
-                }
-            }
-            scannedDocs = to;
-        }
-        progress.scanned(scannedDocs);
+        int[] received = {0};
+        source.read(
+                document -> {
+                    if (scanDocument(document.docId(), document.deleted(), document.values())) {
+                        matchedDocs++;
+                        matchedDoc.accept(document.docId());
+                    }
+                    scannedDocs = Math.max(scannedDocs, document.docId() + 1);
+                    if (++received[0] % PROGRESS_INTERVAL == 0) {
+                        report();
+                    }
+                },
+                goneThrough -> {
+                    scannedDocs = Math.max(scannedDocs, goneThrough);
+                    report();
+                });
+        scannedDocs = Math.max(scannedDocs, source.maxDoc());
+        report();
         return new Summary(
                 scannedDocs,
                 matchedDocs,
@@ -239,6 +250,14 @@ public final class StoredScan {
                 timedOutValues,
                 List.copyOf(timedOut),
                 Duration.ofNanos(System.nanoTime() - start));
+    }
+
+    /** Reports the documents gone through, unless they are those reported last. */
+    private void report() {
+        if (scannedDocs != reported) {
+            reported = scannedDocs;
+            progress.scanned(scannedDocs);
+        }
     }
 
     /** Scans the values of one document, and says whether any of them matched. */

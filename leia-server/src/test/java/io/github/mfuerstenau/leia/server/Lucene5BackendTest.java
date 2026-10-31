@@ -186,6 +186,12 @@ class Lucene5BackendTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"lucene4", "lucene5"})
+    void scansAndFiltersThroughTheStoredFieldsCache(String name) throws Exception {
+        RuntimeStoredFields.scansAndFiltersThroughTheCache(testIndex(name), List.of("body"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene4", "lucene5"})
     void keepsTheStoredFieldsOnDisk(String name, @TempDir Path cacheDir) throws Exception {
         RuntimeStoredFields.keepsTheCacheOnDisk(testIndex(name), cacheDir);
     }

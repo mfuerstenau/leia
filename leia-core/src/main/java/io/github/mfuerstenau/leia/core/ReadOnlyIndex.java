@@ -20,6 +20,8 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.CancellationException;
+import java.util.function.Consumer;
+import java.util.function.IntUnaryOperator;
 import java.util.function.ObjIntConsumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -1043,6 +1045,31 @@ public final class ReadOnlyIndex implements OpenedIndex {
             fields.get().forEach(this::checkField);
         }
         return StoredScan.source(reader, fields, includeDeleted);
+    }
+
+    /**
+     * The stored values of the documents of a segment, in document order, each block of documents
+     * decompressed once (ADR 0114), as {@link StoredScan#segment} reads them.
+     *
+     * @param segment the segment's position in the reader's leaves, as {@link #storedFields} takes it
+     * @param fields the stored fields to read; empty for all of them
+     * @param next the first segment-local document at or after the one it gets that is to be read, or
+     *     the segment's maxDoc or more for none
+     * @throws IllegalArgumentException if there is no such segment or a field doesn't exist
+     * @throws java.util.concurrent.CancellationException from {@code progress}, to stop the read
+     */
+    public void storedValues(
+            int segment,
+            Optional<Set<String>> fields,
+            boolean includeDeleted,
+            IntUnaryOperator next,
+            Consumer<StoredScan.Document> sink,
+            ScanProgress progress)
+            throws IOException {
+        if (fields.isPresent()) {
+            fields.get().forEach(this::checkField);
+        }
+        StoredScan.segment(leaf(segment).reader(), fields, includeDeleted, next, sink, progress);
     }
 
     /**

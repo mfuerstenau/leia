@@ -18,6 +18,7 @@ import io.github.mfuerstenau.leia.server.TestIndexes;
 import io.github.mfuerstenau.leia.server.filter.Filters;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
+import io.github.mfuerstenau.leia.server.stored.StoredFieldsCache;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -49,7 +50,8 @@ class StoredScanHandlersTest {
 
     private final Jobs jobs = new Jobs();
     private final CurrentIndex currentIndex = new CurrentIndex(jobs, new Filters());
-    private final StartStoredScanHandler start = new StartStoredScanHandler(currentIndex, jobs);
+    private final StartStoredScanHandler start =
+            new StartStoredScanHandler(currentIndex, jobs, new StoredFieldsCache(Optional.empty()));
     private final GetStoredScanHandler get = new GetStoredScanHandler(jobs);
 
     @Test

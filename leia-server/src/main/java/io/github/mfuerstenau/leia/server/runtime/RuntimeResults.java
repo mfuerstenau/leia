@@ -118,12 +118,15 @@ import io.github.mfuerstenau.leia.server.search.KnnChecks;
 import io.github.mfuerstenau.leia.server.search.ParserChecks;
 import io.github.mfuerstenau.leia.server.search.StartStoredScanHandler;
 import io.github.mfuerstenau.leia.server.search.StoredScan;
+import io.github.mfuerstenau.leia.server.stored.StoredFieldsCache;
+import io.github.mfuerstenau.leia.server.stored.StoredFieldsScan;
 import io.github.mfuerstenau.leia.server.terms.TermExport;
 import io.github.mfuerstenau.leia.server.terms.TermParams;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.BitSet;
 import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
@@ -134,6 +137,9 @@ import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.IntConsumer;
+import java.util.function.IntUnaryOperator;
+import java.util.function.LongConsumer;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -1062,20 +1068,44 @@ public final class RuntimeResults {
 
     /**
      * {@code startFilter} (ADR 0056): the documents that match a query, as {@link #parsedQuery} runs
-     * it, found by the runtime's {@link Search#matches}, or those with a stored value in which a
-     * pattern is found, scanned through {@link #storedSource}. A query with deleted documents is not
-     * supported by a runtime that can't match them.
+     * it, found by the runtime's {@link Search#matches}, those with a stored value in which a pattern
+     * is found, scanned through {@link #storedSource}, or those with a stored value in a field, from
+     * the stored fields cache or else read (ADR 0114). A query with deleted documents is not supported
+     * by a runtime that can't match them.
      */
-    public static JobStarted startFilter(OpenRuntime open, StartFilterParams params, Jobs jobs) throws RpcException {
+    public static JobStarted startFilter(OpenRuntime open, StoredFieldsCache cache, StartFilterParams params, Jobs jobs)
+            throws RpcException {
         boolean includeDeleted = params.includeDeleted();
         String lucene = withLucene(open);
         String deleted = includeDeleted ? ", deleted documents too" : "";
         int maxDoc = open.index().maxDoc();
+        Optional<String> storedField = params.storedField();
+        if (storedField.isPresent()) {
+            String field = storedField.get();
+            Documents documents = open.index().documents().orElseThrow(open::notSupported);
+            checkField(open.index(), field);
+            String label = "stored:" + field;
+            return new JobStarted(jobs.start(
+                    "filter by stored field " + field + deleted + lucene, DocFilter.class, progress -> {
+                        long start = System.nanoTime();
+                        try {
+                            BitSet docs = StoredFieldsScan.docsWith(
+                                    open.index(), documents, cache, field, includeDeleted, progress);
+                            return DocFilter.of(
+                                    docs, maxDoc, label, label, Duration.ofNanos(System.nanoTime() - start));
+                        } catch (IOException e) {
+                            throw new RpcException(
+                                    ErrorCode.INDEX_NOT_READABLE,
+                                    "Cannot read the stored fields: " + e.getMessage(),
+                                    e);
+                        }
+                    }));
+        }
         Optional<FilterPattern> patternParam = params.pattern();
         if (patternParam.isPresent()) {
             FilterPattern filterPattern = patternParam.get();
             Optional<Set<String>> fields = filterPattern.fields().map(Set::copyOf);
-            StoredScan.StoredSource source = storedSource(open, fields, includeDeleted);
+            StoredScan.StoredSource source = storedSource(open, cache, fields, includeDeleted);
             Pattern pattern = StartStoredScanHandler.pattern(filterPattern.pattern(), filterPattern.caseInsensitive());
             return new JobStarted(jobs.start(
                     "filter by /" + pattern + "/" + (filterPattern.caseInsensitive() ? "i" : "")
@@ -1454,18 +1484,22 @@ public final class RuntimeResults {
 
     /**
      * {@code startStoredScan}: the stored values of the documents in {@code fields} (all if empty)
-     * for {@link StoredScan#scan}, read a page at a time through {@link Documents#storedValues} (ADR
-     * 0055).
+     * for {@link StoredScan#scan}, read a segment at a time through {@link Documents#storedValues(int,
+     * Optional, boolean, IntUnaryOperator, Consumer, LongConsumer)} (ADR 0055, ADR 0114). Of a segment
+     * the cache knows, only the documents that store one of the fields are read, and none if no
+     * document does; the cache is looked up as the documents are read, never filled.
      */
     public static StoredScan.StoredSource storedSource(
-            OpenRuntime open, Optional<Set<String>> fields, boolean includeDeleted) throws RpcException {
-        Documents documents = open.index().documents().orElseThrow(open::notSupported);
+            OpenRuntime open, StoredFieldsCache cache, Optional<Set<String>> fields, boolean includeDeleted)
+            throws RpcException {
+        RuntimeIndex index = open.index();
+        Documents documents = index.documents().orElseThrow(open::notSupported);
         if (fields.isPresent()) {
             for (String field : fields.get()) {
-                checkField(open.index(), field);
+                checkField(index, field);
             }
         }
-        int maxDoc = open.index().maxDoc();
+        int maxDoc = index.maxDoc();
         return new StoredScan.StoredSource() {
             @Override
             public int maxDoc() {
@@ -1473,10 +1507,28 @@ public final class RuntimeResults {
             }
 
             @Override
-            public List<StoredScan.Document> read(int fromDoc, int toDoc) throws IOException {
-                return documents.storedValues(fromDoc, toDoc, fields, includeDeleted).stream()
-                        .map(RuntimeResults::storedDocument)
-                        .toList();
+            public void read(Consumer<StoredScan.Document> sink, IntConsumer goneThrough) throws IOException {
+                int segment = 0;
+                for (RuntimeIndex.IndexStats directory : index.stats().indexes()) {
+                    for (RuntimeIndex.Segment info : directory.segments()) {
+                        int docBase = directory.docBase() + info.docBase();
+                        goneThrough.accept(docBase);
+                        IntUnaryOperator next =
+                                cache.storing(directory.path(), info, fields).orElse(IntUnaryOperator.identity());
+                        if (next.applyAsInt(0) < info.maxDoc()) {
+                            documents.storedValues(
+                                    segment,
+                                    fields,
+                                    includeDeleted,
+                                    next,
+                                    document -> sink.accept(new StoredScan.Document(
+                                            docBase + document.docId(), document.deleted(), document.values())),
+                                    docs -> goneThrough.accept(docBase + (int) docs));
+                        }
+                        segment++;
+                    }
+                }
+                goneThrough.accept(maxDoc);
             }
         };
     }

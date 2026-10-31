@@ -18,9 +18,7 @@ The lane is done. What each runtime can do, and how they differ: `docs/runtimes.
 
 From the read-only checklist in `docs/luke-features.md` §7. Ordered roughly by value. Each area will need its own records, handlers and probably an ADR for the cross-cutting parts.
 
-- [ ] Read the regex scan and the pattern filter (`StoredScan.source`, the runtimes' `storedValues`) through the codec's merge instance, as the stored fields scan does (ADR 0113): measured 10× to 90× faster on a large segment.
-- [ ] With `fields`, skip the documents the stored fields cache says store none of them (ADR 0113).
-- [ ] A filter of the documents that store a field, from the stored fields cache, as a `DocFilter` (ADR 0032, ADR 0113).
+None open.
 
 ## MCP mode — output size, then tools
 

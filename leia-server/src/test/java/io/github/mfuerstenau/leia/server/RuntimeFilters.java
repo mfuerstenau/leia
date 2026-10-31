@@ -46,8 +46,8 @@ final class RuntimeFilters {
         assertThat(beta).isNotEmpty();
         assertThat(alphaWithDeleted).hasSizeGreaterThan(alpha.size());
 
-        FilterResult byQuery =
-                backend.filter(new StartFilterParams(Optional.of(classic("beta")), Optional.empty(), false));
+        FilterResult byQuery = backend.filter(
+                new StartFilterParams(Optional.of(classic("beta")), Optional.empty(), Optional.empty(), false));
         assertThat(byQuery.query()).isEqualTo("body:beta");
         assertThat(byQuery.rewrittenQuery()).isEqualTo("body:beta");
         assertThat(byQuery.matchCount()).isEqualTo(beta.size());
@@ -72,7 +72,7 @@ final class RuntimeFilters {
         assertThat(shown).allSatisfy(posting -> assertThat(posting.inFilter()).contains(true));
 
         StartFilterParams alphaWithDeletedQuery =
-                new StartFilterParams(Optional.of(classic("alpha")), Optional.empty(), true);
+                new StartFilterParams(Optional.of(classic("alpha")), Optional.empty(), Optional.empty(), true);
         if (deletedByQuery) {
             assertThat(matches(backend, backend.filter(alphaWithDeletedQuery)))
                     .containsExactlyElementsOf(alphaWithDeleted);
@@ -81,18 +81,23 @@ final class RuntimeFilters {
         }
         assertThat(matches(
                         backend,
-                        backend.filter(new StartFilterParams(Optional.of(classic("alpha")), Optional.empty(), false))))
+                        backend.filter(new StartFilterParams(
+                                Optional.of(classic("alpha")), Optional.empty(), Optional.empty(), false))))
                 .containsExactlyElementsOf(alpha);
 
         FilterResult byPattern = backend.filter(new StartFilterParams(
                 Optional.empty(),
                 Optional.of(new FilterPattern("\\bALPHA\\b", true, Optional.of(List.of("body")))),
+                Optional.empty(),
                 true));
         assertThat(byPattern.query()).isEqualTo("/\\bALPHA\\b/i");
         assertThat(byPattern.timedOutValues()).hasValue(0);
         assertThat(matches(backend, byPattern)).containsExactlyElementsOf(alphaWithDeleted);
         FilterResult liveByPattern = backend.filter(new StartFilterParams(
-                Optional.empty(), Optional.of(new FilterPattern("\\bbeta\\b", true, Optional.empty())), false));
+                Optional.empty(),
+                Optional.of(new FilterPattern("\\bbeta\\b", true, Optional.empty())),
+                Optional.empty(),
+                false));
         assertThat(matches(backend, liveByPattern)).containsExactlyElementsOf(beta);
 
         backend.fails(
@@ -100,6 +105,7 @@ final class RuntimeFilters {
                 new StartFilterParams(
                         Optional.empty(),
                         Optional.of(new FilterPattern("x", false, Optional.of(List.of("nothing")))),
+                        Optional.empty(),
                         false),
                 ErrorCode.FIELD_NOT_FOUND);
     }

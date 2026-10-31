@@ -220,6 +220,12 @@ class Lucene8BackendTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"lucene8", "lucene8to9"})
+    void scansAndFiltersThroughTheStoredFieldsCache(String name) throws Exception {
+        RuntimeStoredFields.scansAndFiltersThroughTheCache(testIndex(name), List.of("body"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene8", "lucene8to9"})
     void keepsTheStoredFieldsOnDisk(String name, @TempDir Path cacheDir) throws Exception {
         RuntimeStoredFields.keepsTheCacheOnDisk(testIndex(name), cacheDir);
     }
@@ -711,7 +717,8 @@ class Lucene8BackendTest {
     private List<Integer> searchFilterAndExplain(SearchQuery query) throws Exception {
         SearchResults results = backend.search(query, 10);
         assertThat(results.hits()).isNotEmpty();
-        FilterResult filter = backend.filter(new StartFilterParams(Optional.of(query), Optional.empty(), false));
+        FilterResult filter =
+                backend.filter(new StartFilterParams(Optional.of(query), Optional.empty(), Optional.empty(), false));
         assertThat(filter.matchCount()).isEqualTo(results.totalHits());
         assertThat(filter.query()).isEqualTo(results.query());
         Hit first = results.hits().getFirst();

@@ -35,6 +35,8 @@ import java.util.OptionalLong;
 import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.Consumer;
+import java.util.function.IntUnaryOperator;
 import java.util.function.LongConsumer;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.codecs.StoredFieldsReader;
@@ -587,28 +589,71 @@ final class Lucene5Index
     }
 
     @Override
+    public void storedValues(
+            int segment,
+            Optional<Set<String>> fields,
+            boolean includeDeleted,
+            IntUnaryOperator next,
+            Consumer<StoredDocument> sink,
+            LongConsumer progress)
+            throws IOException {
+        LeafReader leaf = segmentLeaf(segment);
+        SequentialStored stored = sequential(leaf);
+        Bits liveDocs = leaf.getLiveDocs();
+        int maxDoc = leaf.maxDoc();
+        int reported = 0;
+        progress.accept(0);
+        for (int doc = next.applyAsInt(0); doc < maxDoc; doc = next.applyAsInt(doc + 1)) {
+            if (doc - reported >= PROGRESS_INTERVAL) {
+                progress.accept(doc);
+                reported = doc;
+            }
+            boolean deleted = liveDocs != null && !liveDocs.get(doc);
+            if (deleted && !includeDeleted) {
+                continue;
+            }
+            DocumentStoredFieldVisitor visitor =
+                    fields.map(DocumentStoredFieldVisitor::new).orElseGet(DocumentStoredFieldVisitor::new);
+            stored.document(doc, visitor);
+            sink.accept(new StoredDocument(doc, deleted, storedValues(visitor.getDocument())));
+        }
+        progress.accept(maxDoc);
+    }
+
+    @Override
     public void storedFields(int segment, StoredFieldSink sink, LongConsumer progress) throws IOException {
         LeafReader leaf = segmentLeaf(segment);
         int maxDoc = leaf.maxDoc();
         StoredFieldNames names = new StoredFieldNames(sink);
-        // The codec's merge instance decompresses each block of documents once, the leaf a block for
-        // each document (ADR 0113).
-        StoredFieldsReader merge =
-                FilterLeafReader.unwrap(leaf) instanceof CodecReader codec && codec.getFieldsReader() != null
-                        ? codec.getFieldsReader().getMergeInstance()
-                        : null;
+        SequentialStored stored = sequential(leaf);
         for (int doc = 0; doc < maxDoc; doc++) {
             if (doc % PROGRESS_INTERVAL == 0) {
                 progress.accept(doc);
             }
             names.doc = doc;
-            if (merge != null) {
-                merge.visitDocument(doc, names);
-            } else {
-                leaf.document(doc, names);
-            }
+            stored.document(doc, names);
         }
         progress.accept(maxDoc);
+    }
+
+    /** The stored fields of a leaf, for one pass in document order on one thread. */
+    @FunctionalInterface
+    private interface SequentialStored {
+
+        void document(int doc, StoredFieldVisitor visitor) throws IOException;
+    }
+
+    /**
+     * The stored fields of {@code leaf} for one pass in document order on this thread: the codec's
+     * merge instance, which decompresses each block of documents once, where the leaf decompresses a
+     * block for each document (ADR 0113, ADR 0114); the leaf's own if it isn't a segment's.
+     */
+    private static SequentialStored sequential(LeafReader leaf) throws IOException {
+        if (FilterLeafReader.unwrap(leaf) instanceof CodecReader codec && codec.getFieldsReader() != null) {
+            StoredFieldsReader merge = codec.getFieldsReader().getMergeInstance();
+            return merge::visitDocument;
+        }
+        return leaf::document;
     }
 
     @Override

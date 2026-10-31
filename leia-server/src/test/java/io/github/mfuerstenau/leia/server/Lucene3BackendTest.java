@@ -287,6 +287,11 @@ class Lucene3BackendTest {
     }
 
     @Test
+    void scansAndFiltersThroughTheStoredFieldsCache() throws Exception {
+        RuntimeStoredFields.scansAndFiltersThroughTheCache(Path.of(PATH), List.of("body"));
+    }
+
+    @Test
     void keepsTheStoredFieldsOnDisk() throws Exception {
         // 3.6 records no segment ids: the cache knows the segments by their files.
         RuntimeStoredFields.keepsTheCacheOnDisk(Path.of(PATH), tmp);

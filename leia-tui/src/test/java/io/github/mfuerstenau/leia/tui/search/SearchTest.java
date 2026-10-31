@@ -1644,7 +1644,10 @@ class SearchTest {
         assertThat(press(search, 'b'))
                 .hasValue(new Request.Filter(
                         new StartFilterParams(
-                                Optional.of(classic("red", "title", QueryOperator.OR)), Optional.empty(), false),
+                                Optional.of(classic("red", "title", QueryOperator.OR)),
+                                Optional.empty(),
+                                Optional.empty(),
+                                false),
                         "red",
                         1));
         Request.Filter withDeleted = (Request.Filter) press(search, 'B').orElseThrow();
@@ -1668,6 +1671,7 @@ class SearchTest {
                         new StartFilterParams(
                                 Optional.empty(),
                                 Optional.of(new FilterPattern("re[d]", true, Optional.empty())),
+                                Optional.empty(),
                                 true),
                         "/re[d]/i",
                         8));

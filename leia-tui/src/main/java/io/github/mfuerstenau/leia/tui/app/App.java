@@ -1981,6 +1981,33 @@ public final class App {
     }
 
     /**
+     * {@code b} or {@code B} on the overview: the documents screen narrowed to the documents with a
+     * stored value in the selected field (ADR 0114), the deleted ones too with {@code B}. A field the
+     * finished stored fields scan found in no document is said to have none instead.
+     */
+    private Optional<Action> filterByStoredField(boolean withDeleted) {
+        if (!opened.supports(Feature.STORED_FIELDS)) {
+            notice = new Notice.NotSupported("Docs storing a field", reason());
+            return Optional.empty();
+        }
+        Optional<IndexField> field = overview.selectedField();
+        if (field.isEmpty()) {
+            return Optional.empty();
+        }
+        String name = field.get().name();
+        if (overview.storedFields().orElse(null) instanceof StoredFieldsState.Done done
+                && done.fields().fields().stream()
+                        .noneMatch(stored -> stored.name().equals(name))) {
+            notice = new Notice.NotStored(name);
+            return Optional.empty();
+        }
+        return startFilter(
+                "stored:" + name,
+                new StartFilterParams(Optional.empty(), Optional.empty(), Optional.of(name), withDeleted),
+                0);
+    }
+
+    /**
      * The job of stored fields scan {@code scanId} has started. If that scan was cancelled or
      * forgotten meanwhile, returns the action that cancels the job.
      */
@@ -2084,6 +2111,9 @@ public final class App {
         }
         if (key.isChar('f')) {
             return requestStoredFields();
+        }
+        if (key.isChar('b') || key.isChar('B')) {
+            return filterByStoredField(key.isChar('B'));
         }
         if (key.isChar('+') || key.isChar('=') || key.isChar('-')) {
             topN = Overview.stepTopTerms(topN, !key.isChar('-'));
@@ -2785,7 +2815,7 @@ public final class App {
                     + "s/S sort   Tab panel   ↑↓";
         }
         String topTerms = opened.supports(Feature.TOP_TERMS) ? "⏎ terms   a all terms   +/- top N   " : "";
-        String stored = opened.supports(Feature.STORED_FIELDS) ? "f stored fields   " : "";
+        String stored = opened.supports(Feature.STORED_FIELDS) ? "f stored fields   b/B docs storing it   " : "";
         return " q quit   o open   c close   " + reopen + screens + topTerms + stored + "s/S sort   Tab panel   ↑↓";
     }
 

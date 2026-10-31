@@ -15,6 +15,8 @@ import io.github.mfuerstenau.leia.server.search.StoredScan.Hit;
 import io.github.mfuerstenau.leia.server.search.StoredScan.Span;
 import io.github.mfuerstenau.leia.server.search.StoredScan.Summary;
 import io.github.mfuerstenau.leia.server.search.StoredScan.ValueRef;
+import io.github.mfuerstenau.leia.server.stored.StoredFieldsCache;
+import io.github.mfuerstenau.leia.server.stored.StoredFieldsScan;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -26,6 +28,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.function.Consumer;
+import java.util.function.IntConsumer;
 import java.util.regex.Pattern;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
@@ -44,6 +47,7 @@ import org.junit.jupiter.api.io.TempDir;
 class StoredScanTest {
 
     private static final Duration LIMIT = Duration.ofSeconds(10);
+    private static final StoredFieldsCache NO_CACHE = new StoredFieldsCache(Optional.empty());
 
     @TempDir
     Path tmp;
@@ -242,9 +246,8 @@ class StoredScanTest {
     }
 
     @Test
-    void scansASourceInPages() throws Exception {
+    void scansASource() throws Exception {
         // 150 documents; every tenth is deleted, and the source leaves those out.
-        List<List<Integer>> pages = new ArrayList<>();
         StoredScan.StoredSource source = new StoredScan.StoredSource() {
             @Override
             public int maxDoc() {
@@ -252,13 +255,15 @@ class StoredScanTest {
             }
 
             @Override
-            public List<StoredScan.Document> read(int fromDoc, int toDoc) {
-                pages.add(List.of(fromDoc, toDoc));
-                List<StoredScan.Document> documents = new ArrayList<>();
-                for (int docId = fromDoc; docId < toDoc; docId++) {
+            public void read(Consumer<StoredScan.Document> sink, IntConsumer goneThrough) {
+                goneThrough.accept(0);
+                for (int docId = 0; docId < 150; docId++) {
+                    if (docId == 100) {
+                        goneThrough.accept(100);
+                    }
                     if (docId % 10 != 0) {
                         String text = docId % 7 == 0 ? "seven" : "other";
-                        documents.add(new StoredScan.Document(
+                        sink.accept(new StoredScan.Document(
                                 docId,
                                 false,
                                 Map.of(
@@ -268,7 +273,7 @@ class StoredScanTest {
                                                 new RuntimeIndex.StoredValue.Text(text)))));
                     }
                 }
-                return documents;
+                goneThrough.accept(150);
             }
         };
         List<Hit> hits = new ArrayList<>();
@@ -277,8 +282,8 @@ class StoredScanTest {
         Summary summary =
                 StoredScan.scan(source, Pattern.compile("seven"), 100, LIMIT, listener(hits, _ -> {}), reports::add);
 
-        assertThat(pages).containsExactly(List.of(0, 64), List.of(64, 128), List.of(128, 150));
-        assertThat(reports).containsExactly(0L, 64L, 128L, 150L);
+        // The source's reports, and the scan's own every 64 documents it gets: the 64th is 71.
+        assertThat(reports).containsExactly(0L, 72L, 100L, 143L, 150L);
         // Multiples of 7 that aren't multiples of 10: 21 of them below 150, without 0, 70 and 140.
         assertThat(summary.scannedDocs()).isEqualTo(150);
         assertThat(summary.matchedDocs()).isEqualTo(19);
@@ -290,6 +295,58 @@ class StoredScanTest {
         assertThat(filter.matchCount()).isEqualTo(19);
         assertThat(filter.contains(147)).isTrue();
         assertThat(filter.contains(140)).isFalse();
+    }
+
+    @Test
+    void passesOverTheDocumentsTheCacheSaysStoreNoneOfTheFields() throws Exception {
+        List<Fields> docs = new ArrayList<>();
+        for (int i = 0; i < 10; i++) {
+            int id = i;
+            docs.add(doc -> {
+                doc.add(new StoredField("text", "common"));
+                if (id % 4 == 1) {
+                    doc.add(new StoredField("rare", "rare " + id));
+                }
+            });
+        }
+        Path dir = writeIndex(tmp, docs);
+
+        try (OpenRuntime index = TestIndexes.open(dir)) {
+            StoredFieldsCache cache = new StoredFieldsCache(Optional.empty());
+            Optional<Set<String>> rare = Optional.of(Set.of("rare"));
+            Summary before = storedScan(index, cache, rare);
+            // Without the cache, every document is read, those without rare too.
+            assertThat(read(index, cache, rare)).hasSize(10);
+
+            StoredFieldsScan.scan(
+                    index.index(), index.index().documents().orElseThrow(), cache, false, ScanProgress.NONE);
+
+            assertThat(read(index, cache, rare)).containsExactly(1, 5, 9);
+            assertThat(read(index, cache, Optional.of(Set.of("text")))).hasSize(10);
+            assertThat(read(index, cache, Optional.empty())).hasSize(10);
+            Summary after = storedScan(index, cache, rare);
+            assertThat(after.scannedDocs()).isEqualTo(before.scannedDocs()).isEqualTo(10);
+            assertThat(after.matchedDocs()).isEqualTo(before.matchedDocs()).isEqualTo(3);
+        }
+    }
+
+    /** The ids of the documents {@code startStoredScan}'s source reads of {@code fields}. */
+    private static List<Integer> read(OpenRuntime index, StoredFieldsCache cache, Optional<Set<String>> fields)
+            throws Exception {
+        List<Integer> read = new ArrayList<>();
+        RuntimeResults.storedSource(index, cache, fields, false).read(document -> read.add(document.docId()), _ -> {});
+        return read;
+    }
+
+    private static Summary storedScan(OpenRuntime index, StoredFieldsCache cache, Optional<Set<String>> fields)
+            throws Exception {
+        return StoredScan.scan(
+                RuntimeResults.storedSource(index, cache, fields, false),
+                Pattern.compile("rare"),
+                10,
+                LIMIT,
+                listener(new ArrayList<>(), _ -> {}),
+                ScanProgress.NONE);
     }
 
     @Test
@@ -431,7 +488,7 @@ class StoredScanTest {
             ScanProgress progress)
             throws Exception {
         return StoredScan.scan(
-                RuntimeResults.storedSource(index, fields, includeDeleted),
+                RuntimeResults.storedSource(index, NO_CACHE, fields, includeDeleted),
                 pattern,
                 maxHits,
                 limit,
@@ -448,6 +505,7 @@ class StoredScanTest {
             Duration limit,
             ScanProgress progress)
             throws Exception {
-        return StoredScan.matches(RuntimeResults.storedSource(index, fields, includeDeleted), pattern, limit, progress);
+        return StoredScan.matches(
+                RuntimeResults.storedSource(index, NO_CACHE, fields, includeDeleted), pattern, limit, progress);
     }
 }

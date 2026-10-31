@@ -43,6 +43,9 @@ sealed interface Notice {
     /** The scan of the stored fields failed (ADR 0113). */
     record StoredFieldsFailed(String error) implements Notice {}
 
+    /** {@code b} on the overview, on a field the stored fields scan found no value of (ADR 0114). */
+    record NotStored(String field) implements Notice {}
+
     default Line line() {
         return switch (this) {
             case Reopening _ -> Line.from("Reopening…");
@@ -74,6 +77,10 @@ sealed interface Notice {
                 Line.styled(
                         "Stored fields failed: " + failed.error(),
                         Palette.current().error());
+            case NotStored notStored ->
+                Line.styled(
+                        "No document stores " + notStored.field(),
+                        Palette.current().warning());
         };
     }
 

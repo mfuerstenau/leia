@@ -44,6 +44,7 @@ import java.util.TreeSet;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
+import java.util.function.IntUnaryOperator;
 import java.util.stream.Stream;
 import org.apache.lucene.analysis.core.KeywordAnalyzer;
 import org.apache.lucene.document.Document;
@@ -1802,6 +1803,94 @@ class Lucene7IndexTest {
                 assertThat(segment.files()).contains(segment.name() + ".si").isSorted();
             });
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene6", "lucene7"})
+    void readsTheStoredValuesOfEachSegment(String name) throws IOException {
+        try (RuntimeIndex index = open(name)) {
+            assertSegmentsReadAsPages(index);
+        }
+    }
+
+    /**
+     * Reads the stored values a segment at a time (ADR 0114), with and without the deleted documents
+     * and a field, as the pages of the whole index have them; then only the odd documents of each
+     * segment, and with a progress that stops the read.
+     */
+    private static void assertSegmentsReadAsPages(RuntimeIndex index) throws IOException {
+        Documents documents = index.documents().orElseThrow();
+        for (Optional<Set<String>> fields : List.of(Optional.<Set<String>>empty(), Optional.of(Set.of("id")))) {
+            for (boolean includeDeleted : new boolean[] {false, true}) {
+                assertThat(bySegment(index, fields, includeDeleted, IntUnaryOperator.identity()))
+                        .containsExactlyElementsOf(
+                                documents.storedValues(0, index.maxDoc(), fields, includeDeleted).stream()
+                                        .map(document -> described(document, document.docId()))
+                                        .toList());
+            }
+        }
+        int segment = 0;
+        for (RuntimeIndex.Segment info : segments(index)) {
+            List<Integer> read = new ArrayList<>();
+            // The next odd document at or after doc.
+            documents.storedValues(
+                    segment, Optional.empty(), true, doc -> doc | 1, document -> read.add(document.docId()), _ -> {});
+            assertThat(read).hasSize(info.maxDoc() / 2).allMatch(doc -> doc % 2 == 1);
+            segment++;
+        }
+        assertThatThrownBy(() ->
+                        documents.storedValues(0, Optional.empty(), true, IntUnaryOperator.identity(), _ -> {}, _ -> {
+                            throw new CancellationException();
+                        }))
+                .isInstanceOf(CancellationException.class);
+        int segments = segment;
+        assertThatThrownBy(() -> documents.storedValues(
+                        segments, Optional.empty(), true, IntUnaryOperator.identity(), _ -> {}, _ -> {}))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    /** The stored documents of every segment, read a segment at a time, as {@link #described}. */
+    private static List<String> bySegment(
+            RuntimeIndex index, Optional<Set<String>> fields, boolean includeDeleted, IntUnaryOperator next)
+            throws IOException {
+        Documents documents = index.documents().orElseThrow();
+        List<String> read = new ArrayList<>();
+        int segment = 0;
+        for (RuntimeIndex.IndexStats directory : index.stats().indexes()) {
+            for (RuntimeIndex.Segment info : directory.segments()) {
+                int base = directory.docBase() + info.docBase();
+                List<Long> progress = new ArrayList<>();
+                documents.storedValues(
+                        segment,
+                        fields,
+                        includeDeleted,
+                        next,
+                        document -> read.add(described(document, base + document.docId())),
+                        progress::add);
+                assertThat(progress).isSorted().last().isEqualTo((long) info.maxDoc());
+                segment++;
+            }
+        }
+        return read;
+    }
+
+    /** A stored document with its id in the index, as text, binary values as their bytes. */
+    private static String described(Documents.StoredDocument document, int docId) {
+        StringBuilder text = new StringBuilder().append(docId).append(document.deleted() ? " deleted" : "");
+        document.values().forEach((field, values) -> {
+            text.append(' ').append(field).append('=');
+            for (RuntimeIndex.StoredValue value : values) {
+                text.append(
+                                switch (value) {
+                                    case RuntimeIndex.StoredValue.Text t -> t.text();
+                                    case RuntimeIndex.StoredValue.Binary b -> java.util.Arrays.toString(b.bytes());
+                                    case RuntimeIndex.StoredValue.Numeric n ->
+                                        n.number().toString();
+                                })
+                        .append(';');
+            }
+        });
+        return text.toString();
     }
 
     /**

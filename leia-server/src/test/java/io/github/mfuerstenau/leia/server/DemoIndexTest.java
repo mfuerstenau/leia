@@ -1395,8 +1395,8 @@ class DemoIndexTest {
         }
 
         private FilterResult queryFilter(String expression, boolean includeDeleted) throws Exception {
-            return backend.filter(
-                    new StartFilterParams(Optional.of(classic(expression)), Optional.empty(), includeDeleted));
+            return backend.filter(new StartFilterParams(
+                    Optional.of(classic(expression)), Optional.empty(), Optional.empty(), includeDeleted));
         }
 
         private FilterMatch step(FilterResult filter, int fromDoc, boolean forward) throws Exception {
@@ -1430,7 +1430,10 @@ class DemoIndexTest {
             try (RealBackend before = RealBackend.start()) {
                 before.call(Methods.OPEN_INDEX, new OpenIndexParams(copy.toString()));
                 StartFilterParams regex = new StartFilterParams(
-                        Optional.empty(), Optional.of(new FilterPattern("qu\\w+", false, Optional.empty())), false);
+                        Optional.empty(),
+                        Optional.of(new FilterPattern("qu\\w+", false, Optional.empty())),
+                        Optional.empty(),
+                        false);
                 assertThat(before.filter(regex).matchCount()).isEqualTo(499);
 
                 Files.copy(DEMO.resolve("segments_4"), copy.resolve("segments_4"));
@@ -1725,5 +1728,11 @@ class DemoIndexTest {
         StoredFields second = backend.storedFields(false);
         assertThat(second.fields()).isEqualTo(first.fields());
         assertThat(second.cachedSegments()).isEqualTo(second.segments()).isEqualTo(first.segments());
+    }
+
+    @Test
+    void scansAndFiltersThroughTheStoredFieldsCache() throws Exception {
+        // odd_text is stored in one document of 500.
+        RuntimeStoredFields.scansAndFiltersThroughTheCache(DEMO, List.of("odd_text", "deleted_only"));
     }
 }

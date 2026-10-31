@@ -73,8 +73,8 @@ final class RuntimeSearches {
         RuntimeExplains.explainsTheHit(
                 backend, term("body", term), results.hits().getFirst(), exact);
 
-        FilterResult filter =
-                backend.filter(new StartFilterParams(Optional.of(term("body", term)), Optional.empty(), false));
+        FilterResult filter = backend.filter(
+                new StartFilterParams(Optional.of(term("body", term)), Optional.empty(), Optional.empty(), false));
         assertThat(filter.query()).isEqualTo("body:" + text);
         assertThat(filter.matchCount()).isEqualTo(live.size());
 
@@ -111,7 +111,7 @@ final class RuntimeSearches {
             backend.fails(Methods.START_SEARCH, params(query, 10), ErrorCode.NOT_SUPPORTED);
             backend.fails(
                     Methods.START_FILTER,
-                    new StartFilterParams(Optional.of(query), Optional.empty(), false),
+                    new StartFilterParams(Optional.of(query), Optional.empty(), Optional.empty(), false),
                     ErrorCode.NOT_SUPPORTED);
             backend.fails(Methods.START_EXPLAIN, new StartExplainParams(query, BM25, 0), ErrorCode.NOT_SUPPORTED);
         }
@@ -231,7 +231,8 @@ final class RuntimeSearches {
     private static List<Integer> searchFilterAndExplain(RealBackend backend, SearchQuery query) throws Exception {
         SearchResults results = backend.search(query, 10);
         assertThat(results.hits()).isNotEmpty();
-        FilterResult filter = backend.filter(new StartFilterParams(Optional.of(query), Optional.empty(), false));
+        FilterResult filter =
+                backend.filter(new StartFilterParams(Optional.of(query), Optional.empty(), Optional.empty(), false));
         assertThat(filter.matchCount()).isEqualTo(results.totalHits());
         assertThat(filter.query()).isEqualTo(results.query());
         RuntimeExplains.explainsTheHit(backend, query, results.hits().getFirst(), false);

@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-27
 - **Amends:** ADR 0051 (a segment of `getIndexStats` has its id and files in the runtime interface), ADR 0100 (§6, the Tools table: `stored_fields`)
+- **Amended by:** ADR 0114 (the regex scan and the pattern filter read through the merge instance and the cache, and a filter of the documents that store a field)
 
 ## Context
 
@@ -36,3 +37,4 @@ What a segment stores never changes once it is written: a merge writes a new seg
 - `getIndexStats` carries each segment's id and files, from runtime interface 24 on; every runtime and leia-core report them.
 - `leia.jar` gains RoaringBitmap; `NOTICE` lists it, and `gradle/verification-metadata.xml` pins it.
 - `startStoredScan` and the pattern filter still read through the reader's `storedFields()`. The merge instance would speed them up as much; that, and skipping the documents the cache says lack the scanned fields, is left for later, as is a filter of the documents that store a field.
+  *Amended by ADR 0114:* both read a segment at a time through the merge instance, and pass over the documents the cache says store none of the scanned fields; `startFilter` takes a `storedField`.

@@ -35,6 +35,8 @@ import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.IntUnaryOperator;
 import java.util.function.LongConsumer;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.document.Document;
@@ -429,13 +431,52 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
                 continue;
             }
             Document document = selector == null ? reader.document(doc) : reader.document(doc, selector);
-            Map<String, List<StoredValue>> values = new LinkedHashMap<>();
-            for (Fieldable field : document.getFields()) {
-                values.computeIfAbsent(field.name(), _ -> new ArrayList<>()).add(storedValue(field));
-            }
-            documents.add(new StoredDocument(doc, deleted, values));
+            documents.add(new StoredDocument(doc, deleted, storedValues(document)));
         }
         return List.copyOf(documents);
+    }
+
+    /**
+     * Reads the documents of a segment one by one, as the paged {@code storedValues} does: Lucene 3.x
+     * stores fields uncompressed, so there is no block to decompress once (ADR 0114).
+     */
+    @Override
+    public void storedValues(
+            int segment,
+            Optional<Set<String>> fields,
+            boolean includeDeleted,
+            IntUnaryOperator next,
+            Consumer<StoredDocument> sink,
+            LongConsumer progress)
+            throws IOException {
+        IndexReader leaf = segmentLeaf(segment);
+        FieldSelector selector = fields.map(names -> new MapFieldSelector(new ArrayList<>(names)))
+                .orElse(null);
+        int maxDoc = leaf.maxDoc();
+        int reported = 0;
+        progress.accept(0);
+        for (int doc = next.applyAsInt(0); doc < maxDoc; doc = next.applyAsInt(doc + 1)) {
+            if (doc - reported >= PROGRESS_INTERVAL) {
+                progress.accept(doc);
+                reported = doc;
+            }
+            boolean deleted = leaf.isDeleted(doc);
+            if (deleted && !includeDeleted) {
+                continue;
+            }
+            Document document = selector == null ? leaf.document(doc) : leaf.document(doc, selector);
+            sink.accept(new StoredDocument(doc, deleted, storedValues(document)));
+        }
+        progress.accept(maxDoc);
+    }
+
+    /** A document's stored values by field, in stored order. */
+    private static Map<String, List<StoredValue>> storedValues(Document document) {
+        Map<String, List<StoredValue>> values = new LinkedHashMap<>();
+        for (Fieldable field : document.getFields()) {
+            values.computeIfAbsent(field.name(), _ -> new ArrayList<>()).add(storedValue(field));
+        }
+        return values;
     }
 
     private static StoredValue storedValue(Fieldable field) {

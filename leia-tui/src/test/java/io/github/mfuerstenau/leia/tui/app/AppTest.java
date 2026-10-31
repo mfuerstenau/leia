@@ -36,6 +36,7 @@ import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
 import io.github.mfuerstenau.leia.protocol.filter.FilterMatch;
+import io.github.mfuerstenau.leia.protocol.filter.StartFilterParams;
 import io.github.mfuerstenau.leia.protocol.filter.StepFilterParams;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
@@ -1523,6 +1524,37 @@ class AppTest {
                 .isEmpty();
         assertThat(app.polls()).isEmpty();
         assertThat(wide(app)).contains("1 stored", "f stored fields").doesNotContain("Esc cancel scan");
+    }
+
+    @Test
+    void bBrowsesTheDocumentsThatStoreTheSelectedField() {
+        App app = app();
+        app.opened(withDocs(stats("/data/idx"), 3, field("id", 0), field("body", 1)), List.of());
+        assertThat(wide(app)).contains("b/B docs storing it");
+
+        Optional<Action> live = app.handleKey(key('b'));
+        assertThat(live).containsInstanceOf(Action.StartFilter.class);
+        StartFilterParams params = ((Action.StartFilter) live.orElseThrow()).params();
+        assertThat(params.storedField()).contains("id");
+        assertThat(params.query()).isEmpty();
+        assertThat(params.pattern()).isEmpty();
+        assertThat(params.includeDeleted()).isFalse();
+        assertThat(render(app)).contains("2 Documents");
+
+        app.handleKey(key('1'));
+        Optional<Action> withDeleted = app.handleKey(key('B'));
+        assertThat(withDeleted).containsInstanceOf(Action.StartFilter.class);
+        assertThat(((Action.StartFilter) withDeleted.orElseThrow()).params().includeDeleted())
+                .isTrue();
+
+        // Once the stored fields are known, a field that no document stores has nothing to browse.
+        app.handleKey(key('1'));
+        assertThat(app.handleKey(key('f'))).hasValue(new Action.StartStoredFieldsScan(1));
+        StoredFields found = new StoredFields(List.of(new StoredField("id", 2, 3)), 1, 0, 4);
+        app.storedFieldsProgress(1, new GetStoredFieldsScanResult(3, Optional.of(found)));
+        app.handleKey(key('j'));
+        assertThat(app.handleKey(key('b'))).isEmpty();
+        assertThat(wide(app)).contains("No document stores body");
     }
 
     @Test

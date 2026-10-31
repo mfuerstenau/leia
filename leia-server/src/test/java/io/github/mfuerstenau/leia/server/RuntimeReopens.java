@@ -50,8 +50,8 @@ final class RuntimeReopens {
         assertThat(opened.features()).contains(Feature.REOPEN);
         String older = segmentsFile(opened.indexes());
         assertThat(older).isNotEqualTo(newest);
-        FilterResult filter =
-                backend.filter(new StartFilterParams(Optional.of(classic("alpha")), Optional.empty(), false));
+        FilterResult filter = backend.filter(
+                new StartFilterParams(Optional.of(classic("alpha")), Optional.empty(), Optional.empty(), false));
 
         ReopenIndexResult unchanged = backend.call(Methods.REOPEN_INDEX, new ReopenIndexParams());
         assertThat(unchanged.changed()).isFalse();

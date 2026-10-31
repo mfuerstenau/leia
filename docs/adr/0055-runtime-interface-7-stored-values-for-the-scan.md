@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-13
 - **Amends:** ADR 0049 §4 (the runtime interface); ADR 0027 (where the scan's loop runs)
+- **Amended by:** ADR 0114 (the scan reads a segment at a time, through the codec's merge instance)
 
 ## Context
 

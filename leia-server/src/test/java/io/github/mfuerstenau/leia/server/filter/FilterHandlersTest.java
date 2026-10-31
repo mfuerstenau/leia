@@ -26,6 +26,7 @@ import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.TestIndexes;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
 import io.github.mfuerstenau.leia.server.job.Jobs;
+import io.github.mfuerstenau.leia.server.stored.StoredFieldsCache;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -35,6 +36,7 @@ import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.KnnFloatVectorField;
 import org.apache.lucene.document.SortedDocValuesField;
+import org.apache.lucene.document.StoredField;
 import org.apache.lucene.document.StringField;
 import org.apache.lucene.document.TextField;
 import org.apache.lucene.index.IndexWriter;
@@ -69,7 +71,8 @@ class FilterHandlersTest {
     private final Jobs jobs = new Jobs();
     private final Filters filters = new Filters();
     private final CurrentIndex currentIndex = new CurrentIndex(jobs, filters);
-    private final StartFilterHandler start = new StartFilterHandler(currentIndex, jobs);
+    private final StoredFieldsCache cache = new StoredFieldsCache(Optional.empty());
+    private final StartFilterHandler start = new StartFilterHandler(currentIndex, jobs, cache);
     private final GetFilterHandler get = new GetFilterHandler(jobs, filters);
     private final StepFilterHandler step = new StepFilterHandler(filters);
     private final ReleaseFilterHandler release = new ReleaseFilterHandler(filters);
@@ -195,13 +198,53 @@ class FilterHandlersTest {
                 () -> start.handle(byPattern("red", false, Optional.of(List.of("missing")), false)),
                 ErrorCode.FIELD_NOT_FOUND);
         assertFails(
-                () -> start.handle(new StartFilterParams(Optional.empty(), Optional.empty(), false)),
+                () -> start.handle(new StartFilterParams(Optional.empty(), Optional.empty(), Optional.empty(), false)),
                 ErrorCode.INVALID_PARAMS);
         assertFails(
                 () -> start.handle(new StartFilterParams(
                         Optional.of(classic("red")),
                         Optional.of(new FilterPattern("red", false, Optional.empty())),
+                        Optional.empty(),
                         false)),
+                ErrorCode.INVALID_PARAMS);
+    }
+
+    @Test
+    void buildsAFilterOfTheDocumentsThatStoreAField() throws Exception {
+        openIndex();
+
+        long jobId = start.handle(byStoredField("note", false)).jobId();
+        GetFilterResult done = await(jobId);
+        FilterResult filter = done.result().orElseThrow();
+
+        // note is stored in 2 and in the deleted 3.
+        assertThat(done.docsSearched()).isEqualTo(5);
+        assertThat(filter.query()).isEqualTo("stored:note");
+        assertThat(filter.rewrittenQuery()).isEqualTo("stored:note");
+        assertThat(filter.timedOutValues()).isEmpty();
+        assertThat(filter.matchCount()).isEqualTo(1);
+        assertThat(step(jobId, 0, true)).contains(new FilterMatch(2, 0));
+
+        // The second time from the cache, with the deleted document.
+        long withDeleted = start.handle(byStoredField("note", true)).jobId();
+        assertThat(await(withDeleted).result().orElseThrow().matchCount()).isEqualTo(2);
+        assertThat(step(withDeleted, 3, true)).contains(new FilterMatch(3, 1));
+
+        // An indexed field that isn't stored, and one of doc values only.
+        assertThat(await(start.handle(byStoredField("vec", true)).jobId())
+                        .result()
+                        .orElseThrow()
+                        .matchCount())
+                .isZero();
+        assertThat(await(start.handle(byStoredField("color", true)).jobId())
+                        .result()
+                        .orElseThrow()
+                        .matchCount())
+                .isZero();
+        assertFails(() -> start.handle(byStoredField("missing", false)), ErrorCode.FIELD_NOT_FOUND);
+        assertFails(
+                () -> start.handle(new StartFilterParams(
+                        Optional.of(classic("red")), Optional.empty(), Optional.of("note"), false)),
                 ErrorCode.INVALID_PARAMS);
     }
 
@@ -276,13 +319,20 @@ class FilterHandlersTest {
     }
 
     private static StartFilterParams byQuery(SearchQuery query, boolean includeDeleted) {
-        return new StartFilterParams(Optional.of(query), Optional.empty(), includeDeleted);
+        return new StartFilterParams(Optional.of(query), Optional.empty(), Optional.empty(), includeDeleted);
+    }
+
+    private static StartFilterParams byStoredField(String field, boolean includeDeleted) {
+        return new StartFilterParams(Optional.empty(), Optional.empty(), Optional.of(field), includeDeleted);
     }
 
     private static StartFilterParams byPattern(
             String pattern, boolean caseInsensitive, Optional<List<String>> fields, boolean includeDeleted) {
         return new StartFilterParams(
-                Optional.empty(), Optional.of(new FilterPattern(pattern, caseInsensitive, fields)), includeDeleted);
+                Optional.empty(),
+                Optional.of(new FilterPattern(pattern, caseInsensitive, fields)),
+                Optional.empty(),
+                includeDeleted);
     }
 
     private static SearchQuery classic(String expression) {
@@ -317,6 +367,9 @@ class FilterHandlersTest {
                 doc.add(new TextField("body", bodies.get(id), Field.Store.YES));
                 doc.add(new SortedDocValuesField("color", new BytesRef(bodies.get(id))));
                 doc.add(new KnnFloatVectorField("vec", new float[] {id, 1}, VectorSimilarityFunction.EUCLIDEAN));
+                if (id == 2 || id == 3) {
+                    doc.add(new StoredField("note", "stored only"));
+                }
                 writer.addDocument(doc);
             }
             writer.deleteDocuments(new Term("id", "3"));

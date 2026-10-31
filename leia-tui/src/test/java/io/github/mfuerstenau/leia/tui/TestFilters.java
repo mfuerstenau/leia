@@ -15,7 +15,10 @@ public final class TestFilters {
     /** The params of a filter for the pattern {@code red}. */
     public static StartFilterParams filterParams(boolean includeDeleted) {
         return new StartFilterParams(
-                Optional.empty(), Optional.of(new FilterPattern("red", false, Optional.empty())), includeDeleted);
+                Optional.empty(),
+                Optional.of(new FilterPattern("red", false, Optional.empty())),
+                Optional.empty(),
+                includeDeleted);
     }
 
     /** A filter built as {@code filterId}, with {@code matchCount} matches, after searching {@code docsSearched}. */

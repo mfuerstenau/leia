@@ -1,10 +1,14 @@
 package io.github.mfuerstenau.leia.server.stored;
 
+import io.github.mfuerstenau.leia.runtime.RuntimeIndex;
 import java.nio.file.Path;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.function.IntUnaryOperator;
+import org.roaringbitmap.RoaringBitmap;
 
 /**
  * Which fields the documents of each segment store, for every segment read so far (ADR 0113): in
@@ -36,6 +40,40 @@ public final class StoredFieldsCache {
     StoredFieldsCache(Optional<DiskCache> disk, long maxMemoryBytes) {
         this.disk = disk;
         this.maxMemoryBytes = maxMemoryBytes;
+    }
+
+    /**
+     * The documents of {@code segment} of the index in {@code directory} that store a value in one of
+     * {@code fields} (in any field if empty), deleted ones included, if the cache knows the segment
+     * (ADR 0114): as a function from a document to the first such document at or after it, or the
+     * segment's maxDoc for none, as {@link io.github.mfuerstenau.leia.runtime.Documents#storedValues(
+     * int, Optional, boolean, IntUnaryOperator, java.util.function.Consumer,
+     * java.util.function.LongConsumer)} takes it. It never reads the segment; empty if the cache
+     * doesn't know it.
+     */
+    public Optional<IntUnaryOperator> storing(
+            Path directory, RuntimeIndex.Segment segment, Optional<Set<String>> fields) {
+        return lookup(directory, segment).map(known -> {
+            RoaringBitmap docs = known.docsWithAny(fields);
+            int maxDoc = segment.maxDoc();
+            return doc -> {
+                long next = docs.nextValue(doc);
+                return next < 0 || next >= maxDoc ? maxDoc : (int) next;
+            };
+        });
+    }
+
+    /**
+     * The stored fields of {@code segment} of the index in {@code directory}, if the cache knows the
+     * segment.
+     */
+    private Optional<SegmentFields> lookup(Path directory, RuntimeIndex.Segment segment) {
+        return SegmentKey.of(directory, segment).flatMap(key -> get(key, segment.maxDoc()));
+    }
+
+    /** The stored fields of the segment of {@code key}, if it has {@code maxDoc} documents. */
+    Optional<SegmentFields> get(SegmentKey key, int maxDoc) {
+        return get(key).filter(fields -> fields.maxDoc() == maxDoc);
     }
 
     /** The stored fields of the segment of {@code key}, from memory or else from disk. */

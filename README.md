@@ -364,6 +364,7 @@ Beyond that:
 | `Enter` | count the terms of the selected field and find its top N terms by document frequency (N is 50 at first) |
 | `a` | do so for every field with postings, one after another |
 | `f` | find the fields whose values the documents store: the `Stored` column shows how many live documents store each, and the search screen then offers only them per hit |
+| `b` `B` | browse the documents that store a value in the selected field on the documents screen; `B` includes the deleted ones |
 | `+` `-` | show more or fewer top terms: 10, 20, 50, 100, 200, 500 or 1000 |
 | `s` | sort the field table by number, name, term count or stored count |
 | `S` | flip the sort direction |
@@ -383,7 +384,9 @@ found per segment, in memory and in `~/.cache/leia/stored-fields` (`$XDG_CACHE_H
 if that is set, or `%LOCALAPPDATA%\leia\cache\stored-fields` on Windows): field names and document
 numbers, never values. A segment never changes once written, so a later `f`, also after a reopen or
 a restart, reads only the segments it hasn't seen (ADR 0113). `LEIA_OPTS=-Dleia.cache.dir=<path>`
-moves the cache, and an empty path keeps it in memory only.
+moves the cache, and an empty path keeps it in memory only. A regex scan on the search screen
+passes over the documents that the cache says store none of the fields it scans, and `b` reads the
+documents that store a field from the cache, scanning only the segments it hasn't seen (ADR 0114).
 
 Sorted by term count, the fields without a count come last in either direction. With a larger N,
 the top-terms title shows `⏎ top N` for a field that was scanned for fewer, and `Enter` (or `a`)

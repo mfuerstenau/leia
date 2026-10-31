@@ -14,6 +14,9 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.function.IntUnaryOperator;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.roaringbitmap.RoaringBitmap;
@@ -59,6 +62,35 @@ class StoredFieldsCacheTest {
         Files.delete(tmp.resolve("_0.fdx"));
         assertThat(SegmentKey.of(tmp, segment)).isEmpty();
         assertThat(SegmentKey.of(tmp, new RuntimeIndex.Segment("_0", 0, 7, 6))).isEmpty();
+    }
+
+    @Test
+    void namesTheDocumentsThatStoreOneOfTheFields() {
+        StoredFieldsCache cache = new StoredFieldsCache(Optional.empty());
+        RuntimeIndex.Segment segment = new RuntimeIndex.Segment("_0", 0, 10, 10, Optional.of("00ff"), List.of());
+        Path dir = tmp.resolve("nowhere");
+        assertThat(cache.storing(dir, segment, Optional.empty())).isEmpty();
+
+        // _source in all ten, _id in 2 and 7.
+        cache.put(SegmentKey.of(dir, segment).orElseThrow(), fields(10, 2, 7));
+
+        IntUnaryOperator id =
+                cache.storing(dir, segment, Optional.of(Set.of("_id"))).orElseThrow();
+        assertThat(IntStream.of(0, 2, 3, 7, 8, 10).map(id)).containsExactly(2, 2, 7, 7, 10, 10);
+        IntUnaryOperator none =
+                cache.storing(dir, segment, Optional.of(Set.of("other"))).orElseThrow();
+        assertThat(none.applyAsInt(0)).isEqualTo(10);
+        IntUnaryOperator any = cache.storing(dir, segment, Optional.empty()).orElseThrow();
+        assertThat(IntStream.of(0, 5, 9, 10).map(any)).containsExactly(0, 5, 9, 10);
+        IntUnaryOperator either = cache.storing(dir, segment, Optional.of(Set.of("_id", "_source")))
+                .orElseThrow();
+        assertThat(either.applyAsInt(3)).isEqualTo(3);
+        // A segment with another number of documents isn't the one cached.
+        assertThat(cache.storing(
+                        dir,
+                        new RuntimeIndex.Segment("_0", 0, 11, 11, Optional.of("00ff"), List.of()),
+                        Optional.empty()))
+                .isEmpty();
     }
 
     @Test

@@ -46,6 +46,8 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.IntUnaryOperator;
 import java.util.function.LongConsumer;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.document.DateTools;
@@ -374,14 +376,36 @@ final class Lucene10Index
         List<StoredDocument> documents = new ArrayList<>();
         for (StoredScan.Document document :
                 index.storedValues(fields, includeDeleted).read(fromDoc, toDoc)) {
-            Map<String, List<StoredValue>> values = new LinkedHashMap<>();
-            document.values()
-                    .forEach((field, stored) -> values.put(
-                            field,
-                            stored.stream().map(Lucene10Index::storedValue).toList()));
-            documents.add(new StoredDocument(document.docId(), document.deleted(), values));
+            documents.add(storedDocument(document));
         }
         return List.copyOf(documents);
+    }
+
+    @Override
+    public void storedValues(
+            int segment,
+            Optional<Set<String>> fields,
+            boolean includeDeleted,
+            IntUnaryOperator next,
+            Consumer<StoredDocument> sink,
+            LongConsumer progress)
+            throws IOException {
+        index.storedValues(
+                segment,
+                fields,
+                includeDeleted,
+                next,
+                document -> sink.accept(storedDocument(document)),
+                progress::accept);
+    }
+
+    /** Core's stored document as the runtime interface has it. */
+    private static StoredDocument storedDocument(StoredScan.Document document) {
+        Map<String, List<StoredValue>> values = new LinkedHashMap<>();
+        document.values()
+                .forEach((field, stored) -> values.put(
+                        field, stored.stream().map(Lucene10Index::storedValue).toList()));
+        return new StoredDocument(document.docId(), document.deleted(), values);
     }
 
     @Override

@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-08
+- **Amended by:** ADR 0114 (a third source of `startFilter`, `storedField`)
 
 ## Context
 

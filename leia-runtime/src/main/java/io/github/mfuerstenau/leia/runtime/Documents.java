@@ -7,6 +7,8 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.IntUnaryOperator;
 import java.util.function.LongConsumer;
 
 /** The documents of a {@link RuntimeIndex}. */
@@ -22,12 +24,39 @@ public interface Documents {
     /**
      * The stored values of the documents from {@code fromDoc} up to {@code toDoc} (exclusive), in
      * document id order: every live one, and the deleted ones too if {@code includeDeleted}. Nothing
-     * else of a document is read (ADR 0055).
+     * else of a document is read (ADR 0055). For a few documents, such as a highlight's; a scan reads
+     * a segment at a time through {@link #storedValues(int, Optional, boolean, IntUnaryOperator,
+     * Consumer, LongConsumer)}.
      *
      * @param fields the fields whose values to read; empty for all of them
      * @throws IllegalArgumentException unless {@code 0 <= fromDoc <= toDoc <= maxDoc}
      */
     List<StoredDocument> storedValues(int fromDoc, int toDoc, Optional<Set<String>> fields, boolean includeDeleted)
+            throws IOException;
+
+    /**
+     * The stored values of the documents of a segment, in document order, as {@link
+     * #storedValues(int, int, Optional, boolean)} reads them, but each block of documents decompressed
+     * once (ADR 0114): through the codec's merge instance, as {@link #storedFields} reads them.
+     *
+     * @param segment as {@link #storedFields} takes it
+     * @param fields the fields whose values to read; empty for all of them
+     * @param includeDeleted whether to read the deleted documents too
+     * @param next the first segment-local document at or after the one it gets that is to be read, or
+     *     the segment's maxDoc or more for none; the documents it passes over aren't read. {@link
+     *     IntUnaryOperator#identity()} reads them all
+     * @param sink gets each document read, with its segment-local id
+     * @param progress gets the documents of the segment gone through so far, now and then and at the
+     *     end; it throws to stop the scan, which passes the exception on
+     * @throws IllegalArgumentException if there is no such segment
+     */
+    void storedValues(
+            int segment,
+            Optional<Set<String>> fields,
+            boolean includeDeleted,
+            IntUnaryOperator next,
+            Consumer<StoredDocument> sink,
+            LongConsumer progress)
             throws IOException;
 
     /**

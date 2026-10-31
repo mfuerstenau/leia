@@ -14,6 +14,7 @@ import io.github.mfuerstenau.leia.server.job.Jobs;
 import io.github.mfuerstenau.leia.server.job.ScanProgress;
 import io.github.mfuerstenau.leia.server.runtime.OpenRuntime;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeResults;
+import io.github.mfuerstenau.leia.server.stored.StoredFieldsCache;
 import jakarta.inject.Inject;
 import java.io.IOException;
 import java.time.Duration;
@@ -25,7 +26,8 @@ import java.util.regex.PatternSyntaxException;
 /**
  * {@code startStoredScan}: checks the params and compiles the pattern at once, then scans the stored
  * values of the {@link CurrentIndex} in a job ({@link GetStoredScanHandler}, ADR 0027), on Lucene 10
- * or a runtime (ADR 0055).
+ * or a runtime (ADR 0055), passing over the documents the {@link StoredFieldsCache} says store none
+ * of the scanned fields (ADR 0114).
  */
 public final class StartStoredScanHandler implements MethodHandler<StartStoredScanParams, JobStarted> {
 
@@ -34,11 +36,13 @@ public final class StartStoredScanHandler implements MethodHandler<StartStoredSc
 
     private final CurrentIndex currentIndex;
     private final Jobs jobs;
+    private final StoredFieldsCache cache;
 
     @Inject
-    StartStoredScanHandler(CurrentIndex currentIndex, Jobs jobs) {
+    StartStoredScanHandler(CurrentIndex currentIndex, Jobs jobs, StoredFieldsCache cache) {
         this.currentIndex = currentIndex;
         this.jobs = jobs;
+        this.cache = cache;
     }
 
     @Override
@@ -51,7 +55,7 @@ public final class StartStoredScanHandler implements MethodHandler<StartStoredSc
         Optional<Set<String>> fields = params.fields().map(Set::copyOf);
         boolean includeDeleted = params.includeDeleted();
         OpenRuntime open = currentIndex.runtime();
-        StoredScan.StoredSource source = RuntimeResults.storedSource(open, fields, includeDeleted);
+        StoredScan.StoredSource source = RuntimeResults.storedSource(open, cache, fields, includeDeleted);
         String lucene = " with Lucene " + open.runtime().luceneVersion();
         Pattern pattern = pattern(params.pattern(), params.caseInsensitive());
         StoredScanHits hits = new StoredScanHits();

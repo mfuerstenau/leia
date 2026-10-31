@@ -8,6 +8,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.IntUnaryOperator;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
@@ -98,6 +100,46 @@ public final class StoredScan {
                 return documents;
             }
         };
+    }
+
+    /**
+     * The stored values of the documents of {@code leaf} in {@code fields} (all if empty), in document
+     * order, through the codec's merge instance, which decompresses each block of documents once (ADR
+     * 0114): of the documents {@code next} names, live ones and the deleted ones too if {@code
+     * includeDeleted}. The documents' ids are those in the leaf.
+     *
+     * @param next the first document at or after the one it gets that is to be read, or the leaf's
+     *     maxDoc or more for none
+     * @throws java.util.concurrent.CancellationException from {@code progress}, to stop the read
+     */
+    static void segment(
+            LeafReader leaf,
+            Optional<Set<String>> fields,
+            boolean includeDeleted,
+            IntUnaryOperator next,
+            Consumer<Document> sink,
+            ScanProgress progress)
+            throws IOException {
+        StoredFields stored = StoredFieldNames.sequential(leaf);
+        Bits liveDocs = leaf.getLiveDocs();
+        int maxDoc = leaf.maxDoc();
+        int reported = 0;
+        progress.scanned(0);
+        for (int doc = next.applyAsInt(0); doc < maxDoc; doc = next.applyAsInt(doc + 1)) {
+            if (doc - reported >= StoredFieldNames.PROGRESS_INTERVAL) {
+                progress.scanned(doc);
+                reported = doc;
+            }
+            boolean deleted = liveDocs != null && !liveDocs.get(doc);
+            if (deleted && !includeDeleted) {
+                continue;
+            }
+            StoredValues values =
+                    new StoredValues(name -> fields.isEmpty() || fields.get().contains(name));
+            stored.document(doc, values);
+            sink.accept(new Document(doc, deleted, values.values));
+        }
+        progress.scanned(maxDoc);
     }
 
     /**
