@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-26
 - **Amends:** ADR 0100 (§6, the Tools table: `check_index`, and `index_info` with `indexes`)
+- **Amended by:** ADR 0116 (§7, where the user data comes from)
 
 ## Context
 
@@ -16,7 +17,7 @@ An agent can't ask whether an index is corrupt, and can't see the user data of t
 4. **The result** is `clean` (every index is), `indexes` and `tookMillis`. An index has `path`, `skipped?`, `clean`, `error?`, `segmentsFile?`, `missingSegments?`, `toolOutOfDate?`, `invalidCounter?` (true only if the counter is invalid), `segmentCount`, `badSegments?` and `lostDocs?` (absent if 0), `failedSegments?` (`name`, `maxDoc`, `codec?`, `error`), `onlySegments?` and `segmentsNotFound?`. Only the segments that failed are listed: an Elasticsearch shard has tens of them, and the ones that passed tell nothing (ADR 0103).
 5. **The 5-minute `Jobs.LIMIT`** (ADR 0100 §4) applies: a level 3 check of a large index may not finish. The job is cancelled then, and the message says to narrow the call, now "such as with fewer fields or segments". `only` is the way around it, one segment at a time.
 6. **`index_info`** gains `indexCount` and `indexes`, at most 100 (`MAX_INDEXES`), so that an Elasticsearch data folder costs a bounded amount. An index has `path`, `segmentsFile?` (absent without a reader), `luceneVersion?` and `userData?` (sorted by key; absent if empty). The paths are what `check_index` takes in `only`. `open_index` returns the same.
-7. **The current commit, not the latest.** The user data comes from `getCommits` for the commit with `current == true`: the one the reader sees, which every other tool reads. A newer commit written after the open is not what the agent is looking at. If the session lacks `COMMITS`, there is no current commit or the call fails, `luceneVersion` and `userData` are absent. `getCommits` reads the `segments_N` files only, so `index_info` stays fast.
+7. **The current commit, not the latest.** The user data comes from `getCommits` for the commit with `current == true`: the one the reader sees, which every other tool reads. A newer commit written after the open is not what the agent is looking at. If the session lacks `COMMITS`, there is no current commit or the call fails, `luceneVersion` and `userData` are absent. `getCommits` reads the `segments_N` files only, so `index_info` stays fast. *Amended by ADR 0116: the user data and version come from `getIndexStats`, which has them for the commit each reader opened, without a call per index directory.*
 8. **`Schemas`** knows `Map<String, V>`, as `{"type":"object","additionalProperties":<V>}`: fewer tokens than a list of `{key, value}`.
 
 ## Consequences

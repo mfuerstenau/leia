@@ -15,7 +15,9 @@ import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.StartFieldTermScanParams;
 import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
 import io.github.mfuerstenau.leia.protocol.terms.TopTerm;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -32,7 +34,7 @@ final class TermsTool implements McpTool<TermsTool.Arguments, TermsTool.Result> 
     record Arguments(
             String field,
 
-            @Description("Only terms that start with this text; a binary term never does")
+            @Description("Only terms that start with this text; a binary term if its bytes start with the text's")
             Optional<String> prefix,
 
             @Description("Where the page starts: the next of the last page, which continues it with the same prefix")
@@ -139,10 +141,11 @@ final class TermsTool implements McpTool<TermsTool.Arguments, TermsTool.Result> 
             from = Optional.of(new BytesValue(prefix, false));
         }
         GetTermsResult page = call.call(Methods.GET_TERMS, new GetTermsParams(arguments.field(), from, limit));
+        Prefix matcher = new Prefix(prefix);
         List<Entry> entries = new ArrayList<>();
         boolean cut = false;
         for (TermEntry term : page.terms()) {
-            if (prefix.isEmpty() || !term.binary() && term.term().startsWith(prefix)) {
+            if (matcher.matches(term.term(), term.binary())) {
                 entries.add(entry(term.term(), term.binary(), term.docFreq(), term.totalTermFreq()));
             } else {
                 cut = true;
@@ -151,10 +154,24 @@ final class TermsTool implements McpTool<TermsTool.Arguments, TermsTool.Result> 
         }
         boolean complete = !cut;
         Optional<Term> next = page.next()
-                .filter(value -> complete
-                        && (prefix.isEmpty() || !value.binary() && value.value().startsWith(prefix)))
+                .filter(value -> complete && matcher.matches(value.value(), value.binary()))
                 .map(value -> new Term(value.value(), Absent.flag(value.binary())));
         return new Result(arguments.field(), entries, next, OptionalLong.empty());
+    }
+
+    /**
+     * Whether a term starts with the prefix: a text term by its text, a binary term, in hex, by the
+     * prefix's UTF-8 bytes in hex. In term order, the terms with the prefix's bytes come together, the
+     * binary ones among them.
+     */
+    record Prefix(String text, String hex) {
+        Prefix(String text) {
+            this(text, HexFormat.of().formatHex(text.getBytes(StandardCharsets.UTF_8)));
+        }
+
+        boolean matches(String term, boolean binary) {
+            return binary ? term.startsWith(hex) : term.startsWith(text);
+        }
     }
 
     private static Entry entry(String term, boolean binary, int docFreq, long totalTermFreq) {

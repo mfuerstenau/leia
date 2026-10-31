@@ -89,4 +89,15 @@ class SchemasTest {
         assertThat(Schemas.missing(Inner.class, Messages.MAPPER.readTree("{\"field\": \"id\"}")))
                 .isEmpty();
     }
+
+    @Test
+    void findsTheMissingComponentsAndNullsInListsAndMaps() {
+        assertThat(Schemas.missing(Outer.class, Messages.MAPPER.readTree("""
+                        {"text": "t", "count": 1, "total": 2, "score": 3, "flag": true, "operator": "OR",
+                         "inners": [{"field": "id"}, {}, null], "names": ["a", null]}""")))
+                .containsExactly("inners[1].field", "inners[2]", "names[1]");
+        assertThat(Schemas.missing(Labelled.class, Messages.MAPPER.readTree("""
+                        {"labels": {"a": "b", "c": null}, "inners": {"x": {"binary": true}}}""")))
+                .containsExactly("labels.c", "inners.x.field");
+    }
 }

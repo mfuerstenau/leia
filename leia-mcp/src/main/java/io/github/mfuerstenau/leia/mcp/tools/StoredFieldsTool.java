@@ -9,10 +9,8 @@ import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.document.GetStoredFieldsScanResult;
 import io.github.mfuerstenau.leia.protocol.document.StartStoredFieldsScanParams;
 import io.github.mfuerstenau.leia.protocol.document.StoredFields;
-import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalInt;
 import java.util.OptionalLong;
 
 /**
@@ -78,9 +76,7 @@ final class StoredFieldsTool implements McpTool<StoredFieldsTool.Arguments, Stor
 
     @Override
     public Result call(Arguments arguments, Call call) throws ToolException, Jobs.Cancelled {
-        OptionalInt maxDoc =
-                call.session().opened().map(OpenIndexResult::maxDoc).orElseGet(OptionalInt::empty);
-        OptionalLong total = maxDoc.isPresent() ? OptionalLong.of(maxDoc.getAsInt()) : OptionalLong.empty();
+        OptionalLong total = call.session().maxDoc();
         StoredFields stored = call.job(
                 Methods.START_STORED_FIELDS_SCAN,
                 new StartStoredFieldsScanParams(arguments.ignoreCache().orElse(false)),

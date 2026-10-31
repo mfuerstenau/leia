@@ -10,7 +10,6 @@ import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
-import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.search.DocSort;
 import io.github.mfuerstenau.leia.protocol.search.FieldSort;
 import io.github.mfuerstenau.leia.protocol.search.GetSearchResult;
@@ -233,9 +232,7 @@ final class SearchTool implements McpTool<SearchTool.Arguments, SearchTool.Resul
                 arguments.fields(),
                 Optional.empty());
         // The documents of the index, of which the search goes through the segments' share.
-        OptionalInt maxDoc =
-                call.session().opened().map(OpenIndexResult::maxDoc).orElseGet(OptionalInt::empty);
-        OptionalLong total = maxDoc.isPresent() ? OptionalLong.of(maxDoc.getAsInt()) : OptionalLong.empty();
+        OptionalLong total = call.session().maxDoc();
         SearchResults results = call.job(
                 Methods.START_SEARCH,
                 params,

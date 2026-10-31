@@ -137,10 +137,7 @@ final class PostingsTool implements McpTool<PostingsTool.Arguments, PostingsTool
                 DEFAULT_LIMIT,
                 1,
                 positions ? MAX_LIMIT_WITH_POSITIONS : GetPostingsParams.MAX_LIMIT);
-        int fromDoc = arguments.fromDoc().orElse(0);
-        if (fromDoc < 0) {
-            throw ToolError.invalid("fromDoc must not be negative, not " + fromDoc);
-        }
+        int fromDoc = Slices.bounded("fromDoc", arguments.fromDoc(), 0, 0, Integer.MAX_VALUE);
         Optional<OpenIndexResult> opened = call.session().opened();
         if (opened.isPresent()) {
             if (!opened.get().features().contains(Feature.POSTINGS)) {

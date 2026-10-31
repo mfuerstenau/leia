@@ -4,6 +4,7 @@ import io.github.mfuerstenau.leia.mcp.Call;
 import io.github.mfuerstenau.leia.mcp.Jobs;
 import io.github.mfuerstenau.leia.mcp.ToolError;
 import io.github.mfuerstenau.leia.mcp.ToolException;
+import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.AvailableAnalyzer;
@@ -74,7 +75,7 @@ final class Analyzers {
                     available = call.call(Methods.GET_ANALYSIS_COMPONENTS, new GetAnalysisComponentsParams())
                             .analyzers();
                 } catch (ToolException e) {
-                    if (e.getMessage().endsWith("(NOT_SUPPORTED)")) {
+                    if (e.code().equals(Optional.of(ErrorCode.NOT_SUPPORTED))) {
                         // No Lucene 10 runtime to list them: the older runtimes take the simple name.
                         available = List.of();
                     } else {

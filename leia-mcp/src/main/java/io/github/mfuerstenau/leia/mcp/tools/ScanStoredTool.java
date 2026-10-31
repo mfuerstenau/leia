@@ -7,7 +7,6 @@ import io.github.mfuerstenau.leia.mcp.McpTool;
 import io.github.mfuerstenau.leia.mcp.ToolError;
 import io.github.mfuerstenau.leia.mcp.ToolException;
 import io.github.mfuerstenau.leia.protocol.Methods;
-import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.search.GetStoredScanResult;
 import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
@@ -138,9 +137,7 @@ final class ScanStoredTool implements McpTool<ScanStoredTool.Arguments, ScanStor
                 arguments.caseInsensitive().orElse(false),
                 arguments.fields(),
                 arguments.includeDeleted().orElse(false));
-        OptionalInt maxDoc =
-                call.session().opened().map(OpenIndexResult::maxDoc).orElseGet(OptionalInt::empty);
-        OptionalLong total = maxDoc.isPresent() ? OptionalLong.of(maxDoc.getAsInt()) : OptionalLong.empty();
+        OptionalLong total = call.session().maxDoc();
         Page page = new Page(offset, limit);
         long start = System.nanoTime();
         GetStoredScanResult last = call.job(
@@ -156,7 +153,7 @@ final class ScanStoredTool implements McpTool<ScanStoredTool.Arguments, ScanStor
     }
 
     /** The hits of the page, as the polls bring them. */
-    private static final class Page {
+    static final class Page {
         final int offset;
         final int limit;
         final List<Hit> hits = new ArrayList<>();
@@ -172,7 +169,11 @@ final class ScanStoredTool implements McpTool<ScanStoredTool.Arguments, ScanStor
             this.limit = limit;
         }
 
-        /** The poll as the outcome once the page is full and one hit more is there, or the scan is done. */
+        /**
+         * The poll as the outcome once the page is full and one hit more is there, or the scan is done.
+         * The scan passes on {@code MAX_HITS} hits only, so a page that ends there is done when it is
+         * full: no hit more will come, however long the scan goes on counting.
+         */
         Optional<GetStoredScanResult> add(GetStoredScanResult poll) {
             for (StoredScanHit hit : poll.hits()) {
                 if (seen >= offset && seen < offset + limit) {
@@ -181,7 +182,8 @@ final class ScanStoredTool implements McpTool<ScanStoredTool.Arguments, ScanStor
                 seen++;
                 lastDocId = hit.docId();
             }
-            return poll.result().isPresent() || seen > offset + limit ? Optional.of(poll) : Optional.empty();
+            boolean full = seen > offset + limit || seen == StartStoredScanParams.MAX_HITS;
+            return poll.result().isPresent() || full ? Optional.of(poll) : Optional.empty();
         }
 
         /**

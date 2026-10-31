@@ -8,6 +8,8 @@ import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
+import java.util.OptionalInt;
+import java.util.OptionalLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.Collectors;
@@ -47,6 +49,12 @@ public final class Session {
     /** The last index that was opened, while it is open: a failed open leaves it open. */
     public Optional<OpenIndexResult> opened() {
         return opened;
+    }
+
+    /** The documents of the open index, deleted ones included: the total of a scan over them; absent without. */
+    public OptionalLong maxDoc() {
+        OptionalInt maxDoc = opened.map(OpenIndexResult::maxDoc).orElseGet(OptionalInt::empty);
+        return maxDoc.isPresent() ? OptionalLong.of(maxDoc.getAsInt()) : OptionalLong.empty();
     }
 
     public void opened(OpenIndexResult result) {

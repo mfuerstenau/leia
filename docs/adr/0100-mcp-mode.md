@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-25
 - **Amends:** ADR 0034 (§7, where stdout and stderr go); AGENTS.md, hard rules 2 and 4 and the CLI contract
-- **Amended by:** ADR 0101 (§5, concurrent tool calls), ADR 0102 (§7 and §8, the indexes `open_index` may open), ADR 0103 (§6, the size of the results), ADR 0115 (§6, the `postings` tool)
+- **Amended by:** ADR 0101 (§5, concurrent tool calls), ADR 0102 (§7 and §8, the indexes `open_index` may open), ADR 0103 (§6, the size of the results), ADR 0115 (§6, the `postings` tool), ADR 0116 (§2, the check of the required arguments)
 
 ## Context
 
@@ -23,7 +23,7 @@ A coding agent that works on code using Lucene, Elasticsearch or OpenSearch ofte
 2. **Typed messages.**
    - The envelope reads a line as a Jackson tree only to tell requests from notifications and to keep the `id`, which may be a number or a string.
    - Every tool's arguments and result are records in `leia-mcp`. They are bound with `FAIL_ON_UNKNOWN_PROPERTIES` and `NON_ABSENT`, as in `DocumentExport`'s mapper.
-   - Each tool's `inputSchema` and `outputSchema` are generated from its records, with `additionalProperties: false`. A component is required exactly when it isn't `Optional*`, as hard rule 3 has it, and leia checks that before it binds the arguments. A `@Description` annotation on the components gives the descriptions.
+   - Each tool's `inputSchema` and `outputSchema` are generated from its records, with `additionalProperties: false`. A component is required exactly when it isn't `Optional*`, as hard rule 3 has it, and leia checks that before it binds the arguments. *Amended by ADR 0116: also in the items of lists and the values of maps, where a `null` is missing too.* A `@Description` annotation on the components gives the descriptions.
    - A golden `tools.json` pins the answer to `tools/list`, as `document-export.json` pins the export.
 3. **Results.**
    - `structuredContent` holds the result record. One `text` content item holds the same JSON, for clients that don't read structured content.

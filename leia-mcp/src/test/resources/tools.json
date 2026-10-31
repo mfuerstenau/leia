@@ -90,7 +90,7 @@
                 },
                 "luceneVersion": {
                   "type": "string",
-                  "description": "The Lucene version that wrote that commit; absent if its commit can't be read"
+                  "description": "The Lucene version that wrote that commit; absent without a reader"
                 },
                 "userData": {
                   "type": "object",
@@ -324,7 +324,7 @@
                 },
                 "luceneVersion": {
                   "type": "string",
-                  "description": "The Lucene version that wrote that commit; absent if its commit can't be read"
+                  "description": "The Lucene version that wrote that commit; absent without a reader"
                 },
                 "userData": {
                   "type": "object",
@@ -1613,7 +1613,7 @@
           },
           "prefix": {
             "type": "string",
-            "description": "Only terms that start with this text; a binary term never does"
+            "description": "Only terms that start with this text; a binary term if its bytes start with the text's"
           },
           "from": {
             "type": "object",

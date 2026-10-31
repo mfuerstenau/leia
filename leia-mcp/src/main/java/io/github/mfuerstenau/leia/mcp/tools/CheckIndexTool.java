@@ -130,6 +130,12 @@ final class CheckIndexTool implements McpTool<CheckIndexTool.Arguments, CheckInd
 
     @Override
     public Result call(Arguments arguments, Call call) throws ToolException, Jobs.Cancelled {
+        Slices.bounded(
+                "level",
+                arguments.level(),
+                StartCheckIndexParams.DEFAULT_LEVEL,
+                StartCheckIndexParams.MIN_LEVEL,
+                StartCheckIndexParams.MAX_LEVEL);
         Optional<OpenIndexResult> opened = call.session().opened();
         if (opened.isPresent()) {
             if (!opened.get().features().contains(Feature.CHECK_INDEX)) {

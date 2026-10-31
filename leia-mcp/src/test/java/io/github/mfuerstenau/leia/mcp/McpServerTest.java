@@ -387,6 +387,19 @@ class McpServerTest {
     }
 
     @Test
+    void refusesAListItemThatLacksAnArgument() throws Exception {
+        assertThat(client.error(
+                        1,
+                        "search",
+                        "{\"query\":\"lamp\",\"defaultField\":\"title\",\"sort\":[{\"field\":\"price\"},{}]}"))
+                .isEqualTo("Missing argument sort[1].field (INVALID_PARAMS)");
+        assertThat(client.error(2, "get_document", "{\"docId\":1,\"fields\":[\"id\",null]}"))
+                .isEqualTo("Missing argument fields[1] (INVALID_PARAMS)");
+        assertThat(client.error(3, "check_index", "{\"only\":[{}]}"))
+                .isEqualTo("Missing argument only[0].path (INVALID_PARAMS)");
+    }
+
+    @Test
     void showsADocumentWithOnlyTheFieldsItHasSomethingIn() throws Exception {
         JsonNode document = client.structured(1, "get_document", "{\"docId\":0}");
 
@@ -1324,6 +1337,16 @@ class McpServerTest {
     }
 
     @Test
+    void scansToThePageThatEndsAtTheLastHit() throws Exception {
+        // The demo index has more than 10,000 values with a character, of which the scan passes on 10,000.
+        // Whether the scan stops early there is a race on an index this small: ScanStoredToolTest checks it.
+        JsonNode last = client.structured(1, "scan_stored", "{\"pattern\":\"(?s).\",\"offset\":9990,\"limit\":10}");
+
+        assertThat(last.path("hits")).hasSize(10);
+        assertThat(last.has("nextOffset")).isFalse();
+    }
+
+    @Test
     void listsTheStoredFieldsAndRemembersTheSegments() throws Exception {
         JsonNode first = client.structured(1, "stored_fields", "{\"ignoreCache\":true}");
         JsonNode second = client.structured(2, "stored_fields", "{}");
@@ -1492,8 +1515,10 @@ class McpServerTest {
 
     @Test
     void refusesABadCheck() throws Exception {
-        assertThat(client.error(1, "check_index", "{\"level\":0}")).endsWith("(INVALID_PARAMS)");
-        assertThat(client.error(2, "check_index", "{\"level\":4}")).endsWith("(INVALID_PARAMS)");
+        assertThat(client.error(1, "check_index", "{\"level\":0}"))
+                .isEqualTo("level must be from 1 to 3, not 0 (INVALID_PARAMS)");
+        assertThat(client.error(2, "check_index", "{\"level\":4}"))
+                .isEqualTo("level must be from 1 to 3, not 4 (INVALID_PARAMS)");
         assertThat(client.error(3, "check_index", "{\"only\":[{\"path\":\"" + demo + "/nope\"}]}"))
                 .endsWith("(INVALID_PARAMS)");
     }

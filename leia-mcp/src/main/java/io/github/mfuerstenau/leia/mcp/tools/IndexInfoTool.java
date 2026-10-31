@@ -6,12 +6,11 @@ import io.github.mfuerstenau.leia.mcp.Jobs;
 import io.github.mfuerstenau.leia.mcp.McpTool;
 import io.github.mfuerstenau.leia.mcp.ToolException;
 import io.github.mfuerstenau.leia.protocol.Methods;
-import io.github.mfuerstenau.leia.protocol.commits.Commit;
-import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.protocol.index.Feature;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsParams;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
+import io.github.mfuerstenau.leia.protocol.index.IndexCommitStats;
 import io.github.mfuerstenau.leia.protocol.index.IndexEntry;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
@@ -21,6 +20,7 @@ import io.github.mfuerstenau.leia.protocol.index.TermStats;
 import io.github.mfuerstenau.leia.protocol.index.VectorEncoding;
 import io.github.mfuerstenau.leia.protocol.index.VectorSimilarity;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -83,7 +83,7 @@ final class IndexInfoTool implements McpTool<IndexInfoTool.Arguments, IndexInfoT
                     + " read. Absent without a reader")
             Optional<String> segmentsFile,
 
-            @Description("The Lucene version that wrote that commit; absent if its commit can't be read")
+            @Description("The Lucene version that wrote that commit; absent without a reader")
             Optional<String> luceneVersion,
 
             @Description(
@@ -150,11 +150,10 @@ final class IndexInfoTool implements McpTool<IndexInfoTool.Arguments, IndexInfoT
         OpenIndexResult opened = call.session()
                 .opened()
                 .orElseThrow(() -> new IllegalStateException("An index is open, but not through open_index"));
-        return info(opened, stats, call);
+        return info(opened, stats);
     }
 
-    static Result info(OpenIndexResult opened, GetIndexStatsResult stats, Call call)
-            throws ToolException, Jobs.Cancelled {
+    static Result info(OpenIndexResult opened, GetIndexStatsResult stats) {
         return new Result(
                 stats.path(),
                 opened.luceneRuntime(),
@@ -166,7 +165,7 @@ final class IndexInfoTool implements McpTool<IndexInfoTool.Arguments, IndexInfoT
                         .map(skipped -> new Skipped(skipped.path(), skipped.message()))
                         .toList(),
                 opened.indexes().size(),
-                indexes(opened, call),
+                indexes(opened, stats),
                 opened.features().stream().sorted().toList(),
                 stats.fields().size(),
                 stats.fields().stream()
@@ -175,34 +174,29 @@ final class IndexInfoTool implements McpTool<IndexInfoTool.Arguments, IndexInfoT
                         .toList());
     }
 
-    /** The first {@link #MAX_INDEXES} index directories, each with the user data of the commit it was opened on. */
-    private static List<Index> indexes(OpenIndexResult opened, Call call) throws ToolException, Jobs.Cancelled {
-        boolean commits = opened.features().contains(Feature.COMMITS);
+    /**
+     * The first {@link #MAX_INDEXES} index directories, each with the user data of the commit its
+     * reader was opened on, from {@code getIndexStats}.
+     */
+    private static List<Index> indexes(OpenIndexResult opened, GetIndexStatsResult stats) {
+        Map<String, IndexCommitStats> commits = new HashMap<>();
+        for (IndexCommitStats commit : stats.indexes()) {
+            commits.put(commit.path(), commit);
+        }
         List<Index> indexes = new ArrayList<>();
-        for (int i = 0; i < Math.min(opened.indexes().size(), MAX_INDEXES); i++) {
-            IndexEntry entry = opened.indexes().get(i);
-            Optional<String> segmentsFile = entry.reader().map(ReaderInfo::segmentsFile);
-            Optional<Commit> commit = commits && segmentsFile.isPresent() ? current(call, i) : Optional.empty();
+        for (IndexEntry entry :
+                opened.indexes().subList(0, Math.min(opened.indexes().size(), MAX_INDEXES))) {
+            Optional<IndexCommitStats> commit =
+                    entry.reader().isPresent() ? Optional.ofNullable(commits.get(entry.path())) : Optional.empty();
             indexes.add(new Index(
                     entry.path(),
-                    segmentsFile,
-                    commit.map(Commit::luceneVersion),
-                    commit.map(Commit::userData)
+                    entry.reader().map(ReaderInfo::segmentsFile),
+                    commit.map(IndexCommitStats::commitLuceneVersion),
+                    commit.map(IndexCommitStats::userData)
                             .filter(userData -> !userData.isEmpty())
                             .map(TreeMap::new)));
         }
         return indexes;
-    }
-
-    /** The commit the reader of index {@code i} was opened on; absent if there is none or it can't be listed. */
-    private static Optional<Commit> current(Call call, int i) throws Jobs.Cancelled {
-        try {
-            return call.call(Methods.GET_COMMITS, new GetCommitsParams(OptionalInt.of(i))).commits().stream()
-                    .filter(Commit::current)
-                    .findFirst();
-        } catch (ToolException _) {
-            return Optional.empty();
-        }
     }
 
     private static Field field(IndexField field) {

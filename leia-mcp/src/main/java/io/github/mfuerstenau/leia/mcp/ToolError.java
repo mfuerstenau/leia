@@ -20,7 +20,7 @@ public final class ToolError {
             case MISSING_RUNTIME -> "; the user can install it with leia --download-runtimes --runtime <folder>";
             default -> "";
         };
-        return new ToolException(error.getMessage() + hint + " (" + error.code().name() + ")");
+        return new ToolException(error.getMessage() + hint, error.code());
     }
 
     /**
@@ -42,11 +42,11 @@ public final class ToolError {
 
     /** Arguments that the tool refuses. */
     public static ToolException invalid(String message) {
-        return new ToolException(message + " (" + ErrorCode.INVALID_PARAMS.name() + ")");
+        return new ToolException(message, ErrorCode.INVALID_PARAMS);
     }
 
     /** A feature that the runtime that reads the index lacks. */
     public static ToolException notSupported(String message) {
-        return new ToolException(message + " (" + ErrorCode.NOT_SUPPORTED.name() + ")");
+        return new ToolException(message, ErrorCode.NOT_SUPPORTED);
     }
 }

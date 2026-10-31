@@ -70,7 +70,8 @@ public final class Schemas {
 
     /**
      * The required components of {@code type} that {@code value} lacks or has as {@code null}, also
-     * in the records it holds, as {@code outer.inner}.
+     * in the records it holds, as {@code outer.inner}, and the {@code null} items and values of its
+     * lists and maps, as {@code list[0]} and {@code map.key}, since Jackson binds them as {@code null}.
      */
     public static List<String> missing(Class<? extends Record> type, JsonNode value) {
         List<String> missing = new ArrayList<>();
@@ -86,9 +87,38 @@ public final class Schemas {
                 if (!optional(componentType)) {
                     missing.add(prefix + component.getName());
                 }
-            } else if (node.isObject() && unwrap(componentType) instanceof Class<?> inner && inner.isRecord()) {
-                missing(inner, node, prefix + component.getName() + ".", missing);
+            } else {
+                missingIn(unwrap(componentType), node, prefix + component.getName(), missing);
             }
+        }
+    }
+
+    /** What {@code node}, a value of {@code type} at {@code path} that isn't {@code null}, lacks inside. */
+    private static void missingIn(Type type, JsonNode node, String path, List<String> missing) {
+        if (type instanceof ParameterizedType parameterized && parameterized.getRawType() == List.class) {
+            if (node.isArray()) {
+                Type item = parameterized.getActualTypeArguments()[0];
+                for (int i = 0; i < node.size(); i++) {
+                    missingItem(item, node.get(i), path + "[" + i + "]", missing);
+                }
+            }
+        } else if (type instanceof ParameterizedType parameterized && parameterized.getRawType() == Map.class) {
+            if (node.isObject()) {
+                Type item = parameterized.getActualTypeArguments()[1];
+                for (Map.Entry<String, JsonNode> property : node.properties()) {
+                    missingItem(item, property.getValue(), path + "." + property.getKey(), missing);
+                }
+            }
+        } else if (type instanceof Class<?> raw && raw.isRecord() && node.isObject()) {
+            missing(raw, node, path + ".", missing);
+        }
+    }
+
+    private static void missingItem(Type type, JsonNode item, String path, List<String> missing) {
+        if (item.isNull()) {
+            missing.add(path);
+        } else {
+            missingIn(type, item, path, missing);
         }
     }
 
