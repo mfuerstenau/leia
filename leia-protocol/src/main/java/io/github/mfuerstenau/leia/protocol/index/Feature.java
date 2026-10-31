@@ -76,6 +76,8 @@ public enum Feature {
     HIGHLIGHT,
     /** {@code startStoredScan}. */
     STORED_SCAN,
+    /** {@code startStoredFieldsScan} (ADR 0113). */
+    STORED_FIELDS,
     /** {@code startCheckIndex}. */
     CHECK_INDEX,
     /** The {@code level} of {@code startCheckIndex}; a Lucene without it checks at its one level (ADR 0045). */

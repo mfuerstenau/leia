@@ -74,7 +74,12 @@ class MultiIndexTest {
             // The second directory's segments start at its docBase.
             assertThat(stats.indexes().get(1).segments())
                     .singleElement()
-                    .isEqualTo(new IndexStats.SegmentStats("_0", 2, 3, 3));
+                    .extracting(
+                            IndexStats.SegmentStats::name,
+                            IndexStats.SegmentStats::docBase,
+                            IndexStats.SegmentStats::maxDoc,
+                            IndexStats.SegmentStats::numDocs)
+                    .containsExactly("_0", 2, 3, 3);
             assertThat(stats.field("id").orElseThrow().terms().orElseThrow().docCount())
                     .isEqualTo(5);
         }

@@ -36,6 +36,8 @@ import io.github.mfuerstenau.leia.protocol.document.GetTermVectorParams;
 import io.github.mfuerstenau.leia.protocol.document.KnnVector;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructSource;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructedField;
+import io.github.mfuerstenau.leia.protocol.document.StoredField;
+import io.github.mfuerstenau.leia.protocol.document.StoredFields;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
 import io.github.mfuerstenau.leia.protocol.filter.FilterMatch;
@@ -1703,5 +1705,25 @@ class DemoIndexTest {
 
     private static BytesValue text(String text) {
         return new BytesValue(text, false);
+    }
+
+    @Test
+    void findsTheStoredFieldsAndCachesThem() throws Exception {
+        // First without the cache, which the other tests on the shared backend may have filled.
+        StoredFields first = backend.storedFields(true);
+        assertThat(first.cachedSegments()).isZero();
+        assertThat(first.fields())
+                .contains(
+                        new StoredField("id", 487, 500),
+                        new StoredField("blob", 1, 1),
+                        new StoredField("odd_text", 1, 1),
+                        new StoredField("deleted_only", 0, 1))
+                .extracting(StoredField::name)
+                .doesNotContain("keywords")
+                .isSorted();
+
+        StoredFields second = backend.storedFields(false);
+        assertThat(second.fields()).isEqualTo(first.fields());
+        assertThat(second.cachedSegments()).isEqualTo(second.segments()).isEqualTo(first.segments());
     }
 }

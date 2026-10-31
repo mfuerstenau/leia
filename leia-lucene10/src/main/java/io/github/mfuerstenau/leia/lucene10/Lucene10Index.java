@@ -236,8 +236,13 @@ final class Lucene10Index
             List<Segment> segments = new ArrayList<>();
             List<String> segmentVersions = new ArrayList<>();
             for (SegmentStats segment : commit.segments()) {
-                segments.add(
-                        new Segment(segment.name(), segment.docBase() - docBase, segment.maxDoc(), segment.numDocs()));
+                segments.add(new Segment(
+                        segment.name(),
+                        segment.docBase() - docBase,
+                        segment.maxDoc(),
+                        segment.numDocs(),
+                        segment.id(),
+                        segment.files()));
                 segmentVersions.add(versions.getOrDefault(segment.docBase(), "?"));
             }
             indexes.add(new IndexStats(
@@ -377,6 +382,16 @@ final class Lucene10Index
             documents.add(new StoredDocument(document.docId(), document.deleted(), values));
         }
         return List.copyOf(documents);
+    }
+
+    @Override
+    public void storedFields(int segment, StoredFieldSink sink, LongConsumer progress) throws IOException {
+        index.storedFields(segment, (field, doc) -> sink.accept(doc, field), progress::accept);
+    }
+
+    @Override
+    public int[] deletedDocs(int segment) {
+        return index.deletedDocs(segment);
     }
 
     @Override

@@ -146,6 +146,11 @@ record Cli(
             from the JVM option -Dleia.log.level (INFO without it). The environment variable
             LEIA_OPTS passes options to the JVM, for example LEIA_OPTS=-Dleia.log.level=FINE.
             L in leia shows the log, and - there lowers its level at once.
+
+            Which fields the segments of an index store is cached in
+            $XDG_CACHE_HOME/leia/stored-fields (~/.cache/leia/stored-fields) on Linux,
+            %LOCALAPPDATA%\\leia\\cache\\stored-fields on Windows: field names and document
+            numbers, never values. -Dleia.cache.dir=<PATH> moves it; an empty path turns it off.
             """;
 
     Cli {

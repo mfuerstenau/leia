@@ -122,12 +122,13 @@ class RuntimeFeaturesTest {
         private static Map<String, Set<Feature>> rows() {
             Map<String, Set<Feature>> rows = new LinkedHashMap<>();
             rows.put(
-                    "Overview, documents, stored values and term vectors",
+                    "Overview, documents, stored values and fields, term vectors",
                     EnumSet.of(
                             Feature.INDEX_STATS,
                             Feature.TOP_TERMS,
                             Feature.DOCUMENTS,
                             Feature.STORED_VALUES,
+                            Feature.STORED_FIELDS,
                             Feature.TERM_VECTORS,
                             Feature.RECONSTRUCT,
                             Feature.REOPEN));

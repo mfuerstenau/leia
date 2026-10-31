@@ -3,8 +3,11 @@ package io.github.mfuerstenau.leia.lucene9;
 import java.io.IOException;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.DocumentStoredFieldVisitor;
+import org.apache.lucene.index.CodecReader;
 import org.apache.lucene.index.Fields;
+import org.apache.lucene.index.FilterLeafReader;
 import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.StoredFieldVisitor;
 
 /**
@@ -37,6 +40,18 @@ final class Lucene9Stored {
         return reader::document;
     }
 
+    /**
+     * A reader of the stored fields of {@code leaf} for one pass in document order on this thread
+     * (ADR 0113): from 9.5 on, the codec's merge instance, which decompresses each block of documents
+     * once, where the leaf decompresses a block for each document; before, the leaf's own.
+     */
+    static Reader sequential(LeafReader leaf) throws IOException {
+        if (Lucene9Api.STORED_FIELDS) {
+            return Current.sequential(leaf);
+        }
+        return leaf::document;
+    }
+
     /** The term vectors of {@code docId} of {@code reader}; null if it has none. */
     static Fields termVectors(IndexReader reader, int docId) throws IOException {
         return Lucene9Api.STORED_FIELDS ? Current.termVectors(reader, docId) : reader.getTermVectors(docId);
@@ -47,6 +62,13 @@ final class Lucene9Stored {
 
         static Reader of(IndexReader reader) throws IOException {
             return reader.storedFields()::document;
+        }
+
+        static Reader sequential(LeafReader leaf) throws IOException {
+            if (FilterLeafReader.unwrap(leaf) instanceof CodecReader codec && codec.getFieldsReader() != null) {
+                return codec.getFieldsReader().getMergeInstance()::document;
+            }
+            return leaf.storedFields()::document;
         }
 
         static Fields termVectors(IndexReader reader, int docId) throws IOException {

@@ -42,6 +42,7 @@ The first index of a path decides which Lucene opens it, by the major in its new
 | `EXPLAIN` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `HIGHLIGHT` | – | – | – | ✓ | ✓ |
 | `STORED_SCAN` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `STORED_FIELDS` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `CHECK_INDEX` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `CHECK_LEVELS` | – | ✓ | ✓ | ✓ | ✓ |
 | `CHECK_THREADS` | – | – | – | ✓ | ✓ |
@@ -114,6 +115,7 @@ Where the runtimes give the same feature in different ways. The facades of 5.5.5
 | Classic dates (ADR 0026, ADR 0069) | ✓, in a zone the parser holds itself (3.6 has none); without a resolution, a date becomes a `DateField` term, as 3.6 does | ✓ | ✓ | ✓ | ✓ |
 | Fuzzy terms (ADR 0069) | a minimum similarity of 0.5; the edits are ignored | the edits | the edits | the edits | the edits |
 | Split on whitespace (ADR 0069) | always | always | as chosen | as chosen | as chosen |
+| Stored fields scan (ADR 0113) | a `FieldSelector` that loads nothing, through the reader (3.x stores fields uncompressed); no segment ids, so cached by the segment's files | a visitor that skips the values, through the codec's merge instance; cached by the id from 5.0 segments, by the files before | as 5.5.5, cached by segment id | as 7.7.3 from 9.5; on a server's 9.0 to 9.4, through the reader | as 7.7.3 |
 | Segment blocks (ADR 0069) | – | – | – | recorded from 9.9 | recorded |
 | Directory class in the stats (ADR 0069) | ✓; `fs` gives `NIOFSDirectory`, as 3.6 can't unmap | ✓ | ✓ | ✓ | ✓ |
 | More-Like-This (ADR 0066, ADR 0074) | – | as 7.7.3, but one count of each term over all the fields, its clause in the first field with the most documents | as 9.12.3, but with the live documents for the idf and each token counted once | built from the reader before the rewrite, its terms worked out as leia-core does | leia-core's |

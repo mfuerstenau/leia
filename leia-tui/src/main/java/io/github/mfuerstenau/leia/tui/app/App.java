@@ -25,8 +25,11 @@ import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
 import io.github.mfuerstenau.leia.protocol.document.GetReconstructResult;
+import io.github.mfuerstenau.leia.protocol.document.GetStoredFieldsScanResult;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructResult;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructedField;
+import io.github.mfuerstenau.leia.protocol.document.StoredField;
+import io.github.mfuerstenau.leia.protocol.document.StoredFields;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.document.TermPosition;
 import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
@@ -89,6 +92,7 @@ import io.github.mfuerstenau.leia.tui.log.LogBuffer;
 import io.github.mfuerstenau.leia.tui.log.LogWindow;
 import io.github.mfuerstenau.leia.tui.overview.FieldScan;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
+import io.github.mfuerstenau.leia.tui.overview.StoredFieldsState;
 import io.github.mfuerstenau.leia.tui.points.PointFormats;
 import io.github.mfuerstenau.leia.tui.prompt.ExportPrompt;
 import io.github.mfuerstenau.leia.tui.prompt.ExportPrompt.ExportTarget;
@@ -199,6 +203,15 @@ public final class App {
     private record RunningScan(long id, String field, int topN, Long jobId) {}
 
     private RunningScan scan;
+
+    /**
+     * The scan of the stored fields on the overview (ADR 0113), under an id of the term scans'.
+     *
+     * @param jobId null until the backend has started the job
+     */
+    private record RunningStoredFields(long id, Long jobId) {}
+
+    private RunningStoredFields storedFieldsScan;
 
     /** Fields whose scan waits for the running one. */
     private final ArrayDeque<String> queue = new ArrayDeque<>();
@@ -1796,6 +1809,7 @@ public final class App {
     private void forgetScans() {
         scan = null;
         queue.clear();
+        storedFieldsScan = null;
     }
 
     /** Whether a term scan runs or waits. */
@@ -1821,6 +1835,9 @@ public final class App {
         List<Poll> polls = new ArrayList<>();
         if (scan != null && scan.jobId() != null) {
             polls.add(new Poll.Scan(scan.id(), scan.jobId()));
+        }
+        if (storedFieldsScan != null && storedFieldsScan.jobId() != null) {
+            polls.add(new Poll.StoredFields(storedFieldsScan.id(), storedFieldsScan.jobId()));
         }
         if (documents != null) {
             documents.reconstructJob().ifPresent(jobId -> polls.add(new Poll.Reconstruct(jobId)));
@@ -1949,6 +1966,77 @@ public final class App {
         return jobId == null ? Optional.empty() : Optional.of(new Action.CancelScan(jobId));
     }
 
+    /** Starts the scan of the stored fields, unless it runs (ADR 0113). */
+    private Optional<Action> requestStoredFields() {
+        if (!opened.supports(Feature.STORED_FIELDS)) {
+            notice = new Notice.NotSupported("Stored fields", reason());
+            return Optional.empty();
+        }
+        if (storedFieldsScan != null) {
+            return Optional.empty();
+        }
+        storedFieldsScan = new RunningStoredFields(nextScanId++, null);
+        overview.setStoredFields(Optional.of(new StoredFieldsState.Running(0)));
+        return Optional.of(new Action.StartStoredFieldsScan(storedFieldsScan.id()));
+    }
+
+    /**
+     * The job of stored fields scan {@code scanId} has started. If that scan was cancelled or
+     * forgotten meanwhile, returns the action that cancels the job.
+     */
+    public Optional<Action> storedFieldsStarted(long scanId, long jobId) {
+        if (storedFieldsScan == null || storedFieldsScan.id() != scanId) {
+            return Optional.of(new Action.CancelScan(jobId));
+        }
+        storedFieldsScan = new RunningStoredFields(scanId, jobId);
+        return Optional.empty();
+    }
+
+    /**
+     * Shows the progress of stored fields scan {@code scanId}, or its outcome, which the search screen
+     * then offers as the fields per hit.
+     */
+    public Optional<Action> storedFieldsProgress(long scanId, GetStoredFieldsScanResult result) {
+        if (storedFieldsScan == null || storedFieldsScan.id() != scanId || overview == null) {
+            return Optional.empty();
+        }
+        Optional<StoredFields> fields = result.fields();
+        if (fields.isPresent()) {
+            overview.setStoredFields(Optional.of(new StoredFieldsState.Done(fields.get())));
+            storedFieldsScan = null;
+            if (search != null) {
+                search.storedFieldsKnown(
+                        fields.get().fields().stream().map(StoredField::name).toList());
+            }
+            return Optional.empty();
+        }
+        overview.setStoredFields(Optional.of(new StoredFieldsState.Running(result.docsScanned())));
+        return Optional.empty();
+    }
+
+    /** Shows why stored fields scan {@code scanId} failed. */
+    public Optional<Action> storedFieldsFailed(long scanId, String error) {
+        if (storedFieldsScan == null || storedFieldsScan.id() != scanId) {
+            return Optional.empty();
+        }
+        if (overview != null) {
+            overview.setStoredFields(Optional.of(new StoredFieldsState.Failed(error)));
+        }
+        storedFieldsScan = null;
+        notice = new Notice.StoredFieldsFailed(error);
+        return Optional.empty();
+    }
+
+    /** Forgets the stored fields scan. Returns the action that cancels its job, if it has started. */
+    private Optional<Action> cancelStoredFields() {
+        Long jobId = storedFieldsScan.jobId();
+        if (overview != null) {
+            overview.setStoredFields(Optional.empty());
+        }
+        storedFieldsScan = null;
+        return jobId == null ? Optional.empty() : Optional.of(new Action.CancelScan(jobId));
+    }
+
     /** Queues the scans of {@code fields}, and returns the scan to start if none runs. */
     private Optional<Action> requestScans(List<String> fields) {
         if (!opened.supports(Feature.TOP_TERMS)) {
@@ -1993,6 +2081,9 @@ public final class App {
         }
         if (key.isChar('a')) {
             return requestScans(overview.fieldsToScan());
+        }
+        if (key.isChar('f')) {
+            return requestStoredFields();
         }
         if (key.isChar('+') || key.isChar('=') || key.isChar('-')) {
             topN = Overview.stepTopTerms(topN, !key.isChar('-'));
@@ -2189,6 +2280,9 @@ public final class App {
     private Optional<Action> escapeKey() {
         if (scan != null) {
             return cancelScans();
+        }
+        if (storedFieldsScan != null) {
+            return cancelStoredFields();
         }
         if (export != null) {
             return cancelExport();
@@ -2681,7 +2775,7 @@ public final class App {
     }
 
     private String overviewFooter(String reopen, String screens) {
-        if (scan != null) {
+        if (scan != null || storedFieldsScan != null) {
             return " Esc cancel scan   q quit   o open   c close   " + reopen + screens + "s/S sort   Tab panel   ↑↓";
         }
         if (overview.selectedTopTerm().isPresent()) {
@@ -2691,7 +2785,8 @@ public final class App {
                     + "s/S sort   Tab panel   ↑↓";
         }
         String topTerms = opened.supports(Feature.TOP_TERMS) ? "⏎ terms   a all terms   +/- top N   " : "";
-        return " q quit   o open   c close   " + reopen + screens + topTerms + "s/S sort   Tab panel   ↑↓";
+        String stored = opened.supports(Feature.STORED_FIELDS) ? "f stored fields   " : "";
+        return " q quit   o open   c close   " + reopen + screens + topTerms + stored + "s/S sort   Tab panel   ↑↓";
     }
 
     private void renderAbout(Frame frame, Rect body) {

@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.tamboui.tui.event.KeyCode;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
+import io.github.mfuerstenau.leia.protocol.document.StoredField;
+import io.github.mfuerstenau.leia.protocol.document.StoredFields;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
 import io.github.mfuerstenau.leia.protocol.index.IndexCommitStats;
@@ -429,8 +431,40 @@ class OverviewTest {
         done(overview, "b", 1);
         assertThat(names(overview)).containsExactly("b", "c", "e", "a", "d");
 
+        // By the stored count, which none has before the scan: by number.
         overview.handleKey(key('s'));
         assertThat(names(overview)).containsExactly("c", "a", "d", "b", "e");
+        assertThat(render(overview, 220, 30)).contains("Stored ▼");
+
+        overview.handleKey(key('s'));
+        assertThat(names(overview)).containsExactly("c", "a", "d", "b", "e");
+        assertThat(render(overview, 140, 30)).contains("# ▲");
+    }
+
+    @Test
+    void theStoredColumnShowsTheScanOfTheStoredFields() {
+        Overview overview = overview(List.of(field("id", 0), field("body", 1), field("tag", 2)), 50);
+        assertThat(render(overview, 220, 30)).contains("Stored", " Fields (3) ");
+
+        overview.setStoredFields(Optional.of(new StoredFieldsState.Running(2)));
+        assertThat(overview.scanningStoredFields()).isTrue();
+        assertThat(render(overview, 220, 30)).contains("Fields (3, stored fields 2/3 docs…)");
+
+        overview.setStoredFields(Optional.of(new StoredFieldsState.Done(
+                new StoredFields(List.of(new StoredField("body", 2, 3), new StoredField("id", 1, 3)), 1, 0, 5))));
+        String screen = render(overview, 220, 30);
+        assertThat(screen).contains("Fields (3, 2 stored)");
+        assertThat(row(screen, "body")).containsPattern(" 2┃");
+        assertThat(row(screen, "tag")).containsPattern(" -┃");
+
+        // The most live documents first, a field that stores nothing last.
+        overview.handleKey(key('s'));
+        overview.handleKey(key('s'));
+        overview.handleKey(key('s'));
+        assertThat(names(overview)).containsExactly("body", "id", "tag");
+
+        overview.setStoredFields(Optional.of(new StoredFieldsState.Failed("Cannot read")));
+        assertThat(render(overview, 220, 30)).contains("stored fields failed");
     }
 
     @Test

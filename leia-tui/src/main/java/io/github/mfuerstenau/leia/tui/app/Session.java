@@ -20,6 +20,7 @@ import io.github.mfuerstenau.leia.protocol.document.GetStoredValueResult;
 import io.github.mfuerstenau.leia.protocol.document.GetTermVectorParams;
 import io.github.mfuerstenau.leia.protocol.document.GetTermVectorResult;
 import io.github.mfuerstenau.leia.protocol.document.StartReconstructParams;
+import io.github.mfuerstenau.leia.protocol.document.StartStoredFieldsScanParams;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
 import io.github.mfuerstenau.leia.protocol.filter.ReleaseFilterParams;
@@ -266,6 +267,12 @@ public final class Session {
                         runner,
                         job -> app -> app.scanStarted(start.scanId(), job.jobId()),
                         message -> app -> app.scanFailed(start.scanId(), message));
+            case Action.StartStoredFieldsScan start ->
+                complete(
+                        backend.call(Methods.START_STORED_FIELDS_SCAN, new StartStoredFieldsScanParams(false)),
+                        runner,
+                        job -> app -> app.storedFieldsStarted(start.scanId(), job.jobId()),
+                        message -> app -> app.storedFieldsFailed(start.scanId(), message));
             case Action.LoadCommits load ->
                 complete(
                         backend.call(Methods.GET_COMMITS, new GetCommitsParams(OptionalInt.of(load.index()))),
@@ -827,6 +834,13 @@ public final class Session {
                             runner,
                             result -> app -> app.scanProgress(scan.scanId(), result),
                             message -> app -> app.scanFailed(scan.scanId(), message));
+                case Poll.StoredFields scanning ->
+                    fetch(
+                            poll,
+                            backend.call(Methods.GET_STORED_FIELDS_SCAN, new JobParams(scanning.jobId())),
+                            runner,
+                            result -> app -> app.storedFieldsProgress(scanning.scanId(), result),
+                            message -> app -> app.storedFieldsFailed(scanning.scanId(), message));
                 case Poll.Reconstruct rebuild ->
                     fetch(
                             poll,

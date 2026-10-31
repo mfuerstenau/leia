@@ -7,10 +7,12 @@ plugins {
     id("leia.lucene-runtime-conventions")
 }
 
-// RawPostings lives in Lucene's package to reach 3.6's raw postings (ADR 0062); lucene-core 3.6.2
-// isn't sealed, so it shares the package from the adapter jar.
+// RawPostings lives in Lucene's package to reach 3.6's raw postings (ADR 0062), SegmentFiles a
+// segment's files (ADR 0113); lucene-core 3.6.2 isn't sealed, so it shares the package from the
+// adapter jar.
 tasks.named<AdapterJarCheck>("adapterJarCheck") {
     allowedPackages.add("org/apache/lucene/index/RawPostings")
+    allowedPackages.add("org/apache/lucene/index/SegmentFiles")
 }
 
 dependencies {

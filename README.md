@@ -140,6 +140,10 @@ logs every call to the backend with its result.
 leia keeps the last 10 opened index paths for the open prompt in `~/.local/state/leia/history`
 (`$XDG_STATE_HOME/leia/history` if that is set), or `%LOCALAPPDATA%\leia\history` on Windows.
 
+leia caches which fields the segments of an index store in `~/.cache/leia/stored-fields`
+(`$XDG_CACHE_HOME/leia/stored-fields` if that is set), or `%LOCALAPPDATA%\leia\cache\stored-fields`
+on Windows, at most 512 MB, each segment's file dropped after 30 days unused.
+
 ```sh
 leia --java /opt/jdk-25 /var/lib/solr/products/data/index
 ```
@@ -302,6 +306,7 @@ tools:
 | `search` | a page of hits, best score first or sorted by fields, with a few brief stored values, to find documents: a query in Lucene's syntax, with ranges on number fields, analyzed with `StandardAnalyzer` or the analyzers it names, one exact term, such as an id, the doc values of a field, or the nearest documents to a vector or a document's vector |
 | `explain` | how a document scores for a query, or why it doesn't match: the arguments of `search` plus a hit's `docId`; Lucene's explanation as text, one line per part, indented |
 | `scan_stored` | the stored values a Java regular expression matches, also in fields that aren't indexed such as `_source`, with a snippet and the match; stops once the page is full, `nextOffset` for the next |
+| `stored_fields` | the fields whose values the documents store, which the index doesn't record, with how many live and all documents store each; the first call reads every document's stored fields without their values, later ones only the segments leia hasn't seen, also after a restart |
 | `analyze` | the tokens an analyzer makes of a text, with positions, offsets and types, to see why a query matches or not; needs no open index |
 | `terms` | the terms of a field a page at a time, from a prefix, or those in the most documents, to see which values a field holds and why a term query misses |
 | `get_document` | a document by its id: per field its stored values, cut when long, doc values, norm and KNN vector |
@@ -358,8 +363,9 @@ Beyond that:
 |---|---|
 | `Enter` | count the terms of the selected field and find its top N terms by document frequency (N is 50 at first) |
 | `a` | do so for every field with postings, one after another |
+| `f` | find the fields whose values the documents store: the `Stored` column shows how many live documents store each, and the search screen then offers only them per hit |
 | `+` `-` | show more or fewer top terms: 10, 20, 50, 100, 200, 500 or 1000 |
-| `s` | sort the field table by number, name or term count |
+| `s` | sort the field table by number, name, term count or stored count |
 | `S` | flip the sort direction |
 | `Tab` | switch between the field table and the top terms |
 | `Enter` on a top term | show the term and its documents on the terms screen |
@@ -370,6 +376,14 @@ Counting terms reads every term of the field, which can take a while on a large 
 runs in the background while leia shows its progress, and `Esc` stops it. Once every field has been
 counted, the field table's title shows the total and the `%` column each field's share of it.
 Like Lucene's own statistics, the counts include deleted documents that no merge has removed yet.
+
+The index doesn't record which fields are stored, so `f` reads the stored fields of every document,
+without their values, which takes about as long as reading the stored data. leia remembers what it
+found per segment, in memory and in `~/.cache/leia/stored-fields` (`$XDG_CACHE_HOME/leia/stored-fields`
+if that is set, or `%LOCALAPPDATA%\leia\cache\stored-fields` on Windows): field names and document
+numbers, never values. A segment never changes once written, so a later `f`, also after a reopen or
+a restart, reads only the segments it hasn't seen (ADR 0113). `LEIA_OPTS=-Dleia.cache.dir=<path>`
+moves the cache, and an empty path keeps it in memory only.
 
 Sorted by term count, the fields without a count come last in either direction. With a larger N,
 the top-terms title shows `⏎ top N` for a field that was scanned for fewer, and `Enter` (or `a`)

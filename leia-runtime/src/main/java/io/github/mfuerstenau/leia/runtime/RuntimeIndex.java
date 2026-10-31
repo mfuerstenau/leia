@@ -192,8 +192,18 @@ public interface RuntimeIndex extends Closeable {
      * @param docBase the document id of the segment's first document within its directory
      * @param maxDoc the documents of the segment, deleted ones included
      * @param numDocs the live documents of the segment
+     * @param id the segment's unique id in hex, as Lucene records it since 5.0; empty without one
+     *     (ADR 0113)
+     * @param files the segment's own files in its directory, without those of its deletions; empty if
+     *     the reader doesn't say (ADR 0113)
      */
-    record Segment(String name, int docBase, int maxDoc, int numDocs) {}
+    record Segment(String name, int docBase, int maxDoc, int numDocs, Optional<String> id, List<String> files) {
+
+        /** A segment without an id or files. */
+        public Segment(String name, int docBase, int maxDoc, int numDocs) {
+            this(name, docBase, maxDoc, numDocs, Optional.empty(), List.of());
+        }
+    }
 
     /**
      * The opened commit of one directory.

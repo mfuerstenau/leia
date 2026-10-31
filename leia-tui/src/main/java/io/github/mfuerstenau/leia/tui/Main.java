@@ -152,7 +152,7 @@ public final class Main {
                 }
             }
             refreshOwnJars(platform);
-            Optional<LeiaBackend> backend = startBackend(cli, runtimeFolders, defaultJars, jars, err);
+            Optional<LeiaBackend> backend = startBackend(cli, platform, runtimeFolders, defaultJars, jars, err);
             if (backend.isEmpty()) {
                 return 1;
             }
@@ -168,9 +168,14 @@ public final class Main {
      * {@code err}.
      */
     private static Optional<LeiaBackend> startBackend(
-            Cli cli, RuntimeFolders runtimeFolders, DefaultJars defaultJars, List<Path> jars, PrintStream err) {
+            Cli cli,
+            Platform platform,
+            RuntimeFolders runtimeFolders,
+            DefaultJars defaultJars,
+            List<Path> jars,
+            PrintStream err) {
         try {
-            return Optional.of(LeiaBackend.start(runtimeFolders.dir(), jars, cli.servers()));
+            return Optional.of(LeiaBackend.start(runtimeFolders.dir(), jars, cli.servers(), platform.cacheDir()));
         } catch (RpcException e) {
             LOG.log(Level.SEVERE, "Cannot start", e);
             err.println("leia: " + e.getMessage());
@@ -210,7 +215,7 @@ public final class Main {
         System.setErr(log.stream());
         try {
             refreshOwnJars(platform);
-            Optional<LeiaBackend> backend = startBackend(cli, runtimeFolders, defaultJars, jars, err);
+            Optional<LeiaBackend> backend = startBackend(cli, platform, runtimeFolders, defaultJars, jars, err);
             if (backend.isEmpty()) {
                 return 1;
             }

@@ -13,6 +13,7 @@ public final class Tools {
             new SearchTool(),
             new ExplainTool(),
             new ScanStoredTool(),
+            new StoredFieldsTool(),
             new AnalyzeTool(),
             new TermsTool(),
             new GetDocumentTool(),

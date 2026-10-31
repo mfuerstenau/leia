@@ -162,8 +162,12 @@ public final class RuntimeResults {
      */
     private static void addDocumentFeatures(RuntimeIndex index, Set<Feature> features) {
         if (index.documents().isPresent()) {
-            features.addAll(
-                    List.of(Feature.DOCUMENTS, Feature.STORED_VALUES, Feature.TERM_VECTORS, Feature.STORED_SCAN));
+            features.addAll(List.of(
+                    Feature.DOCUMENTS,
+                    Feature.STORED_VALUES,
+                    Feature.TERM_VECTORS,
+                    Feature.STORED_SCAN,
+                    Feature.STORED_FIELDS));
             if (index.fields().stream().anyMatch(field -> field.docValuesType() != RuntimeIndex.DocValuesType.NONE)) {
                 features.add(Feature.DOC_VALUES);
             }

@@ -103,6 +103,7 @@ class Lucene7BackendTest {
                         Feature.DOCUMENTS,
                         Feature.STORED_VALUES,
                         Feature.STORED_SCAN,
+                        Feature.STORED_FIELDS,
                         Feature.TERM_VECTORS,
                         Feature.DOC_VALUES,
                         Feature.TERMS,
@@ -143,6 +144,18 @@ class Lucene7BackendTest {
         OpenIndexResult opened = open(testIndex(name));
 
         RuntimeStoredScans.scansTheStoredValues(backend, opened.maxDoc().orElseThrow(), true);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene6", "lucene7"})
+    void findsTheStoredFields(String name) throws Exception {
+        RuntimeStoredFields.findsTheStoredFields(backend, open(testIndex(name)), true);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene6", "lucene7"})
+    void keepsTheStoredFieldsOnDisk(String name, @TempDir Path cacheDir) throws Exception {
+        RuntimeStoredFields.keepsTheCacheOnDisk(testIndex(name), cacheDir);
     }
 
     @ParameterizedTest

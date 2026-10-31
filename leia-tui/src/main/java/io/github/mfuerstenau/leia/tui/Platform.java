@@ -13,8 +13,8 @@ import java.util.function.Function;
 
 /**
  * Where leia keeps its files on this platform: the state folder, with the log (ADR 0034 §7) and the
- * history (ADR 0020), the default folder of jars (ADR 0024), and the folder of runtimes, beside
- * {@code leia.jar} or in the data folder (ADR 0044, ADR 0098).
+ * history (ADR 0020), the default folder of jars (ADR 0024), the folder of runtimes, beside {@code
+ * leia.jar} or in the data folder (ADR 0044, ADR 0098), and the cache folder (ADR 0113).
  *
  * @param env the environment variables
  * @param home the user's home directory, if known
@@ -91,6 +91,26 @@ record Platform(Function<String, String> env, Optional<Path> home, boolean windo
                 ? absolute("LOCALAPPDATA").map(dir -> dir.resolve("leia"))
                 : absolute("XDG_STATE_HOME")
                         .or(() -> home.map(dir -> dir.resolve(".local").resolve("state")))
+                        .map(dir -> dir.resolve("leia"));
+    }
+
+    /**
+     * leia's cache folder, for the stored fields of the segments it read (ADR 0113): the folder that
+     * {@code -Dleia.cache.dir} names, or none if it names none; else {@code %LOCALAPPDATA%\leia\cache}
+     * on Windows, elsewhere {@code $XDG_CACHE_HOME/leia}, or {@code ~/.cache/leia} without it. Empty
+     * if the platform's variables don't say where.
+     */
+    Optional<Path> cacheDir() {
+        String property = System.getProperty("leia.cache.dir");
+        if (property != null) {
+            return property.isEmpty()
+                    ? Optional.empty()
+                    : Optional.of(Path.of(property).toAbsolutePath());
+        }
+        return windows
+                ? absolute("LOCALAPPDATA").map(dir -> dir.resolve("leia").resolve("cache"))
+                : absolute("XDG_CACHE_HOME")
+                        .or(() -> home.map(dir -> dir.resolve(".cache")))
                         .map(dir -> dir.resolve("leia"));
     }
 

@@ -19,6 +19,7 @@ import io.github.mfuerstenau.leia.runtime.support.Failures;
 import io.github.mfuerstenau.leia.runtime.support.IndexParts;
 import java.io.Closeable;
 import java.io.IOException;
+import java.io.Serial;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -38,6 +39,7 @@ import java.util.function.LongConsumer;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.FieldSelector;
+import org.apache.lucene.document.FieldSelectorResult;
 import org.apache.lucene.document.Fieldable;
 import org.apache.lucene.document.MapFieldSelector;
 import org.apache.lucene.document.NumericField;
@@ -46,6 +48,7 @@ import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.IndexCommit;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.MultiReader;
+import org.apache.lucene.index.SegmentFiles;
 import org.apache.lucene.index.SegmentInfo;
 import org.apache.lucene.index.SegmentInfos;
 import org.apache.lucene.index.SegmentReader;
@@ -324,16 +327,23 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
     }
 
     /** The reader's segments, in document order (ADR 0051). */
-    private static List<Segment> segments(IndexReader reader) {
+    private static List<Segment> segments(IndexReader reader) throws IOException {
         IndexReader[] subs = reader.getSequentialSubReaders();
         List<Segment> segments = new ArrayList<>();
         int docBase = 0;
         for (IndexReader sub : subs == null ? new IndexReader[] {reader} : subs) {
-            segments.add(new Segment(
-                    sub instanceof SegmentReader segment ? segment.getSegmentName() : "?",
-                    docBase,
-                    sub.maxDoc(),
-                    sub.numDocs()));
+            if (sub instanceof SegmentReader segment) {
+                // 3.6 records no segment ids (ADR 0113).
+                segments.add(new Segment(
+                        segment.getSegmentName(),
+                        docBase,
+                        sub.maxDoc(),
+                        sub.numDocs(),
+                        Optional.empty(),
+                        SegmentFiles.files(segment)));
+            } else {
+                segments.add(new Segment("?", docBase, sub.maxDoc(), sub.numDocs()));
+            }
             docBase += sub.maxDoc();
         }
         return List.copyOf(segments);
@@ -438,6 +448,67 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
             return new StoredValue.Binary(bytes);
         }
         return new StoredValue.Text(field.stringValue());
+    }
+
+    @Override
+    public void storedFields(int segment, StoredFieldSink sink, LongConsumer progress) throws IOException {
+        IndexReader leaf = segmentLeaf(segment);
+        int maxDoc = leaf.maxDoc();
+        StoredFieldNames names = new StoredFieldNames(sink);
+        for (int doc = 0; doc < maxDoc; doc++) {
+            if (doc % PROGRESS_INTERVAL == 0) {
+                progress.accept(doc);
+            }
+            names.doc = doc;
+            leaf.document(doc, names);
+        }
+        progress.accept(maxDoc);
+    }
+
+    @Override
+    public int[] deletedDocs(int segment) {
+        IndexReader leaf = segmentLeaf(segment);
+        int[] deleted = new int[leaf.numDeletedDocs()];
+        int count = 0;
+        for (int doc = 0; doc < leaf.maxDoc() && count < deleted.length; doc++) {
+            if (leaf.isDeleted(doc)) {
+                deleted[count++] = doc;
+            }
+        }
+        return deleted;
+    }
+
+    /** Segment {@code segment} of the reader, as {@link #storedFields} takes it. */
+    private IndexReader segmentLeaf(int segment) {
+        List<IndexReader> leaves = new ArrayList<>();
+        ReaderUtil.gatherSubReaders(leaves, reader);
+        if (segment < 0 || segment >= leaves.size()) {
+            throw new IllegalArgumentException("No segment " + segment + ": there are " + leaves.size());
+        }
+        return leaves.get(segment);
+    }
+
+    /**
+     * Notes the field of each stored value and loads none (ADR 0113): Lucene 3.6 asks a selector
+     * about every stored value of a document, and skips those it doesn't load.
+     */
+    private static final class StoredFieldNames implements FieldSelector {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        private final transient StoredFieldSink sink;
+        int doc;
+
+        StoredFieldNames(StoredFieldSink sink) {
+            this.sink = sink;
+        }
+
+        @Override
+        public FieldSelectorResult accept(String fieldName) {
+            sink.accept(doc, fieldName);
+            return FieldSelectorResult.NO_LOAD;
+        }
     }
 
     @Override

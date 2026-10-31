@@ -9,8 +9,11 @@ import io.github.mfuerstenau.leia.protocol.RpcMethod;
 import io.github.mfuerstenau.leia.protocol.analysis.Analyzer;
 import io.github.mfuerstenau.leia.protocol.analysis.StandardAnalyzer;
 import io.github.mfuerstenau.leia.protocol.document.GetReconstructResult;
+import io.github.mfuerstenau.leia.protocol.document.GetStoredFieldsScanResult;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructResult;
 import io.github.mfuerstenau.leia.protocol.document.StartReconstructParams;
+import io.github.mfuerstenau.leia.protocol.document.StartStoredFieldsScanParams;
+import io.github.mfuerstenau.leia.protocol.document.StoredFields;
 import io.github.mfuerstenau.leia.protocol.filter.FilterResult;
 import io.github.mfuerstenau.leia.protocol.filter.GetFilterResult;
 import io.github.mfuerstenau.leia.protocol.filter.StartFilterParams;
@@ -97,6 +100,12 @@ final class RealBackend implements AutoCloseable {
         return new RealBackend(LeiaBackend.start(runtimesDir, jars, servers));
     }
 
+    /** A backend with the runtimes' folders and a cache of the stored fields in {@code cacheDir} (ADR 0113). */
+    static RealBackend startWithCache(Path cacheDir) throws RpcException {
+        return new RealBackend(LeiaBackend.start(
+                Optional.of(testFile("leia.test.runtimes")), List.of(), List.of(), Optional.of(cacheDir)));
+    }
+
     /** A test index that leia-core's build writes, given by the system property {@code leia.test.index.<name>}. */
     static Path testIndex(String name) {
         return testFile("leia.test.index." + name);
@@ -181,6 +190,14 @@ final class RealBackend implements AutoCloseable {
 
     FilterResult filter(StartFilterParams params) throws Exception {
         return job(Methods.START_FILTER, params, Methods.GET_FILTER, GetFilterResult::result);
+    }
+
+    StoredFields storedFields(boolean ignoreCache) throws Exception {
+        return job(
+                Methods.START_STORED_FIELDS_SCAN,
+                new StartStoredFieldsScanParams(ignoreCache),
+                Methods.GET_STORED_FIELDS_SCAN,
+                GetStoredFieldsScanResult::fields);
     }
 
     /** The hits and the outcome of a stored-values scan, polled as the search screen does. */

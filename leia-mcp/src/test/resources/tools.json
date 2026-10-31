@@ -136,6 +136,7 @@
                 "EXPLAIN",
                 "HIGHLIGHT",
                 "STORED_SCAN",
+                "STORED_FIELDS",
                 "CHECK_INDEX",
                 "CHECK_LEVELS",
                 "CHECK_THREADS",
@@ -227,7 +228,7 @@
               ],
               "additionalProperties": false
             },
-            "description": "The fields, at most 1000, by field number. The index doesn't record which fields are stored: get_document shows a document's stored values"
+            "description": "The fields, at most 1000, by field number. The index doesn't record which fields are stored: stored_fields finds them"
           }
         },
         "required": [
@@ -369,6 +370,7 @@
                 "EXPLAIN",
                 "HIGHLIGHT",
                 "STORED_SCAN",
+                "STORED_FIELDS",
                 "CHECK_INDEX",
                 "CHECK_LEVELS",
                 "CHECK_THREADS",
@@ -460,7 +462,7 @@
               ],
               "additionalProperties": false
             },
-            "description": "The fields, at most 1000, by field number. The index doesn't record which fields are stored: get_document shows a document's stored values"
+            "description": "The fields, at most 1000, by field number. The index doesn't record which fields are stored: stored_fields finds them"
           }
         },
         "required": [
@@ -1429,6 +1431,78 @@
           "offset",
           "scannedDocs",
           "matchedValues",
+          "tookMillis"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "stored_fields",
+      "description": "List the fields whose values the documents store, with how many documents store each: the fields get_document, get_field_value and scan_stored can show. The index doesn't record this, so the first call reads every document's stored fields, without their values; leia remembers each segment, so later calls, also after a restart, only read new segments.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "ignoreCache": {
+            "type": "boolean",
+            "description": "Whether to read every segment again instead of taking what leia remembers of it; false by default. Not needed for correctness: a segment never changes once written"
+          }
+        },
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "fieldCount": {
+            "type": "integer",
+            "description": "How many fields have a stored value in at least one document, deleted ones included"
+          },
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "liveDocs": {
+                  "type": "integer",
+                  "description": "Live documents with at least one stored value in the field"
+                },
+                "allDocs": {
+                  "type": "integer",
+                  "description": "Documents with at least one stored value in the field, deleted ones included"
+                }
+              },
+              "required": [
+                "name",
+                "liveDocs",
+                "allDocs"
+              ],
+              "additionalProperties": false
+            },
+            "description": "The fields, at most 1000, by name"
+          },
+          "segments": {
+            "type": "integer",
+            "description": "The segments of the index"
+          },
+          "cachedSegments": {
+            "type": "integer",
+            "description": "Those of them whose stored fields leia remembered, from this session or an earlier one, instead of reading them"
+          },
+          "tookMillis": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "fieldCount",
+          "fields",
+          "segments",
+          "cachedSegments",
           "tookMillis"
         ],
         "additionalProperties": false

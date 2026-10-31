@@ -22,6 +22,7 @@ import dev.tamboui.widgets.table.Row;
 import dev.tamboui.widgets.table.Table;
 import dev.tamboui.widgets.table.TableState;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
+import io.github.mfuerstenau.leia.protocol.document.StoredField;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.protocol.index.GetIndexStatsResult;
 import io.github.mfuerstenau.leia.protocol.index.IndexCommitStats;
@@ -46,6 +47,7 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.TreeMap;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -96,11 +98,14 @@ public final class Overview {
             new Column("%", true),
             new Column("Docs", true),
             new Column("Σ doc freq", true),
-            new Column("Σ term freq", true));
+            new Column("Σ term freq", true),
+            // Live documents with a stored value in the field, once the stored fields are scanned (ADR 0113).
+            new Column("Stored", true));
 
     private static final int NUMBER_COLUMN = 0;
     private static final int NAME_COLUMN = 1;
     private static final int TERMS_COLUMN = 7;
+    private static final int STORED_COLUMN = 12;
 
     /** A space and {@code ▲} or {@code ▼} after the title of the sorted column. */
     private static final int SORT_MARKER_WIDTH = 2;
@@ -113,19 +118,22 @@ public final class Overview {
         NUMBER,
         NAME,
         /** The unique term count; fields without one come last in either direction. */
-        TERMS;
+        TERMS,
+        /** The live documents with a stored value; fields without a count come last in either direction. */
+        STORED;
 
         SortKey next() {
             return switch (this) {
                 case NUMBER -> NAME;
                 case NAME -> TERMS;
-                case TERMS -> NUMBER;
+                case TERMS -> STORED;
+                case STORED -> NUMBER;
             };
         }
 
-        /** The direction a key starts in: the largest term counts first, everything else ascending. */
+        /** The direction a key starts in: the largest counts first, everything else ascending. */
         boolean startsDescending() {
-            return this == TERMS;
+            return this == TERMS || this == STORED;
         }
 
         /** The column whose header shows the sort. */
@@ -134,6 +142,7 @@ public final class Overview {
                 case NUMBER -> NUMBER_COLUMN;
                 case NAME -> NAME_COLUMN;
                 case TERMS -> TERMS_COLUMN;
+                case STORED -> STORED_COLUMN;
             };
         }
     }
@@ -164,6 +173,12 @@ public final class Overview {
 
     /** Term scans by field name; a field that was never scanned has none. */
     private final Map<String, FieldScan> scans = new HashMap<>();
+
+    /** The scan of the stored fields; none until one is started (ADR 0113). */
+    private Optional<StoredFieldsState> storedFields = Optional.empty();
+
+    /** The stored fields by name, once the scan is done. */
+    private Map<String, StoredField> stored = Map.of();
 
     /** How many top terms to show, and to scan for. */
     private int topN;
@@ -222,7 +237,7 @@ public final class Overview {
         fieldRows = order.stream()
                 .map(index -> {
                     IndexField field = stats.fields().get(index);
-                    return fieldCells(field, scans.get(field.name()), total);
+                    return fieldCells(field, scans.get(field.name()), total, storedCell(field));
                 })
                 .toList();
         columnWidths = new int[COLUMNS.size()];
@@ -243,23 +258,66 @@ public final class Overview {
         Comparator<IndexField> byKey = switch (sort) {
             case NUMBER -> directed(Comparator.comparingInt(IndexField::number));
             case NAME -> directed(Comparator.comparing(IndexField::name));
-            // Fields without a count last, in either direction.
-            case TERMS ->
-                (a, b) -> {
-                    OptionalLong countA = termCount(a);
-                    OptionalLong countB = termCount(b);
-                    if (countA.isPresent() && countB.isPresent()) {
-                        int ordering = Long.compare(countA.getAsLong(), countB.getAsLong());
-                        return descending ? -ordering : ordering;
-                    }
-                    return Boolean.compare(countA.isEmpty(), countB.isEmpty());
-                };
+            case TERMS -> countsLast(this::termCount);
+            case STORED -> countsLast(this::storedCount);
         };
         Comparator<IndexField> comparator = byKey.thenComparingInt(IndexField::number);
         return IntStream.range(0, fields.size())
                 .boxed()
                 .sorted((a, b) -> comparator.compare(fields.get(a), fields.get(b)))
                 .toList();
+    }
+
+    /** By {@code count}, in the direction chosen, the fields without one last in either direction. */
+    private Comparator<IndexField> countsLast(Function<IndexField, OptionalLong> count) {
+        return (a, b) -> {
+            OptionalLong countA = count.apply(a);
+            OptionalLong countB = count.apply(b);
+            if (countA.isPresent() && countB.isPresent()) {
+                int ordering = Long.compare(countA.getAsLong(), countB.getAsLong());
+                return descending ? -ordering : ordering;
+            }
+            return Boolean.compare(countA.isEmpty(), countB.isEmpty());
+        };
+    }
+
+    /** The live documents with a stored value in {@code field}, once the stored fields are scanned. */
+    private OptionalLong storedCount(IndexField field) {
+        StoredField found = stored.get(field.name());
+        return found == null ? OptionalLong.empty() : OptionalLong.of(found.liveDocs());
+    }
+
+    /** The Stored cell of {@code field}: {@code ?} before the scan, {@code -} if it stores no value. */
+    private String storedCell(IndexField field) {
+        return switch (storedFields.orElse(null)) {
+            case null -> "?";
+            case StoredFieldsState.Running _ -> "…";
+            case StoredFieldsState.Failed _ -> "failed";
+            case StoredFieldsState.Done _ -> {
+                StoredField found = stored.get(field.name());
+                yield found == null ? "-" : Integer.toString(found.liveDocs());
+            }
+        };
+    }
+
+    /** The scan of the stored fields, if one was started (ADR 0113). */
+    public Optional<StoredFieldsState> storedFields() {
+        return storedFields;
+    }
+
+    /** Sets or, with an empty {@code state}, forgets the scan of the stored fields. */
+    public void setStoredFields(Optional<StoredFieldsState> state) {
+        storedFields = state;
+        stored = state.filter(StoredFieldsState.Done.class::isInstance)
+                .map(done -> ((StoredFieldsState.Done) done)
+                        .fields().fields().stream().collect(Collectors.toMap(StoredField::name, field -> field)))
+                .orElse(Map.of());
+        formatRows();
+    }
+
+    /** Whether the stored fields are being scanned. */
+    public boolean scanningStoredFields() {
+        return storedFields.orElse(null) instanceof StoredFieldsState.Running;
     }
 
     private <T> Comparator<T> directed(Comparator<T> comparator) {
@@ -535,9 +593,15 @@ public final class Overview {
     private String fieldsTitle() {
         int count = stats.fields().size();
         OptionalLong total = totalTerms();
-        return total.isPresent()
-                ? " Fields (" + count + ", " + total.getAsLong() + " terms) "
-                : " Fields (" + count + ") ";
+        String counts = total.isPresent() ? count + ", " + total.getAsLong() + " terms" : Integer.toString(count);
+        String scanned = switch (storedFields.orElse(null)) {
+            case null -> "";
+            case StoredFieldsState.Running running ->
+                ", stored fields " + running.docsScanned() + "/" + stats.maxDoc() + " docs…";
+            case StoredFieldsState.Done done -> ", " + done.fields().fields().size() + " stored";
+            case StoredFieldsState.Failed _ -> ", stored fields failed";
+        };
+        return " Fields (" + counts + scanned + ") ";
     }
 
     private void renderTerms(Frame frame, Rect area) {
@@ -760,7 +824,7 @@ public final class Overview {
     }
 
     /** The cells of a field's row. {@code totalTerms} is the number of terms of all fields, once known. */
-    private static String[] fieldCells(IndexField field, FieldScan scan, OptionalLong totalTerms) {
+    private static String[] fieldCells(IndexField field, FieldScan scan, OptionalLong totalTerms, String stored) {
         String points = field.pointDimensionCount() == 0
                 ? "-"
                 : field.pointDimensionCount() + "×" + field.pointNumBytes() + "B";
@@ -805,7 +869,8 @@ public final class Overview {
             share,
             docs,
             sumDocFreq,
-            sumTotalTermFreq
+            sumTotalTermFreq,
+            stored
         };
     }
 

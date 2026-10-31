@@ -116,6 +116,7 @@ class Lucene3BackendTest {
                         Feature.DOCUMENTS,
                         Feature.STORED_VALUES,
                         Feature.STORED_SCAN,
+                        Feature.STORED_FIELDS,
                         Feature.TERM_VECTORS,
                         Feature.TERMS,
                         Feature.POSTINGS,
@@ -278,6 +279,17 @@ class Lucene3BackendTest {
         OpenIndexResult opened = open(Path.of(PATH));
 
         RuntimeStoredScans.scansTheStoredValues(backend, opened.maxDoc().orElseThrow(), false);
+    }
+
+    @Test
+    void findsTheStoredFields() throws Exception {
+        RuntimeStoredFields.findsTheStoredFields(backend, open(Path.of(PATH)), false);
+    }
+
+    @Test
+    void keepsTheStoredFieldsOnDisk() throws Exception {
+        // 3.6 records no segment ids: the cache knows the segments by their files.
+        RuntimeStoredFields.keepsTheCacheOnDisk(Path.of(PATH), tmp);
     }
 
     @Test

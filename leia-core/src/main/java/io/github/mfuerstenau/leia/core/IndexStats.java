@@ -66,6 +66,16 @@ public record IndexStats(
      * @param docBase the document id of the segment's first document in the opened path
      * @param maxDoc the documents of the segment, deleted ones included
      * @param numDocs the live documents of the segment
+     * @param id the segment's unique id in hex; empty if the reader doesn't say
+     * @param files the segment's own files, sorted, without those of its deletions; empty if the
+     *     reader doesn't say
      */
-    public record SegmentStats(String name, int docBase, int maxDoc, int numDocs) {}
+    public record SegmentStats(
+            String name, int docBase, int maxDoc, int numDocs, Optional<String> id, List<String> files) {
+
+        /** A segment without an id or files. */
+        public SegmentStats(String name, int docBase, int maxDoc, int numDocs) {
+            this(name, docBase, maxDoc, numDocs, Optional.empty(), List.of());
+        }
+    }
 }

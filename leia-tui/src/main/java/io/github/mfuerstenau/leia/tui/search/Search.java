@@ -532,6 +532,14 @@ public final class Search {
     }
 
     /**
+     * Offers only {@code stored} as the fields per hit, those that a scan found documents store values
+     * in (ADR 0113), each shown as it was.
+     */
+    public void storedFieldsKnown(List<String> stored) {
+        hitFields = hitFields.storedOnly(stored);
+    }
+
+    /**
      * Offers only the modes and keys that {@code features} allow (ADR 0044): without {@link
      * Feature#HIGHLIGHT}, the hits aren't highlighted, and the mode is the first one left if its own
      * is gone.

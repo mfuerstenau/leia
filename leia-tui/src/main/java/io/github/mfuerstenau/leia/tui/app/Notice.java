@@ -40,6 +40,9 @@ sealed interface Notice {
     /** {@code T} on the start screen switched to the theme {@code id} (ADR 0096). */
     record ThemeChanged(String id) implements Notice {}
 
+    /** The scan of the stored fields failed (ADR 0113). */
+    record StoredFieldsFailed(String error) implements Notice {}
+
     default Line line() {
         return switch (this) {
             case Reopening _ -> Line.from("Reopening…");
@@ -67,6 +70,10 @@ sealed interface Notice {
                         "Cannot download runtimes: " + cannot.reason(),
                         Palette.current().warning());
             case ThemeChanged changed -> Line.from("Theme: " + changed.id());
+            case StoredFieldsFailed failed ->
+                Line.styled(
+                        "Stored fields failed: " + failed.error(),
+                        Palette.current().error());
         };
     }
 
@@ -78,6 +85,7 @@ sealed interface Notice {
         return this instanceof Exported
                 || this instanceof ExportFailed
                 || this instanceof CannotDownload
-                || this instanceof ThemeChanged;
+                || this instanceof ThemeChanged
+                || this instanceof StoredFieldsFailed;
     }
 }

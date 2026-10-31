@@ -18,11 +18,13 @@ import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
 import io.github.mfuerstenau.leia.protocol.document.GetReconstructResult;
+import io.github.mfuerstenau.leia.protocol.document.GetStoredFieldsScanResult;
 import io.github.mfuerstenau.leia.protocol.document.GetStoredValueParams;
 import io.github.mfuerstenau.leia.protocol.document.GetStoredValueResult;
 import io.github.mfuerstenau.leia.protocol.document.GetTermVectorParams;
 import io.github.mfuerstenau.leia.protocol.document.GetTermVectorResult;
 import io.github.mfuerstenau.leia.protocol.document.StartReconstructParams;
+import io.github.mfuerstenau.leia.protocol.document.StartStoredFieldsScanParams;
 import io.github.mfuerstenau.leia.protocol.filter.GetFilterResult;
 import io.github.mfuerstenau.leia.protocol.filter.ReleaseFilterParams;
 import io.github.mfuerstenau.leia.protocol.filter.ReleaseFilterResult;
@@ -370,6 +372,23 @@ public final class Methods {
             new RpcMethod<>("getStoredScan", GetStoredScanParams.class, GetStoredScanResult.class);
 
     /**
+     * Starts a job that finds the fields the documents of the open index store values in, and how many
+     * documents do, by reading the stored fields of every segment the cache doesn't know (ADR 0113).
+     * Fails with {@code NO_INDEX_OPEN}, {@code NO_READER}, or {@code NOT_SUPPORTED} without {@code
+     * STORED_FIELDS}.
+     */
+    public static final RpcMethod<StartStoredFieldsScanParams, JobStarted> START_STORED_FIELDS_SCAN =
+            new RpcMethod<>("startStoredFieldsScan", StartStoredFieldsScanParams.class, JobStarted.class);
+
+    /**
+     * The progress of a stored fields scan, and its outcome once it is done (ADR 0113). The outcome is
+     * handed out once: a scan that failed answers with its error, and afterwards the job is gone
+     * ({@code JOB_NOT_FOUND}).
+     */
+    public static final RpcMethod<JobParams, GetStoredFieldsScanResult> GET_STORED_FIELDS_SCAN =
+            new RpcMethod<>("getStoredFieldsScan", JobParams.class, GetStoredFieldsScanResult.class);
+
+    /**
      * Starts a job that finds every document of the open index that matches a query, without scoring,
      * to browse the documents through (ADR 0031). Fails as {@code startSearch} does for the query.
      */
@@ -546,6 +565,8 @@ public final class Methods {
             GET_HIGHLIGHT,
             START_STORED_SCAN,
             GET_STORED_SCAN,
+            START_STORED_FIELDS_SCAN,
+            GET_STORED_FIELDS_SCAN,
             START_FILTER,
             GET_FILTER,
             STEP_FILTER,

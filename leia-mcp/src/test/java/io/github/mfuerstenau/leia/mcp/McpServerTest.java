@@ -140,6 +140,7 @@ class McpServerTest {
                         "search",
                         "explain",
                         "scan_stored",
+                        "stored_fields",
                         "analyze",
                         "terms",
                         "get_document",
@@ -578,6 +579,7 @@ class McpServerTest {
                             "search",
                             "explain",
                             "scan_stored",
+                            "stored_fields",
                             "analyze",
                             "terms",
                             "get_document",
@@ -1190,6 +1192,31 @@ class McpServerTest {
         }
         assertThat(second.path("offset").asInt()).isEqualTo(5);
         assertThat(second.path("hits").get(0)).isNotEqualTo(first.path("hits").get(0));
+    }
+
+    @Test
+    void listsTheStoredFieldsAndRemembersTheSegments() throws Exception {
+        JsonNode first = client.structured(1, "stored_fields", "{\"ignoreCache\":true}");
+        JsonNode second = client.structured(2, "stored_fields", "{}");
+
+        assertThat(first.path("cachedSegments").asInt()).isZero();
+        assertThat(first.path("segments").asInt()).isEqualTo(3);
+        assertThat(first.path("fieldCount").asInt())
+                .isEqualTo(first.path("fields").size());
+        assertThat(StreamSupport.stream(first.path("fields").spliterator(), false)
+                        .map(field -> field.path("name").asString())
+                        .toList())
+                .contains("_source", "id", "blob")
+                .doesNotContain("keywords")
+                .isSorted();
+        JsonNode deletedOnly = StreamSupport.stream(first.path("fields").spliterator(), false)
+                .filter(field -> field.path("name").asString().equals("deleted_only"))
+                .findFirst()
+                .orElseThrow();
+        assertThat(deletedOnly.path("liveDocs").asInt()).isZero();
+        assertThat(deletedOnly.path("allDocs").asInt()).isEqualTo(1);
+        assertThat(second.path("fields")).isEqualTo(first.path("fields"));
+        assertThat(second.path("cachedSegments").asInt()).isEqualTo(3);
     }
 
     @Test

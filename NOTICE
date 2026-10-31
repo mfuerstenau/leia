@@ -27,6 +27,7 @@ Third-party software in leia.jar
   Dagger 2.60.1                       Apache License, Version 2.0
   Jakarta Inject 2.0.1, javax.inject  Apache License, Version 2.0
   JSpecify                            Apache License, Version 2.0
+  RoaringBitmap 1.6.24                Apache License, Version 2.0
 
 Each is included unmodified, under the license named.
 

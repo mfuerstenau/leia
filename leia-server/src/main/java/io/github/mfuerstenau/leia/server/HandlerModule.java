@@ -45,6 +45,8 @@ import io.github.mfuerstenau.leia.server.search.StartExplainHandler;
 import io.github.mfuerstenau.leia.server.search.StartHighlightHandler;
 import io.github.mfuerstenau.leia.server.search.StartSearchHandler;
 import io.github.mfuerstenau.leia.server.search.StartStoredScanHandler;
+import io.github.mfuerstenau.leia.server.stored.GetStoredFieldsScanHandler;
+import io.github.mfuerstenau.leia.server.stored.StartStoredFieldsScanHandler;
 import io.github.mfuerstenau.leia.server.terms.GetExportTermsHandler;
 import io.github.mfuerstenau.leia.server.terms.GetFieldTermScanHandler;
 import io.github.mfuerstenau.leia.server.terms.GetPositionsHandler;
@@ -189,6 +191,14 @@ interface HandlerModule {
     @Binds
     @IntoSet
     MethodHandler<?, ?> getStoredScan(GetStoredScanHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> startStoredFieldsScan(StartStoredFieldsScanHandler handler);
+
+    @Binds
+    @IntoSet
+    MethodHandler<?, ?> getStoredFieldsScan(GetStoredFieldsScanHandler handler);
 
     @Binds
     @IntoSet

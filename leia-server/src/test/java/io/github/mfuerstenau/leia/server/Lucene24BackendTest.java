@@ -85,6 +85,7 @@ class Lucene24BackendTest {
                 .contains(
                         Feature.DOCUMENTS,
                         Feature.STORED_SCAN,
+                        Feature.STORED_FIELDS,
                         Feature.TERMS,
                         Feature.TOP_TERMS,
                         Feature.EXPORT_TERMS,

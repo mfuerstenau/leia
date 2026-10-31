@@ -93,7 +93,7 @@ that runtime; a screen or option the runtime lacks is greyed out:
 
 | Can | 3.6.2 | 5.5.5 | 7.7.3 | 9.12.3 | 10.5.2 |
 |---|---|---|---|---|---|
-| Overview, documents, stored values and term vectors | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Overview, documents, stored values and fields, term vectors | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Terms, postings and positions, export terms | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Commits and check index | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Check levels | – | ✓ | ✓ | ✓ | ✓ |
@@ -231,6 +231,7 @@ tools:
 | `search` | a page of hits, best score first or sorted by fields, with a few brief stored values, to find documents: a query in Lucene's syntax, with ranges on number fields, analyzed with `StandardAnalyzer` or the analyzers it names, one exact term, such as an id, the doc values of a field, or the nearest documents to a vector or a document's vector |
 | `explain` | how a document scores for a query, or why it doesn't match: the arguments of `search` plus a hit's `docId`; Lucene's explanation as text, one line per part, indented |
 | `scan_stored` | the stored values a Java regular expression matches, also in fields that aren't indexed such as `_source`, with a snippet and the match; stops once the page is full, `nextOffset` for the next |
+| `stored_fields` | the fields whose values the documents store, which the index doesn't record, with how many live and all documents store each; the first call reads every document's stored fields without their values, later ones only the segments leia hasn't seen, also after a restart |
 | `analyze` | the tokens an analyzer makes of a text, with positions, offsets and types, to see why a query matches or not; needs no open index |
 | `terms` | the terms of a field a page at a time, from a prefix, or those in the most documents, to see which values a field holds and why a term query misses |
 | `get_document` | a document by its id: per field its stored values, cut when long, doc values, norm and KNN vector |
@@ -293,6 +294,11 @@ The footer of each screen shows its own keys. `X`, `L` and `?` work on every scr
   leia, and `-` there lowers the level at once: at FINE, every call and its result is logged.
   To start at FINE, run leia with `LEIA_OPTS=-Dleia.log.level=FINE`.
 - **History:** the last 10 opened index paths, in `history` beside the log.
+- **Cache:** which fields the segments of the indexes you scanned with `f` store (field names and
+  document numbers, never values), in `~/.cache/leia/stored-fields` (`$XDG_CACHE_HOME/leia/stored-fields`
+  if that is set), or `%LOCALAPPDATA%\leia\cache\stored-fields` on Windows; at most 512 MB, and a
+  segment's file goes after 30 days unused. `LEIA_OPTS=-Dleia.cache.dir=<path>` moves it, and an
+  empty path turns it off.
 - **Theme:** the theme chosen last with `T`, in `~/.config/leia/theme` (`$XDG_CONFIG_HOME/leia/theme`
   if that is set), or `%APPDATA%\leia\theme` on Windows, beside the default folder of jars.
 

@@ -39,6 +39,7 @@ import java.util.OptionalLong;
 import java.util.ServiceLoader;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
@@ -1607,5 +1608,68 @@ class Lucene5IndexTest {
         }
         // Gone once the writer is closed: the test opens the index as leia does.
         Files.deleteIfExists(dir.resolve("write.lock"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene4", "lucene5"})
+    void readsWhichFieldsTheDocumentsStore(String name) throws IOException {
+        try (RuntimeIndex index = open(name)) {
+            StoredFieldsSeen seen = storedFields(index);
+
+            // Every document, deleted ones too, stores its id; tag is indexed only.
+            assertThat(seen.stored()).hasSize(index.maxDoc());
+            assertThat(seen.stored().values())
+                    .allSatisfy(fields -> assertThat(fields).contains("id").doesNotContain("tag"));
+            assertThat(seen.stored().values())
+                    .anySatisfy(fields -> assertThat(fields).contains("body"));
+            assertThat(seen.deleted())
+                    .isEqualTo(index.maxDoc() - index.stats().numDocs())
+                    .isPositive();
+            // Lucene 4.x recorded no segment ids.
+            assertThat(segments(index)).allSatisfy(segment -> {
+                assertThat(segment.id().isPresent()).isEqualTo(name.equals("lucene5"));
+                assertThat(segment.files()).contains(segment.name() + ".si").isSorted();
+            });
+        }
+    }
+
+    /**
+     * Which fields each document stores, by its id in the index, as the scans of the segments report
+     * them (ADR 0113), and how many documents the segments say are deleted.
+     */
+    private static StoredFieldsSeen storedFields(RuntimeIndex index) throws IOException {
+        Map<Integer, Set<String>> stored = new TreeMap<>();
+        Documents documents = index.documents().orElseThrow();
+        int segment = 0;
+        int deleted = 0;
+        for (RuntimeIndex.IndexStats directory : index.stats().indexes()) {
+            for (RuntimeIndex.Segment info : directory.segments()) {
+                int base = directory.docBase() + info.docBase();
+                List<Long> progress = new ArrayList<>();
+                documents.storedFields(
+                        segment,
+                        (doc, field) -> stored.computeIfAbsent(base + doc, _ -> new TreeSet<>())
+                                .add(field),
+                        progress::add);
+                assertThat(progress).last().isEqualTo((long) info.maxDoc());
+                int[] deletedDocs = documents.deletedDocs(segment);
+                assertThat(deletedDocs).isSorted().hasSize(info.maxDoc() - info.numDocs());
+                deleted += deletedDocs.length;
+                segment++;
+            }
+        }
+        int segments = segment;
+        assertThatThrownBy(() -> documents.storedFields(segments, (doc, field) -> {}, _ -> {}))
+                .isInstanceOf(IllegalArgumentException.class);
+        return new StoredFieldsSeen(stored, deleted);
+    }
+
+    private record StoredFieldsSeen(Map<Integer, Set<String>> stored, int deleted) {}
+
+    /** The segments of {@code index}, of all its directories. */
+    private static List<RuntimeIndex.Segment> segments(RuntimeIndex index) throws IOException {
+        return index.stats().indexes().stream()
+                .flatMap(directory -> directory.segments().stream())
+                .toList();
     }
 }

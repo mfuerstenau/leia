@@ -25,6 +25,7 @@ import java.util.Arrays;
 import java.util.BitSet;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -33,11 +34,14 @@ import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.PriorityQueue;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.function.LongConsumer;
 import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.codecs.StoredFieldsReader;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.DocumentStoredFieldVisitor;
 import org.apache.lucene.index.BinaryDocValues;
+import org.apache.lucene.index.CodecReader;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FieldInfos;
@@ -54,11 +58,13 @@ import org.apache.lucene.index.NumericDocValues;
 import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.ReaderUtil;
 import org.apache.lucene.index.SegmentCommitInfo;
+import org.apache.lucene.index.SegmentInfo;
 import org.apache.lucene.index.SegmentInfos;
 import org.apache.lucene.index.SegmentReader;
 import org.apache.lucene.index.SortedDocValues;
 import org.apache.lucene.index.SortedNumericDocValues;
 import org.apache.lucene.index.SortedSetDocValues;
+import org.apache.lucene.index.StoredFieldVisitor;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.queryparser.classic.ParseException;
@@ -377,13 +383,20 @@ final class Lucene5Index
     private static List<Segment> segments(IndexReader reader) {
         List<Segment> segments = new ArrayList<>();
         for (LeafReaderContext leaf : reader.leaves()) {
-            segments.add(new Segment(
-                    FilterLeafReader.unwrap(leaf.reader()) instanceof SegmentReader segment
-                            ? segment.getSegmentName()
-                            : "?",
-                    leaf.docBase,
-                    leaf.reader().maxDoc(),
-                    leaf.reader().numDocs()));
+            if (FilterLeafReader.unwrap(leaf.reader()) instanceof SegmentReader segment) {
+                SegmentInfo info = segment.getSegmentInfo().info;
+                segments.add(new Segment(
+                        segment.getSegmentName(),
+                        leaf.docBase,
+                        leaf.reader().maxDoc(),
+                        leaf.reader().numDocs(),
+                        // Recorded since 5.0 (ADR 0113).
+                        Optional.ofNullable(info.getId()).map(HexFormat.of()::formatHex),
+                        List.copyOf(new TreeSet<>(info.files()))));
+            } else {
+                segments.add(new Segment(
+                        "?", leaf.docBase, leaf.reader().maxDoc(), leaf.reader().numDocs()));
+            }
         }
         return List.copyOf(segments);
     }
@@ -571,6 +584,74 @@ final class Lucene5Index
             return new StoredValue.Binary(BytesRef.deepCopyOf(binary).bytes);
         }
         return new StoredValue.Text(field.stringValue());
+    }
+
+    @Override
+    public void storedFields(int segment, StoredFieldSink sink, LongConsumer progress) throws IOException {
+        LeafReader leaf = segmentLeaf(segment);
+        int maxDoc = leaf.maxDoc();
+        StoredFieldNames names = new StoredFieldNames(sink);
+        // The codec's merge instance decompresses each block of documents once, the leaf a block for
+        // each document (ADR 0113).
+        StoredFieldsReader merge =
+                FilterLeafReader.unwrap(leaf) instanceof CodecReader codec && codec.getFieldsReader() != null
+                        ? codec.getFieldsReader().getMergeInstance()
+                        : null;
+        for (int doc = 0; doc < maxDoc; doc++) {
+            if (doc % PROGRESS_INTERVAL == 0) {
+                progress.accept(doc);
+            }
+            names.doc = doc;
+            if (merge != null) {
+                merge.visitDocument(doc, names);
+            } else {
+                leaf.document(doc, names);
+            }
+        }
+        progress.accept(maxDoc);
+    }
+
+    @Override
+    public int[] deletedDocs(int segment) {
+        LeafReader leaf = segmentLeaf(segment);
+        Bits liveDocs = leaf.getLiveDocs();
+        if (liveDocs == null) {
+            return new int[0];
+        }
+        int[] deleted = new int[leaf.maxDoc() - leaf.numDocs()];
+        int count = 0;
+        for (int doc = 0; doc < leaf.maxDoc() && count < deleted.length; doc++) {
+            if (!liveDocs.get(doc)) {
+                deleted[count++] = doc;
+            }
+        }
+        return deleted;
+    }
+
+    /** Segment {@code segment} of the reader, as {@link #storedFields} takes it. */
+    private LeafReader segmentLeaf(int segment) {
+        List<LeafReaderContext> leaves = reader.leaves();
+        if (segment < 0 || segment >= leaves.size()) {
+            throw new IllegalArgumentException("No segment " + segment + ": there are " + leaves.size());
+        }
+        return leaves.get(segment).reader();
+    }
+
+    /** Notes the field of each stored value and skips the value (ADR 0113). */
+    private static final class StoredFieldNames extends StoredFieldVisitor {
+
+        private final StoredFieldSink sink;
+        int doc;
+
+        StoredFieldNames(StoredFieldSink sink) {
+            this.sink = sink;
+        }
+
+        @Override
+        public Status needsField(FieldInfo field) {
+            sink.accept(doc, field.name);
+            return Status.NO;
+        }
     }
 
     @Override

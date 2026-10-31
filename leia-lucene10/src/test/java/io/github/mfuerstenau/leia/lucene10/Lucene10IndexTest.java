@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.lucene10;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 
 import io.github.mfuerstenau.leia.runtime.Check;
 import io.github.mfuerstenau.leia.runtime.Commits;
@@ -37,6 +38,7 @@ import java.util.OptionalInt;
 import java.util.ServiceLoader;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.CancellationException;
 import java.util.stream.Stream;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
@@ -105,7 +107,15 @@ class Lucene10IndexTest {
             assertThat(only.segmentVersions()).containsExactly("9.12.3");
             assertThat(only.luceneVersion()).contains("9.12.3");
             assertThat(only.createdVersionMajor()).hasValue(9);
-            assertThat(only.segments()).containsExactly(new RuntimeIndex.Segment("_0", 0, 3, 2));
+            assertThat(only.segments())
+                    .extracting(
+                            RuntimeIndex.Segment::name,
+                            RuntimeIndex.Segment::docBase,
+                            RuntimeIndex.Segment::maxDoc,
+                            RuntimeIndex.Segment::numDocs)
+                    .containsExactly(tuple("_0", 0, 3, 2));
+            assertThat(only.segments().getFirst().id()).isPresent();
+            assertThat(only.segments().getFirst().files()).contains("_0.si");
             assertThat(index.fields())
                     .extracting(RuntimeIndex.Field::name)
                     .containsExactly("id", "body", "vector", "number");
@@ -645,5 +655,63 @@ class Lucene10IndexTest {
                         .segments())
                 .extracting(Commits.Segment::hasBlocks)
                 .containsExactly(true, false);
+    }
+
+    @Test
+    void readsWhichFieldsTheDocumentsStore() throws IOException {
+        try (RuntimeIndex index = open("demo")) {
+            StoredFieldsSeen seen = storedFields(index);
+
+            // docs/demo-index.md: every document stores its id, 42 alone a blob, the deleted 74 alone
+            // deleted_only, and keywords is never stored.
+            assertThat(seen.stored()).hasSize(500);
+            assertThat(seen.stored().values())
+                    .allSatisfy(fields -> assertThat(fields).contains("id").doesNotContain("keywords"));
+            assertThat(seen.stored().get(42)).contains("blob");
+            assertThat(seen.stored().get(74)).contains("deleted_only");
+            assertThat(seen.deleted()).isEqualTo(13);
+            assertThat(segments(index))
+                    .allSatisfy(segment -> assertThat(segment.id()).isPresent());
+        }
+    }
+
+    /**
+     * Which fields each document stores, by its id in the index, as the scans of the segments report
+     * them (ADR 0113), and how many documents the segments say are deleted.
+     */
+    private static StoredFieldsSeen storedFields(RuntimeIndex index) throws IOException {
+        Map<Integer, Set<String>> stored = new TreeMap<>();
+        Documents documents = index.documents().orElseThrow();
+        int segment = 0;
+        int deleted = 0;
+        for (RuntimeIndex.IndexStats directory : index.stats().indexes()) {
+            for (RuntimeIndex.Segment info : directory.segments()) {
+                int base = directory.docBase() + info.docBase();
+                List<Long> progress = new ArrayList<>();
+                documents.storedFields(
+                        segment,
+                        (doc, field) -> stored.computeIfAbsent(base + doc, _ -> new TreeSet<>())
+                                .add(field),
+                        progress::add);
+                assertThat(progress).last().isEqualTo((long) info.maxDoc());
+                int[] deletedDocs = documents.deletedDocs(segment);
+                assertThat(deletedDocs).isSorted().hasSize(info.maxDoc() - info.numDocs());
+                deleted += deletedDocs.length;
+                segment++;
+            }
+        }
+        int segments = segment;
+        assertThatThrownBy(() -> documents.storedFields(segments, (doc, field) -> {}, _ -> {}))
+                .isInstanceOf(IllegalArgumentException.class);
+        return new StoredFieldsSeen(stored, deleted);
+    }
+
+    private record StoredFieldsSeen(Map<Integer, Set<String>> stored, int deleted) {}
+
+    /** The segments of {@code index}, of all its directories. */
+    private static List<RuntimeIndex.Segment> segments(RuntimeIndex index) throws IOException {
+        return index.stats().indexes().stream()
+                .flatMap(directory -> directory.segments().stream())
+                .toList();
     }
 }

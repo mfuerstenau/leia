@@ -8,6 +8,7 @@ import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import io.github.mfuerstenau.leia.server.runtime.ServerException;
 import io.github.mfuerstenau.leia.server.runtime.ServerRuntimes;
+import io.github.mfuerstenau.leia.server.stored.StoredFieldsCache;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -78,6 +79,18 @@ public final class LeiaBackend implements AutoCloseable {
      */
     public static LeiaBackend start(Optional<Path> runtimesDir, List<Path> jars, List<Path> servers)
             throws RpcException {
+        return start(runtimesDir, jars, servers, Optional.empty());
+    }
+
+    /**
+     * As {@link #start(Optional, List, List)}, and keeps the cache of the stored fields on disk below
+     * {@code cacheDir} too (ADR 0113).
+     *
+     * @param cacheDir leia's cache folder, such as {@code ~/.cache/leia}; empty to cache in memory only
+     */
+    public static LeiaBackend start(
+            Optional<Path> runtimesDir, List<Path> jars, List<Path> servers, Optional<Path> cacheDir)
+            throws RpcException {
         // Lucene 10's folder first: the jars link against its Lucene (ADR 0065).
         runtimesDir.ifPresent(RuntimeFolders::load);
         try {
@@ -105,7 +118,7 @@ public final class LeiaBackend implements AutoCloseable {
                     // For libraries in the jars that load through the context class loader; the job
                     // threads, started from this thread, inherit it. addJars sets it again (ADR 0024).
                     Thread.currentThread().setContextClassLoader(JarChain.classLoader());
-                    return DaggerServerComponent.create();
+                    return DaggerServerComponent.factory().create(new StoredFieldsCache(cacheDir));
                 },
                 executor));
         BuildInfo buildInfo = BuildInfo.load();

@@ -56,8 +56,19 @@ class IndexStatsTest {
             assertThat(commit.segmentCount()).isEqualTo(2);
             // The open reader's segments, one deleted document in the first.
             assertThat(commit.segments())
-                    .containsExactly(
-                            new IndexStats.SegmentStats("_0", 0, 2, 1), new IndexStats.SegmentStats("_1", 2, 1, 1));
+                    .extracting(
+                            IndexStats.SegmentStats::name,
+                            IndexStats.SegmentStats::docBase,
+                            IndexStats.SegmentStats::maxDoc,
+                            IndexStats.SegmentStats::numDocs)
+                    .containsExactly(tuple("_0", 0, 2, 1), tuple("_1", 2, 1, 1));
+            // Each with its id and its own files, which the stored fields cache keys on (ADR 0113).
+            assertThat(commit.segments()).allSatisfy(segment -> {
+                assertThat(segment.id()).hasValueSatisfying(id -> assertThat(id).hasSize(32));
+                assertThat(segment.files()).contains(segment.name() + ".si").isSorted();
+            });
+            assertThat(commit.segments().get(0).id())
+                    .isNotEqualTo(commit.segments().get(1).id());
             assertThat(commit.commitLuceneVersion()).isEqualTo(Version.LATEST);
             assertThat(commit.userData()).containsExactly(Map.entry("a", "1"), Map.entry("b", "2"));
             assertThat(stats.deletedDocs()).isEqualTo(1);

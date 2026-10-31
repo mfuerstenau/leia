@@ -12,12 +12,15 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.CancellationException;
+import java.util.function.ObjIntConsumer;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.stream.StreamSupport;
@@ -34,6 +37,7 @@ import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.MultiReader;
 import org.apache.lucene.index.MultiTerms;
+import org.apache.lucene.index.SegmentInfo;
 import org.apache.lucene.index.SegmentInfos;
 import org.apache.lucene.index.SegmentReader;
 import org.apache.lucene.index.Terms;
@@ -471,13 +475,22 @@ public final class ReadOnlyIndex implements OpenedIndex {
             int docBase = summaries.get(i).docBase();
             List<IndexStats.SegmentStats> segments = new ArrayList<>();
             for (LeafReaderContext leaf : part.reader().leaves()) {
-                segments.add(new IndexStats.SegmentStats(
-                        FilterLeafReader.unwrap(leaf.reader()) instanceof SegmentReader segment
-                                ? segment.getSegmentName()
-                                : "?",
-                        docBase + leaf.docBase,
-                        leaf.reader().maxDoc(),
-                        leaf.reader().numDocs()));
+                if (FilterLeafReader.unwrap(leaf.reader()) instanceof SegmentReader segment) {
+                    SegmentInfo info = segment.getSegmentInfo().info;
+                    segments.add(new IndexStats.SegmentStats(
+                            segment.getSegmentName(),
+                            docBase + leaf.docBase,
+                            leaf.reader().maxDoc(),
+                            leaf.reader().numDocs(),
+                            Optional.ofNullable(info.getId()).map(HexFormat.of()::formatHex),
+                            List.copyOf(new TreeSet<>(info.files()))));
+                } else {
+                    segments.add(new IndexStats.SegmentStats(
+                            "?",
+                            docBase + leaf.docBase,
+                            leaf.reader().maxDoc(),
+                            leaf.reader().numDocs()));
+                }
             }
             indexes.add(new IndexStats.CommitStats(
                     summaries.get(i),
@@ -1030,6 +1043,36 @@ public final class ReadOnlyIndex implements OpenedIndex {
             fields.get().forEach(this::checkField);
         }
         return StoredScan.source(reader, fields, includeDeleted);
+    }
+
+    /**
+     * Which fields the documents of a segment store values in, without reading the values (ADR 0113),
+     * as {@link StoredFieldNames#scan} reads them.
+     *
+     * @param segment the segment's position in the reader's leaves, which are those of {@link #stats()}
+     *     in order
+     * @throws IllegalArgumentException if there is no such segment
+     * @throws java.util.concurrent.CancellationException from {@code progress}, to stop the scan
+     */
+    public void storedFields(int segment, ObjIntConsumer<String> sink, ScanProgress progress) throws IOException {
+        StoredFieldNames.scan(leaf(segment).reader(), sink, progress);
+    }
+
+    /**
+     * The deleted documents of a segment, segment-local and ascending (ADR 0113).
+     *
+     * @throws IllegalArgumentException if there is no such segment
+     */
+    public int[] deletedDocs(int segment) {
+        return StoredFieldNames.deleted(leaf(segment).reader());
+    }
+
+    private LeafReaderContext leaf(int segment) {
+        List<LeafReaderContext> leaves = reader.leaves();
+        if (segment < 0 || segment >= leaves.size()) {
+            throw new IllegalArgumentException("No segment " + segment + ": there are " + leaves.size());
+        }
+        return leaves.get(segment);
     }
 
     @Override

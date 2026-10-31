@@ -58,4 +58,17 @@ class HitFieldsTest {
         form.handleKey(key('a'));
         assertThat(applied(form).param()).isEmpty();
     }
+
+    @Test
+    void offersOnlyTheStoredFieldsOnceTheyAreKnown() {
+        HitFields all = new HitFields(List.of("id", "title", "body", "tags"), List.of(true, false, true, true));
+
+        HitFields stored = all.storedOnly(List.of("body", "id", "title"));
+
+        assertThat(stored.names()).containsExactly("id", "title", "body");
+        assertThat(stored.shown()).containsExactly(true, false, true);
+        assertThat(stored.param()).hasValue(List.of("id", "body"));
+        assertThat(fields("id", "body").storedOnly(List.of("id", "body")).param())
+                .isEmpty();
+    }
 }

@@ -60,6 +60,12 @@ public sealed interface Action {
     record CancelScan(long jobId) implements Action {}
 
     /**
+     * Start the scan of the stored fields (ADR 0113), and report back with {@link
+     * App#storedFieldsStarted} or {@link App#storedFieldsFailed}, under {@code scanId}.
+     */
+    record StartStoredFieldsScan(long scanId) implements Action {}
+
+    /**
      * Fetch the commits of the index directory at this position, and report back with {@link
      * App#commitsLoaded} or {@link App#commitsFailed}.
      */

@@ -7,6 +7,7 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
+import java.util.function.LongConsumer;
 
 /** The documents of a {@link RuntimeIndex}. */
 public interface Documents {
@@ -28,6 +29,35 @@ public interface Documents {
      */
     List<StoredDocument> storedValues(int fromDoc, int toDoc, Optional<Set<String>> fields, boolean includeDeleted)
             throws IOException;
+
+    /**
+     * Which fields the documents of a segment store values in, without reading the values (ADR 0113):
+     * {@code sink} gets the segment-local id of every document, deleted ones too, with the field of
+     * each of its stored values, in document order and the order the values were stored.
+     *
+     * @param segment the segment's position among those of all directories, in the order of {@link
+     *     RuntimeIndex.Stats#indexes()} and of their {@link RuntimeIndex.IndexStats#segments()}
+     * @param progress gets the documents of the segment read so far, now and then and at the end; it
+     *     throws to stop the scan, which passes the exception on
+     * @throws IllegalArgumentException if there is no such segment
+     */
+    void storedFields(int segment, StoredFieldSink sink, LongConsumer progress) throws IOException;
+
+    /**
+     * The deleted documents of a segment, segment-local and ascending (ADR 0113).
+     *
+     * @param segment as {@link #storedFields} takes it
+     * @throws IllegalArgumentException if there is no such segment
+     */
+    int[] deletedDocs(int segment) throws IOException;
+
+    /** Receives the stored fields of a segment's documents (ADR 0113). */
+    @FunctionalInterface
+    interface StoredFieldSink {
+
+        /** Document {@code doc} has a stored value in {@code field}. */
+        void accept(int doc, String field);
+    }
 
     /**
      * The term vector of a document in {@code field}, in term order; empty if it has none.

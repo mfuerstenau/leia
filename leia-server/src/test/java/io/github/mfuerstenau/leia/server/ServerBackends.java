@@ -10,6 +10,8 @@ import io.github.mfuerstenau.leia.protocol.check.GetCheckIndexParams;
 import io.github.mfuerstenau.leia.protocol.check.StartCheckIndexParams;
 import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
+import io.github.mfuerstenau.leia.protocol.document.StoredField;
+import io.github.mfuerstenau.leia.protocol.document.StoredFields;
 import io.github.mfuerstenau.leia.protocol.index.CloseIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexParams;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
@@ -95,6 +97,11 @@ final class ServerBackends {
         assertThat(check(backend).indexes())
                 .singleElement()
                 .satisfies(index -> assertThat(index.clean()).isTrue());
+        // The stored fields through the server's Lucene, the second time from the cache (ADR 0113).
+        StoredFields stored = backend.storedFields(false);
+        assertThat(stored.fields()).extracting(StoredField::name).contains("title");
+        assertThat(stored.cachedSegments()).isZero();
+        assertThat(backend.storedFields(false).cachedSegments()).isEqualTo(stored.segments());
 
         assertThat(backend.call(Methods.OPEN_INDEX, new OpenIndexParams(plain(name))))
                 .satisfies(plain -> {

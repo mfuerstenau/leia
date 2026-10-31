@@ -66,7 +66,7 @@ public final class McpServer {
             search finds documents with a query of Lucene's classic syntax, or one exact term; \
             get_document shows a document's fields, get_field_value a whole stored value in slices, and \
             reconstruct_fields the terms a document was indexed with, also in the fields that aren't \
-            stored.""";
+            stored. stored_fields lists the fields whose values are stored.""";
 
     static final String INSTRUCTIONS = """
             leia reads Lucene indexes, never writes them. Call index_info to see the open index and its \

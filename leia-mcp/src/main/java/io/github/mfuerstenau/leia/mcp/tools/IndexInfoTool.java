@@ -71,7 +71,7 @@ final class IndexInfoTool implements McpTool<IndexInfoTool.Arguments, IndexInfoT
             @Description("How many fields the index has") int fieldCount,
 
             @Description("The fields, at most " + MAX_FIELDS + ", by field number. The index doesn't record"
-                    + " which fields are stored: get_document shows a document's stored values")
+                    + " which fields are stored: stored_fields finds them")
             List<Field> fields) {}
 
     record Skipped(String path, String message) {}

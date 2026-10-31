@@ -26,9 +26,12 @@ import io.github.mfuerstenau.leia.protocol.document.DocValues;
 import io.github.mfuerstenau.leia.protocol.document.DocumentField;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
 import io.github.mfuerstenau.leia.protocol.document.GetReconstructResult;
+import io.github.mfuerstenau.leia.protocol.document.GetStoredFieldsScanResult;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructResult;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructSource;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructedField;
+import io.github.mfuerstenau.leia.protocol.document.StoredField;
+import io.github.mfuerstenau.leia.protocol.document.StoredFields;
 import io.github.mfuerstenau.leia.protocol.document.StoredType;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
@@ -1498,6 +1501,44 @@ class AppTest {
         assertThat(app.scanProgress(1, done("id", 3))).isEmpty();
         assertThat(app.polls()).isEmpty();
         assertThat(render(app)).contains("id: 3 terms, top 0");
+    }
+
+    @Test
+    void findsTheStoredFieldsAndPollsThem() {
+        App app = appWithFields();
+
+        assertThat(app.handleKey(key('f'))).hasValue(new Action.StartStoredFieldsScan(1));
+        assertThat(app.polls()).isEmpty();
+        assertThat(app.storedFieldsStarted(1, 7)).isEmpty();
+        assertThat(app.polls()).containsExactly(new Poll.StoredFields(1, 7));
+
+        assertThat(app.storedFieldsProgress(1, new GetStoredFieldsScanResult(2, Optional.empty())))
+                .isEmpty();
+        assertThat(wide(app)).contains("stored fields 2/", "Esc cancel scan");
+        // A running scan is not started again.
+        assertThat(app.handleKey(key('f'))).isEmpty();
+
+        StoredFields found = new StoredFields(List.of(new StoredField("id", 2, 3)), 1, 0, 4);
+        assertThat(app.storedFieldsProgress(1, new GetStoredFieldsScanResult(3, Optional.of(found))))
+                .isEmpty();
+        assertThat(app.polls()).isEmpty();
+        assertThat(wide(app)).contains("1 stored", "f stored fields").doesNotContain("Esc cancel scan");
+    }
+
+    @Test
+    void escCancelsTheStoredFieldsScanAndAFailureIsShown() {
+        App app = appWithFields();
+        app.handleKey(key('f'));
+        app.storedFieldsStarted(1, 4);
+
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.CancelScan(4));
+        assertThat(app.polls()).isEmpty();
+        // The job of the cancelled scan, should it report late, is cancelled.
+        assertThat(app.handleKey(key('f'))).hasValue(new Action.StartStoredFieldsScan(2));
+        assertThat(app.storedFieldsStarted(1, 5)).hasValue(new Action.CancelScan(5));
+
+        assertThat(app.storedFieldsFailed(2, "Cannot read")).isEmpty();
+        assertThat(wide(app)).contains("Stored fields failed: Cannot read");
     }
 
     @Test
