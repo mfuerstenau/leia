@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-25
 - **Amends:** ADR 0034 (§7, where stdout and stderr go); AGENTS.md, hard rules 2 and 4 and the CLI contract
-- **Amended by:** ADR 0101 (§5, concurrent tool calls), ADR 0102 (§7 and §8, the indexes `open_index` may open), ADR 0103 (§6, the size of the results)
+- **Amended by:** ADR 0101 (§5, concurrent tool calls), ADR 0102 (§7 and §8, the indexes `open_index` may open), ADR 0103 (§6, the size of the results), ADR 0115 (§6, the `postings` tool)
 
 ## Context
 
@@ -72,6 +72,7 @@ The records are in `io.github.mfuerstenau.leia.mcp.tools`, one class per tool.
 | `stored_fields` | `ignoreCache?` (false) | `startStoredFieldsScan`, polled `getStoredFieldsScan` | `fieldCount`, the `fields` (at most 1000, by name) with `name`, `liveDocs` and `allDocs`, `segments`, `cachedSegments`, `tookMillis` *(ADR 0113)* |
 | `analyze` | `text` (at most 10,000 characters), `analyzer?` (by name, as in `search`; `StandardAnalyzer`), `maxTokens?` (200, at most 10,000) | `analyze` (needs no open index; Lucene 10 only) | `analyzer`, the `tokens` with `term`, `position`, `startOffset`, `endOffset`, `type` and `positionLength?`, `tokenCount` and `cut?` *(ADR 0105)* |
 | `terms` | `field`, and a page of `prefix?`, `from?` (the previous `next`) and `limit?` (50, at most 1,000), or instead `top` (at most 1,000) | `getTerms`, or `startFieldTermScan`, polled `getFieldTermScan` | `field`, the `terms` with `term`, `binary?`, `docFreq` and `totalTermFreq?`, `next?` or `uniqueTerms?` *(ADR 0106)* |
+| `postings` | `field`, `term`, `binary?`, `fromDoc?` (0), `limit?` (50, at most 1,000; 100 with `positions`), `positions?` (false) | `getPostings`, and with `positions` `getPositions` per posting | `field`, `term`, `binary?`, `docFreq`, `totalTermFreq?`, the `postings` with `docId`, `deleted?`, `freq?`, `positions?` and `positionsCut?`, `nextDoc?` *(ADR 0115)* |
 | `get_document` | `docId`, `fields?`, `maxValueLength?` (2,048 characters, at most 65,536), `withVectors?` (false) | `getDocument`, and `getStoredValue` for the length of a value the backend cut | `docId`, `deleted`, and the `fields` the document has something in, with `norm?`, `stored?` (`type?`, `value`, `binary?`, `fullLength?` when cut), `docValues?` (at most 100 entries, and their count; the numbers of a field that repeats its stored value are `asStored?`, the encoding, instead of `numbers?`, decimal strings, ADR 0103), `hasTermVector?`, `vector?` (its dimension, and its components only with `withVectors`) |
 | `get_field_value` | `docId`, `field`, `index?` (0), `offset?` (0), `length?` (16,384, at most 65,536) | `getStoredValue` | `field`, `index`, `type`, `binary`, `value` (the slice), `offset`, `totalLength`, `nextOffset?` |
 | `reconstruct_fields` | `docId`, `fields?` (every field with postings or points), `maxTerms?` (500 per field, at most 10,000), `withTerms?` (false) | `startReconstruct`, polled `getReconstruct` | per field `field`, `source` (`TERM_VECTOR` or `POSTINGS`), `text?`, `textCut?`, the `terms?` (`term`, `binary?`, `freq`, `positions?`; only with `withTerms` or without `text`), `termCount`, `cut?`, the `points?` (hex, at most 100) and `pointCount?`; `tookMillis` |

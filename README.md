@@ -309,6 +309,7 @@ tools:
 | `stored_fields` | the fields whose values the documents store, which the index doesn't record, with how many live and all documents store each; the first call reads every document's stored fields without their values, later ones only the segments leia hasn't seen, also after a restart |
 | `analyze` | the tokens an analyzer makes of a text, with positions, offsets and types, to see why a query matches or not; needs no open index |
 | `terms` | the terms of a field a page at a time, from a prefix, or those in the most documents, to see which values a field holds and why a term query misses |
+| `postings` | the documents that hold one exact term, a page at a time in document order, with how often and, on request, where; deleted ones marked |
 | `get_document` | a document by its id: per field its stored values, cut when long, doc values, norm and KNN vector |
 | `get_field_value` | one stored value whole, in slices |
 | `reconstruct_fields` | the terms and points a document was indexed with, also in the fields that aren't stored, with the terms in position order; the terms with freqs and positions only on request |

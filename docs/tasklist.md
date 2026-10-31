@@ -20,11 +20,11 @@ From the read-only checklist in `docs/luke-features.md` §7. Ordered roughly by 
 
 None open.
 
-## MCP mode — output size, then tools
+## MCP mode
 
 Goal: the tools cost an agent few tokens, then they answer why a query matches or not. Measured on the demo index (compact JSON, the text item): a default `search` of 10 hits is 45.6 KB (about 13k tokens), with `fields: [id, title]` 2.5 KB; `get_document` 6.2 KB, `index_info` 5.7 KB, `reconstruct_fields` of every field 7.3 KB; `tools/list` 5 KB of descriptions and input schemas. The first five checks and changes are done (ADR 0103); the output size comes first, in this order; each change updates `tools.json`.
 
-Then the tools, each over a method the backend has; each checks the runtime's `features` and answers `NOT_SUPPORTED` without them. Short descriptions keep the cost of `tools/list` down.
+Each tool is over a method the backend has; it checks the runtime's `features` and answers `NOT_SUPPORTED` without them. Short descriptions keep the cost of `tools/list` down. The lane is done.
 
 Not planned: highlighting, the point tree and the KNN graph, the term export, filters, `addJars` and the runtimes, resources and prompts.
 

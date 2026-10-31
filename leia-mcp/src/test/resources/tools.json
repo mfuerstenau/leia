@@ -1717,6 +1717,135 @@
       }
     },
     {
+      "name": "postings",
+      "description": "List the documents that hold one exact term, as indexed (terms lists them), in document order, with how often and, with positions, where. Deleted documents are included and marked. For the next page, call it again with the result's nextDoc as fromDoc.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "term": {
+            "type": "string",
+            "description": "The term as text, or in hex with binary, as terms lists it"
+          },
+          "binary": {
+            "type": "boolean",
+            "description": "Whether term is the term's bytes in hex; false by default"
+          },
+          "fromDoc": {
+            "type": "integer",
+            "description": "Where the page starts: the nextDoc of the last page; 0 by default"
+          },
+          "limit": {
+            "type": "integer",
+            "description": "The most postings of the page, from 1 to 1000; 50 by default; with positions at most 100"
+          },
+          "positions": {
+            "type": "boolean",
+            "description": "Whether to give each posting its positions, offsets and payloads, which needs a field indexed with positions; false by default"
+          }
+        },
+        "required": [
+          "field",
+          "term"
+        ],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "field": {
+            "type": "string"
+          },
+          "term": {
+            "type": "string"
+          },
+          "binary": {
+            "type": "boolean",
+            "description": "Present, and true, only if term is the term's bytes in hex"
+          },
+          "docFreq": {
+            "type": "integer",
+            "description": "The documents with the term, deleted ones included"
+          },
+          "totalTermFreq": {
+            "type": "integer",
+            "description": "The occurrences of the term in all documents; absent if equal to docFreq"
+          },
+          "postings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "docId": {
+                  "type": "integer"
+                },
+                "deleted": {
+                  "type": "boolean",
+                  "description": "Present, and true, only if the document is deleted"
+                },
+                "freq": {
+                  "type": "integer",
+                  "description": "How often the term occurs in the document; absent where frequencies aren't indexed"
+                },
+                "positions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "position": {
+                        "type": "integer",
+                        "description": "Absent where positions aren't indexed"
+                      },
+                      "startOffset": {
+                        "type": "integer",
+                        "description": "Absent where offsets aren't indexed"
+                      },
+                      "endOffset": {
+                        "type": "integer",
+                        "description": "Absent where offsets aren't indexed"
+                      },
+                      "payload": {
+                        "type": "string",
+                        "description": "In hex; absent if there is none"
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "description": "The occurrences in order; only with positions"
+                },
+                "positionsCut": {
+                  "type": "boolean",
+                  "description": "Present, and true, only if the document has more than 100 occurrences, of which positions has the first; freq says how many"
+                }
+              },
+              "required": [
+                "docId"
+              ],
+              "additionalProperties": false
+            },
+            "description": "The documents of the page, in document order"
+          },
+          "nextDoc": {
+            "type": "integer",
+            "description": "The fromDoc of the next page; absent after the last posting"
+          }
+        },
+        "required": [
+          "field",
+          "term",
+          "docFreq",
+          "postings"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
       "name": "get_document",
       "description": "Show a document of the open index by its id: per field its stored values, doc values, norm, KNN vector and whether it has a term vector. Long values are cut, with their full length; get_field_value reads one whole. Fields that are only indexed show no value: reconstruct_fields rebuilds them.",
       "inputSchema": {

@@ -143,6 +143,7 @@ class McpServerTest {
                         "stored_fields",
                         "analyze",
                         "terms",
+                        "postings",
                         "get_document",
                         "get_field_value",
                         "reconstruct_fields");
@@ -582,6 +583,7 @@ class McpServerTest {
                             "stored_fields",
                             "analyze",
                             "terms",
+                            "postings",
                             "get_document",
                             "get_field_value",
                             "reconstruct_fields");
@@ -758,6 +760,125 @@ class McpServerTest {
         assertThat(client.error(3, "terms", "{\"field\":\"id\",\"limit\":1001}"))
                 .contains("limit must be from 1 to 1000");
         assertThat(client.error(4, "terms", "{\"field\":\"id\",\"top\":0}")).contains("top must be from 1");
+    }
+
+    @Test
+    void listsThePostingsAPageAtATime() throws Exception {
+        String category = client.structured(1, "terms", "{\"field\":\"category\",\"top\":1}")
+                .path("terms")
+                .get(0)
+                .path("term")
+                .asString();
+        String arguments = "{\"field\":\"category\",\"term\":\"" + category + "\",\"limit\":3";
+        JsonNode first = client.structured(2, "postings", arguments + "}");
+        JsonNode second = client.structured(3, "postings", arguments + ",\"fromDoc\":" + first.path("nextDoc") + "}");
+
+        assertThat(first.path("postings")).hasSize(3);
+        assertThat(postingIds(first)).isSorted();
+        assertThat(second.path("postings")).hasSize(3);
+        assertThat(postingIds(second)).isSorted().doesNotContainAnyElementsOf(postingIds(first));
+        assertThat(postingIds(second).get(0)).isGreaterThan(postingIds(first).get(2));
+        assertThat(second.path("docFreq").asInt())
+                .isEqualTo(first.path("docFreq").asInt());
+        assertThat(first.path("docFreq").asInt()).isGreaterThan(6);
+        assertThat(first.path("postings").get(0).has("positions")).isFalse();
+
+        JsonNode last = client.structured(
+                4, "postings", "{\"field\":\"category\",\"term\":\"" + category + "\",\"limit\":1000}");
+        assertThat(last.path("postings")).hasSize(last.path("docFreq").asInt());
+        assertThat(last.has("nextDoc")).isFalse();
+    }
+
+    @Test
+    void listsTheOnePostingOfAKeyword() throws Exception {
+        JsonNode result = client.structured(1, "postings", "{\"field\":\"id\",\"term\":\"doc-0042\"}");
+
+        assertThat(result.path("docFreq").asInt()).isEqualTo(1);
+        assertThat(result.has("totalTermFreq")).isFalse();
+        assertThat(result.has("nextDoc")).isFalse();
+        assertThat(result.has("binary")).isFalse();
+        assertThat(result.path("postings")).hasSize(1);
+        assertThat(result.path("postings").get(0).path("docId").asInt()).isEqualTo(42);
+        assertThat(result.path("postings").get(0).has("deleted")).isFalse();
+    }
+
+    @Test
+    void marksADeletedPosting() throws Exception {
+        JsonNode result = client.structured(1, "postings", "{\"field\":\"id\",\"term\":\"doc-0037\"}");
+
+        assertThat(result.path("postings").get(0).path("docId").asInt()).isEqualTo(37);
+        assertThat(result.path("postings").get(0).path("deleted").asBoolean()).isTrue();
+    }
+
+    @Test
+    void listsThePositionsOffsetsAndPayloads() throws Exception {
+        JsonNode body = client.structured(
+                1, "postings", "{\"field\":\"body\",\"term\":\"quick\",\"limit\":2,\"positions\":true}");
+        JsonNode title = client.structured(
+                2, "postings", "{\"field\":\"title\",\"term\":\"lamp\",\"limit\":2,\"positions\":true}");
+        JsonNode tagged = client.structured(
+                3, "postings", "{\"field\":\"tagged\",\"term\":\"lamp\",\"limit\":2,\"positions\":true}");
+
+        JsonNode bodyPosition = body.path("postings").get(0).path("positions").get(0);
+        assertThat(body.path("postings").get(0).path("positions"))
+                .hasSize(body.path("postings").get(0).path("freq").asInt());
+        assertThat(bodyPosition.has("position")).isTrue();
+        assertThat(bodyPosition.path("endOffset").asInt())
+                .isGreaterThan(bodyPosition.path("startOffset").asInt());
+        JsonNode titlePosition = title.path("postings").get(0).path("positions").get(0);
+        assertThat(titlePosition.has("position")).isTrue();
+        assertThat(titlePosition.has("startOffset")).isFalse();
+        assertThat(tagged.path("postings")
+                        .get(0)
+                        .path("positions")
+                        .get(0)
+                        .path("payload")
+                        .asString())
+                .isNotEmpty();
+    }
+
+    @Test
+    void refusesPositionsOfAFieldWithoutThem() throws Exception {
+        JsonNode docs = client.structured(1, "terms", "{\"field\":\"keywords\",\"limit\":1}");
+        String term = docs.path("terms").get(0).path("term").asString();
+        String arguments = "{\"field\":\"keywords\",\"term\":\"" + term + "\"";
+
+        assertThat(client.error(2, "postings", arguments + ",\"positions\":true}"))
+                .contains("DOCS")
+                .endsWith("(INVALID_PARAMS)");
+        assertThat(client.structured(3, "postings", arguments + "}")
+                        .path("postings")
+                        .get(0)
+                        .has("freq"))
+                .isFalse();
+    }
+
+    @Test
+    void refusesBadPostingsArguments() throws Exception {
+        assertThat(client.error(1, "postings", "{\"field\":\"nope\",\"term\":\"a\"}"))
+                .endsWith("(FIELD_NOT_FOUND)");
+        assertThat(client.error(2, "postings", "{\"field\":\"id\",\"term\":\"nope\"}"))
+                .endsWith("(TERM_NOT_FOUND)");
+        assertThat(client.error(3, "postings", "{\"field\":\"id\",\"term\":\"doc-0042\",\"limit\":1001}"))
+                .contains("limit must be from 1 to 1000");
+        assertThat(client.error(
+                        4, "postings", "{\"field\":\"body\",\"term\":\"quick\",\"limit\":101,\"positions\":true}"))
+                .contains("limit must be from 1 to 100");
+        assertThat(client.error(5, "postings", "{\"field\":\"id\",\"term\":\"doc-0042\",\"fromDoc\":-1}"))
+                .contains("fromDoc")
+                .endsWith("(INVALID_PARAMS)");
+    }
+
+    @Test
+    void listsThePostingsOfABinaryTerm() throws Exception {
+        JsonNode terms = client.structured(1, "terms", "{\"field\":\"binary_key\",\"limit\":1}");
+        String term = terms.path("terms").get(0).path("term").asString();
+
+        JsonNode result = client.structured(
+                2, "postings", "{\"field\":\"binary_key\",\"term\":\"" + term + "\",\"binary\":true}");
+
+        assertThat(result.path("binary").asBoolean()).isTrue();
+        assertThat(result.path("postings")).isNotEmpty();
     }
 
     @Test
@@ -1429,6 +1550,12 @@ class McpServerTest {
     private static List<String> terms(JsonNode result) {
         return StreamSupport.stream(result.path("terms").spliterator(), false)
                 .map(term -> term.path("term").asString())
+                .toList();
+    }
+
+    private static List<Integer> postingIds(JsonNode result) {
+        return StreamSupport.stream(result.path("postings").spliterator(), false)
+                .map(posting -> posting.path("docId").asInt())
                 .toList();
     }
 

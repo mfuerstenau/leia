@@ -16,6 +16,7 @@ public final class Tools {
             new StoredFieldsTool(),
             new AnalyzeTool(),
             new TermsTool(),
+            new PostingsTool(),
             new GetDocumentTool(),
             new GetFieldValueTool(),
             new ReconstructFieldsTool());
