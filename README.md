@@ -18,6 +18,9 @@ directory, so it is safe to point at a live index.
 It opens indexes written by Lucene 2.4 to 10, each with the Lucene that reads it: 3.6, 5.5, 7.7,
 9.12 or 10, the official jars, each in a class loader of its own (see [Install](#install)).
 
+With `--mcp`, leia serves an index to a coding agent or another MCP client instead of starting the
+terminal UI (see [MCP mode](#mcp-mode)).
+
 ## What it shows
 
 - **Overview:** path, directory implementation, commit point (`segments_N`, generation, version),
@@ -120,6 +123,9 @@ leia [OPTIONS] [INDEX_PATH]
 | `--no-default-jars` | don't load the jars of the default folder (see [Jars](#jars)) |
 | `--directory <IMPL>` | the Lucene `Directory` to read indexes through: `fs` (default) lets Lucene choose, which is `MMapDirectory` on 64-bit; `mmap` is `MMapDirectory`, `nio` is `NIOFSDirectory`. `Ctrl+D` in the open prompt changes it |
 | `--no-reader` | open `INDEX_PATH` without a reader, for an index that a reader can't open (see [Without a reader](#without-a-reader)); `Ctrl+N` in the open prompt does the same |
+| `--mcp` | serve `INDEX_PATH` to an MCP client, such as a coding agent, on stdin and stdout instead of starting the terminal UI (see [MCP mode](#mcp-mode)) |
+| `--mcp-root <PATH>` | with `--mcp`, a folder below which alone the agent opens indexes; can be repeated (see [Which indexes the agent can open](#which-indexes-the-agent-can-open)) |
+| `--mcp-pin` | with `--mcp` and `INDEX_PATH`, serve only that index: the agent can't open another |
 | `--download-runtimes` | install the runtimes of `--runtime` into the folder `runtimes` without asking, as for a script, then exit (see [Install](#install)); takes no other option but `--runtime`, which it needs |
 | `--runtime <FOLDER>` | with `--download-runtimes`, a runtime to install (`lucene10`, `lucene9`, `lucene7`, `lucene5` or `lucene3`); can be repeated |
 
@@ -245,6 +251,93 @@ A shard's index is `data/indices/<uuid>/<shard>/index` (`data/nodes/0/indices/â€
 OpenSearch and Elasticsearch 7), and `data/indices` opens every shard as one, if their fields and
 index sorts agree. Elasticsearch and OpenSearch hold `write.lock` while they run; leia takes no lock, but stop
 the node or copy the shard first, so that it doesn't change while leia reads it.
+
+### MCP mode
+
+`leia --mcp [INDEX_PATH]` serves an index to an MCP client, such as a coding agent, instead of
+starting the terminal UI. The client starts leia and speaks the
+[Model Context Protocol](https://modelcontextprotocol.io) with it on stdin and stdout: JSON-RPC 2.0,
+one message per line. stdout carries nothing else; the log goes to `leia.log`, as always. It reads
+only, like the UI, and opens every index the UI opens. For Claude Code, to keep it:
+
+```sh
+claude mcp add leia -- /path/to/leia --mcp /path/to/index
+```
+
+This adds it for you in the current project; `--scope user` adds it in every project, and
+`--scope project` writes it to the project's `.mcp.json`, to share with the project.
+`claude mcp remove leia` takes it out again. For one session only, give it to `--mcp-config`, in a
+JSON file:
+
+```json
+{
+  "mcpServers": {
+    "leia": {
+      "command": "/path/to/leia",
+      "args": ["--mcp", "/path/to/index"]
+    }
+  }
+}
+```
+
+```sh
+claude --mcp-config leia-mcp.json
+```
+
+or inline:
+
+```sh
+claude --mcp-config '{"mcpServers":{"leia":{"command":"/path/to/leia","args":["--mcp","/path/to/index"]}}}'
+```
+
+With `--strict-mcp-config` as well, the session leaves out the MCP servers configured elsewhere.
+Other clients take the same command and arguments in their configuration of an MCP server. The
+tools:
+
+| Tool | What it does |
+|---|---|
+| `open_index` | opens an index in place of the open one; without `INDEX_PATH`, the agent opens one with it |
+| `index_info` | the open index: the Lucene that reads it, its document counts, its index directories with their commit's user data, its fields and how each is indexed |
+| `check_index` | Lucene's `CheckIndex` on the open index, read-only: whether it is corrupt and which segments failed and why; `level` 1 to 3, `only` to narrow a large index |
+| `search` | a page of hits, best score first or sorted by fields, with a few brief stored values, to find documents: a query in Lucene's syntax, with ranges on number fields, analyzed with `StandardAnalyzer` or the analyzers it names, one exact term, such as an id, the doc values of a field, or the nearest documents to a vector or a document's vector |
+| `explain` | how a document scores for a query, or why it doesn't match: the arguments of `search` plus a hit's `docId`; Lucene's explanation as text, one line per part, indented |
+| `scan_stored` | the stored values a Java regular expression matches, also in fields that aren't indexed such as `_source`, with a snippet and the match; stops once the page is full, `nextOffset` for the next |
+| `analyze` | the tokens an analyzer makes of a text, with positions, offsets and types, to see why a query matches or not; needs no open index |
+| `terms` | the terms of a field a page at a time, from a prefix, or those in the most documents, to see which values a field holds and why a term query misses |
+| `get_document` | a document by its id: per field its stored values, cut when long, doc values, norm and KNN vector |
+| `get_field_value` | one stored value whole, in slices |
+| `reconstruct_fields` | the terms and points a document was indexed with, also in the fields that aren't stored, with the terms in position order; the terms with freqs and positions only on request |
+
+`--jar`, `--server`, `--no-default-jars` and `--directory` work as for the UI; `--theme`,
+`--no-reader`, `--download-runtimes` and `--runtime` don't go with `--mcp`. If `INDEX_PATH` can't be
+opened, leia says why on stderr and exits with 1; at the end of stdin it cancels what still runs
+and exits with 0. Each result is bounded: a page has at most 100 hits, a value shows 2,048
+characters unless the agent asks for more, and a search or rebuild that takes longer than 5 minutes
+is cancelled.
+
+#### Which indexes the agent can open
+
+Without more options, `open_index` opens any index your account can read, at any path the agent
+gives it. Two options narrow that:
+
+```sh
+# only indexes below these folders; any other path is refused alike, also through a symbolic link
+claude mcp add leia -- /path/to/leia --mcp --mcp-root ~/indexes --mcp-root /srv/search
+# only this one index: the agent gets no open_index
+claude mcp add leia -- /path/to/leia --mcp --mcp-pin /path/to/index
+```
+
+`--mcp-root` can be repeated. `INDEX_PATH` opens wherever it is, since you named it.
+
+Beyond that:
+- Everything in an index the agent opens goes to the agent, and from there wherever its other
+  tools send it. Mind which network tools share the session with an index of private data.
+- The text of a document is data, not instructions. A stored value can be written to look like
+  instructions to the agent.
+- `--no-default-jars` keeps the jars of the default folder out of the process, and `--jar` and
+  `--server` should name only jars and installations you trust.
+- leia runs as you. To keep it from the rest of the machine, run it as another user, or in a
+  container or sandbox with the index folders mounted read-only.
 
 ### Keys
 
@@ -692,6 +785,7 @@ leia is one Java application. The terminal UI ([TamboUI](https://tamboui.dev)) c
 the same JVM, which does all the index work with Lucene 10, plus the backward codecs for Lucene 9
 indexes. Each call takes a params record and returns a result record, and runs on one backend
 thread, so the UI never waits for Lucene; long scans run as jobs that the UI polls and can cancel.
+In MCP mode, the tools call the same backend in place of the UI.
 
 More detail for contributors: [`AGENTS.md`](AGENTS.md) (layout, rules, commands) and the
 architecture decisions in [`docs/adr/`](docs/adr/).

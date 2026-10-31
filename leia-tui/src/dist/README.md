@@ -187,12 +187,39 @@ can't do, for an older minor than leia's runtime is built for, says so, and belo
 `leia --mcp [INDEX_PATH]` serves an index to an MCP client, such as a coding agent, instead of
 starting the terminal UI. The client starts leia and speaks the Model Context Protocol with it on
 stdin and stdout; leia's log goes to `leia.log`, as always. It reads only, like the UI, and opens
-every index the UI opens. For Claude Code:
+every index the UI opens. For Claude Code, to keep it:
 
 ```sh
 claude mcp add leia -- /path/to/leia --mcp /path/to/index
 ```
 
+This adds it for you in the current project; `--scope user` adds it in every project, and
+`--scope project` writes it to the project's `.mcp.json`, to share with the project.
+`claude mcp remove leia` takes it out again. For one session only, give it to `--mcp-config`, in a
+JSON file:
+
+```json
+{
+  "mcpServers": {
+    "leia": {
+      "command": "/path/to/leia",
+      "args": ["--mcp", "/path/to/index"]
+    }
+  }
+}
+```
+
+```sh
+claude --mcp-config leia-mcp.json
+```
+
+or inline:
+
+```sh
+claude --mcp-config '{"mcpServers":{"leia":{"command":"/path/to/leia","args":["--mcp","/path/to/index"]}}}'
+```
+
+With `--strict-mcp-config` as well, the session leaves out the MCP servers configured elsewhere.
 Other clients take the same command and arguments in their configuration of an MCP server. The
 tools:
 
