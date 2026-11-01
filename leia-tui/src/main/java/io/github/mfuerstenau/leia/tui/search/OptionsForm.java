@@ -382,7 +382,7 @@ public final class OptionsForm {
         }
         if (!classic && draft.points.isEmpty()) {
             lines.add(Line.empty());
-            lines.add(Line.styled("No one-dimensional point fields", Form.dim()));
+            lines.add(Line.styled("No one-dimensional point fields", Form.muted()));
         }
         String title = classic ? " Classic parser options " : " Standard parser options ";
         Form.renderPopup(frame, area, title, lines, selectedLine, WIDTH);
@@ -402,7 +402,7 @@ public final class OptionsForm {
     private static void addHeading(List<Line> lines, boolean starts, String heading) {
         if (starts) {
             lines.add(Line.empty());
-            lines.add(Line.styled(heading, Form.dim()));
+            lines.add(Line.styled(heading, Form.muted()));
         }
     }
 

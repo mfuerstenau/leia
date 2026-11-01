@@ -681,6 +681,22 @@ class AppTest {
                 .doesNotContain("Without runtimes");
     }
 
+    @Test
+    void theAboutScreenSaysWhereALoadedRuntimeCameFrom() {
+        App app = app();
+        app.runtimesLoaded(new GetRuntimesResult(
+                List.of(new RuntimeFolder(
+                        "lucene3",
+                        List.of(2, 3),
+                        RuntimeState.LOADED,
+                        Optional.of("3.6.2"),
+                        Optional.empty(),
+                        Optional.of("/usr/share/leia/runtimes/lucene3"))),
+                List.of()));
+
+        assertThat(TestScreens.render(app::render, 200, 30)).contains("lucene3 from /usr/share/leia/runtimes/lucene3");
+    }
+
     /** Every state a runtime can be in, one per folder. */
     private static GetRuntimesResult everyState() {
         return new GetRuntimesResult(

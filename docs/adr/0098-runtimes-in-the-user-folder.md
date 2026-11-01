@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-22
 - **Amends:** ADR 0044, ADR 0072 and ADR 0073 (where `runtimes/` is); AGENTS.md, the CLI contract
+- **Amended by:** ADR 0122 (runtimes are looked up one at a time in user and system folders; downloads go to the first writable user folder)
 
 ## Context
 

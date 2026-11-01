@@ -209,8 +209,8 @@ class CliTest {
         assertThat(Cli.HELP_TEXT).doesNotContain("--yes");
         assertThat(Cli.HELP_TEXT.replaceAll("\\s+", " "))
                 .contains("a folder for each Lucene from 3.6 to 10 in the folder runtimes, are loaded")
-                .contains("The folder runtimes is the one beside leia.jar, if there is one, else"
-                        + " $XDG_DATA_HOME/leia/runtimes")
+                .contains("Each runtime is taken from the first folder runtimes that has it: the one beside"
+                        + " leia.jar, if there is one, then $XDG_DATA_HOME/leia/runtimes")
                 .contains("without them, an index opens only without a reader. D on the start screen downloads them")
                 .contains("To choose runtimes instead, start leia and press D on its start screen");
     }

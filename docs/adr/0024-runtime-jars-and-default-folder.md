@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-07
 - **Amends:** ADR 0016 (jars can be added while leia runs), ADR 0018
+- **Amended by:** ADR 0122 (the default folder of jars is the first of the user's config candidates; never a system folder)
 
 ## Context
 

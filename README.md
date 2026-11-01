@@ -85,8 +85,11 @@ Lucene (`lucene3`, `lucene5`, `lucene7`, `lucene9`, `lucene10`): leia's own jars
 `leia.jar`, Lucene's from Maven Central (`https://repo1.maven.org/maven2/`), each checked against
 the SHA-256 that the build recorded. It needs the network once, about 32 MB in all. The folder
 `runtimes` is `~/.local/share/leia/runtimes` (`$XDG_DATA_HOME/leia/runtimes` if that is set), or
-`%LOCALAPPDATA%\leia\runtimes` on Windows, so it outlives an update of leia; a folder `runtimes`
-beside `leia.jar`, if there is one, is used instead (ADR 0098). After an update of leia, leia
+`%LOCALAPPDATA%\leia\runtimes` on Windows, so it outlives an update of leia. leia takes each runtime
+from the first folder that has it: a folder `runtimes` beside `leia.jar`, if there is one, then that
+one, then the system-wide ones (`$XDG_DATA_DIRS`, `%PROGRAMDATA%\leia\runtimes`), whose jars it checks
+against their SHA-256 and never rewrites; downloads go to the first of the folders above that can
+be written (ADR 0098, ADR 0122). After an update of leia, leia
 rewrites its own jars there at the next start, and a runtime that lacks the jars of its new Lucene
 shows as incomplete, and `D` offers it again; one whose jars leia can't rewrite shows as outdated. Behind a proxy, start leia as `LEIA_OPTS=-Djava.net.useSystemProxies=true leia`.
 
@@ -133,8 +136,8 @@ leia [OPTIONS] [INDEX_PATH]
 it. `leia` resolves symlinks, so a link to it in `~/bin` works; on Windows, put the folder on
 `PATH`. The environment variable `LEIA_OPTS` holds options for the JVM, such as `-Xmx4g`.
 
-leia logs to `~/.local/state/leia/leia.log` (`$XDG_STATE_HOME/leia/leia.log` if that is set), or
-`%LOCALAPPDATA%\leia\leia.log` on Windows, written anew on each start. `LEIA_OPTS=-Dleia.log.level=FINE`
+leia logs to `$XDG_STATE_HOME/leia/leia.log` if that is set and can be written, else
+`~/.local/state/leia/leia.log`, or `%LOCALAPPDATA%\leia\leia.log` on Windows, written anew on each start. `LEIA_OPTS=-Dleia.log.level=FINE`
 logs every call to the backend with its result.
 
 leia keeps the last 10 opened index paths for the open prompt in `~/.local/state/leia/history`

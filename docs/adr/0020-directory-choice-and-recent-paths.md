@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-07
+- **Amended by:** ADR 0122 (the history is written to the first writable state folder and read from the first that has one)
 
 ## Context
 

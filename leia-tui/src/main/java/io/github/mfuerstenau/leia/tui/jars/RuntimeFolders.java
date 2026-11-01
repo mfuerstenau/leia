@@ -2,37 +2,51 @@ package io.github.mfuerstenau.leia.tui.jars;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
 
 /**
- * The runtimes folder, {@code runtimes} beside {@code leia.jar} or in the user's data folder (ADR
- * 0098), with a folder for each runtime, such as {@code lucene9} (ADR 0044, ADR 0073). The backend loads it at every start, before the jars of {@code
- * --jar} and the default folder, whatever {@code --no-default-jars} says; {@code getRuntimes} says
- * which runtimes it loaded.
+ * The runtimes folders, {@code runtimes} beside {@code leia.jar} and in the user's and the system's
+ * data folders (ADR 0098, ADR 0122), with a folder for each runtime, such as {@code lucene9} (ADR
+ * 0044, ADR 0073). The backend loads them at every start, before the jars of {@code --jar} and the
+ * default folder, whatever {@code --no-default-jars} says, each runtime from the first folder that
+ * has it; {@code getRuntimes} says which runtimes it loaded, and from where.
  *
- * @param dir the folder; empty if leia doesn't run from {@code leia.jar}, as under Gradle without
- *     {@code -Dleia.runtimes}
+ * @param dirs the folders, in the order they are looked up in; empty if leia doesn't run from {@code
+ *     leia.jar}, as under Gradle without {@code -Dleia.runtimes}
  */
-public record RuntimeFolders(Optional<Path> dir) {
+public record RuntimeFolders(List<Path> dirs) {
+
+    public RuntimeFolders {
+        dirs = List.copyOf(dirs);
+    }
+
+    /** One folder, or none. */
+    public RuntimeFolders(Optional<Path> dir) {
+        this(dir.stream().toList());
+    }
 
     /** No folder: leia doesn't run from {@code leia.jar}. */
     public static RuntimeFolders none() {
-        return new RuntimeFolders(Optional.empty());
+        return new RuntimeFolders(List.of());
     }
 
-    /** Whether the folder is there. */
+    /** The first folder, the one that leia looks in first. */
+    public Optional<Path> dir() {
+        return dirs.stream().findFirst();
+    }
+
+    /** Whether any of the folders is there. */
     public boolean exists() {
-        return dir.filter(Files::isDirectory).isPresent();
+        return dirs.stream().anyMatch(Files::isDirectory);
     }
 
     /** The runtime's folder that {@code jar} is in, such as {@code runtimes/lucene10}, if it is in one. */
     public Optional<String> folderOf(Path jar) {
         Path parent = jar.getParent();
-        if (dir.isEmpty() || parent == null || parent.getFileName() == null) {
+        if (dirs.isEmpty() || parent == null || parent.getFileName() == null) {
             return Optional.empty();
         }
-        return dir.get().equals(parent.getParent())
-                ? Optional.of("runtimes/" + parent.getFileName())
-                : Optional.empty();
+        return dirs.contains(parent.getParent()) ? Optional.of("runtimes/" + parent.getFileName()) : Optional.empty();
     }
 }

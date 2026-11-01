@@ -145,6 +145,17 @@ class MainTest {
     }
 
     @Test
+    void saysWhyAThemeNamedByThemeWasLeftOut() throws Exception {
+        Path themes = Files.createDirectories(configDir.resolve("leia/themes"));
+        Files.writeString(themes.resolve("broken.theme"), "base = none\n");
+
+        assertThat(run("--theme", "broken")).isEqualTo(2);
+
+        assertThat(err()).contains("leia: theme broken left out: ").contains("broken.theme: missing error");
+        assertThat(err()).doesNotContain("possible values");
+    }
+
+    @Test
     void reportsAJarThatDoesNotExist() throws Exception {
         Path missing = tmp.resolve("missing.jar");
 

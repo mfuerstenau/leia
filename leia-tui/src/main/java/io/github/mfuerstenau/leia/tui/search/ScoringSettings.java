@@ -115,7 +115,7 @@ public final class ScoringSettings {
      * A copy with the first sort level reversed, as {@code S} on the search screen asks for (ADR
      * 0120); without a sort, the score with the worst hits first.
      */
-    ScoringSettings reversed() {
+    ScoringSettings withFirstLevelReversed() {
         ScoringSettings copy = copy();
         SortLevel first = levels[0];
         copy.levels[0] = first == null

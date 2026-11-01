@@ -100,6 +100,19 @@ class AppThemeTest {
     }
 
     @Test
+    void aRefusedUserThemeIsNamedOnTheStartScreenOnce() throws Exception {
+        Path themesDir = Files.createDirectories(dir.resolve("themes"));
+        Files.writeString(themesDir.resolve("old.theme"), "base = none\n");
+        App app = app().withThemes(Themes.bundled().withUserDir(Optional.of(themesDir)), ThemeFile.none());
+
+        assertThat(TestScreens.render(app::render, 200, 30))
+                .contains("Theme left out: ")
+                .contains("old.theme");
+        app.handleKey(key('z'));
+        assertThat(TestScreens.render(app::render, 200, 30)).doesNotContain("Theme left out");
+    }
+
+    @Test
     void tInTheOpenPromptIsTyped() {
         App app = app();
         app.handleKey(key('o'));

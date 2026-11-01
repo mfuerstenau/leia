@@ -50,6 +50,21 @@ class ThemeFileTest {
     }
 
     @Test
+    void readsTheSystemsDefaultAndSavesToTheUsersFolder() throws Exception {
+        Path system = dir.resolve("etc/leia/theme");
+        Files.createDirectories(system.getParent());
+        Files.writeString(system, "light\n");
+        Path user = dir.resolve("home/leia/theme");
+        ThemeFile themeFile = new ThemeFile(Optional.of(system), Optional.of(user));
+
+        assertThat(themeFile.load(THEMES)).hasValue(LIGHT);
+        themeFile.save(NORD);
+
+        assertThat(user).hasContent("nord");
+        assertThat(system).hasContent("light\n");
+    }
+
+    @Test
     void aFailedWriteIsIgnored() throws Exception {
         Path notADir = dir.resolve("file");
         Files.writeString(notADir, "");

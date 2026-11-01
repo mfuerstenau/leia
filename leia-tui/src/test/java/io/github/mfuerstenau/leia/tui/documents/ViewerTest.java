@@ -189,13 +189,13 @@ class ViewerTest {
     void wrapsAcrossStyles() {
         List<Segment> line = List.of(
                 segment(Palette.current().accent(), "key"),
-                segment(Viewer.dim(), " = "),
+                segment(Viewer.muted(), " = "),
                 segment(Style.EMPTY, "value"));
 
         assertThat(wrap(line, 5, new ArrayList<>()))
                 .containsExactly(
-                        Line.from(Span.styled("key", Palette.current().accent()), Span.styled(" =", Viewer.dim())),
-                        Line.from(Span.styled(" ", Viewer.dim()), Span.styled("valu", Style.EMPTY)),
+                        Line.from(Span.styled("key", Palette.current().accent()), Span.styled(" =", Viewer.muted())),
+                        Line.from(Span.styled(" ", Viewer.muted()), Span.styled("valu", Style.EMPTY)),
                         Line.from(Span.styled("e", Style.EMPTY)));
     }
 
@@ -415,7 +415,7 @@ class ViewerTest {
                 .containsExactly("id    = 7", "name  = a=b", "junk", longKey + " = x", "tab\\t = y");
         assertThat(formatted.lines().getFirst().get(0))
                 .isEqualTo(segment(Palette.current().accent(), "id"));
-        assertThat(formatted.lines().getFirst().get(2)).isEqualTo(segment(Viewer.dim(), " = "));
+        assertThat(formatted.lines().getFirst().get(2)).isEqualTo(segment(Viewer.muted(), " = "));
     }
 
     @Test

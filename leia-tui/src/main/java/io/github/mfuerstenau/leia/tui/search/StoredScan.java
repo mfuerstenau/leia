@@ -6,7 +6,6 @@ import static io.github.mfuerstenau.leia.tui.widgets.Panels.right;
 
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
 import dev.tamboui.text.Span;
@@ -252,7 +251,7 @@ public final class StoredScan {
                                 Cell.from("Field"),
                                 Cell.from("Matches"),
                                 Cell.from("Value"))
-                        .style(Style.EMPTY.bold()))
+                        .style(Palette.current().heading()))
                 .widths(
                         Constraint.length(Math.max(rankWidth, 1)),
                         Constraint.length(docWidth + 1),
@@ -296,7 +295,7 @@ public final class StoredScan {
             lines.add(Line.from("Doc " + hit.docId() + " · " + fieldText(hit) + " · " + TextFormat.size(hit.length())
                     + " · " + (hit.matchCount() == 1 ? "1 match" : hit.matchCount() + " matches")
                     + (hit.deleted() ? " · deleted" : "")));
-            lines.add(Line.styled("⏎ opens the document · v views the value with its matches", Form.dim()));
+            lines.add(Line.styled("⏎ opens the document · v views the value with its matches", Form.muted()));
             lines.add(Line.empty());
         });
         lines.add(Line.from("Pattern    /" + TextFormat.escapeControl(params.pattern()) + "/"
@@ -314,7 +313,7 @@ public final class StoredScan {
                 lines.add(Line.styled(
                         "Only the first " + StartStoredScanParams.MAX_HITS
                                 + " values are listed; the counts are of all of them.",
-                        Form.dim()));
+                        Form.muted()));
             }
             lines.addAll(timedOutLines());
         }
@@ -370,11 +369,11 @@ public final class StoredScan {
         long start = snippet.start();
         List<Span> spans = new ArrayList<>();
         if (start > 0) {
-            spans.add(Span.styled("…", Form.dim()));
+            spans.add(Span.styled("…", Form.muted()));
         }
         spans.addAll(TextFormat.marked(text, 0, text.length(), TextFormat.charRanges(text, start, matches)));
         if (start + TextFormat.utf8Length(text) < valueLength) {
-            spans.add(Span.styled("…", Form.dim()));
+            spans.add(Span.styled("…", Form.muted()));
         }
         return spans;
     }

@@ -18,6 +18,7 @@ import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,14 +32,15 @@ import java.util.zip.ZipEntry;
 /**
  * The folders of the runtimes folder, one per runtime, each with the runtime's adapter jar and the
  * jars it lists in {@value #LIST} (ADR 0073): the official Lucene jars and, for Lucene 10,
- * leia-core's. The runtimes folder is {@code runtimes/} beside {@code leia.jar}, or the user's data
- * folder (ADR 0098).
+ * leia-core's. The runtimes folders are {@code runtimes/} beside {@code leia.jar}, the data folders'
+ * (ADR 0098, ADR 0122).
  *
  * <p>An old runtime gets a class loader of its own, whose parent sees only the JDK and the runtime
  * interface, so that its Lucene meets no other. Lucene 10's folder becomes the first link of the
  * {@link JarChain} instead, since the jars of {@code --jar} link against its Lucene (ADR 0065).
  *
- * <p>A folder that is missing, incomplete or refused is not fatal: leia starts, and {@code
+ * <p>Each runtime is looked up in the runtimes folders one at a time, user folders first, then system ones (ADR 0122).
+ * A folder that is missing, incomplete or refused is not fatal: leia starts, and {@code
  * getRuntimes} says what is wrong. A folder whose adapter isn't the one {@code leia.jar} embeds is
  * another leia's, and is refused as outdated (ADR 0098). The folders are loaded per JVM, like the jar chain: at startup, and
  * again by {@code loadRuntimes} after a download (ADR 0080); a folder that is loaded stays loaded.
@@ -117,7 +119,10 @@ public final class RuntimeFolders {
     private static volatile List<String> chainRefusals = List.of();
 
     @SuppressWarnings("java:S3077")
-    private static volatile Optional<Path> dir = Optional.empty();
+    private static volatile List<RuntimesDir> dirs = List.of();
+
+    @SuppressWarnings("java:S3077")
+    private static volatile Map<Known, Path> loadedFrom = Map.of();
 
     private RuntimeFolders() {}
 
@@ -137,41 +142,103 @@ public final class RuntimeFolders {
     }
 
     /**
-     * Loads the folders of {@code dir} whose runtime isn't loaded yet. Lucene 10's goes into the jar
-     * chain, so this comes before the jars of {@code --jar}.
+     * Loads the runtimes from the folder {@code dir}, as one user folder.
+     *
+     * @see #load(List)
      */
     public static synchronized void load(Path dir) {
-        RuntimeFolders.dir = Optional.of(dir);
+        load(List.of(RuntimesDir.user(dir)));
+    }
+
+    /**
+     * Loads the runtimes that aren't loaded yet, each from the first of {@code dirs} whose folder for
+     * it is complete and usable (ADR 0122): a folder that is missing, incomplete or refused is passed
+     * over for the next, and if none loads, the first state that isn't {@code Missing} is the
+     * runtime's, since it says the most. A system folder is checked jar by jar against the list of its
+     * adapter first. Lucene 10's goes into the jar chain, so this comes before the jars of {@code
+     * --jar}.
+     */
+    public static synchronized void load(List<RuntimesDir> dirs) {
+        RuntimeFolders.dirs = List.copyOf(dirs);
+        ClassLoader embedded = RuntimeFolders.class.getClassLoader();
         Map<Known, State> now = new LinkedHashMap<>(states);
+        Map<Known, Path> from = new LinkedHashMap<>(loadedFrom);
         List<LuceneRuntime> loaded = new ArrayList<>(runtimes);
         for (Known known : KNOWN) {
             if (now.get(known) instanceof State.Loaded) {
                 continue;
             }
-            State state = loadFolder(dir.resolve(known.folder()), known, loaded);
+            Found lookedUp = lookUp(known, dirs, loaded, embedded);
+            State state = lookedUp.state();
+            Optional<Path> found = lookedUp.folder();
             now.put(known, state);
+            if (found.isPresent() && state instanceof State.Loaded) {
+                from.put(known, found.get());
+            }
+            Path where = found.orElse(Path.of(known.folder()));
             switch (state) {
-                case State.Loaded _ -> LOG.info(() -> "Loaded the runtime " + dir.resolve(known.folder()));
-                case State.Missing _ -> LOG.info(() -> "No runtime " + dir.resolve(known.folder()));
+                case State.Loaded _ -> LOG.info(() -> "Loaded the runtime " + where);
+                case State.Missing _ -> LOG.info(() -> "No runtime " + known.folder() + " in " + dirs);
                 case State.Incomplete incomplete ->
-                    LOG.warning(() -> "The runtime " + dir.resolve(known.folder()) + " lacks " + incomplete.jar());
+                    LOG.warning(() -> "The runtime " + where + " lacks " + incomplete.jar());
                 case State.Refused refused ->
-                    LOG.warning(() -> "Refused the runtime " + dir.resolve(known.folder()) + ": " + refused.reason());
+                    LOG.warning(() -> "Refused the runtime " + where + ": " + refused.reason());
                 case State.Restart _ ->
-                    LOG.info(() -> "The runtime " + dir.resolve(known.folder())
+                    LOG.info(() -> "The runtime " + where
                             + " is complete, but the jar chain has jars; restart leia to load it");
             }
         }
         runtimes = List.copyOf(loaded);
         states = Map.copyOf(now);
+        loadedFrom = Map.copyOf(from);
     }
 
     /**
-     * Loads the folders of the {@code runtimes/} that {@link #load} was given whose runtime isn't
-     * loaded yet, such as those just downloaded (ADR 0080); does nothing if {@link #load} never ran.
+     * How a runtime was found.
+     *
+     * @param state the state
+     * @param folder the folder the state is of; empty if no folder had the runtime
+     */
+    record Found(State state, Optional<Path> folder) {}
+
+    /**
+     * Looks for the runtime {@code known} in {@code dirs}, in order, and loads it from the first folder
+     * that is usable, adding it to {@code loaded}. If none is, the first state that isn't {@code
+     * Missing}, with its folder, or {@code Missing}.
+     */
+    static Found lookUp(Known known, List<RuntimesDir> dirs, List<LuceneRuntime> loaded, ClassLoader embedded) {
+        Found best = new Found(new State.Missing(), Optional.empty());
+        for (RuntimesDir dir : dirs) {
+            Path folder = dir.path().resolve(known.folder());
+            Inspection inspection = inspect(folder, known, dir.system(), embedded);
+            if (inspection instanceof Inspection.Ready ready) {
+                // The load itself happens once: Lucene 10's can't be undone.
+                return new Found(loadJars(known, ready.jars(), loaded), Optional.of(folder));
+            }
+            State unusable = ((Inspection.Unusable) inspection).state();
+            if (best.state() instanceof State.Missing && !(unusable instanceof State.Missing)) {
+                best = new Found(unusable, Optional.of(folder));
+            }
+        }
+        return best;
+    }
+
+    /**
+     * Loads the folders of the {@code dirs} that {@link #load} was given whose runtime isn't loaded
+     * yet, such as those just downloaded (ADR 0080); does nothing if {@link #load} never ran.
      */
     public static synchronized void reload() {
-        dir.ifPresent(RuntimeFolders::load);
+        if (!dirs.isEmpty()) {
+            load(dirs);
+        }
+    }
+
+    /** What looking into a runtime's folder found: jars to load, or why not. */
+    private sealed interface Inspection {
+
+        record Ready(List<Path> jars) implements Inspection {}
+
+        record Unusable(State state) implements Inspection {}
     }
 
     /**
@@ -187,29 +254,80 @@ public final class RuntimeFolders {
      * adapters that {@code leia.jar} embeds under {@value #EMBEDDED}.
      */
     static State loadFolder(Path folder, Known known, List<LuceneRuntime> loaded, ClassLoader embedded) {
+        return switch (inspect(folder, known, false, embedded)) {
+            case Inspection.Ready ready -> loadJars(known, ready.jars(), loaded);
+            case Inspection.Unusable unusable -> unusable.state();
+        };
+    }
+
+    /**
+     * Looks into {@code folder}: is the adapter there, is it leia's own, are the jars its list names
+     * there; and, for a {@code system} folder, do they match the SHA-256 and size of the list. Loads
+     * nothing.
+     */
+    private static Inspection inspect(Path folder, Known known, boolean system, ClassLoader embedded) {
         Path adapter = folder.resolve(known.adapterJar());
         if (!Files.isRegularFile(adapter)) {
-            return new State.Missing();
+            return new Inspection.Unusable(new State.Missing());
         }
         Optional<String> outdated = outdated(adapter, known, embedded);
         if (outdated.isPresent()) {
-            return new State.Refused(outdated.get());
+            return new Inspection.Unusable(new State.Refused(outdated.get()));
         }
-        List<String> listed;
+        if (system && embedded.getResource(EMBEDDED + known.folder() + "/" + known.adapterJar()) == null) {
+            return new Inspection.Unusable(new State.Refused(
+                    "cannot trust " + adapter + " in a system folder: leia.jar embeds no adapter to compare it with"));
+        }
+        List<ListedJar> listed;
         try {
-            listed = listedJars(adapter);
+            listed = listed(adapter);
         } catch (IOException e) {
-            return new State.Refused("cannot read " + LIST + " of " + adapter + ": " + e.getMessage());
+            return new Inspection.Unusable(
+                    new State.Refused("cannot read " + LIST + " of " + adapter + ": " + e.getMessage()));
         }
         List<Path> jars = new ArrayList<>();
         jars.add(adapter);
-        for (String name : listed) {
-            Path jar = folder.resolve(name);
+        for (ListedJar each : listed) {
+            Path jar = folder.resolve(each.name());
             if (!Files.isRegularFile(jar)) {
-                return new State.Incomplete(name);
+                return new Inspection.Unusable(new State.Incomplete(each.name()));
             }
             jars.add(jar);
         }
+        if (system) {
+            Optional<String> tampered = mismatch(folder, listed);
+            if (tampered.isPresent()) {
+                return new Inspection.Unusable(new State.Refused(tampered.get()));
+            }
+        }
+        return new Inspection.Ready(jars);
+    }
+
+    /**
+     * Why a jar of {@code listed} in {@code folder} isn't the one the list describes: its size or
+     * SHA-256 differs. Empty if each jar that is there matches. A system folder may be writable by
+     * others (ADR 0122), so its jars are trusted only by their hash.
+     */
+    static Optional<String> mismatch(Path folder, List<ListedJar> listed) {
+        for (ListedJar each : listed) {
+            Path jar = folder.resolve(each.name());
+            try {
+                if (Files.size(jar) != each.size()) {
+                    return Optional.of(jar + " is not the jar leia lists: its size differs");
+                }
+                try (InputStream in = Files.newInputStream(jar)) {
+                    if (!HexFormat.of().formatHex(sha256(in)).equalsIgnoreCase(each.sha256())) {
+                        return Optional.of(jar + " is not the jar leia lists: its SHA-256 differs");
+                    }
+                }
+            } catch (IOException e) {
+                return Optional.of("cannot check " + jar + ": " + e.getMessage());
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static State loadJars(Known known, List<Path> jars, List<LuceneRuntime> loaded) {
         if (!known.equals(LATEST)) {
             return loadAlone(known, jars, loaded);
         }
@@ -385,6 +503,11 @@ public final class RuntimeFolders {
     /** How the folder of {@code known} was found. */
     public static State state(Known known) {
         return states.get(known);
+    }
+
+    /** The folder that the runtime of {@code known} was loaded from, if it was loaded from one (ADR 0122). */
+    public static Optional<Path> loadedFrom(Known known) {
+        return Optional.ofNullable(loadedFrom.get(known));
     }
 
     /** What the jar chain refused when Lucene 10's folder was loaded into it; not fatal. */

@@ -399,6 +399,10 @@ public final class App {
     public App withThemes(Themes themes, ThemeFile themeFile) {
         this.themes = themes;
         this.themeFile = themeFile;
+        if (!themes.leftOut().isEmpty()) {
+            notice = new Notice.ThemesLeftOut(
+                    themes.leftOut().stream().map(Themes.LeftOut::reason).toList());
+        }
         return this;
     }
 
@@ -3106,7 +3110,7 @@ public final class App {
 
     private Span tabSpan(Screen tab) {
         if (tab == screen) {
-            return Span.styled(tab.title(), Style.EMPTY.reversed());
+            return Span.styled(tab.title(), Palette.current().selection());
         }
         return supports(tab)
                 ? Span.raw(tab.title())

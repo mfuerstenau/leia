@@ -19,8 +19,17 @@ import java.util.stream.Stream;
  * {@code light}, {@code mono}, {@code nord}, {@code solarized-dark} and {@code solarized-light}, then the user's own from the themes folder.
  *
  * @param themes the themes; never empty, and {@code dark} among them
+ * @param leftOut the theme files of the user's that were read and refused, with why (ADR 0121)
  */
-public record Themes(List<Theme> themes) {
+public record Themes(List<Theme> themes, List<LeftOut> leftOut) {
+
+    /**
+     * A theme file of the user's that leia refused.
+     *
+     * @param id the theme it would have been, from the file's name
+     * @param reason why, naming the file
+     */
+    public record LeftOut(String id, String reason) {}
 
     private static final Logger LOG = Logger.getLogger(Themes.class.getName());
 
@@ -61,6 +70,12 @@ public record Themes(List<Theme> themes) {
 
     public Themes {
         themes = List.copyOf(themes);
+        leftOut = List.copyOf(leftOut);
+    }
+
+    /** These themes, none of the user's left out. */
+    public Themes(List<Theme> themes) {
+        this(themes, List.of());
     }
 
     /** The bundled themes. A bundled file that is broken is a bug of the build, and throws. */
@@ -71,7 +86,7 @@ public record Themes(List<Theme> themes) {
     /**
      * These themes and those of {@code dir}, each a {@code <id>.theme} file, in the order of their
      * names, whose icons come from {@code dir} or leia's own (ADR 0099). One with the id of a theme here replaces it in its place; the others come after. A
-     * file that can't be read, or whose name is no id, is logged and left out: a broken theme
+     * file that can't be read, or whose name is no id, is logged and left out, and named in {@link #leftOut}: a broken theme
      * mustn't stop leia.
      */
     public Themes withUserDir(Optional<Path> dir) {
@@ -89,11 +104,14 @@ public record Themes(List<Theme> themes) {
         }
         Icons icons = Icons.bundled().withUserDir(dir.get());
         List<Theme> merged = new ArrayList<>(themes);
+        List<LeftOut> refused = new ArrayList<>(leftOut);
         for (Path file : files) {
             String name = file.getFileName().toString();
             String id = name.substring(0, name.length() - SUFFIX.length());
             if (!ID.matcher(id).matches()) {
-                LOG.warning(() -> "Theme " + file + " left out: its name is to be lower-case letters, digits and -");
+                String reason = file + ": its name is to be lower-case letters, digits and -";
+                LOG.warning(() -> "Theme left out: " + reason);
+                refused.add(new LeftOut(id, reason));
                 continue;
             }
             Palette palette;
@@ -101,9 +119,11 @@ public record Themes(List<Theme> themes) {
                 palette = ThemeParser.parse(file.toString(), Files.readString(file, StandardCharsets.UTF_8), icons);
             } catch (IOException e) {
                 LOG.log(Level.WARNING, "Theme " + file + " left out: it can't be read", e);
+                refused.add(new LeftOut(id, file + ": it can't be read"));
                 continue;
             } catch (ThemeParser.Invalid e) {
                 LOG.warning(() -> "Theme left out: " + e.getMessage());
+                refused.add(new LeftOut(id, e.getMessage()));
                 continue;
             }
             Theme theme = new Theme(id, palette);
@@ -116,7 +136,20 @@ public record Themes(List<Theme> themes) {
                 merged.add(theme);
             }
         }
-        return new Themes(merged);
+        return new Themes(merged, refused);
+    }
+
+    /**
+     * These themes and those of {@code dirs}, which are folders of theme files in order of
+     * precedence, the one that wins a clash of names first (ADR 0122): applied from the last, so that
+     * an earlier folder's theme replaces a later one's.
+     */
+    public Themes withDirs(List<Path> dirs) {
+        Themes merged = this;
+        for (Path dir : dirs.reversed()) {
+            merged = merged.withUserDir(Optional.of(dir));
+        }
+        return merged;
     }
 
     /** The theme named {@code id}, if there is one. */

@@ -48,10 +48,10 @@ class PanelsTest {
         for (String id : Themes.bundled().ids()) {
             Palette.use(Themes.bundled().find(id).orElseThrow());
 
-            assertThat(Form.dim()).isEqualTo(Palette.current().muted());
+            assertThat(Form.muted()).isEqualTo(Palette.current().muted());
         }
         Palette.use(Themes.bundled().find("light").orElseThrow());
-        assertThat(Form.dim().fg()).contains(Color.indexed(245));
+        assertThat(Form.muted().fg()).contains(Color.indexed(245));
     }
 
     @Test

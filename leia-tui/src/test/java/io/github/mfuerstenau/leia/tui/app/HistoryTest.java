@@ -66,6 +66,21 @@ class HistoryTest {
     }
 
     @Test
+    void readsFromOneStateFolderAndWritesToAnother() throws IOException {
+        Path old = tmp.resolve("old/history");
+        Files.createDirectories(old.getParent());
+        Files.writeString(old, "/a\n");
+        Path moved = tmp.resolve("new/history");
+
+        History history = History.load(old, moved);
+        assertThat(history.paths()).containsExactly("/a");
+        history.add("/b");
+
+        assertThat(Files.readString(moved)).isEqualTo("/b\n/a\n");
+        assertThat(Files.readString(old)).isEqualTo("/a\n");
+    }
+
+    @Test
     void readsAFileThatWasEditedByHand() throws IOException {
         Path file = tmp.resolve("history");
         List<String> lines = new ArrayList<>(List.of("/a", "", "/b", "/a"));

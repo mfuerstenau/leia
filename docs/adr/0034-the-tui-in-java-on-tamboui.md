@@ -4,7 +4,7 @@
 - **Date:** 2026-10-09
 - **Supersedes:** ADR 0001, ADR 0003
 - **Amends:** ADR 0004 (the folders and the launch), ADR 0005 decision 2 (the transport)
-- **Amended by:** ADR 0082 (§9: one `dist/leia-<version>.zip` instead of a folder per OS), ADR 0087 (§7: the log window, `L`, which also sets the level)
+- **Amended by:** ADR 0082 (§9: one `dist/leia-<version>.zip` instead of a folder per OS), ADR 0087 (§7: the log window, `L`, which also sets the level), ADR 0122 (§7: the log goes to the first writable state folder)
 
 ## Context
 

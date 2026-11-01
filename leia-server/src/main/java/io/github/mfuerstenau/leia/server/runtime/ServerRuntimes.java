@@ -102,7 +102,18 @@ public final class ServerRuntimes {
      *     no adapter for, an adapter that isn't installed, a second server for one major; none of
      *     them is loaded then
      */
-    public static synchronized void load(List<Path> paths, Optional<Path> runtimesDir) throws ServerException {
+    public static void load(List<Path> paths, Optional<Path> runtimesDir) throws ServerException {
+        load(paths, runtimesDir.map(RuntimesDir::user).stream().toList());
+    }
+
+    /**
+     * Loads the servers at {@code paths}, each an installation's home or its {@code lib/}, with the
+     * adapters of {@code runtimesDirs}: for each, the adapter of the first folder that has one that is
+     * current (ADR 0122). A server that is loaded already isn't loaded again.
+     *
+     * @throws ServerException as {@link #load(List, Optional)}
+     */
+    public static synchronized void load(List<Path> paths, List<RuntimesDir> runtimesDirs) throws ServerException {
         List<ServerRuntime> loaded = new ArrayList<>(runtimes);
         List<URLClassLoader> fresh = new ArrayList<>();
         try {
@@ -111,7 +122,7 @@ public final class ServerRuntimes {
                     .distinct()
                     .toList()) {
                 if (loaded.stream().noneMatch(runtime -> runtime.home().equals(path))) {
-                    loaded.add(load(path, runtimesDir, loaded, fresh));
+                    loaded.add(load(path, runtimesDirs, loaded, fresh));
                 }
             }
         } catch (ServerException | RuntimeException e) {
@@ -124,7 +135,7 @@ public final class ServerRuntimes {
     }
 
     private static ServerRuntime load(
-            Path home, Optional<Path> runtimesDir, List<ServerRuntime> loaded, List<URLClassLoader> fresh)
+            Path home, List<RuntimesDir> runtimesDirs, List<ServerRuntime> loaded, List<URLClassLoader> fresh)
             throws ServerException {
         Path lib = lib(home)
                 .orElseThrow(() -> new ServerException(
@@ -143,13 +154,13 @@ public final class ServerRuntimes {
                                 + other.home() + "; one server per major can be read");
             }
         }
-        Path folder = runtimesDir
-                .map(dir -> dir.resolve(known.folder()))
-                .orElseThrow(() -> new ServerException(
-                        home,
-                        "it needs leia's adapter in runtimes/" + known.folder()
-                                + ", and leia has no runtimes folder, since it doesn't run from leia.jar"));
-        List<Path> adapterJars = adapterJars(home, folder, known);
+        if (runtimesDirs.isEmpty()) {
+            throw new ServerException(
+                    home,
+                    "it needs leia's adapter in runtimes/" + known.folder()
+                            + ", and leia has no runtimes folder, since it doesn't run from leia.jar");
+        }
+        List<Path> adapterJars = adapterJars(home, runtimesDirs, known);
         String builtFor = builtFor(adapterJars.getFirst());
         List<Path> jars = new ArrayList<>(adapterJars);
         // Sorted by name; the plugins' jars only as pluginJars says.
@@ -192,9 +203,31 @@ public final class ServerRuntimes {
 
     /**
      * The adapter and the jars its list names that {@code leia.jar} brings: leia's own, such as
-     * leia-core for Lucene 10. The folder's Lucene isn't needed, so the folder needn't be complete.
+     * leia-core for Lucene 10, from the first of {@code dirs} that has them. The folder's Lucene isn't
+     * needed, so the folder needn't be complete. If no folder does, the first problem found.
      */
-    private static List<Path> adapterJars(Path home, Path folder, RuntimeFolders.Known known) throws ServerException {
+    private static List<Path> adapterJars(Path home, List<RuntimesDir> dirs, RuntimeFolders.Known known)
+            throws ServerException {
+        ServerException missing = null;
+        ServerException refused = null;
+        for (RuntimesDir dir : dirs) {
+            Path folder = dir.path().resolve(known.folder());
+            try {
+                return adapterJars(home, dir, folder, known);
+            } catch (ServerException e) {
+                // A folder without the adapter says least.
+                if (Files.isRegularFile(folder.resolve(known.adapterJar()))) {
+                    refused = refused == null ? e : refused;
+                } else {
+                    missing = missing == null ? e : missing;
+                }
+            }
+        }
+        throw refused != null ? refused : missing;
+    }
+
+    private static List<Path> adapterJars(Path home, RuntimesDir dir, Path folder, RuntimeFolders.Known known)
+            throws ServerException {
         Path adapter = folder.resolve(known.adapterJar());
         String install = "install the runtime " + known.folder() + " with D on leia's start screen, or with leia"
                 + " --download-runtimes --runtime " + known.folder();
@@ -208,13 +241,20 @@ public final class ServerRuntimes {
         List<Path> jars = new ArrayList<>();
         jars.add(adapter);
         try {
-            for (RuntimeFolders.ListedJar listed : RuntimeFolders.listed(adapter)) {
-                if (listed.mavenPath().isEmpty()) {
-                    Path jar = folder.resolve(listed.name());
-                    if (!Files.isRegularFile(jar)) {
-                        throw new ServerException(home, "it needs " + jar + ", which isn't there; " + install);
-                    }
-                    jars.add(jar);
+            List<RuntimeFolders.ListedJar> own = RuntimeFolders.listed(adapter).stream()
+                    .filter(listed -> listed.mavenPath().isEmpty())
+                    .toList();
+            for (RuntimeFolders.ListedJar listed : own) {
+                Path jar = folder.resolve(listed.name());
+                if (!Files.isRegularFile(jar)) {
+                    throw new ServerException(home, "it needs " + jar + ", which isn't there; " + install);
+                }
+                jars.add(jar);
+            }
+            if (dir.system()) {
+                Optional<String> tampered = RuntimeFolders.mismatch(folder, own);
+                if (tampered.isPresent()) {
+                    throw new ServerException(home, "it needs leia's jars, but " + tampered.get());
                 }
             }
         } catch (IOException e) {

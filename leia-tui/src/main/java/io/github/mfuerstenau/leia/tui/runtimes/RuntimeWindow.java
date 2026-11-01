@@ -386,7 +386,7 @@ public final class RuntimeWindow {
                                 ? "Cancelling…"
                                 : "Downloading " + TextFormat.count(progress.jarCount(), "jar") + " into "
                                         + install.runtimesDir(),
-                        Style.EMPTY.bold())));
+                        Palette.current().heading())));
             default -> doneHeader();
         };
     }
@@ -407,13 +407,14 @@ public final class RuntimeWindow {
                                     .map(runtime -> runtime.known().folder())
                                     .toList())));
         }
-        header.add(Line.from(Span.styled(checkedTotal(), Style.EMPTY.bold())));
+        header.add(Line.from(Span.styled(checkedTotal(), Palette.current().heading())));
         return header;
     }
 
     private List<Line> doneHeader() {
         List<Line> header = new ArrayList<>();
-        header.add(Line.from(Span.styled("Done: " + install.runtimesDir(), Style.EMPTY.bold())));
+        header.add(Line.from(
+                Span.styled("Done: " + install.runtimesDir(), Palette.current().heading())));
         for (String line : progress.outcome().summary()) {
             header.add(
                     line.contains(": failed: ")
@@ -538,8 +539,9 @@ public final class RuntimeWindow {
     /** What {@code runtime} downloads from where, what it keeps, and what comes from leia.jar. */
     private static List<Line> details(RuntimeInstall.RuntimePlan runtime) {
         List<Line> lines = new ArrayList<>();
-        lines.add(Line.from(
-                Span.styled("To download into runtimes/" + runtime.known().folder() + ":", Style.EMPTY.bold())));
+        lines.add(Line.from(Span.styled(
+                "To download into runtimes/" + runtime.known().folder() + ":",
+                Palette.current().heading())));
         for (RuntimeInstall.Download download : runtime.downloads()) {
             // Unindented: a URL or a SHA-256 wraps on a narrow screen, and loses its indent then.
             lines.add(Line.from("• " + download.jar().name() + ", "
@@ -550,7 +552,8 @@ public final class RuntimeWindow {
         }
         if (!runtime.kept().isEmpty()) {
             lines.add(Line.empty());
-            lines.add(Line.from(Span.styled("Already there and matching:", Style.EMPTY.bold())));
+            lines.add(Line.from(
+                    Span.styled("Already there and matching:", Palette.current().heading())));
             runtime.kept().forEach(jar -> lines.add(Line.from("  " + jar.name())));
         }
         ownJars(runtime, lines);
@@ -568,6 +571,7 @@ public final class RuntimeWindow {
         if (state != null && state.state() == RuntimeState.LOADED) {
             lines.add(Line.from("Loaded"
                     + state.luceneVersion().map(v -> " (Lucene " + v + ")").orElse("")
+                    + state.path().map(path -> " from " + path).orElse("")
                     + ". Its jars are open, so the download leaves runtimes/" + folder + " alone."));
         } else if (state != null && state.state() == RuntimeState.REFUSED) {
             lines.add(Line.styled(
@@ -577,7 +581,8 @@ public final class RuntimeWindow {
             lines.add(Line.from("Complete; restart leia to load it."));
         }
         lines.add(Line.empty());
-        lines.add(Line.from(Span.styled("Lucene jars in runtimes/" + folder + ":", Style.EMPTY.bold())));
+        lines.add(Line.from(Span.styled(
+                "Lucene jars in runtimes/" + folder + ":", Palette.current().heading())));
         Set<String> mismatched = new LinkedHashSet<>();
         runtime.downloads().forEach(download -> mismatched.add(download.jar().name()));
         for (RuntimeFolders.ListedJar jar : runtime.listed()) {
@@ -603,7 +608,7 @@ public final class RuntimeWindow {
     /** Adds what of {@code runtime} comes from leia.jar to {@code lines}. */
     private static void ownJars(RuntimeInstall.RuntimePlan runtime, List<Line> lines) {
         lines.add(Line.empty());
-        lines.add(Line.from(Span.styled("From leia.jar:", Style.EMPTY.bold())));
+        lines.add(Line.from(Span.styled("From leia.jar:", Palette.current().heading())));
         runtime.ownJars().forEach(jar -> lines.add(Line.from("  " + jar)));
     }
 
@@ -796,7 +801,9 @@ public final class RuntimeWindow {
             List<Line> lines = new ArrayList<>();
             for (RuntimeInstall.RuntimePlan runtime : runtimes) {
                 String folder = runtime.known().folder();
-                lines.add(Line.from(Span.styled(runtime.known().name() + " · runtimes/" + folder, Style.EMPTY.bold())));
+                lines.add(Line.from(Span.styled(
+                        runtime.known().name() + " · runtimes/" + folder,
+                        Palette.current().heading())));
                 if (failures.containsKey(folder)) {
                     lines.add(Line.from(Span.styled(
                             "  ✗ " + failures.get(folder), Palette.current().error())));

@@ -38,6 +38,7 @@ import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
@@ -321,7 +322,7 @@ public final class Overview {
     }
 
     private <T> Comparator<T> directed(Comparator<T> comparator) {
-        return descending ? comparator.reversed() : comparator;
+        return descending ? Collections.reverseOrder(comparator) : comparator;
     }
 
     /** The unique term count of a scanned field. */
@@ -580,7 +581,7 @@ public final class Overview {
         Table table = Table.builder()
                 .rows(rows)
                 .widths(widths)
-                .header(Row.from(header).style(Style.EMPTY.bold()))
+                .header(Row.from(header).style(Palette.current().heading()))
                 .columnSpacing(COLUMN_SPACING)
                 .highlightStyle(highlight(focus == Focus.FIELDS))
                 .highlightSymbol("")
@@ -675,7 +676,7 @@ public final class Overview {
                         right(titles[1], widths[1]),
                         right(titles[2], widths[2]),
                         Cell.from(titles[3]))
-                .style(Style.EMPTY.bold());
+                .style(Palette.current().heading());
         return Table.builder()
                 .rows(rows.stream()
                         .map(row -> Row.from(

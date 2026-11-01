@@ -9,7 +9,6 @@ import static io.github.mfuerstenau.leia.tui.widgets.Panels.right;
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.CharWidth;
 import dev.tamboui.text.Line;
@@ -676,7 +675,7 @@ public final class Commits {
                         right("Deleted", 7),
                         Cell.from("Lucene"),
                         Cell.from("User data"))
-                .style(Style.EMPTY.bold());
+                .style(Palette.current().heading());
         List<Row> rows = new ArrayList<>();
         for (Commit commit : commits) {
             rows.add(Row.from(
@@ -771,7 +770,7 @@ public final class Commits {
                         new String[] {"Name", "Docs", "Base", "Deleted", "Size", "Lucene", "Codec", "CFS"},
                         widths,
                         shown)
-                .style(Style.EMPTY.bold());
+                .style(Palette.current().heading());
         List<Row> rows = segments.stream()
                 .map(segment -> segmentCells(
                         new String[] {
@@ -1021,7 +1020,7 @@ public final class Commits {
      */
     private static void section(List<Line> lines, String heading, Map<String, String> pairs) {
         lines.add(Line.empty());
-        lines.add(Line.styled(heading, Style.EMPTY.bold()));
+        lines.add(Line.styled(heading, Palette.current().heading()));
         if (pairs.isEmpty()) {
             lines.add(Line.styled("none", Palette.current().muted()));
             return;
@@ -1050,7 +1049,7 @@ public final class Commits {
      */
     private static void fieldFormatSection(List<Line> lines, Segment segment, int width) {
         lines.add(Line.empty());
-        lines.add(Line.styled("Field formats", Style.EMPTY.bold()));
+        lines.add(Line.styled("Field formats", Palette.current().heading()));
         Optional<String> fieldInfosError = segment.fieldInfosError();
         if (fieldInfosError.isPresent()) {
             lines.add(Line.styled(
@@ -1083,7 +1082,7 @@ public final class Commits {
                 formatsOfKind.keySet().stream().mapToInt(String::length).max().orElse(0);
         formatsOfKind.forEach((kind, fieldsOfFormat) -> fieldsOfFormat.forEach((format, fields) -> {
             lines.add(Line.from(
-                    Span.styled(kind, Style.EMPTY.bold()),
+                    Span.styled(kind, Palette.current().heading()),
                     Span.raw(" ".repeat(kindWidth - kind.length()) + "  "),
                     Span.styled(
                             TextFormat.escapeControl(format), Palette.current().accent())));
@@ -1106,8 +1105,9 @@ public final class Commits {
                         .sum())
                 : OptionalLong.empty();
         lines.add(Line.empty());
-        lines.add(
-                Line.styled("Files (" + files.size() + ", " + sizeOr(total, "size unknown") + ")", Style.EMPTY.bold()));
+        lines.add(Line.styled(
+                "Files (" + files.size() + ", " + sizeOr(total, "size unknown") + ")",
+                Palette.current().heading()));
         if (files.isEmpty()) {
             lines.add(Line.styled("none", Palette.current().muted()));
             return;

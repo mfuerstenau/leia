@@ -67,7 +67,7 @@ public final class Viewer {
     static final int MAX_KEY_WIDTH = 32;
 
     /** What is there but out of the way: line numbers, labels, separators (the theme's {@code muted}). */
-    static Style dim() {
+    static Style muted() {
         return Palette.current().muted();
     }
 
@@ -916,8 +916,9 @@ public final class Viewer {
         Value value = values.get(current);
         String title = " " + field + " · " + (current + 1) + " of " + values.size() + " · " + value.kind + " · "
                 + TextFormat.size(value.size()) + " ";
-        Block.Builder block =
-                Panels.box().title(title).borderStyle(Palette.current().base().bold());
+        Block.Builder block = Panels.box()
+                .title(title)
+                .borderStyle(Palette.current().base().patch(Palette.current().heading()));
         Rect inner = block.build().inner(area);
         int height = inner.height();
         page = Math.max(height - 1, 1);
@@ -1030,7 +1031,7 @@ public final class Viewer {
                         .text(Text.from(
                                 formLine("Items", form.items.toString(), !form.onKeyValue),
                                 formLine("Key/value", form.keyValue.toString(), form.onKeyValue),
-                                Line.from(Span.styled(message, dim()))))
+                                Line.from(Span.styled(message, muted()))))
                         .block(Panels.box(" Delimited "))
                         .build(),
                 popup);
@@ -1038,7 +1039,9 @@ public final class Viewer {
 
     private static Line formLine(String label, String input, boolean active) {
         return Line.from(
-                Span.styled(String.format(Locale.ROOT, "%-10s ", label), active ? Style.EMPTY.bold() : dim()),
+                Span.styled(
+                        String.format(Locale.ROOT, "%-10s ", label),
+                        active ? Palette.current().label() : muted()),
                 Span.raw(input + (active ? "▏" : "")));
     }
 
@@ -1210,7 +1213,7 @@ public final class Viewer {
             String number = "%" + Integer.toString(items.size()).length() + "d  ";
             for (int i = 0; i < items.size(); i++) {
                 lines.add(List.of(
-                        new Segment(dim(), String.format(Locale.ROOT, number, i + 1)),
+                        new Segment(muted(), String.format(Locale.ROOT, number, i + 1)),
                         new Segment(Style.EMPTY, TextFormat.escapeControl(items.get(i)))));
             }
             return new Formatted(lines, detail, null);
@@ -1242,7 +1245,7 @@ public final class Viewer {
                 lines.add(List.of(
                         new Segment(Palette.current().accent(), pair[0]),
                         new Segment(Style.EMPTY, " ".repeat(Math.max(keyWidth - CharWidth.of(pair[0]), 0))),
-                        new Segment(dim(), separator),
+                        new Segment(muted(), separator),
                         new Segment(Style.EMPTY, pair[1])));
             }
         }
@@ -1353,11 +1356,11 @@ public final class Viewer {
             }
         }
         return Line.from(
-                Span.styled(String.format(Locale.ROOT, "%08x  ", start), dim()),
+                Span.styled(String.format(Locale.ROOT, "%08x  ", start), muted()),
                 Span.raw(hex.toString()),
-                Span.styled(" |", dim()),
+                Span.styled(" |", muted()),
                 Span.raw(ascii.toString()),
-                Span.styled("|", dim()));
+                Span.styled("|", muted()));
     }
 
     /** {@link GetDocumentResult#MAX_VALUE_LENGTH} for messages. */

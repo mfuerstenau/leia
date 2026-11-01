@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.tamboui.style.Color;
 import dev.tamboui.style.Style;
-import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -72,6 +71,11 @@ class ThemesTest {
                         Style.EMPTY.fg(Color.DARK_GRAY),
                         Style.EMPTY,
                         Style.EMPTY,
+                        Style.EMPTY.bold(),
+                        Style.EMPTY.bold(),
+                        Style.EMPTY.reversed(),
+                        Style.EMPTY.bold(),
+                        Style.EMPTY.italic(),
                         icon("gazelle")));
     }
 
@@ -92,6 +96,11 @@ class ThemesTest {
                         indexed(245),
                         Style.EMPTY,
                         Style.EMPTY,
+                        Style.EMPTY.bold(),
+                        Style.EMPTY.bold(),
+                        Style.EMPTY.reversed(),
+                        Style.EMPTY.bold(),
+                        Style.EMPTY.italic(),
                         icon("gazelle")));
         Color background = Color.hex("#2E3440");
         Color grey = Color.hex("#7B88A1");
@@ -113,6 +122,11 @@ class ThemesTest {
                         Style.EMPTY.fg(grey),
                         Style.EMPTY.fg(grey),
                         Style.EMPTY.fg(frost),
+                        Style.EMPTY.bold(),
+                        Style.EMPTY.bold(),
+                        Style.EMPTY.reversed(),
+                        Style.EMPTY.bold(),
+                        Style.EMPTY.italic(),
                         icon("gazelle-aurora")));
     }
 
@@ -142,6 +156,11 @@ class ThemesTest {
                         Style.EMPTY.fg(Color.hex("#657B83")),
                         Style.EMPTY.fg(Color.hex("#657B83")),
                         Style.EMPTY.fg(blue),
+                        Style.EMPTY.bold(),
+                        Style.EMPTY.bold(),
+                        Style.EMPTY.reversed(),
+                        Style.EMPTY.bold(),
+                        Style.EMPTY.italic(),
                         icon("gazelle-solarized-dark")));
         assertThat(bundled("solarized-light"))
                 .isEqualTo(new Palette(
@@ -158,6 +177,11 @@ class ThemesTest {
                         Style.EMPTY.fg(Color.hex("#839496")),
                         Style.EMPTY.fg(Color.hex("#839496")),
                         Style.EMPTY.fg(blue),
+                        Style.EMPTY.bold(),
+                        Style.EMPTY.bold(),
+                        Style.EMPTY.reversed(),
+                        Style.EMPTY.bold(),
+                        Style.EMPTY.italic(),
                         icon("gazelle-solarized-light")));
     }
 
@@ -189,7 +213,7 @@ class ThemesTest {
     @FieldSource("BUNDLED")
     void aMatchStandsOutInTheSelectedRow(String id) {
         // The selected row is reversed, so a match that is only reversed would vanish in it (mono did).
-        Style selected = Panels.highlight(true);
+        Style selected = bundled(id).selection();
 
         assertThat(selected.patch(bundled(id).match())).isNotEqualTo(selected);
     }
@@ -235,6 +259,18 @@ class ThemesTest {
         assertThat(palette.warning()).isNotEqualTo(Style.EMPTY);
     }
 
+    @ParameterizedTest
+    @FieldSource("BUNDLED")
+    void everyBundledThemeSetsTheStyleSlotsOfAdr0121(String id) {
+        Palette palette = bundled(id);
+
+        assertThat(palette.heading()).isEqualTo(Style.EMPTY.bold());
+        assertThat(palette.label()).isEqualTo(Style.EMPTY.bold());
+        assertThat(palette.selection()).isEqualTo(Style.EMPTY.reversed());
+        assertThat(palette.selectionUnfocused()).isEqualTo(Style.EMPTY.bold());
+        assertThat(palette.secondary()).isEqualTo(Style.EMPTY.italic());
+    }
+
     @Test
     void useSwitchesThePalette() {
         Theme nord = Themes.bundled().find("nord").orElseThrow();
@@ -259,6 +295,37 @@ class ThemesTest {
         assertThat(themes.next(themes.find("solarized-light").orElseThrow()).id())
                 .isEqualTo("solar");
         assertThat(themes.next(themes.find("zen").orElseThrow()).id()).isEqualTo("dark");
+    }
+
+    @Test
+    void theFirstFolderWinsAClashOfNames() throws Exception {
+        Path user = Files.createDirectories(dir.resolve("user"));
+        Path system = Files.createDirectories(dir.resolve("system"));
+        Files.writeString(system.resolve("shared.theme"), bundledText("light"));
+        Files.writeString(system.resolve("admin.theme"), bundledText("nord"));
+        Files.writeString(user.resolve("shared.theme"), bundledText("mono"));
+
+        Themes themes = Themes.bundled().withDirs(List.of(user, system));
+
+        assertThat(themes.find("shared").orElseThrow().palette()).isEqualTo(bundled("mono"));
+        assertThat(themes.find("admin").orElseThrow().palette()).isEqualTo(bundled("nord"));
+    }
+
+    @Test
+    void namesTheUserFilesItLeftOutWithTheReason() throws Exception {
+        // A theme from before the style slots of ADR 0121 lacks them.
+        Files.writeString(dir.resolve("old.theme"), "base = none\n");
+        Files.writeString(dir.resolve("good.theme"), bundledText("mono"));
+
+        Themes themes = Themes.bundled().withUserDir(Optional.of(dir));
+
+        assertThat(themes.ids()).contains("good").doesNotContain("old");
+        assertThat(themes.leftOut()).hasSize(1);
+        assertThat(themes.leftOut().getFirst().id()).isEqualTo("old");
+        assertThat(themes.leftOut().getFirst().reason())
+                .contains("old.theme: missing error, ")
+                .contains("heading, label, selection, selectionUnfocused, secondary");
+        assertThat(Themes.bundled().leftOut()).isEmpty();
     }
 
     @Test

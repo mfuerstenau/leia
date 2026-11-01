@@ -1652,7 +1652,7 @@ public final class Terms {
         int docsWidth = Selection.numberWidth(terms.entries.stream().mapToLong(TermEntry::docFreq));
         int freqWidth = Selection.numberWidth(terms.entries.stream().mapToLong(TermEntry::totalTermFreq));
         Row header = Row.from(Cell.from("Term"), right("Docs", docsWidth), right("Freq", freqWidth))
-                .style(Style.EMPTY.bold());
+                .style(Palette.current().heading());
         List<Row> rows = new ArrayList<>();
         for (TermEntry entry : terms.entries) {
             rows.add(Row.from(
@@ -1685,7 +1685,7 @@ public final class Terms {
         boolean marked = postings.filter.isPresent() && !onlyMatches;
         int docWidth = Selection.numberWidth(postings.postings.stream().mapToLong(Posting::docId)) + (marked ? 2 : 0);
         Row header = Row.from(right("Doc", docWidth), right("Freq", 4), Cell.from(""))
-                .style(Style.EMPTY.bold());
+                .style(Palette.current().heading());
         List<Row> rows = new ArrayList<>();
         for (Posting posting : postings.postings) {
             rows.add(postingRow(posting, marked, docWidth));
@@ -1782,7 +1782,9 @@ public final class Terms {
             List<Span> spans = new ArrayList<>();
             spans.add(Span.raw("  ".repeat(node.depth()) + marker + " "));
             if (node.name.isPresent() || node.depth() == 0) {
-                spans.add(Span.styled(node.name.orElse("#" + node.segment) + "  ", Style.EMPTY.bold()));
+                spans.add(Span.styled(
+                        node.name.orElse("#" + node.segment) + "  ",
+                        Palette.current().heading()));
             }
             spans.add(Span.raw(node.size + " pts  "));
             spans.add(Span.styled(format.format(node.min) + " … " + format.format(node.max), dim));
@@ -1840,7 +1842,8 @@ public final class Terms {
                 ? " Points (" + leaf.points.size() + " of " + leaf.size + ") "
                 : " Points (" + leaf.points.size() + ") ";
         int docWidth = Selection.numberWidth(leaf.points.stream().mapToLong(LeafPoint::docId));
-        Row header = Row.from(right("Doc", docWidth), Cell.from("Value")).style(Style.EMPTY.bold());
+        Row header = Row.from(right("Doc", docWidth), Cell.from("Value"))
+                .style(Palette.current().heading());
         List<Row> rows = new ArrayList<>();
         for (LeafPoint point : leaf.points) {
             Row row =
@@ -1923,7 +1926,9 @@ public final class Terms {
                 KnnGraphSegment info = segment.segment().info;
                 String marker = segment.segment().expanded ? "▾ " : "▸ ";
                 spans.add(Span.raw(info.shape().isEmpty() ? "  " : marker));
-                spans.add(Span.styled(info.name().orElse("#" + info.segment()) + "  ", Style.EMPTY.bold()));
+                spans.add(Span.styled(
+                        info.name().orElse("#" + info.segment()) + "  ",
+                        Palette.current().heading()));
                 spans.add(Span.raw(TextFormat.count(info.vectors(), "vector")));
                 spans.add(Span.styled(info.shape().map(Terms::shapeText).orElse(" · no graph"), dim));
             }
@@ -2022,7 +2027,7 @@ public final class Terms {
                         right("Doc", docWidth),
                         Cell.from("Top"),
                         right("Score", 6))
-                .style(Style.EMPTY.bold());
+                .style(Palette.current().heading());
         List<Row> rows = new ArrayList<>();
         // The node itself first, then each level's neighbours, the level on the first of them.
         Row self = Row.from(
@@ -2031,7 +2036,12 @@ public final class Terms {
                         right(Integer.toString(node.node().docId()), docWidth),
                         Cell.from("L" + node.node().topLevel()),
                         Cell.from(""))
-                .style(node.node().deleted() ? Palette.current().error().bold() : Style.EMPTY.bold());
+                .style(
+                        node.node().deleted()
+                                ? Palette.current()
+                                        .heading()
+                                        .patch(Palette.current().error())
+                                : Palette.current().heading());
         rows.add(self);
         int selectedRow = addLevelRows(rows, node, shown.get().selected, ordWidth, docWidth);
         shown.get().table.select(neighbours.isEmpty() ? 0 : selectedRow);

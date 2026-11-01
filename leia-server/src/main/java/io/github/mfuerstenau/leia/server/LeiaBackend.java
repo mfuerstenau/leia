@@ -6,6 +6,7 @@ import io.github.mfuerstenau.leia.server.jars.JarChain;
 import io.github.mfuerstenau.leia.server.jars.JarException;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
+import io.github.mfuerstenau.leia.server.runtime.RuntimesDir;
 import io.github.mfuerstenau.leia.server.runtime.ServerException;
 import io.github.mfuerstenau.leia.server.runtime.ServerRuntimes;
 import io.github.mfuerstenau.leia.server.stored.StoredFieldsCache;
@@ -91,10 +92,24 @@ public final class LeiaBackend implements AutoCloseable {
     public static LeiaBackend start(
             Optional<Path> runtimesDir, List<Path> jars, List<Path> servers, Optional<Path> cacheDir)
             throws RpcException {
+        return startWith(runtimesDir.map(RuntimesDir::user).stream().toList(), jars, servers, cacheDir);
+    }
+
+    /**
+     * As {@link #start(Optional, List, List, Optional)}, with the runtimes looked up one at a time in
+     * {@code runtimesDirs}, in order (ADR 0122).
+     *
+     * @param runtimesDirs the runtimes folders, user's first; empty if leia has none
+     */
+    public static LeiaBackend startWith(
+            List<RuntimesDir> runtimesDirs, List<Path> jars, List<Path> servers, Optional<Path> cacheDir)
+            throws RpcException {
         // Lucene 10's folder first: the jars link against its Lucene (ADR 0065).
-        runtimesDir.ifPresent(RuntimeFolders::load);
+        if (!runtimesDirs.isEmpty()) {
+            RuntimeFolders.load(runtimesDirs);
+        }
         try {
-            ServerRuntimes.load(servers, runtimesDir);
+            ServerRuntimes.load(servers, runtimesDirs);
         } catch (ServerException e) {
             throw new RpcException(ErrorCode.INVALID_JAR, e.getMessage(), e);
         }

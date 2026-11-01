@@ -49,7 +49,7 @@ public record DefaultJars(Optional<Path> dir, State state) {
     }
 
     /** Whether {@code dir} has a jar directly in it. */
-    static boolean hasJars(Path dir) {
+    public static boolean hasJars(Path dir) {
         try (Stream<Path> entries = Files.list(dir)) {
             return entries.anyMatch(entry ->
                     Files.isRegularFile(entry) && isJarName(entry.getFileName().toString()));

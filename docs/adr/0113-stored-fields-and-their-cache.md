@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-27
 - **Amends:** ADR 0051 (a segment of `getIndexStats` has its id and files in the runtime interface), ADR 0100 (§6, the Tools table: `stored_fields`)
-- **Amended by:** ADR 0114 (the regex scan and the pattern filter read through the merge instance and the cache, and a filter of the documents that store a field)
+- **Amended by:** ADR 0114 (the regex scan and the pattern filter read through the merge instance and the cache, and a filter of the documents that store a field), ADR 0122 (the cache folder is the first writable candidate, else memory)
 
 ## Context
 

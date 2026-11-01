@@ -57,6 +57,13 @@ class RuntimeLoadBackendTest {
             assertThat(lucene9.loaded()).containsExactly("lucene9");
             assertThat(state(lucene9, "lucene9")).isEqualTo(RuntimeState.LOADED);
             assertThat(state(lucene9, "lucene10")).isEqualTo(RuntimeState.MISSING);
+            // Where it came from (ADR 0122).
+            assertThat(lucene9.runtimes().stream()
+                            .filter(runtime -> runtime.folder().equals("lucene9"))
+                            .findFirst()
+                            .orElseThrow()
+                            .path())
+                    .hasValue(runtimes.resolve("lucene9").toString());
             assertThat(backend.call(Methods.OPEN_INDEX, new OpenIndexParams(lucene8))
                             .mode())
                     .isEqualTo(OpenMode.READER);

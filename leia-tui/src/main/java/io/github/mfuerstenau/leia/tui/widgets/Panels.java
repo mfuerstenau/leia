@@ -62,9 +62,9 @@ public final class Panels {
         frame.buffer().setStyle(area, Palette.current().base());
     }
 
-    /** The selected row: reversed in the focused table, bold in the other. */
+    /** The selected row: the theme's {@code selection} in the focused table, {@code selectionUnfocused} in the other. */
     public static Style highlight(boolean focused) {
-        return focused ? Style.EMPTY.reversed() : Style.EMPTY.bold();
+        return focused ? Palette.current().selection() : Palette.current().selectionUnfocused();
     }
 
     /**
@@ -79,7 +79,11 @@ public final class Panels {
 
     /** A label, bold and padded to 10 columns, and its value. */
     public static Line labelLine(String label, String value) {
-        return Line.from(Span.styled(String.format(Locale.ROOT, "%-10s ", label), Style.EMPTY.bold()), Span.raw(value));
+        return Line.from(
+                Span.styled(
+                        String.format(Locale.ROOT, "%-10s ", label),
+                        Palette.current().label()),
+                Span.raw(value));
     }
 
     /**

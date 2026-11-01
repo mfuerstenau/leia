@@ -1,5 +1,6 @@
 package io.github.mfuerstenau.leia.tui;
 
+import io.github.mfuerstenau.leia.server.runtime.RuntimesDir;
 import io.github.mfuerstenau.leia.tui.jars.DefaultJars;
 import java.net.URISyntaxException;
 import java.net.URL;
@@ -7,14 +8,35 @@ import java.nio.file.FileSystemNotFoundException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.CodeSource;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Function;
+import java.util.function.Predicate;
 
 /**
- * Where leia keeps its files on this platform: the state folder, with the log (ADR 0034 §7) and the
- * history (ADR 0020), the default folder of jars (ADR 0024), the folder of runtimes, beside {@code
- * leia.jar} or in the data folder (ADR 0044, ADR 0098), and the cache folder (ADR 0113).
+ * Where leia keeps its files on this platform, as search paths (ADR 0122). Each kind of folder has
+ * user candidates in order, and config and data also system ones; none of them need exist.
+ *
+ * <ul>
+ *   <li>config: {@code $XDG_CONFIG_HOME/leia}, then {@code ~/.config/leia}; on Windows {@code
+ *       %APPDATA%\leia}, or below the home folder if the variable is unset; system: each of {@code
+ *       $XDG_CONFIG_DIRS} (default {@code /etc/xdg}), on Windows {@code %PROGRAMDATA%\leia}
+ *   <li>data: {@code $XDG_DATA_HOME/leia}, then {@code ~/.local/share/leia}; on Windows {@code
+ *       %LOCALAPPDATA%\leia}; system: each of {@code $XDG_DATA_DIRS} (default {@code
+ *       /usr/local/share:/usr/share}), on Windows {@code %PROGRAMDATA%\leia}
+ *   <li>state, with the log (ADR 0034 §7) and the history (ADR 0020): {@code $XDG_STATE_HOME/leia},
+ *       then {@code ~/.local/state/leia}; on Windows as data; no system ones
+ *   <li>cache (ADR 0113): {@code $XDG_CACHE_HOME/leia}, then {@code ~/.cache/leia}; on Windows
+ *       {@code %LOCALAPPDATA%\leia\cache}; no system ones
+ * </ul>
+ *
+ * <p>An item is read from the first candidate that has it, and written to the first user candidate
+ * that is writable or can be created. Never to the temporary folder, which is shared. {@code
+ * -Dleia.runtimes} and {@code -Dleia.cache.dir} replace their lists.
  *
  * @param env the environment variables
  * @param home the user's home directory, if known
@@ -51,54 +73,98 @@ record Platform(Function<String, String> env, Optional<Path> home, boolean windo
     }
 
     /**
-     * The folder of runtimes (ADR 0098): the folder that {@code -Dleia.runtimes} names, as under
-     * Gradle; else {@code runtimes} beside {@code leia.jar} if it is a directory, as in a portable
-     * install (ADR 0044, ADR 0073); else {@code runtimes} in the {@linkplain #dataDir() data folder}.
-     * Empty without {@code leia.jar}, which brings the adapters, or if the platform's variables don't
-     * say where.
+     * The folders that runtimes are looked up in, one runtime at a time, in order (ADR 0122): the
+     * folder that {@code -Dleia.runtimes} names, as under Gradle, alone; else {@code runtimes} beside
+     * {@code leia.jar} if it is a directory, as in a portable install (ADR 0044, ADR 0073), then {@code
+     * runtimes} in each user {@linkplain #dataDirs() data folder}, then in each system one. Empty without
+     * {@code leia.jar}, which brings the adapters.
      */
-    Optional<Path> runtimesDir() {
+    List<RuntimesDir> runtimesDirs() {
         String property = System.getProperty("leia.runtimes", "");
         if (!property.isEmpty()) {
-            return Optional.of(Path.of(property).toAbsolutePath());
+            return List.of(new RuntimesDir(Path.of(property).toAbsolutePath(), false));
         }
         if (leiaJar.isEmpty()) {
-            return Optional.empty();
+            return List.of();
         }
-        return leiaJar.map(jar -> jar.resolveSibling("runtimes"))
+        Set<RuntimesDir> dirs = new LinkedHashSet<>();
+        leiaJar.map(jar -> jar.resolveSibling("runtimes"))
                 .filter(Files::isDirectory)
-                .or(() -> dataDir().map(dir -> dir.resolve("runtimes")));
+                .ifPresent(beside -> dirs.add(new RuntimesDir(beside, false)));
+        dataDirs().forEach(dir -> dirs.add(new RuntimesDir(dir.resolve("runtimes"), false)));
+        systemDataDirs().forEach(dir -> dirs.add(new RuntimesDir(dir.resolve("runtimes"), true)));
+        return List.copyOf(dirs);
+    }
+
+    /** The user's runtimes folders, those of {@link #runtimesDirs()} that leia may write into. */
+    List<Path> userRuntimesDirs() {
+        return runtimesDirs().stream()
+                .filter(dir -> !dir.system())
+                .map(RuntimesDir::path)
+                .toList();
     }
 
     /**
-     * {@code %LOCALAPPDATA%\leia} on Windows; elsewhere {@code $XDG_DATA_HOME/leia}, or {@code
-     * ~/.local/share/leia} without it. Empty if the platform's variables don't say where.
+     * Where runtimes are installed: the first user candidate of {@link #runtimesDirs()} that is
+     * writable or can be created (ADR 0122). Empty without {@code leia.jar}, or if there is none.
      */
-    Optional<Path> dataDir() {
-        return windows
-                ? absolute("LOCALAPPDATA").map(dir -> dir.resolve("leia"))
-                : absolute("XDG_DATA_HOME")
-                        .or(() -> home.map(dir -> dir.resolve(".local").resolve("share")))
-                        .map(dir -> dir.resolve("leia"));
+    Optional<Path> runtimesInstallDir() {
+        return firstWritable(userRuntimesDirs());
+    }
+
+    /** The user's data folders, in order. */
+    List<Path> dataDirs() {
+        return userDirs("XDG_DATA_HOME", ".local/share", "LOCALAPPDATA", "AppData/Local", "");
+    }
+
+    /** The system-wide data folders, in order. */
+    List<Path> systemDataDirs() {
+        return systemDirs("XDG_DATA_DIRS", "/usr/local/share:/usr/share");
+    }
+
+    /** The user's config folders, in order. */
+    List<Path> configDirs() {
+        return userDirs("XDG_CONFIG_HOME", ".config", "APPDATA", "AppData/Roaming", "");
+    }
+
+    /** The system-wide config folders, in order. */
+    List<Path> systemConfigDirs() {
+        return systemDirs("XDG_CONFIG_DIRS", "/etc/xdg");
+    }
+
+    /** The user's config folders, then the system-wide ones: the order to read in. */
+    List<Path> configReadDirs() {
+        return concat(configDirs(), systemConfigDirs());
+    }
+
+    /** The config folder to write into: the first user one that is writable or can be created. */
+    Optional<Path> configWriteDir() {
+        return firstWritable(configDirs());
+    }
+
+    /** The user's state folders, in order. */
+    List<Path> stateDirs() {
+        return userDirs("XDG_STATE_HOME", ".local/state", "LOCALAPPDATA", "AppData/Local", "");
     }
 
     /**
-     * {@code %LOCALAPPDATA%\leia} on Windows; elsewhere {@code $XDG_STATE_HOME/leia}, or {@code
-     * ~/.local/state/leia} without it. Empty if the platform's variables don't say where.
+     * The state folder to write into: the first one that is writable or can be created. Empty if
+     * none is; the temporary folder is shared and never a substitute.
      */
-    Optional<Path> stateDir() {
-        return windows
-                ? absolute("LOCALAPPDATA").map(dir -> dir.resolve("leia"))
-                : absolute("XDG_STATE_HOME")
-                        .or(() -> home.map(dir -> dir.resolve(".local").resolve("state")))
-                        .map(dir -> dir.resolve("leia"));
+    Optional<Path> stateWriteDir() {
+        return firstWritable(stateDirs());
+    }
+
+    /** The user's cache folders, in order. */
+    List<Path> cacheDirs() {
+        return userDirs("XDG_CACHE_HOME", ".cache", "LOCALAPPDATA", "AppData/Local", "cache");
     }
 
     /**
      * leia's cache folder, for the stored fields of the segments it read (ADR 0113): the folder that
-     * {@code -Dleia.cache.dir} names, or none if it names none; else {@code %LOCALAPPDATA%\leia\cache}
-     * on Windows, elsewhere {@code $XDG_CACHE_HOME/leia}, or {@code ~/.cache/leia} without it. Empty
-     * if the platform's variables don't say where.
+     * {@code -Dleia.cache.dir} names, or none if it names none; else the first of the {@linkplain
+     * #cacheDirs() cache folders} that is writable or can be created. Empty keeps the cache in
+     * memory.
      */
     Optional<Path> cacheDir() {
         String property = System.getProperty("leia.cache.dir");
@@ -107,49 +173,126 @@ record Platform(Function<String, String> env, Optional<Path> home, boolean windo
                     ? Optional.empty()
                     : Optional.of(Path.of(property).toAbsolutePath());
         }
-        return windows
-                ? absolute("LOCALAPPDATA").map(dir -> dir.resolve("leia").resolve("cache"))
-                : absolute("XDG_CACHE_HOME")
-                        .or(() -> home.map(dir -> dir.resolve(".cache")))
-                        .map(dir -> dir.resolve("leia"));
+        return firstWritable(cacheDirs());
     }
 
-    /** The log, {@code leia.log} in the {@linkplain #stateDir() state folder}. */
+    /** The log, {@code leia.log} in the {@linkplain #stateWriteDir() state folder}. */
     Optional<Path> logFile() {
-        return stateDir().map(dir -> dir.resolve("leia.log"));
+        return stateWriteDir().map(dir -> dir.resolve("leia.log"));
     }
 
-    /** The recently opened paths (ADR 0020), {@code history} in the {@linkplain #stateDir() state folder}. */
+    /** Where the history is written (ADR 0020), {@code history} in the {@linkplain #stateWriteDir() state folder}. */
     Optional<Path> historyFile() {
-        return stateDir().map(dir -> dir.resolve("history"));
+        return stateWriteDir().map(dir -> dir.resolve("history"));
     }
 
     /**
-     * The default folder of jars: {@code %APPDATA%\leia\jars} on Windows; elsewhere {@code
-     * $XDG_CONFIG_HOME/leia/jars}, or {@code ~/.config/leia/jars} without it. Empty if the
-     * platform's variables don't say where.
+     * Where the history is read from: the first state folder that has one, so that moving {@code
+     * XDG_STATE_HOME} doesn't lose it; else {@link #historyFile()}.
+     */
+    Optional<Path> historyReadFile() {
+        return firstExisting(stateDirs(), "history", Files::isRegularFile).or(this::historyFile);
+    }
+
+    /**
+     * The default folder of jars (ADR 0024), {@code jars} in a user config folder only: a system
+     * folder, such as {@code %PROGRAMDATA%}, may be one that any local user can write to, and its jars
+     * would run as code. The first that holds a jar; else the first that exists; else the first
+     * candidate. Empty if the platform's variables don't say where.
      */
     Optional<Path> defaultJarsDir() {
-        return (windows
-                        ? absolute("APPDATA")
-                        : absolute("XDG_CONFIG_HOME").or(() -> home.map(dir -> dir.resolve(".config"))))
-                .map(dir -> dir.resolve("leia").resolve("jars"));
+        List<Path> candidates =
+                configDirs().stream().map(dir -> dir.resolve("jars")).toList();
+        return candidates.stream()
+                .filter(DefaultJars::hasJars)
+                .findFirst()
+                .or(() -> candidates.stream().filter(Files::isDirectory).findFirst())
+                .or(() -> candidates.stream().findFirst());
     }
 
     /**
-     * The theme chosen last (ADR 0095), {@code theme} beside the {@linkplain #defaultJarsDir()
-     * default folder of jars}.
+     * The theme chosen last (ADR 0095), read from the first config folder, user's or system's, that
+     * has a {@code theme}, so that an administrator can set a default. Empty if none has.
      */
     Optional<Path> themeFile() {
-        return defaultJarsDir().map(dir -> dir.resolveSibling("theme"));
+        return firstExisting(configReadDirs(), "theme", Files::isRegularFile);
+    }
+
+    /** Where the theme is written: {@code theme} in the {@linkplain #configWriteDir() config folder}. */
+    Optional<Path> themeWriteFile() {
+        return configWriteDir().map(dir -> dir.resolve("theme"));
     }
 
     /**
-     * The user's own themes (ADR 0096), {@code themes} beside the {@linkplain #defaultJarsDir()
-     * default folder of jars}.
+     * The folders of the user's own themes (ADR 0096) that exist, with the one that wins a clash of
+     * names first: {@code themes} in each user config folder, then each system one.
      */
-    Optional<Path> themesDir() {
-        return defaultJarsDir().map(dir -> dir.resolveSibling("themes"));
+    List<Path> themesDirs() {
+        return configReadDirs().stream()
+                .map(dir -> dir.resolve("themes"))
+                .filter(Files::isDirectory)
+                .toList();
+    }
+
+    /** The user candidates: {@code $xdg/leia}, then {@code ~/<homeRelative>/leia}; on Windows {@code %variable%\leia}. */
+    private List<Path> userDirs(
+            String xdg, String homeRelative, String windowsVariable, String windowsRelative, String below) {
+        Set<Path> dirs = new LinkedHashSet<>();
+        if (windows) {
+            Optional<Path> root = absolute(windowsVariable).or(() -> home.map(dir -> dir.resolve(windowsRelative)));
+            root.ifPresent(dir -> dirs.add(
+                    below.isEmpty() ? dir.resolve("leia") : dir.resolve("leia").resolve(below)));
+        } else {
+            absolute(xdg).ifPresent(dir -> dirs.add(dir.resolve("leia")));
+            home.ifPresent(dir -> dirs.add(dir.resolve(homeRelative).resolve("leia")));
+        }
+        return List.copyOf(dirs);
+    }
+
+    /** The system candidates: each absolute entry of {@code variable}, or of {@code fallback}, plus {@code /leia}. */
+    private List<Path> systemDirs(String variable, String fallback) {
+        if (windows) {
+            return absolute("PROGRAMDATA")
+                    .map(dir -> List.of(dir.resolve("leia")))
+                    .orElse(List.of());
+        }
+        String value = env.apply(variable);
+        Set<Path> dirs = new LinkedHashSet<>();
+        for (String entry : (value == null || value.isEmpty() ? fallback : value).split(":")) {
+            if (!entry.isEmpty() && Path.of(entry).isAbsolute()) {
+                dirs.add(Path.of(entry).resolve("leia"));
+            }
+        }
+        return List.copyOf(dirs);
+    }
+
+    private static Optional<Path> firstExisting(List<Path> dirs, String name, Predicate<Path> exists) {
+        return dirs.stream().map(dir -> dir.resolve(name)).filter(exists).findFirst();
+    }
+
+    /**
+     * The first of {@code dirs} that is a folder leia can write into, or can create: the nearest
+     * ancestor that exists must be a writable folder. It creates nothing.
+     */
+    static Optional<Path> firstWritable(List<Path> dirs) {
+        return dirs.stream().filter(Platform::writable).findFirst();
+    }
+
+    private static boolean writable(Path dir) {
+        if (Files.exists(dir)) {
+            return Files.isDirectory(dir) && Files.isWritable(dir);
+        }
+        Path ancestor = dir.getParent();
+        while (ancestor != null && !Files.exists(ancestor)) {
+            ancestor = ancestor.getParent();
+        }
+        return ancestor != null && Files.isDirectory(ancestor) && Files.isWritable(ancestor);
+    }
+
+    private static <T> List<T> concat(List<T> first, List<T> second) {
+        List<T> all = new ArrayList<>(first);
+        all.addAll(second);
+        return List.copyOf(all);
     }
 
     /** The XDG Base Directory spec says that a relative path in its variables is to be ignored. */

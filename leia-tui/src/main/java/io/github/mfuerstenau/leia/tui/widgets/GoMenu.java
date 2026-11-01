@@ -1,7 +1,6 @@
 package io.github.mfuerstenau.leia.tui.widgets;
 
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.CharWidth;
 import dev.tamboui.text.Line;
@@ -10,6 +9,7 @@ import dev.tamboui.text.Text;
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.widgets.paragraph.Paragraph;
+import io.github.mfuerstenau.leia.tui.theme.Palette;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
@@ -76,7 +76,7 @@ public final class GoMenu {
     }
 
     private static Line line(String letter, String does) {
-        return Line.from(Span.styled(" " + letter, Style.EMPTY.bold()), Span.raw("  " + does + " "));
+        return Line.from(Span.styled(" " + letter, Palette.current().label()), Span.raw("  " + does + " "));
     }
 
     /** Draws the menu at the bottom left of {@code area}, the screen above the footer. */

@@ -124,6 +124,130 @@ class RuntimeFoldersTest {
         }
     }
 
+    private static Path testFolder() {
+        return Path.of(System.getProperty("leia.test.runtimes")).resolve("lucene9");
+    }
+
+    /** A copy of the lucene9 folder of the tests, at {@code folder}. */
+    private static void copyLucene9(Path folder) throws IOException {
+        Files.createDirectories(folder);
+        try (var files = Files.list(testFolder())) {
+            for (Path file : files.toList()) {
+                Files.copy(file, folder.resolve(file.getFileName()));
+            }
+        }
+    }
+
+    private static List<RuntimesDir> user(Path... dirs) {
+        return java.util.Arrays.stream(dirs).map(RuntimesDir::user).toList();
+    }
+
+    @Test
+    void loadsARuntimeFromTheFirstFolderThatHasItAndReportsWhere() throws IOException {
+        Path first = Files.createDirectories(tmp.resolve("first"));
+        copyLucene9(tmp.resolve("second/lucene9"));
+        List<LuceneRuntime> loaded = new ArrayList<>();
+
+        RuntimeFolders.Found found = RuntimeFolders.lookUp(
+                LUCENE9, user(first, tmp.resolve("second")), loaded, RuntimeFolders.class.getClassLoader());
+
+        assertThat(found.state()).isEqualTo(new RuntimeFolders.State.Loaded());
+        assertThat(found.folder()).hasValue(tmp.resolve("second/lucene9"));
+        assertThat(loaded).hasSize(1);
+    }
+
+    @Test
+    void skipsAnOutdatedAdapterForTheNextFolder() throws IOException {
+        Path first = tmp.resolve("first");
+        copyLucene9(first.resolve("lucene9"));
+        copyLucene9(tmp.resolve("second/lucene9"));
+        // The adapter that leia.jar embeds is the copy in the second folder; the first is another leia's.
+        Path embedded = Files.createDirectories(tmp.resolve("embedded/" + RuntimeFolders.EMBEDDED + "lucene9"));
+        Files.copy(tmp.resolve("second/lucene9/leia-lucene9.jar"), embedded.resolve("leia-lucene9.jar"));
+        Files.write(first.resolve("lucene9/leia-lucene9.jar"), new byte[] {1});
+        List<LuceneRuntime> loaded = new ArrayList<>();
+
+        try (URLClassLoader resources = embedded(tmp.resolve("embedded"))) {
+            RuntimeFolders.Found found =
+                    RuntimeFolders.lookUp(LUCENE9, user(first, tmp.resolve("second")), loaded, resources);
+
+            assertThat(found.state()).isEqualTo(new RuntimeFolders.State.Loaded());
+            assertThat(found.folder()).hasValue(tmp.resolve("second/lucene9"));
+        }
+    }
+
+    @Test
+    void reportsTheFirstStateThatIsNotMissingWhenNoFolderLoads() throws IOException {
+        Path first = Files.createDirectories(tmp.resolve("first"));
+        copyLucene9(tmp.resolve("second/lucene9"));
+        List<String> listed = RuntimeFolders.listedJars(tmp.resolve("second/lucene9/leia-lucene9.jar"));
+        Files.delete(tmp.resolve("second/lucene9/" + listed.getLast()));
+
+        RuntimeFolders.Found found = RuntimeFolders.lookUp(
+                LUCENE9,
+                user(first, tmp.resolve("second"), tmp.resolve("third")),
+                new ArrayList<>(),
+                RuntimeFolders.class.getClassLoader());
+
+        assertThat(found.state()).isEqualTo(new RuntimeFolders.State.Incomplete(listed.getLast()));
+        assertThat(found.folder()).hasValue(tmp.resolve("second/lucene9"));
+    }
+
+    @Test
+    void refusesATamperedJarInASystemFolderButNotInAUserFolder() throws IOException {
+        copyLucene9(tmp.resolve("system/lucene9"));
+        Path embedded = Files.createDirectories(tmp.resolve("embedded/" + RuntimeFolders.EMBEDDED + "lucene9"));
+        Files.copy(tmp.resolve("system/lucene9/leia-lucene9.jar"), embedded.resolve("leia-lucene9.jar"));
+        String core = RuntimeFolders.listedJars(tmp.resolve("system/lucene9/leia-lucene9.jar")).stream()
+                .filter(jar -> jar.startsWith("lucene-core-"))
+                .findFirst()
+                .orElseThrow();
+        // Same size, other bytes.
+        byte[] bytes = Files.readAllBytes(tmp.resolve("system/lucene9/" + core));
+        bytes[bytes.length / 2] ^= 1;
+        Files.write(tmp.resolve("system/lucene9/" + core), bytes);
+
+        try (URLClassLoader resources = embedded(tmp.resolve("embedded"))) {
+            RuntimeFolders.Found system = RuntimeFolders.lookUp(
+                    LUCENE9, List.of(new RuntimesDir(tmp.resolve("system"), true)), new ArrayList<>(), resources);
+
+            assertThat(system.state())
+                    .isInstanceOfSatisfying(
+                            RuntimeFolders.State.Refused.class,
+                            refused -> assertThat(refused.reason()).contains(core, "SHA-256 differs"));
+        }
+    }
+
+    @Test
+    void trustsAGenuineSystemFolder() throws IOException {
+        copyLucene9(tmp.resolve("system/lucene9"));
+        Path embedded = Files.createDirectories(tmp.resolve("embedded/" + RuntimeFolders.EMBEDDED + "lucene9"));
+        Files.copy(tmp.resolve("system/lucene9/leia-lucene9.jar"), embedded.resolve("leia-lucene9.jar"));
+
+        try (URLClassLoader resources = embedded(tmp.resolve("embedded"))) {
+            assertThat(RuntimeFolders.lookUp(
+                                    LUCENE9,
+                                    List.of(new RuntimesDir(tmp.resolve("system"), true)),
+                                    new ArrayList<>(),
+                                    resources)
+                            .state())
+                    .isEqualTo(new RuntimeFolders.State.Loaded());
+        }
+    }
+
+    @Test
+    void refusesASystemFolderWhenLeiaJarEmbedsNoAdapterToCompare() throws IOException {
+        copyLucene9(tmp.resolve("system/lucene9"));
+
+        assertThat(RuntimeFolders.lookUp(
+                                LUCENE9,
+                                List.of(new RuntimesDir(tmp.resolve("system"), true)),
+                                new ArrayList<>(),
+                                embedded(tmp.resolve("none")))
+                        .state())
+                .isInstanceOf(RuntimeFolders.State.Refused.class);
+    }
+
     /** A class loader that sees the resources in {@code dir}, as leia.jar's loader sees its own. */
     private static URLClassLoader embedded(Path dir) throws IOException {
         return new URLClassLoader(new URL[] {dir.toUri().toURL()}, null);

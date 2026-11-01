@@ -2,6 +2,7 @@
 
 - **Status:** Accepted, amended by ADR 0096 (theme files, user themes, `T` names the theme) and ADR 0097 (the logo's roles)
 - **Date:** 2026-10-22
+- **Amended by:** ADR 0121 (five more roles: `heading`, `label`, `selection`, `selectionUnfocused`, `secondary`; no screen applies a style of its own)
 - **Revised 2026-10-23** after looking at every screen in all four themes: `nord`'s `muted` and `border` went from `#4C566A` (1.7:1 on `#2E3440`, panel titles all but vanished) to `#7B88A1` (3.5:1), and `mono`'s `match` from `reversed` to `bold underlined`, since the selected row is reversed and hid the match
 - **Revised 2026-10-24** after a look in Windows Terminal with a light scheme: `nord` drew the borders and titles of popups and frames in the terminal's foreground, dark on its own background. They now take `base` through `Panels.box` (point 4)
 - **Revised 2026-10-24** with two themes after Ethan Schoonover's Solarized, `solarized-dark` and `solarized-light`, each on its own background as `nord` is (points 2, 4 and 5). Their `muted` and `border` are Solarized's greys: `base00` `#657B83` on `base03` in the dark one (3.37:1) and `base0` `#839496` on `base3` in the light one (2.93:1). The light theme can't reach the 3.0 that `nord` met: no Solarized grey does on `base3` without becoming body text, so the shared contrast test's bound is 2.9

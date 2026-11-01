@@ -11,6 +11,7 @@ import io.github.mfuerstenau.leia.protocol.version.VersionParams;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import io.github.mfuerstenau.leia.server.LeiaBackend;
 import io.github.mfuerstenau.leia.server.RpcException;
+import io.github.mfuerstenau.leia.server.runtime.RuntimesDir;
 import io.github.mfuerstenau.leia.server.runtime.ServerRuntimes;
 import io.github.mfuerstenau.leia.tui.app.Action;
 import io.github.mfuerstenau.leia.tui.app.App;
@@ -128,7 +129,8 @@ public final class Main {
         }
         // The runtimes come first (ADR 0044, ADR 0073, ADR 0098); the default folder's jars come
         // after those of --jar, which win a clash of names (ADR 0024).
-        RuntimeFolders runtimeFolders = new RuntimeFolders(platform.runtimesDir());
+        RuntimeFolders runtimeFolders = new RuntimeFolders(
+                platform.runtimesDirs().stream().map(RuntimesDir::path).toList());
         DefaultJars defaultJars = DefaultJars.find(platform.defaultJarsDir(), cli.noDefaultJars());
         List<Path> jars = new ArrayList<>(cli.jars());
         defaultJars.loadedDir().ifPresent(jars::add);
@@ -139,13 +141,20 @@ public final class Main {
                 return runMcp(cli, platform, runtimeFolders, defaultJars, jars, mcpRoots, log, in, out, err);
             }
             // In the log, which a broken theme of the user's goes to (ADR 0096).
-            Themes themes = Themes.bundled().withUserDir(platform.themesDir());
+            Themes themes = Themes.bundled().withDirs(platform.themesDirs());
             Optional<Theme> theme = Optional.empty();
             if (cli.theme().isPresent()) {
                 theme = themes.find(cli.theme().get());
                 if (theme.isEmpty()) {
+                    String wanted = cli.theme().get();
+                    Optional<String> refused = themes.leftOut().stream()
+                            .filter(left -> left.id().equals(wanted))
+                            .map(Themes.LeftOut::reason)
+                            .findFirst();
                     err.println("leia: "
-                            + Cli.unknownTheme(cli.theme().get(), themes.ids()).getMessage());
+                            + (refused.isPresent()
+                                    ? "theme " + wanted + " left out: " + refused.get()
+                                    : Cli.unknownTheme(wanted, themes.ids()).getMessage()));
                     err.println(Cli.USAGE);
                     err.println("For more information, try '--help'.");
                     return 2;
@@ -175,7 +184,8 @@ public final class Main {
             List<Path> jars,
             PrintStream err) {
         try {
-            return Optional.of(LeiaBackend.start(runtimeFolders.dir(), jars, cli.servers(), platform.cacheDir()));
+            return Optional.of(
+                    LeiaBackend.startWith(platform.runtimesDirs(), jars, cli.servers(), platform.cacheDir()));
         } catch (RpcException e) {
             LOG.log(Level.SEVERE, "Cannot start", e);
             err.println("leia: " + e.getMessage());
@@ -253,9 +263,14 @@ public final class Main {
         if (platform.leiaJar().isEmpty()) {
             return;
         }
-        platform.runtimesDir()
-                .map(dir -> new RuntimeInstall(dir, RuntimeInstall.base(), Main.class.getClassLoader()))
-                .ifPresent(install -> install.refreshOwnJars(RuntimeInstall.Listener.logging(LOG)));
+        // The user's folders only, and only those that exist and are writable: a system folder is
+        // another leia's too, and rewriting it would break that one (ADR 0122).
+        for (Path dir : platform.userRuntimesDirs()) {
+            if (Files.isDirectory(dir) && Files.isWritable(dir)) {
+                new RuntimeInstall(dir, RuntimeInstall.base(), Main.class.getClassLoader())
+                        .refreshOwnJars(RuntimeInstall.Listener.logging(LOG));
+            }
+        }
     }
 
     /**
@@ -286,10 +301,15 @@ public final class Main {
     private static int downloadRuntimes(Platform platform, Cli cli, PrintStream out, PrintStream err) {
         // Not into leia.log, which would lose the last session's log; only problems show.
         LeiaLog.toStderr(Level.WARNING);
-        Optional<Path> runtimesDir = platform.runtimesDir();
-        if (runtimesDir.isEmpty()) {
+        Optional<Path> runtimesDir = platform.runtimesInstallDir();
+        if (platform.runtimesDirs().isEmpty()) {
             err.println("leia: --download-runtimes installs into the folder runtimes, which leia has only when it"
                     + " runs from leia.jar");
+            return 1;
+        }
+        if (runtimesDir.isEmpty()) {
+            err.println("leia: --download-runtimes finds no runtimes folder it can write to: "
+                    + platform.userRuntimesDirs());
             return 1;
         }
         return RuntimeDownload.run(
@@ -325,8 +345,11 @@ public final class Main {
         PrintStream log = leiaLog.stream();
         VersionResult version =
                 backend.call(Methods.VERSION, new VersionParams()).get();
-        History history = platform.historyFile().map(History::load).orElseGet(History::inMemory);
-        ThemeFile themeFile = new ThemeFile(platform.themeFile());
+        History history = platform.historyFile()
+                .map(write -> History.load(platform.historyReadFile().orElse(write), write))
+                .orElseGet(History::inMemory);
+        ThemeFile themeFile =
+                new ThemeFile(platform.themeFile().or(platform::themeWriteFile), platform.themeWriteFile());
         Palette.use(themeFile.resolve(theme, platform.env().apply("NO_COLOR"), themes));
         App app = new App(version, platform.home(), history, cli.directory())
                 .withCwd(Path.of("").toAbsolutePath())
@@ -339,7 +362,7 @@ public final class Main {
         Session session = new Session(
                 app,
                 backend,
-                platform.runtimesDir()
+                platform.runtimesInstallDir()
                         .map(dir -> new RuntimeInstall(dir, RuntimeInstall.base(), Main.class.getClassLoader())));
         OpenMode mode = cli.noReader() ? OpenMode.DIRECTORY_ONLY : OpenMode.READER;
         // The first frame shows the path being opened.

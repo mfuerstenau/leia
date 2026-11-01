@@ -3,6 +3,7 @@
 - **Status:** Accepted, amended by ADR 0097 (the logo's roles)
 - **Date:** 2026-10-22
 - **Amends:** ADR 0095 §2, §5 and its alternatives "user-defined themes" and "the theme's name in the footer"
+- **Amended by:** ADR 0121 (the five new roles; refused files are reported), ADR 0122 (themes are read from several config folders)
 
 ## Context
 

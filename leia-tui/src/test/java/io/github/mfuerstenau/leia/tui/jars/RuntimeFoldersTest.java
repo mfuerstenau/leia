@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -20,6 +21,19 @@ class RuntimeFoldersTest {
                 .isFalse();
         assertThat(Files.isDirectory(tmp)).isTrue();
         assertThat(RuntimeFolders.none().exists()).isFalse();
+    }
+
+    @Test
+    void existsWhenAnyOfTheFoldersDoesAndNamesTheRuntimeFolderOfAJarInAny() {
+        Path second = tmp.resolve("second");
+        RuntimeFolders folders = new RuntimeFolders(List.of(tmp.resolve("missing"), second));
+
+        assertThat(folders.exists()).isFalse();
+        assertThat(folders.dir()).hasValue(tmp.resolve("missing"));
+        assertThat(folders.folderOf(second.resolve("lucene9").resolve("x.jar"))).hasValue("runtimes/lucene9");
+        assertThat(folders.folderOf(tmp.resolve("lucene9").resolve("x.jar"))).isEmpty();
+        assertThat(new RuntimeFolders(List.of(tmp.resolve("missing"), tmp)).exists())
+                .isTrue();
     }
 
     @Test

@@ -3,7 +3,6 @@ package io.github.mfuerstenau.leia.tui.about;
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.CharWidth;
 import dev.tamboui.text.Line;
@@ -160,7 +159,7 @@ public final class AboutWindow {
     /** The licence and the NOTICE. */
     List<Line> licence() {
         List<Line> lines = new ArrayList<>();
-        lines.add(Line.from(Span.styled("Licence", Style.EMPTY.bold())));
+        lines.add(Line.from(Span.styled("Licence", Palette.current().heading())));
         lines.add(Line.from("leia is licensed under the Apache License, Version 2.0: " + About.LICENSE_URL));
         lines.add(Line.empty());
         notice.lines().map(Line::from).forEach(lines::add);
@@ -182,7 +181,8 @@ public final class AboutWindow {
                 String group = first ? section.group().title() : "";
                 lines.add(Line.from(
                         Span.styled(pad(group, GROUP_WIDTH), Palette.current().muted()),
-                        Span.styled(pad(key.key(), keyWidth + 2), Style.EMPTY.bold()),
+                        Span.styled(
+                                pad(key.key(), keyWidth + 2), Palette.current().label()),
                         Span.raw(key.does())));
                 first = false;
             }
@@ -242,7 +242,7 @@ public final class AboutWindow {
         List<Span> spans = new ArrayList<>();
         for (Tab each : Tab.values()) {
             String name = each == Tab.KEYS ? " Keys " : " About ";
-            spans.add(each == tab ? Span.styled(name, Style.EMPTY.reversed()) : Span.raw(name));
+            spans.add(each == tab ? Span.styled(name, Palette.current().selection()) : Span.raw(name));
         }
         spans.add(Span.raw("· " + shown));
         return Line.from(spans);

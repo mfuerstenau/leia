@@ -60,7 +60,7 @@ public final class KeyLegend {
         List<Line> lines = new ArrayList<>();
         List<Span> line = new ArrayList<>();
         int lineWidth = 0;
-        Style bold = Style.EMPTY.bold();
+        Style bold = Palette.current().label();
         for (Keys.Section section : keys.footer()) {
             boolean first = true;
             for (Keys.Key key : section.keys()) {

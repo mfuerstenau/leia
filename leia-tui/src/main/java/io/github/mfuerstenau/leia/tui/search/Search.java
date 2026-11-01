@@ -12,7 +12,6 @@ import static io.github.mfuerstenau.leia.tui.widgets.Panels.tailRow;
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
 import dev.tamboui.text.Span;
@@ -1813,7 +1812,7 @@ public final class Search {
                 return Optional.of(none);
             }
             case 'S' -> {
-                scoring = scoring.reversed();
+                scoring = scoring.withFirstLevelReversed();
                 return Optional.of(resubmit());
             }
             case 'l' -> {
@@ -2226,7 +2225,7 @@ public final class Search {
                 case KNN -> "Press / to type a document id or a vector in brackets, or g n on the documents screen.";
                 default -> "Press / to type a query.";
             };
-            frame.renderWidget(Paragraph.from(Line.styled(hint, Form.dim())), inner);
+            frame.renderWidget(Paragraph.from(Line.styled(hint, Form.muted())), inner);
         } else {
             frame.renderWidget(Paragraph.from(Line.from(TextFormat.escapeControl(input.text()))), inner);
         }
@@ -2272,7 +2271,7 @@ public final class Search {
     private void renderKnnSecondLine(Frame frame, Rect area, String defaultField) {
         String label = editing && editLine == EditLine.K ? "k      " : "where  ";
         LineInput line = editing && editLine == EditLine.K ? kInput : knnFilter;
-        Span labelSpan = Span.styled(label, Style.EMPTY.bold());
+        Span labelSpan = Span.styled(label, Palette.current().label());
         Rect rest = new Rect(area.x() + label.length(), area.y(), Math.max(area.width() - label.length(), 0), 1);
         if (editing && editLine != EditLine.QUERY) {
             LineInput.Visible visible = line.visible(rest.width());
@@ -2283,7 +2282,8 @@ public final class Search {
                     Paragraph.from(Line.from(
                             labelSpan,
                             Span.styled(
-                                    "w types a filter in classic syntax, default field " + defaultField, Form.dim()))),
+                                    "w types a filter in classic syntax, default field " + defaultField,
+                                    Form.muted()))),
                     area);
         } else {
             frame.renderWidget(
@@ -2422,7 +2422,8 @@ public final class Search {
         table.select(Math.clamp(selected, 0, list.hits.size() - 1));
         Table widget = Table.builder()
                 .rows(rows)
-                .header(Row.from(header.toArray(Cell[]::new)).style(Style.EMPTY.bold()))
+                .header(Row.from(header.toArray(Cell[]::new))
+                        .style(Palette.current().heading()))
                 .widths(widths.toArray(Constraint[]::new))
                 .columnSpacing(COLUMN_SPACING)
                 .highlightStyle(highlight(focused))
@@ -2448,7 +2449,7 @@ public final class Search {
             if (highlight != hit.highlights().getFirst()) {
                 fieldSpans.add(Span.raw("  "));
             }
-            fieldSpans.add(Span.styled(TextFormat.escapeControl(highlight.field()) + ": ", Form.dim()));
+            fieldSpans.add(Span.styled(TextFormat.escapeControl(highlight.field()) + ": ", Form.muted()));
             fieldSpans.addAll(passageSpans(hit, highlight, highlight.passages().getFirst()));
         }
         return fieldSpans;
@@ -2472,7 +2473,7 @@ public final class Search {
             } else if (explained.explanation != null) {
                 explanationLines(explained.explanation, 0, lines);
             } else {
-                lines.add(Line.styled("Explaining…", Form.dim()));
+                lines.add(Line.styled("Explaining…", Form.muted()));
             }
         } else if (mode == Mode.REGEX) {
             title = " Scan ";
@@ -2514,7 +2515,7 @@ public final class Search {
 
     private static List<Line> dimmed(List<String> texts) {
         return new ArrayList<>(
-                texts.stream().map(text -> Line.styled(text, Form.dim())).toList());
+                texts.stream().map(text -> Line.styled(text, Form.muted())).toList());
     }
 
     /** The parsed and rewritten query, or how to write one. */
@@ -2592,14 +2593,14 @@ public final class Search {
                                 ? "No term of the document passed the limits (p), or its fields have neither a term "
                                         + "vector nor stored text."
                                 : "No term of the text passed the limits (p), or none is in the chosen fields.",
-                        Form.dim()));
+                        Form.muted()));
             } else if (docId.isPresent() && list.hits.stream().anyMatch(hit -> hit.docId() == docId.getAsInt())) {
-                lines.add(
-                        Line.styled(SOURCE_MARK + " marks document " + docId.getAsInt() + ", the source.", Form.dim()));
+                lines.add(Line.styled(
+                        SOURCE_MARK + " marks document " + docId.getAsInt() + ", the source.", Form.muted()));
             }
         }
         if (!list.hits.isEmpty() && supports(Feature.EXPLAIN)) {
-            lines.add(Line.styled("x explains the selected hit.", Form.dim()));
+            lines.add(Line.styled("x explains the selected hit.", Form.muted()));
         }
         lines.add(settingsLine());
         return lines;
@@ -2629,7 +2630,7 @@ public final class Search {
         if (!scores()) {
             popups = popups.replace("s similarity and sort · ", "");
         }
-        return Line.styled(popups, Form.dim());
+        return Line.styled(popups, Form.muted());
     }
 
     /**
@@ -2706,7 +2707,8 @@ public final class Search {
         String header = "Terms      %9s  %" + tfWidth + "s  %" + dfWidth + "s  %s  term";
         String row = "           %9s  %" + tfWidth + "d  %" + dfWidth + "d  %s  %s";
         lines.add(Line.styled(
-                String.format(Locale.ROOT, header, "score", "tf", "df", Form.padded("field", fieldWidth)), Form.dim()));
+                String.format(Locale.ROOT, header, "score", "tf", "df", Form.padded("field", fieldWidth)),
+                Form.muted()));
         for (int i = 0; i < terms.size(); i++) {
             LikeTerm term = terms.get(i);
             lines.add(Line.from(String.format(
@@ -2774,17 +2776,19 @@ public final class Search {
             return lines;
         }
         lines.add(Line.from(
-                Span.styled("Highlights of doc " + hit.get().docId(), Style.EMPTY.bold()),
-                Span.styled(" · " + highlights.text, Form.dim())));
+                Span.styled(
+                        "Highlights of doc " + hit.get().docId(),
+                        Palette.current().heading()),
+                Span.styled(" · " + highlights.text, Form.muted())));
         for (HitHighlight highlight : hit.get().highlights()) {
             lines.add(Line.from(
                     Span.styled(
                             TextFormat.escapeControl(highlight.field()),
                             Palette.current().accent()),
-                    Span.styled(" · offsets from " + offsetSourceText(highlight.offsetSource()), Form.dim())));
+                    Span.styled(" · offsets from " + offsetSourceText(highlight.offsetSource()), Form.muted())));
             for (HighlightPassage passage : highlight.passages()) {
                 List<Span> spans = new ArrayList<>();
-                spans.add(Span.styled("  [" + passage.valueIndex() + "] ", Form.dim()));
+                spans.add(Span.styled("  [" + passage.valueIndex() + "] ", Form.muted()));
                 spans.addAll(passageSpans(hit.get(), highlight, passage));
                 lines.add(Line.from(spans));
             }
@@ -2800,14 +2804,14 @@ public final class Search {
                                 + TextFormat.escapeControl(
                                         highlighting.params.field().orElseThrow()) + "[" + highlighting.valueIndex
                                 + "]…",
-                        Form.dim()));
+                        Form.muted()));
             }
         } else {
             HitHighlight first = hit.get().highlights().getFirst();
             lines.add(Line.styled(
                     "v views " + TextFormat.escapeControl(first.field()) + "["
                             + first.passages().getFirst().valueIndex() + "] with every match marked.",
-                    Form.dim()));
+                    Form.muted()));
         }
         lines.add(Line.empty());
         return lines;
@@ -2843,7 +2847,7 @@ public final class Search {
     static void explanationLines(Explanation explanation, int depth, List<Line> lines) {
         String text =
                 "  ".repeat(depth) + explanation.value() + "  " + TextFormat.escapeControl(explanation.description());
-        lines.add(explanation.match() ? Line.from(text) : Line.styled(text, Form.dim()));
+        lines.add(explanation.match() ? Line.from(text) : Line.styled(text, Form.muted()));
         for (Explanation detail : explanation.details()) {
             explanationLines(detail, depth + 1, lines);
         }

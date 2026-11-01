@@ -8,7 +8,6 @@ import static io.github.mfuerstenau.leia.tui.widgets.Panels.panel;
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
 import dev.tamboui.text.Span;
@@ -561,11 +560,11 @@ public final class Analysis {
                     Line.styled(
                             "Press / to type a text, then Enter to analyze it, or g a on the documents "
                                     + "screen for a stored value.",
-                            Form.dim()),
+                            Form.muted()),
                     Line.styled(
                             "Each step shows what the analyzer has made of it so far, and each token "
                                     + "every attribute.",
-                            Form.dim()));
+                            Form.muted()));
             frame.renderWidget(Panels.wrapped(hint, panel(" Analysis ", false), body), body);
         } else {
             // The names, the counts, the borders and a column to spare.
@@ -614,18 +613,19 @@ public final class Analysis {
         if (field.isEmpty()) {
             return List.of(Line.from(
                     Span.raw(settings.analyzer(field).text()),
-                    Span.styled(fields.isEmpty() ? "" : "   for any field · f picks one", Form.dim())));
+                    Span.styled(fields.isEmpty() ? "" : "   for any field · f picks one", Form.muted())));
         }
         List<Line> lines = new ArrayList<>();
         String name = TextFormat.escapeControl(field.get());
         boolean own = settings.hasOwn(field.get());
         lines.add(Line.from(
-                Span.styled(name + ": ", Style.EMPTY.bold()),
+                Span.styled(name + ": ", Palette.current().label()),
                 Span.raw(settings.analyzer(field).text()),
-                Span.styled(own ? "   its own · D drops it" : "   the default one", Form.dim())));
+                Span.styled(own ? "   its own · D drops it" : "   the default one", Form.muted())));
         List<String> words = settings.stopWords(field.get());
         if (!words.isEmpty()) {
-            lines.add(Line.styled(AnalysisSettings.count(words.size(), "auto stop word") + " of " + name, Form.dim()));
+            lines.add(
+                    Line.styled(AnalysisSettings.count(words.size(), "auto stop word") + " of " + name, Form.muted()));
         }
         return lines;
     }
@@ -644,7 +644,7 @@ public final class Analysis {
         if (!stopWords.isEmpty()) {
             text += text.isEmpty() ? stopWords.substring(3) : stopWords;
         }
-        return Optional.of(Line.styled(text, Form.dim()));
+        return Optional.of(Line.styled(text, Form.muted()));
     }
 
     private void renderText(Frame frame, Rect area) {
@@ -659,11 +659,11 @@ public final class Analysis {
             frame.renderWidget(Paragraph.from(Line.from(visible.text())), inner);
             frame.setCursorPosition(inner.x() + visible.cursorColumn(), inner.y());
         } else if (input.text().isEmpty()) {
-            frame.renderWidget(Paragraph.from(Line.styled("Press / to type a text.", Form.dim())), inner);
+            frame.renderWidget(Paragraph.from(Line.styled("Press / to type a text.", Form.muted())), inner);
         } else {
             Line line = Line.from(Span.raw(TextFormat.escapeControl(input.text())));
             if (shown != null && !shown.text.equals(input.text())) {
-                line = line.append(Span.styled("   (not analyzed yet: Enter)", Form.dim()));
+                line = line.append(Span.styled("   (not analyzed yet: Enter)", Form.muted()));
             }
             frame.renderWidget(Paragraph.from(line), inner);
         }
@@ -702,7 +702,7 @@ public final class Analysis {
         for (CharFilterStep filter : shown.result.charFilters()) {
             rows.add(Row.from(Cell.from(Line.from(
                     Span.raw(Form.padded(TextFormat.escapeControl(filter.name()), width) + " "),
-                    Span.styled(String.format("%6s", "text"), Form.dim())))));
+                    Span.styled(String.format("%6s", "text"), Form.muted())))));
         }
         for (TokenStage stage : shown.result.stages()) {
             String count = stage.tokens().size() + (stage.truncated() ? "+" : "");
@@ -751,7 +751,7 @@ public final class Analysis {
         if (stage.tokens().isEmpty()) {
             frame.renderWidget(
                     Paragraph.builder()
-                            .text(Text.from(Line.styled("No token.", Form.dim())))
+                            .text(Text.from(Line.styled("No token.", Form.muted())))
                             .block(block)
                             .build(),
                     area);
@@ -765,13 +765,13 @@ public final class Analysis {
                     Cell.from(offsets(each)),
                     Cell.from(TextFormat.escapeControl(each.type())));
             // Stacked on the token before, such as a synonym.
-            rows.add(each.positionIncrement() == 0 ? row.style(Style.EMPTY.italic()) : row);
+            rows.add(each.positionIncrement() == 0 ? row.style(Palette.current().secondary()) : row);
         }
         tokenTable.select(Math.min(token, stage.tokens().size() - 1));
         Table table = Table.builder()
                 .rows(rows)
                 .header(Row.from(Cell.from("Pos"), Cell.from("Term"), Cell.from("Offsets"), Cell.from("Type"))
-                        .style(Style.EMPTY.bold()))
+                        .style(Palette.current().heading()))
                 .widths(
                         Constraint.length(width(stage, each -> chars(positionText(each)))),
                         Constraint.fill(),
@@ -804,7 +804,7 @@ public final class Analysis {
             String hint = step().orElse(null) instanceof Step.CharFilter
                     ? "A char filter changes the text, before any token."
                     : "";
-            frame.renderWidget(Panels.wrapped(List.of(Line.styled(hint, Form.dim())), block, area), area);
+            frame.renderWidget(Panels.wrapped(List.of(Line.styled(hint, Form.muted())), block, area), area);
             return;
         }
         Token shownToken = selected.get();
@@ -820,7 +820,9 @@ public final class Analysis {
             if (!value.attribute().equals(attribute)) {
                 attribute = value.attribute();
                 lines.add(Line.empty());
-                lines.add(Line.styled(TextFormat.escapeControl(value.attribute()), Style.EMPTY.bold()));
+                lines.add(Line.styled(
+                        TextFormat.escapeControl(value.attribute()),
+                        Palette.current().heading()));
             }
             lines.add(Line.from("  " + Form.padded(TextFormat.escapeControl(value.key()), 15) + " "
                     + TextFormat.escapeControl(value.value())));

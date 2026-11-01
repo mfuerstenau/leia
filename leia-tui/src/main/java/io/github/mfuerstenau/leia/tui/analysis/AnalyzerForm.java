@@ -1096,13 +1096,13 @@ public final class AnalyzerForm {
             if (heading != null && !heading.equals(lastHeading)) {
                 lastHeading = heading;
                 lines.add(Line.empty());
-                lines.add(Line.styled(heading, Style.EMPTY.bold()));
+                lines.add(Line.styled(heading, Palette.current().heading()));
             }
             if (i == shownRow) {
                 selectedLine = lines.size();
             }
             Line line = rowLine(row);
-            lines.add(i == shownRow ? line.patchStyle(Style.EMPTY.reversed()) : line);
+            lines.add(i == shownRow ? line.patchStyle(Palette.current().selection()) : line);
         }
         List<String> notes = new ArrayList<>(
                 switch (draft.kind) {
@@ -1136,7 +1136,7 @@ public final class AnalyzerForm {
             lines.add(Line.empty());
             for (String note : notes) {
                 for (String line : TextFormat.wrap(note, width, Integer.MAX_VALUE)) {
-                    lines.add(Line.styled(line, Form.dim()));
+                    lines.add(Line.styled(line, Form.muted()));
                 }
             }
         }
@@ -1159,7 +1159,7 @@ public final class AnalyzerForm {
     private static Line valueLine(String label, Optional<String> value, String fallback) {
         String padded = Form.padded(label, Math.max(LABEL, label.length()));
         return value.map(v -> Line.from(padded + v))
-                .orElseGet(() -> Line.from(Span.raw(padded), Span.styled(fallback, Form.dim())));
+                .orElseGet(() -> Line.from(Span.raw(padded), Span.styled(fallback, Form.muted())));
     }
 
     private Line rowLine(Row row) {
@@ -1168,14 +1168,14 @@ public final class AnalyzerForm {
             case Row.Preset _ ->
                 Line.from(
                         Span.raw("Class           " + TextFormat.escapeControl(simpleName(draft.preset)) + "  "),
-                        Span.styled(TextFormat.escapeControl(packageOf(draft.preset)), Form.dim()));
+                        Span.styled(TextFormat.escapeControl(packageOf(draft.preset)), Form.muted()));
             case Row.WordSet(WordSetKind kind) -> {
                 String label = Form.padded(kind.label, LABEL);
                 if (draft.wordSet(kind).isPresent()) {
                     yield Line.from(label + wordSetText(draft.wordSet(kind).get()));
                 }
                 String text;
-                Style style = Form.dim();
+                Style style = Form.muted();
                 if (kind == WordSetKind.STOPWORDS && support(kind).orElse(null) == WordSetSupport.REQUIRED) {
                     text = "none: this analyzer needs some";
                     style = Palette.current().error();
@@ -1267,7 +1267,7 @@ public final class AnalyzerForm {
                         ? Line.from("Config dir      " + TextFormat.escapeControl(draft.configDir.get()))
                         : Line.from(
                                 Span.raw("Config dir      "),
-                                Span.styled("none: resources from the classpath", Form.dim()));
+                                Span.styled("none: resources from the classpath", Form.muted()));
             case Row.Component(Section section, int index) ->
                 Line.from("  "
                         + component(section, index)
@@ -1287,7 +1287,7 @@ public final class AnalyzerForm {
                 }
                 yield Line.from("      " + key + " = " + value);
             }
-            case Row.Add(Section section) -> Line.styled("  + " + section.noun, Form.dim());
+            case Row.Add(Section section) -> Line.styled("  + " + section.noun, Form.muted());
         };
     }
 
@@ -1301,9 +1301,9 @@ public final class AnalyzerForm {
         if (noAnalysis) {
             lines.add(Line.from(Analysis.NO_ANALYSIS + "."));
         } else if (components.isEmpty()) {
-            lines.add(Line.styled("The components are not loaded; Enter takes the typed " + typed + ".", Form.dim()));
+            lines.add(Line.styled("The components are not loaded; Enter takes the typed " + typed + ".", Form.muted()));
         } else if (matches.isEmpty()) {
-            lines.add(Line.styled("No match; Enter takes the typed " + typed + ".", Form.dim()));
+            lines.add(Line.styled("No match; Enter takes the typed " + typed + ".", Form.muted()));
         }
         for (int i = 0; i < matches.size(); i++) {
             Choice choice = matches.get(i);
@@ -1312,8 +1312,8 @@ public final class AnalyzerForm {
             String name = TextFormat.escapeControl(choice.name());
             Line line = Line.from(
                     Span.raw(Form.padded(name, Math.max(28, name.codePointCount(0, name.length()))) + " "),
-                    Span.styled(TextFormat.escapeControl(detail), Form.dim()));
-            lines.add(i == shown ? line.patchStyle(Style.EMPTY.reversed()) : line);
+                    Span.styled(TextFormat.escapeControl(detail), Form.muted()));
+            lines.add(i == shown ? line.patchStyle(Palette.current().selection()) : line);
         }
         String title = open.pick.preset() ? " Pick a preset analyzer " : " Pick a " + open.pick.section().noun + " ";
         Form.renderPopup(frame, area, title, lines, shown + 2, WIDTH - 8);

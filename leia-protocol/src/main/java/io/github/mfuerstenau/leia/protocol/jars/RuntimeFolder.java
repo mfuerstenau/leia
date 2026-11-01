@@ -13,10 +13,24 @@ import java.util.Optional;
  *     3.6.2}, or empty if none is loaded
  * @param problem for {@link RuntimeState#INCOMPLETE}, the jar that is missing from the folder; for
  *     {@link RuntimeState#REFUSED}, why the runtime is refused; empty otherwise
+ * @param path the folder the loaded runtime came from, among the runtimes folders it is looked up in
+ *     one runtime at a time (ADR 0122); empty if it isn't loaded, or loaded through the jars
  */
 public record RuntimeFolder(
         String folder,
         List<Integer> indexMajors,
         RuntimeState state,
         Optional<String> luceneVersion,
-        Optional<String> problem) {}
+        Optional<String> problem,
+        Optional<String> path) {
+
+    /** A runtime that came from no known folder: not loaded, or loaded through the jars. */
+    public RuntimeFolder(
+            String folder,
+            List<Integer> indexMajors,
+            RuntimeState state,
+            Optional<String> luceneVersion,
+            Optional<String> problem) {
+        this(folder, indexMajors, state, luceneVersion, problem, Optional.empty());
+    }
+}

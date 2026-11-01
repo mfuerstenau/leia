@@ -6,7 +6,6 @@ import static io.github.mfuerstenau.leia.tui.widgets.Panels.right;
 
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
 import dev.tamboui.tui.event.KeyEvent;
@@ -152,7 +151,7 @@ public final class KnnRecall {
             } else if (result != null) {
                 line = Line.from("The approximate search found every one of the exact nearest documents.");
             } else {
-                line = Line.styled("Comparing the approximate search with the exact one…", Form.dim());
+                line = Line.styled("Comparing the approximate search with the exact one…", Form.muted());
             }
             frame.renderWidget(Panels.wrapped(List.of(line), panel(title, focused), area), area);
             return;
@@ -193,7 +192,7 @@ public final class KnnRecall {
         table.select(Math.min(selected, rows.size() - 1));
         Table widget = Table.builder()
                 .rows(rows)
-                .header(header.style(Style.EMPTY.bold()))
+                .header(header.style(Palette.current().heading()))
                 .widths(widths)
                 .columnSpacing(2)
                 .highlightStyle(highlight(focused))
@@ -260,8 +259,8 @@ public final class KnnRecall {
             lines.add(Line.empty());
             selectedTarget()
                     .ifPresent(target -> lines.add(Line.styled(
-                            "⏎ searches the nearest to doc " + target.docId().orElse(0), Form.dim())));
-            selectedMiss().ifPresent(miss -> lines.add(Line.styled("⏎ opens doc " + miss.docId(), Form.dim())));
+                            "⏎ searches the nearest to doc " + target.docId().orElse(0), Form.muted())));
+            selectedMiss().ifPresent(miss -> lines.add(Line.styled("⏎ opens doc " + miss.docId(), Form.muted())));
         }
         lines.add(Line.from(
                 sampled()

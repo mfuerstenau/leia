@@ -9,15 +9,22 @@ import java.util.Optional;
 
 /**
  * The theme chosen last (ADR 0095), bundled or the user's own (ADR 0096), kept as its id on one line of a file in the platform's config
- * folder, beside the default folder of jars.
+ * folder, beside the default folder of jars. Read from the first config folder that has one, system-wide ones included, and
+ * written to the user's own (ADR 0122).
  *
- * @param file where the theme is kept; empty keeps it nowhere
+ * @param file where the theme is read from; empty reads it nowhere
+ * @param writeFile where the theme is written; empty keeps it nowhere
  */
-public record ThemeFile(Optional<Path> file) {
+public record ThemeFile(Optional<Path> file, Optional<Path> writeFile) {
+
+    /** A theme file that is read and written in one place. */
+    public ThemeFile(Optional<Path> file) {
+        this(file, file);
+    }
 
     /** A theme file that keeps nothing. */
     public static ThemeFile none() {
-        return new ThemeFile(Optional.empty());
+        return new ThemeFile(Optional.empty(), Optional.empty());
     }
 
     /**
@@ -41,10 +48,10 @@ public record ThemeFile(Optional<Path> file) {
      * theme is a convenience, and the TUI has nowhere to report it.
      */
     public void save(Theme theme) {
-        if (file.isEmpty()) {
+        if (writeFile.isEmpty()) {
             return;
         }
-        Path target = file.get();
+        Path target = writeFile.get();
         Path temporary = target.resolveSibling(
                 target.getFileName() + "." + ProcessHandle.current().pid() + ".tmp");
         try {

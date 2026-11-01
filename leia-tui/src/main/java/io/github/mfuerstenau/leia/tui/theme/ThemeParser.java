@@ -141,6 +141,11 @@ public final class ThemeParser {
                 styles.get("muted"),
                 styles.get("border"),
                 styles.get("borderFocused"),
+                styles.get("heading"),
+                styles.get("label"),
+                styles.get("selection"),
+                styles.get("selectionUnfocused"),
+                styles.get("secondary"),
                 logo);
     }
 

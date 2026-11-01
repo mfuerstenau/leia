@@ -26,6 +26,11 @@ class ThemeParserTest {
             muted         = dark-gray
             border        = none
             borderFocused = none
+            heading       = bold
+            label         = bold
+            selection     = reversed
+            selectionUnfocused = bold
+            secondary     = italic
             logo          = gazelle
             """;
 
@@ -88,9 +93,9 @@ class ThemeParserTest {
     void reportsARoleSetTwice() {
         assertThatThrownBy(() -> ThemeParser.parse("t.theme", "base = none\n" + REST + "error = bold\n"))
                 .isInstanceOf(ThemeParser.Invalid.class)
-                .hasMessage("t.theme:15: error is set twice");
+                .hasMessage("t.theme:20: error is set twice");
         assertThatThrownBy(() -> ThemeParser.parse("t.theme", "base = none\n" + REST + "logo = gazelle-mono\n"))
-                .hasMessage("t.theme:15: logo is set twice");
+                .hasMessage("t.theme:20: logo is set twice");
     }
 
     @Test
@@ -104,7 +109,7 @@ class ThemeParserTest {
     void refusesAnUnknownIcon() {
         assertThatThrownBy(() -> ThemeParser.parse("t.theme", "base = none\n" + REST.replace("= gazelle", "= zebra")))
                 .isInstanceOf(ThemeParser.Invalid.class)
-                .hasMessage("t.theme:14: no icon file zebra.colours among leia's own");
+                .hasMessage("t.theme:19: no icon file zebra.colours among leia's own");
     }
 
     @Test
@@ -112,6 +117,7 @@ class ThemeParserTest {
         assertThatThrownBy(() -> ThemeParser.parse("t.theme", "# nothing\nerror = red\n"))
                 .isInstanceOf(ThemeParser.Invalid.class)
                 .hasMessage("t.theme: missing base, warning, success, accent, jsonKey, jsonString, jsonNumber,"
-                        + " jsonLiteral, match, muted, border, borderFocused, logo");
+                        + " jsonLiteral, match, muted, border, borderFocused, heading, label, selection,"
+                        + " selectionUnfocused, secondary, logo");
     }
 }

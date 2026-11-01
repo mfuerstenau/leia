@@ -1,7 +1,6 @@
 package io.github.mfuerstenau.leia.tui.analysis;
 
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
 import dev.tamboui.tui.event.KeyEvent;
@@ -295,7 +294,9 @@ public final class AutoStopWordsForm {
                 selected == Row.VALUE.ordinal()));
         lines.add(Line.empty());
         boolean none = !chosen.contains(true);
-        lines.add(Line.styled(none ? "Fields: none chosen, so every indexed field" : "Fields", Style.EMPTY.bold()));
+        lines.add(Line.styled(
+                none ? "Fields: none chosen, so every indexed field" : "Fields",
+                Palette.current().heading()));
         int selectedLine = selected < 2 ? selected : 0;
         for (int i = 0; i < fields.size(); i++) {
             String field = fields.get(i);
@@ -308,7 +309,7 @@ public final class AutoStopWordsForm {
             }
         }
         if (fields.isEmpty()) {
-            lines.add(Line.styled("  No indexed fields: open an index with a reader.", Form.dim()));
+            lines.add(Line.styled("  No indexed fields: open an index with a reader.", Form.muted()));
         }
         lines.add(Line.empty());
         lines.add(stateLine());
@@ -336,7 +337,7 @@ public final class AutoStopWordsForm {
                 : String.join(", ", fieldWords.subList(0, Math.min(fieldWords.size(), SHOWN_WORDS))) + more;
         List<Line> lines = new ArrayList<>();
         for (String line : TextFormat.wrap(TextFormat.escapeControl(text), WIDTH - 6, Integer.MAX_VALUE)) {
-            lines.add(Line.styled("    " + line, Form.dim()));
+            lines.add(Line.styled("    " + line, Form.muted()));
         }
         return lines;
     }
@@ -348,7 +349,7 @@ public final class AutoStopWordsForm {
         if (found.isPresent()) {
             return Line.from("Found: more than " + found.get().maxDocFreq() + " documents");
         }
-        return Line.styled("A term in more documents than this is a stop word of its field.", Form.dim());
+        return Line.styled("A term in more documents than this is a stop word of its field.", Form.muted());
     }
 
     private boolean hasField(String field) {

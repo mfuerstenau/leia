@@ -48,6 +48,10 @@ public final class RuntimeLines {
                                                 .map(runtime -> runtime.luceneVersion()
                                                                 .orElseThrow() + " (" + majors(runtime) + ")")
                                                 .toList()))));
+        // Where each was found, when it was in more than one place it could have been (ADR 0122).
+        for (RuntimeFolder runtime : loaded) {
+            runtime.path().ifPresent(path -> lines.add(Line.from("  " + runtime.folder() + " from " + path)));
+        }
         for (ServerRuntimeInfo server : runtimes.servers()) {
             lines.add(Line.from(
                     "Server: " + server.label().map(label -> label + ", ").orElse("") + "Lucene "

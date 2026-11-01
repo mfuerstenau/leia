@@ -251,11 +251,11 @@ public final class LikeForm {
             Row row = row(i);
             if (row == Row.MIN_WORD_LEN) {
                 lines.add(Line.empty());
-                lines.add(Line.styled("Words left out, after analysis", Form.dim()));
+                lines.add(Line.styled("Words left out, after analysis", Form.muted()));
             }
             if (i == Row.FIELD.ordinal()) {
                 lines.add(Line.empty());
-                lines.add(Line.styled("Fields to take terms from", Form.dim()));
+                lines.add(Line.styled("Fields to take terms from", Form.muted()));
             }
             if (i == shown) {
                 selectedLine = lines.size();
@@ -266,8 +266,8 @@ public final class LikeForm {
         if (noField) {
             lines.add(Line.styled("Choose at least one field", Palette.current().error()));
         } else {
-            lines.add(Line.styled("Terms: a document's term vector or analyzed", Form.dim()));
-            lines.add(Line.styled("stored text, or the text, analyzed", Form.dim()));
+            lines.add(Line.styled("Terms: a document's term vector or analyzed", Form.muted()));
+            lines.add(Line.styled("stored text, or the text, analyzed", Form.muted()));
         }
         Form.renderPopup(frame, area, " More like this ", lines, selectedLine, WIDTH);
         if (editing != null) {

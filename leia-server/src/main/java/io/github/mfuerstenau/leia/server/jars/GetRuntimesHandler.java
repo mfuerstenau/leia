@@ -12,6 +12,7 @@ import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import io.github.mfuerstenau.leia.server.runtime.ServerRuntime;
 import jakarta.inject.Inject;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 
@@ -57,7 +58,12 @@ public final class GetRuntimesHandler implements MethodHandler<GetRuntimesParams
         String name = known.known().folder();
         if (known.luceneVersion().isPresent()) {
             return new RuntimeFolder(
-                    name, known.known().indexMajors(), RuntimeState.LOADED, known.luceneVersion(), Optional.empty());
+                    name,
+                    known.known().indexMajors(),
+                    RuntimeState.LOADED,
+                    known.luceneVersion(),
+                    Optional.empty(),
+                    RuntimeFolders.loadedFrom(known.known()).map(Path::toString));
         }
         return switch (known.folder()) {
             // Loaded, but its runtime gone from the list: not expected.

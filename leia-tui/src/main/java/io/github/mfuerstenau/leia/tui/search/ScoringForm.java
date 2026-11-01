@@ -241,10 +241,10 @@ public final class ScoringForm {
         }
         if (draft.fields.isEmpty()) {
             lines.add(Line.empty());
-            lines.add(Line.styled("No field has doc values: score or document id only", Form.dim()));
+            lines.add(Line.styled("No field has doc values: score or document id only", Form.muted()));
         } else if (sortsByNumbers()) {
             lines.add(Line.empty());
-            lines.add(Line.styled("Number types, guessed: the index doesn't say", Form.dim()));
+            lines.add(Line.styled("Number types, guessed: the index doesn't say", Form.muted()));
         }
         Form.renderPopup(frame, area, " Similarity and sort ", lines, selectedLine, 52);
     }

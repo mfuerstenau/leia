@@ -3,7 +3,6 @@ package io.github.mfuerstenau.leia.tui.widgets;
 import dev.tamboui.layout.Constraint;
 import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
-import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
 import dev.tamboui.text.Line;
 import dev.tamboui.text.Span;
@@ -52,7 +51,7 @@ public final class Logo {
      */
     public static List<Line> aboutLines(VersionResult version) {
         return List.of(
-                Line.from(Span.styled("leia", Style.EMPTY.bold()), Span.raw(" " + version.version())),
+                Line.from(Span.styled("leia", Palette.current().heading()), Span.raw(" " + version.version())),
                 Line.from("build " + version.commit()),
                 Line.from(version.commitTime()));
     }

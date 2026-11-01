@@ -42,10 +42,10 @@ public final class Form {
         return typed <= max ? (int) typed : Math.min(value, max);
     }
 
-    /** A popup row: {@code label}, padded, then {@code value}; reversed while selected. */
+    /** A popup row: {@code label}, padded, then {@code value}; in the theme's selection style while selected. */
     public static Line row(String label, String value, boolean selected) {
         Line line = Line.from(padded(label, 22) + " " + value);
-        return selected ? line.patchStyle(Style.EMPTY.reversed()) : line;
+        return selected ? line.patchStyle(Palette.current().selection()) : line;
     }
 
     /** {@code text} cut or padded to {@code width} characters, as Rust's {@code {:<w.w}}. */
@@ -83,7 +83,7 @@ public final class Form {
         return popup;
     }
 
-    public static Style dim() {
+    public static Style muted() {
         return Palette.current().muted();
     }
 }

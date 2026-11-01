@@ -730,7 +730,8 @@ public final class Check {
                             ? Span.styled("✓ ", Palette.current().success())
                             : Span.styled("✗ ", Palette.current().error()));
         }
-        spans.add(Span.styled(Overview.relative(path, index.path()), Style.EMPTY.bold()));
+        spans.add(Span.styled(
+                Overview.relative(path, index.path()), Palette.current().heading()));
         if (index.skipped()) {
             spans.add(Span.raw(" (skipped when opened)"));
         }
@@ -752,7 +753,7 @@ public final class Check {
                             ? Span.styled("✓ ", Palette.current().success())
                             : Span.styled("✗ ", Palette.current().error()));
         }
-        spans.add(Span.styled(segment.name(), Style.EMPTY.bold()));
+        spans.add(Span.styled(segment.name(), Palette.current().heading()));
         spans.add(Span.raw("  " + TextFormat.count(segment.maxDoc(), "doc")
                 + segment.sizeBytes().stream()
                         .mapToObj(size -> ", " + TextFormat.size(size))
@@ -811,10 +812,14 @@ public final class Check {
                 bad == 0
                         ? Line.styled(
                                 "OK: no problems found in " + indexCount(count) + " (" + took + ")",
-                                Palette.current().success().bold())
+                                Palette.current()
+                                        .heading()
+                                        .patch(Palette.current().success()))
                         : Line.styled(
                                 "BAD: problems in " + bad + " of " + indexCount(count) + " (" + took + ")",
-                                Palette.current().error().bold()));
+                                Palette.current()
+                                        .heading()
+                                        .patch(Palette.current().error())));
         return shown;
     }
 
@@ -825,7 +830,8 @@ public final class Check {
                         ? Span.styled("✓ ", Palette.current().success())
                         : Span.styled("✗ ", Palette.current().error()));
         if (named) {
-            head.add(Span.styled(Overview.relative(path, index.path()), Style.EMPTY.bold()));
+            head.add(Span.styled(
+                    Overview.relative(path, index.path()), Palette.current().heading()));
             if (index.skipped()) {
                 head.add(Span.raw(" (skipped when opened)"));
             }

@@ -41,9 +41,14 @@ leia reads every index through a **runtime**: a folder in `runtimes/` with the o
 jars of one Lucene version and leia's small adapter jar for it. `runtimes/` is in your data folder,
 `~/.local/share/leia/runtimes` (`$XDG_DATA_HOME/leia/runtimes`) on Linux and
 `%LOCALAPPDATA%\leia\runtimes` on Windows, so a new version of leia finds the runtimes that an
-older one downloaded, and leia's own folder may be read-only. If there is a folder `runtimes`
-beside `leia.jar`, leia uses that one instead, as for a portable install or one that an
-administrator fills for all users. The zip comes without `runtimes/`, so on the first start there
+older one downloaded, and leia's own folder may be read-only. leia takes each runtime from the
+first folder that has it: a folder `runtimes` beside `leia.jar`, if there is one (a portable
+install), then your data folder, then the system-wide ones (`/usr/local/share/leia/runtimes`,
+`/usr/share/leia/runtimes`, or those of `$XDG_DATA_DIRS`; `%PROGRAMDATA%\leia\runtimes` on
+Windows), which an administrator can fill for all users. leia checks every jar of a system-wide
+folder against the SHA-256 that its adapter lists, and never rewrites it. Downloads go to the
+first folder of yours that can be written, so a read-only folder beside `leia.jar` is passed over.
+The about screen (`?`) says where each loaded runtime came from. The zip comes without `runtimes/`, so on the first start there
 are none. Install the runtimes once:
 
 - **Interactively:** start leia and press `D` on its start screen. The window lists the runtimes
@@ -305,23 +310,31 @@ On the documents screen, `P` pins the document's segment and `I` rebuilds the se
 
 ## Files
 
-- **Log:** `~/.local/state/leia/leia.log` (`$XDG_STATE_HOME/leia/leia.log` if that is set), or
-  `%LOCALAPPDATA%\leia\leia.log` on Windows, written anew on each start. `L` shows it inside
+- **Log:** `$XDG_STATE_HOME/leia/leia.log` if that is set and can be written, else
+  `~/.local/state/leia/leia.log`, or `%LOCALAPPDATA%\leia\leia.log` on Windows, written anew on each start. `L` shows it inside
   leia, and `-` there lowers the level at once: at FINE, every call and its result is logged.
   To start at FINE, run leia with `LEIA_OPTS=-Dleia.log.level=FINE`.
-- **History:** the last 10 opened index paths, in `history` beside the log.
+- **History:** the last 10 opened index paths, in `history` beside the log. It is read from the
+  first of those folders that has one.
 - **Cache:** which fields the segments of the indexes you scanned with `f` store (field names and
-  document numbers, never values), in `~/.cache/leia/stored-fields` (`$XDG_CACHE_HOME/leia/stored-fields`
-  if that is set), or `%LOCALAPPDATA%\leia\cache\stored-fields` on Windows; at most 512 MB, and a
+  document numbers, never values), in `$XDG_CACHE_HOME/leia/stored-fields` (else `~/.cache/leia/stored-fields`), or `%LOCALAPPDATA%\leia\cache\stored-fields` on Windows; at most 512 MB, and a
   segment's file goes after 30 days unused. `LEIA_OPTS=-Dleia.cache.dir=<path>` moves it, and an
   empty path turns it off.
-- **Theme:** the theme chosen last with `T`, in `~/.config/leia/theme` (`$XDG_CONFIG_HOME/leia/theme`
-  if that is set), or `%APPDATA%\leia\theme` on Windows, beside the default folder of jars.
+- **Theme:** the theme chosen last with `T`, written to `theme` in `$XDG_CONFIG_HOME/leia` (else
+  `~/.config/leia`), or `%APPDATA%\leia` on Windows, beside the default folder of jars. It is read
+  from the first config folder that has one, also a system-wide one (`/etc/xdg/leia/theme`,
+  `%PROGRAMDATA%\leia\theme`), so an administrator can set a default.
+- **Folders:** config, data, state and cache are each looked up in order, yours before the
+  system's, and written to the first of yours that can be written. The default folder of jars
+  (`jars` in your config folders) is never read from a system-wide one, since any local user might
+  have put a jar there. The temporary folder is never used.
 
 ## Themes of your own
 
-A theme is a file `<name>.theme` in `~/.config/leia/themes` (`$XDG_CONFIG_HOME/leia/themes` if
-that is set), or `%APPDATA%\leia\themes` on Windows. The name is lower-case letters, digits and
+A theme is a file `<name>.theme` in `themes` of a config folder: `$XDG_CONFIG_HOME/leia/themes`
+and `~/.config/leia/themes`, or `%APPDATA%\leia\themes` on Windows; an administrator can add
+`/etc/xdg/leia/themes` (`%PROGRAMDATA%\leia\themes`) for all users, and a theme of yours with the same
+name wins. The name is lower-case letters, digits and
 `-`. leia reads the folder on start. `--theme <name>` chooses a theme, and `T` cycles through your
 themes after the six of leia's own. A file named like one of those, such as `nord.theme`,
 replaces it. This is `nord`:
@@ -341,10 +354,20 @@ match         = #2E3440 on #EBCB8B
 muted         = #7B88A1
 border        = #7B88A1
 borderFocused = #88C0D0
+heading       = bold
+label         = bold
+selection     = reversed
+selectionUnfocused = bold
+secondary     = italic
 logo          = gazelle-aurora
 ```
 
-A file sets every role once; a line starting with `#` is a comment. A style is `none`, the
+A file sets every role once; a line starting with `#` is a comment. Besides the colours, five roles
+style what leia would otherwise do in bold, reversed or italic: `heading` (section titles, table
+headers), `label` (keys and labels), `selection` (the selected row or tab), `selectionUnfocused`
+(the selected row of a table that has no focus) and `secondary` (a token stacked on the one
+before, on the analysis screen). A theme from before these roles is left out: leia names it on the
+start screen, and its log says which roles are missing. A style is `none`, the
 terminal's own, or a colour, `on` a background colour, and modifiers, each part optional. A colour
 is a name (`black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`, `gray`,
 `dark-gray`, `light-red`, `light-green`, `light-yellow`, `light-blue`, `light-magenta`,

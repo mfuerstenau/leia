@@ -70,6 +70,7 @@ import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
@@ -1375,7 +1376,7 @@ public final class Documents {
             case NAME -> {
                 Comparator<Integer> byName =
                         Comparator.comparing(i -> fields.get(i).name());
-                yield descending ? byName.reversed() : byName;
+                yield descending ? Collections.reverseOrder(byName) : byName;
             }
         };
         return byKey.thenComparingInt(Integer::intValue);
@@ -2080,14 +2081,18 @@ public final class Documents {
                 .filter(Objects::nonNull)
                 .collect(Collectors.joining(" · "));
         if (!segment.isEmpty()) {
-            spans.add(Span.styled(segment + " ", Palette.current().accent().bold()));
+            spans.add(Span.styled(
+                    segment + " ",
+                    Palette.current().heading().patch(Palette.current().accent())));
         }
         if (filter != null) {
             DocFilter.Title title = filter.title(docId, maxDoc);
-            Style style = (title.error()
-                            ? Palette.current().error()
-                            : Palette.current().warning())
-                    .bold();
+            Style style = Palette.current()
+                    .heading()
+                    .patch(
+                            title.error()
+                                    ? Palette.current().error()
+                                    : Palette.current().warning());
             spans.add(Span.styled(title.text() + " ", style));
         }
         return Line.from(spans);
@@ -2098,7 +2103,7 @@ public final class Documents {
             return Line.from("The index has no documents.");
         }
         List<Span> spans = new ArrayList<>();
-        spans.add(Span.styled("#" + docId, Style.EMPTY.bold()));
+        spans.add(Span.styled("#" + docId, Palette.current().heading()));
         spans.add(Span.raw(" of 0–" + (maxDoc - 1)));
         indexOf(docId)
                 .ifPresent(index ->
@@ -2110,7 +2115,9 @@ public final class Documents {
             spans.add(Span.raw("   Cannot read it: " + error));
         } else if (document != null && document.deleted()) {
             spans.add(Span.raw("   "));
-            spans.add(Span.styled("deleted", Palette.current().error().bold()));
+            spans.add(Span.styled(
+                    "deleted",
+                    Palette.current().heading().patch(Palette.current().error())));
         }
         if (hit != null) {
             // Dimmed while another document is shown.
@@ -2160,7 +2167,7 @@ public final class Documents {
                         Cell.from(FLAGS_LABEL),
                         right("Norm", widths[3]),
                         Cell.from("Value"))
-                .style(Style.EMPTY.bold());
+                .style(Palette.current().heading());
         List<Row> tableRows = new ArrayList<>();
         for (int i = 0; i < cells.size(); i++) {
             String[] cellRow = cells.get(i);
@@ -2463,7 +2470,8 @@ public final class Documents {
     }
 
     private static Span label(String text) {
-        return Span.styled(String.format(Locale.ROOT, "%-12s", text), Style.EMPTY.bold());
+        return Span.styled(
+                String.format(Locale.ROOT, "%-12s", text), Palette.current().label());
     }
 
     private static Line labelled(String label, String text) {

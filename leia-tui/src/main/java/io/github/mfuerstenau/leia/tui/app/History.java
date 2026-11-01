@@ -33,11 +33,19 @@ public final class History {
         return new History(new ArrayList<>(), Optional.empty());
     }
 
-    /** Reads the history from {@code file}. A missing or unreadable file is an empty history. */
+    /** Reads the history from {@code file}, and keeps it there. A missing or unreadable file is an empty history. */
     public static History load(Path file) {
+        return load(file, file);
+    }
+
+    /**
+     * Reads the history from {@code read}, which may be another state folder than the one it is
+     * kept in (ADR 0122), and writes it to {@code write}.
+     */
+    public static History load(Path read, Path write) {
         List<String> paths = new ArrayList<>();
         try {
-            for (String line : Files.readAllLines(file, StandardCharsets.UTF_8)) {
+            for (String line : Files.readAllLines(read, StandardCharsets.UTF_8)) {
                 if (!line.isEmpty() && paths.size() < MAX_PATHS && !paths.contains(line)) {
                     paths.add(line);
                 }
@@ -45,7 +53,7 @@ public final class History {
         } catch (IOException _) {
             paths.clear();
         }
-        return new History(paths, Optional.of(file));
+        return new History(paths, Optional.of(write));
     }
 
     /** Newest first. */

@@ -86,14 +86,18 @@ record Cli(
                       or lucene10, of which only leia's own jars are used. Can be repeated, once per
                       Lucene major
                   --no-default-jars
-                      Don't load the jars of the default folder: $XDG_CONFIG_HOME/leia/jars
-                      (~/.config/leia/jars) on Linux, %APPDATA%\\leia\\jars on Windows. Without this
-                      flag, they are loaded after those of --jar. The runtimes, a folder for each
-                      Lucene from 3.6 to 10 in the folder runtimes, are loaded always, before all
-                      others; without them, an index opens only without a reader. D on the start
-                      screen downloads them. The folder runtimes is the one beside leia.jar, if
-                      there is one, else $XDG_DATA_HOME/leia/runtimes (~/.local/share/leia/runtimes)
-                      on Linux, %LOCALAPPDATA%\\leia\\runtimes on Windows
+                      Don't load the jars of the default folder: $XDG_CONFIG_HOME/leia/jars, else
+                      ~/.config/leia/jars on Linux, %APPDATA%\\leia\\jars on Windows; only the
+                      user's, never a system-wide folder. Without this flag, they are loaded after
+                      those of --jar. The runtimes, a folder for each Lucene from 3.6 to 10 in the
+                      folder runtimes, are loaded always, before all others; without them, an
+                      index opens only without a reader. D on the start screen downloads them. Each
+                      runtime is taken from the first folder runtimes that has it: the one beside
+                      leia.jar, if there is one, then $XDG_DATA_HOME/leia/runtimes and
+                      ~/.local/share/leia/runtimes on Linux, %LOCALAPPDATA%\\leia\\runtimes on
+                      Windows, then the system-wide ones ($XDG_DATA_DIRS/leia/runtimes,
+                      %PROGRAMDATA%\\leia\\runtimes), whose jars are checked against their SHA-256.
+                      Downloads go to the first user folder that can be written
                   --directory <IMPL>
                       The Lucene Directory to read indexes through: fs lets Lucene choose
                       (MMapDirectory on 64-bit), mmap is MMapDirectory, nio is NIOFSDirectory.
@@ -120,7 +124,8 @@ record Cli(
                       none at all; nord, the Nord palette, and solarized-dark and
                       solarized-light, Solarized, each on its own background, which needs a
                       terminal with 24-bit colour; or a theme of your own, <THEME>.theme in
-                      ~/.config/leia/themes. Without it, mono if NO_COLOR is set, else the theme
+                      $XDG_CONFIG_HOME/leia/themes or ~/.config/leia/themes, or in a system-wide
+                      config folder such as /etc/xdg/leia/themes. Without it, mono if NO_COLOR is set, else the theme
                       chosen last with T on the start screen, else dark [possible values: dark,
                       light, mono, nord, solarized-dark, solarized-light, or a theme of your own]
                   --mcp

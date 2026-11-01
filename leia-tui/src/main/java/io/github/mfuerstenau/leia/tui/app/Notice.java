@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.tui.app;
 
 import dev.tamboui.text.Line;
 import io.github.mfuerstenau.leia.tui.theme.Palette;
+import java.util.List;
 
 /**
  * What the tab line says about the last reopen, or the footer about the last export or theme, until
@@ -40,6 +41,9 @@ sealed interface Notice {
     /** {@code T} on the start screen switched to the theme {@code id} (ADR 0096). */
     record ThemeChanged(String id) implements Notice {}
 
+    /** Theme files of the user's that leia refused, such as ones from before a slot was added (ADR 0121). */
+    record ThemesLeftOut(List<String> reasons) implements Notice {}
+
     /** The scan of the stored fields failed (ADR 0113). */
     record StoredFieldsFailed(String error) implements Notice {}
 
@@ -73,6 +77,13 @@ sealed interface Notice {
                         "Cannot download runtimes: " + cannot.reason(),
                         Palette.current().warning());
             case ThemeChanged changed -> Line.from("Theme: " + changed.id());
+            case ThemesLeftOut left ->
+                Line.styled(
+                        "Theme left out: " + left.reasons().getFirst()
+                                + (left.reasons().size() > 1
+                                        ? " (+" + (left.reasons().size() - 1) + " more)"
+                                        : ""),
+                        Palette.current().warning());
             case StoredFieldsFailed failed ->
                 Line.styled(
                         "Stored fields failed: " + failed.error(),
@@ -93,6 +104,7 @@ sealed interface Notice {
                 || this instanceof ExportFailed
                 || this instanceof CannotDownload
                 || this instanceof ThemeChanged
+                || this instanceof ThemesLeftOut
                 || this instanceof StoredFieldsFailed;
     }
 }
