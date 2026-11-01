@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-27
+- **Amended by:** ADR 0119 (§2, positions come with the postings in one call)
 - **Amends:** ADR 0100 (§6, the Tools table: `postings`)
 
 ## Context

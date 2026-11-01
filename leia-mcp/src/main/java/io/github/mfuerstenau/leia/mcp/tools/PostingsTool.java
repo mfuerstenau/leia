@@ -12,8 +12,6 @@ import io.github.mfuerstenau.leia.protocol.document.TermPosition;
 import io.github.mfuerstenau.leia.protocol.index.Feature;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.index.OpenIndexResult;
-import io.github.mfuerstenau.leia.protocol.terms.GetPositionsParams;
-import io.github.mfuerstenau.leia.protocol.terms.GetPositionsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.Posting;
@@ -31,7 +29,7 @@ final class PostingsTool implements McpTool<PostingsTool.Arguments, PostingsTool
 
     static final int DEFAULT_LIMIT = 50;
 
-    /** The most postings of a page with positions, which costs a backend call each. */
+    /** The most postings of a page with positions, which keeps its output near 16 KB (ADR 0115). */
     static final int MAX_LIMIT_WITH_POSITIONS = 100;
 
     /** The most positions of one document that a page returns. */
@@ -151,11 +149,14 @@ final class PostingsTool implements McpTool<PostingsTool.Arguments, PostingsTool
             requirePositions(arguments.field(), new Queries.Stats(call));
         }
         BytesValue term = new BytesValue(arguments.term(), arguments.binary().orElse(false));
+        // One more than the tool returns, so that a longer list says that it was cut (ADR 0119).
+        OptionalInt maxPositions = positions ? OptionalInt.of(MAX_POSITIONS + 1) : OptionalInt.empty();
         GetPostingsResult page = call.call(
-                Methods.GET_POSTINGS, new GetPostingsParams(arguments.field(), term, fromDoc, limit, Optional.empty()));
+                Methods.GET_POSTINGS,
+                new GetPostingsParams(arguments.field(), term, fromDoc, limit, Optional.empty(), maxPositions));
         List<Entry> entries = new ArrayList<>();
         for (Posting posting : page.postings()) {
-            entries.add(entry(posting, positions ? positions(posting, arguments.field(), term, call) : null));
+            entries.add(entry(posting, posting.positions().orElse(null)));
         }
         return new Result(
                 arguments.field(),
@@ -180,13 +181,6 @@ final class PostingsTool implements McpTool<PostingsTool.Arguments, PostingsTool
             throw ToolError.invalid("The field " + field + " is indexed with " + options.get()
                     + ", which holds no positions: leave positions out");
         }
-    }
-
-    private static List<TermPosition> positions(Posting posting, String field, BytesValue term, Call call)
-            throws ToolException, Jobs.Cancelled {
-        GetPositionsResult result =
-                call.call(Methods.GET_POSITIONS, new GetPositionsParams(posting.docId(), field, term));
-        return result.positions();
     }
 
     private static Entry entry(Posting posting, List<TermPosition> positions) {

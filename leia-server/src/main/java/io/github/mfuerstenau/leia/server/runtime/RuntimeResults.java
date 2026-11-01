@@ -716,6 +716,13 @@ public final class RuntimeResults {
             throw new RpcException(
                     ErrorCode.INVALID_PARAMS, "Invalid params: fromDoc must not be negative, not " + params.fromDoc());
         }
+        int maxPositions = params.maxPositions().orElse(0);
+        if (params.maxPositions().isPresent() && (maxPositions < 1 || maxPositions > GetPostingsParams.MAX_POSITIONS)) {
+            throw new RpcException(
+                    ErrorCode.INVALID_PARAMS,
+                    "Invalid params: maxPositions must be from 1 to " + GetPostingsParams.MAX_POSITIONS + ", not "
+                            + maxPositions);
+        }
         checkField(open.index(), params.field());
         String term = TermParams.text(params.term());
         // A field of documents only has no frequencies, as leia-core shows them; Lucene says 1.
@@ -730,8 +737,10 @@ public final class RuntimeResults {
                             bytes(params.term()),
                             params.fromDoc(),
                             params.limit(),
+                            maxPositions,
                             filter.get().filter())
-                    : terms.postings(params.field(), bytes(params.term()), params.fromDoc(), params.limit());
+                    : terms.postings(
+                            params.field(), bytes(params.term()), params.fromDoc(), params.limit(), maxPositions);
             if (page.docFreq() == 0) {
                 throw new RpcException(
                         ErrorCode.TERM_NOT_FOUND, "No term '" + term + "' in field '" + params.field() + "'");
@@ -744,7 +753,12 @@ public final class RuntimeResults {
                                     posting.docId(),
                                     posting.deleted(),
                                     freqs ? OptionalInt.of(posting.freq()) : OptionalInt.empty(),
-                                    filter.map(through -> through.filter().contains(posting.docId()))))
+                                    filter.map(through -> through.filter().contains(posting.docId())),
+                                    params.maxPositions().isPresent()
+                                            ? Optional.of(posting.positions().stream()
+                                                    .map(RuntimeResults::position)
+                                                    .toList())
+                                            : Optional.empty()))
                             .toList(),
                     page.nextDoc());
         } catch (IOException e) {
@@ -763,12 +777,13 @@ public final class RuntimeResults {
     // Clearer than a loop with one exit (ADR 0088)
     @SuppressWarnings("java:S135")
     static Terms.PostingsPage matchingPostings(
-            Terms terms, String field, byte[] term, int fromDoc, int limit, DocFilter filter) throws IOException {
+            Terms terms, String field, byte[] term, int fromDoc, int limit, int maxPositions, DocFilter filter)
+            throws IOException {
         List<Terms.Posting> shown = new ArrayList<>();
         int first = filter.next(fromDoc);
         boolean any = first != DocFilter.NO_MORE_DOCS;
         // Read even if the filter has no match left, for the term's statistics.
-        Terms.PostingsPage page = terms.postings(field, term, any ? first : fromDoc, any ? limit + 1 : 0);
+        Terms.PostingsPage page = terms.postings(field, term, any ? first : fromDoc, any ? limit + 1 : 0, maxPositions);
         int docFreq = page.docFreq();
         long totalTermFreq = page.totalTermFreq();
         while (true) {
@@ -784,7 +799,7 @@ public final class RuntimeResults {
             if (from == DocFilter.NO_MORE_DOCS) {
                 break;
             }
-            page = terms.postings(field, term, from, limit + 1 - shown.size());
+            page = terms.postings(field, term, from, limit + 1 - shown.size(), maxPositions);
         }
         OptionalInt nextDoc =
                 shown.size() > limit ? OptionalInt.of(shown.get(limit).docId()) : OptionalInt.empty();

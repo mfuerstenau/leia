@@ -25,12 +25,24 @@ public record PostingsPage(int docFreq, long totalTermFreq, List<Posting> postin
      * @param freq how often the term occurs in the document; empty if frequencies are not indexed
      * @param inFilter whether the document is in the filter the postings were read through; empty
      *     without one
+     * @param positions the first occurrences of the term in the document, as many as asked for;
+     *     empty if none were; an empty list if positions are not indexed
      */
-    public record Posting(int docId, boolean deleted, OptionalInt freq, Optional<Boolean> inFilter) {
+    public record Posting(
+            int docId,
+            boolean deleted,
+            OptionalInt freq,
+            Optional<Boolean> inFilter,
+            Optional<List<TermPosition>> positions) {
 
-        /** A posting read without a filter. */
+        /** A posting read without a filter or positions. */
         public Posting(int docId, boolean deleted, OptionalInt freq) {
             this(docId, deleted, freq, Optional.empty());
+        }
+
+        /** A posting read without positions. */
+        public Posting(int docId, boolean deleted, OptionalInt freq, Optional<Boolean> inFilter) {
+            this(docId, deleted, freq, inFilter, Optional.empty());
         }
     }
 

@@ -116,6 +116,8 @@ import io.github.mfuerstenau.leia.protocol.search.StartHighlightParams;
 import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.search.StartStoredScanParams;
 import io.github.mfuerstenau.leia.protocol.search.StoredScanHit;
+import io.github.mfuerstenau.leia.protocol.terms.GetPositionsParams;
+import io.github.mfuerstenau.leia.protocol.terms.GetPositionsResult;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.Posting;
@@ -1427,6 +1429,32 @@ class DemoIndexTest {
         private Optional<FilterMatch> stepTo(FilterResult filter, int fromDoc, boolean forward) throws Exception {
             return backend.call(Methods.STEP_FILTER, new StepFilterParams(filter.filterId(), fromDoc, forward))
                     .match();
+        }
+    }
+
+    @Nested
+    class Postings {
+
+        @Test
+        void positionsComeWithThePostingsAsGetPositionsHasThem() throws Exception {
+            BytesValue quick = text("quick");
+            GetPostingsResult page = backend.call(
+                    Methods.GET_POSTINGS,
+                    new GetPostingsParams("body", quick, 0, 1000, Optional.empty(), OptionalInt.of(1000)));
+
+            assertThat(page.postings()).hasSizeGreaterThan(100);
+            for (Posting posting : page.postings()) {
+                GetPositionsResult positions =
+                        backend.call(Methods.GET_POSITIONS, new GetPositionsParams(posting.docId(), "body", quick));
+                assertThat(posting.positions()).hasValue(positions.positions());
+            }
+            GetPostingsResult cut = backend.call(
+                    Methods.GET_POSTINGS,
+                    new GetPostingsParams("body", quick, 0, 1000, Optional.empty(), OptionalInt.of(1)));
+            assertThat(cut.postings())
+                    .allSatisfy(posting -> assertThat(posting.positions())
+                            .hasValueSatisfying(
+                                    positions -> assertThat(positions).hasSize(1)));
         }
     }
 

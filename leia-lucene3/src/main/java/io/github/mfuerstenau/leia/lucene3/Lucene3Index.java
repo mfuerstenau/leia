@@ -667,18 +667,25 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
 
     /** {@inheritDoc} Lucene 3 skips deleted documents in the postings, though {@code docFreq} counts them. */
     @Override
-    public PostingsPage postings(String field, byte[] text, int fromDoc, int limit) throws IOException {
+    public PostingsPage postings(String field, byte[] text, int fromDoc, int limit, int maxPositions)
+            throws IOException {
         Term term = new Term(field, text(text));
         List<Posting> postings = new ArrayList<>();
         OptionalInt next = OptionalInt.empty();
-        try (TermDocs docs = reader.termDocs(term)) {
+        boolean withPositions = maxPositions > 0 && hasPositions(field);
+        try (TermDocs docs = withPositions ? reader.termPositions(term) : reader.termDocs(term)) {
             boolean more = docs.skipTo(fromDoc);
             while (more) {
                 if (postings.size() == limit) {
                     next = OptionalInt.of(docs.doc());
                     break;
                 }
-                postings.add(new Posting(docs.doc(), docs.freq(), false));
+                int freq = docs.freq();
+                List<Position> positions = new ArrayList<>();
+                for (int i = 0; withPositions && i < Math.min(freq, maxPositions); i++) {
+                    positions.add(position((TermPositions) docs));
+                }
+                postings.add(new Posting(docs.doc(), freq, false, List.copyOf(positions)));
                 more = docs.next();
             }
         }
@@ -697,10 +704,7 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
             if (!positions.skipTo(docId) || positions.doc() != docId) {
                 return Optional.empty();
             }
-            FieldInfo info = fieldInfos.fieldInfo(field);
-            if (info == null
-                    || !info.isIndexed
-                    || info.indexOptions != FieldInfo.IndexOptions.DOCS_AND_FREQS_AND_POSITIONS) {
+            if (!hasPositions(field)) {
                 return Optional.of(List.of());
             }
             List<Position> result = new ArrayList<>();
@@ -709,6 +713,14 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
             }
             return Optional.of(List.copyOf(result));
         }
+    }
+
+    /** Whether the postings of {@code field} hold positions. */
+    private boolean hasPositions(String field) {
+        FieldInfo info = fieldInfos.fieldInfo(field);
+        return info != null
+                && info.isIndexed
+                && info.indexOptions == FieldInfo.IndexOptions.DOCS_AND_FREQS_AND_POSITIONS;
     }
 
     /** The next position of {@code positions}, with its payload; 3.6 has no offsets in the postings. */

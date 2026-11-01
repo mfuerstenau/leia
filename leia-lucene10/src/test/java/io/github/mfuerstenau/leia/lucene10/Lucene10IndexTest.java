@@ -158,6 +158,22 @@ class Lucene10IndexTest {
     }
 
     @Test
+    void readsPositionsWithThePostings() throws IOException {
+        try (RuntimeIndex index = open("lucene9")) {
+            Terms terms = index.terms().orElseThrow();
+            Terms.PostingsPage page = terms.postings("body", utf8("number"), 0, 10, 5);
+            assertThat(page.postings())
+                    .hasSize(3)
+                    .allSatisfy(posting -> assertThat(posting.positions())
+                            .usingRecursiveComparison()
+                            .isEqualTo(terms.positions(posting.docId(), "body", utf8("number"))
+                                    .orElseThrow()));
+            assertThat(terms.postings("body", utf8("number"), 0, 10, 0).postings())
+                    .allSatisfy(posting -> assertThat(posting.positions()).isEmpty());
+        }
+    }
+
+    @Test
     void readsTheTermsAndPostings() throws IOException {
         try (RuntimeIndex index = open("lucene9")) {
             Terms terms = index.terms().orElseThrow();
@@ -168,14 +184,14 @@ class Lucene10IndexTest {
             assertThat(page.next()).hasValueSatisfying(next -> assertThat(next).isEqualTo(utf8("number")));
             assertThat(terms.terms("nope", Optional.empty(), 10).terms()).isEmpty();
 
-            Terms.PostingsPage postings = terms.postings("body", utf8("number"), 0, 10);
+            Terms.PostingsPage postings = terms.postings("body", utf8("number"), 0, 10, 0);
             assertThat(postings.docFreq()).isEqualTo(3);
             assertThat(postings.postings())
                     .containsExactly(
                             new Terms.Posting(0, 1, false),
                             new Terms.Posting(1, 1, true),
                             new Terms.Posting(2, 1, false));
-            assertThat(terms.postings("body", utf8("nothing"), 0, 10).postings())
+            assertThat(terms.postings("body", utf8("nothing"), 0, 10, 0).postings())
                     .isEmpty();
 
             assertThat(terms.positions(2, "body", utf8("number")).orElseThrow())

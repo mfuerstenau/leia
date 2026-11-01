@@ -69,7 +69,7 @@ class RuntimeResultsTest {
         PagedPostings postings = new PagedPostings(20);
         DocFilter filter = filter(40, 2, 3, 9, 15, 30);
 
-        Terms.PostingsPage page = RuntimeResults.matchingPostings(postings, "f", new byte[0], 0, 2, filter);
+        Terms.PostingsPage page = RuntimeResults.matchingPostings(postings, "f", new byte[0], 0, 2, 0, filter);
 
         assertThat(page.postings()).extracting(Terms.Posting::docId).containsExactly(2, 3);
         assertThat(page.nextDoc()).hasValue(9);
@@ -77,7 +77,7 @@ class RuntimeResultsTest {
         // Each read starts at the filter's next match after the page before.
         assertThat(postings.froms).containsExactly(2, 9);
 
-        Terms.PostingsPage next = RuntimeResults.matchingPostings(postings, "f", new byte[0], 9, 2, filter);
+        Terms.PostingsPage next = RuntimeResults.matchingPostings(postings, "f", new byte[0], 9, 2, 0, filter);
 
         assertThat(next.postings()).extracting(Terms.Posting::docId).containsExactly(9, 15);
         assertThat(next.nextDoc()).isEmpty();
@@ -90,7 +90,7 @@ class RuntimeResultsTest {
         PagedPostings postings = new PagedPostings(20, 2);
         DocFilter filter = filter(20, 1, 3, 4, 5, 8, 12);
 
-        Terms.PostingsPage page = RuntimeResults.matchingPostings(postings, "f", new byte[0], 0, 2, filter);
+        Terms.PostingsPage page = RuntimeResults.matchingPostings(postings, "f", new byte[0], 0, 2, 0, filter);
 
         assertThat(page.postings()).extracting(Terms.Posting::docId).containsExactly(4, 8);
         assertThat(page.nextDoc()).hasValue(12);
@@ -100,7 +100,8 @@ class RuntimeResultsTest {
     void onlyMatchesWithNoMatchLeftGivesTheStatisticsAlone() throws Exception {
         PagedPostings postings = new PagedPostings(20);
 
-        Terms.PostingsPage page = RuntimeResults.matchingPostings(postings, "f", new byte[0], 6, 5, filter(20, 1, 5));
+        Terms.PostingsPage page =
+                RuntimeResults.matchingPostings(postings, "f", new byte[0], 6, 5, 0, filter(20, 1, 5));
 
         assertThat(page.postings()).isEmpty();
         assertThat(page.nextDoc()).isEmpty();
@@ -134,7 +135,7 @@ class RuntimeResultsTest {
         }
 
         @Override
-        public PostingsPage postings(String field, byte[] term, int fromDoc, int limit) {
+        public PostingsPage postings(String field, byte[] term, int fromDoc, int limit, int maxPositions) {
             froms.add(fromDoc);
             List<Posting> page = new ArrayList<>();
             int doc = (fromDoc + step - 1) / step * step;
@@ -178,7 +179,7 @@ class RuntimeResultsTest {
         }
 
         @Override
-        public PostingsPage postings(String field, byte[] term, int fromDoc, int limit) {
+        public PostingsPage postings(String field, byte[] term, int fromDoc, int limit, int maxPositions) {
             throw new UnsupportedOperationException();
         }
 

@@ -147,6 +147,66 @@ class TermHandlersTest {
     }
 
     @Test
+    void readsThePositionsWithThePostings() throws Exception {
+        openIndex();
+
+        GetPostingsResult red = getPostings.handle(
+                new GetPostingsParams("body", text("red"), 0, 10, Optional.empty(), OptionalInt.of(10)));
+        assertThat(red.postings())
+                .containsExactly(new Posting(
+                        0,
+                        false,
+                        OptionalInt.of(2),
+                        Optional.empty(),
+                        Optional.of(List.of(position(0, 0, 3), position(2, 9, 12)))));
+        // Cut at maxPositions, and the deleted document has its positions too.
+        assertThat(getPostings
+                        .handle(new GetPostingsParams("body", text("red"), 0, 10, Optional.empty(), OptionalInt.of(1)))
+                        .postings()
+                        .getFirst()
+                        .positions())
+                .hasValue(List.of(position(0, 0, 3)));
+        assertThat(getPostings
+                        .handle(new GetPostingsParams(
+                                "body", text("green"), 0, 10, Optional.empty(), OptionalInt.of(1)))
+                        .postings())
+                .extracting(Posting::deleted, posting -> posting.positions().orElseThrow())
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(true, List.of(position(0, 0, 5))));
+        // A field without positions has an empty list, and without maxPositions there is no list.
+        assertThat(getPostings
+                        .handle(new GetPostingsParams(
+                                "key", new BytesValue("ff", true), 0, 10, Optional.empty(), OptionalInt.of(5)))
+                        .postings())
+                .extracting(Posting::positions)
+                .containsExactly(Optional.of(List.of()));
+        assertThat(getPostings
+                        .handle(new GetPostingsParams("body", text("red"), 0, 10, Optional.empty()))
+                        .postings())
+                .extracting(Posting::positions)
+                .containsExactly(Optional.empty());
+    }
+
+    @Test
+    void readsThePositionsOfTheDocumentsInTheFilter() throws Exception {
+        openIndex();
+        BitSet docs = new BitSet();
+        docs.set(2);
+        filters.put(7, DocFilter.of(docs, currentIndex.runtime().index().maxDoc(), "id:3", "id:3", Duration.ZERO));
+
+        assertThat(getPostings
+                        .handle(new GetPostingsParams(
+                                "body",
+                                text("blue"),
+                                0,
+                                10,
+                                Optional.of(new PostingsFilter(7, true)),
+                                OptionalInt.of(5)))
+                        .postings())
+                .containsExactly(new Posting(
+                        2, false, OptionalInt.of(1), Optional.of(true), Optional.of(List.of(position(0, 0, 4)))));
+    }
+
+    @Test
     void failsWithoutOpenIndex() {
         assertFails(() -> getTerms.handle(new GetTermsParams("body", Optional.empty(), 10)), ErrorCode.NO_INDEX_OPEN);
         assertFails(
@@ -197,6 +257,15 @@ class TermHandlersTest {
                 "Invalid params: fromDoc must not be negative, not -1");
         assertFails(
                 () -> getPostings.handle(new GetPostingsParams("body", text("red"), 0, 1001, Optional.empty())),
+                ErrorCode.INVALID_PARAMS);
+        assertFails(
+                () -> getPostings.handle(
+                        new GetPostingsParams("body", text("red"), 0, 10, Optional.empty(), OptionalInt.of(0))),
+                ErrorCode.INVALID_PARAMS,
+                "Invalid params: maxPositions must be from 1 to 1000, not 0");
+        assertFails(
+                () -> getPostings.handle(
+                        new GetPostingsParams("body", text("red"), 0, 10, Optional.empty(), OptionalInt.of(1001))),
                 ErrorCode.INVALID_PARAMS);
     }
 

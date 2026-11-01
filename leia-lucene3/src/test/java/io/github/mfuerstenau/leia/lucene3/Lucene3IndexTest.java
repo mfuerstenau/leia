@@ -207,7 +207,7 @@ class Lucene3IndexTest {
                             .terms())
                     .isEmpty();
 
-            Terms.PostingsPage postings = index.terms().orElseThrow().postings("body", utf8("document"), 0, 1);
+            Terms.PostingsPage postings = index.terms().orElseThrow().postings("body", utf8("document"), 0, 1, 0);
             // docFreq counts the deleted document, the postings skip it.
             assertThat(postings.docFreq()).isEqualTo(3);
             assertThat(postings.postings()).containsExactly(new Terms.Posting(0, 1, false));
@@ -231,6 +231,30 @@ class Lucene3IndexTest {
             assertThat(terms.positions(0, "tag", utf8("odd"))).hasValue(List.of());
             assertThatThrownBy(() -> terms.positions(99, "body", utf8("alpha")))
                     .isInstanceOf(IllegalArgumentException.class);
+        }
+    }
+
+    @Test
+    void readsPositionsWithThePostings() throws IOException {
+        try (RuntimeIndex index = open3()) {
+            Terms terms = index.terms().orElseThrow();
+            Terms.PostingsPage page = terms.postings("body", utf8("alpha"), 0, 10, 5);
+            assertThat(page.postings())
+                    .isNotEmpty()
+                    .allSatisfy(posting -> assertThat(posting.positions())
+                            .usingRecursiveComparison()
+                            .isEqualTo(terms.positions(posting.docId(), "body", utf8("alpha"))
+                                    .orElseThrow()));
+            assertThat(page.postings().getFirst().positions())
+                    .singleElement()
+                    .isEqualTo(new Documents.Position(
+                            OptionalInt.of(0), OptionalInt.empty(), OptionalInt.empty(), Optional.empty()));
+            assertThat(terms.postings("body", utf8("alpha"), 0, 10, 0).postings())
+                    .allSatisfy(posting -> assertThat(posting.positions()).isEmpty());
+            // Docs only: the postings hold no positions.
+            assertThat(terms.postings("tag", utf8("odd"), 0, 10, 5).postings())
+                    .isNotEmpty()
+                    .allSatisfy(posting -> assertThat(posting.positions()).isEmpty());
         }
     }
 
@@ -309,7 +333,7 @@ class Lucene3IndexTest {
     private static void searchesTheTerm(RuntimeIndex index, String field, byte[] term) throws IOException {
         Search search = index.search().orElseThrow();
         Search.ParsedQuery query = search.term(field, term);
-        List<Integer> live = index.terms().orElseThrow().postings(field, term, 0, index.maxDoc()).postings().stream()
+        List<Integer> live = index.terms().orElseThrow().postings(field, term, 0, index.maxDoc(), 0).postings().stream()
                 .filter(posting -> !posting.deleted())
                 .map(Terms.Posting::docId)
                 .toList();
@@ -664,7 +688,7 @@ class Lucene3IndexTest {
             Terms.TermsPage page = terms.terms(field.name(), from, 100);
             for (Terms.TermEntry entry : page.terms()) {
                 List<Terms.Posting> postings =
-                        terms.postings(field.name(), entry.term(), doc, 1).postings();
+                        terms.postings(field.name(), entry.term(), doc, 1, 0).postings();
                 if (!postings.isEmpty() && postings.getFirst().docId() == doc) {
                     result.add(new Documents.VectorTerm(
                             entry.term(),

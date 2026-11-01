@@ -459,9 +459,10 @@ final class Lucene10Index
 
     /** {@inheritDoc} Deleted documents are read too, and marked. */
     @Override
-    public PostingsPage postings(String field, byte[] term, int fromDoc, int limit) throws IOException {
+    public PostingsPage postings(String field, byte[] term, int fromDoc, int limit, int maxPositions)
+            throws IOException {
         Optional<io.github.mfuerstenau.leia.core.PostingsPage> page = index.hasField(field)
-                ? index.postings(field, new BytesRef(term), Math.max(fromDoc, 0), limit)
+                ? index.postings(field, new BytesRef(term), Math.max(fromDoc, 0), limit, Optional.empty(), maxPositions)
                 : Optional.empty();
         if (page.isEmpty()) {
             return new PostingsPage(0, 0, List.of(), OptionalInt.empty());
@@ -474,7 +475,10 @@ final class Lucene10Index
                                 posting.docId(),
                                 // 1 without frequencies, as Lucene's postings have it.
                                 posting.freq().orElse(1),
-                                posting.deleted()))
+                                posting.deleted(),
+                                posting.positions().orElse(List.of()).stream()
+                                        .map(Lucene10Index::position)
+                                        .toList()))
                         .toList(),
                 page.get().nextDoc());
     }

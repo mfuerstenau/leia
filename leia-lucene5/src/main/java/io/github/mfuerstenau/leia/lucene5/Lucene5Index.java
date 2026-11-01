@@ -811,7 +811,8 @@ final class Lucene5Index
 
     /** {@inheritDoc} Lucene 5 reads the postings of deleted documents too, and marks them. */
     @Override
-    public PostingsPage postings(String field, byte[] text, int fromDoc, int limit) throws IOException {
+    public PostingsPage postings(String field, byte[] text, int fromDoc, int limit, int maxPositions)
+            throws IOException {
         org.apache.lucene.index.Terms terms = MultiFields.getTerms(reader, field);
         if (terms == null) {
             return new PostingsPage(0, 0, List.of(), OptionalInt.empty());
@@ -821,7 +822,9 @@ final class Lucene5Index
             return new PostingsPage(0, 0, List.of(), OptionalInt.empty());
         }
         Bits liveDocs = MultiFields.getLiveDocs(reader);
-        PostingsEnum docs = termsEnum.postings(null, PostingsEnum.FREQS);
+        boolean withPositions = maxPositions > 0 && terms.hasPositions();
+        boolean withOffsets = withPositions && terms.hasOffsets();
+        PostingsEnum docs = termsEnum.postings(null, maxPositions > 0 ? PostingsEnum.ALL : PostingsEnum.FREQS);
         List<Posting> postings = new ArrayList<>();
         OptionalInt next = OptionalInt.empty();
         for (int doc = docs.advance(Math.max(fromDoc, 0)); doc != DocIdSetIterator.NO_MORE_DOCS; doc = docs.nextDoc()) {
@@ -829,7 +832,12 @@ final class Lucene5Index
                 next = OptionalInt.of(doc);
                 break;
             }
-            postings.add(new Posting(doc, docs.freq(), liveDocs != null && !liveDocs.get(doc)));
+            int freq = docs.freq();
+            List<Position> positions = new ArrayList<>();
+            for (int i = 0; withPositions && i < Math.min(freq, maxPositions); i++) {
+                positions.add(position(docs, true, withOffsets));
+            }
+            postings.add(new Posting(doc, freq, liveDocs != null && !liveDocs.get(doc), List.copyOf(positions)));
         }
         return new PostingsPage(termsEnum.docFreq(), totalTermFreq(termsEnum), List.copyOf(postings), next);
     }

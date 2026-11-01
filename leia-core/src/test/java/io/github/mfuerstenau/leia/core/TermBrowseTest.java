@@ -202,6 +202,43 @@ class TermBrowseTest {
     }
 
     @Test
+    void readsThePositionsWithThePostings() throws Exception {
+        try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
+            List<TermPosition> red =
+                    List.of(position(0, 0, 3, Optional.of(new BytesRef("p0"))), position(2, 9, 12, Optional.empty()));
+            assertThat(index.postings("body", new BytesRef("red"), 0, 10, Optional.empty(), 5)
+                            .orElseThrow()
+                            .postings())
+                    .singleElement()
+                    .extracting(Posting::positions)
+                    .isEqualTo(Optional.of(red));
+            // Cut, and from the postings of a deleted document.
+            assertThat(index.postings("body", new BytesRef("red"), 0, 10, Optional.empty(), 1)
+                            .orElseThrow()
+                            .postings()
+                            .getFirst()
+                            .positions())
+                    .hasValue(List.of(red.getFirst()));
+            assertThat(index.postings("body", new BytesRef("green"), 0, 10, Optional.empty(), 1)
+                            .orElseThrow()
+                            .postings())
+                    .extracting(Posting::deleted, posting -> posting.positions().orElseThrow())
+                    .containsExactly(tuple(true, List.of(position(0, 0, 5, Optional.empty()))));
+            // Without positions indexed the list is empty, and without maxPositions there is none.
+            assertThat(index.postings("id", new BytesRef("3"), 0, 10, Optional.empty(), 5)
+                            .orElseThrow()
+                            .postings())
+                    .extracting(Posting::positions)
+                    .containsExactly(Optional.of(List.of()));
+            assertThat(index.postings("body", new BytesRef("red"), 0, 10)
+                            .orElseThrow()
+                            .postings())
+                    .extracting(Posting::positions)
+                    .containsExactly(Optional.empty());
+        }
+    }
+
+    @Test
     void documentWithoutTheTermHasNoPositions() throws Exception {
         try (ReadOnlyIndex index = ReadOnlyIndex.open(writeIndex())) {
             assertThat(index.positions(2, "body", new BytesRef("red"))).isEmpty();

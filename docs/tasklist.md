@@ -24,9 +24,7 @@ None open.
 
 Goal: the tools cost an agent few tokens, then they answer why a query matches or not. Measured on the demo index (compact JSON, the text item): a default `search` of 10 hits is 45.6 KB (about 13k tokens), with `fields: [id, title]` 2.5 KB; `get_document` 6.2 KB, `index_info` 5.7 KB, `reconstruct_fields` of every field 7.3 KB; `tools/list` 5 KB of descriptions and input schemas. The first five checks and changes are done (ADR 0103); the output size comes first, in this order; each change updates `tools.json`.
 
-Each tool is over a method the backend has; it checks the runtime's `features` and answers `NOT_SUPPORTED` without them. Short descriptions keep the cost of `tools/list` down. The tools are done; what is left are costs that need the protocol to change (ADR 0116):
-
-- [ ] `postings` with positions in one call: positions, with a cap per document, from the same pass over the postings as `getPostings`, instead of one `getPositions` call per posting (ADR 0115 §2), in every runtime.
+Each tool is over a method the backend has; it checks the runtime's `features` and answers `NOT_SUPPORTED` without them. Short descriptions keep the cost of `tools/list` down. The tools are done, and so are the costs that needed the protocol to change (ADR 0116).
 
 Not planned: highlighting, the point tree and the KNN graph, the term export, filters, `addJars` and the runtimes, resources and prompts.
 

@@ -15,8 +15,15 @@ public interface Terms {
     /** Up to {@code limit} terms of {@code field}, from {@code from} on (or from its first term). */
     TermsPage terms(String field, Optional<byte[]> from, int limit) throws IOException;
 
-    /** Up to {@code limit} postings of {@code term} in {@code field}, from document {@code fromDoc} on. */
-    PostingsPage postings(String field, byte[] term, int fromDoc, int limit) throws IOException;
+    /**
+     * Up to {@code limit} postings of {@code term} in {@code field}, from document {@code fromDoc} on.
+     *
+     * @param maxPositions the most occurrences each posting reads, 0 for none. They are read in the
+     *     same pass as the postings, with offsets and payloads as far as they were indexed, and are
+     *     an empty list where the field has no positions; a list shorter than the {@code freq} was
+     *     cut.
+     */
+    PostingsPage postings(String field, byte[] term, int fromDoc, int limit, int maxPositions) throws IOException;
 
     /**
      * Where {@code term} occurs in document {@code docId}, with offsets and payloads as far as they
@@ -59,8 +66,15 @@ public interface Terms {
      * A document that contains a term, and how often.
      *
      * @param deleted whether the document is deleted
+     * @param positions the first occurrences of the term in the document if asked for, else empty
      */
-    record Posting(int docId, int freq, boolean deleted) {}
+    record Posting(int docId, int freq, boolean deleted, List<Documents.Position> positions) {
+
+        /** A posting without positions. */
+        public Posting(int docId, int freq, boolean deleted) {
+            this(docId, freq, deleted, List.of());
+        }
+    }
 
     /**
      * A page of postings.

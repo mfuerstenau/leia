@@ -310,7 +310,7 @@ class Lucene5IndexTest {
             assertThat(terms.terms("id", Optional.of(utf8("9")), 2).terms()).isEmpty();
             assertThat(terms.terms("nothing", Optional.empty(), 2).terms()).isEmpty();
 
-            Terms.PostingsPage alpha = terms.postings("body", utf8("alpha"), 0, 3);
+            Terms.PostingsPage alpha = terms.postings("body", utf8("alpha"), 0, 3, 0);
             assertThat(alpha.docFreq()).isEqualTo(7);
             assertThat(alpha.totalTermFreq()).isEqualTo(7);
             assertThat(alpha.postings())
@@ -319,12 +319,49 @@ class Lucene5IndexTest {
                             new Terms.Posting(1, 1, true),
                             new Terms.Posting(2, 1, false));
             assertThat(alpha.nextDoc()).hasValue(3);
-            assertThat(terms.postings("body", utf8("alpha"), 6, 3).postings())
+            assertThat(terms.postings("body", utf8("alpha"), 6, 3, 0).postings())
                     .containsExactly(new Terms.Posting(6, 1, false));
             // Docs only: totalTermFreq is docFreq, as in Lucene 10.
-            Terms.PostingsPage odd = terms.postings("tag", utf8("odd"), 0, 10);
+            Terms.PostingsPage odd = terms.postings("tag", utf8("odd"), 0, 10, 0);
             assertThat(odd.totalTermFreq()).isEqualTo(odd.docFreq()).isEqualTo(4);
-            assertThat(terms.postings("body", utf8("missing"), 0, 10).docFreq()).isZero();
+            assertThat(terms.postings("body", utf8("missing"), 0, 10, 0).docFreq())
+                    .isZero();
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"lucene4", "lucene5"})
+    void readsPositionsWithThePostings(String name) throws IOException {
+        try (RuntimeIndex index = open(name)) {
+            Terms terms = index.terms().orElseThrow();
+            for (String text : List.of("alpha", "gamma")) {
+                Terms.PostingsPage page = terms.postings("body", utf8(text), 0, 10, 5);
+                assertThat(page.postings())
+                        .isNotEmpty()
+                        .allSatisfy(posting -> assertThat(posting.positions())
+                                .usingRecursiveComparison()
+                                .isEqualTo(terms.positions(posting.docId(), "body", utf8(text))
+                                        .orElseThrow()));
+            }
+            // Cut at maxPositions: gamma occurs twice in document 0.
+            assertThat(terms.postings("body", utf8("gamma"), 0, 10, 5)
+                            .postings()
+                            .getFirst()
+                            .positions())
+                    .extracting(position -> position.position().getAsInt())
+                    .containsExactly(4, 5);
+            assertThat(terms.postings("body", utf8("gamma"), 0, 10, 1)
+                            .postings()
+                            .getFirst()
+                            .positions())
+                    .extracting(position -> position.position().getAsInt())
+                    .containsExactly(4);
+            // Without maxPositions there are none, and a field without positions has empty lists.
+            assertThat(terms.postings("body", utf8("gamma"), 0, 10, 0).postings())
+                    .allSatisfy(posting -> assertThat(posting.positions()).isEmpty());
+            assertThat(terms.postings("tag", utf8("odd"), 0, 10, 5).postings())
+                    .isNotEmpty()
+                    .allSatisfy(posting -> assertThat(posting.positions()).isEmpty());
         }
     }
 
@@ -448,7 +485,7 @@ class Lucene5IndexTest {
     private static void searchesTheTerm(RuntimeIndex index, String field, byte[] term) throws IOException {
         Search search = index.search().orElseThrow();
         Search.ParsedQuery query = search.term(field, term);
-        List<Integer> live = index.terms().orElseThrow().postings(field, term, 0, index.maxDoc()).postings().stream()
+        List<Integer> live = index.terms().orElseThrow().postings(field, term, 0, index.maxDoc(), 0).postings().stream()
                 .filter(posting -> !posting.deleted())
                 .map(Terms.Posting::docId)
                 .toList();
@@ -851,7 +888,7 @@ class Lucene5IndexTest {
             Terms.TermsPage page = terms.terms(field.name(), from, 100);
             for (Terms.TermEntry entry : page.terms()) {
                 List<Terms.Posting> postings =
-                        terms.postings(field.name(), entry.term(), doc, 1).postings();
+                        terms.postings(field.name(), entry.term(), doc, 1, 0).postings();
                 if (!postings.isEmpty() && postings.getFirst().docId() == doc) {
                     result.add(new Documents.VectorTerm(
                             entry.term(),
@@ -895,7 +932,7 @@ class Lucene5IndexTest {
             assertThat(field(doc, "dv_num").docValues().orElseThrow().numbers()).containsExactly(400L);
             assertThat(index.terms()
                             .orElseThrow()
-                            .postings("id", utf8("2"), 0, 10)
+                            .postings("id", utf8("2"), 0, 10, 0)
                             .postings())
                     .containsExactly(new Terms.Posting(1, 1, true), new Terms.Posting(8, 1, true));
             assertThat(index.terms().orElseThrow().positions(7, "body", utf8("alpha")))

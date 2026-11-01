@@ -890,12 +890,30 @@ public final class ReadOnlyIndex implements OpenedIndex {
     public Optional<PostingsPage> postings(
             String field, BytesRef term, int fromDoc, int limit, Optional<PostingsPage.Filter> filter)
             throws IOException {
+        return postings(field, term, fromDoc, limit, filter, 0);
+    }
+
+    /**
+     * A page of the postings of a term, as {@link #postings(String, BytesRef, int, int)} reads it,
+     * through a filter of this index (ADR 0032), with the first {@code maxPositions} occurrences of
+     * the term in each posting (ADR 0119); 0 reads none.
+     *
+     * @throws IllegalArgumentException if there is no such field, {@code fromDoc} is negative,
+     *     {@code limit} is below 1 or {@code maxPositions} is negative
+     * @throws IOException if reading the postings fails
+     */
+    public Optional<PostingsPage> postings(
+            String field, BytesRef term, int fromDoc, int limit, Optional<PostingsPage.Filter> filter, int maxPositions)
+            throws IOException {
         checkField(field);
+        if (maxPositions < 0) {
+            throw new IllegalArgumentException("maxPositions must not be negative: " + maxPositions);
+        }
         checkLimit(limit);
         if (fromDoc < 0) {
             throw new IllegalArgumentException("fromDoc must not be negative: " + fromDoc);
         }
-        return TermReader.postings(reader, fieldInfos.fieldInfo(field), term, fromDoc, limit, filter);
+        return TermReader.postings(reader, fieldInfos.fieldInfo(field), term, fromDoc, limit, filter, maxPositions);
     }
 
     /**

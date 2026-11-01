@@ -51,7 +51,8 @@ final class TermReader {
             BytesRef term,
             int fromDoc,
             int limit,
-            Optional<PostingsPage.Filter> filter)
+            Optional<PostingsPage.Filter> filter,
+            int maxPositions)
             throws IOException {
         Terms terms = MultiTerms.getTerms(reader, field.getName());
         if (terms == null) {
@@ -62,7 +63,9 @@ final class TermReader {
             return Optional.empty();
         }
         boolean hasFreqs = field.getIndexOptions().compareTo(IndexOptions.DOCS_AND_FREQS) >= 0;
-        PostingsEnum postings = termsEnum.postings(null, hasFreqs ? PostingsEnum.FREQS : PostingsEnum.NONE);
+        boolean withPositions = maxPositions > 0;
+        int flags = withPositions ? PostingsEnum.ALL : hasFreqs ? PostingsEnum.FREQS : PostingsEnum.NONE;
+        PostingsEnum postings = termsEnum.postings(null, flags);
         Bits liveDocs = MultiBits.getLiveDocs(reader);
         List<PostingsPage.Posting> page = new ArrayList<>();
         // Advancing past the last document is not allowed.
@@ -74,7 +77,17 @@ final class TermReader {
                     doc,
                     liveDocs != null && !liveDocs.get(doc),
                     hasFreqs ? OptionalInt.of(postings.freq()) : OptionalInt.empty(),
-                    filter.map(through -> through.filter().contains(docId))));
+                    filter.map(through -> through.filter().contains(docId)),
+                    withPositions
+                            ? Optional.of(
+                                    terms.hasPositions()
+                                            ? TermPosition.read(
+                                                    postings,
+                                                    Math.min(postings.freq(), maxPositions),
+                                                    true,
+                                                    terms.hasOffsets())
+                                            : List.of())
+                            : Optional.empty()));
             doc = shown(postings, postings.nextDoc(), filter);
         }
         return Optional.of(new PostingsPage(
