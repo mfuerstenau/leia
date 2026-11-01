@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-13
 - **Amends:** ADR 0051 (Consequences: the reverse jump from a document to its segment)
+- **Amended by:** ADR 0120 (the jumps are in the `g` menu: `g c`, `g t`, `g s`, and the overview's `/` is `g s`; the footer shows `⌫ back` before `? keys`)
 
 ## Context
 

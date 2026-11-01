@@ -250,13 +250,13 @@ class AppTest {
         assertThat(app.handleKey(key('6'))).hasValue(new Action.LoadAnalysisComponents());
         app.componentsFailed("down");
         String screen = render(app);
-        assertThat(screen).contains("6 Analysis", "standard analyzer", "q quit   o open   / text");
+        assertThat(screen).contains("6 Analysis", "standard analyzer", "/ text", "q quit   o open");
         // The other screens need an index.
         assertThat(app.handleKey(key('5'))).isEmpty();
         assertThat(render(app)).contains("standard analyzer");
 
         // b builds a custom analyzer, which the backend tries first.
-        assertThat(app.handleKey(key('b'))).isEmpty();
+        assertThat(app.handleKey(key('e'))).isEmpty();
         assertThat(app.handleKey(key(KeyCode.LEFT))).isEmpty();
         Optional<Action> applied = app.handleKey(key(KeyCode.ENTER));
         assertThat(applied).containsInstanceOf(Action.Analyze.class);
@@ -268,7 +268,7 @@ class AppTest {
 
         // An index opened now keeps the analysis screen shown.
         assertThat(app.opened(stats("/data/idx"), List.of())).isEmpty();
-        assertThat(render(app)).contains("1-7 screen", "standard › lowercase");
+        assertThat(render(app)).contains("6 Analysis", "standard › lowercase").doesNotContain("q quit");
     }
 
     @Test
@@ -277,9 +277,9 @@ class AppTest {
         app.handleKey(key('2'));
         // The Rust test answered with another document, which the port drops (ADR 0034 §10).
         app.documentLoaded(document(0));
-        assertThat(wide(app)).contains("a analyze");
+        assertThat(wide(app)).contains("g go to");
 
-        Optional<Action> analyze = app.handleKey(key('a'));
+        Optional<Action> analyze = goTo(app, 'a');
         assertThat(analyze)
                 .hasValue(new Action.Analyze(
                         new AnalyzeParams(AnalyzerSettings.standardAnalyzer(), "doc-0", Optional.empty())));
@@ -292,8 +292,8 @@ class AppTest {
         // So does the viewer, for the value it shows.
         assertThat(app.handleKey(key('2'))).isEmpty();
         assertThat(app.handleKey(key('v'))).isEmpty();
-        assertThat(wide(app)).contains("a analyze");
-        assertThat(app.handleKey(key('a')))
+        assertThat(wide(app)).contains("g go to");
+        assertThat(goTo(app, 'a'))
                 .hasValue(new Action.Analyze(
                         new AnalyzeParams(AnalyzerSettings.standardAnalyzer(), "doc-0", Optional.empty())));
         assertThat(app.handleKey(key('c'))).hasValue(new Action.Close());
@@ -504,13 +504,13 @@ class AppTest {
     }
 
     @Test
-    void mOnADocumentSearchesForDocumentsLikeIt() {
+    void goToSimilarSearchesForDocumentsLikeTheDocument() {
         App app = app();
         app.opened(withDocs(stats("/data/idx"), 3, field("id", 0), field("body", 1)), List.of());
         assertThat(app.handleKey(key('2'))).isEqualTo(load(0));
         app.documentLoaded(document(0));
 
-        Optional<Action> start = app.handleKey(key('m'));
+        Optional<Action> start = goTo(app, 'm');
         assertThat(start).containsInstanceOf(Action.StartSearch.class);
         assertThat(((Action.StartSearch) start.orElseThrow()).cancel()).isEmpty();
         MoreLikeThisQuery like = ((Action.StartSearch) start.orElseThrow())
@@ -525,7 +525,7 @@ class AppTest {
     }
 
     @Test
-    void sOnADocValueSearchesForTheDocumentsWithIt() {
+    void goToSearchOnADocValueSearchesForTheDocumentsWithIt() {
         App app = app();
         IndexField id = new IndexField(
                 "id",
@@ -555,7 +555,7 @@ class AppTest {
                         false,
                         Optional.empty()))));
 
-        Optional<Action> start = app.handleKey(key('s'));
+        Optional<Action> start = goTo(app, 's');
         assertThat(start).containsInstanceOf(Action.StartSearch.class);
         DocValuesQuery query = ((Action.StartSearch) start.orElseThrow())
                 .params()
@@ -568,7 +568,7 @@ class AppTest {
     }
 
     @Test
-    void slashOnATopTermSearchesForIt() {
+    void goToSearchOnATopTermSearchesForIt() {
         App app = appWithFields();
         app.handleKey(key(KeyCode.DOWN));
         assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(start(1, "body"));
@@ -578,9 +578,9 @@ class AppTest {
                 new GetFieldTermScanResult(
                         1, Optional.of(new FieldTerms("body", 1, List.of(new TopTerm("ff", true, 1, 1))))));
         app.handleKey(key(KeyCode.TAB));
-        assertThat(wide(app)).contains("/ search term");
+        assertThat(wide(app)).contains("g go to");
 
-        Optional<Action> start = app.handleKey(key('/'));
+        Optional<Action> start = goTo(app, 's');
         assertThat(start).containsInstanceOf(Action.StartSearch.class);
         assertThat(((Action.StartSearch) start.orElseThrow()).params().query().term())
                 .hasValue(new TermQuery("body", new BytesValue("ff", true)));
@@ -592,7 +592,7 @@ class AppTest {
         App app = searching("q");
         app.handleKey(key('6'));
         app.componentsFailed("down");
-        app.handleKey(key('b'));
+        app.handleKey(key('e'));
         app.handleKey(key(KeyCode.LEFT));
         Action.Analyze analyze =
                 (Action.Analyze) app.handleKey(key(KeyCode.ENTER)).orElseThrow();
@@ -791,16 +791,17 @@ class AppTest {
     }
 
     @Test
-    void questionMarkShowsTheAboutWindowOnTheStartScreenAndEscClosesIt() {
+    void questionMarkShowsTheKeysAndTheAboutTabOnTheStartScreenAndEscClosesIt() {
         App app = app();
 
         assertThat(app.handleKey(key('?'))).isEmpty();
+        app.handleKey(key(KeyCode.TAB));
         assertThat(TestScreens.render(app::render, 160, 60))
-                .contains(" About leia", "by ", "Java 25")
+                .contains(" Keys  About · leia", "by ", "Java 25")
                 .doesNotContain("Read with");
 
         assertThat(app.handleKey(key(KeyCode.ESCAPE))).isEmpty();
-        assertThat(render(app)).doesNotContain(" About leia");
+        assertThat(render(app)).doesNotContain("Keys  About");
         assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.Quit());
     }
 
@@ -810,13 +811,14 @@ class AppTest {
         app.opened(stats("/data/idx"), List.of());
 
         app.handleKey(key('?'));
+        app.handleKey(key(KeyCode.TAB));
 
         assertThat(TestScreens.render(app::render, 160, 60))
-                .contains(" About leia", "/data/idx", "Read with", "Lucene 10");
+                .contains(" Keys  About · leia", "/data/idx", "Read with", "Lucene 10");
         assertThat(app.handleKey(key('y')))
                 .hasValueSatisfying(action -> assertThat(action).isInstanceOf(Action.Copy.class));
         app.handleKey(key('?'));
-        assertThat(render(app)).doesNotContain(" About leia");
+        assertThat(render(app)).doesNotContain("Keys  About");
     }
 
     @Test
@@ -828,11 +830,11 @@ class AppTest {
         assertThat(render(app)).contains(" Log: ");
 
         app.handleKey(key(KeyCode.ESCAPE));
-        assertThat(render(app)).doesNotContain(" Log: ").contains(" About leia");
+        assertThat(render(app)).doesNotContain(" Log: ").contains("Keys  About");
     }
 
     @Test
-    void theAboutAndLogWindowsOpenOnEveryScreenButOnlyTheStartFooterListsTheirKeys() {
+    void theKeyAndLogWindowsOpenOnEveryScreenButOnlyTheStartFooterListsTheirKeys() {
         App app = appWithDocuments();
         app.handleKey(key('2'));
         app.documentLoaded(document(0));
@@ -842,14 +844,14 @@ class AppTest {
             assertThat(footer).doesNotContain("? about", "L log", "X jars");
 
             app.handleKey(key('?'));
-            assertThat(TestScreens.render(app::render, 160, 60)).contains(" About leia");
+            assertThat(TestScreens.render(app::render, 160, 60)).contains("Keys  About");
             app.handleKey(key(KeyCode.ESCAPE));
             app.handleKey(key('L'));
             assertThat(TestScreens.render(app::render, 160, 60)).contains(" Log: ");
             app.handleKey(key(KeyCode.ESCAPE));
-            assertThat(render(app)).doesNotContain(" About leia", " Log: ");
+            assertThat(render(app)).doesNotContain("Keys  About", " Log: ");
         }
-        assertThat(render(app())).contains("L log", "? about");
+        assertThat(render(app())).contains("L log", "? keys");
     }
 
     @Test
@@ -991,7 +993,7 @@ class AppTest {
                 .containsExactly(
                         " q quit   o open   6 analysis ",
                         " X jars   D runtimes   L log  ",
-                        " T theme   ? about            ");
+                        " T theme   ? keys             ");
         // The screen ends above the footer.
         assertThat(rows.get(16)).startsWith("└").endsWith("┘");
 
@@ -999,9 +1001,10 @@ class AppTest {
         app.handleKey(key('2'));
         app.documentLoaded(document(0));
         String screen = TestScreens.render(app::render, 60, 30);
-        assertThat(screen).contains(" q quit   o open   c close   1-7 screen   ←→ doc   i go to");
+        assertThat(screen).contains(" ←→ doc   i go to doc  │  / seek field");
+        // Two lines at 60 columns.
         assertThat(screen.lines().toList().getLast())
-                .isEqualTo(" m similar   r rebuild   E export   T terms   Tab panel   ↑↓");
+                .isEqualTo(" v view  │  s/S sort  │  E export  │  g go to  │  ? keys    ");
     }
 
     @Test
@@ -1011,7 +1014,7 @@ class AppTest {
         app.documentLoaded(document(0));
         List<String> rows = TestScreens.render(app::render, 30, 12).lines().toList();
         assertThat(rows.get(7)).startsWith("└").endsWith("┘");
-        assertThat(rows.get(8)).isEqualTo(" q quit   o open   c close    ");
+        assertThat(rows.get(8)).startsWith(" ←→ doc   i go to doc ");
     }
 
     @Test
@@ -1125,7 +1128,7 @@ class AppTest {
     void rReopensAndTheTabLineSaysWhatCameOfIt() {
         assertThat(app().handleKey(key('R'))).isEmpty();
         App app = appWithFields();
-        assertThat(render(app)).contains("R reopen");
+        assertThat(keyList(app)).containsPattern("R +reopen");
 
         assertThat(app.handleKey(key('R'))).hasValue(new Action.Reopen());
         assertThat(render(app)).contains("Reopening…");
@@ -1328,6 +1331,20 @@ class AppTest {
         assertThat(render(app)).doesNotContain("r read again");
     }
 
+    /** {@code g} and {@code letter}: a jump of the go-to menu (ADR 0120). */
+    private static Optional<Action> goTo(App app, char letter) {
+        assertThat(app.handleKey(key('g'))).isEmpty();
+        return app.handleKey(key(letter));
+    }
+
+    /** The key list that {@code ?} opens, which it closes again. */
+    private static String keyList(App app) {
+        app.handleKey(key('?'));
+        String list = TestScreens.render(app::render, 160, 60);
+        app.handleKey(key(KeyCode.ESCAPE));
+        return list;
+    }
+
     private static String legend(App app) {
         return TestScreens.render(app::render, 240, 30);
     }
@@ -1339,11 +1356,11 @@ class AppTest {
         assertThat(app.documentLoaded(document(0))).isEmpty();
         assertThat(legend(app))
                 .contains("⏎ term vector", "v view", "E export")
-                .doesNotContain("r rebuild", "N nearest", "m similar", "t points", "s search value");
+                .doesNotContain("I indexed terms", "t point format");
 
-        assertThat(app.handleKey(key('r'))).isEmpty();
+        assertThat(app.handleKey(key('I'))).isEmpty();
         assertThat(render(app)).contains("Rebuild: not for Lucene 2.x");
-        assertThat(app.handleKey(key('m'))).isEmpty();
+        assertThat(goTo(app, 'm')).isEmpty();
         assertThat(render(app)).contains("Similar: not for Lucene 2.x");
     }
 
@@ -1353,8 +1370,8 @@ class AppTest {
         app.handleKey(key('3'));
         app.termsLoaded(loadTerms("id", null), termPage("1", "2"));
         app.postingsLoaded(loadPostings("id", "1"), postingsOf());
-        assertThat(legend(app)).contains("/ seek", "⏎ open doc").doesNotContain("e export");
-        assertThat(app.handleKey(key('e'))).isEmpty();
+        assertThat(legend(app)).contains("/ seek", "⏎ open doc").doesNotContain("E export");
+        assertThat(app.handleKey(key('E'))).isEmpty();
         assertThat(render(app)).contains("Export: not for Lucene 2.x");
 
         app.handleKey(key(KeyCode.ENTER));
@@ -1368,8 +1385,8 @@ class AppTest {
         App app = oldLuceneApp();
         assertThat(app.handleKey(key('5'))).isEmpty();
         assertThat(legend(app))
-                .contains("/ query", "p/l settings", "⏎ open doc")
-                .doesNotContain("m mode", "p/s/l settings", "H highlight", "x explain", "b/B browse");
+                .contains("/ query", "⏎ open doc")
+                .doesNotContain("m mode", "s/S sort", "v view", "x explain", "b/B browse");
         assertThat(app.handleKey(key('m'))).isEmpty();
         assertThat(render(app)).contains("Other modes: not for Lucene 2.x");
 
@@ -1841,10 +1858,10 @@ class AppTest {
         app.handleKey(key(KeyCode.ENTER));
         assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(load(0));
         app.documentLoaded(document(0));
-        assertThat(legend(app)).contains("⌫ back", "C commit", "T terms");
+        assertThat(legend(app)).contains("⌫ back", "g go to");
 
         // Documents C → the commits screen, on the document's segment of the opened commit.
-        assertThat(app.handleKey(key('C'))).hasValue(new Action.LoadCommits(0));
+        assertThat(goTo(app, 'c')).hasValue(new Action.LoadCommits(0));
         assertThat(app.commitsLoaded(0, list(commit(2, false), commit(1, true))))
                 .hasValue(new Action.LoadCommit(0, 1));
         app.commitLoaded(0, 1, new GetCommitResult(commit(1, true), List.of(commitSegment("_0", 0, 3)), List.of()));
@@ -1881,6 +1898,51 @@ class AppTest {
                                 Optional.empty())));
     }
 
+    /** {@code g} lists the jumps of the selection above the footer; {@code g g} goes to the top (ADR 0120). */
+    @Test
+    void theGoToMenuListsTheJumpsOfTheSelectionAndGGoesToTheTop() {
+        App app = appOnSegmentTerms();
+        app.handleKey(key(KeyCode.ENTER));
+        app.handleKey(key(KeyCode.ENTER));
+        app.handleKey(key(KeyCode.ENTER));
+        app.documentLoaded(documentWithBody(0));
+        app.handleKey(key(KeyCode.DOWN));
+        assertThat(legend(app)).contains("g go to");
+
+        assertThat(app.handleKey(key('g'))).isEmpty();
+        assertThat(legend(app)).contains("Go to", "t  terms of body", "c  commit of segment _0", "g  top");
+        // g again: the top, as Home, and the menu is closed.
+        assertThat(app.handleKey(key('g'))).isEmpty();
+        assertThat(legend(app)).doesNotContain("Go to");
+        app.handleKey(key('g'));
+        assertThat(legend(app)).contains("t  terms of id");
+        // Any other key closes it and does nothing else.
+        assertThat(app.handleKey(key('q'))).isEmpty();
+        assertThat(legend(app)).doesNotContain("Go to").contains("Document ");
+    }
+
+    /** {@code ?} lists every key of the shown screen, the jumps of its selection and the app's (ADR 0120). */
+    @Test
+    void questionMarkListsTheKeysOfTheShownScreen() {
+        App app = appOnSegmentTerms();
+        app.handleKey(key(KeyCode.ENTER));
+        app.handleKey(key(KeyCode.ENTER));
+        app.handleKey(key(KeyCode.ENTER));
+        app.documentLoaded(documentWithBody(0));
+
+        assertThat(keyList(app))
+                .contains("Keys  About · Documents")
+                .containsPattern("Sort +s/S +sort")
+                .containsPattern("n +number format")
+                .containsPattern("g t +terms of id")
+                .containsPattern("Tab/Shift\\+Tab +next / previous panel")
+                .containsPattern("App +q +quit");
+        // The footer has the common keys only.
+        assertThat(app.footerKeys().text())
+                .contains("←→ doc", "s/S sort", "g go to", "? keys")
+                .doesNotContain("n number format", "q quit", "1-7");
+    }
+
     @Test
     void backspaceShowsTheTermsAsTheJumpLeftThem() {
         App app = appOnSegmentTerms();
@@ -1889,9 +1951,9 @@ class AppTest {
         assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(load(0));
         app.documentLoaded(documentWithBody(0));
 
-        // T on body: the terms screen shows body's terms and postings.
+        // g t on body: the terms screen shows body's terms and postings.
         app.handleKey(key(KeyCode.DOWN));
-        assertThat(app.handleKey(key('T'))).hasValue(loadTerms("body", null));
+        assertThat(goTo(app, 't')).hasValue(loadTerms("body", null));
         app.termsLoaded(loadTerms("body", null), termPage("text"));
         app.postingsLoaded(
                 loadPostings("body", "text"),
@@ -1922,7 +1984,7 @@ class AppTest {
         app.documentLoaded(document(0));
 
         // m searches for documents like it; ⏎ on a hit shows document 2.
-        Action.StartSearch like = (Action.StartSearch) app.handleKey(key('m')).orElseThrow();
+        Action.StartSearch like = (Action.StartSearch) goTo(app, 'm').orElseThrow();
         app.searchStarted(like.searchId(), 1);
         app.searchProgress(like.searchId(), page(2));
         Action.LoadDocument hit =
@@ -1943,14 +2005,14 @@ class AppTest {
     void backspaceShowsTheSearchAsTheJumpLeftIt() {
         App app = appOnSegmentTerms();
         // s searches the term id:1; ⏎ on its first hit shows document 0.
-        Action.StartSearch term = (Action.StartSearch) app.handleKey(key('s')).orElseThrow();
+        Action.StartSearch term = (Action.StartSearch) goTo(app, 's').orElseThrow();
         app.searchStarted(term.searchId(), 1);
         app.searchProgress(term.searchId(), page(0, 2));
         assertThat(docId(app.handleKey(key(KeyCode.ENTER)))).isEqualTo(0);
         app.documentLoaded(document(0));
 
         // m searches for documents like it, whose job still runs.
-        Action.StartSearch like = (Action.StartSearch) app.handleKey(key('m')).orElseThrow();
+        Action.StartSearch like = (Action.StartSearch) goTo(app, 'm').orElseThrow();
         app.searchStarted(like.searchId(), 2);
         assertThat(legend(app)).contains("More like this document");
 
@@ -2008,7 +2070,7 @@ class AppTest {
         app.handleKey(key('3'));
         assertThat(app.handleKey(key(KeyCode.ENTER))).isEqualTo(load(3));
         app.documentLoaded(document(3));
-        assertThat(app.handleKey(key('C'))).isEmpty();
+        assertThat(goTo(app, 'c')).isEmpty();
         assertThat(legend(app)).contains("Segment _1");
 
         // Back to document 3, then to the commits screen on _0.
@@ -2062,8 +2124,8 @@ class AppTest {
                         Optional.of(value),
                         Optional.of(value),
                         List.of(new PointSegment(0, 0, Optional.of("_0"), 0, 3, 3, 3, value, value))));
-        app.handleKey(key('s'));
-        assertThat(legend(app)).contains("s searches terms only");
+        goTo(app, 's');
+        assertThat(legend(app)).contains("g s searches terms only");
 
         app.handleKey(key('2'));
         app.handleKey(key('3'));
@@ -2078,7 +2140,7 @@ class AppTest {
         app.handleKey(key(KeyCode.ENTER));
         app.documentLoaded(documentWithBody(0));
         app.handleKey(key(KeyCode.DOWN));
-        app.handleKey(key('T'));
+        goTo(app, 't');
         app.termsLoaded(loadTerms("body", null), termPage("text"));
 
         app.handleKey(key('R'));
@@ -2137,7 +2199,7 @@ class AppTest {
     }
 
     @Test
-    void tOpensTheFieldOnTheTermsScreenAndSSearchesTheTerm() {
+    void goToTermsOpensTheFieldAndGoToSearchSearchesTheTerm() {
         App app = appOnSegmentTerms();
         app.handleKey(key(KeyCode.ENTER));
         app.handleKey(key(KeyCode.ENTER));
@@ -2147,11 +2209,11 @@ class AppTest {
         app.handleKey(key('2'));
 
         // The hit's field opens at the hit's term, whose page is fetched again.
-        assertThat(app.handleKey(key('T'))).hasValue(loadTerms("id", "1"));
+        assertThat(goTo(app, 't')).hasValue(loadTerms("id", "1"));
         assertThat(legend(app)).contains("⌫ back");
 
         // s on the terms screen searches for the term.
-        assertThat(app.handleKey(key('s')))
+        assertThat(goTo(app, 's'))
                 .hasValueSatisfying(action -> assertThat(action).isInstanceOf(Action.StartSearch.class));
         assertThat(legend(app)).contains("5 Search");
         app.handleKey(key(KeyCode.BACKSPACE));
@@ -2164,13 +2226,13 @@ class AppTest {
         App app = oldLuceneApp();
         assertThat(app.handleKey(key('2'))).isEqualTo(load(0));
         app.documentLoaded(document(0));
-        assertThat(legend(app)).doesNotContain("C commit");
-        assertThat(app.handleKey(key('C'))).isEmpty();
+        assertThat(keyList(app)).doesNotContain("g c");
+        assertThat(goTo(app, 'c')).isEmpty();
         assertThat(render(app)).contains("Commits: not for Lucene 2.x");
 
         app.handleKey(key('3'));
         app.termsLoaded(loadTerms("id", null), termPage("1", "2"));
-        assertThat(app.handleKey(key('s'))).isEmpty();
+        assertThat(goTo(app, 's')).isEmpty();
         assertThat(render(app)).contains("Search term: not for Lucene 2.x");
     }
 
@@ -2186,15 +2248,15 @@ class AppTest {
                 new GetFieldTermScanResult(
                         1, Optional.of(new FieldTerms("body", 1, List.of(new TopTerm("ff", true, 1, 1))))));
         app.handleKey(key(KeyCode.TAB));
-        assertThat(wide(app)).contains("/ search term");
-        Action.StartSearch top = (Action.StartSearch) app.handleKey(key('/')).orElseThrow();
+        assertThat(wide(app)).contains("g go to");
+        Action.StartSearch top = (Action.StartSearch) goTo(app, 's').orElseThrow();
         assertThat(top.params().query().term()).hasValue(new TermQuery("body", new BytesValue("ff", true)));
-        assertThat(legend(app)).contains("m mode").doesNotContain("p/s/l settings");
+        assertThat(legend(app)).contains("m mode").doesNotContain("s/S sort");
 
         app.handleKey(key('3'));
         app.termsLoaded(loadTerms("id", null), termPage("1", "2"));
-        assertThat(legend(app)).contains("s search");
-        Action.StartSearch term = (Action.StartSearch) app.handleKey(key('s')).orElseThrow();
+        assertThat(legend(app)).contains("g go to");
+        Action.StartSearch term = (Action.StartSearch) goTo(app, 's').orElseThrow();
         assertThat(term.params().query().term()).hasValue(new TermQuery("id", new BytesValue("1", false)));
     }
 
@@ -2203,9 +2265,9 @@ class AppTest {
         App app = oldLuceneApp(Feature.RECONSTRUCT);
         assertThat(app.handleKey(key('2'))).isEqualTo(load(0));
         app.documentLoaded(document(0));
-        assertThat(legend(app)).contains("r rebuild");
+        assertThat(keyList(app)).containsPattern("I +indexed terms");
 
-        assertThat(app.handleKey(key('r'))).hasValue(new Action.StartReconstruct(0, "id", List.of()));
+        assertThat(app.handleKey(key('I'))).hasValue(new Action.StartReconstruct(0, "id", List.of()));
         app.reconstructStarted(0, "id", 7);
         app.reconstructProgress(
                 7,
@@ -2293,7 +2355,7 @@ class AppTest {
 
         String screen = render(app);
         assertThat(screen)
-                .contains("3 Terms", "id (/ seeks)", "Postings (2)", "/ seek", "⏎ open doc", "e export", "←/→ column");
+                .contains("3 Terms", "id (/ seeks)", "Postings (2)", "/ seek", "⏎ open doc", "E export", "←→ column");
         // The terms screen has everything it shows.
         app.handleKey(key('1'));
         assertThat(app.handleKey(key('3'))).isEmpty();
@@ -2428,7 +2490,7 @@ class AppTest {
                         StoredType.STRING, "doc-0", false, OptionalLong.of(100_000), OptionalLong.of(100_000))));
 
         assertThat(app.handleKey(key('v'))).hasValue(new Action.LoadStoredValue(0, "id", 0));
-        assertThat(render(app)).contains("Esc close   ←/→ value   t text   h hex   J json   d delimited   y copy");
+        assertThat(render(app)).contains("←→ value", "t text   h hex   J json   d delimited", "y copy", "Esc close");
         // The viewer takes q and the screen keys.
         assertThat(app.handleKey(key('1'))).isEmpty();
         app.storedValueLoaded(0, "id", 0, new StoredValue(StoredType.STRING, "doc-0, whole", false));
@@ -2599,7 +2661,7 @@ class AppTest {
     void rebuildsAFieldAndStopsWhenTheDocumentChanges() {
         App app = appShowingADocument();
 
-        assertThat(app.handleKey(key('r'))).hasValue(new Action.StartReconstruct(0, "id", List.of()));
+        assertThat(app.handleKey(key('I'))).hasValue(new Action.StartReconstruct(0, "id", List.of()));
         assertThat(app.reconstructStarted(0, "id", 7)).isEmpty();
         assertThat(app.polls()).containsExactly(new Poll.Reconstruct(7));
         app.reconstructProgress(7, new GetReconstructResult(1024, OptionalLong.of(3000), Optional.empty()));
@@ -2607,7 +2669,7 @@ class AppTest {
         app.handleKey(key(KeyCode.TAB));
         app.handleKey(key(KeyCode.END));
         assertThat(render(app)).contains("Esc stop rebuild", "rebuilding… 1024 of 3000 terms");
-        assertThat(TestScreens.render(app::render, 260, 20)).contains("m similar   r rebuild   E export   T terms");
+        assertThat(TestScreens.render(app::render, 260, 20)).contains("E export", "g go to");
 
         // Another document stops it.
         assertThat(app.handleKey(key(KeyCode.RIGHT)))
@@ -2616,19 +2678,19 @@ class AppTest {
         app.documentLoaded(document(1));
 
         // So does Esc, before it quits.
-        app.handleKey(key('r'));
+        app.handleKey(key('I'));
         app.reconstructStarted(1, "id", 8);
         assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.CancelReconstruct(8));
         assertThat(app.polls()).isEmpty();
         app.handleKey(key(KeyCode.END));
-        assertThat(render(app)).contains("r rebuilds the terms");
+        assertThat(render(app)).contains("I rebuilds the terms");
         assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.Quit());
     }
 
     @Test
     void aRebuildStoppedBeforeItsJobStartedIsCancelledOnceItHas() {
         App app = appShowingADocument();
-        app.handleKey(key('r'));
+        app.handleKey(key('I'));
 
         assertThat(app.handleKey(key(KeyCode.ESCAPE))).isEmpty();
         assertThat(app.reconstructStarted(0, "id", 7)).hasValue(new Action.CancelReconstruct(7));
@@ -2638,7 +2700,7 @@ class AppTest {
     @Test
     void showsTheRebuiltField() {
         App app = appShowingADocument();
-        app.handleKey(key('r'));
+        app.handleKey(key('I'));
         app.reconstructStarted(0, "id", 7);
 
         app.reconstructProgress(
@@ -2661,7 +2723,7 @@ class AppTest {
         String screen = render(app);
         assertThat(screen).contains("1 term, from the postings", "  doc-0").doesNotContain("×1");
         // Rebuilt once is enough.
-        assertThat(app.handleKey(key('r'))).isEmpty();
+        assertThat(app.handleKey(key('I'))).isEmpty();
     }
 
     @Test
@@ -2691,7 +2753,7 @@ class AppTest {
                 .isEqualTo(load(2));
         app.documentLoaded(document(2));
         assertThat(app.loadingDocuments()).isFalse();
-        assertThat(render(app)).contains("filter red: 2 of 2", "←→ match   b unfilter");
+        assertThat(render(app)).contains("filter red: 2 of 2", "←→ match", "b unfilter");
 
         // The terms screen reads the postings through it.
         assertThat(app.handleKey(key('3'))).hasValue(loadTerms("id", null));
@@ -2905,7 +2967,7 @@ class AppTest {
         // The first showing fetches the segments, for the list to mark.
         assertThat(app.handleKey(key('7'))).hasValue(new Action.LoadCheckTargets());
         String screen = render(app);
-        assertThat(screen).contains("Lucene's CheckIndex", "⏎ check all   Space mark   a all");
+        assertThat(screen).contains("Lucene's CheckIndex", "⏎ check all   Space mark   a mark all");
 
         app.handleKey(key('l'));
         assertThat(app.handleKey(key(KeyCode.ENTER)))
@@ -3015,7 +3077,7 @@ class AppTest {
     @Test
     void exportsTheTermsOfTheSelectedField(@TempDir Path dir) {
         App app = appOnTerms().withCwd(dir);
-        assertThat(app.handleKey(key('e'))).isEmpty();
+        assertThat(app.handleKey(key('E'))).isEmpty();
         assertThat(render(app)).contains("Export the terms of id", "Tab delimiter: tab");
         app.handleKey(ctrl('u'));
         typed(app, "ids.out");
@@ -3036,7 +3098,7 @@ class AppTest {
         app.termsExportProgress(1, new GetExportTermsResult(1024, Optional.empty()));
         assertThat(wide(app)).contains("Exporting id: 1024 terms", "Esc cancel export");
         // One export at a time.
-        app.handleKey(key('e'));
+        app.handleKey(key('E'));
         assertThat(wide(app)).contains("An export runs; Esc cancels it").doesNotContain("Export the terms");
 
         app.termsExportProgress(
@@ -3055,7 +3117,7 @@ class AppTest {
     @Test
     void aTermsExportThatCantStartSaysWhyInItsPrompt(@TempDir Path dir) {
         App app = appOnTerms().withCwd(dir);
-        app.handleKey(key('e'));
+        app.handleKey(key('E'));
         assertThat(app.handleKey(key(KeyCode.ENTER))).containsInstanceOf(Action.StartExportTerms.class);
         app.exportFailed(1, "Not writing into the index directory " + dir);
         assertThat(wide(app)).contains("Not writing into the index directory");
@@ -3066,7 +3128,7 @@ class AppTest {
     @Test
     void escCancelsARunningTermsExportAndAFailureIsShown(@TempDir Path dir) {
         App app = appOnTerms().withCwd(dir);
-        app.handleKey(key('e'));
+        app.handleKey(key('E'));
         app.handleKey(key(KeyCode.ENTER));
         app.exportStarted(1, 4);
         assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.CancelExport(4));
@@ -3075,7 +3137,7 @@ class AppTest {
         app.termsExportProgress(1, new GetExportTermsResult(5, Optional.empty()));
         assertThat(app.exporting()).isFalse();
 
-        app.handleKey(key('e'));
+        app.handleKey(key('E'));
         app.handleKey(key(KeyCode.ENTER));
         app.exportStarted(2, 5);
         app.exportFailed(2, "Cannot write x: disk full");
@@ -3083,7 +3145,7 @@ class AppTest {
         assertThat(render(app)).contains("Export failed: Cannot write x: disk full");
 
         // A job that starts for an export that a close forgot is cancelled.
-        app.handleKey(key('e'));
+        app.handleKey(key('E'));
         app.handleKey(key(KeyCode.ENTER));
         app.closed();
         assertThat(app.exportStarted(3, 6)).hasValue(new Action.CancelExport(6));

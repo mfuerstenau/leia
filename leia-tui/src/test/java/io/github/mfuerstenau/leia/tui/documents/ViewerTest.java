@@ -128,7 +128,7 @@ class ViewerTest {
                 5);
         assertThat(viewer.fetch()).isEmpty();
         assertThat(viewer.mode()).isEqualTo(Mode.TEXT);
-        assertThat(viewer.keys()).contains("m/M next/previous match");
+        assertThat(viewer.keys().text()).contains("m/M next/previous match");
 
         String screen = render(viewer, 70, 8);
         assertThat(screen).contains("body · 2 of 2");
@@ -153,7 +153,7 @@ class ViewerTest {
     void valuesWithoutMatchesHaveNoMatchKeys() {
         Viewer viewer = viewer(Value.stored(0, text("red")));
 
-        assertThat(viewer.keys()).doesNotContain("match");
+        assertThat(viewer.keys().text()).doesNotContain("match");
         assertThat(viewer.handleKey(key('m'))).isEmpty();
         assertThat(render(viewer, 40, 6)).doesNotContain("match");
     }
@@ -257,7 +257,9 @@ class ViewerTest {
         viewer.handleKey(key(KeyCode.END));
         assertThat(render(viewer, 40, 12)).contains("│line 50", "rows 41–50 of 50");
         viewer.handleKey(key(KeyCode.UP));
-        viewer.handleKey(key('g'));
+        // g opens the go-to menu, whose g sends Home.
+        assertThat(viewer.handleKey(key('g'))).contains(new Viewer.Event.GoTo());
+        viewer.handleKey(key(KeyCode.HOME));
         assertThat(render(viewer, 40, 12)).contains("rows 1–10 of 50");
     }
 
@@ -433,7 +435,8 @@ class ViewerTest {
         Viewer viewer = viewer(Value.stored(0, text("a=1|b=22")));
         assertThat(viewer.handleKey(key('d'))).isEmpty();
         assertThat(render(viewer, 80, 12)).contains("Delimited", "Items      ,▏");
-        assertThat(viewer.keys()).contains("Tab/↑↓ other delimiter   ⏎ apply   Esc cancel");
+        assertThat(viewer.promptKeys())
+                .hasValueSatisfying(keys -> assertThat(keys).contains("Tab/↑↓ other delimiter   ⏎ apply   Esc cancel"));
 
         // The form takes the keys, q included.
         viewer.handleKey(key(KeyCode.BACKSPACE));

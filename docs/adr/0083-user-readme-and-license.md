@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-15
 - **Amends:** ADR 0082 §1 (what the zip holds)
+- **Amended by:** ADR 0120 (the README's keys: the shared keys, the `g` menu and the `?` key list)
 
 ## Context
 

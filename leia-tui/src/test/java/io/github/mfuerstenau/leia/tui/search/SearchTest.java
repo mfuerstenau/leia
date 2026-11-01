@@ -54,6 +54,7 @@ import io.github.mfuerstenau.leia.protocol.search.ParserOptions;
 import io.github.mfuerstenau.leia.protocol.search.PointField;
 import io.github.mfuerstenau.leia.protocol.search.PointType;
 import io.github.mfuerstenau.leia.protocol.search.QueryOperator;
+import io.github.mfuerstenau.leia.protocol.search.ScoreSort;
 import io.github.mfuerstenau.leia.protocol.search.SearchQuery;
 import io.github.mfuerstenau.leia.protocol.search.SearchResults;
 import io.github.mfuerstenau.leia.protocol.search.Similarity;
@@ -266,9 +267,9 @@ class SearchTest {
     @Test
     void aClassicOnlyIndexSearchesWithoutHighlightsOrOtherModes() {
         Search search = search().withFeatures(Set.of(Feature.CLASSIC_SEARCH, Feature.DOCUMENTS));
-        assertThat(search.keys())
-                .contains("/ query", "p/l settings", "⏎ open doc")
-                .doesNotContain("m mode", "x explain", "H highlight", "v view", "b/B browse");
+        assertThat(TestScreens.allKeys(search.keys()))
+                .contains("/ query", "p parser options", "l stored fields", "⏎ open doc")
+                .doesNotContain("m mode", "x explain", "H highlight", "v view", "b/B browse", "s/S sort");
         assertThat(press(search, 'm')).hasValue(new Request.Unsupported("Other modes"));
         assertThat(press(search, 's')).hasValue(new Request.Unsupported("Similarity and sort"));
 
@@ -290,7 +291,7 @@ class SearchTest {
     @Test
     void aRuntimeWithTermQueriesHasTheTermMode() {
         Search search = search().withFeatures(Set.of(Feature.CLASSIC_SEARCH, Feature.TERM_SEARCH, Feature.DOCUMENTS));
-        assertThat(search.keys()).contains("m mode");
+        assertThat(search.keys().text()).contains("m mode");
         assertThat(press(search, 'm')).isEmpty();
         assertThat(search.mode()).isEqualTo(Mode.TERM);
         assertThat(press(search, 'm')).isEmpty();
@@ -302,7 +303,7 @@ class SearchTest {
     @Test
     void aRuntimeThatScoresHasTheSimilarityAndSort() {
         Search search = search().withFeatures(Set.of(Feature.CLASSIC_SEARCH, Feature.SCORING, Feature.DOCUMENTS));
-        assertThat(search.keys()).contains("p/s/l settings");
+        assertThat(TestScreens.allKeys(search.keys())).contains("p parser options", "s/S sort", "l stored fields");
 
         press(search, '/');
         typed(search, "red");
@@ -319,7 +320,7 @@ class SearchTest {
     void aClassicOnlyIndexWithVectorsSearchesTheNearestToo() {
         Search search =
                 knnSearch().withFeatures(Set.of(Feature.CLASSIC_SEARCH, Feature.KNN_VECTORS, Feature.DOCUMENTS));
-        assertThat(search.keys()).contains("m mode");
+        assertThat(search.keys().text()).contains("m mode");
         assertThat(press(search, 'm')).isEmpty();
         assertThat(search.mode()).isEqualTo(Mode.KNN);
         assertThat(press(search, 'm')).isEmpty();
@@ -362,11 +363,11 @@ class SearchTest {
     @Test
     void cyclesOnlyThroughTheModesTheIndexHas() {
         Search search = search().withFeatures(Set.of(Feature.CLASSIC_SEARCH, Feature.STORED_SCAN));
-        assertThat(search.keys()).startsWith("/ query").contains("m mode");
+        assertThat(search.keys().text()).startsWith(" / query").contains("m mode");
         assertThat(press(search, 'm')).isEmpty();
-        assertThat(search.keys()).startsWith("/ pattern");
+        assertThat(search.keys().text()).startsWith(" / pattern");
         assertThat(press(search, 'm')).isEmpty();
-        assertThat(search.keys()).startsWith("/ query");
+        assertThat(search.keys().text()).startsWith(" / query");
     }
 
     /** A search for {@code red} whose first page is in: hits 0 to {@code count - 1} of {@code totalHits}. */
@@ -666,7 +667,7 @@ class SearchTest {
                 .contains(
                         "Doc values · field price (NUMERIC) · long · count to 1000",
                         "Press / to type a value, several values, a range, or a prefix.");
-        assertThat(search.keys()).startsWith("/ values");
+        assertThat(search.keys().text()).startsWith(" / values");
 
         press(search, '/');
         typed(search, "{1 TO *]");
@@ -846,7 +847,7 @@ class SearchTest {
                         "KNN · embedding (3d float, cosine) · k 10 · approximate",
                         "Press / to type a document id or a vector in brackets",
                         "w types a filter in classic syntax, default field title");
-        assertThat(search.keys()).startsWith("/ target   w filter");
+        assertThat(TestScreens.allKeys(search.keys())).startsWith("/ target   m mode   w filter");
 
         assertThat(knnOf(line(search, "42")))
                 .isEqualTo(new KnnQuery(
@@ -889,7 +890,8 @@ class SearchTest {
         // k takes digits only, and stays within 1 to 10,000.
         assertThat(press(search, 'k')).isEmpty();
         assertThat(search.prompting()).isTrue();
-        assertThat(search.keys()).contains("set k");
+        assertThat(search.promptKeys())
+                .hasValueSatisfying(keys -> assertThat(keys).contains("set k"));
         press(search, ctrl('u'));
         typed(search, "2x5");
         assertThat(knnOf(press(search, KeyCode.ENTER)).k()).hasValue(25);
@@ -962,12 +964,12 @@ class SearchTest {
     }
 
     @Test
-    void rChecksTheRecallOfTheLinesTargetAndOpensAMissedDocument() {
+    void capitalKChecksTheRecallOfTheLinesTargetAndOpensAMissedDocument() {
         Search search = knnMode();
         line(search, "42");
-        assertThat(search.keys()).contains("r recall");
+        assertThat(TestScreens.allKeys(search.keys())).contains("K recall");
 
-        Request.Recall recall = recallOf(press(search, 'r'));
+        Request.Recall recall = recallOf(press(search, 'K'));
         assertThat(recall.params().sample()).isEmpty();
         assertThat(recall.params().query())
                 .isEqualTo(new KnnQuery(
@@ -1011,7 +1013,7 @@ class SearchTest {
     }
 
     @Test
-    void rOnABlankLineSamplesDocumentsAndSearchesAWorstTarget() {
+    void capitalKOnABlankLineSamplesDocumentsAndSearchesAWorstTarget() {
         Search search = knnMode();
         press(search, 'w');
         typed(search, "red");
@@ -1020,7 +1022,7 @@ class SearchTest {
         press(search, ctrl('u'));
         press(search, KeyCode.ESCAPE);
 
-        Request.Recall recall = recallOf(press(search, 'r'));
+        Request.Recall recall = recallOf(press(search, 'K'));
         assertThat(recall.params().sample()).hasValue(Search.RECALL_SAMPLE);
         assertThat(recall.params().query().docId()).isEmpty();
         assertThat(recall.params().query().vector()).isEmpty();
@@ -1052,14 +1054,14 @@ class SearchTest {
     @Test
     void escStopsARecallCheck() {
         Search search = knnMode();
-        Request.Recall recall = recallOf(press(search, 'r'));
+        Request.Recall recall = recallOf(press(search, 'K'));
         search.knnRecallStarted(recall.recallId(), 5);
 
         assertThat(search.cancel()).containsExactly(5L);
         assertThat(search.running()).isFalse();
         assertThat(render(search)).contains("Recall · k 10 · stopped", "Stopped.");
         // A start of a check that was stopped is cancelled.
-        Request.Recall again = recallOf(press(search, 'r'));
+        Request.Recall again = recallOf(press(search, 'K'));
         assertThat(search.knnRecallStarted(recall.recallId(), 6)).hasValue(6);
         assertThat(search.knnRecallStarted(again.recallId(), 7)).isEmpty();
     }
@@ -1067,18 +1069,18 @@ class SearchTest {
     @Test
     void aSampledRecallCheckBelongsToItsField() {
         Search search = knnMode();
-        assertThat(search.keys()).contains("⏎ open doc");
-        Request.Recall recall = recallOf(press(search, 'r'));
+        assertThat(search.keys().text()).contains("⏎ open doc");
+        Request.Recall recall = recallOf(press(search, 'K'));
         assertThat(recall.params().sample()).hasValue(Search.RECALL_SAMPLE);
         search.knnRecallStarted(recall.recallId(), 5);
         // Enter on a sampled target searches its nearest.
-        assertThat(search.keys()).contains("⏎ nearest").doesNotContain("⏎ open doc");
+        assertThat(search.keys().text()).contains("⏎ nearest").doesNotContain("⏎ open doc");
 
         // The next field searches nothing on a blank line, but stops the check and drops it.
         assertThat(press(search, 'f')).hasValue(new Request.Cancel(List.of(5L)));
         assertThat(search.knnRecallJob()).isEmpty();
         assertThat(render(search)).contains("KNN · fingerprint").doesNotContain("Recall ·");
-        assertThat(search.keys()).contains("⏎ open doc");
+        assertThat(search.keys().text()).contains("⏎ open doc");
     }
 
     @Test
@@ -1180,7 +1182,7 @@ class SearchTest {
         }
         assertThat(render(search))
                 .contains("More like this text · fields title · body · count to 1000", "Press / to type a text");
-        assertThat(search.keys()).startsWith("/ text");
+        assertThat(search.keys().text()).startsWith(" / text");
 
         press(search, '/');
         // Anything goes into the line, unlike a document id.
@@ -1191,7 +1193,8 @@ class SearchTest {
         // The popup is the same as for a document; f/F don't step a field.
         assertThat(press(search, 'f')).isEmpty();
         assertThat(press(search, 'p')).isEmpty();
-        assertThat(search.keys()).contains("a/n all/no fields");
+        assertThat(search.promptKeys())
+                .hasValueSatisfying(keys -> assertThat(keys).contains("a/n all/no fields"));
         press(search, KeyCode.ESCAPE);
 
         search.searchStarted(start.searchId(), 1);
@@ -1246,7 +1249,8 @@ class SearchTest {
 
         assertThat(press(search, 'p')).isEmpty();
         assertThat(search.prompting()).isTrue();
-        assertThat(search.keys()).contains("a/n all/no fields");
+        assertThat(search.promptKeys())
+                .hasValueSatisfying(keys -> assertThat(keys).contains("a/n all/no fields"));
         for (int i = 0; i < 4; i++) {
             press(search, KeyCode.DOWN);
         }
@@ -1538,6 +1542,33 @@ class SearchTest {
         assertThat(render(search)).contains("count to 1000 · no highlights");
         // Back to the query's fields; the searches before never started a job.
         assertSearch(press(search, 'H'), query, 0, Search.SEARCH_PAGE, List.of());
+    }
+
+    /** {@code S} reverses the first sort level and searches again (ADR 0120). */
+    @Test
+    void capitalSReversesTheFirstSortLevel() {
+        Search search = searched(2, 2);
+
+        // Without a sort, the score with the worst hits first.
+        Request.Start worst = started(press(search, 'S'));
+        assertThat(worst.params().sort())
+                .containsExactly(new SortKey(Optional.empty(), Optional.of(new ScoreSort(true)), Optional.empty()));
+        // Again: the best first.
+        Request.Start best = started(press(search, 'S'));
+        assertThat(best.params().sort())
+                .containsExactly(new SortKey(Optional.empty(), Optional.of(new ScoreSort(false)), Optional.empty()));
+
+        // A field's level flips its direction.
+        press(search, 's');
+        for (KeyCode code : List.of(KeyCode.DOWN, KeyCode.DOWN, KeyCode.DOWN, KeyCode.RIGHT, KeyCode.RIGHT)) {
+            press(search, code);
+        }
+        Request.Start price = started(press(search, KeyCode.ENTER));
+        assertThat(price.params().sort().getFirst().field())
+                .hasValueSatisfying(field -> assertThat(field.reverse()).isFalse());
+        Request.Start reversed = started(press(search, 'S'));
+        assertThat(reversed.params().sort().getFirst().field())
+                .hasValue(new FieldSort("price", SortType.LONG, true, SortSelector.MIN, SortMissing.DEFAULT));
     }
 
     @Test

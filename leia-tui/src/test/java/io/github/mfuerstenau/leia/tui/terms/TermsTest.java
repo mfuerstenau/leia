@@ -36,6 +36,8 @@ import io.github.mfuerstenau.leia.tui.points.PointFormat;
 import io.github.mfuerstenau.leia.tui.points.PointFormats;
 import io.github.mfuerstenau.leia.tui.terms.Terms.Request;
 import io.github.mfuerstenau.leia.tui.terms.Terms.TermHit;
+import io.github.mfuerstenau.leia.tui.widgets.GoMenu;
+import io.github.mfuerstenau.leia.tui.widgets.Jump;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -130,12 +132,12 @@ class TermsTest {
         terms.termsLoaded(termsRequest("id", null, false), page(List.of("a", "b", "c"), "d"));
         terms.postingsLoaded(postingsRequest("id", "a", 0, false), postings(List.of(1, 4), 7));
 
-        assertThat(terms.keys()).contains("/ seek").doesNotContain("e export", "⏎ open doc");
-        assertThat(terms.handleKey(key('e'))).hasValue(new Request.Unsupported("Export"));
+        assertThat(terms.keys().text()).contains("/ seek").doesNotContain("E export", "⏎ open doc");
+        assertThat(terms.handleKey(key('E'))).hasValue(new Request.Unsupported("Export"));
         terms.handleKey(key(KeyCode.ENTER));
         terms.handleKey(key(KeyCode.ENTER));
         assertThat(terms.handleKey(key(KeyCode.ENTER))).hasValue(new Request.Unsupported("Open doc"));
-        assertThat(loaded().keys()).contains("e export", "⏎ open doc");
+        assertThat(loaded().keys().text()).contains("E export", "⏎ open doc");
     }
 
     private static String render(Terms terms) {
@@ -313,10 +315,10 @@ class TermsTest {
     }
 
     @Test
-    void eExportsTheSelectedField() {
+    void capitalEExportsTheSelectedField() {
         Terms terms = loaded();
 
-        assertThat(terms.handleKey(key('e'))).hasValue(new Request.Export("id"));
+        assertThat(terms.handleKey(key('E'))).hasValue(new Request.Export("id"));
     }
 
     // What the asynchronous calls add.
@@ -518,45 +520,45 @@ class TermsTest {
         assertThat(terms.handleKey(key('/'))).isEmpty();
         assertThat(terms.prompting()).isFalse();
         assertThat(render(terms)).contains("/ seeks terms only");
-        assertThat(terms.handleKey(key('e'))).isEmpty();
+        assertThat(terms.handleKey(key('E'))).isEmpty();
     }
 
     @Test
-    void sSearchesTheSelectedTermOrThePostingsTerm() {
+    void gsSearchesTheSelectedTermOrThePostingsTerm() {
         Terms terms = loaded();
-        assertThat(terms.keys()).contains("s search");
+        assertThat(terms.jumps()).containsExactly(new GoMenu.Target(Jump.SEARCH, "search id for the term"));
         // On the fields column, the selected term.
-        assertThat(terms.handleKey(key('s'))).hasValue(new Request.Search("id", text("a")));
+        assertThat(terms.jump(Jump.SEARCH)).hasValue(new Request.Search("id", text("a")));
 
         terms.handleKey(key(KeyCode.RIGHT));
         terms.handleKey(key(KeyCode.DOWN));
-        assertThat(terms.handleKey(key('s'))).hasValue(new Request.Search("id", text("b")));
+        assertThat(terms.jump(Jump.SEARCH)).hasValue(new Request.Search("id", text("b")));
         // On the postings column, the postings' term, which is a's until b's are in.
         terms.handleKey(key(KeyCode.RIGHT));
-        assertThat(terms.handleKey(key('s'))).hasValue(new Request.Search("id", text("a")));
+        assertThat(terms.jump(Jump.SEARCH)).hasValue(new Request.Search("id", text("a")));
     }
 
     @Test
-    void sNeedsSearchAndWorksOnTermsOnly() {
+    void gsNeedsSearchAndWorksOnTermsOnly() {
         Terms terms = terms().withFeatures(Set.of(Feature.TERMS, Feature.POSTINGS));
-        assertThat(terms.keys()).doesNotContain("s search");
-        assertThat(terms.handleKey(key('s'))).hasValue(new Request.Unsupported("Search term"));
+        assertThat(terms.jumps()).isEmpty();
+        assertThat(terms.jump(Jump.SEARCH)).hasValue(new Request.Unsupported("Search term"));
 
         // A runtime searches a term with term queries alone (ADR 0058).
         Terms runtime = loaded().withFeatures(Set.of(Feature.TERMS, Feature.POSTINGS, Feature.TERM_SEARCH));
-        assertThat(runtime.keys()).contains("s search");
-        assertThat(runtime.handleKey(key('s'))).hasValue(new Request.Search("id", text("a")));
+        assertThat(runtime.jumps()).extracting(GoMenu.Target::jump).containsExactly(Jump.SEARCH);
+        assertThat(runtime.jump(Jump.SEARCH)).hasValue(new Request.Search("id", text("a")));
 
         Terms points = codeTree();
-        assertThat(points.handleKey(key('s'))).isEmpty();
-        assertThat(render(points)).contains("s searches terms only");
+        assertThat(points.jump(Jump.SEARCH)).isEmpty();
+        assertThat(render(points)).contains("g s searches terms only");
     }
 
     @Test
     void leavingTheScreenEndsTheNote() {
         Terms terms = codeTree();
-        terms.handleKey(key('s'));
-        assertThat(render(terms)).contains("s searches terms only");
+        terms.jump(Jump.SEARCH);
+        assertThat(render(terms)).contains("g s searches terms only");
 
         terms.leave();
         assertThat(render(terms)).doesNotContain("terms only");
@@ -565,12 +567,12 @@ class TermsTest {
     @Test
     void thePointTreeTitleFitsItsPanel() {
         Terms terms = codeTree();
-        terms.handleKey(key('s'));
+        terms.jump(Jump.SEARCH);
 
         // Too narrow for the whole title: it leaves out the segments, inside the corners.
         String wide = TestScreens.render(frame -> terms.render(frame, frame.area()), 120, 12);
         assertThat(wide.lines().findFirst().orElseThrow())
-                .contains("┌ code · s searches terms only · 3 points in 3 docs · as int ─")
+                .contains("┌ code · g s searches terms only · 3 points in 3 docs · as int ─")
                 .doesNotContain("segment");
         // Narrower than the note: the title is cut and the corner stays.
         String narrow = TestScreens.render(frame -> terms.render(frame, frame.area()), 60, 12);
@@ -608,7 +610,7 @@ class TermsTest {
         assertThat(terms.show("code", Optional.empty(), false)).hasValue(termsRequest("code", null, false));
         terms.termsLoaded(termsRequest("code", null, false), page(List.of("x", "y"), null));
         terms.handleKey(key(KeyCode.DOWN));
-        assertThat(terms.handleKey(key('s'))).hasValue(new Request.Search("code", text("y")));
+        assertThat(terms.jump(Jump.SEARCH)).hasValue(new Request.Search("code", text("y")));
         // A row the screen doesn't have.
         assertThat(terms.show("price", Optional.empty(), false)).isEmpty();
     }
@@ -703,7 +705,7 @@ class TermsTest {
                         "_1  5 vectors · no graph",
                         "⏎ on a node shows its",
                         "neighbours.");
-        assertThat(terms.keys()).contains("< back", "d open doc");
+        assertThat(terms.keys().text()).contains("< walk back");
     }
 
     @Test
@@ -750,9 +752,9 @@ class TermsTest {
                         "L0       0     0  L0   0.9312",
                         "         5     6  L0   1.2e-5");
 
-        // Enter walks on to the selected neighbour; d opens its document.
+        // Enter walks on to the selected neighbour; g d opens its document.
         terms.handleKey(key(KeyCode.DOWN));
-        assertThat(terms.handleKey(key('d'))).hasValue(new Request.VectorDocument("embedding", 0));
+        assertThat(terms.jump(Jump.DOCUMENT)).hasValue(new Request.VectorDocument("embedding", 0));
         Request.LoadKnnNode walk = Request.LoadKnnNode.ofOrd("embedding", 1, 0, 0, true);
         assertThat(terms.handleKey(key(KeyCode.ENTER))).hasValue(walk);
         terms.knnNodeLoaded(
@@ -942,7 +944,7 @@ class TermsTest {
         assertThat(render(terms)).contains("doesn't", "read HNSW graphs.");
         terms.handleKey(key(KeyCode.RIGHT));
         assertThat(terms.handleKey(key(KeyCode.ENTER))).hasValue(new Request.Unsupported("HNSW graph"));
-        assertThat(terms.keys()).doesNotContain("< back");
+        assertThat(terms.keys().text()).doesNotContain("< back");
     }
 
     @Test

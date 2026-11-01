@@ -4,6 +4,8 @@ import static io.github.mfuerstenau.leia.tui.TestScreens.key;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.tamboui.tui.event.KeyCode;
+import dev.tamboui.tui.event.KeyEvent;
+import dev.tamboui.tui.event.KeyModifiers;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.StoredField;
 import io.github.mfuerstenau.leia.protocol.document.StoredFields;
@@ -390,6 +392,11 @@ class OverviewTest {
         overview.handleKey(key(KeyCode.UP));
         overview.handleKey(key(KeyCode.TAB));
         assertThat(overview.selectedTopTerm()).hasValue(new Overview.FieldTerm("body", new BytesValue("c", false)));
+
+        // Two panels: Shift+Tab switches back as Tab does (ADR 0120).
+        assertThat(overview.handleKey(KeyEvent.ofKey(KeyCode.TAB, KeyModifiers.SHIFT)))
+                .isTrue();
+        assertThat(overview.selectedTopTerm()).isEmpty();
     }
 
     @Test

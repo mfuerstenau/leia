@@ -5,16 +5,19 @@ import dev.tamboui.layout.Layout;
 import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
+import dev.tamboui.text.CharWidth;
 import dev.tamboui.text.Line;
 import dev.tamboui.text.Span;
 import dev.tamboui.text.Text;
 import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.widgets.block.Block;
+import dev.tamboui.widgets.block.Title;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import io.github.mfuerstenau.leia.tui.theme.Icon;
 import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.KeyLegend;
+import io.github.mfuerstenau.leia.tui.widgets.Keys;
 import io.github.mfuerstenau.leia.tui.widgets.Logo;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.util.ArrayList;
@@ -22,9 +25,10 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * The about window, opened with {@code ?} on any screen: leia's version, build, author and project,
- * the Java and the runtimes, the open index, and the licence with the NOTICE. All of it scrolls,
- * the logo with it.
+ * The window that {@code ?} opens on any screen, with two tabs (ADR 0120). Keys, the first, lists
+ * every key of the shown screen by its group, footer or not, then the moves and the app's keys.
+ * About has leia's version, build, author and project, the Java and the runtimes, the open index,
+ * and the licence with the NOTICE. Either scrolls, the logo with it; Tab switches them.
  */
 public final class AboutWindow {
 
@@ -34,7 +38,18 @@ public final class AboutWindow {
     /** The fewest columns left for the text next to the logo. */
     private static final int MIN_TEXT_WIDTH = 30;
 
-    private static final String KEYS = "↑↓ scroll   g/G start/end   y copy link   Esc close";
+    private static final String KEYS_TAB_KEYS = "↑↓ scroll   g/G start/end   Tab about   Esc close";
+
+    private static final String ABOUT_TAB_KEYS = "↑↓ scroll   g/G start/end   y copy link   Tab keys   Esc close";
+
+    /** Columns of the group names in the key list, the widest and a gap. */
+    private static final int GROUP_WIDTH = 7;
+
+    /** The window's tabs. */
+    public enum Tab {
+        KEYS,
+        ABOUT
+    }
 
     /** What a key did to the window. */
     public sealed interface Event {}
@@ -45,12 +60,19 @@ public final class AboutWindow {
     /** Esc or {@code ?}: close the window. */
     public record Close() implements Event {}
 
-    /** {@code y}: put the project's URL on the clipboard. */
+    /** {@code y} on the About tab: put the project's URL on the clipboard. */
     public record Copy(String text) implements Event {}
 
     private final VersionResult version;
     private final List<Line> environment;
     private final String notice;
+
+    /** What the key list is of, such as {@code Documents}. */
+    private final String screen;
+
+    private final Keys keys;
+
+    private Tab tab = Tab.KEYS;
 
     /** The first row shown. */
     private int scroll;
@@ -64,17 +86,24 @@ public final class AboutWindow {
     private Optional<String> message = Optional.empty();
 
     /**
-     * A window on leia {@code version}, with {@code environment}, the lines about the Java, the
-     * runtimes and the open index, and the NOTICE of {@code leia.jar}.
+     * A window with {@code keys}, those of {@code screen}, and on leia {@code version}, with {@code
+     * environment}, the lines about the Java, the runtimes and the open index, and the NOTICE of
+     * {@code leia.jar}.
      */
-    public AboutWindow(VersionResult version, List<Line> environment) {
-        this(version, environment, About.notice());
+    public AboutWindow(VersionResult version, List<Line> environment, String screen, Keys keys) {
+        this(version, environment, About.notice(), screen, keys);
     }
 
-    AboutWindow(VersionResult version, List<Line> environment, String notice) {
+    AboutWindow(VersionResult version, List<Line> environment, String notice, String screen, Keys keys) {
         this.version = version;
         this.environment = List.copyOf(environment);
         this.notice = notice;
+        this.screen = screen;
+        this.keys = keys.merged();
+    }
+
+    public Tab tab() {
+        return tab;
     }
 
     public Event handleKey(KeyEvent key) {
@@ -89,6 +118,10 @@ public final class AboutWindow {
             case PAGE_UP -> scrollTo(scroll - rows);
             case HOME -> scrollTo(0);
             case END -> scrollTo(Integer.MAX_VALUE);
+            case TAB -> {
+                tab = tab == Tab.KEYS ? Tab.ABOUT : Tab.KEYS;
+                scroll = 0;
+            }
             case CHAR -> {
                 switch (key.codePoint()) {
                     case '?' -> {
@@ -99,8 +132,10 @@ public final class AboutWindow {
                     case 'g' -> scrollTo(0);
                     case 'G' -> scrollTo(Integer.MAX_VALUE);
                     case 'y' -> {
-                        message = Optional.of("Copied " + About.URL + " (OSC 52).");
-                        return new Copy(About.URL);
+                        if (tab == Tab.ABOUT) {
+                            message = Optional.of("Copied " + About.URL + " (OSC 52).");
+                            return new Copy(About.URL);
+                        }
                     }
                     default -> {}
                 }
@@ -132,8 +167,41 @@ public final class AboutWindow {
         return lines;
     }
 
-    /** Everything the window shows, for a text {@code width} columns wide. */
+    /** The key list: a group's name, then each of its keys in bold and what it does, one a line. */
+    List<Line> keyLines(int width) {
+        int keyWidth = 0;
+        for (Keys.Section section : keys.sections()) {
+            for (Keys.Key key : section.keys()) {
+                keyWidth = Math.max(keyWidth, CharWidth.of(key.key()));
+            }
+        }
+        List<Line> lines = new ArrayList<>();
+        for (Keys.Section section : keys.sections()) {
+            boolean first = true;
+            for (Keys.Key key : section.keys()) {
+                String group = first ? section.group().title() : "";
+                lines.add(Line.from(
+                        Span.styled(pad(group, GROUP_WIDTH), Palette.current().muted()),
+                        Span.styled(pad(key.key(), keyWidth + 2), Style.EMPTY.bold()),
+                        Span.raw(key.does())));
+                first = false;
+            }
+        }
+        return Panels.wrap(lines, width);
+    }
+
+    /** {@code text} padded with spaces to {@code width} columns, and a space at least. */
+    private static String pad(String text, int width) {
+        return text + " ".repeat(Math.max(width - CharWidth.of(text), 1));
+    }
+
+    /** Everything the shown tab shows, for a text {@code width} columns wide. */
     List<Line> content(int width) {
+        return tab == Tab.KEYS ? keyLines(width) : aboutLines(width);
+    }
+
+    /** Everything the About tab shows. */
+    private List<Line> aboutLines(int width) {
         List<Line> lines = new ArrayList<>(headerBesideLogo(width));
         lines.add(Line.empty());
         lines.addAll(Panels.wrap(environment, width));
@@ -169,6 +237,17 @@ public final class AboutWindow {
         return lines;
     }
 
+    /** The tabs, the shown one reversed, and what it shows. */
+    private Line titleLine(String shown) {
+        List<Span> spans = new ArrayList<>();
+        for (Tab each : Tab.values()) {
+            String name = each == Tab.KEYS ? " Keys " : " About ";
+            spans.add(each == tab ? Span.styled(name, Style.EMPTY.reversed()) : Span.raw(name));
+        }
+        spans.add(Span.raw("· " + shown));
+        return Line.from(spans);
+    }
+
     /** Draws the window over most of {@code area}. */
     public void render(Frame frame, Rect area) {
         Rect window = Panels.centered(area, Math.max(area.width() - 4, 0), Math.max(area.height() - 2, 0));
@@ -182,7 +261,7 @@ public final class AboutWindow {
         List<Line> footer = new ArrayList<>();
         message.ifPresent(text ->
                 footer.add(Line.from(Span.styled(" " + text, Palette.current().muted()))));
-        footer.addAll(KeyLegend.lines(KEYS, inner.width()));
+        footer.addAll(KeyLegend.lines(tab == Tab.KEYS ? KEYS_TAB_KEYS : ABOUT_TAB_KEYS, inner.width()));
         int footerHeight = Math.min(footer.size(), Math.max(inner.height() / 3, 1));
         List<Rect> parts = Layout.vertical()
                 .constraints(Constraint.fill(), Constraint.length(footerHeight))
@@ -194,10 +273,11 @@ public final class AboutWindow {
         rows = Math.max(list.height(), 1);
         scroll = Math.min(scroll, Math.max(total - rows, 0));
         List<Line> shown = all.subList(scroll, Math.min(scroll + rows, total));
-        String title = total <= rows
-                ? " About leia "
-                : " About leia, lines " + (scroll + 1) + "–" + (scroll + shown.size()) + " of " + total + " ";
-        frame.renderWidget(Panels.box().title(title).build(), window);
+        String name = tab == Tab.KEYS ? screen : "leia " + version.version();
+        String where =
+                total <= rows ? " " : ", lines " + (scroll + 1) + "–" + (scroll + shown.size()) + " of " + total + " ";
+        frame.renderWidget(
+                Panels.box().title(Title.from(titleLine(name + where))).build(), window);
         frame.renderWidget(Paragraph.from(Text.from(shown)), list);
         frame.renderWidget(Paragraph.from(Text.from(footer)), parts.get(1));
     }

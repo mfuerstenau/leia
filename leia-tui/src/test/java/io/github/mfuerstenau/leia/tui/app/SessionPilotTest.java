@@ -232,6 +232,7 @@ class SessionPilotTest {
         // The terms screen's s searches the selected term with a term query (ADR 0058).
         pilot.press('3');
         settle();
+        pilot.press('g');
         pilot.press('s');
         settle();
         assertThat(screen()).contains("Term · field", "1 hit").doesNotContain("not for");
@@ -252,7 +253,7 @@ class SessionPilotTest {
         // Lucene 5.5 checks at the levels, so l is there.
         pilot.press('7');
         settle();
-        assertThat(screen()).contains("l level");
+        assertThat(screen()).contains("⏎ check all").doesNotContain("Level: not for");
         pilot.press('l');
         settle();
         assertThat(screen()).doesNotContain("not for");
@@ -316,12 +317,13 @@ class SessionPilotTest {
         }
         assertThat(screen()).contains("[1.0, 0.0, 0.0, 0.0] 4d", "Field has   vectors 4d float");
 
-        pilot.press('N');
+        pilot.press('g');
+        pilot.press('n');
         settle();
         assertThat(screen()).contains("KNN · embedding (4d float, cosine)", "3 hits");
 
         // r checks the recall of the same target as a job (ADR 0086): 3 vectors, all found.
-        pilot.press('r');
+        pilot.press('K');
         settle();
         assertThat(screen()).contains("Recall · k 10 · 1.00 · missed by approximate", "Recall     1.000");
     }
@@ -371,7 +373,8 @@ class SessionPilotTest {
             pilot.press(KeyCode.DOWN);
             settle();
         }
-        pilot.press('T');
+        pilot.press('g');
+        pilot.press('t');
         settle();
         assertThat(screen()).contains(" ord 0 ", "node     0     8  L0", "L0       1     9  L0   0.9000");
     }
@@ -489,7 +492,7 @@ class SessionPilotTest {
         assertThat(screen()).contains("standard analyzer", "Tokens after StandardAnalyzer · 2", "foxes");
 
         // b builds a preset; it becomes the current analyzer once the backend took it.
-        pilot.press('b');
+        pilot.press('e');
         pilot.press(' ');
         pilot.press(KeyCode.ENTER);
         settle();
@@ -499,6 +502,7 @@ class SessionPilotTest {
         openAtStart(writeIndex(tmp.resolve("index"), 3), OpenMode.READER);
         pilot.press('2');
         settle();
+        pilot.press('g');
         pilot.press('a');
         settle();
         assertThat(screen()).contains("Text · doc 0 · id", "EnglishAnalyzer", "doc");
@@ -623,7 +627,7 @@ class SessionPilotTest {
         pilot.press('2');
         settle();
 
-        pilot.press('r');
+        pilot.press('I');
         settle();
         pilot.press(KeyCode.TAB);
         pilot.press(KeyCode.END);
@@ -746,7 +750,7 @@ class SessionPilotTest {
         pilot.press('3');
         settle();
 
-        pilot.press('e');
+        pilot.press('E');
         pilot.press('u', KeyModifiers.CTRL);
         for (char c : "terms.out".toCharArray()) {
             pilot.press(c);
@@ -761,7 +765,7 @@ class SessionPilotTest {
                 .allMatch(line -> line.startsWith("doc-") && line.contains(","));
 
         // A second export to the same file asks first.
-        pilot.press('e');
+        pilot.press('E');
         pilot.press('u', KeyModifiers.CTRL);
         for (char c : "terms.out".toCharArray()) {
             pilot.press(c);
@@ -895,23 +899,25 @@ class SessionPilotTest {
     }
 
     @Test
-    void slashOnATopTermSearchesForIt() throws Exception {
+    void goToSearchOnATopTermSearchesForIt() throws Exception {
         openAtStart(writeIndex(tmp.resolve("index"), 3), OpenMode.READER);
         pilot.press(KeyCode.ENTER);
         settle();
         pilot.press(KeyCode.TAB);
 
-        pilot.press('/');
+        pilot.press('g');
+        pilot.press('s');
         settle();
         assertThat(screen()).contains("Term · field id", "1 hit in", "id=doc-0");
     }
 
     @Test
-    void mOnADocumentSearchesForDocumentsLikeIt() throws Exception {
+    void goToSimilarOnADocumentSearchesForDocumentsLikeIt() throws Exception {
         openAtStart(writeBodies(tmp.resolve("index"), "red fox", "red fox", "blue lamp"), OpenMode.READER);
         pilot.press('2');
         settle();
 
+        pilot.press('g');
         pilot.press('m');
         settle();
         assertThat(screen()).contains("More like this document · field body", "Parsed");
@@ -946,7 +952,7 @@ class SessionPilotTest {
         settle();
 
         startFilter();
-        assertThat(screen()).contains("filter red: 1 of 2", "#1 of 0–3", "←→ match   b unfilter");
+        assertThat(screen()).contains("filter red: 1 of 2", "#1 of 0–3", "←→ match", "b unfilter");
         pilot.press(KeyCode.RIGHT);
         settle();
         assertThat(screen()).contains("filter red: 2 of 2", "#3 of 0–3");

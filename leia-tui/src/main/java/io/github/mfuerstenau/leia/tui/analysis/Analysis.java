@@ -1,5 +1,7 @@
 package io.github.mfuerstenau.leia.tui.analysis;
 
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.DO;
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.FIND;
 import static io.github.mfuerstenau.leia.tui.widgets.Panels.highlight;
 import static io.github.mfuerstenau.leia.tui.widgets.Panels.panel;
 
@@ -32,6 +34,7 @@ import io.github.mfuerstenau.leia.tui.prompt.LineInput;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.Form;
+import io.github.mfuerstenau.leia.tui.widgets.Keys;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
 import java.util.ArrayList;
@@ -313,7 +316,7 @@ public final class Analysis {
     /**
      * Edits the text line while it is open (Enter analyzes, Esc closes it), or the analyzer popup
      * (Enter tries the analyzer, which becomes the current one once the backend took it). Otherwise
-     * {@code /} opens the line, {@code b} the popup, {@code r} analyzes again, and Tab switches between
+     * {@code /} opens the line, {@code e} the popup, {@code r} analyzes again, and Tab switches between
      * the steps, the tokens and the token's details.
      */
     public Optional<Request> handleKey(KeyEvent key) {
@@ -330,7 +333,7 @@ public final class Analysis {
             editing = true;
             return Optional.empty();
         }
-        if (key.isChar('b')) {
+        if (key.isChar('e')) {
             // A field's first analyzer starts from the default one.
             form = new AnalyzerForm(settings.analyzer(field), Optional.ofNullable(components));
             if (noAnalysis) {
@@ -506,20 +509,30 @@ public final class Analysis {
                 .map(tokens -> tokens.get(Math.min(token, tokens.size() - 1)));
     }
 
-    /** The keys for the footer. */
-    public String keys() {
+    /** The keys of the text line or a popup while one takes the keys; empty otherwise. */
+    public Optional<String> promptKeys() {
         if (stopWordsForm != null) {
-            return stopWordsForm.keys();
+            return Optional.of(stopWordsForm.keys());
         }
         if (form != null) {
-            return form.keys();
+            return Optional.of(form.keys());
         }
         if (editing) {
-            return " ⏎ analyze   Esc done   ←→ Ctrl+A/E/U/K/W edit";
+            return Optional.of(" ⏎ analyze   Esc done   ←→ Ctrl+A/E/U/K/W edit");
         }
-        String fieldKeys = fields.isEmpty() ? "" : "f/F field   ";
-        String drop = field.isPresent() && settings.hasOwn(field.get()) ? "D default   " : "";
-        return "/ text   b analyzer   " + fieldKeys + drop + "w stop words   r again   Tab panel   ↑↓";
+        return Optional.empty();
+    }
+
+    /** The screen's keys (ADR 0120). */
+    public Keys keys() {
+        return Keys.builder()
+                .key(FIND, "/", "text")
+                .keyIf(!fields.isEmpty(), FIND, "f/F", "field")
+                .key(DO, "e", "analyzer")
+                .keyIf(field.isPresent() && settings.hasOwn(field.get()), DO, "D", "default analyzer")
+                .more(DO, "w", "stop words")
+                .key(DO, "r", "again")
+                .build();
     }
 
     public void render(Frame frame, Rect area) {
@@ -533,7 +546,7 @@ public final class Analysis {
                         Constraint.fill())
                 .split(area);
         frame.renderWidget(
-                Panels.wrapped(analyzerLines, panel(" Analyzer · b builds it ", false), rows.get(0)), rows.get(0));
+                Panels.wrapped(analyzerLines, panel(" Analyzer · e edits it ", false), rows.get(0)), rows.get(0));
         renderText(frame, rows.get(1));
         Rect body = rows.get(2);
         if (error != null) {
@@ -546,7 +559,7 @@ public final class Analysis {
         } else if (shown == null) {
             List<Line> hint = List.of(
                     Line.styled(
-                            "Press / to type a text, then Enter to analyze it, or a on the documents "
+                            "Press / to type a text, then Enter to analyze it, or g a on the documents "
                                     + "screen for a stored value.",
                             Form.dim()),
                     Line.styled(

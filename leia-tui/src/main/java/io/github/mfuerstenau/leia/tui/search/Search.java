@@ -1,5 +1,9 @@
 package io.github.mfuerstenau.leia.tui.search;
 
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.DO;
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.FIND;
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.SHOW;
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.SORT;
 import static io.github.mfuerstenau.leia.tui.widgets.Panels.highlight;
 import static io.github.mfuerstenau.leia.tui.widgets.Panels.panel;
 import static io.github.mfuerstenau.leia.tui.widgets.Panels.right;
@@ -74,6 +78,9 @@ import io.github.mfuerstenau.leia.tui.search.LikeSettings.LikeSource;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.Form;
+import io.github.mfuerstenau.leia.tui.widgets.GoMenu;
+import io.github.mfuerstenau.leia.tui.widgets.Jump;
+import io.github.mfuerstenau.leia.tui.widgets.Keys;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
 import java.nio.charset.StandardCharsets;
@@ -602,7 +609,7 @@ public final class Search {
         return switch (key.codePoint()) {
             case 'm' -> modes().size() > 1 ? Optional.empty() : Optional.of("Other modes");
             case 'b', 'B' -> need("Browse", Feature.FILTER);
-            case 's' -> regex || scores() ? Optional.empty() : Optional.of("Similarity and sort");
+            case 's', 'S' -> regex || scores() ? Optional.empty() : Optional.of("Similarity and sort");
             case 'x' -> regex ? Optional.empty() : need("Explain", Feature.EXPLAIN);
             case 'H' -> regex ? Optional.empty() : need("Highlight", Feature.HIGHLIGHT);
             case 'v' -> regex ? Optional.empty() : need("View", Feature.HIGHLIGHT);
@@ -1650,7 +1657,7 @@ public final class Search {
      * and searches again, Esc cancels). Otherwise {@code /} opens the line, {@code m} cycles classic
      * syntax, standard syntax, a term, doc values, More-Like-This for a document or a text, and a
      * regex over stored values, {@code p} opens the parser options or the More-Like-This settings,
-     * {@code s} the similarity and the sort, {@code l} the stored fields per hit, {@code f}/{@code F}
+     * {@code s} the similarity and the sort, {@code S} reverses the first sort level, {@code l} the stored fields per hit, {@code f}/{@code F}
      * step the field, {@code n} the encoding of a doc values number field, {@code h} switches its bytes
      * between text and hex, {@code a} switches between OR and AND, {@code t} between an exact and an
      * approximate count, {@code x} explains the selected hit, Enter shows its document, {@code
@@ -1790,7 +1797,7 @@ public final class Search {
             case 'e' -> {
                 return toggleKnnExact();
             }
-            case 'r' -> {
+            case 'K' -> {
                 return knn ? Optional.of(startRecall()) : Optional.empty();
             }
             case 'm' -> {
@@ -1804,6 +1811,10 @@ public final class Search {
             case 's' -> {
                 form = new ScoringForm(scoring);
                 return Optional.of(none);
+            }
+            case 'S' -> {
+                scoring = scoring.reversed();
+                return Optional.of(resubmit());
             }
             case 'l' -> {
                 form = new FieldsForm(hitFields);
@@ -2020,7 +2031,7 @@ public final class Search {
                     includeDeleted = !includeDeleted;
                     return Optional.of(resubmit());
                 }
-                case 'p', 's', 'f', 'F', 'a', 't', 'x' -> {
+                case 'p', 's', 'S', 'f', 'F', 'a', 't', 'x' -> {
                     return Optional.of(none);
                 }
                 case 'v' -> {
@@ -2065,86 +2076,105 @@ public final class Search {
         return (int) Math.min(value, Integer.MAX_VALUE);
     }
 
-    /** The keys for the footer. */
-    public String keys() {
+    /** The keys of the query line or the popup while one takes the keys; empty otherwise. */
+    public Optional<String> promptKeys() {
         switch (form) {
             case OptionsForm options -> {
-                return options.keys();
+                return Optional.of(options.keys());
             }
             case LikeForm likeForm -> {
-                return likeForm.keys();
+                return Optional.of(likeForm.keys());
             }
             case ScoringForm _ -> {
-                return ScoringForm.keys();
+                return Optional.of(ScoringForm.keys());
             }
             case FieldsForm _ -> {
-                return FieldsForm.keys();
+                return Optional.of(FieldsForm.keys());
             }
             case null, default -> {}
         }
         if (editing && editLine == EditLine.K) {
-            return " ⏎ set k and search   Esc cancel   digits only";
+            return Optional.of(" ⏎ set k and search   Esc cancel   digits only");
         }
         if (editing) {
-            return " ⏎ search   Esc done   ←→ Ctrl+A/E/U/K/W edit";
+            return Optional.of(" ⏎ search   Esc done   ←→ Ctrl+A/E/U/K/W edit");
         }
-        return available(
-                switch (mode) {
-                    case REGEX ->
-                        "/ pattern   m mode   l fields   i case   d deleted   ⏎ open doc   v view value   Tab panel   ↑↓";
-                    case LIKE ->
-                        "/ doc id   m mode   p/s/l settings   t count   x explain   H highlight   v view   ⏎ open doc   b/B browse   "
-                                + "Tab panel   ↑↓";
-                    case LIKE_TEXT ->
-                        "/ text   m mode   p/s/l settings   t count   x explain   H highlight   v view   ⏎ open doc   b/B browse   "
-                                + "Tab panel   ↑↓";
-                    case DOC_VALUES ->
-                        "/ values   m mode   s/l settings   f/F field   n number   h hex   t count   x explain   ⏎ open doc   "
-                                + "b/B browse   Tab panel   ↑↓";
-                    case KNN ->
-                        "/ target   w filter   m mode   p/s/l settings   f/F field   k k   e exact   r recall   a AND/OR   "
-                                + "t count   x explain   ⏎ open doc   b/B browse   Tab panel   ↑↓";
-                    case TERM ->
-                        "/ term   m mode   s/l settings   f/F field   t count   x explain   H highlight   v view   ⏎ open doc   "
-                                + "b/B browse   Tab panel   ↑↓";
-                    default ->
-                        "/ query   m mode   p/s/l settings   f/F field   a AND/OR   t count   x explain   H highlight   v view   "
-                                + "⏎ open doc   b/B browse   Tab panel   ↑↓";
-                });
+        return Optional.empty();
     }
 
-    /** The entries of {@code keys} that the index has the features for (ADR 0044). */
-    private String available(String keys) {
-        List<String> shown = new ArrayList<>();
-        for (String entry : keys.split(" {3}")) {
-            String kept = kept(entry);
-            if (!kept.isEmpty()) {
-                shown.add(kept);
-            }
+    /** The keys of the mode (ADR 0120): those the index has the features for (ADR 0044). */
+    public Keys keys() {
+        boolean like = mode == Mode.LIKE || mode == Mode.LIKE_TEXT;
+        boolean knn = mode == Mode.KNN;
+        Keys.Builder keys = Keys.builder()
+                .key(
+                        FIND,
+                        "/",
+                        switch (mode) {
+                            case REGEX -> "pattern";
+                            case LIKE -> "doc id";
+                            case LIKE_TEXT -> "text";
+                            case DOC_VALUES -> "values";
+                            case KNN -> "target";
+                            case TERM -> "term";
+                            default -> "query";
+                        })
+                .keyIf(modes().size() > 1, FIND, "m", "mode");
+        if (mode == Mode.REGEX) {
+            return keys.more(FIND, "i", "case")
+                    .more(FIND, "d", "deleted")
+                    .keyIf(supports(Feature.DOCUMENTS), SHOW, "⏎", "open doc")
+                    .key(SHOW, "v", "view value")
+                    .more(SHOW, "l", "stored fields")
+                    .build();
         }
-        return String.join("   ", shown);
+        boolean highlights = supports(Feature.HIGHLIGHT) && mode != Mode.DOC_VALUES && !knn;
+        // Enter on a sampled target of a recall check searches its nearest (ADR 0086).
+        boolean sampled = knn && recall != null && recall.params().sample().isPresent();
+        return keys.moreIf(knn, FIND, "w", "filter")
+                .moreIf(knn, FIND, "k", "k")
+                .moreIf(knn, FIND, "e", "exact")
+                .moreIf(!like, FIND, "f/F", "field")
+                .moreIf(mode == Mode.DOC_VALUES, FIND, "n", "number")
+                .moreIf(mode == Mode.DOC_VALUES, FIND, "h", "hex")
+                .moreIf(mode == Mode.CLASSIC || mode == Mode.STANDARD || knn, FIND, "a", "AND/OR")
+                .moreIf(like, FIND, "p", "More Like This settings")
+                .moreIf(parses(), FIND, "p", "parser options")
+                .keyIf(sampled, SHOW, "⏎", "nearest")
+                .keyIf(!sampled && supports(Feature.DOCUMENTS), SHOW, "⏎", "open doc")
+                .keyIf(highlights, SHOW, "v", "view")
+                .moreIf(highlights, SHOW, "H", "highlight")
+                .keyIf(supports(Feature.EXPLAIN), SHOW, "x", "explain")
+                .more(SHOW, "t", "count")
+                .more(SHOW, "l", "stored fields")
+                .keyIf(scores(), SORT, "s/S", "sort")
+                .moreIf(knn, DO, "K", "recall")
+                .keyIf(supports(Feature.FILTER), DO, "b/B", "browse")
+                .build();
     }
 
-    /** What the footer says of the keys of {@code entry}; empty for keys the index lacks. */
-    private String kept(String entry) {
-        return switch (entry) {
-            case "m mode" -> shownIf(modes().size() > 1, entry);
-            case "p/s/l settings" -> scores() ? entry : "p/l settings";
-            case "s/l settings" -> scores() ? entry : "l settings";
-            case "x explain" -> shownIf(supports(Feature.EXPLAIN), entry);
-            case "H highlight", "v view" -> shownIf(supports(Feature.HIGHLIGHT), entry);
-            // Enter on a sampled target of a recall check searches its nearest (ADR 0086).
-            case "⏎ open doc" ->
-                mode == Mode.KNN && recall != null && recall.params().sample().isPresent()
-                        ? "⏎ nearest"
-                        : shownIf(supports(Feature.DOCUMENTS), entry);
-            case "b/B browse" -> shownIf(supports(Feature.FILTER), entry);
-            default -> entry;
-        };
+    /** The jumps of the {@code g} menu (ADR 0120): the selected hit's document. */
+    public List<GoMenu.Target> jumps() {
+        Optional<Integer> doc = mode == Mode.REGEX
+                ? Optional.ofNullable(scan).flatMap(StoredScan::selected).map(hit -> hit.docId())
+                : selectedHit().map(Hit::docId);
+        return supports(Feature.DOCUMENTS) && doc.isPresent()
+                ? List.of(new GoMenu.Target(Jump.DOCUMENT, "document " + doc.get()))
+                : List.of();
     }
 
-    private static String shownIf(boolean shown, String entry) {
-        return shown ? entry : "";
+    /** Where {@code g} and {@code jump} go: {@code g d} shows the selected hit's document, as Enter does. */
+    public Optional<Request> jump(Jump jump) {
+        if (jump != Jump.DOCUMENT) {
+            return Optional.empty();
+        }
+        if (!supports(Feature.DOCUMENTS)) {
+            return Optional.of(new Request.Unsupported("Open doc"));
+        }
+        if (mode == Mode.REGEX) {
+            return scan == null ? Optional.empty() : scan.selected().map(hit -> new Request.Document(hit.docId()));
+        }
+        return selectedHit().map(hit -> new Request.Document(hit.docId()));
     }
 
     public void render(Frame frame, Rect area) {
@@ -2189,11 +2219,11 @@ public final class Search {
             frame.setCursorPosition(inner.x() + visible.cursorColumn(), inner.y());
         } else if (input.text().isEmpty()) {
             String hint = switch (mode) {
-                case LIKE -> "Press / to type a document id, or m on the documents screen.";
+                case LIKE -> "Press / to type a document id, or g m on the documents screen.";
                 case LIKE_TEXT -> "Press / to type a text to find documents like it.";
                 case REGEX -> "Press / to type a regular expression.";
                 case DOC_VALUES -> "Press / to type a value, several values, a range, or a prefix.";
-                case KNN -> "Press / to type a document id or a vector in brackets, or N on the documents screen.";
+                case KNN -> "Press / to type a document id or a vector in brackets, or g n on the documents screen.";
                 default -> "Press / to type a query.";
             };
             frame.renderWidget(Paragraph.from(Line.styled(hint, Form.dim())), inner);
@@ -2522,7 +2552,7 @@ public final class Search {
                                     "dimension, floats or bytes from -128 to 127. k sets how many the graph search",
                                     "finds; e scores every document with a vector instead, exactly, best first.",
                                     "w filters in classic syntax; p and a set its parser options and operator.",
-                                    "r checks how many of the exact k nearest the graph search finds: for the line's",
+                                    "K checks how many of the exact k nearest the graph search finds: for the line's",
                                     "target, or with a blank line for " + RECALL_SAMPLE
                                             + " documents spread over the segments.");
                         case REGEX -> List.of();

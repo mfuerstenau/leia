@@ -357,6 +357,13 @@ Beyond that:
 | `Backspace` | go back to the screen that the last jump came from (a term's documents, a hit, a search from a document, …), as it was left; the footer shows `⌫ back` while there is one, and `1` … `7`, an open or a close forget the jumps |
 | `Esc` | stop the running term scans, then a running export, or on the search and check screens the running search or check; with none running, quit |
 | `q`, `Ctrl+C` | quit |
+| `g` | go to another screen with the selection: a menu above the footer lists the jumps it allows, each with the same letter on every screen (`t` terms, `s` search, `a` analysis, `c` commit, `d` document, `m` similar documents, `n` nearest vectors), and `g` again goes to the top (ADR 0120) |
+| `?` | list every key of the shown screen by group, footer or not; `Tab` switches to About: the version, the Java and runtimes, the open index and the licence |
+
+The footer shows a screen's common keys in groups (Move, Find, Show, Sort, Do, Go to, App) and
+ends in `? keys`; the tab line shows the number keys. `s` `S` sort, `/` is the screen's input,
+`E` exports, `r` reads, lists or analyzes again, and `Tab` `Shift+Tab` switch panels wherever a
+screen has them.
 
 #### Overview
 
@@ -369,10 +376,10 @@ Beyond that:
 | `+` `-` | show more or fewer top terms: 10, 20, 50, 100, 200, 500 or 1000 |
 | `s` | sort the field table by number, name, term count or stored count |
 | `S` | flip the sort direction |
-| `Tab` | switch between the field table and the top terms |
-| `Enter` on a top term | show the term and its documents on the terms screen |
-| `/` on a top term | search for the documents that contain it |
-| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the field table or the top terms |
+| `Tab`, `Shift+Tab` | switch between the field table and the top terms |
+| `Enter`, `g t` on a top term | show the term and its documents on the terms screen |
+| `g s` on a top term | search for the documents that contain it |
+| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g g` `G` | move through the field table or the top terms |
 
 Counting terms reads every term of the field, which can take a while on a large index. The scan
 runs in the background while leia shows its progress, and `Esc` stops it. Once every field has been
@@ -397,25 +404,28 @@ scans it again; a smaller N needs no new scan.
 
 | Key | Action |
 |---|---|
-| `←` `→` / `p` `n` | previous or next document id; with a filter, previous or next match |
+| `←` `→` | previous or next document id; with a filter, previous or next match |
 | `i` | go to a document id; with a filter, to the match there or after it, else the last one before |
 | `b` | clear the filter (`Esc` stops one that is still being built) |
 | `/` | seek a field: type a text, and the first shown field whose name starts with it (ignoring case), or else contains it, is selected; `Enter` or `Esc` ends it |
 | `[` `]` | previous or next document of the term opened on the terms screen |
 | `Enter` | load the term vector of the selected field |
-| `r` | rebuild the terms and points the selected field was indexed with (`Esc` stops it) |
+| `I` | rebuild the terms and points the selected field was indexed with (`Esc` stops it) |
 | `t` | show the selected field's points as int, long, float, double, lat/lon, address or hex, as fit their size; the terms screen shows them the same way |
 | `v` | view the selected field's values (see below) |
-| `x` | show numeric doc values as long, double bits, sortable double, float bits or sortable float |
-| `s` | search for the documents with any of the selected field's doc values on the search screen, numbers as `x` shows them |
-| `N` | search for the documents whose vectors in the selected field are nearest to this document's (KNN) on the search screen |
+| `n` | show numeric doc values as long, double bits, sortable double, float bits or sortable float |
+| `s` `S` | sort the fields by number or name, flip the direction |
+| `g s` | search for the documents with any of the selected field's doc values on the search screen, numbers as `n` shows them |
+| `g n` | search for the documents whose vectors in the selected field are nearest to this document's (KNN) on the search screen |
 | `e` | hide or show the fields in which the document has nothing |
-| `m` | search for documents like this one (More-Like-This) on the search screen |
+| `g m` | search for documents like this one (More-Like-This) on the search screen |
+| `g a` | analyze the selected field's first stored text on the analysis screen |
+| `<` `>`, `P` | the first document of the previous or next segment; pin the document's segment, so that `←` `→` stay in it |
 | `E` | export the document as JSON to a file, or copy it (see below) |
-| `T` | show the selected field on the terms screen: at the term of the posting that opened the document, if it is that field's, otherwise from its first term; a field with points and no terms shows its BKD tree |
-| `C` | show the document's segment on the commits screen, in the opened commit, with its details |
+| `g t` | show the selected field on the terms screen: at the term of the posting that opened the document, if it is that field's, otherwise from its first term; a field with points and no terms shows its BKD tree |
+| `g c` | show the document's segment on the commits screen, in the opened commit, with its details |
 | `Tab` | switch between the field table and the details of the selected field |
-| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the fields or scroll the details |
+| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g g` `G` | move through the fields or scroll the details |
 
 The documents screen shows one document at a time, every field of the index in a row: its flags,
 its norm and its first stored value (or else its doc values, or else its KNN vector). The details
@@ -424,7 +434,7 @@ line, with its length) and, on `Enter`, its term vector with positions,
 offsets and payloads. Deleted documents can be read too, until a merge removes them; they are
 marked `deleted`. Byte strings that aren't UTF-8 are shown as `0x` and their hex.
 
-`r` rebuilds the terms the document was indexed with in the selected field, also for fields
+`I` rebuilds the terms the document was indexed with in the selected field, also for fields
 without term vectors (ADR 0029). A term vector that holds all that the postings hold is read at
 once. Otherwise every term of the field in the document's segment is checked for the document, so
 it takes a while on a field with many terms; the details panel shows the progress, and `Esc` or
@@ -432,7 +442,7 @@ another document stops it. The result shows the tokens in position order (`a|b` 
 `·` where positions were skipped, such as for a removed stop word), then each term with its freq
 and positions.
 
-On a field with points, such as an `IntPoint` or a `LatLonPoint`, `r` also finds the document's
+On a field with points, such as an `IntPoint` or a `LatLonPoint`, `I` also finds the document's
 points, by going through every point of the field in the segment (ADR 0041). The index doesn't
 record what a point encodes, so leia guesses from its size: int for 4 bytes, lat/lon for two
 dimensions of 4, long for 8, an address for 16. `t` cycles through the other encodings of that
@@ -478,7 +488,7 @@ Flags: `I` indexed, `N` has a norm, `P` payloads, `S` stored, `V` term vector, `
 `T` points, `K` KNN vector. `N`, `S`, `V`, `D` and `K` say what this document has; the others
 describe the field. The details panel's first line spells out the selected field's flags. Whether
 the document has terms or points in a field is not shown: finding out means reading the field's
-terms and points, which `r` does.
+terms and points, which `I` does.
 
 #### Viewer
 
@@ -486,14 +496,15 @@ terms and points, which `r` does.
 
 | Key | Action |
 |---|---|
-| `←` `→` / `p` `n` | previous or next value |
+| `←` `→` | previous or next value |
 | `m` `M` | next or previous match, for a value opened from the regex scan, a search hit's `v`, or a document opened from a hit |
 | `t` | show the text |
 | `h` | switch between the text and a hex dump |
 | `J` | switch between the text and pretty-printed JSON |
 | `d` | split the value at a delimiter, one item per line (asks for the delimiters) |
 | `y` | copy the value as shown (the text, the bytes in hex, the pretty-printed JSON or the items) to the clipboard |
-| `↑` `↓` / `j` `k`, `PgUp` `PgDn` / `Space`, `Home` `End` / `g` `G` | scroll |
+| `g a` | analyze the shown value on the analysis screen |
+| `↑` `↓` / `j` `k`, `PgUp` `PgDn` / `Space`, `Home` `End` / `g g` `G` | scroll |
 | `Esc` / `q` / `v` | close the viewer |
 
 Bytes that aren't UTF-8 open as hex, and JSON objects and arrays open pretty-printed; numbers show
@@ -517,11 +528,11 @@ takes about 1 MiB.
 | `←` `→` / `h` `l`, `Tab` | switch between the fields, their terms and the postings of the selected term |
 | `/` | seek: type a text, and the terms start from the first one that is not smaller; `Enter` or `Esc` ends it, and an empty text goes back to the first term |
 | `Enter` | go to the next column; on a posting, show its document on the documents screen |
-| `e` | export the selected field's terms to a file |
-| `s` | search for the documents with the selected term on the search screen; on the postings, with their term |
+| `E` | export the selected field's terms to a file |
+| `g s` | search for the documents with the selected term on the search screen; on the postings, with their term |
 | `b` | with a filter on the documents screen, show only the postings in it, or all of them again |
 | `t` | on a point field, show its values as int, long, float, double, lat/lon, address or hex, as fit their size; the documents screen shows them the same way |
-| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the focused column |
+| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g g` `G` | move through the focused column |
 
 The terms screen lists the fields that have postings, the terms of the selected field in term
 order with their document frequency and total term frequency, and the documents that contain the
@@ -558,9 +569,10 @@ valid UTF-8 is written as hex, and a term may contain the delimiter, so split at
 | Key | Action |
 |---|---|
 | `Tab`, `Shift+Tab` | switch between the indexes (with several), the commits, the segments of the selected commit and the details |
-| `Enter` | on a commit, go to its segments |
+| `Enter` | on a commit, go to its segments; on a segment, show its documents |
+| `g d` | show the selected segment's documents on the documents screen |
 | `r` | read the commits from the directory again |
-| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the focused list, or scroll the details |
+| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g g` `G` | move through the focused list, or scroll the details |
 
 The commits screen lists the commits of the index directory, newest first; `●` marks the one leia
 opened, and `✗` a `segments_N` file that can't be read, with the reason. A directory keeps older commits only if the writer's deletion policy kept them, and it
@@ -578,6 +590,7 @@ shows as missing. The documents and terms screens always show the opened commit.
 | `m` | switch between classic query syntax, standard query syntax, a single term, doc values, KNN, More-Like-This for a document, More-Like-This for a text and a regex over stored values |
 | `p` | set the parser options (in KNN mode, the filter's), and for the standard syntax the type of each point field; for More-Like-This, its fields, limits, word lengths and stop words; `Enter` applies, `Esc` cancels |
 | `s` | set the similarity (BM25 with `k1` and `b`, classic TF-IDF or boolean) and the sort; `Enter` applies, `Esc` cancels |
+| `S` | reverse the first sort level and search again; without a sort, the score with the worst hits first |
 | `l` | choose the stored fields each hit shows; `Space` shows or hides one, `a` all, `n` none |
 | `f` `F` | step through the fields with postings: the default field of a query, or the field of a term; in doc values mode, the fields with doc values; in KNN mode, the fields with vectors |
 | `n` | doc values: read a number field as long, double bits, sortable double, float bits or sortable float |
@@ -586,16 +599,17 @@ shows as missing. The documents and terms screens always show the opened commit.
 | `k` | KNN: type how many nearest documents the approximate search finds (1–10,000) |
 | `e` | KNN: search the graph approximately, or score every document with a vector exactly |
 | `w` | KNN: edit the filter, in classic syntax |
+| `K` | KNN: check the recall of the approximate search against the exact one, for the line's target or, on a blank line, a sample of documents |
 | `t` | count every hit, or stop counting after 1000 |
 | `x` | explain how the selected hit scores |
 | `H` | highlight the matches with the terms of each field, with the terms of any field, or not at all |
 | `i` | regex: ignore case, or match it |
 | `d` | regex: scan deleted documents too, or not |
-| `Enter` | show the selected hit's document on the documents screen |
+| `Enter`, `g d` | show the selected hit's document on the documents screen |
 | `b` `B` | browse the documents that match the query, or have a value the regex finds, on the documents screen, without or with the deleted ones |
 | `v` | view the value of the selected hit's first passage, or in regex mode the selected value, with its matches highlighted |
 | `Tab` | switch between the hits and the details |
-| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the hits, or scroll the details |
+| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g g` `G` | move through the hits, or scroll the details |
 
 A classic query is parsed with Lucene's classic `QueryParser` and the analyzer of the analysis
 screen (at first the `StandardAnalyzer`), for example `title:fox AND body:qu*`, `"quick fox"~2` or `fox~`. A standard query is parsed with
@@ -630,16 +644,16 @@ The doc values mode searches one field's doc values, which find what has neither
 such as a sort or facet field (ADR 0033). The line holds one value, several values separated by
 spaces, or a range in Lucene's syntax: `42`, `-1 0 1`, `[10 TO 20]`, `{0 TO *]`, `"new york"
 boston`; quotes take `\"` and `\\`, and `*` is an open bound. A document matches if any of its
-values does. The index doesn't record what a number field's longs encode, so `n` says it, as `x`
+values does. The index doesn't record what a number field's longs encode, so `n` says it, as `n`
 does on the documents screen: raw double or float bits (`DoubleDocValuesField`) read as double or
 float bits, Lucene's `DoubleField` as a sortable double. Sorted and binary values compare as
 unsigned bytes, and `h` takes them in hex. Binary doc values have no query of Lucene's, so every
-document's value is read; `Esc` stops it. `s` on the documents screen searches for the selected
+document's value is read; `Esc` stops it. `g s` on the documents screen searches for the selected
 field's doc values.
 
 The KNN mode finds the documents whose vectors in one field are nearest to a target (ADR 0040).
 The line holds a document id, whose vector in the field is the target, or a vector in brackets:
-`42`, `[0.5, -1, 2.25]`, or `[12 -7 0]` for a field of bytes. `N` on the documents screen starts
+`42`, `[0.5, -1, 2.25]`, or `[12 -7 0]` for a field of bytes. `g n` on the documents screen starts
 it for the shown document's vector. At first it searches the field's graph for the `k` nearest
 (10; `k` changes it), as Lucene's `KnnFloatVectorQuery` and `KnnByteVectorQuery` do. `e` scores
 every document with a vector exactly instead, best first, with the same scores: its first `k`
@@ -648,7 +662,7 @@ with the classic mode's default field, which the graph search takes as Lucene's 
 title names the field with its dimension, encoding and similarity; `Esc` stops a long search.
 
 More-Like-This searches for the documents like the one whose id the line holds, as Lucene's
-`MoreLikeThis` does; `m` on the documents screen starts it for the document shown. It takes the
+`MoreLikeThis` does; `g m` on the documents screen starts it for the document shown. It takes the
 terms of each chosen field from the document's term vector, or else from its stored text,
 analyzed with the analyzer of the analysis screen, and keeps the best of them by tf × idf. `p` chooses the
 fields (at first those with positions) and the limits, which start from Lucene's defaults: a term
@@ -710,7 +724,7 @@ value in the viewer with its first 100 matches highlighted, `m` and `M` jump bet
 | `l` | switch the level: 1 checks the checksums of every file, 2 also the integrity of every part of each segment, 3 also runs the slow checks |
 | `Esc` | cancel the running check |
 | `Tab` | switch between the summary and the output |
-| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | scroll the focused panel; at the end, the output follows new lines |
+| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g g` `G` | scroll the focused panel; at the end, the output follows new lines |
 | `←` `→` | scroll the output sideways |
 
 The check reads the latest commit of each index, the opened ones and then those skipped when the
@@ -724,13 +738,13 @@ reader. A check stays until another path is opened; a reopen stops a running one
 | Key | Action |
 |---|---|
 | `/` | edit the text; `Enter` analyzes it, `Esc` leaves the line |
-| `b` | build the analyzer; `Enter` applies, `Esc` cancels |
+| `e` | edit the analyzer; `Enter` applies, `Esc` cancels |
 | `r` | analyze again, such as after a resource file changed |
 | `Tab` | switch between the steps, the tokens and the selected token |
-| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g` `G` | move through the steps or the tokens, or scroll the token |
+| `↑` `↓` / `j` `k`, `PgUp` `PgDn`, `Home` `End` / `g g` `G` | move through the steps or the tokens, or scroll the token |
 
 The analyzer is the `StandardAnalyzer`, a preset (an analyzer by class name, picked from a list) or
-a custom one. In the builder (`b`), `Space` (or `→`, and `←` back) switches between them and
+a custom one. In the builder (`e`), `Space` (or `→`, and `←` back) switches between them and
 changes the selected row: the preset or a component (from a list that you filter by typing; a name
 that isn't listed is taken as typed), the config directory or a parameter (`name=value`;
 blank removes it). `a` adds a filter after the selected one, `p` a parameter to the selected

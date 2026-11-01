@@ -111,6 +111,19 @@ public final class ScoringSettings {
         return copy;
     }
 
+    /**
+     * A copy with the first sort level reversed, as {@code S} on the search screen asks for (ADR
+     * 0120); without a sort, the score with the worst hits first.
+     */
+    ScoringSettings reversed() {
+        ScoringSettings copy = copy();
+        SortLevel first = levels[0];
+        copy.levels[0] = first == null
+                ? new SortLevel(new Target.Score(), SortType.LONG, true, SortSelector.MIN, SortMissing.DEFAULT)
+                : new SortLevel(first.target(), first.sortType(), !first.reverse(), first.selector(), first.missing());
+        return copy;
+    }
+
     public Similarity similarity() {
         return switch (kind) {
             case BM25 ->

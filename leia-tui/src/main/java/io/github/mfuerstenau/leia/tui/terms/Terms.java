@@ -1,5 +1,9 @@
 package io.github.mfuerstenau.leia.tui.terms;
 
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.DO;
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.FIND;
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.MOVE;
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.SHOW;
 import static io.github.mfuerstenau.leia.tui.widgets.Panels.highlight;
 import static io.github.mfuerstenau.leia.tui.widgets.Panels.panel;
 import static io.github.mfuerstenau.leia.tui.widgets.Panels.right;
@@ -43,6 +47,9 @@ import io.github.mfuerstenau.leia.tui.points.PointFormat;
 import io.github.mfuerstenau.leia.tui.points.PointFormats;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.theme.Palette;
+import io.github.mfuerstenau.leia.tui.widgets.GoMenu;
+import io.github.mfuerstenau.leia.tui.widgets.Jump;
+import io.github.mfuerstenau.leia.tui.widgets.Keys;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
 import java.util.ArrayDeque;
@@ -78,8 +85,6 @@ import java.util.stream.LongStream;
 public final class Terms {
 
     private static final String POSTINGS_TITLE = " Postings (";
-
-    private static final String COLUMN_KEYS = "←/→ column   ↑↓";
 
     /** How many terms one {@code getTerms} call fetches. */
     public static final int TERMS_PAGE = 100;
@@ -953,7 +958,7 @@ public final class Terms {
         }
     }
 
-    /** {@code d}: the document of the selected node or neighbour. */
+    /** {@code g d}: the document of the selected node or neighbour. */
     private Optional<Request> graphDocument() {
         Optional<KnnGraphNode> node = Optional.empty();
         if (focus == Column.POSTINGS) {
@@ -1155,13 +1160,12 @@ public final class Terms {
     /**
      * Moves the selection in the focused column, switches columns with ←/→ and Tab, seeks with
      * {@code /}, with Enter goes one column to the right or shows the selected posting's document,
-     * with {@code e} exports the selected field's terms, with {@code s} searches for the selected
-     * term or the postings' term (ADR 0052), and with {@code b} switches between all postings and
+     * with {@code E} exports the selected field's terms, and with {@code b} switches between all postings and
      * those in the filter, if there is one. On a point field's tree, Enter expands or
      * collapses a cell, or shows a leaf's points, and on a point shows its document; {@code t}
      * cycles the format the points are shown in. On a vector field's graphs, Enter expands or
      * collapses a segment or level, shows a node's neighbours, and on a neighbour walks on to it;
-     * {@code <} walks back, and {@code d} shows the document of a node or neighbour (ADR 0085). Past
+     * {@code <} walks back (ADR 0085). The jumps to other screens are {@link #jump}'s (ADR 0120). Past
      * the fields column, a key pressed before the selected row's tree or graphs are in waits for them.
      */
     public Optional<Request> handleKey(KeyEvent key) {
@@ -1195,7 +1199,7 @@ public final class Terms {
 
     /** A key on a vector field; empty for one that works as on any field. */
     private Optional<Optional<Request>> vectorKey(KeyEvent key) {
-        if (key.isChar('/') || key.isChar('e') || key.isChar('s')) {
+        if (key.isChar('/') || key.isChar('E')) {
             note = termsOnly(key);
             return Optional.of(Optional.empty());
         }
@@ -1223,9 +1227,6 @@ public final class Terms {
             walkBack();
             return Optional.of(Optional.empty());
         }
-        if (key.isChar('d')) {
-            return Optional.of(graphDocument());
-        }
         return Optional.empty();
     }
 
@@ -1235,7 +1236,7 @@ public final class Terms {
             pointFormats.cycle(field);
             return Optional.of(Optional.empty());
         }
-        if (key.isChar('/') || key.isChar('e') || key.isChar('s')) {
+        if (key.isChar('/') || key.isChar('E')) {
             note = termsOnly(key);
             return Optional.of(Optional.empty());
         }
@@ -1253,11 +1254,8 @@ public final class Terms {
     }
 
     private Optional<Request> termsKey(KeyEvent key) {
-        if (key.isChar('e')) {
+        if (key.isChar('E')) {
             return selectedField().map(field -> new Request.Export(field.name()));
-        }
-        if (key.isChar('s')) {
-            return searchedTerm();
         }
         if (key.isChar('b') && filter.isPresent()) {
             onlyFiltered = !onlyFiltered;
@@ -1313,10 +1311,6 @@ public final class Terms {
     private Optional<String> unsupported(KeyEvent key) {
         boolean points = showsPoints();
         boolean graph = showsGraph();
-        if (key.isChar('s') && !points && !graph) {
-            // A runtime has term queries without the rest of search (ADR 0058).
-            return searchesTerms() ? Optional.empty() : Optional.of("Search term");
-        }
         return need(key, points, graph)
                 .filter(need -> !features.contains(need.feature()))
                 .map(Need::what);
@@ -1329,13 +1323,13 @@ public final class Terms {
         if (graph && (key.code() == KeyCode.ENTER && focus != Column.FIELDS || key.isChar('<'))) {
             return Optional.of(new Need(Feature.KNN_GRAPH, "HNSW graph"));
         }
-        if ((graph && key.isChar('d')) || (key.code() == KeyCode.ENTER && focus == Column.POSTINGS)) {
+        if (key.code() == KeyCode.ENTER && focus == Column.POSTINGS) {
             return Optional.of(new Need(Feature.DOCUMENTS, "Open doc"));
         }
         if (key.isChar('t') && points) {
             return Optional.of(new Need(Feature.POINTS, "Points"));
         }
-        if (key.isChar('e') && !points && !graph) {
+        if (key.isChar('E') && !points && !graph) {
             return Optional.of(new Need(Feature.EXPORT_TERMS, "Export"));
         }
         if (key.isChar('b') && filter.isPresent()) {
@@ -1349,34 +1343,102 @@ public final class Terms {
         return features.contains(Feature.TERM_SEARCH);
     }
 
-    /**
-     * The screen's keys for the footer, after the app's, while the seek prompt is closed: those the
-     * index has the features for (ADR 0044).
-     */
-    public String keys() {
+    /** The screen's keys while the seek prompt is closed (ADR 0120): those the index has the features for (ADR 0044). */
+    public Keys keys() {
+        Keys.Builder keys = Keys.builder().key(MOVE, "←→", "column");
         if (showsGraph()) {
-            if (!features.contains(Feature.KNN_GRAPH)) {
-                return COLUMN_KEYS;
+            if (features.contains(Feature.KNN_GRAPH)) {
+                keys.key(SHOW, "⏎", "expand / neighbours / walk on").key(MOVE, "<", "walk back");
             }
-            return "⏎ expand / neighbours / walk on   < back   "
-                    + (features.contains(Feature.DOCUMENTS) ? "d open doc   " : "") + COLUMN_KEYS;
+            return keys.build();
         }
         if (showsPoints()) {
-            return "⏎ expand / points / open doc   " + (features.contains(Feature.POINTS) ? "t format   " : "")
-                    + COLUMN_KEYS;
+            return keys.key(SHOW, "⏎", "expand / points / open doc")
+                    .keyIf(features.contains(Feature.POINTS), SHOW, "t", "point format")
+                    .build();
         }
-        String open = features.contains(Feature.DOCUMENTS) ? "⏎ open doc   " : "";
-        String only = "";
-        if (filtered()) {
-            only = onlyFiltered ? "b all postings   " : "b filter only   ";
-        }
-        String export = features.contains(Feature.EXPORT_TERMS) ? "e export   " : "";
-        String search = searchesTerms() ? "s search   " : "";
-        return "/ seek   " + open + search + only + export + COLUMN_KEYS;
+        return keys.key(FIND, "/", "seek")
+                .keyIf(features.contains(Feature.DOCUMENTS), SHOW, "⏎", "open doc")
+                .keyIf(filtered(), SHOW, "b", onlyFiltered ? "all postings" : "filter only")
+                .keyIf(features.contains(Feature.EXPORT_TERMS), DO, "E", "export")
+                .build();
     }
 
     /**
-     * {@code s}: the term to search for (ADR 0052), the postings' on the postings column, otherwise
+     * The jumps of the {@code g} menu that the index and the selection allow (ADR 0120): the term to
+     * the search screen, and a posting's or a graph node's document to the documents screen.
+     */
+    public List<GoMenu.Target> jumps() {
+        List<GoMenu.Target> jumps = new ArrayList<>();
+        if (showsGraph()) {
+            if (features.contains(Feature.DOCUMENTS)
+                    && features.contains(Feature.KNN_GRAPH)
+                    && knnTree != null
+                    && knnTree.graph != null
+                    && graphDocument().isPresent()) {
+                jumps.add(new GoMenu.Target(Jump.DOCUMENT, "document of the node"));
+            }
+            return jumps;
+        }
+        if (showsPoints()) {
+            return jumps;
+        }
+        if (searchesTerms()) {
+            searchedTerm()
+                    .map(Request.Search.class::cast)
+                    .ifPresent(term -> jumps.add(new GoMenu.Target(
+                            Jump.SEARCH, "search " + TextFormat.escapeControl(term.field()) + " for the term")));
+        }
+        if (features.contains(Feature.DOCUMENTS)
+                && focus == Column.POSTINGS
+                && postings != null
+                && postings.hit().isPresent()) {
+            jumps.add(new GoMenu.Target(Jump.DOCUMENT, "document of the posting"));
+        }
+        return jumps;
+    }
+
+    /** Where {@code g} and {@code jump} go from the selection (ADR 0052, ADR 0120). */
+    public Optional<Request> jump(Jump jump) {
+        if (awaitingTree()) {
+            return Optional.empty();
+        }
+        note = null;
+        boolean points = showsPoints();
+        boolean graph = showsGraph();
+        return switch (jump) {
+            case SEARCH -> {
+                if (points || graph) {
+                    note = "g s searches terms only";
+                    yield Optional.empty();
+                }
+                // A runtime has term queries without the rest of search (ADR 0058).
+                if (!searchesTerms()) {
+                    yield Optional.of(new Request.Unsupported("Search term"));
+                }
+                yield searchedTerm().map(Request.class::cast);
+            }
+            case DOCUMENT -> {
+                if (!features.contains(Feature.DOCUMENTS)) {
+                    yield Optional.of(new Request.Unsupported("Open doc"));
+                }
+                if (graph) {
+                    if (!features.contains(Feature.KNN_GRAPH)) {
+                        yield Optional.of(new Request.Unsupported("HNSW graph"));
+                    }
+                    yield knnTree != null && knnTree.graph != null ? graphDocument() : Optional.empty();
+                }
+                if (points || focus != Column.POSTINGS || postings == null) {
+                    yield Optional.empty();
+                }
+                yield postings.hit().map(Request.Document::new);
+            }
+            default -> Optional.empty();
+        };
+    }
+
+    /**
+     * {@code g s}: the term to search for (ADR 0052), the postings' on the postings column, otherwise
      * the selected one.
      */
     private Optional<Request> searchedTerm() {
@@ -2065,6 +2127,6 @@ public final class Terms {
         if (key.isChar('/')) {
             return "/ seeks terms only";
         }
-        return key.isChar('e') ? "e exports terms only" : "s searches terms only";
+        return "E exports terms only";
     }
 }

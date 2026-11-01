@@ -132,7 +132,7 @@ class AnalysisTest {
     @Test
     void anAppliedAnalyzerBecomesCurrentOnceTheBackendTookIt() {
         Analysis analysis = new Analysis();
-        press(analysis, key('b'));
+        press(analysis, key('e'));
         // ← switches to the custom chain; Enter applies it.
         press(analysis, key(KeyCode.LEFT));
         Optional<Request> applied = press(analysis, key(KeyCode.ENTER));
@@ -155,7 +155,7 @@ class AnalysisTest {
         assertThat(render(analysis, 100)).contains("standard › lowercase");
 
         // Esc closes the form without a change.
-        press(analysis, key('b'));
+        press(analysis, key('e'));
         press(analysis, key(' '));
         assertThat(press(analysis, key(KeyCode.ESCAPE))).isEmpty();
         assertThat(analysis.prompting()).isFalse();
@@ -231,7 +231,7 @@ class AnalysisTest {
         assertThat(render(analysis, 130)).contains("title: standard analyzer", "the default one");
 
         // b builds title's own analyzer, from the default one: ← to custom, Enter applies it.
-        press(analysis, key('b'));
+        press(analysis, key('e'));
         press(analysis, key(KeyCode.LEFT));
         Request.Analyze tried =
                 (Request.Analyze) press(analysis, key(KeyCode.ENTER)).orElseThrow();
@@ -245,7 +245,7 @@ class AnalysisTest {
         assertThat(analysis.settings().hasOwn("title")).isTrue();
         assertThat(analysis.settings().defaultAnalyzer().isStandard()).isTrue();
         assertThat(render(analysis, 130)).contains("title: standard › lowercase", "its own · D drops it");
-        assertThat(analysis.keys()).contains("D default");
+        assertThat(analysis.keys().text()).contains("D default");
 
         // D drops it again.
         assertThat(press(analysis, key('D'))).containsInstanceOf(Request.Analyze.class);

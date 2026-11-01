@@ -1,5 +1,9 @@
 package io.github.mfuerstenau.leia.tui.documents;
 
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.DO;
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.MOVE;
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.SHOW;
+
 import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Style;
 import dev.tamboui.terminal.Frame;
@@ -23,6 +27,9 @@ import io.github.mfuerstenau.leia.tui.Osc52;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.theme.Palette;
+import io.github.mfuerstenau.leia.tui.widgets.GoMenu;
+import io.github.mfuerstenau.leia.tui.widgets.Jump;
+import io.github.mfuerstenau.leia.tui.widgets.Keys;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
@@ -83,6 +90,12 @@ public final class Viewer {
 
         /** Analyze the shown value's text on the analysis screen. */
         record Analyze(int docId, String field, String text) implements Event {}
+
+        /** {@code g}: open the go-to menu with {@link Viewer#jumps()} (ADR 0120). */
+        record GoTo() implements Event {}
+
+        /** {@code ?}: open the key list with {@link Viewer#keys()}. */
+        record Help() implements Event {}
 
         record Close() implements Event {}
     }
@@ -699,17 +712,42 @@ public final class Viewer {
         return delimiters;
     }
 
-    /** The keys for the footer. */
-    public String keys() {
-        if (form != null) {
-            return " type a delimiter   Tab/↑↓ other delimiter   ⏎ apply   Esc cancel";
+    /** The keys of the delimiter form while it is open, which takes every key; empty otherwise. */
+    public Optional<String> promptKeys() {
+        return form != null
+                ? Optional.of(" type a delimiter   Tab/↑↓ other delimiter   ⏎ apply   Esc cancel")
+                : Optional.empty();
+    }
+
+    /** The keys of the viewer (ADR 0120). */
+    public Keys keys() {
+        return Keys.builder()
+                .key(MOVE, "←→", "value")
+                .keyIf(!values.get(current).matches.isEmpty(), MOVE, "m/M", "next/previous match")
+                .more(MOVE, "Space", "page")
+                .key(SHOW, "t", "text")
+                .key(SHOW, "h", "hex")
+                .key(SHOW, "J", "json")
+                .key(SHOW, "d", "delimited")
+                .key(DO, "y", "copy")
+                // Before the app's g and ?, which follow in groups of their own.
+                .key(DO, "Esc", "close")
+                .build();
+    }
+
+    /** The jumps of the {@code g} menu: the shown value to the analysis screen. */
+    public List<GoMenu.Target> jumps() {
+        return List.of(new GoMenu.Target(Jump.ANALYSIS, "analyze this value"));
+    }
+
+    /** What {@code jump} does from the viewer: {@code g a} analyzes the shown value. */
+    public Optional<Event> jump(Jump jump) {
+        message = null;
+        if (jump != Jump.ANALYSIS) {
+            return Optional.empty();
         }
-        if (!values.get(current).matches.isEmpty()) {
-            return " Esc close   m/M next/previous match   ←/→ value   t text   h hex   J json   d delimited   y copy   "
-                    + "a analyze   ↑↓ PgUp/PgDn Home/End";
-        }
-        return " Esc close   ←/→ value   t text   h hex   J json   d delimited   y copy   a analyze   "
-                + "↑↓ PgUp/PgDn Home/End";
+        Value value = values.get(current);
+        return Optional.of(new Event.Analyze(docId, field, value.content.text()));
     }
 
     public Optional<Event> handleKey(KeyEvent key) {
@@ -741,11 +779,11 @@ public final class Viewer {
                     case 'q', 'v' -> {
                         return Optional.of(new Event.Close());
                     }
-                    case 'p' -> {
-                        return previous();
+                    case 'g' -> {
+                        return Optional.of(new Event.GoTo());
                     }
-                    case 'n' -> {
-                        return next();
+                    case '?' -> {
+                        return Optional.of(new Event.Help());
                     }
                     case 'm', 'M' -> {
                         if (!value.matches.isEmpty()) {
@@ -766,13 +804,9 @@ public final class Viewer {
                     case 'y' -> {
                         return copy();
                     }
-                    case 'a' -> {
-                        return Optional.of(new Event.Analyze(docId, field, value.content.text()));
-                    }
                     case 'j' -> scrollBy(1);
                     case 'k' -> scrollBy(-1);
                     case ' ' -> scrollBy(page);
-                    case 'g' -> scroll = 0;
                     case 'G' -> scroll = Integer.MAX_VALUE;
                     default -> {}
                 }

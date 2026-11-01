@@ -1,5 +1,7 @@
 package io.github.mfuerstenau.leia.tui.commits;
 
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.DO;
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.SHOW;
 import static io.github.mfuerstenau.leia.tui.widgets.Panels.highlight;
 import static io.github.mfuerstenau.leia.tui.widgets.Panels.panel;
 import static io.github.mfuerstenau.leia.tui.widgets.Panels.right;
@@ -31,6 +33,9 @@ import io.github.mfuerstenau.leia.protocol.commits.Segment;
 import io.github.mfuerstenau.leia.protocol.commits.UnreadableCommit;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.theme.Palette;
+import io.github.mfuerstenau.leia.tui.widgets.GoMenu;
+import io.github.mfuerstenau.leia.tui.widgets.Jump;
+import io.github.mfuerstenau.leia.tui.widgets.Keys;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
 import java.util.ArrayList;
@@ -514,13 +519,34 @@ public final class Commits {
         }
     }
 
-    /** The screen's keys for the footer, after the app's. */
-    public String keys() {
-        String enter = "⏎ segments   ";
+    /** The screen's keys (ADR 0120). */
+    public Keys keys() {
+        String enter = "segments";
         if (focus == Focus.SEGMENTS) {
-            enter = readerOpen ? "⏎ documents   " : "";
+            enter = readerOpen ? "documents" : null;
         }
-        return "r read again   " + enter + "Tab panel   ↑↓";
+        Keys.Builder keys = Keys.builder();
+        if (enter != null) {
+            keys.key(SHOW, "⏎", enter);
+        }
+        return keys.key(DO, "r", "read again").build();
+    }
+
+    /** The jumps of the {@code g} menu (ADR 0120): the selected segment's documents, if a reader is open. */
+    public List<GoMenu.Target> jumps() {
+        return readerOpen
+                ? selectedSegment()
+                        .map(segment -> List.of(new GoMenu.Target(Jump.DOCUMENT, "documents of " + segment.name())))
+                        .orElse(List.of())
+                : List.of();
+    }
+
+    /** Where {@code g} and {@code jump} go: {@code g d} shows the selected segment's documents (ADR 0051). */
+    public Optional<Request> jump(Jump jump) {
+        wantedSegment = null;
+        return jump == Jump.DOCUMENT && readerOpen
+                ? selectedSegment().map(segment -> new Request.ShowDocuments(indexRow, segment.name()))
+                : Optional.empty();
     }
 
     private void focus(Focus focus) {

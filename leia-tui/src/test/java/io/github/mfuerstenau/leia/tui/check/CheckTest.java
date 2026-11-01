@@ -101,7 +101,8 @@ class CheckTest {
     @Test
     void aCheckWithoutLevelsHasNoL() {
         Check check = new Check("/data", false, false);
-        assertThat(check.keys()).isEqualTo("⏎ check all   Space mark   a all   r list again   Tab panel");
+        assertThat(check.keys().text()).isEqualTo(" ⏎ check all   Space mark   a mark all   r list again");
+        assertThat(TestScreens.allKeys(check.keys())).doesNotContain("l level");
         assertThat(check.handleKey(key('l'))).contains(new Check.Request.Unsupported("Level"));
         assertThat(check.handleKey(key(KeyCode.ENTER)))
                 .contains(new Check.Request.Start(1, OptionalInt.empty(), OptionalInt.empty(), Optional.empty()));
@@ -118,17 +119,18 @@ class CheckTest {
         // No second check while one runs, and the level stays.
         assertThat(check.handleKey(key(KeyCode.ENTER))).isEmpty();
         check.handleKey(key('l'));
-        assertThat(check.keys()).startsWith("Esc cancel").doesNotContain("r list again");
+        // The app's Esc cancels it.
+        assertThat(check.keys().text()).doesNotContain("r list again", "⏎");
 
         assertThat(check.started(1, 7)).isEmpty();
         assertThat(check.job()).hasValueSatisfying(job -> assertThat(job).containsExactly(1, 7));
-        assertThat(check.keys()).isEqualTo("Esc cancel check   Tab panel   ↑↓←→");
+        assertThat(check.keys().text()).isBlank();
     }
 
     @Test
     void theLevelCycles() {
         Check check = new Check("/data", true, false);
-        assertThat(check.keys()).contains("   l level");
+        assertThat(TestScreens.allKeys(check.keys())).contains("l level");
         for (int level : new int[] {2, 3, 1}) {
             check.handleKey(key('l'));
             assertThat(render(check, 80, 20)).contains("Check (level " + level + ", " + Check.levelName(level) + ")");
@@ -329,7 +331,7 @@ class CheckTest {
     @Test
     void nothingMarkedChecksEverything() {
         Check check = loaded();
-        assertThat(check.keys()).contains("⏎ check all");
+        assertThat(check.keys().text()).contains("⏎ check all");
         assertThat(only(check)).isEmpty();
     }
 
@@ -338,7 +340,7 @@ class CheckTest {
         Check check = loaded();
         // On the first index row: all of it.
         check.handleKey(key(' '));
-        assertThat(check.keys()).contains("⏎ check marked");
+        assertThat(check.keys().text()).contains("⏎ check marked");
         assertThat(render(check, 80, 40)).contains("[x] a", "    [x] _0", "    [x] _2", "[ ] b");
 
         // On a segment: unmarking it leaves the others, so the index is partly marked.
@@ -416,7 +418,7 @@ class CheckTest {
     @Test
     void theThreadsCycleUpToTheProcessorsAndStartWithAllOfThem() {
         Check check = loaded();
-        assertThat(check.keys()).contains("   t threads");
+        assertThat(TestScreens.allKeys(check.keys())).contains("t threads");
         assertThat(render(check, 100, 40)).contains("· 6 threads)");
         for (int threads : new int[] {1, 2, 4, 6, 1}) {
             assertThat(check.handleKey(key('t'))).isEmpty();
@@ -438,7 +440,7 @@ class CheckTest {
     @Test
     void aCheckWithoutThreadsHasNoT() {
         Check check = new Check("/data", true, false, 6);
-        assertThat(check.keys()).doesNotContain("t threads");
+        assertThat(TestScreens.allKeys(check.keys())).doesNotContain("t threads");
         assertThat(check.handleKey(key('t'))).contains(new Check.Request.Unsupported("Threads"));
         assertThat(check.handleKey(key(KeyCode.ENTER)))
                 .contains(new Check.Request.Start(1, OptionalInt.of(1), OptionalInt.empty(), Optional.empty()));

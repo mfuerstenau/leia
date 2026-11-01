@@ -456,11 +456,12 @@ public final class Overview {
     }
 
     /**
-     * Moves the selection in the focused table, switches the focus with Tab, cycles the sort column
+     * Moves the selection in the focused table, switches the focus with Tab or Shift+Tab, cycles the sort column
      * with {@code s} and flips its direction with {@code S}. Returns whether the key was used.
      */
     public boolean handleKey(KeyEvent key) {
-        if (key.code() == KeyCode.TAB && !key.hasShift()) {
+        // Two panels: Tab and Shift+Tab both switch.
+        if (key.code() == KeyCode.TAB) {
             focus = focus == Focus.FIELDS ? Focus.TERMS : Focus.FIELDS;
             return true;
         }

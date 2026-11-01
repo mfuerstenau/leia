@@ -253,10 +253,10 @@ class CommitsTest {
     @Test
     void enterOnASegmentShowsItsDocuments() {
         Commits commits = loaded();
-        assertThat(commits.keys()).contains("⏎ segments");
+        assertThat(commits.keys().text()).contains("⏎ segments");
         commits.handleKey(key(KeyCode.ENTER));
         commits.handleKey(key(KeyCode.DOWN));
-        assertThat(commits.keys()).contains("⏎ documents");
+        assertThat(commits.keys().text()).contains("⏎ documents");
         assertThat(commits.handleKey(key(KeyCode.ENTER))).contains(new Commits.Request.ShowDocuments(0, "_1"));
 
         // Without a reader, there are no documents to show.
@@ -266,7 +266,7 @@ class CommitsTest {
         withoutReader.commitLoaded(0, 4, details(4, false));
         withoutReader.handleKey(key(KeyCode.ENTER));
         assertThat(withoutReader.handleKey(key(KeyCode.ENTER))).isEmpty();
-        assertThat(withoutReader.keys()).doesNotContain("⏎");
+        assertThat(withoutReader.keys().text()).doesNotContain("⏎");
     }
 
     @Test
@@ -278,7 +278,7 @@ class CommitsTest {
         // Commit 4 is in already: the segment is selected at once, with its details.
         assertThat(commits.showSegment(0, "_1")).isEmpty();
         assertThat(render(commits, 140, 40)).contains("Segments of segments_4").contains("Segment _1");
-        assertThat(commits.keys()).contains("⏎ documents");
+        assertThat(commits.keys().text()).contains("⏎ documents");
         assertThat(commits.handleKey(key(KeyCode.ENTER))).contains(new Commits.Request.ShowDocuments(0, "_1"));
     }
 

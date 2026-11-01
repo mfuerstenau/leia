@@ -1,5 +1,7 @@
 package io.github.mfuerstenau.leia.tui.check;
 
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.DO;
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.MOVE;
 import static io.github.mfuerstenau.leia.tui.widgets.Panels.panel;
 
 import dev.tamboui.layout.Constraint;
@@ -26,6 +28,7 @@ import io.github.mfuerstenau.leia.protocol.check.StartCheckIndexParams;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.theme.Palette;
+import io.github.mfuerstenau.leia.tui.widgets.Keys;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -571,16 +574,21 @@ public final class Check {
         return Math.max(lines.size() - outputRows, 0);
     }
 
-    /** The keys of the screen, for the footer. */
-    public String keys() {
+    /** The keys of the screen (ADR 0120); while it runs, the app's Esc cancels it. */
+    public Keys keys() {
         if (running()) {
-            return "Esc cancel check   Tab panel   ↑↓←→";
+            return Keys.builder().more(MOVE, "←→", "scroll the output").build();
         }
         // The title says the level and the threads.
-        return "⏎ check " + (anyMarked() ? "marked" : "all") + "   Space mark   a all"
-                + (levels ? "   l level" : "")
-                + (threadsSupported ? "   t threads" : "")
-                + "   r list again   Tab panel";
+        return Keys.builder()
+                .more(MOVE, "←→", "scroll the output")
+                .key(DO, "⏎", "check " + (anyMarked() ? "marked" : "all"))
+                .key(DO, "Space", "mark")
+                .key(DO, "a", "mark all")
+                .moreIf(levels, DO, "l", "level")
+                .moreIf(threadsSupported, DO, "t", "threads")
+                .key(DO, "r", "list again")
+                .build();
     }
 
     public void render(Frame frame, Rect area) {

@@ -1,5 +1,11 @@
 package io.github.mfuerstenau.leia.tui.app;
 
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.APP;
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.DO;
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.GO_TO;
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.MOVE;
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.SHOW;
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.SORT;
 import static io.github.mfuerstenau.leia.tui.widgets.Panels.labelLine;
 
 import dev.tamboui.layout.Constraint;
@@ -107,7 +113,10 @@ import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.theme.Theme;
 import io.github.mfuerstenau.leia.tui.theme.ThemeFile;
 import io.github.mfuerstenau.leia.tui.theme.Themes;
+import io.github.mfuerstenau.leia.tui.widgets.GoMenu;
+import io.github.mfuerstenau.leia.tui.widgets.Jump;
 import io.github.mfuerstenau.leia.tui.widgets.KeyLegend;
+import io.github.mfuerstenau.leia.tui.widgets.Keys;
 import io.github.mfuerstenau.leia.tui.widgets.Logo;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import java.nio.charset.StandardCharsets;
@@ -139,11 +148,26 @@ import java.util.logging.Level;
  */
 public final class App {
 
-    /**
-     * The keys that every footer starts with. {@code X}, {@code L} and {@code ?} work on every screen
-     * too, but only the start screen's footer lists them: the others' are long enough already.
-     */
-    private static final String APP_KEYS = "q quit   o open   c close   ";
+    /** The start screen's footer: the app's keys, on one line of 80 columns. */
+    private static final Keys START_KEYS = Keys.builder()
+            .key(APP, "q", "quit")
+            .key(APP, "o", "open")
+            .key(APP, "6", "analysis")
+            .key(APP, "X", "jars")
+            .key(APP, "D", "runtimes")
+            .key(APP, "L", "log")
+            .key(APP, "T", "theme")
+            .key(APP, "?", "keys")
+            .build();
+
+    /** The footer of an index opened without a reader, on the screens that need one. */
+    private static final Keys NO_READER_KEYS = Keys.builder()
+            .key(APP, "q", "quit")
+            .key(APP, "o", "open")
+            .key(APP, "c", "close")
+            .key(APP, "1-7", "screen")
+            .key(APP, "?", "keys")
+            .build();
 
     private static final String INDEXES = " indexes";
 
@@ -295,6 +319,9 @@ public final class App {
 
     /** The about window, while it is open; or null. */
     private AboutWindow aboutWindow;
+
+    /** The menu that {@code g} opened, which takes the next key (ADR 0120); null while closed. */
+    private GoMenu goMenu;
 
     /** The level the log window shows; it outlasts the window. */
     private Level logFilter = log.logged();
@@ -1340,6 +1367,14 @@ public final class App {
                 jump(Screen.TERMS);
                 yield termsAction(terms.showNode(browse.field(), browse.docId()));
             }
+            case Documents.Request.GoTo _ -> {
+                goMenu = new GoMenu(documents.jumps());
+                yield Optional.empty();
+            }
+            case Documents.Request.Help _ -> {
+                openKeys();
+                yield Optional.empty();
+            }
         };
     }
 
@@ -2094,18 +2129,6 @@ public final class App {
         if (key.code() == KeyCode.ENTER) {
             return overviewEnter();
         }
-        if (key.isChar('/')) {
-            Optional<Overview.FieldTerm> top = overview.selectedTopTerm();
-            if (top.isPresent() && !searchesTerms()) {
-                notice = new Notice.NotSupported("Search term", reason());
-                return Optional.empty();
-            }
-            if (top.isPresent() && search != null) {
-                jump(Screen.SEARCH);
-                return searchAction(
-                        search.termQuery(top.get().field(), top.get().term()));
-            }
-        }
         if (key.isChar('a')) {
             return requestScans(overview.fieldsToScan());
         }
@@ -2122,6 +2145,43 @@ public final class App {
         }
         overview.handleKey(key);
         return Optional.empty();
+    }
+
+    /** The jumps of the {@code g} menu on the overview (ADR 0120): the selected top term's docs and a search for it. */
+    private List<GoMenu.Target> overviewJumps() {
+        if (overview.selectedTopTerm().isEmpty()) {
+            return List.of();
+        }
+        List<GoMenu.Target> jumps = new ArrayList<>();
+        if (opened.supports(Feature.TERMS)) {
+            jumps.add(new GoMenu.Target(Jump.TERMS, "docs of the term"));
+        }
+        if (searchesTerms() && search != null) {
+            jumps.add(new GoMenu.Target(Jump.SEARCH, "search the term"));
+        }
+        return jumps;
+    }
+
+    /** {@code g t} and {@code g s} on the overview: the selected top term's docs, or a search for it. */
+    private Optional<Action> overviewJump(Jump to) {
+        Optional<Overview.FieldTerm> top = overview.selectedTopTerm();
+        if (top.isEmpty()) {
+            return Optional.empty();
+        }
+        if (to == Jump.TERMS) {
+            return overviewEnter();
+        }
+        if (to != Jump.SEARCH) {
+            return Optional.empty();
+        }
+        if (!searchesTerms()) {
+            return notSupported("Search term");
+        }
+        if (search == null) {
+            return Optional.empty();
+        }
+        jump(Screen.SEARCH);
+        return searchAction(search.termQuery(top.get().field(), top.get().term()));
     }
 
     /** Enter on the overview: the docs of the selected top term, or else a scan of the selected field. */
@@ -2155,6 +2215,9 @@ public final class App {
             return Optional.empty();
         }
         notice = null;
+        if (goMenu != null) {
+            return goMenuKey(key);
+        }
         if (runtimeWindow != null) {
             return runtimeWindowKey(key);
         }
@@ -2192,6 +2255,122 @@ public final class App {
             }
             case LogWindow.Nothing _ -> Optional.empty();
         };
+    }
+
+    /** The key after {@code g}: a jump of the shown screen, {@code g} for the top, or any other to close it. */
+    private Optional<Action> goMenuKey(KeyEvent key) {
+        GoMenu.Event event = goMenu.handleKey(key);
+        goMenu = null;
+        return switch (event) {
+            case GoMenu.Picked picked -> goTo(picked.jump());
+            case GoMenu.Top _ -> screenKey(KeyEvent.ofKey(KeyCode.HOME));
+            case GoMenu.Close _ -> Optional.empty();
+        };
+    }
+
+    /** Opens the {@code g} menu with the jumps of the shown screen, if one is shown (ADR 0120). */
+    private void openGoMenu() {
+        if (hasIndex() || screen == Screen.ANALYSIS) {
+            goMenu = new GoMenu(jumps());
+        }
+    }
+
+    /** The jumps of the shown screen that its selection allows; they follow the branches of {@link #renderScreen}. */
+    private List<GoMenu.Target> jumps() {
+        if (opened == null) {
+            return List.of();
+        }
+        return switch (screen) {
+            case OVERVIEW -> overview != null ? overviewJumps() : List.of();
+            case DOCUMENTS -> overview != null && documents != null ? documents.jumps() : List.of();
+            case TERMS -> overview != null && terms != null ? terms.jumps() : List.of();
+            case COMMITS -> commits != null ? commits.jumps() : List.of();
+            case SEARCH -> overview != null && search != null ? search.jumps() : List.of();
+            case ANALYSIS, CHECK -> List.of();
+        };
+    }
+
+    /** Goes where {@code to} goes from the shown screen, through its action, which keeps the way back (ADR 0052). */
+    private Optional<Action> goTo(Jump to) {
+        if (opened == null) {
+            return Optional.empty();
+        }
+        return switch (screen) {
+            case OVERVIEW -> overview != null ? overviewJump(to) : Optional.empty();
+            case DOCUMENTS -> documents != null ? documentsAction(documents.jump(to)) : Optional.empty();
+            case TERMS -> terms != null ? termsAction(terms.jump(to)) : Optional.empty();
+            case COMMITS -> commits != null ? commitsAction(commits.jump(to)) : Optional.empty();
+            case SEARCH -> search != null ? searchAction(search.jump(to)) : Optional.empty();
+            case ANALYSIS, CHECK -> Optional.empty();
+        };
+    }
+
+    /** Opens the {@code ?} window on its key list, with the keys of the shown screen. */
+    private void openKeys() {
+        aboutWindow = new AboutWindow(version, aboutEnvironment(), keysTitle(), helpKeys());
+    }
+
+    /** What the key list is of. */
+    private String keysTitle() {
+        if (viewing()) {
+            return "the value viewer";
+        }
+        return opened == null && screen != Screen.ANALYSIS ? "the start screen" : screen.name;
+    }
+
+    /** Whether the value viewer is open over the documents screen, which then takes every key. */
+    private boolean viewing() {
+        return screen == Screen.DOCUMENTS
+                && opened != null
+                && overview != null
+                && documents != null
+                && documents.viewer().isPresent();
+    }
+
+    /**
+     * Every key of the shown screen for the key list: its own, footer or not, the jumps its selection
+     * allows, the moves and the app's (ADR 0120).
+     */
+    private Keys helpKeys() {
+        Keys.Builder goTo = Keys.builder();
+        for (GoMenu.Target target : jumps()) {
+            goTo.more(GO_TO, "g " + target.jump().letter(), target.does());
+        }
+        if (viewing()) {
+            return screenKeys()
+                    .plus(goTo.build())
+                    .plus(Keys.COMMON)
+                    .plus(Keys.builder().more(APP, "?", "keys").build());
+        }
+        if (opened == null && screen != Screen.ANALYSIS) {
+            return START_KEYS;
+        }
+        return stopKeys()
+                .plus(screenKeys())
+                .plus(goTo.build())
+                .plus(Keys.COMMON)
+                .plus(Keys.builder()
+                        .more(MOVE, "Tab/Shift+Tab", "next / previous panel")
+                        .build())
+                .plus(appKeys());
+    }
+
+    /** The app's keys for the key list. */
+    private Keys appKeys() {
+        boolean reopens = overview != null && opened.supports(Feature.REOPEN);
+        return Keys.builder()
+                .more(APP, "q", "quit")
+                .more(APP, "o", "open an index")
+                .moreIf(hasIndex(), APP, "c", "close the index")
+                .moreIf(reopens, APP, "R", "reopen")
+                .moreIf(hasIndex(), APP, "1-7", "screen")
+                .moreIf(!hasIndex(), APP, "6", "analysis")
+                .moreIf(hasIndex(), APP, "⌫", "back")
+                .more(APP, "Esc", "stop what runs, else quit")
+                .more(APP, "X", "jars")
+                .more(APP, "L", "log")
+                .more(APP, "?", "keys and about")
+                .build();
     }
 
     private Optional<Action> aboutWindowKey(KeyEvent key) {
@@ -2373,7 +2552,8 @@ public final class App {
             }
             case 'o' -> openPrompt();
             case 'L' -> logWindow = new LogWindow(log, logFilter);
-            case '?' -> aboutWindow = new AboutWindow(version, aboutEnvironment());
+            case '?' -> openKeys();
+            case 'g' -> openGoMenu();
             case 'X' -> {
                 jars = new JarsPopup(defaultJars, runtimeFolders, home);
                 return Optional.of(new Action.LoadJars());
@@ -2383,7 +2563,7 @@ public final class App {
                 return opened == null && screen != Screen.ANALYSIS ? openRuntimeWindow() : screenKey(key);
             }
             case 'T' -> {
-                // Only on the start screen: the documents tab has a T of its own.
+                // Only on the start screen.
                 if (opened != null || screen == Screen.ANALYSIS) {
                     return screenKey(key);
                 }
@@ -2665,7 +2845,7 @@ public final class App {
         boolean tabsShown = hasIndex() || screen == Screen.ANALYSIS;
         List<Line> footer = notice != null && notice.inFooter()
                 ? List.of(Line.from(Span.raw(" ")).append(notice.line()))
-                : KeyLegend.lines(footerKeys(), area.width());
+                : footerLines(area.width());
         // A legend that wraps takes a third of the screen at most, so the screen keeps the rest.
         int footerCap = Math.max(area.height() / 3, 1);
         int footerHeight = Math.min(footer.size(), footerCap);
@@ -2689,6 +2869,9 @@ public final class App {
         }
         if (runtimeWindow != null) {
             runtimeWindow.render(frame, body);
+        }
+        if (goMenu != null) {
+            goMenu.render(frame, body);
         }
         if (aboutWindow != null) {
             aboutWindow.render(frame, body);
@@ -2721,102 +2904,139 @@ public final class App {
         }
     }
 
-    /** The footer's keys for the shown screen; they follow the branches of {@link #renderScreen}. */
-    private String footerKeys() {
-        String reopen = overview != null && opened.supports(Feature.REOPEN) ? "R reopen   " : "";
-        String cancel = cancelKeys();
-        String screens = "1-7 screen   " + (back.isEmpty() ? "" : "⌫ back   ");
+    /** The footer's lines: the legend of a prompt that takes the keys, or else the keys (ADR 0120). */
+    private List<Line> footerLines(int width) {
+        Optional<String> prompt = promptKeys();
+        return prompt.isPresent() ? KeyLegend.lines(prompt.get(), width) : KeyLegend.lines(footerKeys(), width);
+    }
+
+    /**
+     * The legend of the shown screen's prompt or popup while one takes every key; empty otherwise.
+     * It follows the branches of {@link #renderScreen}.
+     */
+    private Optional<String> promptKeys() {
         if (screen == Screen.ANALYSIS) {
-            return analysisFooter(cancel, screens);
+            return analysis.promptKeys();
         }
-        if (opened == null) {
-            // Fits 80 columns, on one line.
-            return " q quit   o open   6 analysis   X jars   D runtimes   L log   T theme   ? about";
+        if (opened == null || overview == null) {
+            return Optional.empty();
         }
-        if (screen == Screen.COMMITS) {
-            return " " + cancel + APP_KEYS + reopen + screens + commitsKeys();
-        }
-        if (screen == Screen.CHECK && check != null) {
-            return " " + cancel + APP_KEYS + reopen + screens + check.keys();
-        }
-        if (overview == null) {
-            return " q quit   o open   c close   1-7 screen";
-        }
-        if (screen == Screen.SEARCH) {
-            return searchFooter(screens);
-        }
-        if (screen == Screen.TERMS) {
-            return terms.prompting() ? " type to seek   ⏎/Esc done" : " " + cancel + APP_KEYS + screens + terms.keys();
-        }
-        if (screen == Screen.DOCUMENTS) {
-            return documentsFooter(cancel, screens);
-        }
-        return overviewFooter(reopen, screens);
+        return switch (screen) {
+            case SEARCH -> search.promptKeys();
+            case TERMS -> terms.prompting() ? Optional.of(" type to seek   ⏎/Esc done") : Optional.empty();
+            case DOCUMENTS -> documentsPromptKeys();
+            default -> Optional.empty();
+        };
     }
 
-    /** What Esc stops: the scans first, then the export. */
-    private String cancelKeys() {
-        if (scan != null) {
-            return "Esc cancel scan   ";
-        }
-        return export != null ? "Esc cancel export   " : "";
-    }
-
-    private String commitsKeys() {
-        return commits != null ? commits.keys() : "r read again   ⏎ segments   Tab panel   ↑↓";
-    }
-
-    private String analysisFooter(String cancel, String screens) {
-        if (analysis.prompting()) {
-            return analysis.keys();
-        }
-        return hasIndex()
-                ? " " + cancel + APP_KEYS + screens + analysis.keys()
-                : " q quit   o open   " + analysis.keys();
-    }
-
-    private String searchFooter(String screens) {
-        if (search.prompting()) {
-            return search.keys();
-        }
-        String stop = scan != null || search.running() ? "Esc cancel   " : "";
-        return " " + stop + APP_KEYS + screens + search.keys();
-    }
-
-    private String documentsFooter(String cancel, String screens) {
+    private Optional<String> documentsPromptKeys() {
         Optional<Viewer> viewer = documents.viewer();
         if (viewer.isPresent()) {
-            return viewer.get().keys();
+            return viewer.get().promptKeys();
         }
         if (documents.seeking()) {
-            return " type to seek a field   ⏎/Esc done";
+            return Optional.of(" type to seek a field   ⏎/Esc done");
         }
         if (documents.goingTo()) {
-            return " type a document id   ⏎ go   Esc cancel";
+            return Optional.of(" type a document id   ⏎ go   Esc cancel");
         }
-        // Esc stops the scan first.
-        String stop = cancel;
-        if (stop.isEmpty() && documents.rebuilding()) {
-            stop = "Esc stop rebuild   ";
-        } else if (stop.isEmpty() && documents.filterBuilding()) {
-            stop = "Esc stop filter   ";
-        }
-        return " " + stop + APP_KEYS + screens + documents.keys();
+        return Optional.empty();
     }
 
-    private String overviewFooter(String reopen, String screens) {
+    /**
+     * The footer's keys: what Esc stops, the shown screen's own, then {@code g}, Backspace and {@code
+     * ?} (ADR 0120). The app's other keys are in the key list, and the tab line shows the numbers.
+     */
+    Keys footerKeys() {
+        if (opened == null && screen != Screen.ANALYSIS) {
+            return START_KEYS;
+        }
+        if (opened != null
+                && overview == null
+                && screen != Screen.ANALYSIS
+                && screen != Screen.COMMITS
+                && screen != Screen.CHECK) {
+            return NO_READER_KEYS;
+        }
+        boolean viewing = viewing();
+        Keys tail = Keys.builder()
+                .keyIf(!jumps().isEmpty(), GO_TO, "g", "go to")
+                .keyIf(!hasIndex(), APP, "q", "quit")
+                .keyIf(!hasIndex(), APP, "o", "open")
+                .keyIf(!viewing && !back.isEmpty(), APP, "⌫", "back")
+                .key(APP, "?", "keys")
+                .build();
+        return (viewing ? Keys.NONE : stopKeys()).plus(screenKeys()).plus(tail);
+    }
+
+    /** What Esc stops, in the order {@link #escapeKey} stops it; none if nothing runs. */
+    private Keys stopKeys() {
+        String stops = null;
         if (scan != null || storedFieldsScan != null) {
-            return " Esc cancel scan   q quit   o open   c close   " + reopen + screens + "s/S sort   Tab panel   ↑↓";
+            stops = "cancel scan";
+        } else if (export != null) {
+            stops = "cancel export";
+        } else if (screen == Screen.SEARCH && searching()) {
+            stops = "cancel";
+        } else if (screen == Screen.DOCUMENTS && documents != null && documents.rebuilding()) {
+            stops = "stop rebuild";
+        } else if (screen == Screen.DOCUMENTS && documents != null && documents.filterBuilding()) {
+            stops = "stop filter";
+        } else if (screen == Screen.CHECK && checking()) {
+            stops = "cancel check";
+        }
+        return stops == null ? Keys.NONE : Keys.builder().key(DO, "Esc", stops).build();
+    }
+
+    /** The shown screen's own keys; they follow the branches of {@link #renderScreen}. */
+    private Keys screenKeys() {
+        if (screen == Screen.ANALYSIS) {
+            return analysis.keys();
+        }
+        if (opened == null) {
+            return Keys.NONE;
+        }
+        if (screen == Screen.COMMITS) {
+            return commits != null
+                    ? commits.keys()
+                    : Keys.builder()
+                            .key(SHOW, "⏎", "segments")
+                            .key(DO, "r", "read again")
+                            .build();
+        }
+        if (screen == Screen.CHECK && check != null) {
+            return check.keys();
+        }
+        if (overview == null) {
+            return Keys.NONE;
+        }
+        return switch (screen) {
+            case SEARCH -> search.keys();
+            case TERMS -> terms.keys();
+            case DOCUMENTS -> documents.viewer().map(Viewer::keys).orElseGet(documents::keys);
+            default -> overviewKeys();
+        };
+    }
+
+    /** The overview's keys: those of the selected top term, or else of the selected field. */
+    private Keys overviewKeys() {
+        Keys.Builder keys = Keys.builder().key(SORT, "s/S", "sort");
+        if (scan != null || storedFieldsScan != null) {
+            return keys.build();
         }
         if (overview.selectedTopTerm().isPresent()) {
-            String docs = opened.supports(Feature.TERMS) ? "⏎ term's docs   " : "";
-            String searchTerm = searchesTerms() ? "/ search term   " : "";
-            return " q quit   o open   c close   " + reopen + screens + docs + searchTerm + "+/- top N   "
-                    + "s/S sort   Tab panel   ↑↓";
+            return keys.keyIf(opened.supports(Feature.TERMS), SHOW, "⏎", "term's docs")
+                    .key(SHOW, "+/-", "top N")
+                    .build();
         }
-        String topTerms = opened.supports(Feature.TOP_TERMS) ? "⏎ terms   a all terms   +/- top N   " : "";
-        String stored = opened.supports(Feature.STORED_FIELDS) ? "f stored fields   b/B docs storing it   " : "";
-        return " q quit   o open   c close   " + reopen + screens + topTerms + stored + "s/S sort   Tab panel   ↑↓";
+        boolean topTerms = opened.supports(Feature.TOP_TERMS);
+        boolean stored = opened.supports(Feature.STORED_FIELDS);
+        return keys.keyIf(topTerms, SHOW, "⏎", "terms")
+                .keyIf(topTerms, SHOW, "+/-", "top N")
+                .keyIf(topTerms, DO, "a", "all terms")
+                .keyIf(stored, DO, "f", "stored fields")
+                .keyIf(stored, DO, "b/B", "docs storing it")
+                .build();
     }
 
     private void renderAbout(Frame frame, Rect body) {

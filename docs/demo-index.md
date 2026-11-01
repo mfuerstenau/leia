@@ -40,14 +40,14 @@ other tests use their own indexes and the Lucene 9 and 8 indexes from `LegacyInd
 | `category` | keyword + sorted doc values (6 values) |
 | `tags` | multi-valued keyword + sorted set doc values; missing in about 1 in 5 documents |
 | `binary_key` | binary terms that aren't UTF-8 (`0xff…80`): hex on the terms screen; stored binary |
-| `price` | double point + stored double + double doc values (raw double bits: `x` decodes them) |
+| `price` | double point + stored double + double doc values (raw double bits: `n` decodes them) |
 | `quantity` | int point + stored int + numeric doc values, some negative |
 | `rating` | float point + stored float + float doc values (float bits) |
 | `timestamp` | long point + stored long + sorted numeric doc values (epoch millis in 2026) |
 | `published` | keyword, stored: the day of `timestamp` in UTC as `DateTools` writes it (`20260131`), for date ranges |
 | `updated` | keyword, stored: the hour of `timestamp` in UTC as `DateTools` writes it (`2026013114`), for a date resolution per field |
 | `scores` | sorted numeric doc values, 1–4 values from -100 to 100 |
-| `weight` | sorted numeric doc values as sortable double bits (`x` decodes them) |
+| `weight` | sorted numeric doc values as sortable double bits (`n` decodes them) |
 | `location` | lat/lon point + lat/lon doc values |
 | `checksum` | binary doc values, 8 random bytes |
 | `embedding` | float KNN vector, 8 dimensions, cosine; in every document but 0. Its first component is shifted by 2, so it is never all zeros |
@@ -74,11 +74,11 @@ other tests use their own indexes and the Lucene 9 and 8 indexes from `LegacyInd
 - **42:** a 5000-word `body` (its norm encodes a range), a `_source` of about 108 KiB with a
   3000-entry `history` array (cut, then fetched whole by the viewer), and `blob`.
 - **37, 74, …:** deleted; 74 has `deleted_only`.
-- **Rebuilding indexed terms (`r`):** `title` from the postings with positions; `body` from its term
+- **Rebuilding indexed terms (`I`):** `title` from the postings with positions; `body` from its term
   vector at once, and 42's 5000 words in position order (`東京` as `東 京`); `labels` with freqs and
   `keywords` with docs only, neither of them stored; `binary_key` as hex; `deleted_only` in the
   deleted document 74.
-- **Rebuilding points (`r`, ADR 0041):** on document 1, `quantity` shows `1 point, as int (t)` and
+- **Rebuilding points (`I`, ADR 0041):** on document 1, `quantity` shows `1 point, as int (t)` and
   `302`, its stored value; `price` shows a long until `t` makes it a double, `313.97`; `location`
   shows `52.52, 13.405` as lat/lon (`t` cycles to int, float and hex). The deleted document 74 has
   its points too: `quantity` 697.
@@ -118,7 +118,7 @@ other tests use their own indexes and the Lucene 9 and 8 indexes from `LegacyInd
 - `/` on a top term of `binary_key` in the overview: a term query for a binary term, shown as hex.
 - `title:(lamp`: a syntax error; `body:*a*`: a leading wildcard, which the classic parser rejects
   until `p` turns leading wildcards on.
-- `m` on document 223 (documents screen): More-Like-This with Lucene's defaults, 485 hits with doc 223
+- `g m` on document 223 (documents screen): More-Like-This with Lucene's defaults, 485 hits with doc 223
   (`◆`) first. `body` has term vectors, `title` is analyzed from its stored text. With `p`, a min
   term freq of 1, a max doc freq of 50 and "boost", the rewritten query shows the weighted terms.
   Document 0 has nothing to take terms from, and document 37 is deleted: a source, but no hit.
@@ -163,8 +163,8 @@ other tests use their own indexes and the Lucene 9 and 8 indexes from `LegacyInd
   `[-5 TO 5]`: 9 hits, the same as `quantity:[-5 TO 5]` on the int points in standard syntax.
   `price` with `n` as double bits, `{* TO 10]`: 12 hits, the same as the double points, with the
   range split at zero in the parsed query. `category` `kitchen`: 80
-  hits; `tags` `eco gift`: 101, `[a TO c}`: 92. On the documents screen, `s` on `checksum` (binary,
-  8 random bytes) searches for it in hex: 1 hit, the document itself; `s` on `price` after `x`
+  hits; `tags` `eco gift`: 101, `[a TO c}`: 92. On the documents screen, `g s` on `checksum` (binary,
+  8 random bytes) searches for it in hex: 1 hit, the document itself; `g s` on `price` after `n`
   searches for its double.
 - A doc values prefix (ADR 0036): `category` `o*`: 158 hits (office and outdoor), the same as
   `category:o*` in classic syntax, with `category:[[6f] TO [70]}` as the parsed query; `tags` `l*`:
@@ -172,7 +172,7 @@ other tests use their own indexes and the Lucene 9 and 8 indexes from `LegacyInd
   prefix is for doc values of bytes, and `o* toys` that a prefix stands alone.
 - KNN (ADR 0040): the overview's Vector column says `8d f32 cos` for `embedding` and `16d byte euc`
   for `fingerprint`. On document 42, the details of `embedding` list its 8 components and its
-  length, 2.63876; `N` searches its 10 nearest: doc 42 first with score 1.0, then 411, 98, 491.
+  length, 2.63876; `g n` searches its 10 nearest: doc 42 first with score 1.0, then 411, 98, 491.
   `e` scores every document exactly instead: 486 hits (every live document but 0), with the same
   first 10. `w` with `category:kitchen`: 80 hits exactly; with `e` again and `k` 3, the graph
   finds 42, 98 and 278, the exact top 3, and `b` browses them on the documents screen (`1 of 3`).
@@ -183,16 +183,16 @@ other tests use their own indexes and the Lucene 9 and 8 indexes from `LegacyInd
   levels · M 16`, with 199, 14 and 1 nodes on L0 to L2; `_1` has 200, 14 and 1, `_2` 100 and 6.
   `fingerprint hnsw 16d`, written with an M of 4, has more levels: 199, 52, 14, 2, 1, 1 in `_0`.
   On L0 of `_0`, ordinal 36 is document 37, in red: a deleted document keeps its node. On document
-  42, `T` on `embedding` shows its node, ordinal 41 of `_0`, with its neighbours scored as the
+  42, `g t` on `embedding` shows its node, ordinal 41 of `_0`, with its neighbours scored as the
   exact search scores them; Enter walks on, `<` back.
-- Recall (ADR 0086): in the KNN mode of the search screen, `r` on a blank line samples 100
+- Recall (ADR 0086): in the KNN mode of the search screen, `K` on a blank line samples 100
   documents. `embedding` at `k` 10 has a mean recall of 1.000: its graphs find every exact
   neighbour. With `f` on `fingerprint` (M 4), 0.997: documents 63, 362 and 472 each miss one of
-  their 10, such as `#9 doc 363`; Enter on 63 searches its nearest. `42` on the line, then `r`,
+  their 10, such as `#9 doc 363`; Enter on 63 searches its nearest. `42` on the line, then `K`,
   checks that one target.
-- Segments (ADR 0051): document 417's header says `_2 #17 of 0–99`. `S` pins `_2`, and ← stops at
+- Segments (ADR 0051): document 417's header says `_2 #17 of 0–99`. `P` pins `_2`, and ← stops at
   document 400 (`first document of _2`); `<` goes to document 200, the first of `_1`, and the pin
-  moves along. With a filter (`b` on the search screen) and `S`, → stops at the segment's last
+  moves along. With a filter (`b` on the search screen) and `P`, → stops at the segment's last
   match with `no next match in _1`. On the commits screen, ⏎ on segment `_1` of `segments_4` shows document 200,
   pinned; segment `_0` of `segments_1` is the same segment, also found.
 - A regex as the filter, on a copy of the demo index without `segments_4`, which has no deletions
@@ -202,54 +202,54 @@ other tests use their own indexes and the Lucene 9 and 8 indexes from `LegacyInd
 
 ## Jumps between screens worth a try
 
-Cross-screen navigation (ADR 0052). `⌫ back` in the footer says when `Backspace` has somewhere to go.
+Cross-screen navigation (ADR 0052), through the `g` menu (ADR 0120), which lists the jumps the selection allows. `⌫ back` in the footer says when `Backspace` has somewhere to go.
 
 - **Terms → documents → commits, and back:** on the terms screen, `labels`, any term, `Enter` twice
-  and `Enter` on a posting shows its document. `C` there opens the commits screen on `segments_4`,
+  and `Enter` on a posting shows its document. `g c` there opens the commits screen on `segments_4`,
   the opened commit, with the document's segment selected (`_1` for a document in 200–399) and its
   details shown. `Backspace` shows the document again, as it was, then the terms with the same term
   and posting selected; one more does nothing, and `⌫ back` is gone.
 - **Back keeps what a jump left (ADR 0053):** on the terms screen, `labels`, any term and
-  `Enter` on a posting; on its document `T` on `title`, then `Backspace`: the document again, whose
+  `Enter` on a posting; on its document `g t` on `title`, then `Backspace`: the document again, whose
   `]` still steps along the `labels` term's postings; one more `Backspace` shows `labels` at that
   term, with the posting `]` stepped to selected.
 - **Back keeps the search and the commits (ADR 0054):** on the search screen, `labels:2024`, `Enter`
-  on a hit, `m` on its document: More Like This hits. `Backspace` shows the document, whose `]`
+  on a hit, `g m` on its document: More Like This hits. `Backspace` shows the document, whose `]`
   steps along the `labels:2024` hits; one more shows those hits, with the hit `]` stepped to
   selected. On the commits screen, `Enter`, `↓` to segment `_1`, `Enter` on its documents, `i` to
-  450 (in `_2`), `C`: segment `_2`; `Backspace` twice shows `_1` again.
-- **Documents → terms (`T`):** on that document, `T` on `labels` opens the terms screen at the
-  hit's term with the postings focused; `T` on `title` opens `title` from its first term; `T` on
-  `price` (points, no terms) opens `price pt 1×8`'s tree; `T` on `checksum` (doc values only) says
+  450 (in `_2`), `g c`: segment `_2`; `Backspace` twice shows `_1` again.
+- **Documents → terms (`g t`):** on that document, `g t` on `labels` opens the terms screen at the
+  hit's term with the postings focused; `g t` on `title` opens `title` from its first term; `g t` on
+  `price` (points, no terms) opens `price pt 1×8`'s tree; `g t` on `checksum` (doc values only) says
   `checksum has no terms` in the document's title.
-- **Terms → search (`s`):** on `category`, any term, `s` runs the term query on the search screen;
-  on the postings column, `s` searches the postings' term. On `price pt 1×8`, `s` says
-  `s searches terms only`, in a title that fits its panel at 100 columns; `2` and `3` end the note.
+- **Terms → search (`g s`):** on `category`, any term, `g s` runs the term query on the search screen;
+  on the postings column, `g s` searches the postings' term. On `price pt 1×8`, `g s` says
+  `g s searches terms only`, in a title that fits its panel at 100 columns; `2` and `3` end the note.
 - **The number keys forget:** after a jump, `2` (or any of `1`–`7`) clears the way back, and
   `Backspace` does nothing. In a prompt (`i` on the documents screen, `/` on the terms screen, the
   viewer), `Backspace` edits the text as before, and the footer shows the prompt's keys without `⌫ back`.
-- **Old indexes:** on the `lucene3` test index, `C` and `T` work as on the demo index, every
-  runtime has commits and terms. `s` on the terms screen says `Search term: not for Lucene 3.x` and
-  is not in the legend, as `/` on the overview's top terms: the term query needs `SEARCH`.
+- **Old indexes:** on the `lucene3` test index, `g c` and `g t` work as on the demo index, every
+  runtime has commits and terms. `g s` on the terms screen says `Search term: not for Lucene 3.x` and
+  is not in the menu, as `g s` on the overview's top terms: the term query needs `SEARCH`.
 
 ## Analysis worth a try
 
 The analysis screen (`6`) needs no index, but these go with the demo index's text:
 
 - `<b>The</b> Wi-Fi routers are running FASTER` with the standard analyzer: the tags come out
-  as terms (`b`), and `Wi-Fi` as `wi` and `fi`. With `htmlStrip` added as a char filter (`b`, `Space`, then `+ char filter`), the tags
+  as terms (`b`), and `Wi-Fi` as `wi` and `fi`. With `htmlStrip` added as a char filter (`e`, `Space`, then `+ char filter`), the tags
   are gone, and `the` keeps the offsets of the original text (3–10).
 - Add `porterStem` after `lowercase`: `routers` becomes `router`, `running` becomes `run`. On the
   search screen, `routers running` then parses to `title:router title:run`, and the details panel
   shows the analyzer.
 - Add `stop`: `the` and `are` are gone, and the next tokens' positions are marked `·`. With
   `words=nope.txt`, the builder stays open and says that the resource is not found.
-- The preset `CollationKeyAnalyzer` (`b`, `Space` to preset, `Space` on the class) with locale `de`
+- The preset `CollationKeyAnalyzer` (`e`, `Space` to preset, `Space` on the class) with locale `de`
   and strength `primary`: `Äpfel` and `apfel` both stay their own term, but the token details
   show the same `bytes`, the collation key that an index of this analyzer holds. With `tertiary`
   they differ. `ICUCollationKeyAnalyzer` comes with `--jar` and the `icu` module
   (`./gradlew :leia-server:analysisModules`), and also reads tags like `de-u-ks-level1`.
-- A field's own analyzer: `f` until the field line says `title_key`, then `b`, the preset
+- A field's own analyzer: `f` until the field line says `title_key`, then `e`, the preset
   `CollationKeyAnalyzer`, locale `de`, strength `primary`. On the search screen, the classic
   `title_key:[a TO m]` then finds 206 documents; with the standard analyzer for every field it
   compares the text's bytes with the keys and finds others. `D` on the analysis screen drops the

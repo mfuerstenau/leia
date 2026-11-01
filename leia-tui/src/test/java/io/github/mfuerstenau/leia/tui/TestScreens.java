@@ -6,6 +6,7 @@ import dev.tamboui.terminal.Frame;
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.tui.event.KeyModifiers;
+import io.github.mfuerstenau.leia.tui.widgets.Keys;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -42,6 +43,14 @@ public final class TestScreens {
     /** The text that {@code draw} puts on a screen of {@code width} by {@code height}. */
     public static String render(Consumer<Frame> draw, int width, int height) {
         return text(buffer(draw, width, height));
+    }
+
+    /** Every key of {@code keys}, footer or not, as the footer would show them. */
+    public static String allKeys(Keys keys) {
+        return keys.sections().stream()
+                .flatMap(section -> section.keys().stream())
+                .map(Keys.Key::text)
+                .collect(java.util.stream.Collectors.joining("   "));
     }
 
     public static KeyEvent key(KeyCode code) {

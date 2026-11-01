@@ -48,6 +48,8 @@ import io.github.mfuerstenau.leia.tui.documents.Documents.Request;
 import io.github.mfuerstenau.leia.tui.points.PointFormat;
 import io.github.mfuerstenau.leia.tui.points.PointFormats;
 import io.github.mfuerstenau.leia.tui.terms.Terms.TermHit;
+import io.github.mfuerstenau.leia.tui.widgets.GoMenu;
+import io.github.mfuerstenau.leia.tui.widgets.Jump;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -204,7 +206,7 @@ class DocumentsTest {
         assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEqualTo(load(1));
         documents.loaded(document(4));
         assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEmpty();
-        assertThat(documents.handleKey(key('p'))).isEqualTo(load(3));
+        assertThat(documents.handleKey(key(KeyCode.LEFT))).isEqualTo(load(3));
     }
 
     @Test
@@ -215,7 +217,7 @@ class DocumentsTest {
         assertThat(documents.handleKey(key('i'))).isEmpty();
         assertThat(documents.prompting()).isTrue();
         assertThat(documents.handleKey(key('9'))).isEmpty();
-        assertThat(documents.handleKey(key('x'))).isEmpty();
+        assertThat(documents.handleKey(key('n'))).isEmpty();
         assertThat(documents.handleKey(key(KeyCode.ENTER))).isEmpty();
         assertThat(render(documents, 100, 20)).contains("Enter a number from 0 to 4.");
 
@@ -313,23 +315,23 @@ class DocumentsTest {
         Documents documents = documents();
         documents.loaded(document(0));
         assertThat(render(documents, 100, 20)).contains("# ▲");
-        assertThat(documents.keys().toString()).contains("z Z sort");
+        assertThat(documents.keys().text()).contains("s/S sort");
         assertThat(order(documents)).containsExactly("id", "body", "rank", "extra");
 
-        documents.handleKey(key('z'));
+        documents.handleKey(key('s'));
         assertThat(render(documents, 100, 20)).contains("Field ▲").doesNotContain("# ▲");
         assertThat(order(documents)).containsExactly("body", "extra", "id", "rank");
 
-        documents.handleKey(key('Z'));
+        documents.handleKey(key('S'));
         assertThat(render(documents, 100, 20)).contains("Field ▼");
         assertThat(order(documents)).containsExactly("rank", "id", "extra", "body");
 
         // The next key starts ascending again.
-        documents.handleKey(key('z'));
+        documents.handleKey(key('s'));
         assertThat(render(documents, 100, 20)).contains("# ▲");
         assertThat(order(documents)).containsExactly("id", "body", "rank", "extra");
 
-        documents.handleKey(key('Z'));
+        documents.handleKey(key('S'));
         assertThat(render(documents, 100, 20)).contains("# ▼");
         assertThat(order(documents)).containsExactly("extra", "rank", "body", "id");
     }
@@ -342,9 +344,9 @@ class DocumentsTest {
         documents.handleKey(key(KeyCode.DOWN));
         assertThat(selected(documents)).isEqualTo("rank");
 
-        documents.handleKey(key('z'));
+        documents.handleKey(key('s'));
         assertThat(selected(documents)).isEqualTo("rank");
-        documents.handleKey(key('Z'));
+        documents.handleKey(key('S'));
         assertThat(selected(documents)).isEqualTo("rank");
 
         documents.handleKey(key('e'));
@@ -356,8 +358,8 @@ class DocumentsTest {
     void theSortSurvivesAnotherDocumentAndAReopen() {
         Documents documents = documents();
         documents.loaded(document(0));
-        documents.handleKey(key('z'));
-        documents.handleKey(key('Z'));
+        documents.handleKey(key('s'));
+        documents.handleKey(key('S'));
 
         documents.loaded(document(1));
         assertThat(order(documents)).containsExactly("rank", "id", "extra", "body");
@@ -382,18 +384,18 @@ class DocumentsTest {
         assertThat(order(documents)).containsExactly("id", "body", "rank", "extra");
         assertThat(render(documents, 100, 20)).contains("extra");
 
-        documents.handleKey(key('Z'));
+        documents.handleKey(key('S'));
         assertThat(order(documents)).containsExactly("rank", "body", "id", "extra");
     }
 
     @Test
-    void zTypedIntoTheSeekIsSeekText() {
+    void sTypedIntoTheSeekIsSeekText() {
         Documents documents = documents();
         documents.loaded(document(0));
         documents.handleKey(key('/'));
-        documents.handleKey(key('z'));
+        documents.handleKey(key('s'));
 
-        assertThat(render(documents, 100, 20)).contains("/z▏").doesNotContain("Field ▲");
+        assertThat(render(documents, 100, 20)).contains("/s▏").doesNotContain("Field ▲");
         documents.handleKey(key(KeyCode.ESCAPE));
         assertThat(order(documents)).containsExactly("id", "body", "rank", "extra");
     }
@@ -417,14 +419,14 @@ class DocumentsTest {
     void searchesTheDocValuesOfTheSelectedField() {
         Documents documents = documents();
         documents.loaded(document(0));
-        assertThat(documents.handleKey(key('s'))).as("id has no doc values").isEmpty();
+        assertThat(documents.jump(Jump.SEARCH)).as("id has no doc values").isEmpty();
         documents.handleKey(key(KeyCode.DOWN));
         documents.handleKey(key(KeyCode.DOWN));
 
-        assertThat(documents.handleKey(key('s')))
+        assertThat(documents.jump(Jump.SEARCH))
                 .isEqualTo(search(DocValuesNumber.LONG, false, "-1", "4612811918334230528"));
-        documents.handleKey(key('x'));
-        assertThat(documents.handleKey(key('s'))).isEqualTo(search(DocValuesNumber.DOUBLE, false, "NaN", "2.5"));
+        documents.handleKey(key('n'));
+        assertThat(documents.jump(Jump.SEARCH)).isEqualTo(search(DocValuesNumber.DOUBLE, false, "NaN", "2.5"));
     }
 
     @Test
@@ -442,7 +444,7 @@ class DocumentsTest {
         documents.handleKey(key(KeyCode.DOWN));
         documents.handleKey(key(KeyCode.DOWN));
 
-        assertThat(documents.handleKey(key('s'))).isEqualTo(search(DocValuesNumber.LONG, true, "6162", "ff00"));
+        assertThat(documents.jump(Jump.SEARCH)).isEqualTo(search(DocValuesNumber.LONG, true, "6162", "ff00"));
     }
 
     /** A document with a float vector in {@code vec}, and none in {@code nothing}. */
@@ -484,7 +486,7 @@ class DocumentsTest {
     @Test
     void showsAVectorAndSearchesItsNearest() {
         Documents documents = withVector();
-        assertThat(documents.handleKey(key('N'))).as("id has no vector").isEmpty();
+        assertThat(documents.jump(Jump.NEAREST)).as("id has no vector").isEmpty();
         documents.handleKey(key(KeyCode.DOWN));
 
         String screen = render(documents, 120, 30);
@@ -495,23 +497,23 @@ class DocumentsTest {
                         "vectors 3d float dot product",
                         "Vector      3d float, length 1.00000, N finds the nearest, T its graph node",
                         "0  0.6  -0.8  0.0");
-        assertThat(documents.handleKey(key('N'))).hasValue(new Request.SearchKnn("vec", 4));
+        assertThat(documents.jump(Jump.NEAREST)).hasValue(new Request.SearchKnn("vec", 4));
 
         assertThat(documents.handleKey(key('v'))).isEmpty();
         assertThat(render(documents, 100, 20)).contains("vec · 1 of 1 · float vector · 12 B", "│0.6", "│-0.8");
     }
 
     @Test
-    void tShowsAVectorsNodeInTheHnswGraph() {
+    void goToTermsShowsAVectorsNodeInTheHnswGraph() {
         Documents documents = withVector();
         documents.handleKey(key(KeyCode.DOWN));
 
-        assertThat(documents.handleKey(key('T'))).hasValue(new Request.BrowseGraph("vec", 4));
+        assertThat(documents.jump(Jump.TERMS)).hasValue(new Request.BrowseGraph("vec", 4));
 
         Documents withoutGraph =
                 withVector().withFeatures(Set.of(Feature.DOCUMENTS, Feature.TERMS, Feature.KNN_VECTORS));
         withoutGraph.handleKey(key(KeyCode.DOWN));
-        assertThat(withoutGraph.handleKey(key('T'))).isEmpty();
+        assertThat(withoutGraph.jump(Jump.TERMS)).isEmpty();
         assertThat(render(withoutGraph, 100, 20)).contains("HNSW graph not supported");
     }
 
@@ -535,7 +537,7 @@ class DocumentsTest {
         documents.handleKey(key(KeyCode.DOWN));
         documents.handleKey(key(KeyCode.DOWN));
         documents.handleKey(key('e'));
-        documents.handleKey(key('x'));
+        documents.handleKey(key('n'));
         assertThat(selected(documents)).isEqualTo("rank");
 
         Documents reopened = documents.reopened(List.of(schema("id", 0), schema("rank", 1)), 10, List.of());
@@ -545,7 +547,7 @@ class DocumentsTest {
         assertThat(selected(reopened)).isEqualTo("rank");
         // Empty fields stay hidden, and numbers show as doubles.
         String screen = render(reopened, 140, 30);
-        assertThat(screen).contains("Fields (3 of 4, e shows all", "as double bits (x)");
+        assertThat(screen).contains("Fields (3 of 4, e shows all", "as double bits (n)");
         assertThat(documents.reopened(List.of(schema("id", 0)), 2, List.of()).initialRequest())
                 .isEqualTo(load(1));
     }
@@ -594,8 +596,8 @@ class DocumentsTest {
         assertThat(render(documents, 140, 30)).contains("string  red blue", "          red ", "string  second");
 
         documents.handleKey(key(KeyCode.DOWN));
-        documents.handleKey(key('x'));
-        assertThat(render(documents, 140, 30)).contains("sorted numeric, as double bits (x)", "  2.5", "dv: NaN, 2.5");
+        documents.handleKey(key('n'));
+        assertThat(render(documents, 140, 30)).contains("sorted numeric, as double bits (n)", "  2.5", "dv: NaN, 2.5");
     }
 
     @Test
@@ -655,12 +657,12 @@ class DocumentsTest {
                         string("red blue\nred")),
                 Optional.of(rankValues())));
         documents.handleKey(key(KeyCode.DOWN));
-        assertThat(documents.handleKey(key('a'))).hasValue(new Request.Analyze(2, "body", "red blue\nred"));
+        assertThat(documents.jump(Jump.ANALYSIS)).hasValue(new Request.Analyze(2, "body", "red blue\nred"));
         // rank has no stored value; the viewer analyzes its doc values.
         documents.handleKey(key(KeyCode.DOWN));
-        assertThat(documents.handleKey(key('a'))).isEmpty();
+        assertThat(documents.jump(Jump.ANALYSIS)).isEmpty();
         documents.handleKey(key('v'));
-        assertThat(documents.handleKey(key('a'))).hasValue(new Request.Analyze(2, "rank", "-1"));
+        assertThat(documents.jump(Jump.ANALYSIS)).hasValue(new Request.Analyze(2, "rank", "-1"));
     }
 
     @Test
@@ -738,7 +740,7 @@ class DocumentsTest {
         // The cut value is fetched whole.
         assertThat(documents.openPendingView()).hasValue(new Request.StoredValue(2, "body", 1));
         assertThat(render(documents, 100, 20)).contains("body · 2 of 2");
-        assertThat(documents.viewer().orElseThrow().keys()).contains("m/M");
+        assertThat(documents.viewer().orElseThrow().keys().text()).contains("m/M");
         // Only once.
         assertThat(documents.openPendingView()).isEmpty();
     }
@@ -891,7 +893,7 @@ class DocumentsTest {
         // Scrolled to the last line, at the bottom of the panel.
         assertThat(screen)
                 .doesNotContain("Indexed")
-                .contains("Doc values  -", "Term vector -", "Rebuilt     r rebuilds");
+                .contains("Doc values  -", "Term vector -", "Rebuilt     I rebuilds");
 
         documents.handleKey(key(KeyCode.HOME));
         assertThat(render(documents, 140, 12)).contains("Indexed");
@@ -905,8 +907,8 @@ class DocumentsTest {
                         Set.of(Feature.DOCUMENTS, Feature.STORED_VALUES, Feature.CLASSIC_SEARCH, Feature.KNN_VECTORS));
         documents.handleKey(key(KeyCode.DOWN));
 
-        assertThat(documents.keys()).contains("N nearest").doesNotContain("m similar", "s search value");
-        assertThat(documents.handleKey(key('N'))).hasValue(new Request.SearchKnn("vec", 4));
+        assertThat(jumps(documents)).contains(Jump.NEAREST).doesNotContain(Jump.SIMILAR, Jump.SEARCH);
+        assertThat(documents.jump(Jump.NEAREST)).hasValue(new Request.SearchKnn("vec", 4));
     }
 
     /** A runtime with doc values and More-Like-This queries searches a value and similar documents (ADR 0066). */
@@ -916,23 +918,29 @@ class DocumentsTest {
                 Set.of(Feature.DOCUMENTS, Feature.STORED_VALUES, Feature.CLASSIC_SEARCH, Feature.DOC_VALUES);
         Documents without = documents().withFeatures(classic);
         without.loaded(document(0));
-        assertThat(without.keys()).doesNotContain("m similar", "s search value");
-        assertThat(without.handleKey(key('m'))).hasValue(new Request.Unsupported("Similar"));
+        assertThat(jumps(without)).doesNotContain(Jump.SIMILAR, Jump.SEARCH);
+        assertThat(without.jump(Jump.SIMILAR)).hasValue(new Request.Unsupported("Similar"));
 
         Set<Feature> parts = new HashSet<>(classic);
         parts.addAll(List.of(Feature.DOC_VALUES_SEARCH, Feature.MORE_LIKE_THIS));
         Documents documents = documents().withFeatures(parts);
         documents.loaded(document(0));
-        assertThat(documents.keys()).contains("m similar", "s search value");
-        assertThat(documents.handleKey(key('m'))).hasValue(new Request.MoreLikeThis(0));
+        assertThat(jumps(documents)).contains(Jump.SIMILAR).doesNotContain(Jump.SEARCH);
+        assertThat(documents.jump(Jump.SIMILAR)).hasValue(new Request.MoreLikeThis(0));
         documents.handleKey(key(KeyCode.DOWN));
         documents.handleKey(key(KeyCode.DOWN));
-        assertThat(documents.handleKey(key('s')))
+        // A field with doc values can search them.
+        assertThat(jumps(documents)).contains(Jump.SIMILAR, Jump.SEARCH);
+        assertThat(documents.jump(Jump.SEARCH))
                 .isEqualTo(search(DocValuesNumber.LONG, false, "-1", "4612811918334230528"));
 
         // Doc values queries need doc values.
         parts.remove(Feature.DOC_VALUES);
-        assertThat(documents().withFeatures(parts).keys()).doesNotContain("s search value");
+        Documents withoutDocValues = documents().withFeatures(parts);
+        withoutDocValues.loaded(document(0));
+        withoutDocValues.handleKey(key(KeyCode.DOWN));
+        withoutDocValues.handleKey(key(KeyCode.DOWN));
+        assertThat(jumps(withoutDocValues)).doesNotContain(Jump.SEARCH);
     }
 
     @Test
@@ -941,13 +949,15 @@ class DocumentsTest {
                 documents().withFeatures(Set.of(Feature.DOCUMENTS, Feature.STORED_VALUES, Feature.TERM_VECTORS));
         documents.loaded(document(0));
 
-        assertThat(documents.keys())
+        assertThat(documents.keys().text())
                 .contains("⏎ term vector", "v view", "E export")
-                .doesNotContain("r rebuild", "m similar", "N nearest", "s search value", "t points");
-        assertThat(documents.handleKey(key('r'))).hasValue(new Request.Unsupported("Rebuild"));
-        assertThat(documents.handleKey(key('m'))).hasValue(new Request.Unsupported("Similar"));
-        assertThat(documents.handleKey(key('s'))).hasValue(new Request.Unsupported("Search value"));
-        assertThat(render(documents, 140, 30)).doesNotContain("r rebuilds");
+                .doesNotContain("I indexed terms", "t point format");
+        assertThat(TestScreens.allKeys(documents.keys())).doesNotContain("I indexed terms", "t point format");
+        assertThat(jumps(documents)).doesNotContain(Jump.SIMILAR, Jump.NEAREST, Jump.SEARCH);
+        assertThat(documents.handleKey(key('I'))).hasValue(new Request.Unsupported("Rebuild"));
+        assertThat(documents.jump(Jump.SIMILAR)).hasValue(new Request.Unsupported("Similar"));
+        assertThat(documents.jump(Jump.SEARCH)).hasValue(new Request.Unsupported("Search value"));
+        assertThat(render(documents, 140, 30)).doesNotContain("I rebuilds");
 
         // Without positions, a hit's are not fetched.
         documents.showHit(hit("body", 2, 1));
@@ -955,7 +965,12 @@ class DocumentsTest {
         assertThat(documents.positionsRequest()).isEmpty();
 
         assertThat(documents.reopened(List.of(schema("id", 0)), 5, List.of()).keys())
-                .doesNotContain("r rebuild");
+                .satisfies(keys -> assertThat(TestScreens.allKeys(keys)).doesNotContain("I indexed terms"));
+    }
+
+    /** The jumps of the {@code g} menu, without what they say. */
+    private static List<Jump> jumps(Documents documents) {
+        return documents.jumps().stream().map(GoMenu.Target::jump).toList();
     }
 
     private static TermHit hit(String field, int docId, int index) {
@@ -1060,7 +1075,7 @@ class DocumentsTest {
 
         assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEqualTo(step(9, 4, true, FilterStep.MOVE));
         // Queued behind the step under way.
-        assertThat(documents.handleKey(key('p'))).isEmpty();
+        assertThat(documents.handleKey(key(KeyCode.LEFT))).isEmpty();
         documents.handleKey(key('i'));
         documents.handleKey(key('1'));
         assertThat(documents.handleKey(key(KeyCode.ENTER))).isEqualTo(step(9, 1, true, FilterStep.NEAREST));
@@ -1187,38 +1202,38 @@ class DocumentsTest {
 
         documents.loaded(document(4));
         assertThat(render(documents, 100, 20)).contains("#4 of 0–4   in b   _0 #1 of 0–1");
-        assertThat(documents.keys()).contains("S < > segment");
+        assertThat(TestScreens.allKeys(documents.keys())).contains("< > segment", "P pin segment");
         // Without segments, as before.
         Documents plain = documents();
         plain.loaded(document(4));
         assertThat(render(plain, 100, 20)).contains("#4 of 0–4  ").doesNotContain("_0");
-        assertThat(plain.keys()).doesNotContain("segment");
+        assertThat(TestScreens.allKeys(plain.keys())).doesNotContain("segment");
         assertThat(plain.handleKey(key('>'))).isEmpty();
     }
 
     @Test
-    void cShowsTheSegmentOfTheDocumentOnTheCommitsScreen() {
+    void goToCommitShowsTheSegmentOfTheDocumentOnTheCommitsScreen() {
         Documents documents = segmented();
         documents.loaded(document(1));
-        assertThat(documents.keys()).contains("C commit");
-        assertThat(documents.handleKey(key('C'))).hasValue(new Request.ShowCommit(0, "_0"));
+        assertThat(documents.jumps()).contains(new GoMenu.Target(Jump.COMMIT, "commit of segment _0"));
+        assertThat(documents.jump(Jump.COMMIT)).hasValue(new Request.ShowCommit(0, "_0"));
         // In the second index directory, its own _0.
         documents.loaded(document(4));
-        assertThat(documents.handleKey(key('C'))).hasValue(new Request.ShowCommit(1, "_0"));
+        assertThat(documents.jump(Jump.COMMIT)).hasValue(new Request.ShowCommit(1, "_0"));
 
         // Without segments, there is nothing to show.
         Documents plain = documents();
         plain.loaded(document(1));
-        assertThat(plain.keys()).doesNotContain("C commit");
-        assertThat(plain.handleKey(key('C'))).isEmpty();
+        assertThat(jumps(plain)).doesNotContain(Jump.COMMIT);
+        assertThat(plain.jump(Jump.COMMIT)).isEmpty();
 
         Documents withoutCommits = segmented().withFeatures(Set.of(Feature.DOCUMENTS, Feature.TERMS));
         withoutCommits.loaded(document(1));
-        assertThat(withoutCommits.handleKey(key('C'))).hasValue(new Request.Unsupported("Commits"));
+        assertThat(withoutCommits.jump(Jump.COMMIT)).hasValue(new Request.Unsupported("Commits"));
     }
 
     @Test
-    void tShowsTheSelectedFieldOnTheTermsScreen() {
+    void goToTermsShowsTheSelectedFieldOnTheTermsScreen() {
         Documents documents = new Documents(
                 List.of(
                         schema("id", 0),
@@ -1240,38 +1255,38 @@ class DocumentsTest {
                         schema("extra", 3, IndexOptions.NONE, false)),
                 5);
         documents.loaded(document(0));
-        assertThat(documents.keys()).contains("T terms");
-        assertThat(documents.handleKey(key('T'))).hasValue(new Request.BrowseTerms("id", Optional.empty(), false));
+        assertThat(documents.jumps()).contains(new GoMenu.Target(Jump.TERMS, "terms of id"));
+        assertThat(documents.jump(Jump.TERMS)).hasValue(new Request.BrowseTerms("id", Optional.empty(), false));
 
         // From a hit of the terms screen, its field opens at its term; another field doesn't.
         documents.showHit(hit("body", 2, 1));
         documents.loaded(document(2));
-        assertThat(documents.handleKey(key('T')))
+        assertThat(documents.jump(Jump.TERMS))
                 .hasValue(new Request.BrowseTerms("body", Optional.of(new BytesValue("red", false)), false));
         documents.handleKey(key(KeyCode.UP));
-        assertThat(documents.handleKey(key('T'))).hasValue(new Request.BrowseTerms("id", Optional.empty(), false));
+        assertThat(documents.jump(Jump.TERMS)).hasValue(new Request.BrowseTerms("id", Optional.empty(), false));
 
         // A field with points and no terms opens its points; one with neither says so.
         documents.handleKey(key(KeyCode.DOWN));
         documents.handleKey(key(KeyCode.DOWN));
-        assertThat(documents.handleKey(key('T'))).hasValue(new Request.BrowseTerms("rank", Optional.empty(), true));
+        assertThat(documents.jump(Jump.TERMS)).hasValue(new Request.BrowseTerms("rank", Optional.empty(), true));
         documents.handleKey(key(KeyCode.DOWN));
-        assertThat(documents.handleKey(key('T'))).isEmpty();
+        assertThat(documents.jump(Jump.TERMS)).isEmpty();
         assertThat(render(documents, 100, 20)).contains("extra has no terms");
         documents.handleKey(key(KeyCode.UP));
         assertThat(render(documents, 100, 20)).doesNotContain("has no terms");
 
         Documents withoutTerms = documents().withFeatures(Set.of(Feature.DOCUMENTS));
         withoutTerms.loaded(document(0));
-        assertThat(withoutTerms.keys()).doesNotContain("T terms");
-        assertThat(withoutTerms.handleKey(key('T'))).hasValue(new Request.Unsupported("Terms"));
+        assertThat(jumps(withoutTerms)).doesNotContain(Jump.TERMS);
+        assertThat(withoutTerms.jump(Jump.TERMS)).hasValue(new Request.Unsupported("Terms"));
     }
 
     @Test
     void aPinnedSegmentBoundsTheSteps() {
         Documents documents = segmented();
         documents.loaded(document(0));
-        documents.handleKey(key('S'));
+        documents.handleKey(key('P'));
         assertThat(render(documents, 100, 20)).contains("Document segment _0 ");
 
         assertThat(documents.handleKey(key(KeyCode.LEFT))).isEmpty();
@@ -1282,7 +1297,7 @@ class DocumentsTest {
         assertThat(render(documents, 100, 20)).contains("last document of _0");
 
         // S again unpins it.
-        documents.handleKey(key('S'));
+        documents.handleKey(key('P'));
         assertThat(render(documents, 100, 20)).doesNotContain("segment _0");
         assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEqualTo(load(2));
     }
@@ -1300,7 +1315,7 @@ class DocumentsTest {
         assertThat(documents.handleKey(key('<'))).isEqualTo(load(2));
 
         // The pin moves along.
-        documents.handleKey(key('S'));
+        documents.handleKey(key('P'));
         assertThat(documents.handleKey(key('<'))).isEqualTo(load(2));
         documents.loaded(document(2));
         assertThat(render(documents, 100, 20)).contains("segment _1 ");
@@ -1317,7 +1332,7 @@ class DocumentsTest {
         documents.filterStepped(
                 1, new StepFilterParams(9, 0, true), FilterStep.NEAREST, Optional.of(new FilterMatch(0, 0)));
         documents.loaded(document(0));
-        documents.handleKey(key('S'));
+        documents.handleKey(key('P'));
 
         // The next match is in another segment: none in this one.
         assertThat(documents.handleKey(key(KeyCode.RIGHT))).isEqualTo(step(9, 1, true, FilterStep.MOVE));
@@ -1343,7 +1358,7 @@ class DocumentsTest {
     void goingOutsideThePinnedSegmentUnpinsIt() {
         Documents documents = segmented();
         documents.loaded(document(0));
-        documents.handleKey(key('S'));
+        documents.handleKey(key('P'));
         documents.handleKey(key('i'));
         documents.handleKey(key('4'));
         assertThat(documents.handleKey(key(KeyCode.ENTER))).isEqualTo(load(4));
@@ -1353,7 +1368,7 @@ class DocumentsTest {
         assertThat(render(documents, 100, 20)).doesNotContain("segment _0");
 
         // A hit of the terms screen, here in the pinned segment, keeps it.
-        documents.handleKey(key('S'));
+        documents.handleKey(key('P'));
         documents.showHit(hit("body", 3, 0));
         documents.loaded(document(3));
         assertThat(render(documents, 100, 20)).contains("segment _0 ");
@@ -1381,7 +1396,7 @@ class DocumentsTest {
                 () -> documents.showHit(hit("body", 1, 0)),
                 () -> documents.startFilter("red", filterParams(false), 1));
         for (Runnable show : shows) {
-            documents.handleKey(key('S'));
+            documents.handleKey(key('P'));
             documents.handleKey(key('i'));
             documents.handleKey(key('4'));
             documents.handleKey(key(KeyCode.ENTER));
@@ -1400,7 +1415,7 @@ class DocumentsTest {
         documents.filterStepped(
                 2, new StepFilterParams(9, 0, true), FilterStep.NEAREST, Optional.of(new FilterMatch(0, 0)));
         documents.loaded(document(0));
-        documents.handleKey(key('S'));
+        documents.handleKey(key('P'));
         documents.handleKey(key(KeyCode.RIGHT));
         documents.filterStepped(
                 2, new StepFilterParams(9, 1, true), FilterStep.MOVE, Optional.of(new FilterMatch(3, 1)));
@@ -1421,7 +1436,7 @@ class DocumentsTest {
     void aReopenKeepsThePinIfTheSegmentIsStillThere() {
         Documents documents = segmented();
         documents.loaded(document(2));
-        documents.handleKey(key('S'));
+        documents.handleKey(key('P'));
 
         // _0 of a is merged away: _1 stays, now from document 1.
         Documents kept = documents.reopened(
@@ -1475,7 +1490,7 @@ class DocumentsTest {
                 5);
         documents.loaded(document(0));
 
-        assertThat(documents.handleKey(key('r'))).contains(new Request.Reconstruct(0, "id", List.of()));
+        assertThat(documents.handleKey(key('I'))).contains(new Request.Reconstruct(0, "id", List.of()));
         // Progress of no running job changes nothing.
         documents.reconstructProgress(3, rebuilt("id", Map.of()));
         assertThat(documents.reconstructJob()).isEmpty();
@@ -1484,7 +1499,7 @@ class DocumentsTest {
 
         // Another field stops the running rebuild.
         documents.handleKey(key(KeyCode.DOWN));
-        assertThat(documents.handleKey(key('r'))).contains(new Request.Reconstruct(0, "body", List.of(3L)));
+        assertThat(documents.handleKey(key('I'))).contains(new Request.Reconstruct(0, "body", List.of(3L)));
         documents.reconstructStarted(0, "body", 4);
         // Progress of the stopped job is dropped.
         documents.reconstructProgress(3, rebuilt("id", Map.of()));
@@ -1494,11 +1509,11 @@ class DocumentsTest {
         assertThat(documents.reconstructJob()).isEmpty();
         String screen = render(documents, 140, 50);
         assertThat(screen).contains("Rebuilt     2 terms, from the postings", "  red blue · red", "  red ×2  0, 3");
-        assertThat(documents.handleKey(key('r'))).isEmpty();
+        assertThat(documents.handleKey(key('I'))).isEmpty();
 
         // A field that isn't indexed has nothing to rebuild.
         documents.handleKey(key(KeyCode.DOWN));
-        assertThat(documents.handleKey(key('r'))).isEmpty();
+        assertThat(documents.handleKey(key('I'))).isEmpty();
         assertThat(render(documents, 140, 50)).doesNotContain("Rebuilt");
     }
 
@@ -1527,9 +1542,9 @@ class DocumentsTest {
                         field("id", OptionalLong.empty(), List.of(string("doc-0")), Optional.empty(), false),
                         field("price", OptionalLong.empty(), List.of(string("12.5")), Optional.empty(), false))));
         documents.handleKey(key(KeyCode.DOWN));
-        assertThat(render(documents, 140, 50)).contains("Rebuilt     r rebuilds the points it was indexed with");
+        assertThat(render(documents, 140, 50)).contains("Rebuilt     I rebuilds the points it was indexed with");
 
-        assertThat(documents.handleKey(key('r'))).contains(new Request.Reconstruct(0, "price", List.of()));
+        assertThat(documents.handleKey(key('I'))).contains(new Request.Reconstruct(0, "price", List.of()));
         documents.reconstructStarted(0, "price", 3);
         documents.reconstructProgress(3, new GetReconstructResult(1, OptionalLong.of(5), Optional.empty()));
         assertThat(render(documents, 140, 50)).contains("rebuilding… 1 of 5 points, Esc stops");
@@ -1558,7 +1573,7 @@ class DocumentsTest {
     void aRebuildStoppedBeforeItsJobStartedIsNotWanted() {
         Documents documents = documents();
         documents.loaded(document(0));
-        documents.handleKey(key('r'));
+        documents.handleKey(key('I'));
         assertThat(documents.rebuilding()).isTrue();
 
         // Its job is not known yet: the start that comes later is to be cancelled.
@@ -1566,18 +1581,18 @@ class DocumentsTest {
         assertThat(documents.rebuilding()).isFalse();
         assertThat(documents.reconstructStarted(0, "id", 5)).isFalse();
         documents.reconstructStartFailed(0, "id", "late");
-        assertThat(render(documents, 140, 50)).contains("Rebuilt     r rebuilds");
+        assertThat(render(documents, 140, 50)).contains("Rebuilt     I rebuilds");
 
         // Nor is one for a document no longer shown.
-        documents.handleKey(key('r'));
+        documents.handleKey(key('I'));
         documents.loaded(document(1));
         assertThat(documents.reconstructStarted(0, "id", 6)).isFalse();
 
         // A failed rebuild can start again.
-        documents.handleKey(key('r'));
+        documents.handleKey(key('I'));
         documents.reconstructStarted(1, "id", 7);
         documents.reconstructFailed(7, "Job cancelled");
         assertThat(render(documents, 140, 50)).contains("cannot rebuild it: Job cancelled");
-        assertThat(documents.handleKey(key('r'))).contains(new Request.Reconstruct(1, "id", List.of()));
+        assertThat(documents.handleKey(key('I'))).contains(new Request.Reconstruct(1, "id", List.of()));
     }
 }

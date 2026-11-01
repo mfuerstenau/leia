@@ -279,14 +279,29 @@ Beyond that:
 | `D` | on the start screen: download the runtimes |
 | `T` | on the start screen: the next theme, `dark`, `light`, `mono`, `nord`, `solarized-dark`, `solarized-light`, then your own; the footer names it, and leia remembers it |
 | `L` | show the log; `-`/`+` change its level, `y` copies it |
-| `?` | about leia: version, author, project link, the Java and runtimes in use, the open index, and the licence with the NOTICE; `↑` `↓` scroll, `y` copies the link |
+| `?` | every key of the shown screen, by group; `Tab` switches to About: version, author, project link, the Java and runtimes in use, the open index, and the licence with the NOTICE; `↑` `↓` scroll, `y` copies the link there |
 | `1` … `7` | overview, documents, terms, commits, search, analysis, check |
 | `Space` `a` `l` `t` `r` | on the check screen: mark an index or a segment, mark all, change the level, change the threads, list the segments again; `⏎` checks what is marked, or everything if nothing is |
 | `Backspace` | go back to where the last jump came from |
 | `Esc` | stop what is running; with nothing running, quit |
 | `q`, `Ctrl+C` | quit |
 
-The footer of each screen shows its own keys. `X`, `L` and `?` work on every screen, but only the start screen's footer lists them.
+The footer of each screen shows its common keys, grouped, and ends in `? keys`: `?` lists every key of the screen. The tab line shows the number keys. Every screen shares these keys, each with one meaning:
+
+| Key | Meaning |
+|---|---|
+| `↑` `↓` `j` `k` `PgUp` `PgDn` `Home` `End` `G` | move; `g g` goes to the top |
+| `Tab` `Shift+Tab` | next and previous panel |
+| `←` `→` | the screen's step: the document, the column, the value |
+| `/` | the screen's input: seek a field or a term, or type the query or the text |
+| `Enter` | open or drill into the selection |
+| `s` `S` | sort: the next column, the other direction. On the search screen, `s` sets the similarity and the sort, and `S` reverses the hits' order |
+| `g` | go to another screen with the selection: `t` terms, `s` search, `a` analysis, `c` commit, `d` document, `m` similar documents, `n` nearest vectors, `g` the top. The menu lists the jumps the selection allows |
+| `b` `B` | browse the documents through a filter, or clear it |
+| `v` `y` `E` `r` | view a value, copy, export, again (read, list or analyze again) |
+| `n` `t` `h` `f` `F` | the number format, the point format, hex, the field |
+
+On the documents screen, `P` pins the document's segment and `I` rebuilds the selected field's indexed terms; on the analysis screen, `e` edits the analyzer; on the search screen, `K` checks the recall of a KNN search.
 
 ## Files
 

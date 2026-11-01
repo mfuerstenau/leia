@@ -1,5 +1,10 @@
 package io.github.mfuerstenau.leia.tui.documents;
 
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.DO;
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.FIND;
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.MOVE;
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.SHOW;
+import static io.github.mfuerstenau.leia.tui.widgets.Keys.Group.SORT;
 import static io.github.mfuerstenau.leia.tui.widgets.Panels.highlight;
 import static io.github.mfuerstenau.leia.tui.widgets.Panels.panel;
 import static io.github.mfuerstenau.leia.tui.widgets.Panels.right;
@@ -58,6 +63,9 @@ import io.github.mfuerstenau.leia.tui.search.Search;
 import io.github.mfuerstenau.leia.tui.terms.Terms.TermHit;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import io.github.mfuerstenau.leia.tui.theme.Palette;
+import io.github.mfuerstenau.leia.tui.widgets.GoMenu;
+import io.github.mfuerstenau.leia.tui.widgets.Jump;
+import io.github.mfuerstenau.leia.tui.widgets.Keys;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
 import java.util.ArrayDeque;
@@ -82,7 +90,7 @@ import java.util.stream.Stream;
  * getDocument} reports it (ADR 0006), with a panel for the selected field's values and its term
  * vector. A document opened from the terms screen also shows where the term occurs in it, and
  * {@code [}/{@code ]} step through the term's other documents. {@code v} opens the selected field's
- * values in the {@link Viewer}, and {@code r} rebuilds the terms the field was indexed with (ADR
+ * values in the {@link Viewer}, and {@code I} rebuilds the terms the field was indexed with (ADR
  * 0029). Through a {@link DocFilter}, ←/→ step through the documents that match a query only (ADR
  * 0031).
  *
@@ -232,6 +240,12 @@ public final class Documents {
 
         /** Show the HNSW graph node of this document's vector in {@code field} on the terms screen (ADR 0085). */
         record BrowseGraph(String field, int docId) implements Request {}
+
+        /** {@code g} in the viewer: open the go-to menu with {@link #jumps()} (ADR 0120). */
+        record GoTo() implements Request {}
+
+        /** {@code ?} in the viewer: open the key list with the viewer's keys. */
+        record Help() implements Request {}
     }
 
     /** The filter to locate a document in once it is loaded: its serial and the backend's id. */
@@ -490,7 +504,7 @@ public final class Documents {
     }
 
     /**
-     * Shows which segment of the open reader a document is in, and lets {@code S} pin it (ADR
+     * Shows which segment of the open reader a document is in, and lets {@code P} pin it (ADR
      * 0051): {@code segments} in document order.
      */
     public Documents withSegments(List<SegmentStart> segments) {
@@ -514,17 +528,17 @@ public final class Documents {
         return features.containsAll(List.of(needed));
     }
 
-    /** Whether {@code N} can search the nearest vectors, with the classic search (ADR 0049). */
+    /** Whether {@code g n} can search the nearest vectors, with the classic search (ADR 0049). */
     private boolean nearest() {
         return supports(Feature.KNN_VECTORS) && supports(Feature.CLASSIC_SEARCH);
     }
 
-    /** Whether {@code s} can search a doc value (ADR 0066). */
+    /** Whether {@code g s} can search a doc value (ADR 0066). */
     private boolean searchesValues() {
         return supports(Feature.DOC_VALUES) && supports(Feature.DOC_VALUES_SEARCH);
     }
 
-    /** Whether {@code m} can find similar documents (ADR 0066). */
+    /** Whether {@code g m} can find similar documents (ADR 0066). */
     private boolean findsSimilar() {
         return supports(Feature.MORE_LIKE_THIS);
     }
@@ -1216,7 +1230,7 @@ public final class Documents {
     }
 
     /**
-     * Forgets the rebuild that is asked for or runs, so that {@code r} can start it again. Returns
+     * Forgets the rebuild that is asked for or runs, so that {@code I} can start it again. Returns
      * its job to cancel, if it has started; otherwise {@link #reconstructStarted} says to cancel it
      * once it has.
      */
@@ -1560,14 +1574,12 @@ public final class Documents {
     /**
      * Goes to another document with ←/→, the {@code i} prompt, or {@code [}/{@code ]} through the
      * documents of the hit's term; with a filter, ←/→ and {@code i} go to its matches only, and {@code
-     * b} clears it. Loads the selected field's term vector with Enter, views its values with {@code
-     * v}, analyzes its stored text with {@code a}, searches for its doc values with {@code s} and for
-     * the documents nearest to its vector with {@code N}, cycles
-     * the number format with {@code x} and the point format with {@code t}, hides empty fields with
-     * {@code e}, searches for documents like this one with {@code m}, rebuilds the field's indexed
-     * terms and points with {@code r}, shows the field on the terms screen with {@code T} and the
-     * document's segment on the commits screen with {@code C} (ADR 0052), switches the focus with
-     * Tab, and moves the selection or scrolls the details.
+     * b} clears it. {@code P} pins the segment and {@code <}/{@code >} step through the segments.
+     * Loads the selected field's term vector with Enter, views its values with {@code v}, cycles the
+     * number format with {@code n} and the point format with {@code t}, hides empty fields with
+     * {@code e}, sorts the fields with {@code s}/{@code S}, rebuilds the field's indexed terms and
+     * points with {@code I}, switches the focus with Tab, and moves the selection or scrolls the
+     * details. The jumps to other screens are {@link #jump}'s (ADR 0120).
      */
     public Optional<Request> handleKey(KeyEvent key) {
         if (viewer != null) {
@@ -1584,10 +1596,10 @@ public final class Documents {
         KeyCode code = key.code();
         // A key pressed before the last step's document is in goes on from that document.
         int from = wanted.orElse(docId);
-        if (code == KeyCode.LEFT || key.isChar('p')) {
+        if (code == KeyCode.LEFT) {
             return previous(from);
         }
-        if (code == KeyCode.RIGHT || key.isChar('n')) {
+        if (code == KeyCode.RIGHT) {
             return next(from);
         }
         Optional<String> unsupported = unsupported(key);
@@ -1680,7 +1692,7 @@ public final class Documents {
                 }
                 return Optional.of(Optional.empty());
             }
-            case 'S' -> {
+            case 'P' -> {
                 if (pinned != null) {
                     pinned = null;
                 } else {
@@ -1705,19 +1717,13 @@ public final class Documents {
             case 'v' -> {
                 return Optional.of(view());
             }
-            case 'r' -> {
+            case 'I' -> {
                 return Optional.of(reconstruct());
             }
             case 'b' -> {
                 return Optional.of(clearFilter());
             }
-            case 'a' -> {
-                return Optional.of(analyze());
-            }
-            case 'm' -> {
-                return Optional.of(maxDoc > 0 ? Optional.of(new Request.MoreLikeThis(docId)) : Optional.empty());
-            }
-            case 'x' -> {
+            case 'n' -> {
                 numbers = numbers.next();
                 return Optional.of(Optional.empty());
             }
@@ -1728,36 +1734,21 @@ public final class Documents {
                         .ifPresent(pointFormats::cycle);
                 return Optional.of(Optional.empty());
             }
-            case 's' -> {
-                return Optional.of(searchDocValues());
-            }
-            case 'N' -> {
-                return Optional.of(selectedField()
-                        .filter(field -> field.vector().isPresent())
-                        .map(field -> new Request.SearchKnn(field.name(), docId)));
-            }
             case 'E' -> {
                 return Optional.of(Optional.ofNullable(document).map(doc -> new Request.Export(doc.docId())));
-            }
-            case 'C' -> {
-                return Optional.of(
-                        segmentOf(from).map(segment -> new Request.ShowCommit(segment.index(), segment.name())));
-            }
-            case 'T' -> {
-                return Optional.of(browseTerms());
             }
             case 'e' -> {
                 hideEmpty = !hideEmpty;
                 updateRows(selectedField().map(DocumentField::name).orElse(null));
                 return Optional.of(Optional.empty());
             }
-            case 'z' -> {
+            case 's' -> {
                 sort = sort.next();
                 descending = false;
                 updateRows(selectedField().map(DocumentField::name).orElse(null));
                 return Optional.of(Optional.empty());
             }
-            case 'Z' -> {
+            case 'S' -> {
                 descending = !descending;
                 updateRows(selectedField().map(DocumentField::name).orElse(null));
                 return Optional.of(Optional.empty());
@@ -1782,7 +1773,7 @@ public final class Documents {
     }
 
     /**
-     * {@code T}: the selected field on the terms screen (ADR 0052), at the hit's term if the terms
+     * {@code g t}: the selected field on the terms screen (ADR 0052), at the hit's term if the terms
      * screen opened the document from that field; its points if it has no terms; or a note if it has
      * neither.
      */
@@ -1854,49 +1845,132 @@ public final class Documents {
         return switch (key.codePoint()) {
             case 'v' -> supports(Feature.STORED_VALUES) ? Optional.empty() : Optional.of("View");
             case 'E' -> supports(Feature.STORED_VALUES) ? Optional.empty() : Optional.of("Export");
-            case 'r' -> supports(Feature.RECONSTRUCT) ? Optional.empty() : Optional.of("Rebuild");
+            case 'I' -> supports(Feature.RECONSTRUCT) ? Optional.empty() : Optional.of("Rebuild");
             case 't' -> supports(Feature.POINTS) ? Optional.empty() : Optional.of("Points");
-            case 's' -> searchesValues() ? Optional.empty() : Optional.of("Search value");
-            case 'N' -> nearest() ? Optional.empty() : Optional.of("Nearest");
-            case 'm' -> findsSimilar() ? Optional.empty() : Optional.of("Similar");
             case 'b' -> supports(Feature.FILTER) ? Optional.empty() : Optional.of("Filter");
-            case 'C' -> supports(Feature.COMMITS) ? Optional.empty() : Optional.of("Commits");
-            case 'T' -> supports(Feature.TERMS) ? Optional.empty() : Optional.of("Terms");
             default -> Optional.empty();
         };
     }
 
-    /**
-     * The screen's keys for the footer, after the app's: those the index has the features for (ADR
-     * 0044).
-     */
-    public String keys() {
-        String steps = walk().map(walk -> walk == Walk.TERM_DOCS ? "[ ] term docs   " : "[ ] hits   ")
-                .orElse("");
-        String step = filtered() ? "←→ match   b unfilter   " : "←→ doc   ";
-        StringBuilder keys = new StringBuilder(step).append(steps).append("i go to   ");
-        keyIf(keys, !segments.isEmpty(), "S < > segment");
-        keyIf(keys, supports(Feature.TERM_VECTORS), "⏎ term vector");
-        keyIf(keys, supports(Feature.STORED_VALUES), "v view");
-        keys.append("a analyze   ");
-        keyIf(keys, searchesValues(), "s search value");
-        keyIf(keys, nearest(), "N nearest");
-        keys.append("x numbers   ");
-        keyIf(keys, supports(Feature.POINTS), "t points");
-        keys.append("e empty   ");
-        keys.append("z Z sort   ");
-        keyIf(keys, findsSimilar(), "m similar");
-        keyIf(keys, supports(Feature.RECONSTRUCT), "r rebuild");
-        keyIf(keys, supports(Feature.STORED_VALUES), "E export");
-        keyIf(keys, supports(Feature.TERMS), "T terms");
-        keyIf(keys, supports(Feature.COMMITS) && !segments.isEmpty(), "C commit");
-        return keys.append("Tab panel   ↑↓").toString();
+    /** What {@code jump} is called if the index lacks a feature it needs (ADR 0044); empty otherwise. */
+    private Optional<String> unsupported(Jump jump) {
+        boolean has = switch (jump) {
+            case TERMS -> supports(Feature.TERMS);
+            case SEARCH -> searchesValues();
+            case COMMIT -> supports(Feature.COMMITS);
+            case SIMILAR -> findsSimilar();
+            case NEAREST -> nearest();
+            case ANALYSIS, DOCUMENT -> true;
+        };
+        if (has) {
+            return Optional.empty();
+        }
+        return Optional.of(
+                switch (jump) {
+                    case TERMS -> "Terms";
+                    case SEARCH -> "Search value";
+                    case COMMIT -> "Commits";
+                    case SIMILAR -> "Similar";
+                    default -> "Nearest";
+                });
     }
 
-    private static void keyIf(StringBuilder keys, boolean shown, String key) {
-        if (shown) {
-            keys.append(key).append("   ");
+    /**
+     * The jumps of the {@code g} menu that the index and the selected field allow (ADR 0120); the
+     * viewer's while it is open.
+     */
+    public List<GoMenu.Target> jumps() {
+        if (viewer != null) {
+            return viewer.jumps();
         }
+        List<GoMenu.Target> jumps = new ArrayList<>();
+        Optional<DocumentField> selected = selectedField();
+        String name =
+                selected.map(field -> TextFormat.escapeControl(field.name())).orElse("");
+        Optional<IndexField> field = selected.map(DocumentField::name).map(schema::get);
+        if (supports(Feature.TERMS) && field.isPresent()) {
+            IndexField indexed = field.get();
+            if (indexed.indexOptions() != IndexOptions.NONE) {
+                jumps.add(new GoMenu.Target(Jump.TERMS, "terms of " + name));
+            } else if (indexed.pointDimensionCount() > 0) {
+                jumps.add(new GoMenu.Target(Jump.TERMS, "points of " + name));
+            } else if (indexed.vectorDimension() > 0
+                    && supports(Feature.KNN_GRAPH)
+                    && selected.get().vector().isPresent()) {
+                jumps.add(new GoMenu.Target(Jump.TERMS, "graph node of " + name));
+            }
+        }
+        if (searchesValues() && selected.flatMap(DocumentField::docValues).isPresent()) {
+            jumps.add(new GoMenu.Target(Jump.SEARCH, "search the doc values of " + name));
+        }
+        if (analyze().isPresent()) {
+            jumps.add(new GoMenu.Target(Jump.ANALYSIS, "analyze " + name));
+        }
+        Optional<SegmentStart> segment = segmentOf(wanted.orElse(docId));
+        if (supports(Feature.COMMITS) && segment.isPresent()) {
+            jumps.add(new GoMenu.Target(
+                    Jump.COMMIT, "commit of segment " + segment.get().name()));
+        }
+        if (findsSimilar() && maxDoc > 0) {
+            jumps.add(new GoMenu.Target(Jump.SIMILAR, "documents like this one"));
+        }
+        if (nearest() && selected.flatMap(DocumentField::vector).isPresent()) {
+            jumps.add(new GoMenu.Target(Jump.NEAREST, "nearest to the vector of " + name));
+        }
+        return jumps;
+    }
+
+    /**
+     * Where {@code g} and {@code jump} go from the selected field or the document (ADR 0052, ADR
+     * 0120); the viewer's jump while it is open.
+     */
+    public Optional<Request> jump(Jump jump) {
+        if (viewer != null) {
+            return viewer.jump(jump).flatMap(Documents::viewerRequest);
+        }
+        clearNotes();
+        Optional<String> unsupported = unsupported(jump);
+        if (unsupported.isPresent()) {
+            return unsupported.map(Request.Unsupported::new);
+        }
+        return switch (jump) {
+            case TERMS -> browseTerms();
+            case SEARCH -> searchDocValues();
+            case ANALYSIS -> analyze();
+            case COMMIT ->
+                segmentOf(wanted.orElse(docId)).map(segment -> new Request.ShowCommit(segment.index(), segment.name()));
+            case SIMILAR -> maxDoc > 0 ? Optional.of(new Request.MoreLikeThis(docId)) : Optional.empty();
+            case NEAREST ->
+                selectedField()
+                        .filter(field -> field.vector().isPresent())
+                        .map(field -> new Request.SearchKnn(field.name(), docId));
+            case DOCUMENT -> Optional.empty();
+        };
+    }
+
+    /** The screen's keys (ADR 0120): those the index has the features for (ADR 0044). */
+    public Keys keys() {
+        Keys.Builder keys = Keys.builder();
+        if (filtered()) {
+            keys.key(MOVE, "←→", "match");
+        } else {
+            keys.key(MOVE, "←→", "doc");
+        }
+        walk().ifPresent(walk -> keys.key(MOVE, "[ ]", walk == Walk.TERM_DOCS ? "term docs" : "hits"));
+        keys.key(MOVE, "i", "go to doc")
+                .moreIf(!segments.isEmpty(), MOVE, "< >", "segment")
+                .moreIf(!segments.isEmpty(), MOVE, "P", pinned != null ? "unpin segment" : "pin segment")
+                .key(FIND, "/", "seek field")
+                .keyIf(supports(Feature.TERM_VECTORS), SHOW, "⏎", "term vector")
+                .keyIf(supports(Feature.STORED_VALUES), SHOW, "v", "view")
+                .more(SHOW, "n", "number format")
+                .moreIf(supports(Feature.POINTS), SHOW, "t", "point format")
+                .more(SHOW, "e", hideEmpty ? "show empty fields" : "hide empty fields")
+                .key(SORT, "s/S", "sort")
+                .keyIf(filtered(), DO, "b", "unfilter")
+                .moreIf(supports(Feature.RECONSTRUCT), DO, "I", "indexed terms")
+                .keyIf(supports(Feature.STORED_VALUES), DO, "E", "export");
+        return keys.build();
     }
 
     private void scrollDetails(KeyEvent key) {
@@ -1964,6 +2038,8 @@ public final class Documents {
             case Viewer.Event.Copy copy -> Optional.of(new Request.Copy(copy.text()));
             case Viewer.Event.Analyze analyze ->
                 Optional.of(new Request.Analyze(analyze.docId(), analyze.field(), analyze.text()));
+            case Viewer.Event.GoTo _ -> Optional.of(new Request.GoTo());
+            case Viewer.Event.Help _ -> Optional.of(new Request.Help());
             case Viewer.Event.Close _ -> Optional.empty();
         };
     }
@@ -2540,7 +2616,7 @@ public final class Documents {
         DocValues values = docValues.get();
         String heading = Overview.docValues(values.type());
         if (!values.numbers().isEmpty()) {
-            heading += AS + numbers.label() + " (x)";
+            heading += AS + numbers.label() + " (n)";
         }
         lines.add(labelled("Doc values", heading));
         for (String text : docValueTexts(values, numbers)) {
@@ -2602,7 +2678,7 @@ public final class Documents {
             if (points) {
                 what = terms ? "the terms and points" : "the points";
             }
-            return List.of(labelled("Rebuilt", "r rebuilds " + what + " it was indexed with"));
+            return List.of(labelled("Rebuilt", "I rebuilds " + what + " it was indexed with"));
         }
         List<Line> lines = new ArrayList<>();
         PointFormat format = pointFormats.of(field);
