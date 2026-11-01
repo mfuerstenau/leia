@@ -32,6 +32,10 @@ Not planned: highlighting, the point tree and the KNN graph, the term export, fi
 
 None open.
 
+## Documentation
+
+- [ ] Write a theming example, a `.theme` file of the user's own with its slots and where it goes, into both READMEs: the main `README.md` and the user README `leia-tui/src/dist/README.md` (ADR 0095, ADR 0096, ADR 0121).
+
 ## Bugs
 
 None open.
