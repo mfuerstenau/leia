@@ -26,7 +26,6 @@ Goal: the tools cost an agent few tokens, then they answer why a query matches o
 
 Each tool is over a method the backend has; it checks the runtime's `features` and answers `NOT_SUPPORTED` without them. Short descriptions keep the cost of `tools/list` down. The tools are done; what is left are costs that need the protocol to change (ADR 0116):
 
-- [ ] `get_document`'s cut values: it reads a value the backend cut (over 64 KB) whole, only to give its full length in characters, even when the part it has covers `maxValueLength`. `getStoredValue` has an offset and a length now (ADR 0117), but the server still reads the value whole once; the length in characters from the backend at cut time would spare that read.
 - [ ] `postings` with positions in one call: positions, with a cap per document, from the same pass over the postings as `getPostings`, instead of one `getPositions` call per posting (ADR 0115 §2), in every runtime.
 
 Not planned: highlighting, the point tree and the KNN graph, the term export, filters, `addJars` and the runtimes, resources and prompts.

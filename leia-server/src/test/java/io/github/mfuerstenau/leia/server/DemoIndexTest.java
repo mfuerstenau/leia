@@ -273,6 +273,7 @@ class DemoIndexTest {
             assertThat(whole.fullLength()).isEmpty();
             assertThat(whole.value()).contains("\"history\"");
             assertThat(whole.value().split("\"event\":", -1)).hasSize(3001);
+            assertThat(source.fullChars()).hasValue(whole.value().length());
 
             StoredValue blob = backend.call(Methods.GET_STORED_VALUE, new GetStoredValueParams(42, "blob", 0))
                     .value();
@@ -280,6 +281,7 @@ class DemoIndexTest {
             // In hex.
             assertThat(blob.value()).hasSize(200_000);
             assertThat(stored(document, "blob").fullLength()).hasValue(100_000);
+            assertThat(stored(document, "blob").fullChars()).hasValue(200_000);
 
             assertThat(sliced(42, "_source", 7_000)).isEqualTo(whole.value());
             assertThat(sliced(42, "blob", 6_000)).isEqualTo(blob.value());

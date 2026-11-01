@@ -1724,7 +1724,8 @@ class SearchTest {
                         new HitField("id", List.of(new StoredValue(StoredType.STRING, "doc-0", false))),
                         new HitField(
                                 "key",
-                                List.of(new StoredValue(StoredType.BINARY, "ff00", true, OptionalLong.of(300))))),
+                                List.of(new StoredValue(
+                                        StoredType.BINARY, "ff00", true, OptionalLong.of(300), OptionalLong.of(600))))),
                 List.of());
 
         search.searchProgress(

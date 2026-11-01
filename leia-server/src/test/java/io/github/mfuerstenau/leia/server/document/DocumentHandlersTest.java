@@ -131,9 +131,14 @@ class DocumentHandlersTest {
                 .stored();
         assertThat(stored.get(0))
                 .isEqualTo(new StoredValue(
-                        StoredType.STRING, text.substring(0, max / 2), false, OptionalLong.of(1 + 2L * max)));
+                        StoredType.STRING,
+                        text.substring(0, max / 2),
+                        false,
+                        OptionalLong.of(1 + 2L * max),
+                        OptionalLong.of(1L + max)));
         assertThat(stored.get(1).value()).hasSize(2 * max).startsWith("ff00");
         assertThat(stored.get(1).fullLength()).hasValue(max + 10);
+        assertThat(stored.get(1).fullChars()).hasValue(2L * (max + 10));
         assertThat(stored.get(2)).isEqualTo(new StoredValue(StoredType.STRING, "small", false));
 
         assertThat(getStoredValue.handle(new GetStoredValueParams(0, "big", 0)))
@@ -148,15 +153,16 @@ class DocumentHandlersTest {
         // A surrogate pair is 4 bytes of UTF-8 and is never split.
         String text = "ab\uD83D\uDE00c";
         assertThat(GetDocumentHandler.storedValue(new RuntimeIndex.StoredValue.Text(text), 5))
-                .isEqualTo(new StoredValue(StoredType.STRING, "ab", false, OptionalLong.of(7)));
+                .isEqualTo(new StoredValue(StoredType.STRING, "ab", false, OptionalLong.of(7), OptionalLong.of(5)));
         assertThat(GetDocumentHandler.storedValue(new RuntimeIndex.StoredValue.Text(text), 6))
-                .isEqualTo(new StoredValue(StoredType.STRING, "ab\uD83D\uDE00", false, OptionalLong.of(7)));
+                .isEqualTo(new StoredValue(
+                        StoredType.STRING, "ab\uD83D\uDE00", false, OptionalLong.of(7), OptionalLong.of(5)));
         assertThat(GetDocumentHandler.storedValue(new RuntimeIndex.StoredValue.Text(text), 7))
                 .isEqualTo(new StoredValue(StoredType.STRING, text, false));
         // Bytes that are not UTF-8 stay hex when cut, even if the cut bytes would be valid UTF-8.
         assertThat(GetDocumentHandler.storedValue(
                         new RuntimeIndex.StoredValue.Binary(new byte[] {0x61, 0x62, (byte) 0xff}), 2))
-                .isEqualTo(new StoredValue(StoredType.BINARY, "6162", true, OptionalLong.of(3)));
+                .isEqualTo(new StoredValue(StoredType.BINARY, "6162", true, OptionalLong.of(3), OptionalLong.of(6)));
         // Numbers are never cut.
         assertThat(GetDocumentHandler.storedValue(new RuntimeIndex.StoredValue.Numeric(-123456L), 2))
                 .isEqualTo(new StoredValue(StoredType.LONG, "-123456", false));

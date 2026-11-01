@@ -14,11 +14,16 @@ import java.util.OptionalLong;
  *     bytes, UTF-8 for text. {@code value} then holds its first {@link
  *     GetDocumentResult#MAX_VALUE_LENGTH} bytes or fewer, cut between two characters, and {@code
  *     getStoredValue} fetches the whole value.
+ * @param fullChars present exactly when {@code fullLength} is: the length of the whole value in the
+ *     characters of {@code value}, UTF-16 chars of a text and hex digits of a binary value in hex, which is
+ *     the unit of {@code getStoredValue}'s {@code offset}, {@code length} and {@code totalLength}
+ *     (ADR 0118)
  */
-public record StoredValue(StoredType type, String value, boolean binary, OptionalLong fullLength) {
+public record StoredValue(
+        StoredType type, String value, boolean binary, OptionalLong fullLength, OptionalLong fullChars) {
 
     /** A value that is not cut. */
     public StoredValue(StoredType type, String value, boolean binary) {
-        this(type, value, binary, OptionalLong.empty());
+        this(type, value, binary, OptionalLong.empty(), OptionalLong.empty());
     }
 }

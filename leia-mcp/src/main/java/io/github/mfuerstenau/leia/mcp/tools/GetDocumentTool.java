@@ -92,7 +92,7 @@ final class GetDocumentTool implements McpTool<GetDocumentTool.Arguments, GetDoc
 
             @Description("Present if value is cut: the length of the whole value in characters; get_field_value"
                     + " has the rest")
-            OptionalInt fullLength) {}
+            OptionalLong fullLength) {}
 
     record DocValues(
             DocValuesType type,
@@ -180,8 +180,11 @@ final class GetDocumentTool implements McpTool<GetDocumentTool.Arguments, GetDoc
             List<Value> stored = new ArrayList<>();
             for (int index = 0; index < field.stored().size(); index++) {
                 StoredValue value = field.stored().get(index);
-                if (value.fullLength().isPresent()) {
-                    // Cut by the backend: the head of the value, with its length in characters.
+                if (value.fullLength().isPresent() && value.value().length() >= maxLength) {
+                    // Cut by the backend, whose head holds enough: it gives the length in characters too.
+                    stored.add(value(value, value.fullChars().getAsLong(), maxLength));
+                } else if (value.fullLength().isPresent()) {
+                    // A head shorter than maxLength (non-ASCII text): the value is read again for its head.
                     GetStoredValueResult head = call.call(
                             Methods.GET_STORED_VALUE,
                             new GetStoredValueParams(
@@ -215,16 +218,16 @@ final class GetDocumentTool implements McpTool<GetDocumentTool.Arguments, GetDoc
     }
 
     /** {@code value}, which is the head of a value {@code totalLength} characters long, cut to {@code maxLength}. */
-    private static Value value(StoredValue value, int totalLength, int maxLength) {
+    private static Value value(StoredValue value, long totalLength, int maxLength) {
         String text = value.value();
         if (totalLength <= maxLength) {
-            return new Value(Absent.type(value.type()), text, Absent.flag(value.binary()), OptionalInt.empty());
+            return new Value(Absent.type(value.type()), text, Absent.flag(value.binary()), OptionalLong.empty());
         }
         return new Value(
                 Absent.type(value.type()),
                 Slices.head(text, value.binary(), maxLength),
                 Absent.flag(value.binary()),
-                OptionalInt.of(totalLength));
+                OptionalLong.of(totalLength));
     }
 
     private static DocValues docValues(

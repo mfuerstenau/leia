@@ -45,7 +45,8 @@ class ViewerTest {
     }
 
     private static StoredValue cut(String value, long fullLength) {
-        return new StoredValue(StoredType.STRING, value, false, OptionalLong.of(fullLength));
+        return new StoredValue(
+                StoredType.STRING, value, false, OptionalLong.of(fullLength), OptionalLong.of(fullLength));
     }
 
     private static String render(Viewer viewer, int width, int height) {

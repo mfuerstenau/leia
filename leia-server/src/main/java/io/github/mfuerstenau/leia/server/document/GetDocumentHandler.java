@@ -59,7 +59,8 @@ public final class GetDocumentHandler implements MethodHandler<GetDocumentParams
                                 StoredType.BINARY,
                                 ByteStrings.hex(bytes, maxLength),
                                 true,
-                                OptionalLong.of(bytes.length));
+                                OptionalLong.of(bytes.length),
+                                OptionalLong.of(bytes.length * 2L));
             }
             case RuntimeIndex.StoredValue.Numeric(Integer number) ->
                 new StoredValue(StoredType.INT, Integer.toString(number), false);
@@ -93,7 +94,8 @@ public final class GetDocumentHandler implements MethodHandler<GetDocumentParams
         }
         return end < 0
                 ? new StoredValue(type, text, false)
-                : new StoredValue(type, text.substring(0, end), false, OptionalLong.of(length));
+                : new StoredValue(
+                        type, text.substring(0, end), false, OptionalLong.of(length), OptionalLong.of(text.length()));
     }
 
     private static int utf8Length(int codePoint) {

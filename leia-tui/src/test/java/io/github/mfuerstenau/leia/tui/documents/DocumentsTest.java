@@ -616,7 +616,8 @@ class DocumentsTest {
                 List.of(string("doc-" + docId)),
                 List.of(
                         string("red blue\nred"),
-                        new StoredValue(StoredType.STRING, "second", false, OptionalLong.of(70_000))),
+                        new StoredValue(
+                                StoredType.STRING, "second", false, OptionalLong.of(70_000), OptionalLong.of(70_000))),
                 Optional.of(rankValues()));
     }
 

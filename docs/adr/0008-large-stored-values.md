@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-06
 - **Supersedes:** ADR 0006, decision 6
-- **Amended by:** ADR 0117 (§5, `getStoredValue` takes an optional slice and reads only its field)
+- **Amended by:** ADR 0117 (§5, `getStoredValue` takes an optional slice and reads only its field), ADR 0118 (§2, a cut value also has its length in characters, `fullChars`)
 
 ## Context
 

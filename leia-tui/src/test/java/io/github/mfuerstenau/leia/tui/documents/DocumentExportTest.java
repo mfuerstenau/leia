@@ -131,7 +131,8 @@ class DocumentExportTest {
                         new DocumentField(
                                 "body",
                                 OptionalLong.of(2),
-                                List.of(new StoredValue(StoredType.STRING, "red b", false, OptionalLong.of(9))),
+                                List.of(new StoredValue(
+                                        StoredType.STRING, "red b", false, OptionalLong.of(9), OptionalLong.of(9))),
                                 Optional.empty(),
                                 true,
                                 Optional.empty()),

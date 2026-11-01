@@ -477,3 +477,4 @@ Goal: the runtimes are downloaded from within leia's UI, and `--download-runtime
 - [x] They pass over the documents the stored fields cache says store none of the scanned fields, and skip a segment where none does; the scan never fills the cache (ADR 0114)
 - [x] A filter of the documents that store a field: `StartFilterParams.storedField`, from the cache or else a stored fields scan, `stored:<field>`; `b`/`B` on the overview (ADR 0114)
 - [x] `getStoredValue` with an offset and a length (ADR 0117): reads only its field, keeps the last value read for the slices after the first, and cuts the slice in the server (`ValueSlices`), so `get_field_value` no longer reads a large value whole for every slice; `get_document` asks for the head of a cut value.
+- [x] `get_document` takes the length in characters of a cut value from the backend (ADR 0118): `StoredValue.fullChars`, so it calls `getStoredValue` only for a head shorter than `maxValueLength`.

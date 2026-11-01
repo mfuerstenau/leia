@@ -2422,7 +2422,10 @@ class AppTest {
     void viewsAValueFetchesItWholeAndCopiesIt() {
         App app = appWithDocuments();
         app.handleKey(key('2'));
-        app.documentLoaded(document(0, new StoredValue(StoredType.STRING, "doc-0", false, OptionalLong.of(100_000))));
+        app.documentLoaded(document(
+                0,
+                new StoredValue(
+                        StoredType.STRING, "doc-0", false, OptionalLong.of(100_000), OptionalLong.of(100_000))));
 
         assertThat(app.handleKey(key('v'))).hasValue(new Action.LoadStoredValue(0, "id", 0));
         assertThat(render(app)).contains("Esc close   ←/→ value   t text   h hex   J json   d delimited   y copy");

@@ -3,6 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-27
 - **Amends:** ADR 0008 (§5, `getStoredValue`), ADR 0100 (the row of `get_field_value`), ADR 0116 (the first of its three deferred costs)
+- **Amended by:** ADR 0118 (§5, `get_document` takes the length in characters from the backend)
 
 ## Context
 
@@ -22,4 +23,4 @@ No Lucene can read part of a stored string: `StoredFieldVisitor.stringField` han
 
 - `get_field_value` and `tools.json` are unchanged; the TUI calls `getStoredValue` for the whole value, as before.
 - A value is read whole once per series of slices, and held in memory until another is read or the GC drops it.
-- Left open (`docs/tasklist.md`): `get_document` still reads a cut value whole once, for its length in characters.
+- Left open: `get_document` still reads a cut value whole once, for its length in characters. *Closed by ADR 0118.*
