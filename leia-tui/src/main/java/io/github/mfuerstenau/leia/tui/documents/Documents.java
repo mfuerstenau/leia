@@ -62,6 +62,7 @@ import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
@@ -127,6 +128,9 @@ public final class Documents {
     private static final int NAME_MAX_WIDTH = 32;
 
     private static final int COLUMN_SPACING = 2;
+
+    /** A space and {@code ▲} or {@code ▼} after the title of the sorted column. */
+    private static final int SORT_MARKER_WIDTH = 2;
 
     /** Which documents {@code [}/{@code ]} step through. */
     public enum Walk {
@@ -321,6 +325,21 @@ public final class Documents {
         DETAILS
     }
 
+    /** What the field table is sorted by. */
+    private enum SortKey {
+        NUMBER,
+        NAME;
+
+        SortKey next() {
+            return this == NUMBER ? NAME : NUMBER;
+        }
+
+        /** The column whose header shows the sort. */
+        int column() {
+            return this == NUMBER ? 0 : 1;
+        }
+    }
+
     /** The go-to-document prompt. */
     private static final class DocIdPrompt {
         final StringBuilder input = new StringBuilder();
@@ -366,6 +385,10 @@ public final class Documents {
 
     /** Whether fields in which the document has nothing are left out. */
     private boolean hideEmpty;
+
+    private SortKey sort = SortKey.NUMBER;
+
+    private boolean descending;
 
     private NumberFormat numbers = NumberFormat.LONG;
 
@@ -616,6 +639,8 @@ public final class Documents {
         }
         documents.selectField = selectedField().map(DocumentField::name).orElse(null);
         documents.hideEmpty = hideEmpty;
+        documents.sort = sort;
+        documents.descending = descending;
         documents.numbers = numbers;
         documents.pointFormats = pointFormats;
         documents.delimiters = delimiters;
@@ -1309,6 +1334,7 @@ public final class Documents {
         if (rows.isEmpty()) {
             return;
         }
+        rows.sort(rowOrder(fields));
         row = 0;
         for (int i = 0; i < rows.size(); i++) {
             if (fields.get(rows.get(i)).name().equals(selected)) {
@@ -1316,6 +1342,35 @@ public final class Documents {
                 break;
             }
         }
+    }
+
+    /** The order of the rows by the sort chosen, the document's own order breaking ties. */
+    private Comparator<Integer> rowOrder(List<DocumentField> fields) {
+        Comparator<Integer> byKey = switch (sort) {
+            case NUMBER ->
+                (a, b) -> {
+                    OptionalInt numberA = fieldNumber(fields.get(a));
+                    OptionalInt numberB = fieldNumber(fields.get(b));
+                    if (numberA.isPresent() && numberB.isPresent()) {
+                        int ordering = Integer.compare(numberA.getAsInt(), numberB.getAsInt());
+                        return descending ? -ordering : ordering;
+                    }
+                    // A field the schema doesn't know comes last in either direction.
+                    return Boolean.compare(numberA.isEmpty(), numberB.isEmpty());
+                };
+            case NAME -> {
+                Comparator<Integer> byName =
+                        Comparator.comparing(i -> fields.get(i).name());
+                yield descending ? byName.reversed() : byName;
+            }
+        };
+        return byKey.thenComparingInt(Integer::intValue);
+    }
+
+    /** The field's number in the index, if the schema knows the field. */
+    private OptionalInt fieldNumber(DocumentField field) {
+        IndexField indexed = schema.get(field.name());
+        return indexed == null ? OptionalInt.empty() : OptionalInt.of(indexed.number());
     }
 
     /** The field under the selection. */
@@ -1696,6 +1751,17 @@ public final class Documents {
                 updateRows(selectedField().map(DocumentField::name).orElse(null));
                 return Optional.of(Optional.empty());
             }
+            case 'z' -> {
+                sort = sort.next();
+                descending = false;
+                updateRows(selectedField().map(DocumentField::name).orElse(null));
+                return Optional.of(Optional.empty());
+            }
+            case 'Z' -> {
+                descending = !descending;
+                updateRows(selectedField().map(DocumentField::name).orElse(null));
+                return Optional.of(Optional.empty());
+            }
             default -> {
                 return Optional.empty();
             }
@@ -1818,6 +1884,7 @@ public final class Documents {
         keys.append("x numbers   ");
         keyIf(keys, supports(Feature.POINTS), "t points");
         keys.append("e empty   ");
+        keys.append("z Z sort   ");
         keyIf(keys, findsSimilar(), "m similar");
         keyIf(keys, supports(Feature.RECONSTRUCT), "r rebuild");
         keyIf(keys, supports(Feature.STORED_VALUES), "E export");
@@ -1997,24 +2064,40 @@ public final class Documents {
             empty.add(isEmpty(field));
             matched.add(matchesIn(field.name()).isPresent());
             cells.add(new String[] {
+                fieldNumber(field).isPresent()
+                        ? Integer.toString(fieldNumber(field).getAsInt())
+                        : "-",
                 TextFormat.escapeControl(field.name()),
                 flags(Optional.ofNullable(schema.get(field.name())), field),
                 field.norm().isPresent() ? Long.toString(field.norm().getAsLong()) : "-",
                 valueSummary(field, numbers)
             });
         }
-        String[] titles = {"Field", FLAGS_LABEL, "Norm", "Value"};
+        String[] titles = {"#", "Field", FLAGS_LABEL, "Norm", "Value"};
+        String marker = descending ? " ▼" : " ▲";
+        String[] shown = titles.clone();
+        shown[sort.column()] += marker;
         int[] widths = columnWidths(titles, cells);
-        Row header = Row.from(Cell.from("Field"), Cell.from(FLAGS_LABEL), right("Norm", widths[2]), Cell.from("Value"))
+        Row header = Row.from(
+                        right(shown[0], widths[0]),
+                        Cell.from(shown[1]),
+                        Cell.from(FLAGS_LABEL),
+                        right("Norm", widths[3]),
+                        Cell.from("Value"))
                 .style(Style.EMPTY.bold());
         List<Row> tableRows = new ArrayList<>();
         for (int i = 0; i < cells.size(); i++) {
             String[] cellRow = cells.get(i);
             Cell name = matched.get(i).booleanValue()
                     ? Cell.from(
-                            Line.from(Span.styled(cellRow[0], Palette.current().match())))
-                    : Cell.from(cellRow[0]);
-            Row tableRow = Row.from(name, Cell.from(cellRow[1]), right(cellRow[2], widths[2]), Cell.from(cellRow[3]));
+                            Line.from(Span.styled(cellRow[1], Palette.current().match())))
+                    : Cell.from(cellRow[1]);
+            Row tableRow = Row.from(
+                    right(cellRow[0], widths[0]),
+                    name,
+                    Cell.from(cellRow[2]),
+                    right(cellRow[3], widths[3]),
+                    Cell.from(cellRow[4]));
             tableRows.add(
                     empty.get(i).booleanValue()
                             ? tableRow.style(Palette.current().muted())
@@ -2030,9 +2113,10 @@ public final class Documents {
                 .rows(tableRows)
                 .header(header)
                 .widths(
-                        Constraint.length(Math.min(widths[0], NAME_MAX_WIDTH)),
-                        Constraint.length(widths[1]),
+                        Constraint.length(widths[0]),
+                        Constraint.length(Math.min(widths[1], NAME_MAX_WIDTH)),
                         Constraint.length(widths[2]),
+                        Constraint.length(widths[3]),
                         Constraint.fill())
                 .columnSpacing(COLUMN_SPACING)
                 .highlightStyle(highlight(focused))
@@ -2043,11 +2127,14 @@ public final class Documents {
         frame.renderStatefulWidget(widget, area, table);
     }
 
-    /** The widths of the first three columns: of their title or their widest cell. */
+    /**
+     * The widths of the first four columns: of their title or their widest cell, the sortable
+     * columns with room for the marker.
+     */
     private static int[] columnWidths(String[] titles, List<String[]> cells) {
-        int[] widths = new int[3];
-        for (int column = 0; column < 3; column++) {
-            int width = titles[column].length();
+        int[] widths = new int[4];
+        for (int column = 0; column < 4; column++) {
+            int width = titles[column].length() + (column < 2 ? SORT_MARKER_WIDTH : 0);
             for (String[] cellRow : cells) {
                 width = Math.max(width, cellRow[column].codePointCount(0, cellRow[column].length()));
             }

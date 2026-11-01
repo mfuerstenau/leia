@@ -1001,7 +1001,7 @@ class AppTest {
         String screen = TestScreens.render(app::render, 60, 30);
         assertThat(screen).contains(" q quit   o open   c close   1-7 screen   ←→ doc   i go to");
         assertThat(screen.lines().toList().getLast())
-                .isEqualTo(" r rebuild   E export   T terms   Tab panel   ↑↓" + " ".repeat(12));
+                .isEqualTo(" m similar   r rebuild   E export   T terms   Tab panel   ↑↓");
     }
 
     @Test
@@ -2607,7 +2607,7 @@ class AppTest {
         app.handleKey(key(KeyCode.TAB));
         app.handleKey(key(KeyCode.END));
         assertThat(render(app)).contains("Esc stop rebuild", "rebuilding… 1024 of 3000 terms");
-        assertThat(TestScreens.render(app::render, 230, 20)).contains("m similar   r rebuild   E export   T terms");
+        assertThat(TestScreens.render(app::render, 260, 20)).contains("m similar   r rebuild   E export   T terms");
 
         // Another document stops it.
         assertThat(app.handleKey(key(KeyCode.RIGHT)))

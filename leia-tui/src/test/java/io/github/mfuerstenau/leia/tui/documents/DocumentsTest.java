@@ -169,9 +169,9 @@ class DocumentsTest {
         assertThat(screen)
                 .contains(
                         "#0 of 0–4",
-                        "id     I--S----     -  doc-0",
-                        "body   IN-SV---     3",
-                        "extra  I-------",
+                        "id       I--S----     -  doc-0",
+                        "body     IN-SV---     3",
+                        "extra    I-------",
                         "red blue\\nred (+1 more)",
                         "dv: -1, 4612811918334230528",
                         // The details of the first field.
@@ -291,6 +291,111 @@ class DocumentsTest {
         assertThat(screen).contains("Fields (3 of 4, e shows all, / seeks)").doesNotContain("extra");
         // The hidden field's selection falls back to the first row.
         assertThat(selected(documents)).isEqualTo("id");
+    }
+
+    /** The names of the rows from the first on, which moves the selection. */
+    private static List<String> order(Documents documents) {
+        documents.handleKey(key(KeyCode.HOME));
+        List<String> names = new java.util.ArrayList<>();
+        int rows = 0;
+        String last = null;
+        do {
+            names.add(selected(documents));
+            last = selected(documents);
+            documents.handleKey(key(KeyCode.DOWN));
+            rows++;
+        } while (!selected(documents).equals(last) && rows < 10);
+        return names;
+    }
+
+    @Test
+    void sortsTheFieldsByNumberAndName() {
+        Documents documents = documents();
+        documents.loaded(document(0));
+        assertThat(render(documents, 100, 20)).contains("# ▲");
+        assertThat(documents.keys().toString()).contains("z Z sort");
+        assertThat(order(documents)).containsExactly("id", "body", "rank", "extra");
+
+        documents.handleKey(key('z'));
+        assertThat(render(documents, 100, 20)).contains("Field ▲").doesNotContain("# ▲");
+        assertThat(order(documents)).containsExactly("body", "extra", "id", "rank");
+
+        documents.handleKey(key('Z'));
+        assertThat(render(documents, 100, 20)).contains("Field ▼");
+        assertThat(order(documents)).containsExactly("rank", "id", "extra", "body");
+
+        // The next key starts ascending again.
+        documents.handleKey(key('z'));
+        assertThat(render(documents, 100, 20)).contains("# ▲");
+        assertThat(order(documents)).containsExactly("id", "body", "rank", "extra");
+
+        documents.handleKey(key('Z'));
+        assertThat(render(documents, 100, 20)).contains("# ▼");
+        assertThat(order(documents)).containsExactly("extra", "rank", "body", "id");
+    }
+
+    @Test
+    void theSelectionStaysOnItsFieldWhenTheSortChanges() {
+        Documents documents = documents();
+        documents.loaded(document(0));
+        documents.handleKey(key(KeyCode.DOWN));
+        documents.handleKey(key(KeyCode.DOWN));
+        assertThat(selected(documents)).isEqualTo("rank");
+
+        documents.handleKey(key('z'));
+        assertThat(selected(documents)).isEqualTo("rank");
+        documents.handleKey(key('Z'));
+        assertThat(selected(documents)).isEqualTo("rank");
+
+        documents.handleKey(key('e'));
+        assertThat(selected(documents)).isEqualTo("rank");
+        assertThat(order(documents)).containsExactly("rank", "id", "body");
+    }
+
+    @Test
+    void theSortSurvivesAnotherDocumentAndAReopen() {
+        Documents documents = documents();
+        documents.loaded(document(0));
+        documents.handleKey(key('z'));
+        documents.handleKey(key('Z'));
+
+        documents.loaded(document(1));
+        assertThat(order(documents)).containsExactly("rank", "id", "extra", "body");
+
+        Documents reopened = documents.reopened(
+                List.of(
+                        schema("id", 0),
+                        schema("body", 1, IndexOptions.DOCS_AND_FREQS_AND_POSITIONS, true),
+                        schema("rank", 2),
+                        schema("extra", 3)),
+                5,
+                List.of());
+        reopened.loaded(document(1));
+        assertThat(render(reopened, 100, 20)).contains("Field ▼");
+        assertThat(order(reopened)).containsExactly("rank", "id", "extra", "body");
+    }
+
+    @Test
+    void aFieldTheSchemaLacksComesLastInEitherDirection() {
+        Documents documents = new Documents(List.of(schema("id", 0), schema("body", 1), schema("rank", 2)), 5);
+        documents.loaded(document(0));
+        assertThat(order(documents)).containsExactly("id", "body", "rank", "extra");
+        assertThat(render(documents, 100, 20)).contains("extra");
+
+        documents.handleKey(key('Z'));
+        assertThat(order(documents)).containsExactly("rank", "body", "id", "extra");
+    }
+
+    @Test
+    void zTypedIntoTheSeekIsSeekText() {
+        Documents documents = documents();
+        documents.loaded(document(0));
+        documents.handleKey(key('/'));
+        documents.handleKey(key('z'));
+
+        assertThat(render(documents, 100, 20)).contains("/z▏").doesNotContain("Field ▲");
+        documents.handleKey(key(KeyCode.ESCAPE));
+        assertThat(order(documents)).containsExactly("id", "body", "rank", "extra");
     }
 
     @Test
