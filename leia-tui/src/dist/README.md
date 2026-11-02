@@ -39,17 +39,15 @@ the folder on `PATH`.
 
 leia reads every index through a **runtime**: a folder in `runtimes/` with the official Lucene
 jars of one Lucene version and leia's small adapter jar for it. `runtimes/` is in your data folder,
-`~/.local/share/leia/runtimes` (`$XDG_DATA_HOME/leia/runtimes`) on Linux and
-`%LOCALAPPDATA%\leia\runtimes` on Windows, so a new version of leia finds the runtimes that an
-older one downloaded, and leia's own folder may be read-only. leia takes each runtime from the
-first folder that has it: a folder `runtimes` beside `leia.jar`, if there is one (a portable
-install), then your data folder, then the system-wide ones (`/usr/local/share/leia/runtimes`,
-`/usr/share/leia/runtimes`, or those of `$XDG_DATA_DIRS`; `%PROGRAMDATA%\leia\runtimes` on
-Windows), which an administrator can fill for all users. leia checks every jar of a system-wide
-folder against the SHA-256 that its adapter lists, and never rewrites it. Downloads go to the
-first folder of yours that can be written, so a read-only folder beside `leia.jar` is passed over.
-The about screen (`?`) says where each loaded runtime came from. The zip comes without `runtimes/`, so on the first start there
-are none. Install the runtimes once:
+`~/.local/share/leia/runtimes` on Linux and `%LOCALAPPDATA%\leia\runtimes` on Windows, so a new
+version of leia finds the runtimes that an older one downloaded, and leia's own folder may be
+read-only. leia takes each runtime from the first folder that has it: a folder `runtimes` beside
+`leia.jar`, if there is one (a portable install), then your data folder, then the system-wide ones,
+which an administrator can fill for all users (see [Folders](#folders)). leia checks every jar of a
+system-wide folder against the SHA-256 that its adapter lists, and never rewrites it. Downloads go
+to the first folder of yours that can be written, so a read-only folder beside `leia.jar` is passed
+over. The about screen (`?`) says where each loaded runtime came from. The zip comes without
+`runtimes/`, so on the first start there are none. Install the runtimes once:
 
 - **Interactively:** start leia and press `D` on its start screen. The window lists the runtimes
   that are missing or incomplete, with the jars each would fetch, their URLs, SHA-256s and sizes.
@@ -161,8 +159,8 @@ through `META-INF/services`, as Lucene's are. They must be built for Lucene 10.
 
 - `--jar <PATH>` loads a jar, or the jars directly in a directory, at startup.
 - The **default folder** is loaded at every start, after the jars of `--jar`:
-  `~/.config/leia/jars` (`$XDG_CONFIG_HOME/leia/jars` if that is set), or `%APPDATA%\leia\jars` on
-  Windows. leia doesn't create it. `--no-default-jars` leaves it out.
+  `~/.config/leia/jars`, or `%APPDATA%\leia\jars` on Windows (see [Folders](#folders)). leia
+  doesn't create it. `--no-default-jars` leaves it out.
 - `X`, on any screen, lists the loaded jars and adds more while leia runs. Jars can't be unloaded,
   and a loaded jar must stay where it is.
 
@@ -310,31 +308,65 @@ On the documents screen, `P` pins the document's segment and `I` rebuilds the se
 
 ## Files
 
-- **Log:** `$XDG_STATE_HOME/leia/leia.log` if that is set and can be written, else
-  `~/.local/state/leia/leia.log`, or `%LOCALAPPDATA%\leia\leia.log` on Windows, written anew on each start. `L` shows it inside
+- **Log:** `~/.local/state/leia/leia.log`, or `%LOCALAPPDATA%\leia\leia.log` on Windows (see
+  [Folders](#folders)), written anew on each start. `L` shows it inside
   leia, and `-` there lowers the level at once: at FINE, every call and its result is logged.
   To start at FINE, run leia with `LEIA_OPTS=-Dleia.log.level=FINE`.
-- **History:** the last 10 opened index paths, in `history` beside the log. It is read from the
-  first of those folders that has one.
+- **History:** the last 10 opened index paths, in `history` beside the log.
 - **Cache:** which fields the segments of the indexes you scanned with `f` store (field names and
-  document numbers, never values), in `$XDG_CACHE_HOME/leia/stored-fields` (else `~/.cache/leia/stored-fields`), or `%LOCALAPPDATA%\leia\cache\stored-fields` on Windows; at most 512 MB, and a
-  segment's file goes after 30 days unused. `LEIA_OPTS=-Dleia.cache.dir=<path>` moves it, and an
+  document numbers, never values), in `~/.cache/leia/stored-fields`, or `%LOCALAPPDATA%\leia\cache\stored-fields` on Windows; at most
+  512 MB, and a segment's file goes after 30 days unused. `LEIA_OPTS=-Dleia.cache.dir=<path>` moves it, and an
   empty path turns it off.
-- **Theme:** the theme chosen last with `T`, written to `theme` in `$XDG_CONFIG_HOME/leia` (else
-  `~/.config/leia`), or `%APPDATA%\leia` on Windows, beside the default folder of jars. It is read
-  from the first config folder that has one, also a system-wide one (`/etc/xdg/leia/theme`,
-  `%PROGRAMDATA%\leia\theme`), so an administrator can set a default.
-- **Folders:** config, data, state and cache are each looked up in order, yours before the
-  system's, and written to the first of yours that can be written. The default folder of jars
-  (`jars` in your config folders) is never read from a system-wide one, since any local user might
-  have put a jar there. The temporary folder is never used.
+- **Theme:** the theme chosen last with `T`, written to `theme` in `~/.config/leia`, or
+  `%APPDATA%\leia` on Windows, beside the default folder of jars. It is read from the first config
+  folder that has one, also a system-wide one, so an administrator can set a default.
+
+## Folders
+
+leia keeps its files in four kinds of folder. Each is a list of candidates, not one place; none of
+them has to exist, and leia creates nothing until it writes.
+
+| | What's in it | Linux and other Unix: yours | Linux: system-wide | Windows: yours | Windows: system-wide |
+|---|---|---|---|---|---|
+| **config** | `theme`, `themes/`, `jars/` | `$XDG_CONFIG_HOME/leia`, then `~/.config/leia` | each entry of `$XDG_CONFIG_DIRS` plus `/leia` (default `/etc/xdg/leia`) | `%APPDATA%\leia` | `%PROGRAMDATA%\leia` |
+| **data** | `runtimes/` | `$XDG_DATA_HOME/leia`, then `~/.local/share/leia` | each entry of `$XDG_DATA_DIRS` plus `/leia` (default `/usr/local/share/leia`, `/usr/share/leia`) | `%LOCALAPPDATA%\leia` | `%PROGRAMDATA%\leia` |
+| **state** | `leia.log`, `history` | `$XDG_STATE_HOME/leia`, then `~/.local/state/leia` | none | `%LOCALAPPDATA%\leia` | none |
+| **cache** | `stored-fields/` | `$XDG_CACHE_HOME/leia`, then `~/.cache/leia` | none | `%LOCALAPPDATA%\leia\cache` | none |
+
+**Which one wins.**
+
+- **Reading:** each item comes from the first candidate that has it, yours before the system-wide
+  ones.
+- **Writing:** to the first of your candidates that can be written or created. The temporary folder
+  is never used: with no state folder to write there is no log file, and with no cache folder to
+  write the cache stays in memory.
+- An `XDG_*` variable that is unset, empty or a relative path is skipped, and the `~/...` candidate
+  after it is always tried. On Windows, a variable that is set is used alone; one that is unset
+  falls back to `AppData\Roaming` (config) or `AppData\Local` (data, state, cache) in your home
+  folder.
+
+**Exceptions, item by item.**
+
+- `theme` is also read from the system-wide config folders, so an administrator can set a default.
+  `T` writes yours.
+- `themes/` are merged: leia's own themes, then the system-wide folders', then yours. A later theme
+  with the same name replaces an earlier one.
+- `jars/` is read from your config folders only, the first that holds a jar, never from a
+  system-wide one, since any local user might have put a jar there.
+- `runtimes/`: a folder `runtimes` beside `leia.jar`, if there is one, comes first, then your data
+  folders, then the system-wide ones. leia goes through them one runtime at a time, never rewrites
+  the jars of a system-wide folder and checks them by SHA-256 and size. The about screen (`?`)
+  says where each runtime came from.
+- `history` is read from the first of your state folders that has one, so a moved `XDG_STATE_HOME`
+  keeps it.
+- `LEIA_OPTS=-Dleia.runtimes=<dir>` and `LEIA_OPTS=-Dleia.cache.dir=<dir>` replace their lists
+  and have no fallback; an empty `leia.cache.dir` keeps the cache in memory.
 
 ## Themes of your own
 
-A theme is a file `<name>.theme` in `themes` of a config folder: `$XDG_CONFIG_HOME/leia/themes`
-and `~/.config/leia/themes`, or `%APPDATA%\leia\themes` on Windows; an administrator can add
-`/etc/xdg/leia/themes` (`%PROGRAMDATA%\leia\themes`) for all users, and a theme of yours with the same
-name wins. The name is lower-case letters, digits and
+A theme is a file `<name>.theme` in `themes` of a config folder: `~/.config/leia/themes`, or `%APPDATA%\leia\themes` on
+Windows; an administrator can add `/etc/xdg/leia/themes` (`%PROGRAMDATA%\leia\themes`) for all
+users, and a theme of yours with the same name wins (see [Folders](#folders)). The name is lower-case letters, digits and
 `-`. leia reads the folder on start. `--theme <name>` chooses a theme, and `T` cycles through your
 themes after the six of leia's own. A file named like one of those, such as `nord.theme`,
 replaces it. leia's own themes are a starting point: `nord`, for one, is a background of

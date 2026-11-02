@@ -34,7 +34,7 @@ None open.
 
 ## Documentation
 
-- [ ] Describe leia's folders on Linux and Windows, config, data, state and cache with their user and system candidates, and which one wins (read from the first that has it, write to the first writable user one), in both READMEs: the main `README.md` and the user README `leia-tui/src/dist/README.md` (ADR 0122).
+None open.
 
 ## Bugs
 

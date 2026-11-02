@@ -489,3 +489,4 @@ Goal: the runtimes are downloaded from within leia's UI, and `--download-runtime
 ## Documentation — done
 
 - [x] A theming example in both READMEs, the main `README.md` and the user README `leia-tui/src/dist/README.md` (ADR 0095, ADR 0096, ADR 0121): `harbor`, a `.theme` file of 256-colour numbers, with where it goes, how to choose it and a table of the slots; the main README also gets `--theme` and `T` in its tables and a `Themes` section. `ReadmeThemeTest` parses the example in both and checks that they are the same.
+- [x] Describe leia's folders on Linux and Windows, config, data, state and cache with their user and system candidates, and which one wins (read from the first that has it, write to the first writable user one), in both READMEs: the main `README.md` and the user README `leia-tui/src/dist/README.md` (ADR 0122).
