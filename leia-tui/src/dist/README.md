@@ -337,36 +337,62 @@ and `~/.config/leia/themes`, or `%APPDATA%\leia\themes` on Windows; an administr
 name wins. The name is lower-case letters, digits and
 `-`. leia reads the folder on start. `--theme <name>` chooses a theme, and `T` cycles through your
 themes after the six of leia's own. A file named like one of those, such as `nord.theme`,
-replaces it. This is `nord`:
+replaces it. leia's own themes are a starting point: `nord`, for one, is a background of
+`#2E3440` with `#D8DEE9` text and a palette of `#88C0D0` and `#EBCB8B`.
+
+To make one:
+
+1. Make the folder: `mkdir -p ~/.config/leia/themes` (on Windows, `%APPDATA%\leia\themes`).
+2. Save this as `harbor.theme` in it. It uses 256-colour numbers, so it needs no 24-bit colour:
 
 ```
-# nord: the Nord palette (nordtheme.com) on its own background; needs a truecolor terminal
-base          = #D8DEE9 on #2E3440
-error         = #BF616A
-warning       = #EBCB8B
-success       = #A3BE8C
-accent        = #88C0D0
-jsonKey       = #8FBCBB
-jsonString    = #A3BE8C
-jsonNumber    = #B48EAD
-jsonLiteral   = #81A1C1
-match         = #2E3440 on #EBCB8B
-muted         = #7B88A1
-border        = #7B88A1
-borderFocused = #88C0D0
-heading       = bold
-label         = bold
-selection     = reversed
-selectionUnfocused = bold
-secondary     = italic
-logo          = gazelle-aurora
+# harbor: blues and greens on the terminal's own background; needs 256 colours
+base          = none
+error         = 203
+warning       = 214
+success       = 114
+accent        = 39
+jsonKey       = 74
+jsonString    = 114
+jsonNumber    = 179
+jsonLiteral   = 140
+match         = black on 214
+muted         = 244
+border        = 240
+borderFocused = 39
+heading       = 39 bold
+label         = 74
+selection     = black on 39
+selectionUnfocused = 39 bold
+secondary     = 244 italic
+logo          = gazelle
 ```
 
-A file sets every role once; a line starting with `#` is a comment. Besides the colours, five roles
-style what leia would otherwise do in bold, reversed or italic: `heading` (section titles, table
-headers), `label` (keys and labels), `selection` (the selected row or tab), `selectionUnfocused`
-(the selected row of a table that has no focus) and `secondary` (a token stacked on the one
-before, on the analysis screen). A theme from before these roles is left out: leia names it on the
+3. Run `leia --theme harbor`, or press `T` on the start screen until the footer says `harbor`.
+   leia remembers the choice.
+
+Every slot is set once; a line starting with `#` is a comment. These are the slots:
+
+| Slot | What it styles |
+|---|---|
+| `base` | the whole screen, painted first; `none` keeps the terminal's own colours |
+| `error` | what failed |
+| `warning` | what needs attention |
+| `success` | what went well |
+| `accent` | what stands out without a meaning of its own: segment names, field names, formats |
+| `jsonKey`, `jsonString`, `jsonNumber`, `jsonLiteral` | a key, a string, a number, and `true`, `false` and `null` in the viewer's JSON |
+| `match` | a highlighted match in a text |
+| `muted` | what is there but out of the way |
+| `border`, `borderFocused` | a panel's border, and the focused panel's |
+| `heading` | a section title, a table's header row, a name that heads what follows |
+| `label` | a key or a label, in front of its value |
+| `selection` | the selected row or tab, in the focused table |
+| `selectionUnfocused` | the selected row of a table that has no focus |
+| `secondary` | what comes second of its kind: a token stacked on the one before, on the analysis screen |
+| `logo` | the start screen's logo, an icon (not a style) |
+
+Five of the roles style what leia would otherwise do in bold, reversed or italic, so a theme can
+restyle those too. A theme from before these roles is left out: leia names it on the
 start screen, and its log says which roles are missing. A style is `none`, the
 terminal's own, or a colour, `on` a background colour, and modifiers, each part optional. A colour
 is a name (`black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`, `gray`,

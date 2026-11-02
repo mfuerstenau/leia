@@ -126,6 +126,7 @@ leia [OPTIONS] [INDEX_PATH]
 | `--no-default-jars` | don't load the jars of the default folder (see [Jars](#jars)) |
 | `--directory <IMPL>` | the Lucene `Directory` to read indexes through: `fs` (default) lets Lucene choose, which is `MMapDirectory` on 64-bit; `mmap` is `MMapDirectory`, `nio` is `NIOFSDirectory`. `Ctrl+D` in the open prompt changes it |
 | `--no-reader` | open `INDEX_PATH` without a reader, for an index that a reader can't open (see [Without a reader](#without-a-reader)); `Ctrl+N` in the open prompt does the same |
+| `--theme <NAME>` | the colours: `dark` (default) is the terminal's own, `light` reads on a light background, `mono` has none, `nord` is the Nord palette and `solarized-dark` and `solarized-light` are Solarized, each on its own background, and they need a terminal with 24-bit colour; or a theme of your own (see [Themes of your own](#themes)). Without it: `mono` if the environment variable `NO_COLOR` is set and not empty, else the theme chosen last with `T`, else `dark` |
 | `--mcp` | serve `INDEX_PATH` to an MCP client, such as a coding agent, on stdin and stdout instead of starting the terminal UI (see [MCP mode](#mcp-mode)) |
 | `--mcp-root <PATH>` | with `--mcp`, a folder below which alone the agent opens indexes; can be repeated (see [Which indexes the agent can open](#which-indexes-the-agent-can-open)) |
 | `--mcp-pin` | with `--mcp` and `INDEX_PATH`, serve only that index: the agent can't open another |
@@ -348,6 +349,79 @@ Beyond that:
 - leia runs as you. To keep it from the rest of the machine, run it as another user, or in a
   container or sandbox with the index folders mounted read-only.
 
+### Themes
+
+leia has six themes of its own: `dark` (default; the terminal's own colours), `light`, `mono` (no
+colours), `nord`, `solarized-dark` and `solarized-light` (the last three paint their own background and
+need a terminal with 24-bit colour). `--theme <name>` chooses one, and `T` on the start screen
+cycles through them and remembers the choice. Without either, leia uses `mono` if the environment
+variable `NO_COLOR` is set and not empty, else the theme chosen last, else `dark`.
+
+A theme of your own is a file `<name>.theme` (lower-case letters, digits and `-`) in `themes` of a
+config folder: `$XDG_CONFIG_HOME/leia/themes` and `~/.config/leia/themes`, or `%APPDATA%\leia\themes`
+on Windows. An administrator can add `/etc/xdg/leia/themes` (`%PROGRAMDATA%\leia\themes`) for all
+users; yours wins over the system's, and a file named like a theme of leia's, such as `nord.theme`,
+replaces it. leia reads the folder on start.
+
+To make one:
+
+1. Make the folder: `mkdir -p ~/.config/leia/themes` (on Windows, `%APPDATA%\leia\themes`).
+2. Save this as `harbor.theme` in it. It uses 256-colour numbers, so it needs no 24-bit colour:
+
+```
+# harbor: blues and greens on the terminal's own background; needs 256 colours
+base          = none
+error         = 203
+warning       = 214
+success       = 114
+accent        = 39
+jsonKey       = 74
+jsonString    = 114
+jsonNumber    = 179
+jsonLiteral   = 140
+match         = black on 214
+muted         = 244
+border        = 240
+borderFocused = 39
+heading       = 39 bold
+label         = 74
+selection     = black on 39
+selectionUnfocused = 39 bold
+secondary     = 244 italic
+logo          = gazelle
+```
+
+3. Run `leia --theme harbor`, or press `T` on the start screen until the footer says `harbor`.
+   leia remembers the choice.
+
+Every slot is set once; a line starting with `#` is a comment. These are the slots:
+
+| Slot | What it styles |
+|---|---|
+| `base` | the whole screen, painted first; `none` keeps the terminal's own colours |
+| `error` | what failed |
+| `warning` | what needs attention |
+| `success` | what went well |
+| `accent` | what stands out without a meaning of its own: segment names, field names, formats |
+| `jsonKey`, `jsonString`, `jsonNumber`, `jsonLiteral` | a key, a string, a number, and `true`, `false` and `null` in the viewer's JSON |
+| `match` | a highlighted match in a text |
+| `muted` | what is there but out of the way |
+| `border`, `borderFocused` | a panel's border, and the focused panel's |
+| `heading` | a section title, a table's header row, a name that heads what follows |
+| `label` | a key or a label, in front of its value |
+| `selection` | the selected row or tab, in the focused table |
+| `selectionUnfocused` | the selected row of a table that has no focus |
+| `secondary` | what comes second of its kind: a token stacked on the one before, on the analysis screen |
+| `logo` | the start screen's logo, an icon (not a style) |
+
+A style is `none` (the terminal's own), or a colour, `on` a background colour, and modifiers, each part
+optional. A colour is a name (`black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`,
+`gray`, `dark-gray`, the `light-` ones and `bright-white`), a number from 0 to 255, or `#RRGGBB`, which
+needs 24-bit colour. The modifiers are `bold`, `dim`, `italic`, `underlined` and `reversed`. A file
+that leia can't read is left out, and the log says which line is wrong. The format is in
+[ADR 0096](docs/adr/0096-theme-files.md), the roles in [ADR 0121](docs/adr/0121-style-slots-in-themes.md), and the icon
+behind `logo`, which you can draw yourself, in [ADR 0099](docs/adr/0099-icons-of-characters-and-colours.md).
+
 ### Keys
 
 | Key | Action |
@@ -361,6 +435,7 @@ Beyond that:
 | `Esc` | stop the running term scans, then a running export, or on the search and check screens the running search or check; with none running, quit |
 | `q`, `Ctrl+C` | quit |
 | `g` | go to another screen with the selection: a menu above the footer lists the jumps it allows, each with the same letter on every screen (`t` terms, `s` search, `a` analysis, `c` commit, `d` document, `m` similar documents, `n` nearest vectors), and `g` again goes to the top (ADR 0120) |
+| `T` | the next colour theme, named in the footer and remembered for the next start (see [Themes](#themes)); on the start screen |
 | `?` | list every key of the shown screen by group, footer or not; `Tab` switches to About: the version, the Java and runtimes, the open index and the licence |
 
 The footer shows a screen's common keys in groups (Move, Find, Show, Sort, Do, Go to, App) and

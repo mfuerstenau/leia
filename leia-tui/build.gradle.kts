@@ -126,6 +126,15 @@ tasks.test {
     // LaunchScriptTest runs the leia script from here.
     inputs.dir("src/scripts")
     systemProperty("leia.scripts", file("src/scripts").absolutePath)
+    // ReadmeThemeTest parses the example theme of both READMEs.
+    val readmes = mapOf(
+        "leia.test.doc.readme" to rootProject.file("README.md"),
+        "leia.test.doc.distReadme" to file("src/dist/README.md"),
+    )
+    for ((property, readme) in readmes) {
+        inputs.files(readme).withPropertyName(property)
+        systemProperty(property, readme.absolutePath)
+    }
     useJUnitPlatform { excludeTags("jars", "server") }
     val indexes: Map<String, FileCollection> = oldTestIndexes
     for ((name, index) in indexes) {
