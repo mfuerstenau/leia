@@ -175,13 +175,15 @@ class StoredScanTest {
         Path dir = writeIndex(
                 tmp,
                 doc -> doc.add(new StoredField("text", "a".repeat(40) + "c")),
-                doc -> doc.add(new StoredField("text", "a".repeat(20) + "b")));
+                // Matched by the cheap alternative: a value that matches only after much backtracking
+                // can itself run out of the 50 ms on a slow CI runner.
+                doc -> doc.add(new StoredField("text", "match")));
 
         try (OpenRuntime index = TestIndexes.open(dir)) {
             List<Hit> hits = new ArrayList<>();
             Summary summary = storedScan(
                     index,
-                    Pattern.compile("(.*a){20}b"),
+                    Pattern.compile("(.*a){20}b|match"),
                     Optional.empty(),
                     false,
                     10,
