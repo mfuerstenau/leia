@@ -1,0 +1,98 @@
+# Builds a draft release for a tag release/vMAJOR.MINOR.HOTFIX (ADR 0123): the whole build with all
+# tests first, then the dist zip and a sources zip as assets of a release that stays a draft until
+# it is published by hand on GitHub.
+name: Release
+
+on:
+  push:
+    tags:
+      - 'release/v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Test and build
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Version from the tag
+        id: version
+        run: |
+          version="${GITHUB_REF_NAME#release/v}"
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::'$GITHUB_REF_NAME' is not release/vMAJOR.MINOR.HOTFIX"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      # Full history, to tell whether the tagged commit is on main.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Tagged commit is on main
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$GITHUB_REF_NAME ($GITHUB_SHA) is not on main"
+            exit 1
+          fi
+
+      # Only the Gradle launcher; the build daemon and the toolchain are Temurin 25 as well.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      # compile, every test (also each module's jarsTest and serverTest), spotlessCheck and the
+      # build's checks, then the zip. -Pversion overrides gradle.properties, so the zip and
+      # `leia --version` carry the tag's version.
+      - name: Test and pack
+        run: ./gradlew build :leia-tui:leiaZip -Pversion="${{ steps.version.outputs.version }}"
+
+      - name: Sources
+        run: |
+          mkdir -p dist
+          cp "leia-tui/build/dist/leia-${{ steps.version.outputs.version }}.zip" dist/
+          git archive --format=zip --prefix="leia-${{ steps.version.outputs.version }}/" \
+            -o "dist/leia-${{ steps.version.outputs.version }}-sources.zip" HEAD
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Draft release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      # No checkout here, so gh gets the repository explicitly. --draft leaves publishing to a
+      # person. A re-run on the same tag replaces the assets of the draft that is already there.
+      - name: Draft the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/*.zip --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/*.zip \
+              --draft --verify-tag \
+              --title "leia $VERSION" \
+              --generate-notes
+          fi
