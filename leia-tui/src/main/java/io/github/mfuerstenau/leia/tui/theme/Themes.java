@@ -70,7 +70,7 @@ public record Themes(List<Theme> themes) {
 
     /**
      * These themes and those of {@code dir}, each a {@code <id>.theme} file, in the order of their
-     * names. One with the id of a theme here replaces it in its place; the others come after. A
+     * names, whose icons come from {@code dir} or leia's own (ADR 0099). One with the id of a theme here replaces it in its place; the others come after. A
      * file that can't be read, or whose name is no id, is logged and left out: a broken theme
      * mustn't stop leia.
      */
@@ -87,6 +87,7 @@ public record Themes(List<Theme> themes) {
             LOG.log(Level.WARNING, "Cannot list the themes in " + dir.get(), e);
             return this;
         }
+        Icons icons = Icons.bundled().withUserDir(dir.get());
         List<Theme> merged = new ArrayList<>(themes);
         for (Path file : files) {
             String name = file.getFileName().toString();
@@ -97,7 +98,7 @@ public record Themes(List<Theme> themes) {
             }
             Palette palette;
             try {
-                palette = ThemeParser.parse(file.toString(), Files.readString(file, StandardCharsets.UTF_8));
+                palette = ThemeParser.parse(file.toString(), Files.readString(file, StandardCharsets.UTF_8), icons);
             } catch (IOException e) {
                 LOG.log(Level.WARNING, "Theme " + file + " left out: it can't be read", e);
                 continue;

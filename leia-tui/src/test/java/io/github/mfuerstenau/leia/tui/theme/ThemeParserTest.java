@@ -26,12 +26,7 @@ class ThemeParserTest {
             muted         = dark-gray
             border        = none
             borderFocused = none
-            logo0         = none
-            logo1         = #1A0D0D
-            logo2         = #563F38
-            logo3         = #9E6038
-            logo4         = #C7905D
-            logo5         = #E4CDA5
+            logo          = gazelle
             """;
 
     private static Style base(String value) throws ThemeParser.Invalid {
@@ -68,8 +63,7 @@ class ThemeParserTest {
 
         assertThat(palette.base()).isEqualTo(Style.EMPTY);
         assertThat(palette.match()).isEqualTo(Style.EMPTY.black().onYellow());
-        assertThat(palette.logo0()).isEqualTo(Style.EMPTY);
-        assertThat(palette.logo(5)).isEqualTo(Style.EMPTY.fg(Color.hex("#E4CDA5")));
+        assertThat(palette.logo()).isEqualTo(Icons.bundled().find("", "gazelle"));
     }
 
     @ParameterizedTest
@@ -94,24 +88,30 @@ class ThemeParserTest {
     void reportsARoleSetTwice() {
         assertThatThrownBy(() -> ThemeParser.parse("t.theme", "base = none\n" + REST + "error = bold\n"))
                 .isInstanceOf(ThemeParser.Invalid.class)
-                .hasMessage("t.theme:20: error is set twice");
-        assertThatThrownBy(() -> ThemeParser.parse("t.theme", "base = none\n" + REST + "logo3 = bold\n"))
-                .hasMessage("t.theme:20: logo3 is set twice");
+                .hasMessage("t.theme:15: error is set twice");
+        assertThatThrownBy(() -> ThemeParser.parse("t.theme", "base = none\n" + REST + "logo = gazelle-mono\n"))
+                .hasMessage("t.theme:15: logo is set twice");
     }
 
     @Test
-    void refusesTheOldLogoRoleAndNamesTheNewOnes() {
-        assertThatThrownBy(() -> ThemeParser.parse("t.theme", "base = none\nlogo = coloured\n" + REST))
+    void refusesTheOldLogoRolesAndNamesTheNewOne() {
+        assertThatThrownBy(() -> ThemeParser.parse("t.theme", "base = none\nlogo1 = red\n" + REST))
                 .isInstanceOf(ThemeParser.Invalid.class)
-                .hasMessage("t.theme:2: unknown role 'logo': the logo's colours are logo0 to logo5");
+                .hasMessage("t.theme:2: unknown role 'logo1': the logo is logo = <icon>, which has colours of its own");
+    }
+
+    @Test
+    void refusesAnUnknownIcon() {
+        assertThatThrownBy(() -> ThemeParser.parse("t.theme", "base = none\n" + REST.replace("= gazelle", "= zebra")))
+                .isInstanceOf(ThemeParser.Invalid.class)
+                .hasMessage("t.theme:14: no icon file zebra.colours among leia's own");
     }
 
     @Test
     void reportsEveryMissingRole() {
         assertThatThrownBy(() -> ThemeParser.parse("t.theme", "# nothing\nerror = red\n"))
                 .isInstanceOf(ThemeParser.Invalid.class)
-                .hasMessage(
-                        "t.theme: missing base, warning, success, accent, jsonKey, jsonString, jsonNumber,"
-                                + " jsonLiteral, match, muted, border, borderFocused, logo0, logo1, logo2, logo3, logo4, logo5");
+                .hasMessage("t.theme: missing base, warning, success, accent, jsonKey, jsonString, jsonNumber,"
+                        + " jsonLiteral, match, muted, border, borderFocused, logo");
     }
 }

@@ -892,16 +892,18 @@ class AppTest {
     void showsTheLogoWithoutAnIndexWhereItFits() {
         App app = app();
         String screen = TestScreens.render(app::render, 100, 40);
-        assertThat(screen).contains("X$&&&&$$$$x;", "leia 1", "build abc", "Java 25 (v) in /h");
+        // The gazelle's last row, half blocks.
+        String bottom = "▄▄▄▄▄▄▄▄▀";
+        assertThat(screen).contains(bottom, "leia 1", "build abc", "Java 25 (v) in /h");
 
         // On 80×25, without the rows at the top that don't fit: the first drawn is the logo's tenth.
         List<String> small = TestScreens.render(app::render, 80, 25).lines().toList();
-        assertThat(small.get(2)).contains(".=;:        .:;;;;.");
-        assertThat(small.get(22)).contains("X$&&&&$$$$x;");
+        assertThat(small.get(2)).contains("▄▄▄▄▄▀      ▄▄▄▄▄▄▄▀");
+        assertThat(small.get(22)).contains(bottom);
 
-        assertThat(render(app)).doesNotContain("X$&&&&$$$$x;").contains("leia 1");
+        assertThat(render(app)).doesNotContain(bottom).contains("leia 1");
         assertThat(TestScreens.render(app::render, 50, 40))
-                .doesNotContain("X$&&&&$$$$x;")
+                .doesNotContain(bottom)
                 .contains("leia 1");
     }
 

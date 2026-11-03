@@ -1,7 +1,6 @@
 package io.github.mfuerstenau.leia.tui.widgets;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import dev.tamboui.layout.Rect;
 import dev.tamboui.style.Color;
@@ -18,93 +17,51 @@ import org.junit.jupiter.api.Test;
 
 class LogoTest {
 
-    private static Style fg(String hex) {
-        return Style.EMPTY.fg(Color.hex(hex));
+    /** A half block whose two halves have the colour {@code hex}. */
+    private static Style both(String hex) {
+        return Style.EMPTY.fg(Color.hex(hex)).bg(Color.hex(hex));
+    }
+
+    private static Palette bundled(String id) {
+        return Themes.bundled().find(id).orElseThrow().palette();
     }
 
     @Test
-    void theLogoIsTrimmedAtTheRight() {
+    void drawsTheIconOfThePaletteARowALine() {
         List<Line> lines = Logo.lines(Palette.current());
-        assertThat(Logo.HEIGHT).isEqualTo(30);
-        assertThat(Logo.WIDTH).isEqualTo(37);
-        assertThat(lines).hasSize(Logo.HEIGHT);
-        assertThat(lines).allMatch(line -> line.spans().size() == Logo.WIDTH && line.width() == Logo.WIDTH);
+
+        assertThat(lines).hasSize(30);
+        assertThat(lines).allMatch(line -> line.spans().size() == 38 && line.width() == 38);
+        // dark and light draw the same gazelle.
+        assertThat(Logo.lines(bundled("light"))).isEqualTo(lines);
     }
 
     @Test
-    void everyCellHasItsSlotsStyleInThePalette() {
-        Palette dark = Themes.bundled().dark().palette();
-        Palette nord = Themes.bundled().find("nord").orElseThrow().palette();
+    void everyCellHasTheColoursOfItsIcon() {
+        Palette dark = bundled("dark");
+        Palette nord = bundled("nord");
 
-        // Row 14 starts " =+$$=+", with the slots "0324432".
-        assertThat(Logo.lines(dark).get(13).spans().get(1)).isEqualTo(Span.styled("=", fg("#9E6038")));
-        assertThat(Logo.lines(dark).get(13).spans().get(2)).isEqualTo(Span.styled("+", fg("#563F38")));
-        assertThat(Logo.lines(nord).get(13).spans().get(2)).isEqualTo(Span.styled("+", fg("#B48EAD")));
-        // Slot 0 is a space in logo0's style: none leaves the screen's background, a style shows.
+        // Row 14 of the gazelle starts with half blocks whose halves have one colour.
+        assertThat(Logo.lines(dark).get(13).spans().get(1)).isEqualTo(Span.styled("▄", both("#9E6038")));
+        assertThat(Logo.lines(dark).get(13).spans().get(2)).isEqualTo(Span.styled("▄", both("#523D38")));
+        assertThat(Logo.lines(nord).get(13).spans().get(2)).isEqualTo(Span.styled("▄", both("#B48EAD")));
+        // mono's gazelle is of its own, in the terminal's foreground.
+        assertThat(Logo.lines(bundled("mono")).get(13).spans().get(2)).isEqualTo(Span.styled("█", Style.EMPTY));
+        // A space with no colours leaves the screen's background.
         assertThat(Logo.lines(dark).getFirst().spans().getFirst()).isEqualTo(Span.styled(" ", Style.EMPTY));
-        Palette onRed = new Palette(
-                Style.EMPTY,
-                Style.EMPTY,
-                Style.EMPTY,
-                Style.EMPTY,
-                Style.EMPTY,
-                Style.EMPTY,
-                Style.EMPTY,
-                Style.EMPTY,
-                Style.EMPTY,
-                Style.EMPTY,
-                Style.EMPTY,
-                Style.EMPTY,
-                Style.EMPTY,
-                Style.EMPTY.onRed(),
-                Style.EMPTY,
-                Style.EMPTY,
-                Style.EMPTY,
-                Style.EMPTY,
-                Style.EMPTY);
-        assertThat(Logo.lines(onRed).getFirst().spans().getFirst()).isEqualTo(Span.styled(" ", Style.EMPTY.onRed()));
-    }
-
-    @Test
-    void parseCutsTheColumnsThatAreBlankInEveryRow() {
-        Logo.Grid grid = Logo.parse("a  \n b \n\n100\n010\n");
-
-        assertThat(grid.characters()).containsExactly("a ", " b");
-        assertThat(grid.slots()).containsExactly("10", "01");
-    }
-
-    @Test
-    void parseRefusesABrokenFile() {
-        assertThat(refusal("a\n1\n")).isEqualTo("leia.logo: no characters before a blank line");
-        assertThat(refusal("\n1\n")).isEqualTo("leia.logo: no characters before a blank line");
-        assertThat(refusal("a\n\n1\n1\n")).isEqualTo("leia.logo: 1 rows of characters, 2 of slots");
-        assertThat(refusal("ab\n\n1\n")).isEqualTo("leia.logo: row 1 has 2 characters and 1 slots");
-        assertThat(refusal("a \n\n16\n")).isEqualTo("leia.logo: row 1, column 2: slot is 0 to 5");
-        assertThat(refusal("a \n\n1x\n")).isEqualTo("leia.logo: row 1, column 2: slot is 0 to 5");
-        assertThat(refusal("a \n\n12\n"))
-                .isEqualTo("leia.logo: row 1, column 2: a space is slot 0 and nothing else is");
-        assertThat(refusal("ab\n\n01\n"))
-                .isEqualTo("leia.logo: row 1, column 1: a space is slot 0 and nothing else is");
-        assertThat(refusal("  \n\n00\n")).isEqualTo("leia.logo is empty");
-    }
-
-    private static String refusal(String text) {
-        return assertThatThrownBy(() -> Logo.parse(text))
-                .isInstanceOf(IllegalStateException.class)
-                .actual()
-                .getMessage();
     }
 
     @Test
     void fitsBesideWithItsTopCutOffDownToTheMinimum() {
         List<Line> text = List.of(Line.from("leia 1"));
-        int width = Logo.WIDTH + Logo.GAP + Logo.MIN_TEXT_WIDTH;
+        int width = Palette.current().logo().width() + Logo.GAP + Logo.MIN_TEXT_WIDTH;
 
         assertThat(Logo.fitsBeside(new Rect(0, 0, width, Logo.MIN_HEIGHT), text))
                 .isTrue();
         assertThat(Logo.fitsBeside(new Rect(0, 0, width, Logo.MIN_HEIGHT - 1), text))
                 .isFalse();
-        assertThat(Logo.fitsBeside(new Rect(0, 0, width - 1, Logo.HEIGHT), text))
+        assertThat(Logo.fitsBeside(
+                        new Rect(0, 0, width - 1, Palette.current().logo().height()), text))
                 .isFalse();
         // Not where the wrapped text is taller than the area.
         List<Line> tall = Collections.nCopies(Logo.MIN_HEIGHT + 1, Line.from("x"));

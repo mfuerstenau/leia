@@ -1,6 +1,6 @@
 # ADR 0097 — Logo colours from the theme
 
-- **Status:** Accepted
+- **Status:** Superseded by ADR 0099 (an icon of characters and colours, named by the theme, drawn from new PNGs)
 - **Date:** 2026-10-22
 - **Amends:** ADR 0095 §1 and §2 (the logo row), ADR 0096 §1 (the role `logo`)
 

@@ -4,6 +4,7 @@ import dev.tamboui.style.Color;
 import dev.tamboui.style.Modifier;
 import dev.tamboui.style.Style;
 import java.lang.reflect.RecordComponent;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -15,7 +16,7 @@ import java.util.regex.Pattern;
  * Reads a theme file (ADR 0096): a {@code role = value} per line, where a role is a component of
  * {@link Palette} and every one must be set. A style is {@code none}, or {@code [colour] [on colour]
  * [modifier…]}; a colour is a name such as {@code dark-gray}, an index of the 256 colours or
- * {@code #RRGGBB}. A line starting with {@code #} is
+ * {@code #RRGGBB}. {@code logo} names an {@link Icon} (ADR 0099). A line starting with {@code #} is
  * a comment.
  */
 public final class ThemeParser {
@@ -29,8 +30,11 @@ public final class ThemeParser {
         }
     }
 
-    /** The role that ADR 0095 and ADR 0096 had for the logo, which {@code logo0} to {@code logo5} replace. */
-    private static final String OLD_LOGO = "logo";
+    /** The role that names the logo's icon. */
+    private static final String LOGO = "logo";
+
+    /** The roles that ADR 0097 had for the logo's colours, which the icon's colours replace. */
+    private static final Pattern OLD_LOGO = Pattern.compile("logo[0-5]");
 
     private static final Pattern HEX = Pattern.compile("#[0-9A-Fa-f]{6}");
     private static final Pattern INDEX = Pattern.compile("[0-9]{1,3}");
@@ -69,14 +73,22 @@ public final class ThemeParser {
 
     private ThemeParser() {}
 
+    /** The palette of a theme file whose logo is one of leia's own icons. */
+    public static Palette parse(String source, String text) throws Invalid {
+        return parse(source, text, Icons.bundled());
+    }
+
     /**
      * The palette of a theme file.
      *
      * @param source the file, as the message of an {@link Invalid} names it
-     * @throws Invalid if a line can't be read, a role is set twice or not at all
+     * @param icons where the icon of {@code logo} comes from
+     * @throws Invalid if a line can't be read, a role is set twice or not at all, or the icon is
+     *     missing or broken
      */
-    public static Palette parse(String source, String text) throws Invalid {
+    public static Palette parse(String source, String text, Icons icons) throws Invalid {
         Map<String, Style> styles = new HashMap<>();
+        Icon logo = null;
         List<String> lines = text.lines().toList();
         for (int i = 0; i < lines.size(); i++) {
             String line = lines.get(i).strip();
@@ -90,8 +102,14 @@ public final class ThemeParser {
             }
             String key = line.substring(0, equals).strip();
             String value = line.substring(equals + 1).strip();
-            if (key.equals(OLD_LOGO)) {
-                throw new Invalid(where + "unknown role 'logo': the logo's colours are logo0 to logo5");
+            if (OLD_LOGO.matcher(key).matches()) {
+                throw new Invalid(
+                        where + "unknown role '" + key + "': the logo is logo = <icon>, which has colours of its own");
+            } else if (key.equals(LOGO)) {
+                if (logo != null) {
+                    throw new Invalid(where + key + " is set twice");
+                }
+                logo = icons.find(where, value);
             } else if (ROLES.contains(key)) {
                 if (styles.containsKey(key)) {
                     throw new Invalid(where + key + " is set twice");
@@ -101,8 +119,11 @@ public final class ThemeParser {
                 throw new Invalid(where + "unknown role '" + key + "'");
             }
         }
-        List<String> missing =
-                ROLES.stream().filter(role -> !styles.containsKey(role)).toList();
+        List<String> missing = new ArrayList<>(
+                ROLES.stream().filter(role -> !styles.containsKey(role)).toList());
+        if (logo == null) {
+            missing.add(LOGO);
+        }
         if (!missing.isEmpty()) {
             throw new Invalid(source + ": missing " + String.join(", ", missing));
         }
@@ -120,12 +141,7 @@ public final class ThemeParser {
                 styles.get("muted"),
                 styles.get("border"),
                 styles.get("borderFocused"),
-                styles.get("logo0"),
-                styles.get("logo1"),
-                styles.get("logo2"),
-                styles.get("logo3"),
-                styles.get("logo4"),
-                styles.get("logo5"));
+                logo);
     }
 
     private static Style style(String where, String value) throws Invalid {
@@ -160,7 +176,7 @@ public final class ThemeParser {
         return style;
     }
 
-    private static Color colour(String where, String word) throws Invalid {
+    static Color colour(String where, String word) throws Invalid {
         Color named = NAMED.get(word.toLowerCase(Locale.ROOT));
         if (named != null) {
             return named;

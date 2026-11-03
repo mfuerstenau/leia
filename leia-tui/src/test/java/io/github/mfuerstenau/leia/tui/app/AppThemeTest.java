@@ -17,8 +17,10 @@ import io.github.mfuerstenau.leia.tui.theme.Themes;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -124,11 +126,17 @@ class AppThemeTest {
 
         Buffer buffer = TestScreens.buffer(app::render, 160, 30);
 
-        Color background = Color.hex("#2E3440");
+        // Nord's own, or where the logo's upper half is drawn, the colour of that half (ADR 0099).
+        Set<Color> backgrounds = new HashSet<>();
+        backgrounds.add(Color.hex("#2E3440"));
+        Palette.current()
+                .logo()
+                .rows()
+                .forEach(row -> row.forEach(logo -> logo.style().bg().ifPresent(backgrounds::add)));
         assertThat(cells(buffer))
                 .allSatisfy(cell -> assertThat(cell.style().bg())
                         .as("the background at %s", cell.position())
-                        .hasValue(background));
+                        .hasValueSatisfying(colour -> assertThat(backgrounds).contains(colour)));
     }
 
     @ParameterizedTest

@@ -10,40 +10,20 @@ import dev.tamboui.text.Span;
 import dev.tamboui.text.Text;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
+import io.github.mfuerstenau.leia.tui.theme.Icon;
 import io.github.mfuerstenau.leia.tui.theme.Palette;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.UncheckedIOException;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * leia's logo (ADR 0097): characters and slots, read from the resource {@code leia.logo}, which
- * holds a row of characters per line, a blank line, then a row of digits {@code 0} to {@code 5} per
- * line, the slot of each cell. The theme colours the slots through {@link Palette#logo}. Next to
- * the logo go leia's name, version and build.
+ * leia's logo: the {@link Icon} of the theme in use (ADR 0099), {@link Palette#logo}. Next to the
+ * logo go leia's name, version and build.
  */
 public final class Logo {
 
-    /** The slots, which {@link Palette} has a role for each. */
-    private static final int SLOTS = 6;
-
-    /** What {@code leia.logo} holds: a row of characters and a row of slots per line, as read. */
-    record Grid(List<String> characters, List<String> slots) {}
-
-    /** The logo's characters and slots, without the columns that are blank in every row at the right. */
-    private static final Grid GRID = load();
-
-    /** Columns the logo takes. */
-    public static final int WIDTH = GRID.characters().getFirst().length();
-
-    /** Rows the logo takes. */
-    public static final int HEIGHT = GRID.characters().size();
-
     /**
-     * The fewest rows the logo is drawn with. Where there are fewer than {@link #HEIGHT}, its top
-     * is cut off, down to these rows, which leave out only the sparse dots at the top.
+     * The fewest rows the logo is drawn with. Where there are fewer than its height, its top is cut
+     * off, down to these rows, which leave out the tips of the gazelle's horns.
      */
     public static final int MIN_HEIGHT = 18;
 
@@ -55,83 +35,15 @@ public final class Logo {
 
     private Logo() {}
 
-    /** The logo as {@link #HEIGHT} lines of {@link #WIDTH} cells, in the styles of {@code palette}. */
+    /** The logo of {@code palette} as a line per row. */
     static List<Line> lines(Palette palette) {
         List<Line> lines = new ArrayList<>();
-        for (int row = 0; row < HEIGHT; row++) {
-            String characters = GRID.characters().get(row);
-            String slots = GRID.slots().get(row);
-            List<Span> spans = new ArrayList<>();
-            for (int column = 0; column < WIDTH; column++) {
-                spans.add(Span.styled(
-                        String.valueOf(characters.charAt(column)), palette.logo(slots.charAt(column) - '0')));
-            }
-            lines.add(Line.from(spans));
+        for (List<Icon.Cell> row : palette.logo().rows()) {
+            lines.add(Line.from(row.stream()
+                    .map(cell -> Span.styled(cell.character(), cell.style()))
+                    .toList()));
         }
         return lines;
-    }
-
-    private static Grid load() {
-        try (InputStream in = Logo.class.getResourceAsStream("leia.logo")) {
-            if (in == null) {
-                throw new IllegalStateException("leia.logo is missing");
-            }
-            return parse(new String(in.readAllBytes(), StandardCharsets.UTF_8));
-        } catch (IOException e) {
-            throw new UncheckedIOException(e);
-        }
-    }
-
-    /**
-     * Reads the text of a {@code leia.logo}, and cuts the columns that are blank in every row at the
-     * right.
-     *
-     * @throws IllegalStateException if the blocks differ in size, a slot is not 0 to 5, or a space
-     *     is not exactly the cells of slot 0: a bug of the build, as a broken bundled theme is
-     */
-    static Grid parse(String text) {
-        List<String> rows = text.lines().toList();
-        int blank = rows.indexOf("");
-        if (blank <= 0) {
-            throw new IllegalStateException("leia.logo: no characters before a blank line");
-        }
-        List<String> characters = rows.subList(0, blank);
-        List<String> slots = rows.subList(blank + 1, rows.size());
-        if (slots.size() != characters.size()) {
-            throw new IllegalStateException(
-                    "leia.logo: " + characters.size() + " rows of characters, " + slots.size() + " of slots");
-        }
-        int width = 0;
-        for (int row = 0; row < characters.size(); row++) {
-            String cells = characters.get(row);
-            String slotRow = slots.get(row);
-            if (slotRow.length() != cells.length()) {
-                throw new IllegalStateException("leia.logo: row " + (row + 1) + " has " + cells.length()
-                        + " characters and " + slotRow.length() + " slots");
-            }
-            for (int column = 0; column < cells.length(); column++) {
-                int slot = slotRow.charAt(column) - '0';
-                if (slot < 0 || slot >= SLOTS) {
-                    throw new IllegalStateException(
-                            "leia.logo: row " + (row + 1) + ", column " + (column + 1) + ": slot is 0 to 5");
-                }
-                boolean space = cells.charAt(column) == ' ';
-                if (space != (slot == 0)) {
-                    throw new IllegalStateException("leia.logo: row " + (row + 1) + ", column " + (column + 1)
-                            + ": a space is slot 0 and nothing else is");
-                }
-                if (!space) {
-                    width = Math.max(width, column + 1);
-                }
-            }
-        }
-        if (width == 0) {
-            throw new IllegalStateException("leia.logo is empty");
-        }
-        int cut = width;
-        return new Grid(
-                characters.stream().map(row -> row.substring(0, cut)).toList(),
-                slots.stream().map(row -> row.substring(0, cut)).toList());
     }
 
     /**
@@ -146,12 +58,13 @@ public final class Logo {
     }
 
     /**
-     * Whether the logo, cut to {@link #MIN_HEIGHT} rows at the least, and {@code text} next to it,
+     * Whether the logo of the theme in use, cut to {@link #MIN_HEIGHT} rows at the least, and {@code text} next to it,
      * wrapped, fit into {@code area}.
      */
     public static boolean fitsBeside(Rect area, List<Line> text) {
-        int textWidth = area.width() - WIDTH - GAP;
-        return area.height() >= MIN_HEIGHT
+        Icon logo = Palette.current().logo();
+        int textWidth = area.width() - logo.width() - GAP;
+        return area.height() >= Math.min(MIN_HEIGHT, logo.height())
                 && textWidth >= MIN_TEXT_WIDTH
                 && Panels.wrap(text, textWidth).size() <= area.height();
     }
@@ -162,12 +75,14 @@ public final class Logo {
      * wide.
      */
     public static void renderBeside(Frame frame, Rect area, List<Line> text) {
+        Icon logo = Palette.current().logo();
         List<Rect> columns = Layout.horizontal()
-                .constraints(Constraint.length(WIDTH), Constraint.length(GAP), Constraint.fill())
+                .constraints(Constraint.length(logo.width()), Constraint.length(GAP), Constraint.fill())
                 .split(area);
-        int height = Math.min(HEIGHT, area.height());
+        int height = Math.min(logo.height(), area.height());
         List<Line> lines = lines(Palette.current());
-        frame.renderWidget(Paragraph.from(Text.from(lines.subList(HEIGHT - height, HEIGHT))), columns.get(0));
+        frame.renderWidget(
+                Paragraph.from(Text.from(lines.subList(logo.height() - height, logo.height()))), columns.get(0));
         int offset = Math.max(height - Panels.wrap(text, columns.get(2).width()).size(), 0) / 2;
         Rect textArea = Layout.vertical()
                 .constraints(Constraint.length(offset), Constraint.fill())

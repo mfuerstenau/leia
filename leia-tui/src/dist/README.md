@@ -231,12 +231,7 @@ match         = #2E3440 on #EBCB8B
 muted         = #7B88A1
 border        = #7B88A1
 borderFocused = #88C0D0
-logo0         = none
-logo1         = #BF616A
-logo2         = #B48EAD
-logo3         = #A3BE8C
-logo4         = #EBCB8B
-logo5         = #D08770
+logo          = gazelle-aurora
 ```
 
 A file sets every role once; a line starting with `#` is a comment. A style is `none`, the
@@ -245,9 +240,30 @@ is a name (`black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `white`
 `dark-gray`, `light-red`, `light-green`, `light-yellow`, `light-blue`, `light-magenta`,
 `light-cyan`, `bright-white`), a number from 0 to 255 of the 256-colour palette, or `#RRGGBB`,
 which needs a terminal with 24-bit colour. The modifiers are `bold`, `dim`, `italic`, `underlined`
-and `reversed`. `logo0` to `logo5` colour the start screen's logo, slot by slot: `logo0` is the
-space around the gazelle, and `none` leaves it the terminal's own. A file leia can't read is left out, and the log
+and `reversed`. `logo` names the start screen's logo, an icon: leia's own are `gazelle` (of
+`dark` and `light`), `gazelle-aurora` (of `nord`) and
+`gazelle-mono` (of `mono`, without colours). A file leia can't read is left out, and the log
 says which line is wrong and why.
+
+### Icons of your own
+
+An icon is two files in the themes folder. `<name>.chars` holds a row of characters per line.
+`<name>.colours` holds a row of cells per line, one for each character, separated by spaces. A cell
+is `foreground/background`, a `foreground` alone, or `-`. Each colour is written as in a theme,
+or as `-` for none, which leaves what is beneath: the terminal's own, or the theme's `base`. If
+the first line of `<name>.colours` is `chars = <other>`, it colours the characters of
+`<other>.chars`, one of yours or one of leia's. So a single file, here `gazelle-sepia.colours`,
+recolours leia's gazelle in 30 rows of 38 cells:
+
+```
+chars = gazelle
+- - - - - - - - - - - - - - - - - - - #704214 - - - - - - - - - - - - - - - #704214 - -
+…
+```
+
+`logo = gazelle-sepia` in a theme then draws it. A row of characters may be shorter than its
+cells, as an editor that strips trailing spaces leaves it; the rest are spaces. An icon leia can't
+read leaves out the theme that names it, and the log says why.
 
 ## License and disclaimer
 

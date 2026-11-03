@@ -2,7 +2,6 @@ package io.github.mfuerstenau.leia.tui.theme;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import dev.tamboui.style.Style;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -101,12 +100,14 @@ class ThemeFileTest {
         try (var in = Themes.class.getResourceAsStream("mono.theme")) {
             mono = new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
-        Files.writeString(themesDir.resolve("mono.theme"), mono.replace("logo1         = none", "logo1         = red"));
+        Files.writeString(
+                themesDir.resolve("mono.theme"),
+                mono.replace("logo          = gazelle-mono", "logo          = gazelle"));
         Themes themes = THEMES.withUserDir(Optional.of(themesDir));
 
         Theme chosen = ThemeFile.none().resolve(Optional.empty(), "1", themes);
 
         assertThat(chosen.id()).isEqualTo("mono");
-        assertThat(chosen.palette().logo1()).isEqualTo(Style.EMPTY.red());
+        assertThat(chosen.palette().logo()).isEqualTo(DARK.palette().logo());
     }
 }
