@@ -9,6 +9,7 @@
 
 A **read-only Lucene index inspector** for the terminal, as an alternative to
 [Luke](https://github.com/apache/lucene/tree/main/lucene/luke), the Swing tool that ships with Lucene.
+Also it is an MCP server.
 
 ![welcome screen](/docs/screenshots/welcome_dark.png "welcome screen")
 
@@ -955,3 +956,6 @@ Apache Lucene code it adapts and the third-party software in `leia.jar`.
 
 leia stands for **L**uke **E**volved **I**ndex **A**nalysis. leia is in no way affiliated with,
 endorsed by or connected to Disney, Lucasfilm or the Star Wars franchise.
+
+leia is 99% vibe-coded, despite me (mfuerstenau) having more than 10+ years experience with Lucene
+(since 2.4 actually). I did review some of the core functionality, but did not bother with the UI.
