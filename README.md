@@ -1,5 +1,5 @@
 <p align="center">
-    <img src="https://badgen.net/badge/State/Alpha/red" />
+    <img src="https://badgen.net/badge/State/Stable/green" />
     <img src="https://badgen.net/badge/License/Apache 2.0/blue" />
     <img src="https://badgen.net/badge/JDK%2fJRE/25/blue" />
     <img src="https://badgen.net/badge/Lucene/2-10/blue" />
