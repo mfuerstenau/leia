@@ -618,6 +618,10 @@ class McpServerTest {
         blocking.release.countDown();
 
         client.structured(3, "index_info", "{}");
+        // The job of 1 sends its progress once released, on a worker of its own, and is cancelled
+        // after that; a ping then reads what it sent.
+        assertThat(blocking.cancelled.await(30, TimeUnit.SECONDS)).isTrue();
+        client.request(4, "ping", "{}");
 
         assertThat(client.received())
                 .noneMatch(message -> message.path("id").isIntegralNumber()
@@ -628,8 +632,6 @@ class McpServerTest {
                                 .path("progressToken")
                                 .asString("")
                                 .equals("p"));
-        // index_info doesn't wait for it: the calls run side by side (ADR 0101).
-        assertThat(blocking.cancelled.await(30, TimeUnit.SECONDS)).isTrue();
     }
 
     @Test
@@ -1191,24 +1193,27 @@ class McpServerTest {
     void refusesKnnWithoutTheFeature() throws Exception {
         Session session = new Session(DirectoryImpl.FS, Optional.empty(), List.of());
         McpClient plain = serve(session, Tools.ALL);
-        OpenIndexResult opened = session.opened().orElseThrow();
-        session.opened(new OpenIndexResult(
-                opened.path(),
-                opened.mode(),
-                opened.numDocs(),
-                opened.maxDoc(),
-                opened.indexes(),
-                opened.skipped(),
-                opened.features().stream()
-                        .filter(feature -> feature != Feature.KNN_VECTORS)
-                        .collect(java.util.stream.Collectors.toSet()),
-                opened.luceneRuntime(),
-                opened.server()));
+        try {
+            OpenIndexResult opened = session.opened().orElseThrow();
+            session.opened(new OpenIndexResult(
+                    opened.path(),
+                    opened.mode(),
+                    opened.numDocs(),
+                    opened.maxDoc(),
+                    opened.indexes(),
+                    opened.skipped(),
+                    opened.features().stream()
+                            .filter(feature -> feature != Feature.KNN_VECTORS)
+                            .collect(java.util.stream.Collectors.toSet()),
+                    opened.luceneRuntime(),
+                    opened.server()));
 
-        assertThat(plain.error(1, "search", knn("\"docId\":42") + "}"))
-                .contains("Lucene 9 or 10")
-                .endsWith("(NOT_SUPPORTED)");
-        plain.close();
+            assertThat(plain.error(1, "search", knn("\"docId\":42") + "}"))
+                    .contains("Lucene 9 or 10")
+                    .endsWith("(NOT_SUPPORTED)");
+        } finally {
+            plain.close();
+        }
     }
 
     @Test
@@ -1527,15 +1532,18 @@ class McpServerTest {
     void refusesACheckWithoutTheFeatures() throws Exception {
         Session session = new Session(DirectoryImpl.FS, Optional.empty(), List.of());
         McpClient plain = serve(session, Tools.ALL);
-        withoutFeature(session, Feature.CHECK_LEVELS);
+        try {
+            withoutFeature(session, Feature.CHECK_LEVELS);
 
-        assertThat(plain.error(1, "check_index", "{\"level\":2}")).endsWith("(NOT_SUPPORTED)");
-        assertThat(plain.structured(2, "check_index", "{}").path("clean").asBoolean())
-                .isTrue();
+            assertThat(plain.error(1, "check_index", "{\"level\":2}")).endsWith("(NOT_SUPPORTED)");
+            assertThat(plain.structured(2, "check_index", "{}").path("clean").asBoolean())
+                    .isTrue();
 
-        withoutFeature(session, Feature.CHECK_INDEX);
-        assertThat(plain.error(3, "check_index", "{}")).endsWith("(NOT_SUPPORTED)");
-        plain.close();
+            withoutFeature(session, Feature.CHECK_INDEX);
+            assertThat(plain.error(3, "check_index", "{}")).endsWith("(NOT_SUPPORTED)");
+        } finally {
+            plain.close();
+        }
     }
 
     @Test

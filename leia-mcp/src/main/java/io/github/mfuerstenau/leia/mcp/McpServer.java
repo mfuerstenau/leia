@@ -236,7 +236,8 @@ public final class McpServer {
                             callTool(request, params, output);
                         }
                     } finally {
-                        requests.remove(id.toString());
+                        // Unless answered, which freed the id; a new request may have it by now.
+                        requests.remove(id.toString(), request);
                     }
                 });
             }
@@ -265,7 +266,7 @@ public final class McpServer {
                 .filter(candidate -> candidate.name().equals(name))
                 .findFirst();
         if (tool.isEmpty()) {
-            output.send(Messages.error(request.id, Messages.INVALID_PARAMS, "Unknown tool: " + name));
+            answer(request, Messages.error(request.id, Messages.INVALID_PARAMS, "Unknown tool: " + name), output);
             return;
         }
         Lock lock = tool.get().exclusive() ? calls.writeLock() : calls.readLock();
@@ -299,14 +300,23 @@ public final class McpServer {
             return;
         } catch (RuntimeException | Error e) {
             LOG.log(Level.SEVERE, e, () -> "tools/call " + name + " failed");
-            output.send(Messages.error(request.id, Messages.INTERNAL_ERROR, "Internal error: " + e));
+            answer(request, Messages.error(request.id, Messages.INTERNAL_ERROR, "Internal error: " + e), output);
             return;
         }
         if (request.cancelled.get()) {
             LOG.info(() -> "Request " + request.id + " cancelled; no answer");
             return;
         }
-        output.send(Messages.response(request.id, result));
+        answer(request, Messages.response(request.id, result), output);
+    }
+
+    /**
+     * Frees the id of {@code request}, then sends its answer: a client that has the answer may send
+     * a new request with the same id at once.
+     */
+    private void answer(Request request, JsonNode message, Output output) {
+        requests.remove(request.id.toString(), request);
+        output.send(message);
     }
 
     private static <A extends Record, R extends Record> R run(McpTool<A, R> tool, JsonNode arguments, Call call)

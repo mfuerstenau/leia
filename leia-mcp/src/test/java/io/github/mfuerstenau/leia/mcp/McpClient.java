@@ -31,14 +31,19 @@ final class McpClient {
 
     McpClient(McpServer server) throws IOException {
         PipedInputStream in = new PipedInputStream(stdin, 1 << 16);
-        status = CompletableFuture.supplyAsync(() -> {
-            try {
-                return server.serve(in, new Lines());
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException(e);
-            }
-        });
+        // Not on the common pool: serve blocks for the whole test, and the pool has a thread per
+        // processor but one, two or three on a CI runner, so clients that don't end would starve
+        // the next ones. A daemon, so that one that hangs doesn't keep the test JVM alive.
+        status = CompletableFuture.supplyAsync(
+                () -> {
+                    try {
+                        return server.serve(in, new Lines());
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException(e);
+                    }
+                },
+                task -> Thread.ofPlatform().daemon().name("mcp-client").start(task));
     }
 
     void send(String line) throws IOException {
