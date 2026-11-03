@@ -10,7 +10,7 @@
 A **read-only Lucene index inspector** for the terminal, as an alternative to
 [Luke](https://github.com/apache/lucene/tree/main/lucene/luke), the Swing tool that ships with Lucene.
 
-![welcome screen](/docs/screenshots/welcome.png?raw=true "welcome creen")
+![welcome screen](/docs/screenshots/welcome_dark.png "welcome screen")
 
 leia never opens an `IndexWriter`, never takes the write lock and never changes a file in the index
 directory, so it is safe to point at a live index.
@@ -59,13 +59,18 @@ terminal UI (see [MCP mode](#mcp-mode)).
   without a reader too.
 - **Export terms:** the terms of a field with their document frequencies, written to a file.
 
-*More screenshots:*
+<details>
+<summary>More screenshots</summary>
 
-![download dialog](/docs/screenshots/download.png?raw=true "download dialog")
-![overview tab](/docs/screenshots/overview.png?raw=true "overview tab")
-![document tab](/docs/screenshots/document.png?raw=true "document tab")
-![value view](/docs/screenshots/document_value_view.png?raw=true "value view")
-![search tab](/docs/screenshots/search.png?raw=true "search tab")
+<p>
+  <a href="/docs/screenshots/welcome_solarized.png"><img src="/docs/screenshots/welcome_solarized.png" alt="welcome screen solarized theme" title="welcome screen solarized theme" width="32%"></a>
+  <a href="/docs/screenshots/overview.png"><img src="/docs/screenshots/overview.png" alt="overview tab" title="overview tab" width="32%"></a>
+  <a href="/docs/screenshots/download.png"><img src="/docs/screenshots/download.png" alt="download dialog" title="download dialog" width="32%"></a>
+  <a href="/docs/screenshots/check.png"><img src="/docs/screenshots/check.png" alt="commits tab" title="commits tab" width="32%"></a>
+  <a href="/docs/screenshots/search.png"><img src="/docs/screenshots/search.png" alt="search tab" title="search tab" width="32%"></a>
+</p>
+
+</details>
 
 The rest of Luke's read-only features are still to come (see
 [`docs/tasklist.md`](docs/tasklist.md)).
