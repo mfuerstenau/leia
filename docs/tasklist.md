@@ -34,7 +34,10 @@ None open.
 
 ## Documentation
 
-None open.
+- [ ] Rewrite `README.md` to be far more compact: lists instead of full paragraphs.
+  - The runtimes as a table: each runtime folder with the Lucene version it ships (the version only, no hash or URL) and the indexes it reads.
+  - The building section as a short step-by-step guide: clone, then the Gradle commands in order.
+  - State the Java version needed to build (Java 17+ to start the wrapper; Gradle provisions Temurin 25 for the daemon and the toolchain).
 
 ## Bugs
 
