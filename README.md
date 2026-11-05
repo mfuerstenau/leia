@@ -8,7 +8,7 @@
 # leia
 
 A **read-only Lucene index inspector** for the terminal, as an alternative to
-[Luke](https://github.com/apache/lucene/tree/main/lucene/luke), the Swing tool that ships with Lucene.
+[Luke](https://github.com/apache/lucene/tree/main/lucene/luke), the tool that ships with Lucene.
 
 ![welcome screen](/docs/screenshots/overview.png "overview tab")
 
@@ -18,6 +18,7 @@ A **read-only Lucene index inspector** for the terminal, as an alternative to
   in a class loader of its own (see [Runtimes](#runtimes)).
 - **MCP server:** with `--mcp`, leia serves an index to a coding agent instead of starting the UI
   (see [MCP mode](#mcp-mode)).
+- **Sorting** of field names (😉 sorry, luke)
 
 ## What it shows
 
