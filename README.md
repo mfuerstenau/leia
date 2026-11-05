@@ -10,7 +10,7 @@
 A **read-only Lucene index inspector** for the terminal, as an alternative to
 [Luke](https://github.com/apache/lucene/tree/main/lucene/luke), the tool that ships with Lucene.
 
-![welcome screen](/docs/screenshots/overview.png "overview tab")
+![welcome screen](/docs/screenshots/overview.png "overview tab - this is nord theme, can look different on  your terminal")
 
 - **Read-only:** never opens an `IndexWriter`, never takes the write lock, never changes a file in
   the index directory. Safe to point at a live index.
