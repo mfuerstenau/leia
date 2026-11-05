@@ -10,7 +10,7 @@
 A **read-only Lucene index inspector** for the terminal, as an alternative to
 [Luke](https://github.com/apache/lucene/tree/main/lucene/luke), the Swing tool that ships with Lucene.
 
-![welcome screen](/docs/screenshots/welcome_dark.png "welcome screen")
+![welcome screen](/docs/screenshots/overview.png "overview tab")
 
 - **Read-only:** never opens an `IndexWriter`, never takes the write lock, never changes a file in
   the index directory. Safe to point at a live index.
@@ -41,7 +41,7 @@ A **read-only Lucene index inspector** for the terminal, as an alternative to
 
 <p>
   <a href="/docs/screenshots/welcome_solarized.png"><img src="/docs/screenshots/welcome_solarized.png" alt="welcome screen solarized theme" title="welcome screen solarized theme" width="32%"></a>
-  <a href="/docs/screenshots/overview.png"><img src="/docs/screenshots/overview.png" alt="overview tab" title="overview tab" width="32%"></a>
+  <a href="/docs/screenshots/welcome_dark.png"><img src="/docs/screenshots/welcome_dark.png" alt="welcome screen dark theme" title="welcome screen dark theme" width="32%"></a>
   <a href="/docs/screenshots/download.png"><img src="/docs/screenshots/download.png" alt="download dialog" title="download dialog" width="32%"></a>
   <a href="/docs/screenshots/check.png"><img src="/docs/screenshots/check.png" alt="commits tab" title="commits tab" width="32%"></a>
   <a href="/docs/screenshots/search.png"><img src="/docs/screenshots/search.png" alt="search tab" title="search tab" width="32%"></a>
