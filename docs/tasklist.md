@@ -28,6 +28,10 @@ Each tool is over a method the backend has; it checks the runtime's `features` a
 
 Not planned: highlighting, the point tree and the KNN graph, the term export, filters, `addJars` and the runtimes, resources and prompts.
 
+## Download mirrors for runtime jars
+
+The lane is done (ADR 0124).
+
 ## Open prompt
 
 None open.

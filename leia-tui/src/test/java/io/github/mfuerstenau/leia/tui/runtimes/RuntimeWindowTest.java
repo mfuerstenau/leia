@@ -12,13 +12,17 @@ import io.github.mfuerstenau.leia.protocol.jars.RuntimeState;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
 import io.github.mfuerstenau.leia.tui.TestScreens;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
@@ -343,6 +347,175 @@ class RuntimeWindowTest {
             assertThat(files).noneMatch(file -> file.getFileName().toString().endsWith(".part"));
         }
         assertThat(window.handleKey(key(KeyCode.ESCAPE))).isInstanceOf(RuntimeWindow.Close.class);
+    }
+
+    @Test
+    void mChoosesTheMirrorToDownloadFrom() throws Exception {
+        Mirror eu = Mirrors.builtIn().get(3);
+        install = new RuntimeInstall(
+                runtimes,
+                List.of(new Mirror(repository.base(), "Local", Mirror.Origin.OPTION), eu),
+                RuntimeWindowTest.class.getClassLoader());
+        plan(RuntimeFolders.KNOWN);
+        // The header wraps: its pieces are checked one by one.
+        assertThat(screen()).contains("from Local", "(" + repository.base() + ") (--download-url)", "m mirror");
+
+        assertThat(window.handleKey(key('m'))).isInstanceOf(RuntimeWindow.Nothing.class);
+        assertThat(screen())
+                .contains(" Mirror to download from ")
+                .contains("Local · " + repository.base() + " (--download-url)")
+                .contains(eu.name() + " · " + eu.uri())
+                .contains("Own URL…")
+                .contains("u own URL", "Esc back");
+        window.handleKey(key(KeyCode.DOWN));
+
+        assertThat(window.handleKey(key(KeyCode.ENTER))).isEqualTo(new RuntimeWindow.UseMirror(eu));
+        assertThat(window.mirror()).hasValue(eu);
+        assertThat(screen())
+                .contains("from " + eu.name())
+                .doesNotContain(repository.base() + "org/apache/lucene/")
+                .doesNotContain(" Mirror to download from ");
+    }
+
+    @Test
+    void refusesAnOwnUrlThatIsNotHttps() throws Exception {
+        plan(RuntimeFolders.KNOWN);
+        window.handleKey(key('m'));
+        window.handleKey(key('u'));
+        assertThat(screen()).contains(" Mirror URL ", "https://", "⏎ use");
+        window.handleKey(TestScreens.ctrl('u'));
+        "http://maven.example.com/".chars().forEach(c -> window.handleKey(key((char) c)));
+
+        assertThat(window.handleKey(key(KeyCode.ENTER))).isInstanceOf(RuntimeWindow.Nothing.class);
+        assertThat(screen()).contains("is http, which a proxy may rewrite");
+
+        window.handleKey(TestScreens.ctrl('u'));
+        "https://maven.example.com/central".chars().forEach(c -> window.handleKey(key((char) c)));
+        assertThat(window.handleKey(key(KeyCode.ENTER)))
+                .isEqualTo(new RuntimeWindow.UseMirror(new Mirror(
+                        java.net.URI.create("https://maven.example.com/central/"),
+                        "maven.example.com",
+                        Mirror.Origin.TYPED)));
+        assertThat(screen()).contains("from maven.example.com", "(https://maven.example.com/central/) (typed)");
+    }
+
+    @Test
+    void escapeLeavesTheMirrorsAsTheyWere() throws Exception {
+        plan(RuntimeFolders.KNOWN);
+        window.handleKey(key('m'));
+
+        assertThat(window.handleKey(key(KeyCode.ESCAPE))).isInstanceOf(RuntimeWindow.Nothing.class);
+        assertThat(screen()).doesNotContain(" Mirror to download from ").contains("[ ] Lucene 9");
+        assertThat(window.handleKey(key(KeyCode.ESCAPE))).isInstanceOf(RuntimeWindow.Close.class);
+    }
+
+    @Test
+    void namesTheMirrorsThatWereLeftOut() throws Exception {
+        window.planned(
+                install,
+                install.plan(RuntimeFolders.KNOWN),
+                List.of(),
+                List.of("/home/u/.config/leia/mirrors, line 2: 'http://x/' is http"));
+
+        assertThat(screen()).contains("Mirror left out: /home/u/.config/leia/mirrors, line 2: 'http://x/' is http");
+    }
+
+    @Test
+    void asksWhichMirrorToRetryAFailedDownloadFrom() throws Exception {
+        try (FakeRepository second = new FakeRepository()) {
+            String path = "org/apache/lucene/lucene-backward-codecs/9.12.3/lucene-backward-codecs-9.12.3.jar";
+            repository.served.remove(path);
+            Mirror local = new Mirror(repository.base(), "Local", Mirror.Origin.OPTION);
+            Mirror other = new Mirror(second.base(), "Second", Mirror.Origin.OPTION);
+            install = new RuntimeInstall(runtimes, List.of(local, other), RuntimeWindowTest.class.getClassLoader());
+            plan(List.of(known("lucene9")));
+            window.handleKey(key(' '));
+            BlockingQueue<MirrorChooser.Failure> failures = new LinkedBlockingQueue<>();
+            BlockingQueue<Set<URI>> tried = new LinkedBlockingQueue<>();
+            BlockingQueue<MirrorChooser.Choice> choices = new LinkedBlockingQueue<>();
+
+            RuntimeWindow.Install start = (RuntimeWindow.Install) window.handleKey(key(KeyCode.ENTER));
+            CompletableFuture<RuntimeInstall.Outcome> running = CompletableFuture.supplyAsync(() -> start.install()
+                    .install(start.plan(), start.chosen(), start.listener(), start.cancelled(), (failure, m, t) -> {
+                        failures.add(failure);
+                        tried.add(t);
+                        try {
+                            return choices.take();
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            return new MirrorChooser.Choice.Abort();
+                        }
+                    }));
+            MirrorChooser.Failure failure = failures.poll(30, TimeUnit.SECONDS);
+            assertThat(failure).isNotNull();
+            window.downloadFailed(failure, List.of(local, other), tried.take());
+
+            assertThat(window.installing()).isTrue();
+            assertThat(screen())
+                    .contains("lucene9/lucene-backward-codecs-9.12.3.jar from Local failed: HTTP 404")
+                    .contains("Esc stops the download")
+                    .contains(" Retry lucene-backward-codecs-9.12.3.jar from ")
+                    .contains("✗ Local · " + repository.base() + " (--download-url) · HTTP 404")
+                    .contains("✗ lucene-backward-codecs-9.12.3.jar")
+                    .contains("✗ Local: HTTP 404")
+                    .contains("Esc stop");
+            // The cursor is on the first mirror that hasn't failed.
+            RuntimeWindow.Event event = window.handleKey(key(KeyCode.ENTER));
+            assertThat(event).isEqualTo(new RuntimeWindow.Choose(new MirrorChooser.Choice.Retry(other)));
+            choices.add(((RuntimeWindow.Choose) event).choice());
+
+            RuntimeInstall.Outcome outcome = running.get(30, TimeUnit.SECONDS);
+            assertThat(outcome.status()).isZero();
+            assertThat(window.finished(outcome)).isTrue();
+            assertThat(screen())
+                    .contains("lucene9: installed")
+                    .contains("lucene-backward-codecs-9.12.3.jar, ")
+                    .contains("downloaded from Second")
+                    .contains("✗ Local: HTTP 404");
+            assertThat(window.gaugeDone()).isEqualTo(window.gaugeTotal());
+        }
+    }
+
+    @Test
+    void escapeAfterAFailedDownloadStopsIt() throws Exception {
+        plan(List.of(known("lucene9")));
+        window.handleKey(key(' '));
+        repository.holdBack();
+        CompletableFuture<RuntimeInstall.Outcome> running = enter();
+        await(() -> repository.requests.get() > 0);
+        Mirror local = install.mirrors().getFirst();
+
+        window.downloadFailed(
+                new MirrorChooser.Failure("lucene9", "a.jar", local, "HTTP 500", "cannot download a.jar"),
+                install.mirrors(),
+                Set.of(local.uri()));
+
+        assertThat(window.handleKey(key(KeyCode.ESCAPE)))
+                .isEqualTo(new RuntimeWindow.Choose(new MirrorChooser.Choice.Abort()));
+        assertThat(window.installing()).isTrue();
+        window.handleKey(key(KeyCode.ESCAPE));
+        repository.release();
+        window.finished(running.get());
+        assertThat(window.installing()).isFalse();
+    }
+
+    @Test
+    void aRetriedJarStartsItsBytesOver() throws Exception {
+        RuntimeInstall.Plan plan = install.plan(List.of(known("lucene9")));
+        RuntimeWindow.Progress progress = new RuntimeWindow.Progress(plan.runtimes());
+        String jar = lucene(known("lucene9")).getFirst().name();
+        Mirror local = install.mirrors().getFirst();
+
+        progress.jarStarted("lucene9", jar, 1000);
+        progress.bytes(400);
+        progress.mirrorFailed(new MirrorChooser.Failure("lucene9", jar, local, "no bytes for 60 s", ""));
+        assertThat(progress.done()).isEqualTo(400);
+        progress.jarStarted("lucene9", jar, 1000);
+
+        assertThat(progress.done()).isZero();
+        assertThat(progress.lines("*"))
+                .map(line -> line.spans().stream().map(span -> span.content()).reduce("", String::concat))
+                .contains("      ✗ " + local.name() + ": no bytes for 60 s");
     }
 
     @Test

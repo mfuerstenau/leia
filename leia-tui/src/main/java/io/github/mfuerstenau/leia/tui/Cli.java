@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.tui;
 
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
+import io.github.mfuerstenau.leia.tui.runtimes.Mirrors;
 import java.io.Serial;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -27,6 +28,8 @@ import java.util.Optional;
  *     option, and no {@code INDEX_PATH} (ADR 0080)
  * @param runtimes {@code --runtime}, in the order given: with {@code --download-runtimes}, the
  *     runtimes' folders to install without asking, each one leia knows (ADR 0079, ADR 0080)
+ * @param downloadUrls {@code --download-url}, in the order given: with {@code --download-runtimes},
+ *     mirrors of Maven Central to try first, each one that {@link Mirrors#check} accepts (ADR 0124)
  * @param theme {@code --theme}, the colour theme (ADR 0095): a name that {@link Main} checks
  *     against the themes, since the user's own are known only once their folder is read (ADR 0096)
  * @param mcp {@code --mcp}: serve {@code INDEX_PATH} to an MCP client on stdin and stdout instead
@@ -48,6 +51,7 @@ record Cli(
         Optional<String> indexPath,
         boolean downloadRuntimes,
         List<String> runtimes,
+        List<String> downloadUrls,
         Optional<String> theme,
         boolean mcp,
         List<Path> mcpRoots,
@@ -110,15 +114,24 @@ record Cli(
                       Install the runtimes of --runtime into the folder runtimes (see
                       --no-default-jars) without asking, as for a script, then exit: leia's own
                       jars from leia.jar, Lucene's from Maven Central
-                      (https://repo1.maven.org/maven2/), each checked against its SHA-256. It
-                      lists the Lucene jars with their URLs and SHA-256s, then downloads them; a
-                      jar that is there and matches is kept. Behind a proxy, start it with
+                      (https://repo1.maven.org/maven2/) or a mirror of it, each checked against
+                      its SHA-256. It lists the Lucene jars with their URLs and SHA-256s and the
+                      mirrors, then downloads them; a jar that is there and matches is kept. When a
+                      download fails, it asks on a terminal which mirror to retry from; without
+                      one, it tries the next mirror. Behind a proxy, start it with
                       LEIA_OPTS=-Djava.net.useSystemProxies=true. Takes no other option but
-                      --runtime. To choose runtimes instead, start leia and press D on its start
-                      screen
+                      --runtime and --download-url. To choose runtimes instead, start leia and
+                      press D on its start screen
                   --runtime <FOLDER>
                       With --download-runtimes, a runtime to install: lucene10, lucene9, lucene7,
                       lucene5 or lucene3. Can be repeated
+                  --download-url <URL>
+                      With --download-runtimes, a mirror of Maven Central to try first, such as
+                      https://maven-central-eu.storage-download.googleapis.com/maven2/. Can be
+                      repeated. After it come the mirrors of the file mirrors in the config folder
+                      ($XDG_CONFIG_HOME/leia, ~/.config/leia, /etc/xdg/leia; %APPDATA%\\leia), one
+                      URL per line, then leia's own list. It must be https; http needs
+                      LEIA_OPTS=-Dleia.download.insecure=true
                   --theme <THEME>
                       The colours: dark, the terminal's own; light, for a light background; mono,
                       none at all; nord, the Nord palette, and solarized-dark and
@@ -162,6 +175,7 @@ record Cli(
         jars = List.copyOf(jars);
         servers = List.copyOf(servers);
         runtimes = List.copyOf(runtimes);
+        downloadUrls = List.copyOf(downloadUrls);
         mcpRoots = List.copyOf(mcpRoots);
     }
 
@@ -200,6 +214,7 @@ record Cli(
         private Optional<String> indexPath = Optional.empty();
         private boolean downloadRuntimes;
         private final List<String> runtimes = new ArrayList<>();
+        private final List<String> downloadUrls = new ArrayList<>();
         private Optional<String> theme = Optional.empty();
         private boolean mcp;
         private final List<Path> mcpRoots = new ArrayList<>();
@@ -241,6 +256,7 @@ record Cli(
                 case "--jar" -> jars.add(path(name, value(name, inline, "<PATH>")));
                 case "--server" -> servers.add(path(name, value(name, inline, "<PATH>")));
                 case "--runtime" -> runtimes.add(runtime(value(name, inline, "<FOLDER>")));
+                case "--download-url" -> downloadUrls.add(downloadUrl(value(name, inline, "<URL>")));
                 case "--theme" -> theme = Optional.of(value(name, inline, "<THEME>"));
                 case "--directory" -> {
                     directory = directory(value(name, inline, "<IMPL>"));
@@ -270,7 +286,12 @@ record Cli(
                 throw new UsageException("--download-runtimes takes no INDEX_PATH and none of --jar, --server,"
                         + " --no-default-jars, --directory, --no-reader, --theme");
             }
-            if (mcp && (downloadRuntimes || !runtimes.isEmpty() || theme.isPresent() || noReader)) {
+            if (mcp
+                    && (downloadRuntimes
+                            || !runtimes.isEmpty()
+                            || !downloadUrls.isEmpty()
+                            || theme.isPresent()
+                            || noReader)) {
                 throw new UsageException("--mcp takes none of --download-runtimes, --runtime, --theme, --no-reader:"
                         + " an MCP client reads an index only with a reader");
             }
@@ -285,6 +306,10 @@ record Cli(
             }
             if (!runtimes.isEmpty() && !downloadRuntimes) {
                 throw new UsageException("--runtime goes only with --download-runtimes");
+            }
+            if (!downloadUrls.isEmpty() && !downloadRuntimes) {
+                throw new UsageException("--download-url goes only with --download-runtimes; in leia, m in the"
+                        + " window of D chooses a mirror");
             }
             if (downloadRuntimes && runtimes.isEmpty() && !help && !version) {
                 throw new UsageException("--download-runtimes needs --runtime <FOLDER>; to choose runtimes, start leia"
@@ -301,6 +326,7 @@ record Cli(
                     indexPath,
                     downloadRuntimes,
                     runtimes.stream().distinct().toList(),
+                    downloadUrls.stream().distinct().toList(),
                     theme,
                     mcp,
                     mcpRoots,
@@ -336,6 +362,14 @@ record Cli(
             if (!known.contains(value)) {
                 throw new UsageException("invalid value '" + value + "' for --runtime <FOLDER>: possible values are "
                         + String.join(", ", known));
+            }
+            return value;
+        }
+
+        private static String downloadUrl(String value) throws UsageException {
+            Optional<String> problem = Mirrors.check(value);
+            if (problem.isPresent()) {
+                throw new UsageException("invalid value for --download-url <URL>: " + problem.get());
             }
             return value;
         }

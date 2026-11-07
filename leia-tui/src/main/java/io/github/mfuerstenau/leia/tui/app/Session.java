@@ -50,10 +50,15 @@ import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.tui.Osc52;
 import io.github.mfuerstenau.leia.tui.documents.DocumentExport;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
+import io.github.mfuerstenau.leia.tui.runtimes.Mirror;
+import io.github.mfuerstenau.leia.tui.runtimes.MirrorChooser;
+import io.github.mfuerstenau.leia.tui.runtimes.MirrorSettings;
+import io.github.mfuerstenau.leia.tui.runtimes.Mirrors;
 import io.github.mfuerstenau.leia.tui.runtimes.RuntimeInstall;
 import io.github.mfuerstenau.leia.tui.runtimes.RuntimeWindow;
 import io.github.mfuerstenau.leia.tui.terms.Terms;
 import java.io.IOException;
+import java.net.URI;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -63,12 +68,17 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongFunction;
@@ -117,8 +127,17 @@ public final class Session {
     private final App ui;
     private final LeiaBackend backend;
 
-    /** Installs into the runtimes folder (ADR 0098); empty if leia doesn't run from {@code leia.jar}. */
-    private final Optional<RuntimeInstall> runtimeInstall;
+    /**
+     * Installs into the runtimes folder (ADR 0098); empty if leia doesn't run from {@code leia.jar}.
+     * Its first mirror changes when the user chooses one (ADR 0124): on the UI thread.
+     */
+    private Optional<RuntimeInstall> runtimeInstall;
+
+    /** The mirrors left out, and where the mirror chosen is saved (ADR 0124). */
+    private final MirrorSettings mirrorSettings;
+
+    /** What the install that waits after a failed download is told, once the user chose (ADR 0124). */
+    private final AtomicReference<CompletableFuture<MirrorChooser.Choice>> pendingChoice = new AtomicReference<>();
 
     /** The thread that downloads runtimes, while one runs (ADR 0080). */
     // An immutable value, published through volatile (ADR 0088)
@@ -142,9 +161,19 @@ public final class Session {
      * @param runtimeInstall installs the runtimes that the window of {@code D} downloads (ADR 0080)
      */
     public Session(App app, LeiaBackend backend, Optional<RuntimeInstall> runtimeInstall) {
+        this(app, backend, runtimeInstall, MirrorSettings.none());
+    }
+
+    /**
+     * @param runtimeInstall installs the runtimes that the window of {@code D} downloads (ADR 0080)
+     * @param mirrorSettings the mirrors left out, and where the mirror the user chooses is saved (ADR 0124)
+     */
+    public Session(
+            App app, LeiaBackend backend, Optional<RuntimeInstall> runtimeInstall, MirrorSettings mirrorSettings) {
         this.ui = app;
         this.backend = backend;
         this.runtimeInstall = runtimeInstall;
+        this.mirrorSettings = mirrorSettings;
     }
 
     /**
@@ -497,6 +526,16 @@ public final class Session {
             case Action.AddJars add -> addJars(add, runner);
             case Action.PlanRuntimes plan -> planRuntimes(plan, runner);
             case Action.InstallRuntimes install -> installRuntimes(install.install(), runner);
+            case Action.UseMirror use -> useMirror(use.mirror());
+            case Action.ChooseMirror choose -> {
+                if (choose.choice() instanceof MirrorChooser.Choice.Retry retry) {
+                    useMirror(retry.mirror());
+                }
+                CompletableFuture<MirrorChooser.Choice> pending = pendingChoice.getAndSet(null);
+                if (pending != null) {
+                    pending.complete(choose.choice());
+                }
+            }
             case Action.LoadRuntimes _ ->
                 complete(
                         backend.call(Methods.LOAD_RUNTIMES, new LoadRuntimesParams()),
@@ -608,7 +647,7 @@ public final class Session {
                 List<RuntimeInstall.RuntimePlan> present =
                         install.plan(plan.present()).runtimes();
                 reply(runner, app -> {
-                    app.runtimesPlanned(install, planned, present);
+                    app.runtimesPlanned(install, planned, present, mirrorSettings.problems());
                     return Optional.empty();
                 });
             } catch (RuntimeInstall.InstallException | RuntimeException e) {
@@ -630,12 +669,15 @@ public final class Session {
         installer = Thread.ofPlatform().daemon().name("leia-runtime-install").start(() -> {
             RuntimeInstall.Outcome outcome;
             try {
+                BooleanSupplier cancelled =
+                        () -> quitting.get() || install.cancelled().getAsBoolean();
                 outcome = install.install()
                         .install(
                                 install.plan(),
                                 install.chosen(),
                                 install.listener(),
-                                () -> quitting.get() || install.cancelled().getAsBoolean());
+                                cancelled,
+                                (failure, mirrors, tried) -> askForMirror(failure, mirrors, tried, cancelled, runner));
             } catch (RuntimeException e) {
                 LOG.log(Level.WARNING, "The runtimes' download failed", e);
                 outcome = RuntimeWindow.failedOutcome(install.chosen(), e);
@@ -646,6 +688,43 @@ public final class Session {
                 return app.runtimesInstalled(done);
             });
         });
+    }
+
+    /**
+     * On the install's thread: asks the window which mirror to retry a failed download from, and
+     * waits for the answer (ADR 0124). Quitting leia, or a cancel, stops the download.
+     */
+    private MirrorChooser.Choice askForMirror(
+            MirrorChooser.Failure failure,
+            List<Mirror> mirrors,
+            Set<URI> tried,
+            BooleanSupplier cancelled,
+            TuiRunner runner) {
+        CompletableFuture<MirrorChooser.Choice> choice = new CompletableFuture<>();
+        pendingChoice.set(choice);
+        reply(runner, app -> app.downloadFailed(failure, mirrors, tried));
+        while (true) {
+            try {
+                return choice.get(100, TimeUnit.MILLISECONDS);
+            } catch (TimeoutException _) {
+                if (cancelled.getAsBoolean()) {
+                    pendingChoice.compareAndSet(choice, null);
+                    return new MirrorChooser.Choice.Abort();
+                }
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+                return new MirrorChooser.Choice.Abort();
+            } catch (ExecutionException e) {
+                LOG.log(Level.WARNING, "No mirror was chosen", e);
+                return new MirrorChooser.Choice.Abort();
+            }
+        }
+    }
+
+    /** The mirror the user chose is the first from now on, and saved for next time (ADR 0124). */
+    private void useMirror(Mirror mirror) {
+        runtimeInstall = runtimeInstall.map(install -> install.withFirst(mirror));
+        mirrorSettings.saveFile().ifPresent(file -> Mirrors.save(file, mirror));
     }
 
     /** Hands the app the runtime jars that are loaded and missing now, for the about screen. */

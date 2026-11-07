@@ -41,8 +41,10 @@ Lucene and leia's small adapter jar for it. The zip has none, so install them on
 
 1. **Interactively:** press `D` on the start screen. The window lists the missing and incomplete
    runtimes with the jars each would fetch (URLs, SHA-256s, sizes). `Space` checks one, `a` all,
-   `n` none; `Enter` downloads, `Esc` cancels. leia loads them without a restart, except Lucene
-   10's when extension jars are loaded (the window says so).
+   `n` none, `m` chooses the mirror; `Enter` downloads, `Esc` cancels. leia loads them without a
+   restart, except Lucene 10's when extension jars are loaded (the window says so). A jar that
+   fails shows the mirrors, with why it failed: `Enter` retries from the one at the cursor, `u`
+   takes a URL of your own, `Esc` stops the download.
 2. **Unattended:**
 
    ```sh
@@ -51,16 +53,28 @@ Lucene and leia's small adapter jar for it. The zip has none, so install them on
    ```
 
    Running it again keeps matching jars, replaces the others and removes those that don't belong.
-   The exit status is 1 if a runtime failed.
+   `--download-url <URL>` (repeatable) names a mirror to try first. When a jar fails, it asks on a
+   terminal which mirror to retry from (`a` aborts); in a script it tries the next mirror. The exit
+   status is 1 if a runtime failed.
 
 - **Where:** `runtimes/` in your data folder, `~/.local/share/leia/runtimes` or
   `%LOCALAPPDATA%\leia\runtimes`, so a new leia finds what an older one downloaded. A `runtimes/`
   beside `leia.jar` (a portable install) comes first, system-wide folders last; downloads go to the
   first of yours that can be written (see [Folders](#folders)). The about screen (`?`) says where
   each runtime came from.
-- **What is downloaded:** only the official Lucene jars, from Maven Central
-  (`LEIA_OPTS=-Dleia.download.url=<URL>` names a mirror), each checked against the SHA-256 and
-  size leia's build recorded. leia's adapter jars come out of `leia.jar`. About 32 MB in all.
+- **What is downloaded:** only the official Lucene jars, from Maven Central or a mirror of it,
+  each checked against the SHA-256 and size leia's build recorded, so a mirror needs no trust.
+  leia's adapter jars come out of `leia.jar`. About 32 MB in all.
+- **Mirrors,** tried in this order:
+  1. `LEIA_OPTS=-Dleia.download.url=<URL>`;
+  2. `--download-url`;
+  3. the one chosen last with `m` (`mirror` in your config folder);
+  4. the lines of `mirrors` in your config folder, or a system-wide one (a URL and an optional name
+     per line, `#` comments);
+  5. leia's own list: Maven Central, Google Cloud (US, EU, Asia), Alibaba Cloud, Huawei Cloud.
+
+  A mirror must be `https`; `http` needs `LEIA_OPTS=-Dleia.download.insecure=true`. A mirror
+  that gives no answer or no bytes for 60 s has failed.
 - **Behind a proxy:** `LEIA_OPTS=-Djava.net.useSystemProxies=true`.
 - **After an update of leia:** at each start, leia rewrites its adapter jars in `runtimes/`. A
   runtime that needs a new Lucene shows as incomplete, and `D` downloads it. If leia can't write a
@@ -129,6 +143,7 @@ leia [OPTIONS] [INDEX_PATH]
 | `--mcp-pin` | with `--mcp` and `INDEX_PATH`, serve only that index |
 | `--download-runtimes` | install the runtimes of `--runtime` without asking, then exit |
 | `--runtime <FOLDER>` | with `--download-runtimes`: `lucene10`, `lucene9`, `lucene7`, `lucene5` or `lucene3`; repeatable |
+| `--download-url <URL>` | with `--download-runtimes`: a Maven Central mirror to try first (`https`); repeatable |
 | `-V, --version` | print the version and build of leia, and the Java in use |
 | `-h, --help` | print the help |
 
@@ -266,7 +281,7 @@ None has to exist; leia creates nothing until it writes.
 
 | | What's in it | Linux and other Unix: yours | Linux: system-wide | Windows: yours | Windows: system-wide |
 |---|---|---|---|---|---|
-| **config** | `theme`, `themes/`, `jars/` | `$XDG_CONFIG_HOME/leia`, then `~/.config/leia` | each entry of `$XDG_CONFIG_DIRS` plus `/leia` (default `/etc/xdg/leia`) | `%APPDATA%\leia` | `%PROGRAMDATA%\leia` |
+| **config** | `theme`, `themes/`, `jars/`, `mirrors`, `mirror` | `$XDG_CONFIG_HOME/leia`, then `~/.config/leia` | each entry of `$XDG_CONFIG_DIRS` plus `/leia` (default `/etc/xdg/leia`) | `%APPDATA%\leia` | `%PROGRAMDATA%\leia` |
 | **data** | `runtimes/` | `$XDG_DATA_HOME/leia`, then `~/.local/share/leia` | each entry of `$XDG_DATA_DIRS` plus `/leia` (default `/usr/local/share/leia`, `/usr/share/leia`) | `%LOCALAPPDATA%\leia` | `%PROGRAMDATA%\leia` |
 | **state** | `leia.log`, `history` | `$XDG_STATE_HOME/leia`, then `~/.local/state/leia` | none | `%LOCALAPPDATA%\leia` | none |
 | **cache** | `stored-fields/` | `$XDG_CACHE_HOME/leia`, then `~/.cache/leia` | none | `%LOCALAPPDATA%\leia\cache` | none |
@@ -282,6 +297,8 @@ None has to exist; leia creates nothing until it writes.
   numbers, never values); at most 512 MB, a file dropped after 30 days unused.
   `-Dleia.cache.dir=<path>` moves it, an empty path turns it off.
 - `theme`: the last choice of `T`; read from system-wide folders too, so an administrator can set a default.
+- `mirrors` and `mirror` (see [Runtimes](#runtimes)): read from system-wide folders too, so an
+  administrator can name the company's mirror.
 - `themes/` merge: leia's, then the system-wide, then yours.
 - `jars/` comes from your folders only, never a system-wide one.
 - `runtimes/`: one beside `leia.jar` comes first. System-wide jars are checked by SHA-256 and

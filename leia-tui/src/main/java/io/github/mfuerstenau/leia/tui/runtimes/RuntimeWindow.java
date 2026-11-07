@@ -24,6 +24,7 @@ import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.widgets.KeyLegend;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
 import io.github.mfuerstenau.leia.tui.widgets.Selection;
+import java.net.URI;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -61,7 +62,7 @@ public final class RuntimeWindow {
     private static final int WIDE = 90;
 
     private static final String CHOOSE_KEYS =
-            "␣ check   a all   n none   ↑↓ move   [/] details   ⏎ download   Esc close";
+            "␣ check   a all   n none   ↑↓ move   [/] details   m mirror   ⏎ download   Esc close";
     private static final String VIEW_KEYS = "↑↓ move   [/] details   Esc close";
     private static final String NOTHING_CHECKED = "Nothing checked: Space checks a runtime; Esc closes";
     private static final String[] SPINNER = Spinner.dots().frames();
@@ -71,6 +72,8 @@ public final class RuntimeWindow {
         PLAN_FAILED,
         CHOOSE,
         INSTALLING,
+        /** A download failed; the install waits for the mirror to retry from (ADR 0124). */
+        RETRY,
         LOADING,
         DONE
     }
@@ -96,6 +99,12 @@ public final class RuntimeWindow {
     /** Esc: close the window. */
     public record Close() implements Event {}
 
+    /** The user chose the mirror to download from first, now and next time (ADR 0124). */
+    public record UseMirror(Mirror mirror) implements Event {}
+
+    /** After a failed download: what the install that waits is to do (ADR 0124). */
+    public record Choose(MirrorChooser.Choice choice) implements Event {}
+
     private final Set<RuntimeFolders.Known> checked = new LinkedHashSet<>();
     private final AtomicBoolean cancelled = new AtomicBoolean();
     private final Map<String, RuntimeFolder> states = new LinkedHashMap<>();
@@ -112,6 +121,10 @@ public final class RuntimeWindow {
     private Progress progress;
     private List<Line> loadLines = List.of();
     private int ticks;
+    private List<String> mirrorProblems = List.of();
+    private MirrorPicker picker;
+    private MirrorChooser.Failure failure;
+    private final Map<URI, String> jarFailures = new LinkedHashMap<>();
 
     /** A window that waits for its plan, with the runtimes' states as {@code getRuntimes} has them. */
     public RuntimeWindow(List<RuntimeFolder> runtimes) {
@@ -123,6 +136,19 @@ public final class RuntimeWindow {
      * of the runtimes that are there already, which are only shown.
      */
     public void planned(RuntimeInstall install, RuntimeInstall.Plan plan, List<RuntimeInstall.RuntimePlan> present) {
+        planned(install, plan, present, List.of());
+    }
+
+    /**
+     * {@link #planned(RuntimeInstall, RuntimeInstall.Plan, List)}, with the mirrors that were left
+     * out and why, which the window names.
+     */
+    public void planned(
+            RuntimeInstall install,
+            RuntimeInstall.Plan plan,
+            List<RuntimeInstall.RuntimePlan> present,
+            List<String> mirrorProblems) {
+        this.mirrorProblems = List.copyOf(mirrorProblems);
         this.install = install;
         this.plan = plan;
         this.offered = plan.needingDownload();
@@ -141,9 +167,10 @@ public final class RuntimeWindow {
      * new runtimes; the window waits for {@link #loaded} or {@link #loadFailed} then.
      */
     public boolean finished(RuntimeInstall.Outcome outcome) {
-        if (phase != Phase.INSTALLING) {
+        if (phase != Phase.INSTALLING && phase != Phase.RETRY) {
             return false;
         }
+        picker = null;
         progress.finish(outcome);
         boolean installed =
                 outcome.results().values().stream().anyMatch(RuntimeInstall.Result.Installed.class::isInstance);
@@ -207,7 +234,48 @@ public final class RuntimeWindow {
 
     /** Whether a download runs, which closing the window would leave running. */
     public boolean installing() {
-        return phase == Phase.INSTALLING;
+        return phase == Phase.INSTALLING || phase == Phase.RETRY;
+    }
+
+    /**
+     * A jar's download failed, and the install waits for the mirror to retry it from (ADR 0124):
+     * the window shows the mirrors, with the cursor on the first that the jar hasn't failed from.
+     *
+     * @param mirrors the install's mirrors, in order
+     * @param tried the mirrors the jar failed from
+     */
+    public void downloadFailed(MirrorChooser.Failure failure, List<Mirror> mirrors, Set<URI> tried) {
+        if (phase != Phase.INSTALLING) {
+            return;
+        }
+        if (this.failure == null
+                || !this.failure.jar().equals(failure.jar())
+                || !this.failure.folder().equals(failure.folder())) {
+            jarFailures.clear();
+        }
+        jarFailures.put(failure.mirror().uri(), failure.reason());
+        Map<URI, String> failed = new LinkedHashMap<>();
+        tried.forEach(uri -> failed.put(uri, jarFailures.getOrDefault(uri, "failed")));
+        this.failure = failure;
+        picker = MirrorPicker.afterFailures(mirrors, failed);
+        phase = Phase.RETRY;
+    }
+
+    /** The bytes the gauge shows as downloaded, for the tests. */
+    long gaugeDone() {
+        return progress.done();
+    }
+
+    /** The bytes the gauge shows in all, for the tests. */
+    long gaugeTotal() {
+        return progress.total();
+    }
+
+    /** The mirror the downloads begin with. */
+    public Optional<Mirror> mirror() {
+        return install == null
+                ? Optional.empty()
+                : Optional.of(install.mirrors().getFirst());
     }
 
     /** A tick: the spinner moves on. */
@@ -218,7 +286,8 @@ public final class RuntimeWindow {
     public Event handleKey(KeyEvent key) {
         boolean close = key.code() == KeyCode.ESCAPE || key.isChar('q');
         return switch (phase) {
-            case CHOOSE -> choose(key);
+            case CHOOSE -> picker != null ? pick(key) : choose(key);
+            case RETRY -> retry(key);
             case INSTALLING -> {
                 // Closed once the install has ended, and the backend has loaded what it installed.
                 if (key.code() == KeyCode.ESCAPE) {
@@ -231,10 +300,47 @@ public final class RuntimeWindow {
         };
     }
 
+    /** A key to the mirrors that {@code m} opened: the one chosen is the first from now on. */
+    private Event pick(KeyEvent key) {
+        return switch (picker.handleKey(key)) {
+            case MirrorPicker.Chosen chosen -> {
+                picker = null;
+                install = install.withFirst(chosen.mirror());
+                yield new UseMirror(chosen.mirror());
+            }
+            case MirrorPicker.Back _ -> {
+                picker = null;
+                yield new Nothing();
+            }
+            case MirrorPicker.Nothing _ -> new Nothing();
+        };
+    }
+
+    /** A key after a failed download: a mirror to retry from, or Esc, which stops the download. */
+    private Event retry(KeyEvent key) {
+        return switch (picker.handleKey(key)) {
+            case MirrorPicker.Chosen chosen -> {
+                picker = null;
+                phase = Phase.INSTALLING;
+                yield new Choose(new MirrorChooser.Choice.Retry(chosen.mirror()));
+            }
+            case MirrorPicker.Back _ -> {
+                picker = null;
+                phase = Phase.INSTALLING;
+                yield new Choose(new MirrorChooser.Choice.Abort());
+            }
+            case MirrorPicker.Nothing _ -> new Nothing();
+        };
+    }
+
     private Event choose(KeyEvent key) {
         hint = Optional.empty();
         if (key.code() == KeyCode.ESCAPE || key.isChar('q')) {
             return new Close();
+        }
+        if (key.isChar('m') && !plan.runtimes().isEmpty()) {
+            picker = new MirrorPicker(install.mirrors(), Map.of(), 0);
+            return new Nothing();
         }
         if (key.code() == KeyCode.ENTER) {
             return startChosen();
@@ -352,7 +458,10 @@ public final class RuntimeWindow {
                         : inner.height());
         int footerCap = Math.max(inner.height() / 3, 1);
         int footerHeight = Math.min(footer.size(), footerCap);
-        int gaugeHeight = phase == Phase.INSTALLING || phase == Phase.LOADING || phase == Phase.DONE ? 1 : 0;
+        int gaugeHeight =
+                phase == Phase.INSTALLING || phase == Phase.RETRY || phase == Phase.LOADING || phase == Phase.DONE
+                        ? 1
+                        : 0;
         List<Rect> rows = Layout.vertical()
                 .constraints(
                         Constraint.length(headerHeight),
@@ -361,10 +470,19 @@ public final class RuntimeWindow {
                         Constraint.length(footerHeight))
                 .split(inner);
         frame.renderWidget(Paragraph.from(Text.from(wrappedHeader)), rows.get(0));
-        if (phase == Phase.CHOOSE) {
+        if (phase == Phase.CHOOSE && picker != null) {
+            picker.render(frame, rows.get(2), " Mirror to download from ");
+        } else if (phase == Phase.CHOOSE) {
             if (!plan.runtimes().isEmpty() || !present.isEmpty()) {
                 renderChoose(frame, rows.get(2));
             }
+        } else if (phase == Phase.RETRY) {
+            frame.renderWidget(gauge(), rows.get(1));
+            List<Rect> parts = Layout.vertical()
+                    .constraints(Constraint.percentage(40), Constraint.fill())
+                    .split(rows.get(2));
+            renderProgress(frame, parts.get(0));
+            picker.render(frame, parts.get(1), " Retry " + failure.jar() + " from ");
         } else if (gaugeHeight > 0) {
             frame.renderWidget(gauge(), rows.get(1));
             renderProgress(frame, rows.get(2));
@@ -380,6 +498,13 @@ public final class RuntimeWindow {
                         "Cannot plan the download: " + planError,
                         Palette.current().error()));
             case CHOOSE -> chooseHeader();
+            case RETRY ->
+                List.of(
+                        Line.styled(
+                                failure.folder() + "/" + failure.jar() + " from "
+                                        + failure.mirror().name() + " failed: " + failure.reason(),
+                                Palette.current().error()),
+                        Line.from("Choose a mirror to retry it from, and to go on with; Esc stops the download."));
             case INSTALLING ->
                 List.of(Line.from(Span.styled(
                         cancelled.get()
@@ -398,6 +523,10 @@ public final class RuntimeWindow {
         List<Line> header = new ArrayList<>();
         header.add(Line.from(
                 install.source() + ", and checks each against the SHA-256 and size that" + " leia's build recorded."));
+        for (String problem : mirrorProblems) {
+            header.add(
+                    Line.styled("Mirror left out: " + problem, Palette.current().warning()));
+        }
         List<RuntimeInstall.RuntimePlan> refreshed = refreshed();
         if (!refreshed.isEmpty()) {
             header.add(Line.from("Need no download, and are installed from leia.jar with them: "
@@ -433,6 +562,9 @@ public final class RuntimeWindow {
         return switch (phase) {
             case PLANNING, PLAN_FAILED -> KeyLegend.lines(CLOSE_KEYS, width);
             case CHOOSE -> {
+                if (picker != null) {
+                    yield KeyLegend.lines(picker.keys() + (picker.typing() ? "" : "   Esc back"), width);
+                }
                 List<Line> footer = new ArrayList<>();
                 hint.ifPresent(text -> footer.add(
                         Line.from(Span.styled(" " + text, Palette.current().warning()))));
@@ -444,6 +576,7 @@ public final class RuntimeWindow {
                 yield footer;
             }
             case INSTALLING -> KeyLegend.lines("Esc cancel", width);
+            case RETRY -> KeyLegend.lines(picker.keys() + (picker.typing() ? "" : "   Esc stop"), width);
             default -> KeyLegend.lines("⏎/Esc close", width);
         };
     }
@@ -537,7 +670,7 @@ public final class RuntimeWindow {
     }
 
     /** What {@code runtime} downloads from where, what it keeps, and what comes from leia.jar. */
-    private static List<Line> details(RuntimeInstall.RuntimePlan runtime) {
+    private List<Line> details(RuntimeInstall.RuntimePlan runtime) {
         List<Line> lines = new ArrayList<>();
         lines.add(Line.from(Span.styled(
                 "To download into runtimes/" + runtime.known().folder() + ":",
@@ -546,7 +679,12 @@ public final class RuntimeWindow {
             // Unindented: a URL or a SHA-256 wraps on a narrow screen, and loses its indent then.
             lines.add(Line.from("• " + download.jar().name() + ", "
                     + TextFormat.size(download.jar().size())));
-            lines.add(Line.from(download.uri().toString()));
+            // From the mirror the downloads begin with, which m may have changed since the plan.
+            lines.add(Line.from(download.jar()
+                    .mavenPath()
+                    .map(path -> install.repository().resolve(path))
+                    .orElse(download.uri())
+                    .toString()));
             lines.add(Line.from(Span.styled(
                     "SHA-256 " + download.jar().sha256(), Palette.current().muted())));
         }
@@ -669,6 +807,8 @@ public final class RuntimeWindow {
             final long size;
             State state = State.WAITING;
             long bytes;
+            String mirror;
+            final List<String> failures = new ArrayList<>();
 
             Jar(String folder, String name, long size) {
                 this.folder = folder;
@@ -727,8 +867,32 @@ public final class RuntimeWindow {
         public synchronized void jarStarted(String folder, String jar, long size) {
             active = jars.get(key(folder, jar));
             if (active != null) {
+                // A retry starts over: the bytes of the failed try don't count.
+                done -= active.bytes;
                 active.state = State.ACTIVE;
                 active.bytes = 0;
+            }
+        }
+
+        @Override
+        public synchronized void jarDownloaded(String folder, String jar, long size, Mirror mirror) {
+            Jar found = jars.get(key(folder, jar));
+            if (found != null) {
+                found.mirror = mirror.name();
+            }
+            jarDone(folder, jar, RuntimeInstall.JarDone.DOWNLOADED, size);
+        }
+
+        @Override
+        public synchronized void mirrorFailed(MirrorChooser.Failure failure) {
+            Jar found = jars.get(key(failure.folder(), failure.jar()));
+            if (found == null) {
+                return;
+            }
+            found.state = State.FAILED;
+            found.failures.add(failure.mirror().name() + ": " + failure.reason());
+            if (found == active) {
+                active = null;
             }
         }
 
@@ -789,7 +953,7 @@ public final class RuntimeWindow {
                         if (jar == active) {
                             return line;
                         }
-                        line++;
+                        line += 1 + jar.failures.size();
                     }
                 }
             }
@@ -811,6 +975,8 @@ public final class RuntimeWindow {
                 for (Jar jar : jars.values()) {
                     if (jar.folder.equals(folder)) {
                         lines.add(line(jar, spinner));
+                        jar.failures.forEach(failed -> lines.add(Line.styled(
+                                "      ✗ " + failed, Palette.current().error())));
                     }
                 }
             }
@@ -830,7 +996,8 @@ public final class RuntimeWindow {
                 case DOWNLOADED ->
                     Line.from(
                             Span.styled("  ✓ ", Palette.current().success()),
-                            Span.raw(jar.name + ", " + size + " downloaded"));
+                            Span.raw(jar.name + ", " + size + " downloaded"
+                                    + (jar.mirror == null ? "" : " from " + jar.mirror)));
                 case KEPT -> Line.from(Span.raw("  = " + jar.name + ", " + size + " kept"));
                 case FAILED ->
                     Line.from(Span.styled(

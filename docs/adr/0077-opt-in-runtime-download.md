@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-15
-- **Amended by:** ADR 0079 (§2–§4: a dialogue instead of the question; `--runtime`); ADR 0080 (§2–§3: `--download-runtimes` needs `--runtime` and asks nothing; `--yes` is gone)
+- **Amended by:** ADR 0079 (§2–§4: a dialogue instead of the question; `--runtime`); ADR 0080 (§2–§3: `--download-runtimes` needs `--runtime` and asks nothing; `--yes` is gone); ADR 0124 (§2: the listing names the mirrors)
 - **Amends:** ADR 0073 §7 (`--download-runtimes` asks first, and takes `--yes`); AGENTS.md, the CLI contract
 
 ## Context

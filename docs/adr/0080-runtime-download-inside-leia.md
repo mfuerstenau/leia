@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-15
-- **Amended by:** ADR 0081 (§2 and "Offer every runtime, and refresh loaded ones": present runtimes are listed, greyed out, and planned apart from the install)
+- **Amended by:** ADR 0081 (§2 and "Offer every runtime, and refresh loaded ones": present runtimes are listed, greyed out, and planned apart from the install); ADR 0124 (§1 and §7: `m` chooses a mirror; a failed download asks which mirror to retry from)
 - **Amends:** ADR 0079 §2–§3 and §7–§9 (a window inside leia replaces the standalone dialogue; `--yes` is gone; no terminal check); ADR 0077 §2–§3 (`--download-runtimes` asks nothing); ADR 0073 (the folders load at startup and on `loadRuntimes`); AGENTS.md, the CLI contract
 
 ## Context
