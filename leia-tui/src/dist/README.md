@@ -65,6 +65,10 @@ Lucene and leia's small adapter jar for it. The zip has none, so install them on
 - **What is downloaded:** only the official Lucene jars, from Maven Central or a mirror of it,
   each checked against the SHA-256 and size leia's build recorded, so a mirror needs no trust.
   leia's adapter jars come out of `leia.jar`. About 32 MB in all.
+- **Already on disk:** a jar that your Maven repository (`~/.m2/repository`, or the
+  `<localRepository>` of `~/.m2/settings.xml`) or Gradle cache (`~/.gradle/caches`, or
+  `$GRADLE_USER_HOME`) has is copied from there instead, if it matches, without the network. The
+  listing and the window say so per jar. `LEIA_OPTS=-Dleia.download.local=false` turns it off.
 - **Mirrors,** tried in this order:
   1. `LEIA_OPTS=-Dleia.download.url=<URL>`;
   2. `--download-url`;

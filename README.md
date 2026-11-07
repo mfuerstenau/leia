@@ -68,6 +68,9 @@ A **read-only Lucene index inspector** for the terminal, as an alternative to
   `leia.jar` comes first, system-wide folders last (see [Folders](#folders)).
 - Lucene's jars come from Maven Central or a mirror of it, each checked against the SHA-256 and
   size the build recorded; leia's own adapter jars come from `leia.jar`. About 32 MB in all, once.
+- A jar that your Maven repository (`~/.m2/repository`) or Gradle cache (`~/.gradle/caches`)
+  already has is copied from there instead, if it matches; `-Dleia.download.local=false` turns
+  that off.
 - Mirrors: `m` in the `D` window chooses one, and is saved for next time. leia knows Maven Central,
   Google Cloud (US, EU, Asia), Alibaba Cloud and Huawei Cloud. Add your own as `--download-url
   <URL>`, or as lines of `mirrors` in your config folder. A failed jar shows the mirrors to retry

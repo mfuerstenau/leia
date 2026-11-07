@@ -115,7 +115,8 @@ record Cli(
                       --no-default-jars) without asking, as for a script, then exit: leia's own
                       jars from leia.jar, Lucene's from Maven Central
                       (https://repo1.maven.org/maven2/) or a mirror of it, each checked against
-                      its SHA-256. It lists the Lucene jars with their URLs and SHA-256s and the
+                      its SHA-256; a jar that Maven's local repository or Gradle's cache has is
+                      copied from there instead (-Dleia.download.local=false turns that off). It lists the Lucene jars with their URLs and SHA-256s and the
                       mirrors, then downloads them; a jar that is there and matches is kept. When a
                       download fails, it asks on a terminal which mirror to retry from; without
                       one, it tries the next mirror. Behind a proxy, start it with

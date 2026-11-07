@@ -607,7 +607,8 @@ public final class RuntimeWindow {
             texts.add((checked.contains(runtime.known()) ? "[x] " : "[ ] ")
                     + runtime.known().name()
                     + " · indexes of " + majors(runtime.known().indexMajors()) + " · "
-                    + TextFormat.count(runtime.downloads().size(), "jar") + ", "
+                    + TextFormat.count(
+                            runtime.downloads().size() - runtime.localCopies().size(), "jar") + ", "
                     + TextFormat.size(runtime.downloadSize()));
         }
         for (RuntimeInstall.RuntimePlan runtime : present) {
@@ -672,10 +673,27 @@ public final class RuntimeWindow {
     /** What {@code runtime} downloads from where, what it keeps, and what comes from leia.jar. */
     private List<Line> details(RuntimeInstall.RuntimePlan runtime) {
         List<Line> lines = new ArrayList<>();
+        // First, so that they are in sight: these jars cost no download (ADR 0125).
+        if (!runtime.localCopies().isEmpty()) {
+            lines.add(Line.from(Span.styled(
+                    "Copied from local caches, not downloaded:",
+                    Palette.current().heading())));
+            for (RuntimeInstall.Download download : runtime.localCopies()) {
+                LocalCaches.Local local = download.local().orElseThrow();
+                lines.add(Line.from("• " + download.jar().name() + ", "
+                        + TextFormat.size(download.jar().size()) + ", from "
+                        + local.cache().name()));
+                lines.add(Line.styled(local.file().toString(), Palette.current().muted()));
+            }
+            lines.add(Line.empty());
+        }
         lines.add(Line.from(Span.styled(
                 "To download into runtimes/" + runtime.known().folder() + ":",
                 Palette.current().heading())));
         for (RuntimeInstall.Download download : runtime.downloads()) {
+            if (download.local().isPresent()) {
+                continue;
+            }
             // Unindented: a URL or a SHA-256 wraps on a narrow screen, and loses its indent then.
             lines.add(Line.from("• " + download.jar().name() + ", "
                     + TextFormat.size(download.jar().size())));
@@ -796,6 +814,7 @@ public final class RuntimeWindow {
             WAITING,
             ACTIVE,
             DOWNLOADED,
+            COPIED,
             KEPT,
             FAILED,
             CANCELLED
@@ -884,6 +903,15 @@ public final class RuntimeWindow {
         }
 
         @Override
+        public synchronized void jarCopied(String folder, String jar, long size, LocalCaches.Local local) {
+            Jar found = jars.get(key(folder, jar));
+            if (found != null) {
+                found.mirror = local.cache().name();
+            }
+            jarDone(folder, jar, RuntimeInstall.JarDone.COPIED, size);
+        }
+
+        @Override
         public synchronized void mirrorFailed(MirrorChooser.Failure failure) {
             Jar found = jars.get(key(failure.folder(), failure.jar()));
             if (found == null) {
@@ -912,6 +940,7 @@ public final class RuntimeWindow {
             }
             switch (how) {
                 case DOWNLOADED -> found.state = State.DOWNLOADED;
+                case COPIED -> found.state = State.COPIED;
                 case KEPT -> found.state = State.KEPT;
                 default -> {}
             }
@@ -998,6 +1027,10 @@ public final class RuntimeWindow {
                             Span.styled("  ✓ ", Palette.current().success()),
                             Span.raw(jar.name + ", " + size + " downloaded"
                                     + (jar.mirror == null ? "" : " from " + jar.mirror)));
+                case COPIED ->
+                    Line.from(
+                            Span.styled("  ✓ ", Palette.current().success()),
+                            Span.raw(jar.name + ", " + size + " copied from " + jar.mirror));
                 case KEPT -> Line.from(Span.raw("  = " + jar.name + ", " + size + " kept"));
                 case FAILED ->
                     Line.from(Span.styled(

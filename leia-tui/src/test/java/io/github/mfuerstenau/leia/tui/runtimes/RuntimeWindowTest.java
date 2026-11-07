@@ -519,6 +519,42 @@ class RuntimeWindowTest {
     }
 
     @Test
+    void copiesAJarThatALocalCacheHas() throws Exception {
+        RuntimeFolders.ListedJar core = lucene(known("lucene9")).stream()
+                .filter(jar -> jar.name().equals("lucene-core-9.12.3.jar"))
+                .findFirst()
+                .orElseThrow();
+        Path cached =
+                tmp.resolve("home/.m2/repository").resolve(core.mavenPath().orElseThrow());
+        Files.createDirectories(cached.getParent());
+        Files.copy(FakeRepository.built(known("lucene9")).resolve(core.name()), cached);
+        install = new RuntimeInstall(
+                runtimes,
+                install.mirrors(),
+                RuntimeWindowTest.class.getClassLoader(),
+                LocalCaches.detect(name -> null, name -> null, Optional.of(tmp.resolve("home"))));
+        plan(List.of(known("lucene9")));
+        RuntimeInstall.RuntimePlan lucene9 =
+                install.plan(List.of(known("lucene9"))).runtimes().getFirst();
+
+        assertThat(screen())
+                .contains(
+                        "[ ] Lucene 9 · indexes of 8 · " + (lucene9.downloads().size() - 1) + " jars, "
+                                + io.github.mfuerstenau.leia.tui.text.TextFormat.size(lucene9.downloadSize()))
+                .contains("Copied from local caches, not downloaded:")
+                .contains("• lucene-core-9.12.3.jar, ", "from Maven's local");
+
+        window.handleKey(key(' '));
+        RuntimeInstall.Outcome outcome = enter().get();
+        assertThat(window.finished(outcome)).isTrue();
+
+        assertThat(outcome.status()).isZero();
+        assertThat(screen()).contains("lucene-core-9.12.3.jar, ", "copied from Maven's local repository");
+        assertThat(repository.requests).hasValue(lucene9.downloads().size() - 1);
+        assertThat(window.gaugeDone()).isEqualTo(window.gaugeTotal());
+    }
+
+    @Test
     void closesWithoutDownloading() throws Exception {
         plan(RuntimeFolders.KNOWN);
         window.handleKey(key(' '));

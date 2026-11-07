@@ -79,6 +79,7 @@ public final class RuntimeInstall {
     private final List<Mirror> mirrors;
     private final ClassLoader resourceLoader;
     private final Duration timeout;
+    private final LocalCaches caches;
 
     /**
      * @param runtimesDir the runtimes folder (ADR 0098)
@@ -86,7 +87,14 @@ public final class RuntimeInstall {
      * @param resources the class loader that sees {@value RuntimeFolders#EMBEDDED}
      */
     public RuntimeInstall(Path runtimesDir, List<Mirror> mirrors, ClassLoader resources) {
-        this(runtimesDir, mirrors, resources, TIMEOUT);
+        this(runtimesDir, mirrors, resources, LocalCaches.none());
+    }
+
+    /**
+     * @param caches the local caches a Lucene jar is copied from before it is downloaded (ADR 0125)
+     */
+    public RuntimeInstall(Path runtimesDir, List<Mirror> mirrors, ClassLoader resources, LocalCaches caches) {
+        this(runtimesDir, mirrors, resources, TIMEOUT, caches);
     }
 
     /** With one mirror, {@code base}, as the tests have it. */
@@ -98,6 +106,11 @@ public final class RuntimeInstall {
      * @param timeout how long a mirror may take to answer, and to send the next bytes of a jar
      */
     RuntimeInstall(Path runtimesDir, List<Mirror> mirrors, ClassLoader resources, Duration timeout) {
+        this(runtimesDir, mirrors, resources, timeout, LocalCaches.none());
+    }
+
+    private RuntimeInstall(
+            Path runtimesDir, List<Mirror> mirrors, ClassLoader resources, Duration timeout, LocalCaches caches) {
         if (mirrors.isEmpty()) {
             throw new IllegalArgumentException("no mirror");
         }
@@ -105,6 +118,7 @@ public final class RuntimeInstall {
         this.mirrors = List.copyOf(mirrors);
         this.resourceLoader = resources;
         this.timeout = timeout;
+        this.caches = caches;
     }
 
     /** The folder {@code runtimes}. */
@@ -124,7 +138,7 @@ public final class RuntimeInstall {
 
     /** This install with {@code first} as its first mirror, and its other mirrors after it. */
     public RuntimeInstall withFirst(Mirror first) {
-        return new RuntimeInstall(runtimesDir, Mirrors.withFirst(mirrors, first), resourceLoader, timeout);
+        return new RuntimeInstall(runtimesDir, Mirrors.withFirst(mirrors, first), resourceLoader, timeout, caches);
     }
 
     /** A failure that ends a plan, or a runtime's install, with what to say about it. */
@@ -176,8 +190,15 @@ public final class RuntimeInstall {
      * @param folder the runtime's folder, such as {@code lucene9}
      * @param jar the jar as the adapter's list names it
      * @param uri where it is downloaded from
+     * @param local a copy in a local cache that matches, which is copied instead (ADR 0125)
      */
-    public record Download(String folder, RuntimeFolders.ListedJar jar, URI uri) {}
+    public record Download(String folder, RuntimeFolders.ListedJar jar, URI uri, Optional<LocalCaches.Local> local) {
+
+        /** A jar that no local cache has. */
+        public Download(String folder, RuntimeFolders.ListedJar jar, URI uri) {
+            this(folder, jar, uri, Optional.empty());
+        }
+    }
 
     /**
      * A runtime's folder as {@code leia.jar} has it, and what of it needs downloading.
@@ -208,11 +229,19 @@ public final class RuntimeInstall {
             return !downloads.isEmpty();
         }
 
-        /** The bytes to download. */
+        /** The bytes to download: the jars that no local cache has. */
         public long downloadSize() {
             return downloads.stream()
+                    .filter(download -> download.local().isEmpty())
                     .mapToLong(download -> download.jar().size())
                     .sum();
+        }
+
+        /** The jars to download that a local cache has, which are copied instead (ADR 0125). */
+        public List<Download> localCopies() {
+            return downloads.stream()
+                    .filter(download -> download.local().isPresent())
+                    .toList();
         }
 
         /** leia's own jars, which come from {@code leia.jar}: the adapter first. */
@@ -281,6 +310,8 @@ public final class RuntimeInstall {
         WRITTEN,
         /** Downloaded, and it matches. */
         DOWNLOADED,
+        /** Copied from a local cache, and it matches (ADR 0125). */
+        COPIED,
         /** There already, and it matches. */
         KEPT,
         /** Not listed, or an unfinished download, and removed. */
@@ -304,6 +335,11 @@ public final class RuntimeInstall {
             jarDone(folder, jar, JarDone.DOWNLOADED, size);
         }
 
+        /** A jar was copied from a local cache, and it matches; tells {@link #jarDone} too. */
+        default void jarCopied(String folder, String jar, long size, LocalCaches.Local local) {
+            jarDone(folder, jar, JarDone.COPIED, size);
+        }
+
         /** A jar's download from a mirror failed; the {@link MirrorChooser} is asked next. */
         default void mirrorFailed(MirrorChooser.Failure failure) {}
 
@@ -325,6 +361,7 @@ public final class RuntimeInstall {
                             switch (how) {
                                 case WRITTEN -> label + "written, " + TextFormat.size(size);
                                 case DOWNLOADED -> label + "downloaded, " + TextFormat.size(size);
+                                case COPIED -> label + "copied, " + TextFormat.size(size);
                                 case KEPT -> label + "kept";
                                 case REMOVED -> label + "removed";
                             });
@@ -334,6 +371,12 @@ public final class RuntimeInstall {
                 public void jarDownloaded(String folder, String jar, long size, Mirror mirror) {
                     out.println(
                             folder + "/" + jar + ": downloaded, " + TextFormat.size(size) + ", from " + mirror.name());
+                }
+
+                @Override
+                public void jarCopied(String folder, String jar, long size, LocalCaches.Local local) {
+                    out.println(folder + "/" + jar + ": copied, " + TextFormat.size(size) + ", from "
+                            + local.cache().name());
                 }
 
                 @Override
@@ -401,7 +444,8 @@ public final class RuntimeInstall {
             if (Files.isRegularFile(target) && sha256(target).equals(jar.sha256())) {
                 kept.add(jar);
             } else {
-                downloads.add(new Download(folderName, jar, repository().resolve(mavenPath.get())));
+                downloads.add(new Download(
+                        folderName, jar, repository().resolve(mavenPath.get()), caches.find(mavenPath.get(), jar)));
             }
         }
         return new RuntimePlan(known, adapter, listed, downloads, kept);
@@ -419,12 +463,31 @@ public final class RuntimeInstall {
             for (Download download : runtime.downloads()) {
                 out.println("  " + download.folder() + "/" + download.jar().name() + ", "
                         + TextFormat.size(download.jar().size()));
-                out.println("    " + download.uri());
+                out.println(download.local()
+                        .map(local -> "    copied from " + local.file() + " ("
+                                + local.cache().name() + ")")
+                        .orElse("    " + download.uri()));
                 out.println("    SHA-256 " + download.jar().sha256());
             }
         }
         out.println();
         out.println("leia's own jars, the adapters and leia-core, come from leia.jar and aren't downloaded.");
+        List<Download> copies = runtimes.stream()
+                .flatMap(runtime -> runtime.localCopies().stream())
+                .toList();
+        if (!copies.isEmpty()) {
+            long copied =
+                    copies.stream().mapToLong(download -> download.jar().size()).sum();
+            long downloaded =
+                    runtimes.stream().mapToLong(RuntimePlan::downloadSize).sum();
+            int all = runtimes.stream()
+                    .mapToInt(runtime -> runtime.downloads().size())
+                    .sum();
+            out.println(TextFormat.count(copies.size(), "jar") + ", " + TextFormat.size(copied)
+                    + ", come from local caches and aren't downloaded; "
+                    + TextFormat.count(all - copies.size(), "jar") + ", " + TextFormat.size(downloaded)
+                    + ", are.");
+        }
         int kept = runtimes.stream().mapToInt(runtime -> runtime.kept().size()).sum();
         if (kept > 0) {
             out.println(TextFormat.count(kept, "jar") + " already there and matching " + (kept == 1 ? "is" : "are")
@@ -579,8 +642,8 @@ public final class RuntimeInstall {
         Set<String> names = new HashSet<>();
         names.add(known.adapterJar());
         writeOwn(folder, known.adapterJar(), runtime.adapter(), listener);
-        Set<String> downloads = new HashSet<>();
-        runtime.downloads().forEach(download -> downloads.add(download.jar().name()));
+        Map<String, Download> downloads = new LinkedHashMap<>();
+        runtime.downloads().forEach(download -> downloads.put(download.jar().name(), download));
         for (RuntimeFolders.ListedJar jar : runtime.listed()) {
             if (cancelled.getAsBoolean()) {
                 throw new CancelledException();
@@ -589,8 +652,11 @@ public final class RuntimeInstall {
             Optional<String> mavenPath = jar.mavenPath();
             if (mavenPath.isEmpty()) {
                 writeOwn(folder, jar.name(), resource(folderName, jar.name()), listener);
-            } else if (downloads.contains(jar.name())) {
-                fetch(run, folder, jar, mavenPath.get());
+            } else if (downloads.containsKey(jar.name())) {
+                Optional<LocalCaches.Local> local = downloads.get(jar.name()).local();
+                if (local.isEmpty() || !copyLocal(run, folder, jar, local.get())) {
+                    fetch(run, folder, jar, mavenPath.get());
+                }
             } else {
                 listener.jarDone(folderName, jar.name(), JarDone.KEPT, jar.size());
             }
@@ -677,6 +743,48 @@ public final class RuntimeInstall {
             throw new InstallException("cannot write " + target + ": " + e);
         }
         listener.jarDone(folderName, name, JarDone.WRITTEN, content.length);
+    }
+
+    /**
+     * Copies a Lucene jar from a local cache (ADR 0125), checking it again, since the cache may have
+     * changed since the plan, and moves it into place once it matches.
+     *
+     * @return whether it was copied; if not, the jar is downloaded instead
+     */
+    private boolean copyLocal(Run run, Path folder, RuntimeFolders.ListedJar jar, LocalCaches.Local local)
+            throws InstallException, CancelledException {
+        String folderName = folder.getFileName().toString();
+        Path part = null;
+        try {
+            part = Files.createTempFile(folder, jar.name(), PART);
+            MessageDigest digest = newDigest();
+            long size;
+            try (InputStream in = new DigestInputStream(Files.newInputStream(local.file()), digest)) {
+                size = Files.copy(in, part, StandardCopyOption.REPLACE_EXISTING);
+            }
+            String sha256 = HexFormat.of().formatHex(digest.digest());
+            if (run.cancelled.getAsBoolean()) {
+                throw new CancelledException();
+            }
+            if (size != jar.size() || !sha256.equals(jar.sha256())) {
+                delete(part);
+                LOG.info(() -> local.file() + " no longer matches " + jar.name() + "; downloading it instead");
+                return false;
+            }
+            move(part, folder.resolve(jar.name()));
+            run.listener.jarCopied(folderName, jar.name(), size, local);
+            return true;
+        } catch (CancelledException e) {
+            delete(part);
+            throw e;
+        } catch (IOException e) {
+            delete(part);
+            if (part == null) {
+                throw new InstallException("cannot write " + folder.resolve(jar.name()) + ": " + e);
+            }
+            LOG.info(() -> "Cannot copy " + local.file() + ": " + e + "; downloading it instead");
+            return false;
+        }
     }
 
     /**
@@ -876,7 +984,7 @@ public final class RuntimeInstall {
         }
     }
 
-    private static String sha256(Path file) throws InstallException {
+    static String sha256(Path file) throws InstallException {
         MessageDigest digest = newDigest();
         try (InputStream in = new DigestInputStream(Files.newInputStream(file), digest)) {
             in.transferTo(OutputStream.nullOutputStream());

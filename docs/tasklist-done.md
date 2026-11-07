@@ -500,3 +500,4 @@ Goal: the runtimes are downloaded from within leia's UI, and `--download-runtime
 - [x] The listing names the first mirror and the others in order, and the line per jar the mirror it came from.
 - [x] The download window: `m` chooses the first mirror, saved to `mirror`; a failed download shows the mirrors with why each failed, ⏎ retries, `u` takes an own URL, Esc stops the download.
 - [x] Tests against local repositories (`MirrorFallbackTest`, `MirrorsTest`, `RuntimeWindowTest`, `RuntimeDownloadPilotTest`), `CliTest`, `MainTest`, `PlatformTest`; `AGENTS.md`, `Cli`'s help and both READMEs.
+- [x] Local caches (ADR 0125): a Lucene jar that Maven's local repository or Gradle's cache has, with the listed size and SHA-256, is copied instead of downloaded, checked again at copy time, else downloaded; `-Dleia.download.local=false` turns it off.

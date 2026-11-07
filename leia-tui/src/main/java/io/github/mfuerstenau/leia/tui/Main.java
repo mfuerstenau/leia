@@ -20,6 +20,7 @@ import io.github.mfuerstenau.leia.tui.app.Session;
 import io.github.mfuerstenau.leia.tui.jars.DefaultJars;
 import io.github.mfuerstenau.leia.tui.jars.RuntimeFolders;
 import io.github.mfuerstenau.leia.tui.runtimes.ConsoleChooser;
+import io.github.mfuerstenau.leia.tui.runtimes.LocalCaches;
 import io.github.mfuerstenau.leia.tui.runtimes.MirrorChooser;
 import io.github.mfuerstenau.leia.tui.runtimes.MirrorSettings;
 import io.github.mfuerstenau.leia.tui.runtimes.Mirrors;
@@ -331,11 +332,24 @@ public final class Main {
                 ? new ConsoleChooser(new BufferedReader(console.reader()), out)
                 : MirrorChooser.fallback();
         return RuntimeDownload.run(
-                new RuntimeInstall(runtimesDir.get(), mirrors.mirrors(), Main.class.getClassLoader()),
+                new RuntimeInstall(
+                        runtimesDir.get(), mirrors.mirrors(), Main.class.getClassLoader(), localCaches(platform)),
                 cli.runtimes(),
                 out,
                 err,
                 chooser);
+    }
+
+    /**
+     * The local Maven and Gradle caches that a Lucene jar is copied from before it is downloaded
+     * (ADR 0125); none with {@code -Dleia.download.local=false}.
+     */
+    private static LocalCaches localCaches(Platform platform) {
+        LocalCaches caches = LocalCaches.detect(System::getenv, System::getProperty, platform.home());
+        caches.caches()
+                .forEach(cache -> LOG.info(() ->
+                        "Lucene jars are copied from " + cache.name() + ", " + cache.root() + ", where they match"));
+        return caches;
     }
 
     /**
@@ -394,7 +408,8 @@ public final class Main {
                 app,
                 backend,
                 platform.runtimesInstallDir()
-                        .map(dir -> new RuntimeInstall(dir, mirrors.mirrors(), Main.class.getClassLoader())),
+                        .map(dir -> new RuntimeInstall(
+                                dir, mirrors.mirrors(), Main.class.getClassLoader(), localCaches(platform))),
                 new MirrorSettings(mirrors.problems(), platform.mirrorWriteFile()));
         OpenMode mode = cli.noReader() ? OpenMode.DIRECTORY_ONLY : OpenMode.READER;
         // The first frame shows the path being opened.

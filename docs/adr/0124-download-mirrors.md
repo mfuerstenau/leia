@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-07
+- **Amended by:** ADR 0125 (the jars that a local Maven or Gradle cache has are copied, not downloaded)
 - **Amends:** ADR 0073 §7 (one repository becomes a list of mirrors); ADR 0077 §2 (the listing names the mirrors); ADR 0080 §1 and §7 (`m` in the window of `D`; `--download-runtimes` asks, on a terminal, after a failed download); AGENTS.md, the CLI contract
 
 ## Context
