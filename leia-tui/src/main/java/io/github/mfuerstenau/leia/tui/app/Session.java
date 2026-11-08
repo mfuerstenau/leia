@@ -674,8 +674,9 @@ public final class Session {
         ExportJob job = exporter.start(start.request());
         ui.documentExportStarted(start.exportId(), job);
         job.done().thenAccept(done -> {
-            if (done.state() == ExportJob.State.FAILED && done.cause().isPresent()) {
-                RpcException rpc = rpcException(done.cause().get(), runner);
+            Throwable cause = done.cause();
+            if (done.state() == ExportJob.State.FAILED && cause != null) {
+                RpcException rpc = rpcException(cause, runner);
                 if (rpc != null) {
                     String message = describe(rpc);
                     reply(runner, changing(app -> app.exportFailed(start.exportId(), message)));

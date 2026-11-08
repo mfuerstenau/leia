@@ -32,11 +32,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalInt;
-import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.function.Function;
+import org.jspecify.annotations.Nullable;
 import tools.jackson.core.json.JsonWriteFeature;
 import tools.jackson.core.util.DefaultIndenter;
 import tools.jackson.core.util.DefaultPrettyPrinter;
@@ -66,7 +65,7 @@ public final class DocumentExport {
      * A document as leia exports it.
      *
      * @param index the path that was opened
-     * @param indexDirectory the index directory the document is in, as shown; empty with only one
+     * @param indexDirectory the index directory the document is in, as shown; null with only one
      * @param indexedTerms whether the indexed terms and points were rebuilt; if not, no field has
      *     {@code indexed} or {@code points}
      * @param fields the fields in which the document has something, in field number order
@@ -75,7 +74,7 @@ public final class DocumentExport {
             String format,
             int version,
             String index,
-            Optional<String> indexDirectory,
+            @Nullable String indexDirectory,
             int docId,
             boolean deleted,
             boolean indexedTerms,
@@ -84,29 +83,31 @@ public final class DocumentExport {
     /**
      * What the document has in one field.
      *
-     * @param number the field number; empty if the index doesn't know the field
+     * @param number the field number; null if the index doesn't know the field
      * @param flags as the documents screen shows them
      * @param indexOptions what the postings of the field hold, over the whole index
+     * @param norm the norm; null if the document has none in the field
      * @param stored the stored values, in the order they were added, whole
-     * @param vector the KNN vector; empty if the document has none in the field (version 2, ADR 0040)
-     * @param termVector the term vector, in term order; empty if the document has none in the field
-     * @param indexed the terms the field was indexed with; empty if the field has no postings or the
+     * @param docValues the doc values; null if the document has none in the field
+     * @param vector the KNN vector; null if the document has none in the field (version 2, ADR 0040)
+     * @param termVector the term vector, in term order; null if the document has none in the field
+     * @param indexed the terms the field was indexed with; null if the field has no postings or the
      *     terms weren't rebuilt
-     * @param points the points the field was indexed with, as bytes per dimension in hex; empty if the
+     * @param points the points the field was indexed with, as bytes per dimension in hex; null if the
      *     field has no points or they weren't rebuilt (version 3, ADR 0041)
      */
     public record ExportedField(
             String name,
-            OptionalInt number,
+            @Nullable Integer number,
             String flags,
             IndexOptions indexOptions,
-            OptionalLong norm,
+            @Nullable Long norm,
             List<StoredValue> stored,
-            Optional<DocValues> docValues,
-            Optional<KnnVector> vector,
-            Optional<List<TermVectorTerm>> termVector,
-            Optional<IndexedTerms> indexed,
-            Optional<List<PointValue>> points) {}
+            @Nullable DocValues docValues,
+            @Nullable KnnVector vector,
+            @Nullable List<TermVectorTerm> termVector,
+            @Nullable IndexedTerms indexed,
+            @Nullable List<PointValue> points) {}
 
     /** The rebuilt terms of a field (ADR 0029), in term order, with their occurrences in the document. */
     public record IndexedTerms(ReconstructSource source, List<TermVectorTerm> terms) {}
@@ -199,16 +200,19 @@ public final class DocumentExport {
 
     /**
      * The export of {@code data}, with the fields {@code schema} describes. {@code rebuilt} holds
-     * the indexed terms and points, if they were rebuilt.
+     * the indexed terms and points, or is null if they weren't rebuilt; {@code indexDirectory} is the
+     * index directory the document is in, or null with only one.
      */
     public static ExportedDocument assemble(
             DocumentData data,
-            Optional<List<ReconstructedField>> rebuilt,
+            @Nullable List<ReconstructedField> rebuilt,
             Function<String, Optional<IndexField>> schema,
             String index,
-            Optional<String> indexDirectory) {
+            @Nullable String indexDirectory) {
         Map<String, ReconstructedField> byField = new LinkedHashMap<>();
-        rebuilt.ifPresent(fields -> fields.forEach(field -> byField.put(field.field(), field)));
+        if (rebuilt != null) {
+            rebuilt.forEach(field -> byField.put(field.field(), field));
+        }
         List<ExportedField> fields = new ArrayList<>();
         for (DocumentField field : data.document().fields()) {
             Optional<ReconstructedField> indexed = Optional.ofNullable(byField.remove(field.name()));
@@ -223,16 +227,18 @@ public final class DocumentExport {
             boolean points = info.map(f -> f.pointDimensionCount() > 0).orElse(hasPoints);
             fields.add(new ExportedField(
                     field.name(),
-                    info.map(f -> OptionalInt.of(f.number())).orElse(OptionalInt.empty()),
+                    info.map(IndexField::number).orElse(null),
                     FieldFlags.of(info, field),
                     info.map(IndexField::indexOptions).orElse(IndexOptions.NONE),
-                    field.norm(),
+                    field.norm().isPresent() ? field.norm().getAsLong() : null,
                     field.stored(),
-                    field.docValues(),
-                    field.vector(),
-                    Optional.ofNullable(data.termVectors().get(field.name())),
-                    indexed.filter(_ -> postings).map(f -> new IndexedTerms(f.source(), f.terms())),
-                    indexed.filter(_ -> points).map(ReconstructedField::points)));
+                    field.docValues().orElse(null),
+                    field.vector().orElse(null),
+                    data.termVectors().get(field.name()),
+                    indexed.filter(_ -> postings)
+                            .map(f -> new IndexedTerms(f.source(), f.terms()))
+                            .orElse(null),
+                    indexed.filter(_ -> points).map(ReconstructedField::points).orElse(null)));
         }
         return new ExportedDocument(
                 FORMAT,
@@ -241,7 +247,7 @@ public final class DocumentExport {
                 indexDirectory,
                 data.document().docId(),
                 data.document().deleted(),
-                rebuilt.isPresent(),
+                rebuilt != null,
                 List.copyOf(fields));
     }
 
