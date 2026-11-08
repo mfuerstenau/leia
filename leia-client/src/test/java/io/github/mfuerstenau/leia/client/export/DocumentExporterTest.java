@@ -29,6 +29,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import org.junit.jupiter.api.AfterAll;
@@ -73,6 +75,23 @@ class DocumentExporterTest {
 
     private static Request request(int docId, boolean indexedTerms, Target target) {
         return new Request(docId, true, indexedTerms, schema, demo, Optional.empty(), target);
+    }
+
+    @Test
+    void theBackendsCallsFetchAWholeStoredValueAndCancelAJob() throws Exception {
+        DocumentExporter.Calls calls = DocumentExporter.Calls.of(backend);
+        DocumentField field = calls.document(1).toCompletableFuture().get().fields().stream()
+                .filter(f -> !f.stored().isEmpty())
+                .findFirst()
+                .orElseThrow();
+
+        StoredValue value =
+                calls.storedValue(1, field.name(), 0).toCompletableFuture().get();
+        long job = calls.startReconstruct(1).toCompletableFuture().get();
+
+        assertThat(value.value()).isEqualTo(field.stored().getFirst().value());
+        assertThat(value.fullLength()).isEmpty();
+        assertThat(calls.cancelJob(job).toCompletableFuture().get()).isNull();
     }
 
     @Test
@@ -192,7 +211,7 @@ class DocumentExporterTest {
         calls.started.complete(7L);
 
         assertThat(job.done().get(30, TimeUnit.SECONDS).state()).isEqualTo(State.CANCELLED);
-        awaitTrue(() -> calls.cancelled.contains(7L));
+        assertThat(calls.firstCancelled.get(30, TimeUnit.SECONDS)).isEqualTo(7L);
     }
 
     @Test
@@ -211,40 +230,129 @@ class DocumentExporterTest {
         assertThat(done.cause()).containsInstanceOf(RpcException.class);
     }
 
+    @Test
+    void failsWhenTheRebuildCantStartOrBeAskedOrTheDocumentCantBePutTogether() throws Exception {
+        FakeExportCalls notStarted = fakeCalls();
+        notStarted.started = CompletableFuture.failedFuture(new IllegalStateException());
+        FakeExportCalls notAsked = fakeCalls();
+        notAsked.reconstructCall =
+                CompletableFuture.failedFuture(new CompletionException(new IllegalStateException("the job is gone")));
+
+        Snapshot notStartedDone = exportText(notStarted, true, name -> Optional.empty());
+        Snapshot notAskedDone = exportText(notAsked, true, name -> Optional.empty());
+        Snapshot unassembled = exportText(fakeCalls(), false, name -> {
+            throw new IllegalArgumentException("no schema");
+        });
+
+        assertThat(notStartedDone.state()).isEqualTo(State.FAILED);
+        assertThat(notStartedDone.error()).contains(IllegalStateException.class.getName());
+        assertThat(notAskedDone.state()).isEqualTo(State.FAILED);
+        assertThat(notAskedDone.error()).contains("the job is gone");
+        assertThat(notAskedDone.cause()).containsInstanceOf(IllegalStateException.class);
+        assertThat(unassembled.state()).isEqualTo(State.FAILED);
+        assertThat(unassembled.error()).contains("no schema");
+    }
+
+    @Test
+    void aCancelWhileTheDocumentLoadsEndsItWhateverTheLoadDoesThen() throws Exception {
+        for (boolean indexedTerms : List.of(true, false)) {
+            FakeExportCalls loaded = fakeCalls();
+            CompletableFuture<GetDocumentResult> document = new CompletableFuture<>();
+            GetDocumentResult result = loaded.document.toCompletableFuture().get();
+            loaded.document = document;
+            ExportJob job = new DocumentExporter(loaded).start(textRequest(indexedTerms, name -> Optional.empty()));
+
+            job.cancel();
+            document.complete(result);
+
+            assertThat(job.done().get(30, TimeUnit.SECONDS).state()).isEqualTo(State.CANCELLED);
+            assertThat(job.snapshot().state()).isEqualTo(State.CANCELLED);
+            assertThat(loaded.cancelled).isEmpty();
+        }
+        FakeExportCalls failed = fakeCalls();
+        CompletableFuture<GetDocumentResult> document = new CompletableFuture<>();
+        failed.document = document;
+        ExportJob job = new DocumentExporter(failed).start(textRequest(false, name -> Optional.empty()));
+
+        job.cancel();
+        document.completeExceptionally(new IllegalStateException("too late"));
+
+        assertThat(job.snapshot().state()).isEqualTo(State.CANCELLED);
+        assertThat(job.snapshot().error()).isEmpty();
+    }
+
+    @Test
+    void aRebuildsAnswerAfterACancelIsDropped() {
+        FakeExportCalls calls = fakeCalls();
+        CompletableFuture<GetReconstructResult> answer = new CompletableFuture<>();
+        calls.reconstructCall = answer;
+        ExportJob job = new DocumentExporter(calls).start(textRequest(true, name -> Optional.empty()));
+        assertThat(job.snapshot().state()).isEqualTo(State.REBUILDING);
+
+        job.cancel();
+        answer.complete(FakeExportCalls.running(5, 10));
+
+        assertThat(job.snapshot().state()).isEqualTo(State.CANCELLED);
+        assertThat(job.snapshot().scanned()).isZero();
+        assertThat(calls.cancelled).containsExactly(7L);
+    }
+
+    @Test
+    void aCancelAfterTheEndChangesNothing() throws Exception {
+        ExportJob job = new DocumentExporter(fakeCalls()).start(textRequest(false, name -> Optional.empty()));
+        Snapshot done = job.done().get(30, TimeUnit.SECONDS);
+
+        job.cancel();
+
+        assertThat(done.state()).isEqualTo(State.DONE);
+        assertThat(job.snapshot()).isEqualTo(done);
+    }
+
+    private static Request textRequest(boolean indexedTerms, Function<String, Optional<IndexField>> schema) {
+        return new Request(0, true, indexedTerms, schema, "/index", Optional.empty(), new Target.Text());
+    }
+
+    private static Snapshot exportText(
+            FakeExportCalls calls, boolean indexedTerms, Function<String, Optional<IndexField>> schema)
+            throws Exception {
+        return new DocumentExporter(calls, Duration.ofMillis(10))
+                .start(textRequest(indexedTerms, schema))
+                .done()
+                .get(30, TimeUnit.SECONDS);
+    }
+
     /** The rebuild of {@code docId}, as the job of the backend gives it. */
     private static List<ReconstructedField> rebuilt(int docId) throws Exception {
         long job = backend.call(Methods.START_RECONSTRUCT, new StartReconstructParams(docId, Optional.empty()))
                 .get()
                 .jobId();
-        while (true) {
-            GetReconstructResult result =
-                    backend.call(Methods.GET_RECONSTRUCT, new JobParams(job)).get();
-            if (result.result().isPresent()) {
-                return result.result().get().fields();
-            }
-            Thread.sleep(10);
+        // Asked again 10 ms after each answer, until the rebuild is done
+        Executor later = CompletableFuture.delayedExecutor(10, TimeUnit.MILLISECONDS);
+        GetReconstructResult result =
+                backend.call(Methods.GET_RECONSTRUCT, new JobParams(job)).get();
+        while (result.result().isEmpty()) {
+            result = CompletableFuture.supplyAsync(
+                            () -> backend.call(Methods.GET_RECONSTRUCT, new JobParams(job)), later)
+                    .thenCompose(Function.identity())
+                    .get();
         }
+        return result.result().orElseThrow().fields();
     }
 
-    private static Snapshot awaitSnapshot(ExportJob job, java.util.function.Predicate<Snapshot> condition)
-            throws InterruptedException {
+    private static Snapshot awaitSnapshot(ExportJob job, java.util.function.Predicate<Snapshot> condition) {
         long end = System.nanoTime() + Duration.ofSeconds(30).toNanos();
         while (System.nanoTime() < end) {
             Snapshot snapshot = job.snapshot();
             if (condition.test(snapshot)) {
                 return snapshot;
             }
-            Thread.sleep(5);
+            // Until the export ends, or for 5 ms
+            job.done()
+                    .copy()
+                    .completeOnTimeout(snapshot, 5, TimeUnit.MILLISECONDS)
+                    .join();
         }
         throw new AssertionError("no such snapshot: " + job.snapshot());
-    }
-
-    private static void awaitTrue(java.util.function.BooleanSupplier condition) throws InterruptedException {
-        long end = System.nanoTime() + Duration.ofSeconds(30).toNanos();
-        while (!condition.getAsBoolean()) {
-            assertThat(System.nanoTime()).as("in time").isLessThan(end);
-            Thread.sleep(5);
-        }
     }
 
     private static FakeExportCalls fakeCalls() {

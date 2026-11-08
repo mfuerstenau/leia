@@ -26,8 +26,14 @@ public final class FakeExportCalls implements DocumentExporter.Calls {
     /** What {@code getReconstruct} answers: running, until a test sets the rebuilt fields. */
     public volatile GetReconstructResult reconstruct = running(5, 10);
 
+    /** If set, what {@code getReconstruct} answers instead of {@link #reconstruct}, such as a failure. */
+    public volatile CompletableFuture<GetReconstructResult> reconstructCall;
+
     /** The jobs that were cancelled. */
     public final List<Long> cancelled = new CopyOnWriteArrayList<>();
+
+    /** Completes with the job that was cancelled first. */
+    public final CompletableFuture<Long> firstCancelled = new CompletableFuture<>();
 
     public FakeExportCalls(GetDocumentResult document) {
         this.document = CompletableFuture.completedFuture(document);
@@ -65,12 +71,14 @@ public final class FakeExportCalls implements DocumentExporter.Calls {
 
     @Override
     public CompletionStage<GetReconstructResult> reconstruct(long jobId) {
-        return CompletableFuture.completedFuture(reconstruct);
+        CompletableFuture<GetReconstructResult> call = reconstructCall;
+        return call != null ? call : CompletableFuture.completedFuture(reconstruct);
     }
 
     @Override
     public CompletionStage<Void> cancelJob(long jobId) {
         cancelled.add(jobId);
+        firstCancelled.complete(jobId);
         return CompletableFuture.completedFuture(null);
     }
 }

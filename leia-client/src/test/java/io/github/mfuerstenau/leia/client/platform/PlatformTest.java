@@ -21,6 +21,19 @@ class PlatformTest {
     Path tmp;
 
     @Test
+    void theCurrentPlatformIsThisJvmsWithoutLeiaJarOutsideOfIt() {
+        Platform current = Platform.current(PlatformTest.class);
+
+        assertThat(current.home()).contains(Path.of(System.getProperty("user.home")));
+        assertThat(current.windows())
+                .isEqualTo(System.getProperty("os.name")
+                        .toLowerCase(java.util.Locale.ROOT)
+                        .startsWith("windows"));
+        assertThat(current.env().apply("PATH")).isEqualTo(System.getenv("PATH"));
+        assertThat(current.leiaJar()).as("the test classes are a folder").isEmpty();
+    }
+
+    @Test
     void listsTheUserCandidatesInOrder() {
         Platform platform =
                 linux(Map.of("XDG_STATE_HOME", "/state", "XDG_CONFIG_HOME", "/config", "XDG_DATA_HOME", "/data"), HOME);

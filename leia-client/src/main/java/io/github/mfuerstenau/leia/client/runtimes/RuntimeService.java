@@ -4,6 +4,7 @@ import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * What a UI needs of the runtimes' install (ADR 0080, ADR 0124, ADR 0126): plans, on a thread of
@@ -26,16 +27,16 @@ public final class RuntimeService {
     }
 
     private final MirrorSettings settings;
-    private volatile RuntimeInstall install;
+    private final AtomicReference<RuntimeInstall> install;
 
     public RuntimeService(RuntimeInstall install, MirrorSettings settings) {
-        this.install = install;
+        this.install = new AtomicReference<>(install);
         this.settings = settings;
     }
 
     /** The install, with the mirror chosen last first. */
     public RuntimeInstall install() {
-        return install;
+        return install.get();
     }
 
     /** The mirrors that were left out, and why, such as a bad line of the {@code mirrors} file. */
@@ -49,7 +50,7 @@ public final class RuntimeService {
      * RuntimeInstall.InstallException} that says why it can't.
      */
     public CompletableFuture<Plans> plan(List<RuntimeFolders.Known> runtimes, List<RuntimeFolders.Known> present) {
-        RuntimeInstall current = install;
+        RuntimeInstall current = install.get();
         CompletableFuture<Plans> plans = new CompletableFuture<>();
         Thread.ofPlatform().daemon().name("leia-runtime-plan").start(() -> {
             try {
@@ -64,12 +65,12 @@ public final class RuntimeService {
 
     /** An install of {@code chosen} of {@code plan}, not started yet, that asks after a failed download. */
     public InstallJob job(RuntimeInstall.Plan plan, Set<RuntimeFolders.Known> chosen) {
-        return InstallJob.of(install, plan, chosen);
+        return InstallJob.of(install.get(), plan, chosen);
     }
 
     /** {@code mirror} is the first from now on, and saved for next time (ADR 0124). */
     public void useMirror(Mirror mirror) {
-        install = install.withFirst(mirror);
+        install.updateAndGet(current -> current.withFirst(mirror));
         settings.saveFile().ifPresent(file -> Mirrors.save(file, mirror));
     }
 }

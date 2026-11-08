@@ -479,8 +479,8 @@ public final class RuntimeInstall {
                     copies.stream().mapToLong(download -> download.jar().size()).sum();
             long downloaded =
                     runtimes.stream().mapToLong(RuntimePlan::downloadSize).sum();
-            int all = runtimes.stream()
-                    .mapToInt(runtime -> runtime.downloads().size())
+            long all = runtimes.stream()
+                    .mapToLong(runtime -> runtime.downloads().size())
                     .sum();
             out.println(Units.count(copies.size(), "jar") + ", " + Units.size(copied)
                     + ", come from local caches and aren't downloaded; "
@@ -518,7 +518,7 @@ public final class RuntimeInstall {
     public String source() {
         Mirror first = mirrors.getFirst();
         String others = mirrors.size() > 1
-                ? ", or, when a download fails, from " + Units.count(mirrors.size() - 1, "other mirror")
+                ? ", or, when a download fails, from " + Units.count(mirrors.size() - 1L, "other mirror")
                 : "";
         return first.uri().equals(Mirrors.CENTRAL)
                 ? "leia downloads these official Lucene jars from Maven Central (" + Mirrors.CENTRAL + "), unchanged"

@@ -75,10 +75,22 @@ public final class Tui {
      *
      * @return the exit status: 1 if something unexpected ended it
      */
+    public static int run(Start start, PrintStream out, PrintStream err) throws Exception {
+        selectBackend();
+        return run(start, out, err, Boolean.getBoolean("leia.exitAfterFirstFrame"), TuiConfig.builder());
+    }
+
+    /**
+     * Runs the TUI on the terminal of {@code terminal} until the user quits, or until the first frame
+     * is on the screen if {@code exitAfterFirstFrame}.
+     *
+     * @param terminal the config to start from, such as with a test's backend
+     */
     // It keeps the CLI's own streams (ADR 0088)
     @SuppressWarnings("java:S106")
-    public static int run(Start start, PrintStream out, PrintStream err) throws Exception {
-        boolean exitAfterFirstFrame = Boolean.getBoolean("leia.exitAfterFirstFrame");
+    static int run(
+            Start start, PrintStream out, PrintStream err, boolean exitAfterFirstFrame, TuiConfig.Builder terminal)
+            throws Exception {
         Platform platform = start.platform();
         LeiaBackend backend = start.backend();
         PrintStream log = start.log().stream();
@@ -101,15 +113,12 @@ public final class Tui {
         Session session = new Session(app, backend, start.runtimes());
         // The first frame shows the path being opened.
         start.indexPath().ifPresent(path -> app.opening(path, start.mode()));
-        selectBackend();
         PrintStream stdout = System.out;
         PrintStream stderr = System.err;
         Instant[] firstFrame = new Instant[1];
         Instant terminalReady;
-        TuiConfig config = TuiConfig.builder()
-                .tickRate(Duration.ofMillis(100))
-                .errorOutput(log)
-                .build();
+        TuiConfig config =
+                terminal.tickRate(Duration.ofMillis(100)).errorOutput(log).build();
         try (TuiRunner runner = TuiRunner.create(config)) {
             terminalReady = Instant.now();
             // The terminal has its own streams now; anything else that prints goes to the log

@@ -2880,15 +2880,18 @@ class AppTest {
         return job;
     }
 
-    private static ExportJob.Snapshot awaitExport(ExportJob job, Predicate<ExportJob.Snapshot> condition)
-            throws InterruptedException {
+    private static ExportJob.Snapshot awaitExport(ExportJob job, Predicate<ExportJob.Snapshot> condition) {
         long end = System.nanoTime() + Duration.ofSeconds(30).toNanos();
         while (System.nanoTime() < end) {
             ExportJob.Snapshot snapshot = job.snapshot();
             if (condition.test(snapshot)) {
                 return snapshot;
             }
-            Thread.sleep(2);
+            // Until the export ends, or for 2 ms
+            job.done()
+                    .copy()
+                    .completeOnTimeout(snapshot, 2, TimeUnit.MILLISECONDS)
+                    .join();
         }
         throw new AssertionError("no such snapshot: " + job.snapshot());
     }

@@ -1688,10 +1688,11 @@ public final class App {
         return switch (done.state()) {
             case DONE -> {
                 forgetExport();
-                if (done.text().isPresent()) {
-                    long bytes = done.text().get().getBytes(StandardCharsets.UTF_8).length;
+                Optional<String> text = done.text();
+                if (text.isPresent()) {
+                    long bytes = text.get().getBytes(StandardCharsets.UTF_8).length;
                     notice = new Notice.Exported("Copied document " + docId + " as JSON, " + TextFormat.size(bytes));
-                    yield Optional.of(new Action.Copy(done.text().get()));
+                    yield Optional.of(new Action.Copy(text.get()));
                 }
                 notice = new Notice.Exported("Exported document " + docId + " to "
                         + shownPath(done.path().map(Path::toString).orElse("")));

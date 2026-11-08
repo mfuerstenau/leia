@@ -28,8 +28,8 @@ class IsolationTest {
     void hasNeitherTamboUiNorLuceneNorTheTui() {
         List<String> jars = mainClasspath();
 
-        assertThat(jars).isNotEmpty();
         assertThat(jars)
+                .isNotEmpty()
                 .noneMatch(jar -> jar.startsWith("tamboui"))
                 .noneMatch(jar -> jar.startsWith("lucene-"))
                 .noneMatch(jar -> jar.startsWith("leia-core"))

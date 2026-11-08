@@ -139,7 +139,7 @@ public final class Main {
         try (LeiaLog.Opened log = LeiaLog.toFile(platform.logFile())) {
             LOG.info(() -> "leia started with " + List.of(args));
             if (cli.mcp()) {
-                return runMcp(cli, platform, runtimeFolders, defaultJars, jars, mcpRoots, log, in, out, err);
+                return runMcp(cli, platform, defaultJars, jars, mcpRoots, log, in, out, err);
             }
             // In the log, which a broken theme of the user's goes to (ADR 0096).
             Themes themes = Tui.themes(platform);
@@ -162,7 +162,7 @@ public final class Main {
                 }
             }
             refreshOwnJars(platform);
-            Optional<LeiaBackend> backend = startBackend(cli, platform, runtimeFolders, defaultJars, jars, err);
+            Optional<LeiaBackend> backend = startBackend(cli, platform, defaultJars, jars, err);
             if (backend.isEmpty()) {
                 return 1;
             }
@@ -178,12 +178,7 @@ public final class Main {
      * {@code err}.
      */
     private static Optional<LeiaBackend> startBackend(
-            Cli cli,
-            Platform platform,
-            RuntimesDirs runtimeFolders,
-            DefaultJars defaultJars,
-            List<Path> jars,
-            PrintStream err) {
+            Cli cli, Platform platform, DefaultJars defaultJars, List<Path> jars, PrintStream err) {
         try {
             return Optional.of(
                     LeiaBackend.startWith(platform.runtimesDirs(), jars, cli.servers(), platform.cacheDir()));
@@ -211,7 +206,6 @@ public final class Main {
     private static int runMcp(
             Cli cli,
             Platform platform,
-            RuntimesDirs runtimeFolders,
             DefaultJars defaultJars,
             List<Path> jars,
             List<Path> mcpRoots,
@@ -226,7 +220,7 @@ public final class Main {
         System.setErr(log.stream());
         try {
             refreshOwnJars(platform);
-            Optional<LeiaBackend> backend = startBackend(cli, platform, runtimeFolders, defaultJars, jars, err);
+            Optional<LeiaBackend> backend = startBackend(cli, platform, defaultJars, jars, err);
             if (backend.isEmpty()) {
                 return 1;
             }

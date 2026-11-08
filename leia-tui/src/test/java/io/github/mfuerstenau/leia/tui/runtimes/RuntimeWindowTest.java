@@ -468,6 +468,33 @@ class RuntimeWindowTest {
     }
 
     @Test
+    void keepsTheFailuresOfAJarAcrossItsRetries() throws Exception {
+        try (FakeRepository second = new FakeRepository()) {
+            String path = "org/apache/lucene/lucene-backward-codecs/9.12.3/lucene-backward-codecs-9.12.3.jar";
+            repository.served.remove(path);
+            second.served.remove(path);
+            Mirror local = new Mirror(repository.base(), "Local", Mirror.Origin.OPTION);
+            Mirror other = new Mirror(second.base(), "Second", Mirror.Origin.OPTION);
+            install = new RuntimeInstall(runtimes, List.of(local, other), RuntimeWindowTest.class.getClassLoader());
+            plan(List.of(known("lucene9")));
+            window.handleKey(key(' '));
+            CompletableFuture<RuntimeInstall.Outcome> running = enter();
+            awaitQuestion();
+            assertThat(window.handleKey(key(KeyCode.ENTER))).isEqualTo(new RuntimeWindow.UseMirror(other));
+
+            awaitQuestion();
+
+            assertThat(screen())
+                    .contains("lucene9/lucene-backward-codecs-9.12.3.jar from Second failed: HTTP 404")
+                    .contains("✗ Local · " + repository.base() + " (--download-url) · HTTP 404")
+                    .contains("✗ Second · " + second.base() + " (--download-url) · HTTP 404");
+            assertThat(window.handleKey(key(KeyCode.ESCAPE))).isEqualTo(new RuntimeWindow.Nothing());
+            RuntimeInstall.Outcome outcome = running.get(30, TimeUnit.SECONDS);
+            assertThat(outcome.results().get(known("lucene9"))).isInstanceOf(RuntimeInstall.Result.Failed.class);
+        }
+    }
+
+    @Test
     void escapeAfterAFailedDownloadStopsIt() throws Exception {
         repository.served.remove("org/apache/lucene/lucene-core/9.12.3/lucene-core-9.12.3.jar");
         plan(List.of(known("lucene9"), known("lucene5")));

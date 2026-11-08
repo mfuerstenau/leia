@@ -7,7 +7,6 @@ import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.protocol.search.DocValuesNumber;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -128,6 +127,6 @@ class DocValuesNumbersTest {
                         DocValuesType.SORTED_NUMERIC,
                         List.of(1L, 2L),
                         List.of(stored(StoredType.LONG, "1"), stored(StoredType.STRING, "2"))))
-                .isEqualTo(Optional.empty());
+                .isEmpty();
     }
 }

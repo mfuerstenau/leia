@@ -13,6 +13,7 @@ import io.github.mfuerstenau.leia.protocol.document.StoredValue;
 import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
+import io.github.mfuerstenau.leia.protocol.job.JobStarted;
 import io.github.mfuerstenau.leia.server.LeiaBackend;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -30,7 +31,7 @@ import java.util.function.Function;
 public final class DocumentExporter {
 
     /** How often a rebuild is asked how far it is. */
-    private static final Duration POLL = Duration.ofMillis(100);
+    private static final Duration DEFAULT_POLL = Duration.ofMillis(100);
 
     /** The calls an export makes: to the backend, or a test's. */
     public interface Calls extends DocumentExport.Fetch {
@@ -67,7 +68,7 @@ public final class DocumentExporter {
                 @Override
                 public CompletionStage<Long> startReconstruct(int docId) {
                     return backend.call(Methods.START_RECONSTRUCT, new StartReconstructParams(docId, Optional.empty()))
-                            .thenApply(started -> started.jobId());
+                            .thenApply(JobStarted::jobId);
                 }
 
                 @Override
@@ -124,20 +125,20 @@ public final class DocumentExporter {
             Target target) {}
 
     private final Calls calls;
-    private final Duration poll;
+    private final Duration pollInterval;
 
     public DocumentExporter(Calls calls) {
-        this(calls, POLL);
+        this(calls, DEFAULT_POLL);
     }
 
     /** @param poll how often a rebuild is asked how far it is */
     public DocumentExporter(Calls calls, Duration poll) {
         this.calls = calls;
-        this.poll = poll;
+        this.pollInterval = poll;
     }
 
     /** Starts the export of {@code request}. */
     public ExportJob start(Request request) {
-        return ExportJob.start(calls, request, poll);
+        return ExportJob.start(calls, request, pollInterval);
     }
 }

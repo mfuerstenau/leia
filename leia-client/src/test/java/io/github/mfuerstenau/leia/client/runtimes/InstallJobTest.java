@@ -7,6 +7,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.mfuerstenau.leia.client.runtimes.InstallJob.JarProgress;
 import io.github.mfuerstenau.leia.client.runtimes.InstallJob.JarState;
+import io.github.mfuerstenau.leia.client.runtimes.InstallJob.RuntimeProgress;
 import io.github.mfuerstenau.leia.client.runtimes.InstallJob.Snapshot;
 import io.github.mfuerstenau.leia.client.runtimes.InstallJob.State;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
@@ -16,6 +17,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -260,7 +262,43 @@ class InstallJobTest {
         RuntimeInstall install = install(mirror(first, "First"));
         InstallJob job = InstallJob.of(install, install.plan(List.of(known("lucene7"))), Set.of(known("lucene7")));
 
-        assertThatThrownBy(() -> job.choose(new MirrorChooser.Choice.Skip())).isInstanceOf(IllegalStateException.class);
+        MirrorChooser.Choice skip = new MirrorChooser.Choice.Skip();
+
+        assertThatThrownBy(() -> job.choose(skip)).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void awaitingBeforeTheStartIsAnError() throws Exception {
+        RuntimeInstall install = install(mirror(first, "First"));
+        InstallJob job = InstallJob.of(install, install.plan(List.of(known("lucene7"))), Set.of(known("lucene7")));
+
+        assertThat(job.install()).isSameAs(install);
+        assertThatThrownBy(job::await).isInstanceOf(IllegalStateException.class);
+    }
+
+    @Test
+    void anInstallThatThrowsFailsEveryChosenRuntime() throws Exception {
+        RuntimeInstall install = install(mirror(first, "First"));
+        IllegalStateException broken = new IllegalStateException("a broken listener");
+        RuntimeInstall.Listener listener = new RuntimeInstall.Listener() {
+            @Override
+            public void jarStarted(String folder, String jar, long size) {
+                throw broken;
+            }
+        };
+        InstallJob job = InstallJob.of(
+                install,
+                install.plan(List.of(known("lucene7"))),
+                Set.of(known("lucene7")),
+                listener,
+                MirrorChooser.fallback());
+
+        RuntimeInstall.Outcome outcome = job.start().await();
+
+        assertThat(outcome.results())
+                .containsExactly(Map.entry(known("lucene7"), new RuntimeInstall.Result.Failed(broken.toString())));
+        assertThat(outcome.status()).isNotZero();
+        assertThat(job.snapshot().state()).isEqualTo(State.DONE);
     }
 
     @Test
@@ -325,7 +363,8 @@ class InstallJobTest {
         }
 
         assertThat(before.runtimes().getFirst().jars()).anyMatch(jar -> jar.state() != JarState.DOWNLOADED);
-        assertThatThrownBy(() -> before.runtimes().clear()).isInstanceOf(UnsupportedOperationException.class);
+        List<RuntimeProgress> shown = before.runtimes();
+        assertThatThrownBy(shown::clear).isInstanceOf(UnsupportedOperationException.class);
         assertThat(job.await().status()).isZero();
     }
 
@@ -337,14 +376,15 @@ class InstallJobTest {
                 .orElseThrow();
     }
 
-    private static Snapshot awaitSnapshot(InstallJob job, Predicate<Snapshot> condition) throws InterruptedException {
+    private static Snapshot awaitSnapshot(InstallJob job, Predicate<Snapshot> condition) {
         Instant end = Instant.now().plus(Duration.ofSeconds(30));
         while (Instant.now().isBefore(end)) {
             Snapshot snapshot = job.snapshot();
             if (condition.test(snapshot)) {
                 return snapshot;
             }
-            Thread.sleep(10);
+            // Until the install ends, or for 10 ms
+            job.done().copy().completeOnTimeout(null, 10, TimeUnit.MILLISECONDS).join();
         }
         throw new AssertionError("no such snapshot: " + job.snapshot());
     }

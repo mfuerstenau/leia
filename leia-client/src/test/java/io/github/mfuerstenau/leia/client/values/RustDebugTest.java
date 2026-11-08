@@ -28,5 +28,10 @@ class RustDebugTest {
         assertThat(RustDebug.of(0.1f)).isEqualTo("0.1");
         assertThat(RustDebug.of(16777216f)).isEqualTo("16777216.0");
         assertThat(RustDebug.of(3.4028235e38f)).isEqualTo("3.4028235e38");
+        assertThat(RustDebug.of(-0.0f)).isEqualTo("-0.0");
+        assertThat(RustDebug.of(1.5e-5f)).isEqualTo("1.5e-5");
+        assertThat(RustDebug.of(Float.NaN)).isEqualTo("NaN");
+        assertThat(RustDebug.of(Float.POSITIVE_INFINITY)).isEqualTo("inf");
+        assertThat(RustDebug.of(Float.NEGATIVE_INFINITY)).isEqualTo("-inf");
     }
 }
