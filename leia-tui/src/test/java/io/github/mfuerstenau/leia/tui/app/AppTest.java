@@ -9,6 +9,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.tui.event.KeyModifiers;
+import io.github.mfuerstenau.leia.client.export.DocumentExporter;
+import io.github.mfuerstenau.leia.client.export.ExportJob;
+import io.github.mfuerstenau.leia.client.export.FakeExportCalls;
+import io.github.mfuerstenau.leia.client.history.History;
+import io.github.mfuerstenau.leia.client.log.LogBuffer;
+import io.github.mfuerstenau.leia.client.platform.DefaultJars;
+import io.github.mfuerstenau.leia.client.platform.RuntimesDirs;
+import io.github.mfuerstenau.leia.client.runtimes.RuntimeInstall;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeParams;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeResult;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsResult;
@@ -103,14 +111,11 @@ import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders.Known;
 import io.github.mfuerstenau.leia.tui.TestScreens;
 import io.github.mfuerstenau.leia.tui.analysis.AnalyzerSettings;
 import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
-import io.github.mfuerstenau.leia.tui.documents.DocumentExport.DocumentData;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
-import io.github.mfuerstenau.leia.tui.jars.DefaultJars;
-import io.github.mfuerstenau.leia.tui.jars.RuntimeFolders;
-import io.github.mfuerstenau.leia.tui.log.LogBuffer;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
-import io.github.mfuerstenau.leia.tui.runtimes.RuntimeInstall;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.List;
@@ -119,6 +124,9 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 import java.util.logging.Level;
 import java.util.logging.LogRecord;
 import org.junit.jupiter.api.Test;
@@ -643,7 +651,7 @@ class AppTest {
 
     @Test
     void theAboutScreenNamesTheLoadedRuntimesAndWhyTheOthersAreNot() {
-        App app = app().withRuntimeFolders(new RuntimeFolders(Optional.of(Path.of("/opt/leia/runtimes"))));
+        App app = app().withRuntimeFolders(new RuntimesDirs(Optional.of(Path.of("/opt/leia/runtimes"))));
         app.runtimesLoaded(new GetRuntimesResult(
                 List.of(
                         new RuntimeFolder(
@@ -724,7 +732,7 @@ class AppTest {
 
     @Test
     void theAboutScreenSaysWhenARuntimeNeedsARestart() {
-        App app = app().withRuntimeFolders(new RuntimeFolders(Optional.of(Path.of("/opt/leia/runtimes"))));
+        App app = app().withRuntimeFolders(new RuntimesDirs(Optional.of(Path.of("/opt/leia/runtimes"))));
         app.runtimesLoaded(everyState());
 
         assertThat(TestScreens.render(app::render, 200, 30))
@@ -734,7 +742,7 @@ class AppTest {
 
     @Test
     void dOnTheStartScreenPlansOnlyTheMissingAndIncompleteRuntimes() {
-        App app = app().withRuntimeFolders(new RuntimeFolders(Optional.of(Path.of("/opt/leia/runtimes"))));
+        App app = app().withRuntimeFolders(new RuntimesDirs(Optional.of(Path.of("/opt/leia/runtimes"))));
         app.runtimesLoaded(everyState());
 
         Optional<Action> action = app.handleKey(key('D'));
@@ -918,7 +926,7 @@ class AppTest {
 
     @Test
     void dOnTheAnalysisTabIsTheAnalysisTabs() {
-        App app = app().withRuntimeFolders(new RuntimeFolders(Optional.of(Path.of("/opt/leia/runtimes"))));
+        App app = app().withRuntimeFolders(new RuntimesDirs(Optional.of(Path.of("/opt/leia/runtimes"))));
         app.handleKey(key('6'));
 
         Optional<Action> action = app.handleKey(key('D'));
@@ -930,7 +938,7 @@ class AppTest {
 
     @Test
     void theNewRuntimesAreLoadedOnceInstalledAndTheAboutScreenFollows() {
-        App app = app().withRuntimeFolders(new RuntimeFolders(Optional.of(Path.of("/opt/leia/runtimes"))));
+        App app = app().withRuntimeFolders(new RuntimesDirs(Optional.of(Path.of("/opt/leia/runtimes"))));
         app.runtimesLoaded(everyState());
         app.handleKey(key('D'));
 
@@ -2845,10 +2853,6 @@ class AppTest {
         return appShowingADocument().withCwd(dir);
     }
 
-    private static DocumentData data(int docId) {
-        return new DocumentData(document(docId), Map.of());
-    }
-
     private static GetReconstructResult rebuiltId(int docId) {
         return new GetReconstructResult(
                 3,
@@ -2867,107 +2871,154 @@ class AppTest {
         return TestScreens.render(app::render, 140, 20);
     }
 
+    /** Starts the export that {@code action} asks for against {@code calls}, as the session does. */
+    private static ExportJob started(App app, Optional<Action> action, FakeExportCalls calls) {
+        assertThat(action).containsInstanceOf(Action.StartDocumentExport.class);
+        Action.StartDocumentExport start = (Action.StartDocumentExport) action.get();
+        ExportJob job = new DocumentExporter(calls, Duration.ofMillis(1)).start(start.request());
+        app.documentExportStarted(start.exportId(), job);
+        return job;
+    }
+
+    private static ExportJob.Snapshot awaitExport(ExportJob job, Predicate<ExportJob.Snapshot> condition) {
+        long end = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+        while (System.nanoTime() < end) {
+            ExportJob.Snapshot snapshot = job.snapshot();
+            if (condition.test(snapshot)) {
+                return snapshot;
+            }
+            // Until the export ends, or for 2 ms
+            job.done()
+                    .copy()
+                    .completeOnTimeout(snapshot, 2, TimeUnit.MILLISECONDS)
+                    .join();
+        }
+        throw new AssertionError("no such snapshot: " + job.snapshot());
+    }
+
+    private static ExportJob.Snapshot ended(ExportJob job) throws Exception {
+        return job.done().get(30, TimeUnit.SECONDS);
+    }
+
     @Test
-    void exportsADocumentWithItsIndexedTerms(@TempDir Path dir) {
+    void exportsADocumentWithItsIndexedTerms(@TempDir Path dir) throws Exception {
         App app = appExporting(dir);
         assertThat(app.handleKey(key('E'))).isEmpty();
         assertThat(render(app)).contains("Export document 0 as JSON", "Tab terms and points: on");
 
-        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.LoadDocumentExport(1, 0, true));
+        Optional<Action> start = app.handleKey(key(KeyCode.ENTER));
+        assertThat(start).hasValueSatisfying(action -> {
+            Action.StartDocumentExport export = (Action.StartDocumentExport) action;
+            assertThat(export.exportId()).isEqualTo(1);
+            assertThat(export.request().docId()).isZero();
+            assertThat(export.request().termVectors()).isTrue();
+            assertThat(export.request().indexedTerms()).isTrue();
+            assertThat(export.request().index()).isEqualTo("/data/idx");
+            assertThat(export.request().target())
+                    .isEqualTo(
+                            new DocumentExporter.Target.File(dir.resolve("doc-0.json"), false, List.of("/data/idx")));
+        });
         assertThat(render(app)).contains("Exporting…");
-        assertThat(app.documentExportLoaded(1, data(0))).hasValue(new Action.StartDocumentExport(1, 0));
-        assertThat(app.exportStarted(1, 7)).isEmpty();
-        assertThat(app.polls()).containsExactly(new Poll.DocumentExport(1, 7));
-        assertThat(app.documentExportProgress(
-                        1, new GetReconstructResult(1024, OptionalLong.of(3000), Optional.empty())))
-                .isEmpty();
+        FakeExportCalls calls = new FakeExportCalls(document(0));
+        calls.reconstruct = FakeExportCalls.running(1024, 3000);
+        ExportJob job = started(app, start, calls);
+        awaitExport(job, snapshot -> snapshot.scanned() == 1024);
+
+        // The prompt closes once the rebuild runs, and the tab line follows it.
+        assertThat(app.tick()).isTrue();
         assertThat(wide(app)).contains("Exporting doc 0: 1024/3000 terms", "Esc cancel export");
         // One export at a time.
         app.handleKey(key('E'));
         assertThat(wide(app)).contains("An export runs; Esc cancels it").doesNotContain("as JSON");
 
-        Optional<Action> write = app.documentExportProgress(1, rebuiltId(0));
-        assertThat(write).containsInstanceOf(Action.WriteExport.class);
-        Action.WriteExport written = (Action.WriteExport) write.get();
-        assertThat(written.exportId()).isEqualTo(1);
-        assertThat(written.docId()).isZero();
-        assertThat(written.path()).isEqualTo(dir.resolve("doc-0.json").toString());
-        assertThat(written.overwrite()).isFalse();
-        assertThat(written.indexDirs()).containsExactly("/data/idx");
-        assertThat(written.text()).contains("\"indexedTerms\": true", "\"source\": \"POSTINGS\"");
-        assertThat(app.polls()).isEmpty();
-
-        app.documentExported(1, 0, written.path());
+        calls.rebuilt(rebuiltId(0));
+        ExportJob.Snapshot done = ended(job);
+        assertThat(done.path()).contains(dir.resolve("doc-0.json"));
+        assertThat(Files.readString(dir.resolve("doc-0.json")))
+                .contains("\"indexedTerms\": true", "\"source\": \"POSTINGS\"");
+        assertThat(app.documentExportDone(1, done)).isEmpty();
         assertThat(render(app)).contains(" Exported document 0 to doc-0.json");
-        // A late poll of the finished export changes nothing.
-        assertThat(app.documentExportProgress(1, rebuiltId(0))).isEmpty();
+        assertThat(app.exporting()).isFalse();
+        // A late end of the finished export changes nothing.
+        assertThat(app.documentExportDone(1, done)).isEmpty();
     }
 
     @Test
-    void copiesADocumentWithoutItsIndexedTerms(@TempDir Path dir) {
+    void copiesADocumentWithoutItsIndexedTerms(@TempDir Path dir) throws Exception {
         App app = appExporting(dir);
         app.handleKey(key('E'));
         app.handleKey(key(KeyCode.TAB));
         assertThat(render(app)).contains("Tab terms and points: off");
 
-        assertThat(app.handleKey(ctrl('y'))).hasValue(new Action.LoadDocumentExport(1, 0, true));
-        Optional<Action> copy = app.documentExportLoaded(1, data(0));
+        FakeExportCalls calls = new FakeExportCalls(document(0));
+        ExportJob job = started(app, app.handleKey(ctrl('y')), calls);
+
+        Optional<Action> copy = app.documentExportDone(1, ended(job));
         assertThat(copy).containsInstanceOf(Action.Copy.class);
         assertThat(((Action.Copy) copy.get()).text()).contains("\"indexedTerms\": false", "\"value\": \"doc-0\"");
         assertThat(render(app)).doesNotContain("Export document").contains(" Copied document 0 as JSON, ");
-        assertThat(app.polls()).isEmpty();
+        assertThat(calls.cancelled).isEmpty();
+        try (var files = Files.list(dir)) {
+            assertThat(files).isEmpty();
+        }
     }
 
     @Test
-    void aDocumentExportThatFailsSaysWhy(@TempDir Path dir) {
+    void aDocumentExportThatFailsSaysWhy(@TempDir Path dir) throws Exception {
         App app = appExporting(dir);
-        // Without indexed terms, the prompt stays open until the file is written.
+        // Without indexed terms, the prompt stays open until the export has ended.
         app.handleKey(key('E'));
         app.handleKey(key(KeyCode.TAB));
-        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.LoadDocumentExport(1, 0, true));
-        assertThat(app.documentExportLoaded(1, data(0))).containsInstanceOf(Action.WriteExport.class);
-        app.exportFailed(1, "Cannot write doc-0.json: disk full");
-        assertThat(render(app)).contains("Cannot write doc-0.json: disk full");
+        FakeExportCalls failing = new FakeExportCalls(document(0));
+        failing.document = CompletableFuture.failedFuture(new IllegalStateException("Cannot read doc 0: gone"));
+        ExportJob job = started(app, app.handleKey(key(KeyCode.ENTER)), failing);
+        assertThat(app.documentExportDone(1, ended(job))).isEmpty();
+        assertThat(render(app)).contains("Cannot read doc 0: gone");
         assertThat(app.handleKey(key(KeyCode.ESCAPE))).isEmpty();
         assertThat(render(app)).doesNotContain("Export document");
 
-        // With them, Esc stops the rebuild.
+        // With them, Esc stops the rebuild, and its job.
         app.handleKey(key('E'));
-        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.LoadDocumentExport(2, 0, true));
-        app.documentExportLoaded(2, data(0));
-        app.exportStarted(2, 4);
-        assertThat(app.handleKey(key(KeyCode.ESCAPE))).hasValue(new Action.CancelExport(4));
-        assertThat(app.polls()).isEmpty();
-        assertThat(app.documentExportProgress(2, rebuiltId(0))).isEmpty();
+        FakeExportCalls calls = new FakeExportCalls(document(0));
+        ExportJob rebuilding = started(app, app.handleKey(key(KeyCode.ENTER)), calls);
+        awaitExport(rebuilding, snapshot -> snapshot.state() == ExportJob.State.REBUILDING);
+        app.tick();
+        assertThat(app.handleKey(key(KeyCode.ESCAPE))).isEmpty();
+        assertThat(ended(rebuilding).state()).isEqualTo(ExportJob.State.CANCELLED);
+        assertThat(calls.cancelled).containsExactly(7L);
+        assertThat(app.exporting()).isFalse();
+        assertThat(app.documentExportDone(2, ended(rebuilding))).isEmpty();
 
-        // A write that fails after the rebuild is a notice.
+        // A failure once the prompt has closed is a notice.
         app.handleKey(key('E'));
-        app.handleKey(key(KeyCode.ENTER));
-        app.documentExportLoaded(3, data(0));
-        app.exportStarted(3, 5);
-        assertThat(app.documentExportProgress(3, rebuiltId(0))).containsInstanceOf(Action.WriteExport.class);
-        assertThat(wide(app)).contains("Exporting doc 0: writing…");
+        ExportJob third = started(app, app.handleKey(key(KeyCode.ENTER)), new FakeExportCalls(document(0)));
+        awaitExport(third, snapshot -> snapshot.state() == ExportJob.State.REBUILDING);
+        app.tick();
+        third.cancel();
         app.exportFailed(3, "Cannot write doc-0.json: disk full");
         assertThat(render(app)).contains("Export failed: Cannot write doc-0.json: disk full");
     }
 
     @Test
-    void aReopenStopsTheExportAndItsJobIsCancelledOnceItStarts(@TempDir Path dir) {
+    void aReopenStopsTheExportAndItsJobIsCancelledOnceItStarts(@TempDir Path dir) throws Exception {
         App app = appExporting(dir);
         app.handleKey(key('E'));
-        app.handleKey(key(KeyCode.ENTER));
-        assertThat(app.documentExportLoaded(1, data(0))).hasValue(new Action.StartDocumentExport(1, 0));
+        Optional<Action> start = app.handleKey(key(KeyCode.ENTER));
+        assertThat(start).containsInstanceOf(Action.StartDocumentExport.class);
 
         assertThat(app.reopened(withDocs(stats("/data/idx"), 3, field("id", 0)), Feature.all()))
                 .isEqualTo(load(0));
         app.documentLoaded(document(0));
 
         assertThat(wide(app)).contains("Reopened: segments_1; export stopped").doesNotContain("Export document");
-        assertThat(app.exportStarted(1, 9)).hasValue(new Action.CancelExport(9));
-        assertThat(app.polls()).isEmpty();
+        FakeExportCalls calls = new FakeExportCalls(document(0));
+        ExportJob late = started(app, start, calls);
+        assertThat(ended(late).state()).isEqualTo(ExportJob.State.CANCELLED);
         // The next export is a new one.
         app.handleKey(key('E'));
-        assertThat(app.handleKey(key(KeyCode.ENTER))).hasValue(new Action.LoadDocumentExport(2, 0, true));
+        assertThat(app.handleKey(key(KeyCode.ENTER)))
+                .hasValueSatisfying(action -> assertThat(((Action.StartDocumentExport) action).exportId())
+                        .isEqualTo(2));
         app.exportFailed(1, "too late");
         assertThat(render(app)).doesNotContain("too late").contains("Exporting…");
     }

@@ -21,6 +21,13 @@ import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.paragraph.Paragraph;
+import io.github.mfuerstenau.leia.client.export.DocumentExporter;
+import io.github.mfuerstenau.leia.client.export.ExportJob;
+import io.github.mfuerstenau.leia.client.history.History;
+import io.github.mfuerstenau.leia.client.log.LogBuffer;
+import io.github.mfuerstenau.leia.client.platform.DefaultJars;
+import io.github.mfuerstenau.leia.client.platform.RuntimesDirs;
+import io.github.mfuerstenau.leia.client.runtimes.RuntimeInstall;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeResult;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsResult;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAutoStopWordsResult;
@@ -32,8 +39,6 @@ import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
 import io.github.mfuerstenau.leia.protocol.document.GetReconstructResult;
 import io.github.mfuerstenau.leia.protocol.document.GetStoredFieldsScanResult;
-import io.github.mfuerstenau.leia.protocol.document.ReconstructResult;
-import io.github.mfuerstenau.leia.protocol.document.ReconstructedField;
 import io.github.mfuerstenau.leia.protocol.document.StoredField;
 import io.github.mfuerstenau.leia.protocol.document.StoredFields;
 import io.github.mfuerstenau.leia.protocol.document.StoredValue;
@@ -87,14 +92,9 @@ import io.github.mfuerstenau.leia.tui.analysis.AutoStopWordsForm;
 import io.github.mfuerstenau.leia.tui.check.Check;
 import io.github.mfuerstenau.leia.tui.commits.Commits;
 import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
-import io.github.mfuerstenau.leia.tui.documents.DocumentExport;
-import io.github.mfuerstenau.leia.tui.documents.DocumentExport.DocumentData;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
 import io.github.mfuerstenau.leia.tui.documents.Viewer;
-import io.github.mfuerstenau.leia.tui.jars.DefaultJars;
 import io.github.mfuerstenau.leia.tui.jars.JarsPopup;
-import io.github.mfuerstenau.leia.tui.jars.RuntimeFolders;
-import io.github.mfuerstenau.leia.tui.log.LogBuffer;
 import io.github.mfuerstenau.leia.tui.log.LogWindow;
 import io.github.mfuerstenau.leia.tui.overview.FieldScan;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
@@ -104,9 +104,6 @@ import io.github.mfuerstenau.leia.tui.prompt.ExportPrompt;
 import io.github.mfuerstenau.leia.tui.prompt.ExportPrompt.ExportTarget;
 import io.github.mfuerstenau.leia.tui.prompt.PathCompletion;
 import io.github.mfuerstenau.leia.tui.prompt.PathPrompt;
-import io.github.mfuerstenau.leia.tui.runtimes.Mirror;
-import io.github.mfuerstenau.leia.tui.runtimes.MirrorChooser;
-import io.github.mfuerstenau.leia.tui.runtimes.RuntimeInstall;
 import io.github.mfuerstenau.leia.tui.runtimes.RuntimeWindow;
 import io.github.mfuerstenau.leia.tui.search.Search;
 import io.github.mfuerstenau.leia.tui.terms.Terms;
@@ -121,7 +118,6 @@ import io.github.mfuerstenau.leia.tui.widgets.KeyLegend;
 import io.github.mfuerstenau.leia.tui.widgets.Keys;
 import io.github.mfuerstenau.leia.tui.widgets.Logo;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
@@ -303,7 +299,7 @@ public final class App {
     private Themes themes = Themes.bundled();
     private ThemeFile themeFile = ThemeFile.none();
 
-    private RuntimeFolders runtimeFolders = RuntimeFolders.none();
+    private RuntimesDirs runtimeFolders = RuntimesDirs.none();
 
     /** The runtime jars leia knows and which of them are loaded (ADR 0072); null until they are known. */
     private GetRuntimesResult runtimes;
@@ -356,20 +352,13 @@ public final class App {
      */
     private record TermsExport(long id, String field, Long jobId, long termsWritten) implements RunningExport {}
 
-    /** The document is being fetched; the prompt says so. */
-    private record Loading(long id, int docId, boolean indexedTerms, ExportTarget target) implements RunningExport {}
-
     /**
-     * The indexed terms and points of the document are being rebuilt.
+     * A document, exported by leia-client (ADR 0030, ADR 0126): fetched, rebuilt, put together and
+     * written or copied. The prompt says "Exporting…" until the rebuild runs, or the export ends.
      *
-     * @param jobId null until the backend has started the job
+     * @param job null until the session has started it
      */
-    private record Rebuilding(
-            long id, int docId, DocumentData data, ExportTarget target, Long jobId, long scanned, OptionalLong total)
-            implements RunningExport {}
-
-    /** The document is being written to its file. */
-    private record Writing(long id, int docId) implements RunningExport {}
+    private record DocumentExporting(long id, int docId, ExportJob job) implements RunningExport {}
 
     private RunningExport export;
 
@@ -410,7 +399,7 @@ public final class App {
     }
 
     /** The jars popup shows the folder of runtimes (ADR 0044), and marks the jars that came from it. */
-    public App withRuntimeFolders(RuntimeFolders runtimeFolders) {
+    public App withRuntimeFolders(RuntimesDirs runtimeFolders) {
         this.runtimeFolders = runtimeFolders;
         return this;
     }
@@ -900,18 +889,6 @@ public final class App {
         }
     }
 
-    /**
-     * A jar's download failed, and the install waits for the mirror to retry from, which the window
-     * asks for (ADR 0124). Without the window, as after it was closed, the download stops.
-     */
-    public Optional<Action> downloadFailed(MirrorChooser.Failure failure, List<Mirror> mirrors, Set<URI> tried) {
-        if (runtimeWindow == null || !runtimeWindow.installing()) {
-            return Optional.of(new Action.ChooseMirror(new MirrorChooser.Choice.Abort()));
-        }
-        runtimeWindow.downloadFailed(failure, mirrors, tried);
-        return Optional.empty();
-    }
-
     public void runtimesPlanFailed(String message) {
         if (runtimeWindow != null) {
             runtimeWindow.planFailed(message);
@@ -951,12 +928,27 @@ public final class App {
 
     /** A tick of the UI's clock; returns whether something moved, so that the screen is drawn again. */
     boolean tick() {
-        boolean logged = logWindow != null && logWindow.changed();
+        boolean logged = documentExportTick() || (logWindow != null && logWindow.changed());
         if (runtimeWindow == null) {
             return logged;
         }
         runtimeWindow.tick();
         return runtimeWindow.animating() || logged;
+    }
+
+    /**
+     * Follows a document export that runs (ADR 0126): its prompt closes once the rebuild runs, as a
+     * terms export's does once its job runs. Returns whether one runs, whose progress the tab line
+     * shows.
+     */
+    private boolean documentExportTick() {
+        if (!(export instanceof DocumentExporting exporting) || exporting.job() == null) {
+            return false;
+        }
+        if (exportPrompt != null && exporting.job().snapshot().state() == ExportJob.State.REBUILDING) {
+            exportPrompt = null;
+        }
+        return true;
     }
 
     /**
@@ -1598,11 +1590,28 @@ public final class App {
             case ExportPrompt.ExportRequest.Document document -> {
                 exportPrompt.setBusy();
                 long id = nextExportId++;
-                export = new Loading(id, document.docId(), document.indexedTerms(), document.target());
-                yield Optional.of(
-                        new Action.LoadDocumentExport(id, document.docId(), opened.supports(Feature.TERM_VECTORS)));
+                export = new DocumentExporting(id, document.docId(), null);
+                yield Optional.of(new Action.StartDocumentExport(id, exportRequest(document)));
             }
         };
+    }
+
+    /** What leia-client is to export for {@code document}, and where to (ADR 0126). */
+    private DocumentExporter.Request exportRequest(ExportPrompt.ExportRequest.Document document) {
+        Documents shown = documents;
+        DocumentExporter.Target target = switch (document.target()) {
+            case ExportTarget.File file ->
+                new DocumentExporter.Target.File(Path.of(file.path()), file.overwrite(), indexDirs());
+            case ExportTarget.Clipboard _ -> new DocumentExporter.Target.Text();
+        };
+        return new DocumentExporter.Request(
+                document.docId(),
+                opened.supports(Feature.TERM_VECTORS),
+                document.indexedTerms(),
+                shown::field,
+                opened.path(),
+                shown.indexOf(document.docId()),
+                target);
     }
 
     /** The index directories of the open path, opened or skipped: an export never writes there. */
@@ -1626,24 +1635,21 @@ public final class App {
     }
 
     /**
-     * The document of export {@code exportId} is in. Returns the rebuild of its indexed terms, or,
-     * without them, where the export goes.
+     * The session has started document export {@code exportId}; if that export was stopped or
+     * forgotten meanwhile, {@code job} is cancelled.
      */
-    public Optional<Action> documentExportLoaded(long exportId, DocumentData data) {
-        if (!(export instanceof Loading loading) || loading.id() != exportId) {
-            return Optional.empty();
+    public void documentExportStarted(long exportId, ExportJob job) {
+        if (export instanceof DocumentExporting exporting && exporting.id() == exportId && exporting.job() == null) {
+            export = new DocumentExporting(exportId, exporting.docId(), job);
+            return;
         }
-        if (!loading.indexedTerms()) {
-            return finishDocumentExport(exportId, data, Optional.empty(), loading.target());
-        }
-        export = new Rebuilding(exportId, loading.docId(), data, loading.target(), null, 0, OptionalLong.empty());
-        return Optional.of(new Action.StartDocumentExport(exportId, loading.docId()));
+        job.cancel();
     }
 
     /**
-     * The job of export {@code exportId} runs, which writes the terms or rebuilds the document's: the
-     * prompt closes, and the tab line shows the progress. If that export was stopped or forgotten
-     * meanwhile, returns the action that cancels the job.
+     * The job of terms export {@code exportId} runs: the prompt closes, and the tab line shows the
+     * progress. If that export was stopped or forgotten meanwhile, returns the action that cancels the
+     * job.
      */
     public Optional<Action> exportStarted(long exportId, long jobId) {
         if (export instanceof TermsExport termsExport && termsExport.id() == exportId && termsExport.jobId() == null) {
@@ -1651,19 +1657,7 @@ public final class App {
             export = new TermsExport(exportId, termsExport.field(), jobId, 0);
             return Optional.empty();
         }
-        if (!(export instanceof Rebuilding rebuilding) || rebuilding.id() != exportId || rebuilding.jobId() != null) {
-            return Optional.of(new Action.CancelExport(jobId));
-        }
-        exportPrompt = null;
-        export = new Rebuilding(
-                exportId,
-                rebuilding.docId(),
-                rebuilding.data(),
-                rebuilding.target(),
-                jobId,
-                rebuilding.scanned(),
-                rebuilding.total());
-        return Optional.empty();
+        return Optional.of(new Action.CancelExport(jobId));
     }
 
     /** Shows the progress of terms export {@code exportId}, or where it wrote the terms. */
@@ -1682,60 +1676,34 @@ public final class App {
         export = new TermsExport(exportId, termsExport.field(), termsExport.jobId(), result.termsWritten());
     }
 
-    /** Shows the progress of the rebuild. Returns where the export goes once it is done. */
-    public Optional<Action> documentExportProgress(long exportId, GetReconstructResult result) {
-        if (!(export instanceof Rebuilding rebuilding) || rebuilding.id() != exportId) {
+    /**
+     * Document export {@code exportId} has ended, as {@code done} says; a failure the session hands
+     * over with {@link #exportFailed}. Returns the copy of a document exported as text.
+     */
+    public Optional<Action> documentExportDone(long exportId, ExportJob.Snapshot done) {
+        if (!(export instanceof DocumentExporting exporting) || exporting.id() != exportId) {
             return Optional.empty();
         }
-        Optional<ReconstructResult> rebuilt = result.result();
-        if (rebuilt.isPresent()) {
-            return finishDocumentExport(
-                    exportId, rebuilding.data(), Optional.of(rebuilt.get().fields()), rebuilding.target());
-        }
-        export = new Rebuilding(
-                exportId,
-                rebuilding.docId(),
-                rebuilding.data(),
-                rebuilding.target(),
-                rebuilding.jobId(),
-                result.scanned(),
-                result.total());
-        return Optional.empty();
-    }
-
-    /** Puts the export together: the file to write, or the text to copy. */
-    private Optional<Action> finishDocumentExport(
-            long exportId, DocumentData data, Optional<List<ReconstructedField>> rebuilt, ExportTarget target) {
-        if (documents == null || opened == null) {
-            forgetExport();
-            return Optional.empty();
-        }
-        int docId = data.document().docId();
-        Documents shown = documents;
-        String text = DocumentExport.toJson(
-                DocumentExport.assemble(data, rebuilt, shown::field, opened.path(), shown.indexOf(docId)));
-        return switch (target) {
-            case ExportTarget.File file -> {
-                export = new Writing(exportId, docId);
-                yield Optional.of(
-                        new Action.WriteExport(exportId, docId, file.path(), text, file.overwrite(), indexDirs()));
-            }
-            case ExportTarget.Clipboard _ -> {
+        int docId = exporting.docId();
+        return switch (done.state()) {
+            case DONE -> {
                 forgetExport();
-                long bytes = text.getBytes(StandardCharsets.UTF_8).length;
-                notice = new Notice.Exported("Copied document " + docId + " as JSON, " + TextFormat.size(bytes));
-                yield Optional.of(new Action.Copy(text));
+                Optional<String> text = done.text();
+                if (text.isPresent()) {
+                    long bytes = text.get().getBytes(StandardCharsets.UTF_8).length;
+                    notice = new Notice.Exported("Copied document " + docId + " as JSON, " + TextFormat.size(bytes));
+                    yield Optional.of(new Action.Copy(text.get()));
+                }
+                notice = new Notice.Exported("Exported document " + docId + " to "
+                        + shownPath(done.path().map(Path::toString).orElse("")));
+                yield Optional.empty();
             }
+            case FAILED -> {
+                exportFailed(exportId, done.error().orElse("the export failed"));
+                yield Optional.empty();
+            }
+            default -> Optional.empty();
         };
-    }
-
-    /** Document {@code docId} of export {@code exportId} was written to {@code path}. */
-    public void documentExported(long exportId, int docId, String path) {
-        if (export == null || export.id() != exportId) {
-            return;
-        }
-        forgetExport();
-        notice = new Notice.Exported("Exported document " + docId + " to " + shownPath(path));
     }
 
     /** Shows why export {@code exportId} couldn't start in its prompt, or why it failed once running. */
@@ -1909,9 +1877,6 @@ public final class App {
                     .filterJob()
                     .ifPresent(jobId ->
                             polls.add(new Poll.Filter(documents.filterSerial().getAsLong(), jobId)));
-        }
-        if (export instanceof Rebuilding rebuilding && rebuilding.jobId() != null) {
-            polls.add(new Poll.DocumentExport(rebuilding.id(), rebuilding.jobId()));
         }
         if (export instanceof TermsExport termsExport && termsExport.jobId() != null) {
             polls.add(new Poll.ExportTerms(termsExport.id(), termsExport.jobId()));
@@ -2436,9 +2401,8 @@ public final class App {
 
     private Optional<Action> runtimeWindowKey(KeyEvent key) {
         return switch (runtimeWindow.handleKey(key)) {
-            case RuntimeWindow.Install install -> Optional.of(new Action.InstallRuntimes(install));
+            case RuntimeWindow.Install install -> Optional.of(new Action.InstallRuntimes(install.job()));
             case RuntimeWindow.UseMirror use -> Optional.of(new Action.UseMirror(use.mirror()));
-            case RuntimeWindow.Choose choose -> Optional.of(new Action.ChooseMirror(choose.choice()));
             case RuntimeWindow.Close _ -> {
                 runtimeWindow = null;
                 yield Optional.empty();
@@ -2545,11 +2509,15 @@ public final class App {
     }
 
     private Optional<Action> cancelExport() {
-        Long job = switch (export) {
-            case Rebuilding rebuilding -> rebuilding.jobId();
-            case TermsExport termsExport -> termsExport.jobId();
-            default -> null;
-        };
+        Long job = null;
+        switch (export) {
+            case DocumentExporting exporting
+            when exporting.job() != null -> exporting.job().cancel();
+            case TermsExport termsExport -> job = termsExport.jobId();
+            default -> {
+                // Nothing runs yet: a job that starts for it is cancelled then.
+            }
+        }
         export = null;
         return job != null ? Optional.of(new Action.CancelExport(job)) : Optional.empty();
     }
@@ -3121,16 +3089,26 @@ public final class App {
         }
         return switch (export) {
             case null -> Optional.empty();
-            case Loading _ -> Optional.empty();
             case TermsExport termsExport ->
                 Optional.of("Exporting " + termsExport.field() + ": "
                         + TextFormat.count(termsExport.termsWritten(), "term"));
-            case Rebuilding rebuilding ->
-                Optional.of("Exporting doc " + rebuilding.docId() + ": " + rebuilding.scanned()
-                        + (rebuilding.total().isPresent()
-                                ? "/" + rebuilding.total().getAsLong()
-                                : "") + " terms and points");
-            case Writing writing -> Optional.of("Exporting doc " + writing.docId() + ": writing…");
+            case DocumentExporting exporting -> documentExportLine(exporting);
+        };
+    }
+
+    /** What the tab line says about a document export: the rebuild's progress, or the write. */
+    private static Optional<String> documentExportLine(DocumentExporting exporting) {
+        if (exporting.job() == null) {
+            return Optional.empty();
+        }
+        ExportJob.Snapshot snapshot = exporting.job().snapshot();
+        return switch (snapshot.state()) {
+            case REBUILDING ->
+                Optional.of("Exporting doc " + exporting.docId() + ": " + snapshot.scanned()
+                        + (snapshot.total().isPresent() ? "/" + snapshot.total().getAsLong() : "")
+                        + " terms and points");
+            case WRITING -> Optional.of("Exporting doc " + exporting.docId() + ": writing…");
+            default -> Optional.empty();
         };
     }
 

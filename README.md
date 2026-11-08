@@ -384,13 +384,13 @@ None has to exist; leia creates nothing until it writes.
    daemon and the toolchain.
 2. Clone: `git clone https://github.com/mfuerstenau/leia.git && cd leia`
 3. Build and test: `./gradlew build` (compile, test, check formatting).
-4. Assemble: `./gradlew :leia-tui:leiaFolder` → `leia-tui/build/leia/` with `leia.jar`, the
+4. Assemble: `./gradlew :leia-app:leiaFolder` → `leia-app/build/leia/` with `leia.jar`, the
    scripts and `runtimes/`.
-5. Run: `leia-tui/build/leia/leia <index>` (needs a Java 25 `JAVA_HOME`, or `--java`).
+5. Run: `leia-app/build/leia/leia <index>` (needs a Java 25 `JAVA_HOME`, or `--java`).
 6. Optional, a demo index: `./gradlew :leia-core:demoIndex` → `leia-core/build/test-indexes/demo`
    (see [docs/demo-index.md](docs/demo-index.md)).
 7. Optional, the release zip: `./build-dist.sh` → `dist/leia-<version>.zip`, with `leia.jar`, the
-   scripts, the [user README](leia-tui/src/dist/README.md), `LICENSE` and `NOTICE`.
+   scripts, the [user README](leia-app/src/dist/README.md), `LICENSE` and `NOTICE`.
 
 ## How it works
 

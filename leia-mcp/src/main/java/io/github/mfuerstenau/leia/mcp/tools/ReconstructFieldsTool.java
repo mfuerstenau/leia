@@ -1,5 +1,7 @@
 package io.github.mfuerstenau.leia.mcp.tools;
 
+import io.github.mfuerstenau.leia.client.values.PositionedTokens;
+import io.github.mfuerstenau.leia.client.values.PositionedTokens.Token;
 import io.github.mfuerstenau.leia.mcp.Call;
 import io.github.mfuerstenau.leia.mcp.Description;
 import io.github.mfuerstenau.leia.mcp.Jobs;
@@ -14,8 +16,6 @@ import io.github.mfuerstenau.leia.protocol.document.StartReconstructParams;
 import io.github.mfuerstenau.leia.protocol.document.TermPosition;
 import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
 import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
-import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -190,39 +190,12 @@ final class ReconstructFieldsTool implements McpTool<ReconstructFieldsTool.Argum
                         .toList()));
     }
 
-    /** A term at a position. */
-    private record Occurrence(int position, String term) {}
-
     /** The terms in position order; empty if none has a position. */
     static Optional<String> text(List<TermVectorTerm> terms) {
-        List<Occurrence> occurrences = new ArrayList<>();
-        for (TermVectorTerm term : terms) {
-            for (TermPosition position : term.positions()) {
-                position.position().ifPresent(at -> occurrences.add(new Occurrence(at, term.term())));
-            }
-        }
-        if (occurrences.isEmpty()) {
+        List<Token> tokens = PositionedTokens.of(terms);
+        if (tokens.isEmpty()) {
             return Optional.empty();
         }
-        // Stable: the terms at one position stay in term order.
-        occurrences.sort(Comparator.comparingInt(Occurrence::position));
-        StringBuilder text = new StringBuilder();
-        int previous = -1;
-        for (Occurrence occurrence : occurrences) {
-            if (text.length() > MAX_TEXT_LENGTH) {
-                break;
-            }
-            if (previous < 0) {
-                text.append(occurrence.term());
-            } else if (occurrence.position() == previous) {
-                text.append('|').append(occurrence.term());
-            } else if (occurrence.position() == previous + 1) {
-                text.append(' ').append(occurrence.term());
-            } else {
-                text.append(' ').append(GAP).append(' ').append(occurrence.term());
-            }
-            previous = occurrence.position();
-        }
-        return Optional.of(text.toString());
+        return Optional.of(PositionedTokens.line(tokens, Token::term, GAP, false, MAX_TEXT_LENGTH));
     }
 }

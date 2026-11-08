@@ -6,6 +6,8 @@
       <trusted-artifacts>
          <trust file=".*-javadoc[.]jar" regex="true"/>
          <trust file=".*-sources[.]jar" regex="true"/>
+         <trust group="gradle" name="gradle" file="gradle-.*-src[.]zip" regex="true" reason="IDE sync: the Gradle distribution's sources"/>
+         <trust group="org[.]apache[.]groovy" file=".*[.](module|pom)" regex="true" reason="IDE sync: the metadata of the Groovy modules whose sources it fetches"/>
       </trusted-artifacts>
    </configuration>
    <components>

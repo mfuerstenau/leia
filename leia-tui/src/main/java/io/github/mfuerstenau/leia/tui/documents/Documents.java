@@ -26,6 +26,8 @@ import dev.tamboui.widgets.table.Cell;
 import dev.tamboui.widgets.table.Row;
 import dev.tamboui.widgets.table.Table;
 import dev.tamboui.widgets.table.TableState;
+import io.github.mfuerstenau.leia.client.values.FieldFlags;
+import io.github.mfuerstenau.leia.client.values.PointFormat;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.document.DocValues;
 import io.github.mfuerstenau.leia.protocol.document.DocumentField;
@@ -57,7 +59,6 @@ import io.github.mfuerstenau.leia.protocol.search.StartHighlightParams;
 import io.github.mfuerstenau.leia.protocol.search.ValueHighlight;
 import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.overview.Overview;
-import io.github.mfuerstenau.leia.tui.points.PointFormat;
 import io.github.mfuerstenau.leia.tui.points.PointFormats;
 import io.github.mfuerstenau.leia.tui.search.Search;
 import io.github.mfuerstenau.leia.tui.terms.Terms.TermHit;
@@ -2336,39 +2337,16 @@ public final class Documents {
 
     /** Whether the document has nothing that {@code getDocument} reports in the field. It may still have postings there. */
     static boolean isEmpty(DocumentField field) {
-        return field.norm().isEmpty()
-                && field.stored().isEmpty()
-                && field.docValues().isEmpty()
-                && !field.hasTermVector()
-                && field.vector().isEmpty();
+        return FieldFlags.isEmpty(field);
     }
 
-    /**
-     * {@code I} indexed, {@code N} norm, {@code P} payloads, {@code S} stored, {@code V} term vector,
-     * {@code D} doc values, {@code T} points, {@code K} KNN vector; {@code -} where absent. {@code N},
-     * {@code S}, {@code V}, {@code D} and {@code K} are about this document, the others about the
-     * field.
-     */
+    /** As {@link FieldFlags#of}. */
     static String flags(Optional<IndexField> schema, DocumentField field) {
-        boolean[] set = {
-            schema.filter(f -> f.indexOptions() != IndexOptions.NONE).isPresent(),
-            field.norm().isPresent(),
-            schema.filter(IndexField::hasPayloads).isPresent(),
-            !field.stored().isEmpty(),
-            field.hasTermVector(),
-            field.docValues().isPresent(),
-            schema.filter(f -> f.pointDimensionCount() > 0).isPresent(),
-            field.vector().isPresent()
-        };
-        StringBuilder flags = new StringBuilder();
-        for (int i = 0; i < set.length; i++) {
-            flags.append(set[i] ? FLAGS.charAt(i) : '-');
-        }
-        return flags.toString();
+        return FieldFlags.of(schema, field);
     }
 
     /** The letters of {@link #flags}, in order. */
-    private static final String FLAGS = "INPSVDTK";
+    private static final String FLAGS = FieldFlags.LETTERS;
 
     /** What each letter of {@link #FLAGS} stands for. */
     private static final List<String> FLAG_WORDS =

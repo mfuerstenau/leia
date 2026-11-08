@@ -152,7 +152,7 @@ tasks.test {
         testIndexFiles.mapKeys { "leia.test.index.${it.key}" } +
             mapOf(
                 "leia.test.doc.runtimes" to files(rootProject.file("docs/runtimes.md")),
-                "leia.test.doc.distReadme" to files(rootProject.file("leia-tui/src/dist/README.md")),
+                "leia.test.doc.distReadme" to files(rootProject.file("leia-app/src/dist/README.md")),
                 "leia.test.runtimes" to files(testRuntimes),
             ),
     )

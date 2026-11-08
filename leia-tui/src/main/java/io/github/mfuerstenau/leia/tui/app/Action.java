@@ -1,5 +1,8 @@
 package io.github.mfuerstenau.leia.tui.app;
 
+import io.github.mfuerstenau.leia.client.export.DocumentExporter;
+import io.github.mfuerstenau.leia.client.runtimes.InstallJob;
+import io.github.mfuerstenau.leia.client.runtimes.Mirror;
 import io.github.mfuerstenau.leia.protocol.analysis.AnalyzeParams;
 import io.github.mfuerstenau.leia.protocol.analysis.StartAutoStopWordsParams;
 import io.github.mfuerstenau.leia.protocol.check.CheckTarget;
@@ -19,9 +22,6 @@ import io.github.mfuerstenau.leia.protocol.terms.StartExportTermsParams;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
 import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
-import io.github.mfuerstenau.leia.tui.runtimes.Mirror;
-import io.github.mfuerstenau.leia.tui.runtimes.MirrorChooser;
-import io.github.mfuerstenau.leia.tui.runtimes.RuntimeWindow;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -194,17 +194,10 @@ public sealed interface Action {
     record ClearFilter(OptionalLong cancel, OptionalLong release) implements Action {}
 
     /**
-     * Fetch document {@code docId} whole for export {@code exportId} (ADR 0030), with its term vectors
-     * if the index reads {@code termVectors}, and report back with {@link App#documentExportLoaded} or
-     * {@link App#exportFailed}.
+     * Start the export of a document that leia-client runs (ADR 0030, ADR 0126), and hand the app
+     * its job, and how it ended.
      */
-    record LoadDocumentExport(long exportId, int docId, boolean termVectors) implements Action {}
-
-    /**
-     * Start rebuilding the indexed terms of the document of export {@code exportId}, and report back
-     * with {@link App#exportStarted} or {@link App#exportFailed}.
-     */
-    record StartDocumentExport(long exportId, int docId) implements Action {}
+    record StartDocumentExport(long exportId, DocumentExporter.Request request) implements Action {}
 
     /**
      * Start export {@code exportId} of the terms of a field (ADR 0022), and report back with {@link
@@ -214,13 +207,6 @@ public sealed interface Action {
 
     /** Cancel this export job. The app has forgotten the export already, so nothing is reported back. */
     record CancelExport(long jobId) implements Action {}
-
-    /**
-     * Write the exported document to {@code path}, never into {@code indexDirs}, and report back with
-     * {@link App#documentExported} or {@link App#exportFailed}.
-     */
-    record WriteExport(long exportId, int docId, String path, String text, boolean overwrite, List<String> indexDirs)
-            implements Action {}
 
     /**
      * Fetch what custom analyzers can be built from, and report back with {@link
@@ -312,22 +298,16 @@ public sealed interface Action {
     record PlanRuntimes(List<RuntimeFolders.Known> runtimes, List<RuntimeFolders.Known> present) implements Action {}
 
     /**
-     * Install {@code chosen} of {@code plan} on a thread of its own, as {@link RuntimeWindow.Install}
-     * says, and report back with {@link App#runtimesInstalled} (ADR 0080).
+     * Start {@code job}, the install of the runtimes the window chose (ADR 0080, ADR 0126), and
+     * report back with {@link App#runtimesInstalled} once it has ended.
      */
-    record InstallRuntimes(RuntimeWindow.Install install) implements Action {}
+    record InstallRuntimes(InstallJob job) implements Action {}
 
     /**
      * Download from {@code mirror} first, from now on and next time: save it as the mirror chosen
      * last (ADR 0124).
      */
     record UseMirror(Mirror mirror) implements Action {}
-
-    /**
-     * Hand the install that waits after a failed download what to do (ADR 0124); a mirror to retry
-     * from is saved as the one chosen last.
-     */
-    record ChooseMirror(MirrorChooser.Choice choice) implements Action {}
 
     /**
      * Load the folders of {@code runtimes/} that aren't loaded yet, and report back with {@link

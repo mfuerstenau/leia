@@ -11,6 +11,8 @@ import dev.tamboui.text.Text;
 import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.paragraph.Paragraph;
+import io.github.mfuerstenau.leia.client.platform.DefaultJars;
+import io.github.mfuerstenau.leia.client.platform.RuntimesDirs;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsResult;
 import io.github.mfuerstenau.leia.protocol.jars.JarComponents;
 import io.github.mfuerstenau.leia.tui.prompt.CompletionList;
@@ -52,7 +54,7 @@ public final class JarsPopup {
     public record Close() implements Event {}
 
     private final DefaultJars defaultJars;
-    private final RuntimeFolders runtimeFolders;
+    private final RuntimesDirs runtimeFolders;
 
     /** The directory that {@code ~} stands for. */
     private final Optional<Path> home;
@@ -86,7 +88,7 @@ public final class JarsPopup {
     /** How many jars the list showed when it was last drawn. */
     private int page = 1;
 
-    public JarsPopup(DefaultJars defaultJars, RuntimeFolders runtimeFolders, Optional<Path> home) {
+    public JarsPopup(DefaultJars defaultJars, RuntimesDirs runtimeFolders, Optional<Path> home) {
         this.defaultJars = defaultJars;
         this.runtimeFolders = runtimeFolders;
         this.home = home;

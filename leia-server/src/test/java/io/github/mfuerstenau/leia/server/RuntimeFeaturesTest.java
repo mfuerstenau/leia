@@ -109,7 +109,7 @@ class RuntimeFeaturesTest {
     }
 
     /**
-     * The condensed table of the user README in the distribution ({@code leia-tui/src/dist/README.md},
+     * The condensed table of the user README in the distribution ({@code leia-app/src/dist/README.md},
      * ADR 0083) against the feature table: a row per group of features, in user terms, each cell ✓
      * if the runtime has all of them and – if it has none.
      */

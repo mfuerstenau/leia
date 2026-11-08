@@ -4,6 +4,7 @@ import static io.github.mfuerstenau.leia.tui.TestScreens.key;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.tamboui.tui.event.KeyCode;
+import io.github.mfuerstenau.leia.client.values.PointFormat;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import io.github.mfuerstenau.leia.protocol.index.DocValuesType;
 import io.github.mfuerstenau.leia.protocol.index.Feature;
@@ -32,7 +33,6 @@ import io.github.mfuerstenau.leia.protocol.terms.Posting;
 import io.github.mfuerstenau.leia.protocol.terms.PostingsFilter;
 import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
 import io.github.mfuerstenau.leia.tui.TestScreens;
-import io.github.mfuerstenau.leia.tui.points.PointFormat;
 import io.github.mfuerstenau.leia.tui.points.PointFormats;
 import io.github.mfuerstenau.leia.tui.terms.Terms.Request;
 import io.github.mfuerstenau.leia.tui.terms.Terms.TermHit;

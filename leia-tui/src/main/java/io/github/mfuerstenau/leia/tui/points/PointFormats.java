@@ -1,5 +1,6 @@
 package io.github.mfuerstenau.leia.tui.points;
 
+import io.github.mfuerstenau.leia.client.values.PointFormat;
 import io.github.mfuerstenau.leia.protocol.index.IndexField;
 import java.util.HashMap;
 import java.util.List;
