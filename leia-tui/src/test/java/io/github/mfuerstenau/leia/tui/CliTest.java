@@ -29,6 +29,7 @@ class CliTest {
                         Optional.empty(),
                         false,
                         java.util.List.of(),
+                        java.util.List.of(),
                         Optional.empty(),
                         false,
                         java.util.List.of(),
@@ -89,6 +90,24 @@ class CliTest {
         assertThat(Cli.parse("--runtime=lucene5", "--download-runtimes", "--runtime", "lucene9", "--runtime", "lucene5")
                         .runtimes())
                 .containsExactly("lucene5", "lucene9");
+    }
+
+    @Test
+    void parsesTheMirrorsOfTheDownloadInOrder() throws Exception {
+        String eu = "https://maven-central-eu.storage-download.googleapis.com/maven2/";
+        String own = "https://maven.example.com/central";
+        assertThat(Cli.parse(
+                                "--download-runtimes",
+                                "--runtime",
+                                "lucene9",
+                                "--download-url",
+                                own,
+                                "--download-url=" + eu,
+                                "--download-url",
+                                own)
+                        .downloadUrls())
+                .containsExactly(own, eu);
+        assertThat(Cli.parse().downloadUrls()).isEmpty();
     }
 
     @Test
@@ -157,6 +176,15 @@ class CliTest {
             --download-runtimes --runtime lucene99 | invalid value 'lucene99' for --runtime <FOLDER>: possible values are lucene10, lucene9, lucene7, lucene5, lucene3
             --download-runtimes --runtime | --runtime needs a value <FOLDER>
             --theme                     | --theme needs a value <THEME>
+            --download-url https://maven.example.com/ | --download-url goes only with --download-runtimes
+            --download-url https://maven.example.com/ /a | --download-url goes only with --download-runtimes
+            --download-runtimes --runtime lucene9 --download-url | --download-url needs a value <URL>
+            --download-runtimes --runtime lucene9 --download-url http://maven.example.com/ | invalid value for --download-url <URL>: 'http://maven.example.com/' is http, which a proxy may rewrite; use https, or start leia with -Dleia.download.insecure=true
+            --download-runtimes --runtime lucene9 --download-url maven.example.com | invalid value for --download-url <URL>: 'maven.example.com' is not an absolute URL
+            --download-runtimes --runtime lucene9 --download-url ftp://maven.example.com/ | invalid value for --download-url <URL>: 'ftp://maven.example.com/' must be https
+            --download-runtimes --runtime lucene9 --download-url https://maven.example.com/?a=b | invalid value for --download-url <URL>: 'https://maven.example.com/?a=b' has a query
+            --download-runtimes --runtime lucene9 --download-url https://someone@maven.example.com/ | invalid value for --download-url <URL>: 'https://someone@maven.example.com/' holds credentials
+            --download-runtimes --runtime lucene9 --download-url https://maven.example.com/ /a | --download-runtimes takes no INDEX_PATH
             --download-runtimes --runtime lucene9 --theme nord | --download-runtimes takes no INDEX_PATH and none of --jar, --server, --no-default-jars, --directory, --no-reader, --theme
             --mcp=yes                   | --mcp takes no value
             --mcp --no-reader /a        | --mcp takes none of --download-runtimes, --runtime, --theme, --no-reader
@@ -189,6 +217,8 @@ class CliTest {
                         "--no-reader",
                         "--download-runtimes",
                         "--runtime <FOLDER>",
+                        "--download-url <URL>",
+                        "-Dleia.download.insecure=true",
                         "--theme <THEME>",
                         "--mcp",
                         "--mcp-root <PATH>",

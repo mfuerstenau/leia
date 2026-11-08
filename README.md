@@ -66,8 +66,15 @@ A **read-only Lucene index inspector** for the terminal, as an alternative to
 - The runtimes go to `runtimes/` in your data folder (`~/.local/share/leia/runtimes`,
   `%LOCALAPPDATA%\leia\runtimes`), so they outlive an update of leia. A `runtimes/` beside
   `leia.jar` comes first, system-wide folders last (see [Folders](#folders)).
-- Lucene's jars come from Maven Central, each checked against the SHA-256 and size the build
-  recorded; leia's own adapter jars come from `leia.jar`. About 32 MB in all, once.
+- Lucene's jars come from Maven Central or a mirror of it, each checked against the SHA-256 and
+  size the build recorded; leia's own adapter jars come from `leia.jar`. About 32 MB in all, once.
+- A jar that your Maven repository (`~/.m2/repository`) or Gradle cache (`~/.gradle/caches`)
+  already has is copied from there instead, if it matches; `-Dleia.download.local=false` turns
+  that off.
+- Mirrors: `m` in the `D` window chooses one, and is saved for next time. leia knows Maven Central,
+  Google Cloud (US, EU, Asia), Alibaba Cloud and Huawei Cloud. Add your own as `--download-url
+  <URL>`, or as lines of `mirrors` in your config folder. A failed jar shows the mirrors to retry
+  from; `--download-runtimes` asks on a terminal, and otherwise tries the next one.
 - Behind a proxy: `LEIA_OPTS=-Djava.net.useSystemProxies=true leia`.
 - After an update of leia, its adapter jars are rewritten at the next start. A runtime that needs
   a new Lucene shows as incomplete, and `D` offers it again.
@@ -107,6 +114,7 @@ leia [OPTIONS] [INDEX_PATH]
 | `--mcp-pin` | with `--mcp` and `INDEX_PATH`, serve only that index |
 | `--download-runtimes` | install the runtimes of `--runtime` without asking, then exit |
 | `--runtime <FOLDER>` | with `--download-runtimes`: `lucene10`, `lucene9`, `lucene7`, `lucene5` or `lucene3`; repeatable |
+| `--download-url <URL>` | with `--download-runtimes`: a Maven Central mirror to try first (`https`); repeatable |
 | `-V, --version` | print the version and build of leia, and the Java in use |
 | `-h, --help` | print the help |
 
@@ -347,7 +355,7 @@ None has to exist; leia creates nothing until it writes.
 
 | | What's in it | Linux and other Unix: yours | Linux: system-wide | Windows: yours | Windows: system-wide |
 |---|---|---|---|---|---|
-| **config** | `theme`, `themes/`, `jars/` | `$XDG_CONFIG_HOME/leia`, then `~/.config/leia` | each entry of `$XDG_CONFIG_DIRS` plus `/leia` (default `/etc/xdg/leia`) | `%APPDATA%\leia` | `%PROGRAMDATA%\leia` |
+| **config** | `theme`, `themes/`, `jars/`, `mirrors`, `mirror` | `$XDG_CONFIG_HOME/leia`, then `~/.config/leia` | each entry of `$XDG_CONFIG_DIRS` plus `/leia` (default `/etc/xdg/leia`) | `%APPDATA%\leia` | `%PROGRAMDATA%\leia` |
 | **data** | `runtimes/` | `$XDG_DATA_HOME/leia`, then `~/.local/share/leia` | each entry of `$XDG_DATA_DIRS` plus `/leia` (default `/usr/local/share/leia`, `/usr/share/leia`) | `%LOCALAPPDATA%\leia` | `%PROGRAMDATA%\leia` |
 | **state** | `leia.log`, `history` | `$XDG_STATE_HOME/leia`, then `~/.local/state/leia` | none | `%LOCALAPPDATA%\leia` | none |
 | **cache** | `stored-fields/` | `$XDG_CACHE_HOME/leia`, then `~/.cache/leia` | none | `%LOCALAPPDATA%\leia\cache` | none |
@@ -360,6 +368,8 @@ None has to exist; leia creates nothing until it writes.
 - `stored-fields/` caches which fields each segment stores (never values): at most 512 MB, a file
   dropped after 30 days unused.
 - `theme` is read from system-wide folders too, so an administrator can set a default.
+- `mirrors` (a URL and an optional name per line, `#` comments) and `mirror` (the one chosen last
+  in the `D` window) are read from system-wide folders too, so an administrator can name a mirror.
 - `themes/` merge: leia's, then the system-wide, then yours.
 - `jars/` comes from your folders only, never a system-wide one.
 - `runtimes/`: one beside `leia.jar` comes first. System-wide jars are checked by SHA-256 and

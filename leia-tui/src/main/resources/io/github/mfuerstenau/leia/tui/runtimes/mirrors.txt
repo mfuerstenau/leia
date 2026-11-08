@@ -1,0 +1,11 @@
+# leia's own list of Maven Central mirrors (ADR 0124), tried in this order after the user's own.
+# A line is a URL and a name. Each was checked by fetching lucene-core 9.12.3 and 3.6.2 and comparing
+# their SHA-256 with Central's (2026-11-07). Group repositories, which mix other repositories into
+# Central, are left out.
+https://repo1.maven.org/maven2/ Maven Central
+https://repo.maven.apache.org/maven2/ Maven Central (Apache)
+https://maven-central.storage-download.googleapis.com/maven2/ Google Cloud, US
+https://maven-central-eu.storage-download.googleapis.com/maven2/ Google Cloud, EU
+https://maven-central-asia.storage-download.googleapis.com/maven2/ Google Cloud, Asia
+https://maven.aliyun.com/repository/central/ Alibaba Cloud, China
+https://repo.huaweicloud.com/repository/maven/ Huawei Cloud, China

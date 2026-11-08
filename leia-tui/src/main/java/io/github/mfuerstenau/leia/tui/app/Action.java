@@ -19,6 +19,8 @@ import io.github.mfuerstenau.leia.protocol.terms.StartExportTermsParams;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
 import io.github.mfuerstenau.leia.tui.documents.DocFilter.FilterStep;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
+import io.github.mfuerstenau.leia.tui.runtimes.Mirror;
+import io.github.mfuerstenau.leia.tui.runtimes.MirrorChooser;
 import io.github.mfuerstenau.leia.tui.runtimes.RuntimeWindow;
 import java.util.List;
 import java.util.Optional;
@@ -314,6 +316,18 @@ public sealed interface Action {
      * says, and report back with {@link App#runtimesInstalled} (ADR 0080).
      */
     record InstallRuntimes(RuntimeWindow.Install install) implements Action {}
+
+    /**
+     * Download from {@code mirror} first, from now on and next time: save it as the mirror chosen
+     * last (ADR 0124).
+     */
+    record UseMirror(Mirror mirror) implements Action {}
+
+    /**
+     * Hand the install that waits after a failed download what to do (ADR 0124); a mirror to retry
+     * from is saved as the one chosen last.
+     */
+    record ChooseMirror(MirrorChooser.Choice choice) implements Action {}
 
     /**
      * Load the folders of {@code runtimes/} that aren't loaded yet, and report back with {@link

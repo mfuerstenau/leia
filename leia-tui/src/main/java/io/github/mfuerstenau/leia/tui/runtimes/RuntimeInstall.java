@@ -8,11 +8,13 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.io.Serial;
+import java.net.ConnectException;
 import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
@@ -27,11 +29,18 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
 import java.util.jar.JarEntry;
 import java.util.jar.JarInputStream;
@@ -55,29 +64,61 @@ import java.util.logging.Logger;
  */
 public final class RuntimeInstall {
 
-    /** Maven Central. */
-    public static final URI CENTRAL = URI.create("https://repo1.maven.org/maven2/");
+    private static final Logger LOG = Logger.getLogger(RuntimeInstall.class.getName());
 
     /** The suffix of a download that isn't done yet. */
     private static final String PART = ".part";
 
     private static final int BUFFER = 64 * 1024;
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(30);
-    private static final Duration DOWNLOAD_TIMEOUT = Duration.ofMinutes(10);
+
+    /** How long a mirror may take to answer, and to send the next bytes of a jar (ADR 0124). */
+    static final Duration TIMEOUT = Duration.ofSeconds(60);
 
     private final Path runtimesDir;
-    private final URI base;
+    private final List<Mirror> mirrors;
     private final ClassLoader resourceLoader;
+    private final Duration timeout;
+    private final LocalCaches caches;
 
     /**
      * @param runtimesDir the runtimes folder (ADR 0098)
-     * @param base the repository the Lucene jars are downloaded from, such as {@link #CENTRAL}
+     * @param mirrors the mirrors the Lucene jars are downloaded from, in order (ADR 0124); not empty
      * @param resources the class loader that sees {@value RuntimeFolders#EMBEDDED}
      */
+    public RuntimeInstall(Path runtimesDir, List<Mirror> mirrors, ClassLoader resources) {
+        this(runtimesDir, mirrors, resources, LocalCaches.none());
+    }
+
+    /**
+     * @param caches the local caches a Lucene jar is copied from before it is downloaded (ADR 0125)
+     */
+    public RuntimeInstall(Path runtimesDir, List<Mirror> mirrors, ClassLoader resources, LocalCaches caches) {
+        this(runtimesDir, mirrors, resources, TIMEOUT, caches);
+    }
+
+    /** With one mirror, {@code base}, as the tests have it. */
     public RuntimeInstall(Path runtimesDir, URI base, ClassLoader resources) {
+        this(runtimesDir, List.of(Mirror.of(base, Mirror.Origin.OPTION)), resources);
+    }
+
+    /**
+     * @param timeout how long a mirror may take to answer, and to send the next bytes of a jar
+     */
+    RuntimeInstall(Path runtimesDir, List<Mirror> mirrors, ClassLoader resources, Duration timeout) {
+        this(runtimesDir, mirrors, resources, timeout, LocalCaches.none());
+    }
+
+    private RuntimeInstall(
+            Path runtimesDir, List<Mirror> mirrors, ClassLoader resources, Duration timeout, LocalCaches caches) {
+        if (mirrors.isEmpty()) {
+            throw new IllegalArgumentException("no mirror");
+        }
         this.runtimesDir = runtimesDir;
-        this.base = base.toString().endsWith("/") ? base : URI.create(base + "/");
+        this.mirrors = List.copyOf(mirrors);
         this.resourceLoader = resources;
+        this.timeout = timeout;
+        this.caches = caches;
     }
 
     /** The folder {@code runtimes}. */
@@ -85,9 +126,19 @@ public final class RuntimeInstall {
         return runtimesDir;
     }
 
-    /** The repository the Lucene jars are downloaded from. */
+    /** The mirrors the Lucene jars are downloaded from, in order: the first is tried first. */
+    public List<Mirror> mirrors() {
+        return mirrors;
+    }
+
+    /** The first mirror's base. */
     public URI repository() {
-        return base;
+        return mirrors.getFirst().uri();
+    }
+
+    /** This install with {@code first} as its first mirror, and its other mirrors after it. */
+    public RuntimeInstall withFirst(Mirror first) {
+        return new RuntimeInstall(runtimesDir, Mirrors.withFirst(mirrors, first), resourceLoader, timeout, caches);
     }
 
     /** A failure that ends a plan, or a runtime's install, with what to say about it. */
@@ -108,14 +159,46 @@ public final class RuntimeInstall {
         private static final long serialVersionUID = 1L;
     }
 
+    /** The user stopped the install after a failed download; {@code message} says why it failed. */
+    private static final class AbortedException extends Exception {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        AbortedException(String message) {
+            super(message);
+        }
+    }
+
+    /** One download from one mirror failed, for {@code reason}; another mirror may do. */
+    private static final class DownloadFailed extends Exception {
+
+        @Serial
+        private static final long serialVersionUID = 1L;
+
+        private final String reason;
+
+        DownloadFailed(String message, String reason) {
+            super(message);
+            this.reason = reason;
+        }
+    }
+
     /**
      * A Lucene jar to download.
      *
      * @param folder the runtime's folder, such as {@code lucene9}
      * @param jar the jar as the adapter's list names it
      * @param uri where it is downloaded from
+     * @param local a copy in a local cache that matches, which is copied instead (ADR 0125)
      */
-    public record Download(String folder, RuntimeFolders.ListedJar jar, URI uri) {}
+    public record Download(String folder, RuntimeFolders.ListedJar jar, URI uri, Optional<LocalCaches.Local> local) {
+
+        /** A jar that no local cache has. */
+        public Download(String folder, RuntimeFolders.ListedJar jar, URI uri) {
+            this(folder, jar, uri, Optional.empty());
+        }
+    }
 
     /**
      * A runtime's folder as {@code leia.jar} has it, and what of it needs downloading.
@@ -146,11 +229,19 @@ public final class RuntimeInstall {
             return !downloads.isEmpty();
         }
 
-        /** The bytes to download. */
+        /** The bytes to download: the jars that no local cache has. */
         public long downloadSize() {
             return downloads.stream()
+                    .filter(download -> download.local().isEmpty())
                     .mapToLong(download -> download.jar().size())
                     .sum();
+        }
+
+        /** The jars to download that a local cache has, which are copied instead (ADR 0125). */
+        public List<Download> localCopies() {
+            return downloads.stream()
+                    .filter(download -> download.local().isPresent())
+                    .toList();
         }
 
         /** leia's own jars, which come from {@code leia.jar}: the adapter first. */
@@ -219,6 +310,8 @@ public final class RuntimeInstall {
         WRITTEN,
         /** Downloaded, and it matches. */
         DOWNLOADED,
+        /** Copied from a local cache, and it matches (ADR 0125). */
+        COPIED,
         /** There already, and it matches. */
         KEPT,
         /** Not listed, or an unfinished download, and removed. */
@@ -237,12 +330,30 @@ public final class RuntimeInstall {
         /** A jar is done; {@code size} is its size, or 0 for a removed one. */
         default void jarDone(String folder, String jar, JarDone how, long size) {}
 
+        /** A jar was downloaded from {@code mirror}, and it matches; tells {@link #jarDone} too. */
+        default void jarDownloaded(String folder, String jar, long size, Mirror mirror) {
+            jarDone(folder, jar, JarDone.DOWNLOADED, size);
+        }
+
+        /** A jar was copied from a local cache, and it matches; tells {@link #jarDone} too. */
+        default void jarCopied(String folder, String jar, long size, LocalCaches.Local local) {
+            jarDone(folder, jar, JarDone.COPIED, size);
+        }
+
+        /** A jar's download from a mirror failed; the {@link MirrorChooser} is asked next. */
+        default void mirrorFailed(MirrorChooser.Failure failure) {}
+
         /** A runtime failed, for {@code message}; the others go on. */
         default void runtimeFailed(String folder, String message) {}
 
-        /** A line per jar to {@code out}, and a line per failure to {@code err}. */
+        /**
+         * A line per jar to {@code out}, with the mirror of each download, and a line per failure to
+         * {@code err}, also to {@code log}.
+         */
         static Listener printing(PrintStream out, PrintStream err) {
             return new Listener() {
+                private String lastFailure = "";
+
                 @Override
                 public void jarDone(String folder, String jar, JarDone how, long size) {
                     String label = folder + "/" + jar + ": ";
@@ -250,14 +361,37 @@ public final class RuntimeInstall {
                             switch (how) {
                                 case WRITTEN -> label + "written, " + TextFormat.size(size);
                                 case DOWNLOADED -> label + "downloaded, " + TextFormat.size(size);
+                                case COPIED -> label + "copied, " + TextFormat.size(size);
                                 case KEPT -> label + "kept";
                                 case REMOVED -> label + "removed";
                             });
                 }
 
                 @Override
+                public void jarDownloaded(String folder, String jar, long size, Mirror mirror) {
+                    out.println(
+                            folder + "/" + jar + ": downloaded, " + TextFormat.size(size) + ", from " + mirror.name());
+                }
+
+                @Override
+                public void jarCopied(String folder, String jar, long size, LocalCaches.Local local) {
+                    out.println(folder + "/" + jar + ": copied, " + TextFormat.size(size) + ", from "
+                            + local.cache().name());
+                }
+
+                @Override
+                public void mirrorFailed(MirrorChooser.Failure failure) {
+                    lastFailure = failure.message();
+                    err.println("leia: " + failure.message() + " ("
+                            + failure.mirror().name() + ")");
+                }
+
+                @Override
                 public void runtimeFailed(String folder, String message) {
-                    err.println("leia: " + message);
+                    // A runtime that failed on one mirror's download was named just now.
+                    if (!message.equals(lastFailure)) {
+                        err.println("leia: " + message);
+                    }
                 }
             };
         }
@@ -310,7 +444,8 @@ public final class RuntimeInstall {
             if (Files.isRegularFile(target) && sha256(target).equals(jar.sha256())) {
                 kept.add(jar);
             } else {
-                downloads.add(new Download(folderName, jar, base.resolve(mavenPath.get())));
+                downloads.add(new Download(
+                        folderName, jar, repository().resolve(mavenPath.get()), caches.find(mavenPath.get(), jar)));
             }
         }
         return new RuntimePlan(known, adapter, listed, downloads, kept);
@@ -328,25 +463,69 @@ public final class RuntimeInstall {
             for (Download download : runtime.downloads()) {
                 out.println("  " + download.folder() + "/" + download.jar().name() + ", "
                         + TextFormat.size(download.jar().size()));
-                out.println("    " + download.uri());
+                out.println(download.local()
+                        .map(local -> "    copied from " + local.file() + " ("
+                                + local.cache().name() + ")")
+                        .orElse("    " + download.uri()));
                 out.println("    SHA-256 " + download.jar().sha256());
             }
         }
         out.println();
         out.println("leia's own jars, the adapters and leia-core, come from leia.jar and aren't downloaded.");
+        List<Download> copies = runtimes.stream()
+                .flatMap(runtime -> runtime.localCopies().stream())
+                .toList();
+        if (!copies.isEmpty()) {
+            long copied =
+                    copies.stream().mapToLong(download -> download.jar().size()).sum();
+            long downloaded =
+                    runtimes.stream().mapToLong(RuntimePlan::downloadSize).sum();
+            int all = runtimes.stream()
+                    .mapToInt(runtime -> runtime.downloads().size())
+                    .sum();
+            out.println(TextFormat.count(copies.size(), "jar") + ", " + TextFormat.size(copied)
+                    + ", come from local caches and aren't downloaded; "
+                    + TextFormat.count(all - copies.size(), "jar") + ", " + TextFormat.size(downloaded)
+                    + ", are.");
+        }
         int kept = runtimes.stream().mapToInt(runtime -> runtime.kept().size()).sum();
         if (kept > 0) {
             out.println(TextFormat.count(kept, "jar") + " already there and matching " + (kept == 1 ? "is" : "are")
                     + " kept.");
         }
+        if (mirrors.size() > 1) {
+            out.println();
+            out.println("The mirrors, in the order they are tried when a download fails:");
+            for (int i = 0; i < mirrors.size(); i++) {
+                out.println("  " + (i + 1) + ". " + mirrors.get(i).name() + "  "
+                        + mirrors.get(i).uri() + origin(mirrors.get(i)));
+            }
+        }
+    }
+
+    /** Where a mirror comes from, if not from leia's own list, such as {@code " (--download-url)"}. */
+    static String origin(Mirror mirror) {
+        return switch (mirror.origin()) {
+            case PROPERTY -> " (-Dleia.download.url)";
+            case OPTION -> " (--download-url)";
+            case SAVED -> " (chosen last)";
+            case FILE -> " (mirrors file)";
+            case TYPED -> " (typed)";
+            case BUILT_IN -> "";
+        };
     }
 
     /** Where the Lucene jars come from, as a sentence without its end. */
     public String source() {
-        return base.equals(CENTRAL)
-                ? "leia downloads these official Lucene jars from Maven Central (" + CENTRAL + "), unchanged"
-                : "leia downloads these official Lucene jars of Maven Central, unchanged, from " + base
-                        + " (-Dleia.download.url)";
+        Mirror first = mirrors.getFirst();
+        String others = mirrors.size() > 1
+                ? ", or, when a download fails, from " + TextFormat.count(mirrors.size() - 1, "other mirror")
+                : "";
+        return first.uri().equals(Mirrors.CENTRAL)
+                ? "leia downloads these official Lucene jars from Maven Central (" + Mirrors.CENTRAL + "), unchanged"
+                        + others
+                : "leia downloads these official Lucene jars of Maven Central, unchanged, from " + first.label()
+                        + origin(first) + others;
     }
 
     /**
@@ -358,6 +537,20 @@ public final class RuntimeInstall {
      * @return how each runtime it took on ended, in the plan's order
      */
     public Outcome install(Plan plan, Set<RuntimeFolders.Known> chosen, Listener listener, BooleanSupplier cancelled) {
+        return install(plan, chosen, listener, cancelled, MirrorChooser.fallback());
+    }
+
+    /**
+     * {@link #install(Plan, Set, Listener, BooleanSupplier)}, asking {@code chooser} what to do when
+     * a jar's download from a mirror fails (ADR 0124). The mirror it retries from is the one the
+     * install goes on with. Once the user aborts, the runtime fails and the rest are cancelled.
+     */
+    public Outcome install(
+            Plan plan,
+            Set<RuntimeFolders.Known> chosen,
+            Listener listener,
+            BooleanSupplier cancelled,
+            MirrorChooser chooser) {
         // Those without downloads first: they are quick, and a cancel then only stops chosen ones.
         List<RuntimePlan> taken = new ArrayList<>();
         plan.runtimes().stream().filter(runtime -> !runtime.needsDownload()).forEach(taken::add);
@@ -372,22 +565,32 @@ public final class RuntimeInstall {
         if (proxies != null) {
             builder.proxy(proxies);
         }
+        ScheduledExecutorService watchdog = Executors.newSingleThreadScheduledExecutor(
+                Thread.ofPlatform().daemon().name("leia-download-watchdog").factory());
         try (HttpClient client = builder.build()) {
+            Run run = new Run(client, listener, cancelled, chooser, watchdog);
             for (RuntimePlan runtime : taken) {
-                if (cancelled.getAsBoolean()) {
+                if (cancelled.getAsBoolean() || run.aborted) {
                     results.put(runtime.known(), new Result.Cancelled());
                     continue;
                 }
                 try {
-                    install(client, runtime, listener, cancelled);
+                    install(run, runtime);
                     results.put(runtime.known(), new Result.Installed());
                 } catch (InstallException e) {
                     results.put(runtime.known(), new Result.Failed(e.getMessage()));
                     listener.runtimeFailed(runtime.known().folder(), e.getMessage());
+                } catch (AbortedException e) {
+                    run.aborted = true;
+                    String message = e.getMessage() + "; the download was stopped";
+                    results.put(runtime.known(), new Result.Failed(message));
+                    listener.runtimeFailed(runtime.known().folder(), message);
                 } catch (CancelledException _) {
                     results.put(runtime.known(), new Result.Cancelled());
                 }
             }
+        } finally {
+            watchdog.shutdownNow();
         }
         Map<RuntimeFolders.Known, Result> ordered = new LinkedHashMap<>();
         plan.runtimes().stream()
@@ -397,8 +600,37 @@ public final class RuntimeInstall {
         return new Outcome(ordered);
     }
 
-    private void install(HttpClient client, RuntimePlan runtime, Listener listener, BooleanSupplier cancelled)
-            throws InstallException, CancelledException {
+    /**
+     * What an install goes on with from one jar to the next: the mirror that worked last, and
+     * whether the user stopped it.
+     */
+    private final class Run {
+        final HttpClient client;
+        final Listener listener;
+        final BooleanSupplier cancelled;
+        final MirrorChooser chooser;
+        final ScheduledExecutorService watchdog;
+        final List<Mirror> runMirrors = new ArrayList<>(mirrors);
+        Mirror current = mirrors.getFirst();
+        boolean aborted;
+
+        Run(
+                HttpClient client,
+                Listener listener,
+                BooleanSupplier cancelled,
+                MirrorChooser chooser,
+                ScheduledExecutorService watchdog) {
+            this.client = client;
+            this.listener = listener;
+            this.cancelled = cancelled;
+            this.chooser = chooser;
+            this.watchdog = watchdog;
+        }
+    }
+
+    private void install(Run run, RuntimePlan runtime) throws InstallException, CancelledException, AbortedException {
+        Listener listener = run.listener;
+        BooleanSupplier cancelled = run.cancelled;
         RuntimeFolders.Known known = runtime.known();
         String folderName = known.folder();
         Path folder = runtimesDir.resolve(folderName);
@@ -410,8 +642,8 @@ public final class RuntimeInstall {
         Set<String> names = new HashSet<>();
         names.add(known.adapterJar());
         writeOwn(folder, known.adapterJar(), runtime.adapter(), listener);
-        Set<String> downloads = new HashSet<>();
-        runtime.downloads().forEach(download -> downloads.add(download.jar().name()));
+        Map<String, Download> downloads = new LinkedHashMap<>();
+        runtime.downloads().forEach(download -> downloads.put(download.jar().name(), download));
         for (RuntimeFolders.ListedJar jar : runtime.listed()) {
             if (cancelled.getAsBoolean()) {
                 throw new CancelledException();
@@ -420,8 +652,11 @@ public final class RuntimeInstall {
             Optional<String> mavenPath = jar.mavenPath();
             if (mavenPath.isEmpty()) {
                 writeOwn(folder, jar.name(), resource(folderName, jar.name()), listener);
-            } else if (downloads.contains(jar.name())) {
-                download(client, folder, jar, base.resolve(mavenPath.get()), listener, cancelled);
+            } else if (downloads.containsKey(jar.name())) {
+                Optional<LocalCaches.Local> local = downloads.get(jar.name()).local();
+                if (local.isEmpty() || !copyLocal(run, folder, jar, local.get())) {
+                    fetch(run, folder, jar, mavenPath.get());
+                }
             } else {
                 listener.jarDone(folderName, jar.name(), JarDone.KEPT, jar.size());
             }
@@ -511,63 +746,201 @@ public final class RuntimeInstall {
     }
 
     /**
-     * Downloads a Lucene jar from {@code uri}, and moves it into place once it matches. Checks for
-     * a cancel after each buffer, and then leaves nothing behind.
+     * Copies a Lucene jar from a local cache (ADR 0125), checking it again, since the cache may have
+     * changed since the plan, and moves it into place once it matches.
+     *
+     * @return whether it was copied; if not, the jar is downloaded instead
      */
-    private void download(
-            HttpClient client,
-            Path folder,
-            RuntimeFolders.ListedJar jar,
-            URI uri,
-            Listener listener,
-            BooleanSupplier cancelled)
+    private boolean copyLocal(Run run, Path folder, RuntimeFolders.ListedJar jar, LocalCaches.Local local)
             throws InstallException, CancelledException {
-        Path target = folder.resolve(jar.name());
         String folderName = folder.getFileName().toString();
-        listener.jarStarted(folderName, jar.name(), jar.size());
         Path part = null;
         try {
             part = Files.createTempFile(folder, jar.name(), PART);
-            HttpResponse<InputStream> response = client.send(
-                    HttpRequest.newBuilder(uri).timeout(DOWNLOAD_TIMEOUT).GET().build(),
+            MessageDigest digest = newDigest();
+            long size;
+            try (InputStream in = new DigestInputStream(Files.newInputStream(local.file()), digest)) {
+                size = Files.copy(in, part, StandardCopyOption.REPLACE_EXISTING);
+            }
+            String sha256 = HexFormat.of().formatHex(digest.digest());
+            if (run.cancelled.getAsBoolean()) {
+                throw new CancelledException();
+            }
+            if (size != jar.size() || !sha256.equals(jar.sha256())) {
+                delete(part);
+                LOG.info(() -> local.file() + " no longer matches " + jar.name() + "; downloading it instead");
+                return false;
+            }
+            move(part, folder.resolve(jar.name()));
+            run.listener.jarCopied(folderName, jar.name(), size, local);
+            return true;
+        } catch (CancelledException e) {
+            delete(part);
+            throw e;
+        } catch (IOException e) {
+            delete(part);
+            if (part == null) {
+                throw new InstallException("cannot write " + folder.resolve(jar.name()) + ": " + e);
+            }
+            LOG.info(() -> "Cannot copy " + local.file() + ": " + e + "; downloading it instead");
+            return false;
+        }
+    }
+
+    /**
+     * Downloads a Lucene jar from the mirror the install goes on with; when that fails, asks the
+     * chooser, and retries from the mirror it names until one works, or it gives up (ADR 0124).
+     */
+    private void fetch(Run run, Path folder, RuntimeFolders.ListedJar jar, String mavenPath)
+            throws InstallException, CancelledException, AbortedException {
+        String folderName = folder.getFileName().toString();
+        Set<URI> tried = new LinkedHashSet<>();
+        List<String> failures = new ArrayList<>();
+        while (true) {
+            Mirror mirror = run.current;
+            try {
+                download(run, folder, jar, mirror, mirror.resolve(mavenPath));
+                return;
+            } catch (DownloadFailed e) {
+                MirrorChooser.Failure failure =
+                        new MirrorChooser.Failure(folderName, jar.name(), mirror, e.reason, e.getMessage());
+                tried.add(mirror.uri());
+                failures.add(mirror.name() + ": " + e.reason);
+                // INFO: --download-runtimes shows its warnings on stderr, where the listener named it.
+                LOG.info(() -> failure.message() + " (" + mirror.label() + ")");
+                run.listener.mirrorFailed(failure);
+                if (run.cancelled.getAsBoolean()) {
+                    throw new CancelledException();
+                }
+                MirrorChooser.Choice choice =
+                        run.chooser.choose(failure, List.copyOf(run.runMirrors), Set.copyOf(tried));
+                if (run.cancelled.getAsBoolean()) {
+                    throw new CancelledException();
+                }
+                switch (choice) {
+                    case MirrorChooser.Choice.Retry retry -> {
+                        if (run.runMirrors.stream()
+                                .noneMatch(known ->
+                                        known.uri().equals(retry.mirror().uri()))) {
+                            run.runMirrors.add(retry.mirror());
+                        }
+                        run.current = retry.mirror();
+                    }
+                    case MirrorChooser.Choice.Skip _ ->
+                        throw new InstallException(
+                                tried.size() == 1
+                                        ? e.getMessage()
+                                        : "cannot download " + jar.name() + " from any of "
+                                                + TextFormat.count(tried.size(), "mirror") + ": "
+                                                + String.join("; ", failures));
+                    case MirrorChooser.Choice.Abort _ -> throw new AbortedException(e.getMessage());
+                }
+            }
+        }
+    }
+
+    /**
+     * Downloads a Lucene jar from {@code uri}, and moves it into place once it matches. Checks for
+     * a cancel after each buffer, and then leaves nothing behind. A mirror that sends no byte for
+     * {@link #timeout} has timed out.
+     */
+    private void download(Run run, Path folder, RuntimeFolders.ListedJar jar, Mirror mirror, URI uri)
+            throws InstallException, CancelledException, DownloadFailed {
+        Path target = folder.resolve(jar.name());
+        String folderName = folder.getFileName().toString();
+        String from = "cannot download " + jar.name() + " from " + uri + ": ";
+        run.listener.jarStarted(folderName, jar.name(), jar.size());
+        Path part = null;
+        AtomicBoolean idle = new AtomicBoolean();
+        ScheduledFuture<?> watch = null;
+        try {
+            part = Files.createTempFile(folder, jar.name(), PART);
+            HttpResponse<InputStream> response = run.client.send(
+                    HttpRequest.newBuilder(uri).timeout(timeout).GET().build(),
                     HttpResponse.BodyHandlers.ofInputStream());
             MessageDigest digest = newDigest();
             long size = 0;
-            try (InputStream body = new DigestInputStream(response.body(), digest);
+            AtomicLong lastBytes = new AtomicLong(System.nanoTime());
+            InputStream raw = response.body();
+            watch = watch(run.watchdog, raw, lastBytes, idle);
+            try (InputStream body = new DigestInputStream(raw, digest);
                     OutputStream file = Files.newOutputStream(part)) {
                 if (response.statusCode() != 200) {
-                    throw new InstallException(
-                            "cannot download " + jar.name() + " from " + uri + ": HTTP " + response.statusCode());
+                    throw new DownloadFailed(from + "HTTP " + response.statusCode(), "HTTP " + response.statusCode());
                 }
                 byte[] buffer = new byte[BUFFER];
                 for (int n = body.read(buffer); n >= 0; n = body.read(buffer)) {
+                    lastBytes.set(System.nanoTime());
                     file.write(buffer, 0, n);
                     size += n;
-                    listener.bytes(n);
-                    if (cancelled.getAsBoolean()) {
+                    run.listener.bytes(n);
+                    if (run.cancelled.getAsBoolean()) {
                         throw new CancelledException();
                     }
                 }
             }
             String sha256 = HexFormat.of().formatHex(digest.digest());
             if (size != jar.size() || !sha256.equals(jar.sha256())) {
-                throw new InstallException("the download of " + jar.name() + " from " + uri
-                        + " doesn't match: " + size + " bytes with SHA-256 " + sha256 + ", expected " + jar.size()
-                        + " bytes with SHA-256 " + jar.sha256());
+                String mismatch = size + " bytes with SHA-256 " + sha256 + ", expected " + jar.size()
+                        + " bytes with SHA-256 " + jar.sha256();
+                throw new DownloadFailed(
+                        "the download of " + jar.name() + " from " + uri + " doesn't match: " + mismatch,
+                        "doesn't match: " + mismatch);
             }
             move(part, target);
-            listener.jarDone(folderName, jar.name(), JarDone.DOWNLOADED, size);
-        } catch (InstallException | CancelledException e) {
+            run.listener.jarDownloaded(folderName, jar.name(), size, mirror);
+        } catch (DownloadFailed | CancelledException e) {
             delete(part);
             throw e;
+        } catch (HttpTimeoutException _) {
+            delete(part);
+            String reason = "no answer within " + timeout.toSeconds() + " s";
+            throw new DownloadFailed(from + reason, reason);
         } catch (IOException e) {
             delete(part);
-            throw new InstallException("cannot download " + jar.name() + " from " + uri + " to " + target + ": " + e);
+            if (idle.get()) {
+                String reason = "no bytes for " + timeout.toSeconds() + " s";
+                throw new DownloadFailed(from + reason, reason);
+            }
+            if (part == null) {
+                // The folder can't be written: no mirror helps.
+                throw new InstallException(
+                        "cannot download " + jar.name() + " from " + uri + " to " + target + ": " + e);
+            }
+            String reason = e instanceof ConnectException
+                    ? "cannot connect" + (e.getMessage() == null ? "" : ": " + e.getMessage())
+                    : String.valueOf(e);
+            throw new DownloadFailed(from + reason, reason);
         } catch (InterruptedException _) {
             delete(part);
             Thread.currentThread().interrupt();
             throw new InstallException("interrupted while downloading " + jar.name() + " from " + uri);
+        } finally {
+            if (watch != null) {
+                watch.cancel(false);
+            }
         }
+    }
+
+    /** Closes {@code body} once no bytes arrived for {@link #timeout}, which ends a read that waits. */
+    private ScheduledFuture<?> watch(
+            ScheduledExecutorService watchdog, InputStream body, AtomicLong lastBytes, AtomicBoolean idle) {
+        long limit = timeout.toNanos();
+        long period = Math.max(timeout.toMillis() / 4, 10);
+        return watchdog.scheduleAtFixedRate(
+                () -> {
+                    if (!idle.get() && System.nanoTime() - lastBytes.get() > limit) {
+                        idle.set(true);
+                        try {
+                            body.close();
+                        } catch (IOException _) {
+                            // The read that waits fails either way.
+                        }
+                    }
+                },
+                period,
+                period,
+                TimeUnit.MILLISECONDS);
     }
 
     /** Removes the jars and unfinished downloads in {@code folder} that aren't {@code names}. */
@@ -611,7 +984,7 @@ public final class RuntimeInstall {
         }
     }
 
-    private static String sha256(Path file) throws InstallException {
+    static String sha256(Path file) throws InstallException {
         MessageDigest digest = newDigest();
         try (InputStream in = new DigestInputStream(Files.newInputStream(file), digest)) {
             in.transferTo(OutputStream.nullOutputStream());
@@ -631,13 +1004,5 @@ public final class RuntimeInstall {
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("Every Java has SHA-256", e);
         }
-    }
-
-    /** The repository to download from: {@code -Dleia.download.url}, or {@link #CENTRAL}. */
-    public static URI base() {
-        return Optional.ofNullable(System.getProperty("leia.download.url"))
-                .filter(url -> !url.isEmpty())
-                .map(URI::create)
-                .orElse(CENTRAL);
     }
 }

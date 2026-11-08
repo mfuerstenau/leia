@@ -23,6 +23,8 @@ import io.github.mfuerstenau.leia.server.LeiaBackend;
 import io.github.mfuerstenau.leia.tui.TestScreens;
 import io.github.mfuerstenau.leia.tui.jars.RuntimeFolders;
 import io.github.mfuerstenau.leia.tui.runtimes.FakeRepository;
+import io.github.mfuerstenau.leia.tui.runtimes.Mirror;
+import io.github.mfuerstenau.leia.tui.runtimes.MirrorSettings;
 import io.github.mfuerstenau.leia.tui.runtimes.RuntimeInstall;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -80,7 +82,14 @@ class RuntimeDownloadPilotTest {
                 List.of()));
         RuntimeInstall install =
                 new RuntimeInstall(runtimes, repository.base(), RuntimeDownloadPilotTest.class.getClassLoader());
-        Session session = new Session(app, backend, Optional.of(install));
+        run(new Session(app, backend, Optional.of(install)));
+    }
+
+    /** Runs {@code session} in place of the one that runs. */
+    private void run(Session session) throws Exception {
+        if (test != null) {
+            test.close();
+        }
         test = TuiTestRunner.runTest(
                 (event, runner) -> handle(session, event, runner),
                 session::render,
@@ -120,6 +129,59 @@ class RuntimeDownloadPilotTest {
 
     private String screen() {
         return TestScreens.render(app::render, WIDTH, HEIGHT);
+    }
+
+    @Test
+    void asksForAnotherMirrorWhenADownloadFailsAndSavesIt() throws Exception {
+        try (FakeRepository second = new FakeRepository()) {
+            repository.served.remove("org/apache/lucene/lucene-core/5.5.5/lucene-core-5.5.5.jar");
+            Path saved = tmp.resolve("config/leia/mirror");
+            Mirror local = new Mirror(repository.base(), "Local", Mirror.Origin.OPTION);
+            Mirror other = new Mirror(second.base(), "Second", Mirror.Origin.OPTION);
+            RuntimeInstall install = new RuntimeInstall(
+                    runtimes, List.of(local, other), RuntimeDownloadPilotTest.class.getClassLoader());
+            run(new Session(app, backend, Optional.of(install), new MirrorSettings(List.of(), Optional.of(saved))));
+
+            pilot.press('D');
+            settle();
+            pilot.press(' ');
+            pilot.press(KeyCode.ENTER);
+            settle();
+
+            assertThat(screen())
+                    .contains("lucene5/lucene-core-5.5.5.jar from Local failed: HTTP 404")
+                    .contains("✗ Local · ");
+            pilot.press(KeyCode.ENTER);
+            settle();
+
+            assertThat(screen()).contains("lucene5: installed", "downloaded from Second", "✗ Local: HTTP 404");
+            assertThat(saved).content().startsWith(second.base() + " Second");
+            try (Stream<Path> files = Files.list(runtimes.resolve("lucene5"))) {
+                assertThat(files.map(file -> file.getFileName().toString()))
+                        .contains("lucene-core-5.5.5.jar")
+                        .noneMatch(name -> name.endsWith(".part"));
+            }
+        }
+    }
+
+    @Test
+    void escapeAfterAFailedDownloadStopsItAndKeepsNoPart() throws Exception {
+        repository.served.remove("org/apache/lucene/lucene-core/5.5.5/lucene-core-5.5.5.jar");
+
+        pilot.press('D');
+        settle();
+        pilot.press(' ');
+        pilot.press(KeyCode.ENTER);
+        settle();
+        assertThat(screen()).contains("from 127.0.0.1 failed: HTTP 404", "Esc stop");
+
+        pilot.press(KeyCode.ESCAPE);
+        settle();
+
+        assertThat(screen()).contains("lucene5: failed: ", "was stopped", "⏎/Esc close");
+        try (Stream<Path> files = Files.list(runtimes.resolve("lucene5"))) {
+            assertThat(files).noneMatch(file -> file.getFileName().toString().endsWith(".part"));
+        }
     }
 
     @Test

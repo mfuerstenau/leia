@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-10-14
 - **Supersedes:** ADR 0044 §1 (relocation, and its rejected alternative of separate class loaders)
-- **Amended by:** ADR 0077 (`--download-runtimes` lists the jars and asks first; `--yes`); ADR 0078 (the runtimes in a catalog, not in `RuntimeFolders.KNOWN`); ADR 0079 (§7: a dialogue, per-runtime failures, cancel); ADR 0080 (the folders load at startup and on `loadRuntimes`; the download inside leia); ADR 0098 (`runtimes/` beside `leia.jar` or in the user's data folder; leia's own jars refreshed at startup, an outdated adapter refused)
+- **Amended by:** ADR 0077 (`--download-runtimes` lists the jars and asks first; `--yes`); ADR 0078 (the runtimes in a catalog, not in `RuntimeFolders.KNOWN`); ADR 0079 (§7: a dialogue, per-runtime failures, cancel); ADR 0080 (the folders load at startup and on `loadRuntimes`; the download inside leia); ADR 0098 (`runtimes/` beside `leia.jar` or in the user's data folder; leia's own jars refreshed at startup, an outdated adapter refused); ADR 0124 (§7: a list of mirrors, tried in order, instead of one repository); ADR 0125 (§7: a jar is copied from the local Maven or Gradle cache first)
 - **Amends:** ADR 0004 (release folders without `runtimes/`); ADR 0065 §4 (step 5 dropped, steps 6 and 7 as built here); ADR 0068 §2 (old runtimes see no `--jar` jars); ADR 0072 (the layout of `runtimes/`); AGENTS.md hard rule 5, the architecture and the CLI contract
 
 ## Context

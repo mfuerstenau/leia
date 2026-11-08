@@ -224,6 +224,28 @@ record Platform(Function<String, String> env, Optional<Path> home, boolean windo
     }
 
     /**
+     * The user's mirrors of Maven Central (ADR 0124), {@code mirrors} in the first config folder,
+     * user's or system's, that has one, so that an administrator can name the company's. Its mirrors
+     * run no code, and every jar from them is checked against its SHA-256. Empty if none has.
+     */
+    Optional<Path> mirrorsFile() {
+        return firstExisting(configReadDirs(), "mirrors", Files::isRegularFile);
+    }
+
+    /**
+     * The mirror chosen last in the window of {@code D} (ADR 0124), {@code mirror} in the first
+     * config folder that has one; else {@link #mirrorWriteFile()}.
+     */
+    Optional<Path> mirrorFile() {
+        return firstExisting(configReadDirs(), "mirror", Files::isRegularFile).or(this::mirrorWriteFile);
+    }
+
+    /** Where the mirror chosen last is written: {@code mirror} in the {@linkplain #configWriteDir() config folder}. */
+    Optional<Path> mirrorWriteFile() {
+        return configWriteDir().map(dir -> dir.resolve("mirror"));
+    }
+
+    /**
      * The folders of the user's own themes (ADR 0096) that exist, with the one that wins a clash of
      * names first: {@code themes} in each user config folder, then each system one.
      */

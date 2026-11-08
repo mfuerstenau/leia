@@ -104,6 +104,8 @@ import io.github.mfuerstenau.leia.tui.prompt.ExportPrompt;
 import io.github.mfuerstenau.leia.tui.prompt.ExportPrompt.ExportTarget;
 import io.github.mfuerstenau.leia.tui.prompt.PathCompletion;
 import io.github.mfuerstenau.leia.tui.prompt.PathPrompt;
+import io.github.mfuerstenau.leia.tui.runtimes.Mirror;
+import io.github.mfuerstenau.leia.tui.runtimes.MirrorChooser;
 import io.github.mfuerstenau.leia.tui.runtimes.RuntimeInstall;
 import io.github.mfuerstenau.leia.tui.runtimes.RuntimeWindow;
 import io.github.mfuerstenau.leia.tui.search.Search;
@@ -119,6 +121,7 @@ import io.github.mfuerstenau.leia.tui.widgets.KeyLegend;
 import io.github.mfuerstenau.leia.tui.widgets.Keys;
 import io.github.mfuerstenau.leia.tui.widgets.Logo;
 import io.github.mfuerstenau.leia.tui.widgets.Panels;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
@@ -883,9 +886,30 @@ public final class App {
      */
     public void runtimesPlanned(
             RuntimeInstall install, RuntimeInstall.Plan plan, List<RuntimeInstall.RuntimePlan> present) {
+        runtimesPlanned(install, plan, present, List.of());
+    }
+
+    /** {@link #runtimesPlanned}, with the mirrors that were left out and why (ADR 0124). */
+    public void runtimesPlanned(
+            RuntimeInstall install,
+            RuntimeInstall.Plan plan,
+            List<RuntimeInstall.RuntimePlan> present,
+            List<String> mirrorProblems) {
         if (runtimeWindow != null) {
-            runtimeWindow.planned(install, plan, present);
+            runtimeWindow.planned(install, plan, present, mirrorProblems);
         }
+    }
+
+    /**
+     * A jar's download failed, and the install waits for the mirror to retry from, which the window
+     * asks for (ADR 0124). Without the window, as after it was closed, the download stops.
+     */
+    public Optional<Action> downloadFailed(MirrorChooser.Failure failure, List<Mirror> mirrors, Set<URI> tried) {
+        if (runtimeWindow == null || !runtimeWindow.installing()) {
+            return Optional.of(new Action.ChooseMirror(new MirrorChooser.Choice.Abort()));
+        }
+        runtimeWindow.downloadFailed(failure, mirrors, tried);
+        return Optional.empty();
     }
 
     public void runtimesPlanFailed(String message) {
@@ -2413,6 +2437,8 @@ public final class App {
     private Optional<Action> runtimeWindowKey(KeyEvent key) {
         return switch (runtimeWindow.handleKey(key)) {
             case RuntimeWindow.Install install -> Optional.of(new Action.InstallRuntimes(install));
+            case RuntimeWindow.UseMirror use -> Optional.of(new Action.UseMirror(use.mirror()));
+            case RuntimeWindow.Choose choose -> Optional.of(new Action.ChooseMirror(choose.choice()));
             case RuntimeWindow.Close _ -> {
                 runtimeWindow = null;
                 yield Optional.empty();

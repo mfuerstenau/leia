@@ -21,6 +21,16 @@ public final class RuntimeDownload {
      * @return the exit status: 0, or 1 if a runtime failed
      */
     public static int run(RuntimeInstall install, List<String> folders, PrintStream out, PrintStream err) {
+        return run(install, folders, out, err, MirrorChooser.fallback());
+    }
+
+    /**
+     * @param folders the folders of {@code --runtime}, whose runtimes are installed
+     * @param chooser asked which mirror to retry a failed download from (ADR 0124)
+     * @return the exit status: 0, or 1 if a runtime failed
+     */
+    public static int run(
+            RuntimeInstall install, List<String> folders, PrintStream out, PrintStream err, MirrorChooser chooser) {
         List<RuntimeFolders.Known> runtimes = RuntimeFolders.KNOWN.stream()
                 .filter(known -> folders.contains(known.folder()))
                 .toList();
@@ -39,9 +49,11 @@ public final class RuntimeDownload {
             install.printListing(plan, needing, out);
         }
         RuntimeInstall.Outcome outcome =
-                install.install(plan, needing, RuntimeInstall.Listener.printing(out, err), () -> false);
+                install.install(plan, needing, RuntimeInstall.Listener.printing(out, err), () -> false, chooser);
         if (outcome.status() == 0) {
             out.println("Installed the runtimes into " + install.runtimesDir());
+        } else {
+            outcome.summary().forEach(out::println);
         }
         return outcome.status();
     }

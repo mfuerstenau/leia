@@ -78,6 +78,18 @@ class MainTest {
     }
 
     @Test
+    void refusesTheDownloadWithABadLineInTheMirrorsFile() throws Exception {
+        Files.createDirectories(configDir.resolve("leia"));
+        Files.writeString(configDir.resolve("leia/mirrors"), "# ours\nhttp://maven.example.com/\n");
+
+        assertThat(run("--download-runtimes", "--runtime", "lucene9")).isEqualTo(2);
+
+        assertThat(err())
+                .contains(
+                        "leia: " + configDir.resolve("leia/mirrors") + ", line 2: 'http://maven.example.com/' is http");
+    }
+
+    @Test
     void downloadsTheRuntimesOnlyFromLeiaJar() throws Exception {
         assertThat(run("--download-runtimes", "--runtime", "lucene9")).isEqualTo(1);
 

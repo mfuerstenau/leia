@@ -19,12 +19,19 @@ import io.github.mfuerstenau.leia.tui.app.History;
 import io.github.mfuerstenau.leia.tui.app.Session;
 import io.github.mfuerstenau.leia.tui.jars.DefaultJars;
 import io.github.mfuerstenau.leia.tui.jars.RuntimeFolders;
+import io.github.mfuerstenau.leia.tui.runtimes.ConsoleChooser;
+import io.github.mfuerstenau.leia.tui.runtimes.LocalCaches;
+import io.github.mfuerstenau.leia.tui.runtimes.MirrorChooser;
+import io.github.mfuerstenau.leia.tui.runtimes.MirrorSettings;
+import io.github.mfuerstenau.leia.tui.runtimes.Mirrors;
 import io.github.mfuerstenau.leia.tui.runtimes.RuntimeDownload;
 import io.github.mfuerstenau.leia.tui.runtimes.RuntimeInstall;
 import io.github.mfuerstenau.leia.tui.theme.Palette;
 import io.github.mfuerstenau.leia.tui.theme.Theme;
 import io.github.mfuerstenau.leia.tui.theme.ThemeFile;
 import io.github.mfuerstenau.leia.tui.theme.Themes;
+import java.io.BufferedReader;
+import java.io.Console;
 import java.io.InputStream;
 import java.io.PrintStream;
 import java.nio.file.Files;
@@ -267,7 +274,8 @@ public final class Main {
         // another leia's too, and rewriting it would break that one (ADR 0122).
         for (Path dir : platform.userRuntimesDirs()) {
             if (Files.isDirectory(dir) && Files.isWritable(dir)) {
-                new RuntimeInstall(dir, RuntimeInstall.base(), Main.class.getClassLoader())
+                // Downloads nothing, so the mirrors don't matter.
+                new RuntimeInstall(dir, Mirrors.builtIn(), Main.class.getClassLoader())
                         .refreshOwnJars(RuntimeInstall.Listener.logging(LOG));
             }
         }
@@ -301,6 +309,12 @@ public final class Main {
     private static int downloadRuntimes(Platform platform, Cli cli, PrintStream out, PrintStream err) {
         // Not into leia.log, which would lose the last session's log; only problems show.
         LeiaLog.toStderr(Level.WARNING);
+        // A bad mirror is a wrong command line, or as good as one (ADR 0124).
+        Mirrors.Loaded mirrors = mirrors(platform, cli.downloadUrls());
+        if (!mirrors.problems().isEmpty()) {
+            mirrors.problems().forEach(problem -> err.println("leia: " + problem));
+            return 2;
+        }
         Optional<Path> runtimesDir = platform.runtimesInstallDir();
         if (platform.runtimesDirs().isEmpty()) {
             err.println("leia: --download-runtimes installs into the folder runtimes, which leia has only when it"
@@ -312,11 +326,40 @@ public final class Main {
                     + platform.userRuntimesDirs());
             return 1;
         }
+        // Asks which mirror to retry from only on a terminal; a script gets the next one (ADR 0124).
+        Console console = System.console();
+        MirrorChooser chooser = console != null && console.isTerminal()
+                ? new ConsoleChooser(new BufferedReader(console.reader()), out)
+                : MirrorChooser.fallback();
         return RuntimeDownload.run(
-                new RuntimeInstall(runtimesDir.get(), RuntimeInstall.base(), Main.class.getClassLoader()),
+                new RuntimeInstall(
+                        runtimesDir.get(), mirrors.mirrors(), Main.class.getClassLoader(), localCaches(platform)),
                 cli.runtimes(),
                 out,
-                err);
+                err,
+                chooser);
+    }
+
+    /**
+     * The local Maven and Gradle caches that a Lucene jar is copied from before it is downloaded
+     * (ADR 0125); none with {@code -Dleia.download.local=false}.
+     */
+    private static LocalCaches localCaches(Platform platform) {
+        LocalCaches caches = LocalCaches.detect(System::getenv, System::getProperty, platform.home());
+        caches.caches()
+                .forEach(cache -> LOG.info(() ->
+                        "Lucene jars are copied from " + cache.name() + ", " + cache.root() + ", where they match"));
+        return caches;
+    }
+
+    /**
+     * The mirrors to download the runtimes' Lucene jars from, in order (ADR 0124): {@code
+     * -Dleia.download.url}, {@code --download-url}, the mirror chosen last, the {@code mirrors}
+     * file, then leia's own list.
+     */
+    private static Mirrors.Loaded mirrors(Platform platform, List<String> downloadUrls) {
+        return Mirrors.resolve(
+                System.getProperty("leia.download.url"), downloadUrls, platform.mirrorFile(), platform.mirrorsFile());
     }
 
     /**
@@ -359,11 +402,15 @@ public final class Main {
                 .withLog(leiaLog.buffer(), platform.logFile());
         app.runtimesLoaded(
                 backend.call(Methods.GET_RUNTIMES, new GetRuntimesParams()).get());
+        Mirrors.Loaded mirrors = mirrors(platform, List.of());
+        mirrors.problems().forEach(problem -> LOG.warning(() -> "Mirror left out: " + problem));
         Session session = new Session(
                 app,
                 backend,
                 platform.runtimesInstallDir()
-                        .map(dir -> new RuntimeInstall(dir, RuntimeInstall.base(), Main.class.getClassLoader())));
+                        .map(dir -> new RuntimeInstall(
+                                dir, mirrors.mirrors(), Main.class.getClassLoader(), localCaches(platform))),
+                new MirrorSettings(mirrors.problems(), platform.mirrorWriteFile()));
         OpenMode mode = cli.noReader() ? OpenMode.DIRECTORY_ONLY : OpenMode.READER;
         // The first frame shows the path being opened.
         cli.indexPath().ifPresent(path -> app.opening(path, mode));

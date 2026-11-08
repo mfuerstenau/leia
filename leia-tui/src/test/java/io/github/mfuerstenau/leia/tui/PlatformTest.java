@@ -138,6 +138,31 @@ class PlatformTest {
     }
 
     @Test
+    void readsTheMirrorsFromTheFirstConfigFolderThatHasThemAndSavesTheChoiceToTheUsers() throws IOException {
+        Path user = Files.createDirectories(tmp.resolve("user/leia"));
+        Path system = Files.createDirectories(tmp.resolve("system/leia"));
+        Platform platform = linux(
+                Map.of(
+                        "XDG_CONFIG_HOME",
+                        tmp.resolve("user").toString(),
+                        "XDG_CONFIG_DIRS",
+                        tmp.resolve("system").toString()),
+                Optional.empty());
+        assertThat(platform.mirrorsFile()).isEmpty();
+        assertThat(platform.mirrorFile()).hasValue(user.resolve("mirror"));
+
+        // An administrator's list, then the user's own over it.
+        Files.writeString(system.resolve("mirrors"), "https://maven.example.com/\n");
+        assertThat(platform.mirrorsFile()).hasValue(system.resolve("mirrors"));
+        Files.writeString(user.resolve("mirrors"), "https://own.example.com/\n");
+        assertThat(platform.mirrorsFile()).hasValue(user.resolve("mirrors"));
+
+        Files.writeString(system.resolve("mirror"), "https://maven.example.com/\n");
+        assertThat(platform.mirrorFile()).hasValue(system.resolve("mirror"));
+        assertThat(platform.mirrorWriteFile()).hasValue(user.resolve("mirror"));
+    }
+
+    @Test
     void readsABackedUpConfigFolderWhenTheVariableMovedAway() throws IOException {
         Path home = Files.createDirectories(tmp.resolve("home"));
         Files.createDirectories(home.resolve(".config/leia/themes"));

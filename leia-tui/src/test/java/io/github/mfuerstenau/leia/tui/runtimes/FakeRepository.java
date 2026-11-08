@@ -32,7 +32,7 @@ public final class FakeRepository implements AutoCloseable {
     static final int CHUNK = 64 * 1024;
 
     /** What the repository serves by Maven path; missing paths are 404. */
-    final Map<String, byte[]> served = new ConcurrentHashMap<>();
+    public final Map<String, byte[]> served = new ConcurrentHashMap<>();
     /** How many requests it got. */
     public final AtomicInteger requests = new AtomicInteger();
 
