@@ -1,27 +1,30 @@
 package io.github.mfuerstenau.leia.tui.runtimes;
 
+import static io.github.mfuerstenau.leia.client.runtimes.FakeRepository.known;
+import static io.github.mfuerstenau.leia.client.runtimes.FakeRepository.lucene;
 import static io.github.mfuerstenau.leia.tui.TestScreens.key;
-import static io.github.mfuerstenau.leia.tui.runtimes.FakeRepository.known;
-import static io.github.mfuerstenau.leia.tui.runtimes.FakeRepository.lucene;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.tamboui.tui.event.KeyCode;
+import io.github.mfuerstenau.leia.client.runtimes.FakeRepository;
+import io.github.mfuerstenau.leia.client.runtimes.InstallJob;
+import io.github.mfuerstenau.leia.client.runtimes.LocalCaches;
+import io.github.mfuerstenau.leia.client.runtimes.Mirror;
+import io.github.mfuerstenau.leia.client.runtimes.Mirrors;
+import io.github.mfuerstenau.leia.client.runtimes.RuntimeInstall;
 import io.github.mfuerstenau.leia.protocol.jars.LoadRuntimesResult;
 import io.github.mfuerstenau.leia.protocol.jars.RuntimeFolder;
 import io.github.mfuerstenau.leia.protocol.jars.RuntimeState;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
 import io.github.mfuerstenau.leia.tui.TestScreens;
 import java.io.IOException;
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 import java.util.stream.Stream;
@@ -103,9 +106,15 @@ class RuntimeWindowTest {
     private CompletableFuture<RuntimeInstall.Outcome> enter() {
         RuntimeWindow.Event event = window.handleKey(key(KeyCode.ENTER));
         assertThat(event).isInstanceOf(RuntimeWindow.Install.class);
-        RuntimeWindow.Install start = (RuntimeWindow.Install) event;
-        return CompletableFuture.supplyAsync(
-                () -> start.install().install(start.plan(), start.chosen(), start.listener(), start.cancelled()));
+        return ((RuntimeWindow.Install) event).job().start().done();
+    }
+
+    /** Ticks the window, as the app does, until it shows the install's question. */
+    private void awaitQuestion() throws InterruptedException {
+        await(() -> {
+            window.tick();
+            return !window.animating();
+        });
     }
 
     @Test
@@ -186,10 +195,10 @@ class RuntimeWindowTest {
 
         RuntimeWindow.Event event = window.handleKey(key(KeyCode.ENTER));
         assertThat(event).isInstanceOfSatisfying(RuntimeWindow.Install.class, start -> {
-            assertThat(start.plan().runtimes())
-                    .extracting(RuntimeInstall.RuntimePlan::known)
+            assertThat(start.job().snapshot().state()).isEqualTo(InstallJob.State.READY);
+            assertThat(start.job().snapshot().runtimes())
+                    .extracting(InstallJob.RuntimeProgress::known)
                     .containsExactlyElementsOf(MISSING);
-            assertThat(start.chosen()).containsExactlyInAnyOrderElementsOf(MISSING);
         });
     }
 
@@ -430,25 +439,8 @@ class RuntimeWindowTest {
             install = new RuntimeInstall(runtimes, List.of(local, other), RuntimeWindowTest.class.getClassLoader());
             plan(List.of(known("lucene9")));
             window.handleKey(key(' '));
-            BlockingQueue<MirrorChooser.Failure> failures = new LinkedBlockingQueue<>();
-            BlockingQueue<Set<URI>> tried = new LinkedBlockingQueue<>();
-            BlockingQueue<MirrorChooser.Choice> choices = new LinkedBlockingQueue<>();
-
-            RuntimeWindow.Install start = (RuntimeWindow.Install) window.handleKey(key(KeyCode.ENTER));
-            CompletableFuture<RuntimeInstall.Outcome> running = CompletableFuture.supplyAsync(() -> start.install()
-                    .install(start.plan(), start.chosen(), start.listener(), start.cancelled(), (failure, m, t) -> {
-                        failures.add(failure);
-                        tried.add(t);
-                        try {
-                            return choices.take();
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                            return new MirrorChooser.Choice.Abort();
-                        }
-                    }));
-            MirrorChooser.Failure failure = failures.poll(30, TimeUnit.SECONDS);
-            assertThat(failure).isNotNull();
-            window.downloadFailed(failure, List.of(local, other), tried.take());
+            CompletableFuture<RuntimeInstall.Outcome> running = enter();
+            awaitQuestion();
 
             assertThat(window.installing()).isTrue();
             assertThat(screen())
@@ -460,9 +452,8 @@ class RuntimeWindowTest {
                     .contains("✗ Local: HTTP 404")
                     .contains("Esc stop");
             // The cursor is on the first mirror that hasn't failed.
-            RuntimeWindow.Event event = window.handleKey(key(KeyCode.ENTER));
-            assertThat(event).isEqualTo(new RuntimeWindow.Choose(new MirrorChooser.Choice.Retry(other)));
-            choices.add(((RuntimeWindow.Choose) event).choice());
+            // The install goes on with it, and so does the next one.
+            assertThat(window.handleKey(key(KeyCode.ENTER))).isEqualTo(new RuntimeWindow.UseMirror(other));
 
             RuntimeInstall.Outcome outcome = running.get(30, TimeUnit.SECONDS);
             assertThat(outcome.status()).isZero();
@@ -478,44 +469,37 @@ class RuntimeWindowTest {
 
     @Test
     void escapeAfterAFailedDownloadStopsIt() throws Exception {
+        repository.served.remove("org/apache/lucene/lucene-core/9.12.3/lucene-core-9.12.3.jar");
+        plan(List.of(known("lucene9"), known("lucene5")));
+        window.handleKey(key('a'));
+        CompletableFuture<RuntimeInstall.Outcome> running = enter();
+        awaitQuestion();
+
+        assertThat(window.handleKey(key(KeyCode.ESCAPE))).isEqualTo(new RuntimeWindow.Nothing());
+        assertThat(window.installing()).isTrue();
+        RuntimeInstall.Outcome outcome = running.get(30, TimeUnit.SECONDS);
+        assertThat(outcome.results().get(known("lucene9"))).isInstanceOf(RuntimeInstall.Result.Failed.class);
+        assertThat(outcome.results()).containsEntry(known("lucene5"), new RuntimeInstall.Result.Cancelled());
+        window.finished(outcome);
+        assertThat(window.installing()).isFalse();
+    }
+
+    @Test
+    void escapeWhileItDownloadsCancelsIt() throws Exception {
         plan(List.of(known("lucene9")));
         window.handleKey(key(' '));
         repository.holdBack();
         CompletableFuture<RuntimeInstall.Outcome> running = enter();
         await(() -> repository.requests.get() > 0);
-        Mirror local = install.mirrors().getFirst();
 
-        window.downloadFailed(
-                new MirrorChooser.Failure("lucene9", "a.jar", local, "HTTP 500", "cannot download a.jar"),
-                install.mirrors(),
-                Set.of(local.uri()));
-
-        assertThat(window.handleKey(key(KeyCode.ESCAPE)))
-                .isEqualTo(new RuntimeWindow.Choose(new MirrorChooser.Choice.Abort()));
-        assertThat(window.installing()).isTrue();
         window.handleKey(key(KeyCode.ESCAPE));
+        assertThat(screen()).contains("Cancelling…");
         repository.release();
-        window.finished(running.get());
-        assertThat(window.installing()).isFalse();
-    }
 
-    @Test
-    void aRetriedJarStartsItsBytesOver() throws Exception {
-        RuntimeInstall.Plan plan = install.plan(List.of(known("lucene9")));
-        RuntimeWindow.Progress progress = new RuntimeWindow.Progress(plan.runtimes());
-        String jar = lucene(known("lucene9")).getFirst().name();
-        Mirror local = install.mirrors().getFirst();
-
-        progress.jarStarted("lucene9", jar, 1000);
-        progress.bytes(400);
-        progress.mirrorFailed(new MirrorChooser.Failure("lucene9", jar, local, "no bytes for 60 s", ""));
-        assertThat(progress.done()).isEqualTo(400);
-        progress.jarStarted("lucene9", jar, 1000);
-
-        assertThat(progress.done()).isZero();
-        assertThat(progress.lines("*"))
-                .map(line -> line.spans().stream().map(span -> span.content()).reduce("", String::concat))
-                .contains("      ✗ " + local.name() + ": no bytes for 60 s");
+        RuntimeInstall.Outcome outcome = running.get(30, TimeUnit.SECONDS);
+        assertThat(outcome.results()).containsEntry(known("lucene9"), new RuntimeInstall.Result.Cancelled());
+        assertThat(window.finished(outcome)).isFalse();
+        assertThat(screen()).contains("lucene9: cancelled");
     }
 
     @Test

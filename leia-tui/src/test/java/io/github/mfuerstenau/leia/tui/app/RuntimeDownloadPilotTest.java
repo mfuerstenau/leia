@@ -11,6 +11,13 @@ import dev.tamboui.tui.event.Event;
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.pilot.Pilot;
 import dev.tamboui.tui.pilot.TuiTestRunner;
+import io.github.mfuerstenau.leia.client.history.History;
+import io.github.mfuerstenau.leia.client.platform.RuntimesDirs;
+import io.github.mfuerstenau.leia.client.runtimes.FakeRepository;
+import io.github.mfuerstenau.leia.client.runtimes.Mirror;
+import io.github.mfuerstenau.leia.client.runtimes.MirrorSettings;
+import io.github.mfuerstenau.leia.client.runtimes.RuntimeInstall;
+import io.github.mfuerstenau.leia.client.runtimes.RuntimeService;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.index.DirectoryImpl;
 import io.github.mfuerstenau.leia.protocol.jars.GetRuntimesParams;
@@ -21,11 +28,6 @@ import io.github.mfuerstenau.leia.protocol.version.VersionParams;
 import io.github.mfuerstenau.leia.protocol.version.VersionResult;
 import io.github.mfuerstenau.leia.server.LeiaBackend;
 import io.github.mfuerstenau.leia.tui.TestScreens;
-import io.github.mfuerstenau.leia.tui.jars.RuntimeFolders;
-import io.github.mfuerstenau.leia.tui.runtimes.FakeRepository;
-import io.github.mfuerstenau.leia.tui.runtimes.Mirror;
-import io.github.mfuerstenau.leia.tui.runtimes.MirrorSettings;
-import io.github.mfuerstenau.leia.tui.runtimes.RuntimeInstall;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -74,7 +76,7 @@ class RuntimeDownloadPilotTest {
         VersionResult version =
                 backend.call(Methods.VERSION, new VersionParams()).get();
         app = new App(version, Optional.empty(), History.inMemory(), DirectoryImpl.FS)
-                .withRuntimeFolders(new RuntimeFolders(Optional.of(runtimes)));
+                .withRuntimeFolders(new RuntimesDirs(Optional.of(runtimes)));
         // As if lucene5 were missing: the other tests of this JVM may have loaded it already.
         app.runtimesLoaded(new GetRuntimesResult(
                 List.of(new RuntimeFolder(
@@ -82,7 +84,7 @@ class RuntimeDownloadPilotTest {
                 List.of()));
         RuntimeInstall install =
                 new RuntimeInstall(runtimes, repository.base(), RuntimeDownloadPilotTest.class.getClassLoader());
-        run(new Session(app, backend, Optional.of(install)));
+        run(new Session(app, backend, Optional.of(new RuntimeService(install, MirrorSettings.none()))));
     }
 
     /** Runs {@code session} in place of the one that runs. */
@@ -140,7 +142,10 @@ class RuntimeDownloadPilotTest {
             Mirror other = new Mirror(second.base(), "Second", Mirror.Origin.OPTION);
             RuntimeInstall install = new RuntimeInstall(
                     runtimes, List.of(local, other), RuntimeDownloadPilotTest.class.getClassLoader());
-            run(new Session(app, backend, Optional.of(install), new MirrorSettings(List.of(), Optional.of(saved))));
+            run(new Session(
+                    app,
+                    backend,
+                    Optional.of(new RuntimeService(install, new MirrorSettings(List.of(), Optional.of(saved))))));
 
             pilot.press('D');
             settle();

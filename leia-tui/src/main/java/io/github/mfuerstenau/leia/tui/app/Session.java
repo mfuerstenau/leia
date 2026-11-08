@@ -5,6 +5,11 @@ import dev.tamboui.tui.TuiRunner;
 import dev.tamboui.tui.event.Event;
 import dev.tamboui.tui.event.KeyEvent;
 import dev.tamboui.tui.event.TickEvent;
+import io.github.mfuerstenau.leia.client.export.DocumentExporter;
+import io.github.mfuerstenau.leia.client.export.ExportJob;
+import io.github.mfuerstenau.leia.client.runtimes.InstallJob;
+import io.github.mfuerstenau.leia.client.runtimes.RuntimeInstall;
+import io.github.mfuerstenau.leia.client.runtimes.RuntimeService;
 import io.github.mfuerstenau.leia.protocol.ErrorCode;
 import io.github.mfuerstenau.leia.protocol.Methods;
 import io.github.mfuerstenau.leia.protocol.analysis.GetAnalysisComponentsParams;
@@ -16,13 +21,9 @@ import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentParams;
 import io.github.mfuerstenau.leia.protocol.document.GetDocumentResult;
 import io.github.mfuerstenau.leia.protocol.document.GetStoredValueParams;
-import io.github.mfuerstenau.leia.protocol.document.GetStoredValueResult;
 import io.github.mfuerstenau.leia.protocol.document.GetTermVectorParams;
-import io.github.mfuerstenau.leia.protocol.document.GetTermVectorResult;
 import io.github.mfuerstenau.leia.protocol.document.StartReconstructParams;
 import io.github.mfuerstenau.leia.protocol.document.StartStoredFieldsScanParams;
-import io.github.mfuerstenau.leia.protocol.document.StoredValue;
-import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
 import io.github.mfuerstenau.leia.protocol.filter.ReleaseFilterParams;
 import io.github.mfuerstenau.leia.protocol.filter.StepFilterParams;
 import io.github.mfuerstenau.leia.protocol.index.CloseIndexParams;
@@ -48,18 +49,9 @@ import io.github.mfuerstenau.leia.protocol.terms.StartFieldTermScanParams;
 import io.github.mfuerstenau.leia.server.LeiaBackend;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.tui.Osc52;
-import io.github.mfuerstenau.leia.tui.documents.DocumentExport;
 import io.github.mfuerstenau.leia.tui.documents.Documents;
-import io.github.mfuerstenau.leia.tui.runtimes.Mirror;
-import io.github.mfuerstenau.leia.tui.runtimes.MirrorChooser;
-import io.github.mfuerstenau.leia.tui.runtimes.MirrorSettings;
-import io.github.mfuerstenau.leia.tui.runtimes.Mirrors;
-import io.github.mfuerstenau.leia.tui.runtimes.RuntimeInstall;
-import io.github.mfuerstenau.leia.tui.runtimes.RuntimeWindow;
 import io.github.mfuerstenau.leia.tui.terms.Terms;
 import java.io.IOException;
-import java.net.URI;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -68,17 +60,12 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.LongFunction;
@@ -127,22 +114,19 @@ public final class Session {
     private final App ui;
     private final LeiaBackend backend;
 
+    /** Exports documents through the backend (ADR 0126). */
+    private final DocumentExporter exporter;
+
     /**
-     * Installs into the runtimes folder (ADR 0098); empty if leia doesn't run from {@code leia.jar}.
-     * Its first mirror changes when the user chooses one (ADR 0124): on the UI thread.
+     * Plans and installs into the runtimes folder (ADR 0098, ADR 0126); empty if leia doesn't run
+     * from {@code leia.jar}.
      */
-    private Optional<RuntimeInstall> runtimeInstall;
+    private final Optional<RuntimeService> runtimes;
 
-    /** The mirrors left out, and where the mirror chosen is saved (ADR 0124). */
-    private final MirrorSettings mirrorSettings;
-
-    /** What the install that waits after a failed download is told, once the user chose (ADR 0124). */
-    private final AtomicReference<CompletableFuture<MirrorChooser.Choice>> pendingChoice = new AtomicReference<>();
-
-    /** The thread that downloads runtimes, while one runs (ADR 0080). */
-    // An immutable value, published through volatile (ADR 0088)
+    /** The install of runtimes, while one runs (ADR 0080). */
+    // A thread-safe handle, published through volatile (ADR 0088)
     @SuppressWarnings("java:S3077")
-    private volatile Thread installer;
+    private volatile InstallJob installer;
 
     /** Set once leia quits, which cancels a download. */
     private final AtomicBoolean quitting = new AtomicBoolean();
@@ -158,33 +142,26 @@ public final class Session {
     }
 
     /**
-     * @param runtimeInstall installs the runtimes that the window of {@code D} downloads (ADR 0080)
+     * @param runtimes plans and installs the runtimes that the window of {@code D} downloads (ADR 0080,
+     *     ADR 0126)
      */
-    public Session(App app, LeiaBackend backend, Optional<RuntimeInstall> runtimeInstall) {
-        this(app, backend, runtimeInstall, MirrorSettings.none());
-    }
-
-    /**
-     * @param runtimeInstall installs the runtimes that the window of {@code D} downloads (ADR 0080)
-     * @param mirrorSettings the mirrors left out, and where the mirror the user chooses is saved (ADR 0124)
-     */
-    public Session(
-            App app, LeiaBackend backend, Optional<RuntimeInstall> runtimeInstall, MirrorSettings mirrorSettings) {
+    public Session(App app, LeiaBackend backend, Optional<RuntimeService> runtimes) {
         this.ui = app;
         this.backend = backend;
-        this.runtimeInstall = runtimeInstall;
-        this.mirrorSettings = mirrorSettings;
+        this.exporter = new DocumentExporter(DocumentExporter.Calls.of(backend));
+        this.runtimes = runtimes;
     }
 
     /**
      * Cancels a download that still runs, such as after Ctrl+C, and waits for it, so that it leaves
      * no unfinished file behind.
      */
-    public void awaitInstall() throws InterruptedException {
+    public void awaitInstall() {
         quitting.set(true);
-        Thread running = installer;
+        InstallJob running = installer;
         if (running != null) {
-            running.join();
+            running.cancel();
+            running.await();
         }
     }
 
@@ -503,19 +480,7 @@ public final class Session {
                         message -> changing(app -> app.filterStepFailed(step.serial(), message)));
             case Action.ClearFilter clear -> clearFilter(clear.cancel(), clear.release(), runner);
             case Action.CancelScan cancel -> cancelJobs(List.of(cancel.jobId()), runner);
-            case Action.LoadDocumentExport load ->
-                complete(
-                        DocumentExport.load(exportFetch(), load.docId(), load.termVectors()),
-                        runner,
-                        data -> app -> app.documentExportLoaded(load.exportId(), data),
-                        message -> changing(app -> app.exportFailed(load.exportId(), message)));
-            case Action.StartDocumentExport start ->
-                complete(
-                        backend.call(
-                                Methods.START_RECONSTRUCT, new StartReconstructParams(start.docId(), Optional.empty())),
-                        runner,
-                        job -> app -> app.exportStarted(start.exportId(), job.jobId()),
-                        message -> changing(app -> app.exportFailed(start.exportId(), message)));
+            case Action.StartDocumentExport start -> startDocumentExport(start, runner);
             case Action.CancelExport cancel -> cancelJobs(List.of(cancel.jobId()), runner);
             case Action.LoadJars _ ->
                 complete(
@@ -525,33 +490,14 @@ public final class Session {
                         message -> changing(app -> app.jarsFailed(message)));
             case Action.AddJars add -> addJars(add, runner);
             case Action.PlanRuntimes plan -> planRuntimes(plan, runner);
-            case Action.InstallRuntimes install -> installRuntimes(install.install(), runner);
-            case Action.UseMirror use -> useMirror(use.mirror());
-            case Action.ChooseMirror choose -> {
-                if (choose.choice() instanceof MirrorChooser.Choice.Retry retry) {
-                    useMirror(retry.mirror());
-                }
-                CompletableFuture<MirrorChooser.Choice> pending = pendingChoice.getAndSet(null);
-                if (pending != null) {
-                    pending.complete(choose.choice());
-                }
-            }
+            case Action.InstallRuntimes install -> installRuntimes(install.job(), runner);
+            case Action.UseMirror use -> runtimes.ifPresent(service -> service.useMirror(use.mirror()));
             case Action.LoadRuntimes _ ->
                 complete(
                         backend.call(Methods.LOAD_RUNTIMES, new LoadRuntimesParams()),
                         runner,
                         result -> changing(app -> app.runtimesReloaded(result)),
                         message -> changing(app -> app.reloadRuntimesFailed(message)));
-            case Action.WriteExport write -> {
-                // On the UI thread, as the Rust TUI wrote it in its loop: a few writes of text.
-                Optional<String> error = DocumentExport.writeFile(
-                        Path.of(write.path()), write.text(), write.overwrite(), write.indexDirs());
-                if (error.isPresent()) {
-                    ui.exportFailed(write.exportId(), error.get());
-                } else {
-                    ui.documentExported(write.exportId(), write.docId(), write.path());
-                }
-            }
         }
     }
 
@@ -632,99 +578,50 @@ public final class Session {
 
     /** Plans the download on a thread of its own: it hashes the jars that are there (ADR 0080). */
     private void planRuntimes(Action.PlanRuntimes plan, TuiRunner runner) {
-        if (runtimeInstall.isEmpty()) {
+        if (runtimes.isEmpty()) {
             reply(runner, app -> {
                 app.runtimesPlanFailed("leia doesn't run from leia.jar, so it has no runtimes folder");
                 return Optional.empty();
             });
             return;
         }
-        RuntimeInstall install = runtimeInstall.get();
-        Thread.ofPlatform().daemon().name("leia-runtime-plan").start(() -> {
-            try {
-                RuntimeInstall.Plan planned = install.plan(plan.runtimes());
+        RuntimeService service = runtimes.get();
+        RuntimeInstall install = service.install();
+        service.plan(plan.runtimes(), plan.present()).whenComplete((planned, error) -> {
+            if (error == null) {
                 // Only read: the present runtimes' plans never reach the install (ADR 0081).
-                List<RuntimeInstall.RuntimePlan> present =
-                        install.plan(plan.present()).runtimes();
                 reply(runner, app -> {
-                    app.runtimesPlanned(install, planned, present, mirrorSettings.problems());
+                    app.runtimesPlanned(install, planned.plan(), planned.present(), service.mirrorProblems());
                     return Optional.empty();
                 });
-            } catch (RuntimeInstall.InstallException | RuntimeException e) {
-                LOG.log(Level.WARNING, "Cannot plan the runtimes' download", e);
-                String message = e.getMessage() != null ? e.getMessage() : e.toString();
-                reply(runner, app -> {
-                    app.runtimesPlanFailed(message);
-                    return Optional.empty();
-                });
+                return;
             }
-        });
-    }
-
-    /**
-     * Downloads the runtimes on a thread of its own, not as a backend job (ADR 0080): no index is
-     * involved, and the backend thread stays free. Quitting leia cancels it.
-     */
-    private void installRuntimes(RuntimeWindow.Install install, TuiRunner runner) {
-        installer = Thread.ofPlatform().daemon().name("leia-runtime-install").start(() -> {
-            RuntimeInstall.Outcome outcome;
-            try {
-                BooleanSupplier cancelled =
-                        () -> quitting.get() || install.cancelled().getAsBoolean();
-                outcome = install.install()
-                        .install(
-                                install.plan(),
-                                install.chosen(),
-                                install.listener(),
-                                cancelled,
-                                (failure, mirrors, tried) -> askForMirror(failure, mirrors, tried, cancelled, runner));
-            } catch (RuntimeException e) {
-                LOG.log(Level.WARNING, "The runtimes' download failed", e);
-                outcome = RuntimeWindow.failedOutcome(install.chosen(), e);
-            }
-            RuntimeInstall.Outcome done = outcome;
+            Throwable cause =
+                    error instanceof CompletionException && error.getCause() != null ? error.getCause() : error;
+            LOG.log(Level.WARNING, "Cannot plan the runtimes' download", cause);
+            String message = cause.getMessage() != null ? cause.getMessage() : cause.toString();
             reply(runner, app -> {
-                installer = null;
-                return app.runtimesInstalled(done);
+                app.runtimesPlanFailed(message);
+                return Optional.empty();
             });
         });
     }
 
     /**
-     * On the install's thread: asks the window which mirror to retry a failed download from, and
-     * waits for the answer (ADR 0124). Quitting leia, or a cancel, stops the download.
+     * Starts the install, on a thread of its own, not as a backend job (ADR 0080): no index is
+     * involved, and the backend thread stays free. The window polls it; quitting leia cancels it.
      */
-    private MirrorChooser.Choice askForMirror(
-            MirrorChooser.Failure failure,
-            List<Mirror> mirrors,
-            Set<URI> tried,
-            BooleanSupplier cancelled,
-            TuiRunner runner) {
-        CompletableFuture<MirrorChooser.Choice> choice = new CompletableFuture<>();
-        pendingChoice.set(choice);
-        reply(runner, app -> app.downloadFailed(failure, mirrors, tried));
-        while (true) {
-            try {
-                return choice.get(100, TimeUnit.MILLISECONDS);
-            } catch (TimeoutException _) {
-                if (cancelled.getAsBoolean()) {
-                    pendingChoice.compareAndSet(choice, null);
-                    return new MirrorChooser.Choice.Abort();
-                }
-            } catch (InterruptedException _) {
-                Thread.currentThread().interrupt();
-                return new MirrorChooser.Choice.Abort();
-            } catch (ExecutionException e) {
-                LOG.log(Level.WARNING, "No mirror was chosen", e);
-                return new MirrorChooser.Choice.Abort();
-            }
+    private void installRuntimes(InstallJob job, TuiRunner runner) {
+        installer = job;
+        if (quitting.get()) {
+            job.cancel();
         }
-    }
-
-    /** The mirror the user chose is the first from now on, and saved for next time (ADR 0124). */
-    private void useMirror(Mirror mirror) {
-        runtimeInstall = runtimeInstall.map(install -> install.withFirst(mirror));
-        mirrorSettings.saveFile().ifPresent(file -> Mirrors.save(file, mirror));
+        job.start()
+                .done()
+                .thenAccept(outcome -> reply(runner, app -> {
+                    installer = null;
+                    return app.runtimesInstalled(outcome);
+                }));
     }
 
     /** Hands the app the runtime jars that are loaded and missing now, for the about screen. */
@@ -769,26 +666,24 @@ public final class Session {
         });
     }
 
-    /** The calls a document export fetches the document with (ADR 0030). */
-    private DocumentExport.Fetch exportFetch() {
-        return new DocumentExport.Fetch() {
-            @Override
-            public CompletionStage<GetDocumentResult> document(int docId) {
-                return backend.call(Methods.GET_DOCUMENT, new GetDocumentParams(docId));
+    /**
+     * Starts a document export that leia-client runs (ADR 0030, ADR 0126), hands the app its job,
+     * and how it ended: a failed call as the other calls' failures are described.
+     */
+    private void startDocumentExport(Action.StartDocumentExport start, TuiRunner runner) {
+        ExportJob job = exporter.start(start.request());
+        ui.documentExportStarted(start.exportId(), job);
+        job.done().thenAccept(done -> {
+            if (done.state() == ExportJob.State.FAILED && done.cause().isPresent()) {
+                RpcException rpc = rpcException(done.cause().get(), runner);
+                if (rpc != null) {
+                    String message = describe(rpc);
+                    reply(runner, changing(app -> app.exportFailed(start.exportId(), message)));
+                }
+                return;
             }
-
-            @Override
-            public CompletionStage<StoredValue> storedValue(int docId, String field, int index) {
-                return backend.call(Methods.GET_STORED_VALUE, new GetStoredValueParams(docId, field, index))
-                        .thenApply(GetStoredValueResult::value);
-            }
-
-            @Override
-            public CompletionStage<List<TermVectorTerm>> termVector(int docId, String field) {
-                return backend.call(Methods.GET_TERM_VECTOR, new GetTermVectorParams(docId, field))
-                        .thenApply(GetTermVectorResult::terms);
-            }
-        };
+            reply(runner, app -> app.documentExportDone(start.exportId(), done));
+        });
     }
 
     /**
@@ -985,13 +880,6 @@ public final class Session {
                             runner,
                             result -> changing(app -> app.storedScanProgress(scanning.scanId(), result)),
                             message -> changing(app -> app.storedScanFailed(scanning.scanId(), message)));
-                case Poll.DocumentExport exporting ->
-                    fetch(
-                            poll,
-                            backend.call(Methods.GET_RECONSTRUCT, new JobParams(exporting.jobId())),
-                            runner,
-                            result -> app -> app.documentExportProgress(exporting.exportId(), result),
-                            message -> changing(app -> app.exportFailed(exporting.exportId(), message)));
                 case Poll.Check checking ->
                     fetch(
                             poll,

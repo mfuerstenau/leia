@@ -501,3 +501,13 @@ Goal: the runtimes are downloaded from within leia's UI, and `--download-runtime
 - [x] The download window: `m` chooses the first mirror, saved to `mirror`; a failed download shows the mirrors with why each failed, ⏎ retries, `u` takes an own URL, Esc stops the download.
 - [x] Tests against local repositories (`MirrorFallbackTest`, `MirrorsTest`, `RuntimeWindowTest`, `RuntimeDownloadPilotTest`), `CliTest`, `MainTest`, `PlatformTest`; `AGENTS.md`, `Cli`'s help and both READMEs.
 - [x] Local caches (ADR 0125): a Lucene jar that Maven's local repository or Gradle's cache has, with the listed size and SHA-256, is copied instead of downloaded, checked again at copy time, else downloaded; `-Dleia.download.local=false` turns it off.
+
+## Headless client and app modules — done
+
+- [x] ADR 0126: `leia-client` (headless, no TamboUI or Lucene) holds what any frontend needs that isn't drawing or keys; `leia-app` is the composition root; `leia-tui` is the screens.
+- [x] `…client.values`: `DocValuesNumbers` (decode, encode, the encoding the stored values confirm), `RustDebug`, `PointFormat`, `FieldFlags`, `PositionedTokens`; MCP's `StoredNumbers` and its own token text are gone, its answers the same (`ReconstructFieldsToolTest`).
+- [x] `…client.platform`, `…client.log`, `…client.history`: `Platform`, `DefaultJars`, `RuntimesDirs` (was the TUI's `RuntimeFolders`), `LeiaLog`, `LogBuffer`, `History`.
+- [x] `…client.runtimes`: the install stack, with `InstallJob` (snapshot, mirror question, cancel) and `RuntimeService` (plans, the mirror chosen); `RuntimeWindow` draws the snapshots, and the 100 ms wait for the answer on the install's thread is gone.
+- [x] `…client.export`: `DocumentExport` and `DocumentExporter`, the whole export as an `ExportJob`; the app's own state machine of the export is gone.
+- [x] `leia-app`: `Launcher`, `Main`, `Cli`, the scripts, the dist README, `leia.jar`, `leiaFolder`, `leiaZip`; the TUI starts through `Tui.run`.
+- [x] Guards: `IsolationTest` (leia-client's class path), `ScreensOnlyTest` (no download, hash, JSON writing, platform folders or install threads in the TUI); test fixtures `FakeRepository` and `FakeExportCalls`.

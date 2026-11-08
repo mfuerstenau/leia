@@ -15,11 +15,11 @@ cd "$(dirname "$0")"
 version=$(sed -n 's/^version=//p' gradle.properties)
 
 echo "==> leia-$version.zip"
-./gradlew --quiet :leia-tui:leiaZip
+./gradlew --quiet :leia-app:leiaZip
 
 rm -rf dist
 mkdir -p dist
-cp -p "leia-tui/build/dist/leia-$version.zip" dist/
+cp -p "leia-app/build/dist/leia-$version.zip" dist/
 
 echo "==> Done"
 ls -lh dist/*

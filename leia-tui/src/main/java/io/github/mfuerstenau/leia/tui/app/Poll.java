@@ -15,9 +15,6 @@ public sealed interface Poll {
     /** Report back with {@link App#filterProgress} or {@link App#filterFailed}, under {@code serial}. */
     record Filter(long serial, long jobId) implements Poll {}
 
-    /** Report back with {@link App#documentExportProgress} or {@link App#exportFailed}, under {@code exportId}. */
-    record DocumentExport(long exportId, long jobId) implements Poll {}
-
     /** Report back with {@link App#searchProgress} or {@link App#searchFailed}, under {@code searchId}. */
     record Search(long searchId, long jobId) implements Poll {}
 

@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.tamboui.style.Style;
 import dev.tamboui.tui.event.KeyCode;
+import io.github.mfuerstenau.leia.client.log.LogBuffer;
 import io.github.mfuerstenau.leia.tui.TestScreens;
 import java.time.Instant;
 import java.time.ZoneOffset;

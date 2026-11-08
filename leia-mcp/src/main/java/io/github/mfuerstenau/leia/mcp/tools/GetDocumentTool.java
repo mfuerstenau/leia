@@ -1,5 +1,6 @@
 package io.github.mfuerstenau.leia.mcp.tools;
 
+import io.github.mfuerstenau.leia.client.values.DocValuesNumbers;
 import io.github.mfuerstenau.leia.mcp.Call;
 import io.github.mfuerstenau.leia.mcp.Description;
 import io.github.mfuerstenau.leia.mcp.Jobs;
@@ -238,7 +239,8 @@ final class GetDocumentTool implements McpTool<GetDocumentTool.Arguments, GetDoc
                         Slices.head(value.value(), value.binary(), maxLength),
                         Absent.flag(value.binary()),
                         OptionalInt.of(value.value().length()));
-        Optional<DocValuesNumber> asStored = StoredNumbers.encoding(docValues.type(), docValues.numbers(), stored);
+        Optional<DocValuesNumber> asStored =
+                DocValuesNumbers.inferFromStored(docValues.type(), docValues.numbers(), stored);
         return new DocValues(
                 docValues.type(),
                 docValues.numbers().size() + docValues.values().size(),

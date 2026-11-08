@@ -5,6 +5,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import dev.tamboui.tui.event.KeyCode;
 import dev.tamboui.tui.event.KeyEvent;
+import io.github.mfuerstenau.leia.client.platform.DefaultJars;
+import io.github.mfuerstenau.leia.client.platform.RuntimesDirs;
 import io.github.mfuerstenau.leia.protocol.jars.AddJarsResult;
 import io.github.mfuerstenau.leia.protocol.jars.JarComponents;
 import io.github.mfuerstenau.leia.tui.TestScreens;
@@ -34,7 +36,7 @@ class JarsPopupTest {
     }
 
     private static JarsPopup popup() {
-        return new JarsPopup(DefaultJars.none(), RuntimeFolders.none(), Optional.empty());
+        return new JarsPopup(DefaultJars.none(), RuntimesDirs.none(), Optional.empty());
     }
 
     private static AddJarsResult result(List<String> jars, List<String> alreadyLoaded) {
@@ -48,7 +50,7 @@ class JarsPopupTest {
         Path runtimes = Path.of("/opt/leia/runtimes");
         JarsPopup popup = new JarsPopup(
                 new DefaultJars(Optional.of(dir), DefaultJars.State.LOADED),
-                new RuntimeFolders(Optional.of(runtimes)),
+                new RuntimesDirs(Optional.of(runtimes)),
                 Optional.of(home));
         assertThat(render(popup, 100, 20)).contains("Listing the jars…");
         assertThat(popup.waiting()).isTrue();
@@ -75,7 +77,7 @@ class JarsPopupTest {
     void saysWhyTheDefaultFolderAndTheRuntimesWereNotLoaded() {
         JarsPopup popup = new JarsPopup(
                 new DefaultJars(Optional.of(Path.of("/cfg/leia/jars")), DefaultJars.State.SKIPPED),
-                new RuntimeFolders(Optional.of(Path.of("/opt/leia/runtimes"))),
+                new RuntimesDirs(Optional.of(Path.of("/opt/leia/runtimes"))),
                 Optional.empty());
         popup.jarsLoaded(List.of());
 

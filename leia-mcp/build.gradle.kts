@@ -9,6 +9,8 @@ dependencies {
     // index is read through a runtime (AGENTS.md, hard rule 2).
     implementation(project(":leia-server"))
     implementation(project(":leia-protocol"))
+    // What every frontend shares: the values' decoding and more (ADR 0126).
+    implementation(project(":leia-client"))
     // The JSON of the messages and the tools' records.
     implementation(platform(libs.jackson.bom))
     implementation(libs.jackson.databind)

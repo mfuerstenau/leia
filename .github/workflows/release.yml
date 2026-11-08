@@ -53,12 +53,12 @@ jobs:
       # build's checks, then the zip. -Pversion overrides gradle.properties, so the zip and
       # `leia --version` carry the tag's version.
       - name: Test and pack
-        run: ./gradlew build :leia-tui:leiaZip -Pversion="${{ steps.version.outputs.version }}"
+        run: ./gradlew build :leia-app:leiaZip -Pversion="${{ steps.version.outputs.version }}"
 
       - name: Sources
         run: |
           mkdir -p dist
-          cp "leia-tui/build/dist/leia-${{ steps.version.outputs.version }}.zip" dist/
+          cp "leia-app/build/dist/leia-${{ steps.version.outputs.version }}.zip" dist/
           git archive --format=zip --prefix="leia-${{ steps.version.outputs.version }}/" \
             -o "dist/leia-${{ steps.version.outputs.version }}-sources.zip" HEAD
 

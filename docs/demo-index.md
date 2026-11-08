@@ -4,8 +4,8 @@ A Lucene 10 index for trying leia by hand: a small product catalogue with a fiel
 everything leia shows. It is generated, not checked in:
 
 ```sh
-./gradlew :leia-core:demoIndex :leia-tui:leiaFolder   # → leia-core/build/test-indexes/demo
-leia-tui/build/leia/leia leia-core/build/test-indexes/demo
+./gradlew :leia-core:demoIndex :leia-app:leiaFolder   # → leia-core/build/test-indexes/demo
+leia-app/build/leia/leia leia-core/build/test-indexes/demo
 ```
 
 The content is random with a fixed seed, so every run writes the same index. The writer is

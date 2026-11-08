@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.tui.text;
 
 import dev.tamboui.text.CharWidth;
 import dev.tamboui.text.Span;
+import io.github.mfuerstenau.leia.client.values.Units;
 import io.github.mfuerstenau.leia.protocol.search.MatchSpan;
 import io.github.mfuerstenau.leia.tui.theme.Palette;
 import java.time.Instant;
@@ -147,22 +148,12 @@ public final class TextFormat {
 
     /** {@code n} and the noun, in the plural unless {@code n} is 1. */
     public static String count(long n, String noun) {
-        return n == 1 ? "1 " + noun : n + " " + noun + "s";
+        return Units.count(n, noun);
     }
 
     /** A size in bytes, in the largest binary unit that keeps it at 1 or more, such as {@code 1.5 KiB}. */
     public static String size(long bytes) {
-        double kib = 1024.0;
-        if (bytes < 1024) {
-            return bytes + " B";
-        }
-        if (bytes < 1024 * 1024) {
-            return String.format(Locale.ROOT, "%.1f KiB", bytes / kib);
-        }
-        if (bytes < 1024L * 1024 * 1024) {
-            return String.format(Locale.ROOT, "%.1f MiB", bytes / kib / kib);
-        }
-        return String.format(Locale.ROOT, "%.1f GiB", bytes / kib / kib / kib);
+        return Units.size(bytes);
     }
 
     /**

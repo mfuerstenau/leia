@@ -1,8 +1,9 @@
 package io.github.mfuerstenau.leia.tui.documents;
 
+import io.github.mfuerstenau.leia.client.values.PositionedTokens;
+import io.github.mfuerstenau.leia.client.values.PositionedTokens.Token;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructSource;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructedField;
-import io.github.mfuerstenau.leia.protocol.document.TermPosition;
 import io.github.mfuerstenau.leia.protocol.document.TermVectorTerm;
 import io.github.mfuerstenau.leia.tui.text.TextFormat;
 import java.util.ArrayList;
@@ -10,6 +11,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalLong;
+import java.util.function.Function;
 
 /**
  * Rebuilding what a field of the shown document was indexed with (ADR 0029, ADR 0041): the state
@@ -81,54 +83,20 @@ public sealed interface Reconstruction {
                 };
     }
 
-    /** A token at its position, for {@link #tokenLine}. */
-    record Token(int position, int startOffset, String text) {}
-
     /**
      * The field's tokens in position order, as the analyzer left them: tokens at the same position,
-     * such as synonyms, joined by {@code |}, and {@code ·} where positions were skipped, such as for
-     * a removed stop word. Empty if the terms have no positions.
+     * such as synonyms, joined by {@code |} in the order of their offsets, and {@code ·} where
+     * positions were skipped, such as for a removed stop word. Empty if the terms have no positions.
      */
     static Optional<String> tokenLine(List<TermVectorTerm> terms) {
-        List<Token> tokens = tokens(terms);
+        List<Token> tokens = new ArrayList<>(PositionedTokens.of(terms));
         if (tokens.isEmpty()) {
             return Optional.empty();
         }
+        Function<Token, String> text = token -> TextFormat.bytesText(token.term(), token.binary());
         tokens.sort(Comparator.comparingInt(Token::position)
-                .thenComparingInt(Token::startOffset)
-                .thenComparing(Token::text));
-        StringBuilder line = new StringBuilder();
-        Integer last = null;
-        for (Token token : tokens) {
-            if (last == null) {
-                if (token.position() > 0) {
-                    line.append("· ");
-                }
-            } else if (last == token.position()) {
-                line.append('|');
-            } else {
-                line.append(token.position() > last + 1 ? " · " : " ");
-            }
-            line.append(token.text());
-            last = token.position();
-        }
-        return Optional.of(line.toString());
-    }
-
-    /** A token for each position of each term. */
-    private static List<Token> tokens(List<TermVectorTerm> terms) {
-        List<Token> tokens = new ArrayList<>();
-        for (TermVectorTerm term : terms) {
-            String text = TextFormat.bytesText(term.term(), term.binary());
-            for (TermPosition position : term.positions()) {
-                if (position.position().isPresent()) {
-                    tokens.add(new Token(
-                            position.position().getAsInt(),
-                            position.startOffset().orElse(0),
-                            text));
-                }
-            }
-        }
-        return tokens;
+                .thenComparingInt(token -> token.startOffset().orElse(0))
+                .thenComparing(text));
+        return Optional.of(PositionedTokens.line(tokens, text, "·", true, Integer.MAX_VALUE));
     }
 }

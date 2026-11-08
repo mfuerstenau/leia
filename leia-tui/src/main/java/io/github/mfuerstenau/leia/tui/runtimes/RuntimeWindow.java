@@ -15,6 +15,11 @@ import dev.tamboui.widgets.block.Block;
 import dev.tamboui.widgets.gauge.LineGauge;
 import dev.tamboui.widgets.paragraph.Paragraph;
 import dev.tamboui.widgets.spinner.Spinner;
+import io.github.mfuerstenau.leia.client.runtimes.InstallJob;
+import io.github.mfuerstenau.leia.client.runtimes.LocalCaches;
+import io.github.mfuerstenau.leia.client.runtimes.Mirror;
+import io.github.mfuerstenau.leia.client.runtimes.MirrorChooser;
+import io.github.mfuerstenau.leia.client.runtimes.RuntimeInstall;
 import io.github.mfuerstenau.leia.protocol.jars.LoadRuntimesResult;
 import io.github.mfuerstenau.leia.protocol.jars.RuntimeFolder;
 import io.github.mfuerstenau.leia.protocol.jars.RuntimeState;
@@ -33,8 +38,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.BooleanSupplier;
 
 /**
  * The window that downloads runtimes inside leia (ADR 0080), opened with {@code D} on the start
@@ -48,8 +51,9 @@ import java.util.function.BooleanSupplier;
  * their plans are kept apart from the install's {@link RuntimeInstall.Plan}, so that no install
  * ever writes their folders, whose jars may be open.
  *
- * <p>The plan and the install run on threads of their own; the install writes into a {@link
- * Progress} that the ticks draw. Everything else is touched on the UI thread only.
+ * <p>The plan and the install run on threads of their own; the window draws the install's {@link
+ * InstallJob#snapshot snapshots}, and answers and cancels it through its {@link InstallJob} (ADR
+ * 0126). Everything else is touched on the UI thread only.
  */
 public final class RuntimeWindow {
 
@@ -85,16 +89,10 @@ public final class RuntimeWindow {
     public record Nothing() implements Event {}
 
     /**
-     * Enter: install {@code chosen} of {@code plan}, telling {@code listener} how it goes, until
-     * {@code cancelled}. The window shows the progress from now on.
+     * Enter: start {@code job}, the install of the runtimes chosen. The window shows its snapshots
+     * from now on, answers its questions and cancels it (ADR 0126).
      */
-    public record Install(
-            RuntimeInstall install,
-            RuntimeInstall.Plan plan,
-            Set<RuntimeFolders.Known> chosen,
-            RuntimeInstall.Listener listener,
-            BooleanSupplier cancelled)
-            implements Event {}
+    public record Install(InstallJob job) implements Event {}
 
     /** Esc: close the window. */
     public record Close() implements Event {}
@@ -102,11 +100,7 @@ public final class RuntimeWindow {
     /** The user chose the mirror to download from first, now and next time (ADR 0124). */
     public record UseMirror(Mirror mirror) implements Event {}
 
-    /** After a failed download: what the install that waits is to do (ADR 0124). */
-    public record Choose(MirrorChooser.Choice choice) implements Event {}
-
     private final Set<RuntimeFolders.Known> checked = new LinkedHashSet<>();
-    private final AtomicBoolean cancelled = new AtomicBoolean();
     private final Map<String, RuntimeFolder> states = new LinkedHashMap<>();
 
     private Phase phase = Phase.PLANNING;
@@ -118,7 +112,8 @@ public final class RuntimeWindow {
     private int cursor;
     private int detailsScroll;
     private Optional<String> hint = Optional.empty();
-    private Progress progress;
+    private InstallJob job;
+    private RuntimeInstall.Outcome outcome;
     private List<Line> loadLines = List.of();
     private int ticks;
     private List<String> mirrorProblems = List.of();
@@ -171,7 +166,7 @@ public final class RuntimeWindow {
             return false;
         }
         picker = null;
-        progress.finish(outcome);
+        this.outcome = outcome;
         boolean installed =
                 outcome.results().values().stream().anyMatch(RuntimeInstall.Result.Installed.class::isInstance);
         phase = installed ? Phase.LOADING : Phase.DONE;
@@ -186,7 +181,7 @@ public final class RuntimeWindow {
         List<Line> lines = new ArrayList<>();
         for (RuntimeFolder runtime : result.runtimes()) {
             boolean fresh = result.loaded().contains(runtime.folder());
-            boolean taken = progress.outcome().results().keySet().stream()
+            boolean taken = outcome.results().keySet().stream()
                     .anyMatch(known -> known.folder().equals(runtime.folder()));
             if (fresh && runtime.state() == RuntimeState.LOADED) {
                 lines.add(Line.styled(
@@ -240,35 +235,30 @@ public final class RuntimeWindow {
     /**
      * A jar's download failed, and the install waits for the mirror to retry it from (ADR 0124):
      * the window shows the mirrors, with the cursor on the first that the jar hasn't failed from.
-     *
-     * @param mirrors the install's mirrors, in order
-     * @param tried the mirrors the jar failed from
      */
-    public void downloadFailed(MirrorChooser.Failure failure, List<Mirror> mirrors, Set<URI> tried) {
-        if (phase != Phase.INSTALLING) {
-            return;
-        }
+    private void asked(InstallJob.Question question) {
+        MirrorChooser.Failure failed = question.failure();
         if (this.failure == null
-                || !this.failure.jar().equals(failure.jar())
-                || !this.failure.folder().equals(failure.folder())) {
+                || !this.failure.jar().equals(failed.jar())
+                || !this.failure.folder().equals(failed.folder())) {
             jarFailures.clear();
         }
-        jarFailures.put(failure.mirror().uri(), failure.reason());
-        Map<URI, String> failed = new LinkedHashMap<>();
-        tried.forEach(uri -> failed.put(uri, jarFailures.getOrDefault(uri, "failed")));
-        this.failure = failure;
-        picker = MirrorPicker.afterFailures(mirrors, failed);
+        jarFailures.put(failed.mirror().uri(), failed.reason());
+        Map<URI, String> reasons = new LinkedHashMap<>();
+        question.tried().forEach(uri -> reasons.put(uri, jarFailures.getOrDefault(uri, "failed")));
+        this.failure = failed;
+        picker = MirrorPicker.afterFailures(question.mirrors(), reasons);
         phase = Phase.RETRY;
     }
 
     /** The bytes the gauge shows as downloaded, for the tests. */
     long gaugeDone() {
-        return progress.done();
+        return job.snapshot().done();
     }
 
     /** The bytes the gauge shows in all, for the tests. */
     long gaugeTotal() {
-        return progress.total();
+        return job.snapshot().total();
     }
 
     /** The mirror the downloads begin with. */
@@ -278,9 +268,15 @@ public final class RuntimeWindow {
                 : Optional.of(install.mirrors().getFirst());
     }
 
-    /** A tick: the spinner moves on. */
+    /**
+     * A tick: the spinner moves on, and the window shows the question of an install that waits for
+     * one (ADR 0124).
+     */
     public void tick() {
         ticks++;
+        if (phase == Phase.INSTALLING && job != null) {
+            job.snapshot().question().ifPresent(this::asked);
+        }
     }
 
     public Event handleKey(KeyEvent key) {
@@ -291,7 +287,7 @@ public final class RuntimeWindow {
             case INSTALLING -> {
                 // Closed once the install has ended, and the backend has loaded what it installed.
                 if (key.code() == KeyCode.ESCAPE) {
-                    cancelled.set(true);
+                    job.cancel();
                 }
                 yield new Nothing();
             }
@@ -320,17 +316,27 @@ public final class RuntimeWindow {
     private Event retry(KeyEvent key) {
         return switch (picker.handleKey(key)) {
             case MirrorPicker.Chosen chosen -> {
-                picker = null;
-                phase = Phase.INSTALLING;
-                yield new Choose(new MirrorChooser.Choice.Retry(chosen.mirror()));
+                answer(new MirrorChooser.Choice.Retry(chosen.mirror()));
+                // The install goes on with it, and so does the next one (ADR 0124).
+                yield new UseMirror(chosen.mirror());
             }
             case MirrorPicker.Back _ -> {
-                picker = null;
-                phase = Phase.INSTALLING;
-                yield new Choose(new MirrorChooser.Choice.Abort());
+                answer(new MirrorChooser.Choice.Abort());
+                yield new Nothing();
             }
             case MirrorPicker.Nothing _ -> new Nothing();
         };
+    }
+
+    /** Answers the install's question, unless a cancel answered it meanwhile. */
+    private void answer(MirrorChooser.Choice choice) {
+        picker = null;
+        phase = Phase.INSTALLING;
+        try {
+            job.choose(choice);
+        } catch (IllegalStateException _) {
+            // The install doesn't wait any longer: it was cancelled.
+        }
     }
 
     private Event choose(KeyEvent key) {
@@ -420,19 +426,9 @@ public final class RuntimeWindow {
 
     /** Starts the install of the checked runtimes, and of those that need no download. */
     private Install start() {
-        Set<RuntimeFolders.Known> chosen = Set.copyOf(checked);
-        progress = new Progress(plan.runtimes().stream()
-                .filter(runtime -> !runtime.needsDownload() || chosen.contains(runtime.known()))
-                .toList());
+        job = InstallJob.of(install, plan, Set.copyOf(checked));
         phase = Phase.INSTALLING;
-        return new Install(install, plan, chosen, progress, cancelled::get);
-    }
-
-    /** How a failed install thread ends: every chosen runtime failed, for {@code error}. */
-    public static RuntimeInstall.Outcome failedOutcome(Set<RuntimeFolders.Known> chosen, RuntimeException error) {
-        Map<RuntimeFolders.Known, RuntimeInstall.Result> failed = new LinkedHashMap<>();
-        chosen.forEach(known -> failed.put(known, new RuntimeInstall.Result.Failed(String.valueOf(error))));
-        return new RuntimeInstall.Outcome(failed);
+        return new Install(job);
     }
 
     /** Draws the window, centred in {@code area}. */
@@ -507,9 +503,10 @@ public final class RuntimeWindow {
                         Line.from("Choose a mirror to retry it from, and to go on with; Esc stops the download."));
             case INSTALLING ->
                 List.of(Line.from(Span.styled(
-                        cancelled.get()
+                        job.snapshot().cancelled()
                                 ? "Cancelling…"
-                                : "Downloading " + TextFormat.count(progress.jarCount(), "jar") + " into "
+                                : "Downloading "
+                                        + TextFormat.count(job.snapshot().jarCount(), "jar") + " into "
                                         + install.runtimesDir(),
                         Palette.current().heading())));
             default -> doneHeader();
@@ -544,7 +541,7 @@ public final class RuntimeWindow {
         List<Line> header = new ArrayList<>();
         header.add(Line.from(
                 Span.styled("Done: " + install.runtimesDir(), Palette.current().heading())));
-        for (String line : progress.outcome().summary()) {
+        for (String line : outcome.summary()) {
             header.add(
                     line.contains(": failed: ")
                             ? Line.from(Span.styled(line, Palette.current().error()))
@@ -777,8 +774,9 @@ public final class RuntimeWindow {
     }
 
     private LineGauge gauge() {
-        long total = progress.total();
-        long done = progress.done();
+        InstallJob.Snapshot snapshot = job.snapshot();
+        long total = snapshot.total();
+        long done = snapshot.done();
         double ratio = total == 0 ? 1 : Math.min((double) done / total, 1);
         return LineGauge.builder()
                 .ratio(ratio)
@@ -791,9 +789,10 @@ public final class RuntimeWindow {
     private void renderProgress(Frame frame, Rect area) {
         Block block = Panels.panel(" Jars ", true);
         Rect inner = block.inner(area);
-        List<Line> lines = Panels.wrap(progress.lines(SPINNER[ticks % SPINNER.length]), Math.max(inner.width(), 1));
+        InstallJob.Snapshot snapshot = job.snapshot();
+        List<Line> lines = Panels.wrap(lines(snapshot, SPINNER[ticks % SPINNER.length]), Math.max(inner.width(), 1));
         // The active jar stays in sight.
-        int active = progress.activeLine();
+        int active = activeLine(snapshot);
         int top = Math.clamp((long) active - inner.height() / 2, 0, Math.max(lines.size() - inner.height(), 0));
         frame.renderWidget(
                 Paragraph.builder()
@@ -804,242 +803,72 @@ public final class RuntimeWindow {
                 area);
     }
 
-    /**
-     * The state of each jar of the chosen runtimes, written by the install's thread and read by the
-     * UI thread.
-     */
-    static final class Progress implements RuntimeInstall.Listener {
-
-        private enum State {
-            WAITING,
-            ACTIVE,
-            DOWNLOADED,
-            COPIED,
-            KEPT,
-            FAILED,
-            CANCELLED
-        }
-
-        private static final class Jar {
-            final String folder;
-            final String name;
-            final long size;
-            State state = State.WAITING;
-            long bytes;
-            String mirror;
-            final List<String> failures = new ArrayList<>();
-
-            Jar(String folder, String name, long size) {
-                this.folder = folder;
-                this.name = name;
-                this.size = size;
-            }
-        }
-
-        private final List<RuntimeInstall.RuntimePlan> runtimes;
-        private final Map<String, Jar> jars = new LinkedHashMap<>();
-        private final Map<String, String> failures = new LinkedHashMap<>();
-        private final long total;
-        private long done;
-        private Jar active;
-        private RuntimeInstall.Outcome outcome;
-
-        Progress(List<RuntimeInstall.RuntimePlan> runtimes) {
-            this.runtimes = runtimes;
-            long sum = 0;
-            for (RuntimeInstall.RuntimePlan runtime : runtimes) {
-                for (RuntimeFolders.ListedJar jar : runtime.listed()) {
-                    if (jar.mavenPath().isPresent()) {
-                        jars.put(
-                                key(runtime.known().folder(), jar.name()),
-                                new Jar(runtime.known().folder(), jar.name(), jar.size()));
-                    }
-                }
-                sum += runtime.downloadSize();
-            }
-            total = sum;
-        }
-
-        private static String key(String folder, String jar) {
-            return folder + "/" + jar;
-        }
-
-        synchronized int jarCount() {
-            return runtimes.stream()
-                    .mapToInt(runtime -> runtime.downloads().size())
-                    .sum();
-        }
-
-        synchronized long total() {
-            return total;
-        }
-
-        synchronized long done() {
-            return done;
-        }
-
-        synchronized RuntimeInstall.Outcome outcome() {
-            return outcome;
-        }
-
-        @Override
-        public synchronized void jarStarted(String folder, String jar, long size) {
-            active = jars.get(key(folder, jar));
-            if (active != null) {
-                // A retry starts over: the bytes of the failed try don't count.
-                done -= active.bytes;
-                active.state = State.ACTIVE;
-                active.bytes = 0;
-            }
-        }
-
-        @Override
-        public synchronized void jarDownloaded(String folder, String jar, long size, Mirror mirror) {
-            Jar found = jars.get(key(folder, jar));
-            if (found != null) {
-                found.mirror = mirror.name();
-            }
-            jarDone(folder, jar, RuntimeInstall.JarDone.DOWNLOADED, size);
-        }
-
-        @Override
-        public synchronized void jarCopied(String folder, String jar, long size, LocalCaches.Local local) {
-            Jar found = jars.get(key(folder, jar));
-            if (found != null) {
-                found.mirror = local.cache().name();
-            }
-            jarDone(folder, jar, RuntimeInstall.JarDone.COPIED, size);
-        }
-
-        @Override
-        public synchronized void mirrorFailed(MirrorChooser.Failure failure) {
-            Jar found = jars.get(key(failure.folder(), failure.jar()));
-            if (found == null) {
-                return;
-            }
-            found.state = State.FAILED;
-            found.failures.add(failure.mirror().name() + ": " + failure.reason());
-            if (found == active) {
-                active = null;
-            }
-        }
-
-        @Override
-        public synchronized void bytes(long n) {
-            done += n;
-            if (active != null) {
-                active.bytes += n;
-            }
-        }
-
-        @Override
-        public synchronized void jarDone(String folder, String jar, RuntimeInstall.JarDone how, long size) {
-            Jar found = jars.get(key(folder, jar));
-            if (found == null) {
-                return;
-            }
-            switch (how) {
-                case DOWNLOADED -> found.state = State.DOWNLOADED;
-                case COPIED -> found.state = State.COPIED;
-                case KEPT -> found.state = State.KEPT;
-                default -> {}
-            }
-            if (found == active) {
-                active = null;
-            }
-        }
-
-        @Override
-        public synchronized void runtimeFailed(String folder, String message) {
-            failures.put(folder, message);
-            if (active != null && active.folder.equals(folder)) {
-                active.state = State.FAILED;
-                active = null;
-            }
-        }
-
-        /** The install has ended: a jar still active was cancelled. */
-        synchronized void finish(RuntimeInstall.Outcome outcome) {
-            this.outcome = outcome;
-            for (Jar jar : jars.values()) {
-                if (jar.state == State.ACTIVE) {
-                    jar.state = State.CANCELLED;
-                }
-            }
-            active = null;
-        }
-
-        /** The line of the active jar in {@link #lines}, or 0. */
-        synchronized int activeLine() {
-            int line = 0;
-            for (RuntimeInstall.RuntimePlan runtime : runtimes) {
+    /** The line of the active jar in {@link #lines}, or 0. */
+    private static int activeLine(InstallJob.Snapshot snapshot) {
+        int line = 0;
+        for (InstallJob.RuntimeProgress runtime : snapshot.runtimes()) {
+            line++;
+            if (runtime.failure().isPresent()) {
                 line++;
-                if (failures.containsKey(runtime.known().folder())) {
-                    line++;
-                }
-                for (Jar jar : jars.values()) {
-                    if (jar.folder.equals(runtime.known().folder())) {
-                        if (jar == active) {
-                            return line;
-                        }
-                        line += 1 + jar.failures.size();
-                    }
-                }
             }
-            return 0;
-        }
-
-        /** A line per runtime, its failure if any, and a line per Lucene jar of it. */
-        synchronized List<Line> lines(String spinner) {
-            List<Line> lines = new ArrayList<>();
-            for (RuntimeInstall.RuntimePlan runtime : runtimes) {
-                String folder = runtime.known().folder();
-                lines.add(Line.from(Span.styled(
-                        runtime.known().name() + " · runtimes/" + folder,
-                        Palette.current().heading())));
-                if (failures.containsKey(folder)) {
-                    lines.add(Line.from(Span.styled(
-                            "  ✗ " + failures.get(folder), Palette.current().error())));
+            for (InstallJob.JarProgress jar : runtime.jars()) {
+                if (jar.state() == InstallJob.JarState.ACTIVE) {
+                    return line;
                 }
-                for (Jar jar : jars.values()) {
-                    if (jar.folder.equals(folder)) {
-                        lines.add(line(jar, spinner));
-                        jar.failures.forEach(failed -> lines.add(Line.styled(
+                line += 1 + jar.failures().size();
+            }
+        }
+        return 0;
+    }
+
+    /** A line per runtime, its failure if any, and a line per Lucene jar of it. */
+    private static List<Line> lines(InstallJob.Snapshot snapshot, String spinner) {
+        List<Line> lines = new ArrayList<>();
+        for (InstallJob.RuntimeProgress runtime : snapshot.runtimes()) {
+            lines.add(Line.from(Span.styled(
+                    runtime.known().name() + " · runtimes/" + runtime.known().folder(),
+                    Palette.current().heading())));
+            runtime.failure()
+                    .ifPresent(failed -> lines.add(Line.from(
+                            Span.styled("  ✗ " + failed, Palette.current().error()))));
+            for (InstallJob.JarProgress jar : runtime.jars()) {
+                lines.add(line(jar, spinner));
+                jar.failures()
+                        .forEach(failed -> lines.add(Line.styled(
                                 "      ✗ " + failed, Palette.current().error())));
-                    }
-                }
             }
-            return lines;
         }
+        return lines;
+    }
 
-        private static Line line(Jar jar, String spinner) {
-            String size = TextFormat.size(jar.size);
-            return switch (jar.state) {
-                case WAITING ->
-                    Line.from(Span.styled(
-                            "  · " + jar.name + ", " + size, Palette.current().muted()));
-                case ACTIVE ->
-                    Line.from(
-                            Span.styled("  " + spinner + " ", Palette.current().accent()),
-                            Span.raw(jar.name + ", " + TextFormat.size(jar.bytes) + " / " + size));
-                case DOWNLOADED ->
-                    Line.from(
-                            Span.styled("  ✓ ", Palette.current().success()),
-                            Span.raw(jar.name + ", " + size + " downloaded"
-                                    + (jar.mirror == null ? "" : " from " + jar.mirror)));
-                case COPIED ->
-                    Line.from(
-                            Span.styled("  ✓ ", Palette.current().success()),
-                            Span.raw(jar.name + ", " + size + " copied from " + jar.mirror));
-                case KEPT -> Line.from(Span.raw("  = " + jar.name + ", " + size + " kept"));
-                case FAILED ->
-                    Line.from(Span.styled(
-                            "  ✗ " + jar.name + ", " + size, Palette.current().error()));
-                case CANCELLED ->
-                    Line.from(Span.styled(
-                            "  – " + jar.name + ", " + TextFormat.size(jar.bytes) + " / " + size + " cancelled",
-                            Palette.current().muted()));
-            };
-        }
+    private static Line line(InstallJob.JarProgress jar, String spinner) {
+        String size = TextFormat.size(jar.size());
+        return switch (jar.state()) {
+            case WAITING ->
+                Line.from(Span.styled(
+                        "  · " + jar.name() + ", " + size, Palette.current().muted()));
+            case ACTIVE ->
+                Line.from(
+                        Span.styled("  " + spinner + " ", Palette.current().accent()),
+                        Span.raw(jar.name() + ", " + TextFormat.size(jar.bytes()) + " / " + size));
+            case DOWNLOADED ->
+                Line.from(
+                        Span.styled("  ✓ ", Palette.current().success()),
+                        Span.raw(jar.name() + ", " + size + " downloaded"
+                                + jar.source().map(source -> " from " + source).orElse("")));
+            case COPIED ->
+                Line.from(
+                        Span.styled("  ✓ ", Palette.current().success()),
+                        Span.raw(jar.name() + ", " + size + " copied from "
+                                + jar.source().orElse("")));
+            case KEPT -> Line.from(Span.raw("  = " + jar.name() + ", " + size + " kept"));
+            case FAILED ->
+                Line.from(Span.styled(
+                        "  ✗ " + jar.name() + ", " + size, Palette.current().error()));
+            case CANCELLED ->
+                Line.from(Span.styled(
+                        "  – " + jar.name() + ", " + TextFormat.size(jar.bytes()) + " / " + size + " cancelled",
+                        Palette.current().muted()));
+        };
     }
 }
