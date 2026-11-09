@@ -20,6 +20,15 @@ Each module is one task, its callers included. The counts are from a regex scan 
 
 - [ ] **leia-protocol**: check that nothing outside its records takes or holds an `Optional`, such as a helper method or a `Methods` entry.
 
+## Null checking with Error Prone and NullAway
+
+Goal: `@Nullable` (ADR 0127) is checked by the build, not only documentation. Today no null checker runs: `-Xlint:all -Werror` and Spotless only.
+
+- [ ] Add Error Prone with NullAway to the `build-logic/` convention plugins (`leia.java-conventions`), as an annotation processor on Java 25. Check that it works beside Dagger, and add the dependencies to `gradle/libs.versions.toml` and `gradle/verification-metadata.xml` (ADR 0089).
+- [ ] Mark the packages `@NullMarked` (JSpecify, a `package-info.java` each), module by module, and configure NullAway (`OnlyNullMarked`, JSpecify mode). `leia-client` first, as it set the `@Nullable` pattern; then `leia-runtime`, `leia-core`, `leia-server`, `leia-mcp`, `leia-tui`, `leia-app` and the runtime adapters.
+- [ ] Fix what NullAway finds, such as `orElseThrow()` on values that are now plain reads, and fields set after construction. JSpecify becomes `compileOnly` in the modules that lack it (`leia-protocol`, `leia-server`, `leia-tui`, `leia-app`).
+- [ ] Decide for `leia-protocol`'s `Optional*` fields (hard rule 3) and for the old runtimes' classes (Lucene 3 to 9 in class loaders of their own) whether to mark them. Write an ADR for the decision, and amend the tech stack in `AGENTS.md`.
+
 ## Lucene 2 to 10 (ADR 0044)
 
 Goal: every index from Lucene 2.1 to 10 opens in one leia, each read by a relocated Lucene that can read it, with the features of that Lucene and the rest switched off. The spike did Lucene 2.x and 3.x on Lucene 3.6.2 (`leia-lucene3`). Each Lucene major reads its own indexes and those of the major before it, so four runtimes besides Lucene 10 are needed; all four are done.
