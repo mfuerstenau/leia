@@ -35,7 +35,7 @@ final class RuntimeAutoStopWords {
      * terms of the highest document frequency just below it, and the threshold of a fraction from
      * the live documents. Without fields every indexed field is scanned; an unknown field fails.
      */
-    static void findsTheWords(RealBackend backend, String field) throws Exception {
+    static void assertFindsTheWords(RealBackend backend, String field) throws Exception {
         GetTermsResult page =
                 backend.call(Methods.GET_TERMS, new GetTermsParams(field, Optional.empty(), GetTermsParams.MAX_LIMIT));
         assertThat(page.next()).isEmpty();
@@ -82,7 +82,8 @@ final class RuntimeAutoStopWords {
      * A classic search for {@code word} in {@code field} finds it, and none once it is an auto stop
      * word of the field.
      */
-    static void searchesWithoutTheWords(RealBackend backend, int maxDoc, String field, String word) throws Exception {
+    static void assertSearchesWithoutTheWords(RealBackend backend, int maxDoc, String field, String word)
+            throws Exception {
         String expression = field + ":" + word;
         assertThat(backend.search(classic(expression), maxDoc).totalHits()).isPositive();
 

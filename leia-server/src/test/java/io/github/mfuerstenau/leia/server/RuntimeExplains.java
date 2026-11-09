@@ -31,7 +31,7 @@ final class RuntimeExplains {
      *     computes them in another order than its scorer, as 5.5's does, so they may differ in the
      *     last bits
      */
-    static void explainsAHit(RealBackend backend, int maxDoc, boolean exact) throws Exception {
+    static void assertExplainsAHit(RealBackend backend, int maxDoc, boolean exact) throws Exception {
         List<Hit> alpha = backend.search(classic("alpha"), maxDoc).hits();
         assertThat(alpha).isNotEmpty();
         for (Hit hit : alpha.subList(0, Math.min(3, alpha.size()))) {

@@ -36,7 +36,8 @@ final class RuntimeReopens {
      *
      * @return the opened copy and the changed reopen's result, for the caller's own checks
      */
-    static Reopened reopensAChangedIndex(RealBackend backend, Path index, Path copy, String newest) throws Exception {
+    static Reopened assertReopensAChangedIndex(RealBackend backend, Path index, Path copy, String newest)
+            throws Exception {
         Files.createDirectories(copy);
         try (Stream<Path> files = Files.list(index)) {
             for (Path file : files.toList()) {
@@ -88,7 +89,7 @@ final class RuntimeReopens {
         return new Reopened(opened, changed);
     }
 
-    /** What {@link #reopensAChangedIndex} opened, and its changed reopen. */
+    /** What {@link #assertReopensAChangedIndex} opened, and its changed reopen. */
     record Reopened(OpenIndexResult opened, ReopenIndexResult changed) {}
 
     private static String segmentsFile(List<IndexEntry> indexes) {

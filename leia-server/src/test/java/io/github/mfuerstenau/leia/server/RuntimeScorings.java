@@ -96,7 +96,7 @@ final class RuntimeScorings {
     }
 
     /** A runtime without scoring refuses any sort other than the best score first. */
-    static void doesNotSort(RealBackend backend) {
+    static void assertDoesNotSort(RealBackend backend) {
         backend.fails(
                 Methods.START_SEARCH,
                 sorted(BM25, field("dv_num", SortType.LONG, false, SortSelector.MIN, SortMissing.DEFAULT)),

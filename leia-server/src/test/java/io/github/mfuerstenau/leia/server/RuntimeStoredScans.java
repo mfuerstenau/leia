@@ -25,7 +25,7 @@ final class RuntimeStoredScans {
      * Scans {@code body} with and without the deleted document, all fields, an unknown field, and,
      * if {@code hasBlob}, the non-UTF-8 {@code blob} and the numeric {@code price}, which are skipped.
      */
-    static void scansTheStoredValues(RealBackend backend, int maxDoc, boolean hasBlob) throws Exception {
+    static void assertScansTheStoredValues(RealBackend backend, int maxDoc, boolean hasBlob) throws Exception {
         RealBackend.StoredScan idScan =
                 backend.storedScan(new StartStoredScanParams("\\d+", false, Optional.of(List.of("id")), true));
         assertThat(idScan.result().scannedDocs()).isEqualTo(maxDoc);

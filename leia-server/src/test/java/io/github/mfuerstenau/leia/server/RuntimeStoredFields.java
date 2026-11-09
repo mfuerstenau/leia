@@ -28,7 +28,8 @@ final class RuntimeStoredFields {
      * Finds the stored fields with their live and all documents, takes every segment from the cache
      * the second time, and reads them all again with {@code ignoreCache}.
      */
-    static void findsTheStoredFields(RealBackend backend, OpenIndexResult opened, boolean hasBlob) throws Exception {
+    static void assertFindsTheStoredFields(RealBackend backend, OpenIndexResult opened, boolean hasBlob)
+            throws Exception {
         int maxDoc = opened.maxDoc().orElseThrow();
         int numDocs = opened.numDocs().orElseThrow();
         List<String> stored = hasBlob ? List.of("blob", "body", "id", "price") : List.of("body", "id", "price");
@@ -68,7 +69,7 @@ final class RuntimeStoredFields {
      * Scans the index at {@code path} with a cache on disk in {@code cacheDir}, then again in a
      * backend started afresh, which takes every segment from the disk.
      */
-    static void keepsTheCacheOnDisk(Path path, Path cacheDir) throws Exception {
+    static void assertKeepsTheCacheOnDisk(Path path, Path cacheDir) throws Exception {
         StoredFields first;
         try (RealBackend backend = RealBackend.startWithCache(cacheDir)) {
             backend.call(Methods.OPEN_INDEX, new OpenIndexParams(path.toString()));
@@ -94,7 +95,7 @@ final class RuntimeStoredFields {
      * documents that store none of them (ADR 0114): the same hits either way. Then filters by each
      * stored field, which matches its live documents, and its documents with the deleted ones.
      */
-    static void scansAndFiltersThroughTheCache(Path path, List<String> fields) throws Exception {
+    static void assertScansAndFiltersThroughTheCache(Path path, List<String> fields) throws Exception {
         try (RealBackend backend = RealBackend.start()) {
             backend.call(Methods.OPEN_INDEX, new OpenIndexParams(path.toString()));
             StartStoredScanParams scan = new StartStoredScanParams(".", false, Optional.of(fields), true);

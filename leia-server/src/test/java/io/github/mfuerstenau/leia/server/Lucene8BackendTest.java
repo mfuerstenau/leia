@@ -211,25 +211,25 @@ class Lucene8BackendTest {
     void scansTheStoredValues(String name) throws Exception {
         OpenIndexResult opened = open(testIndex(name));
 
-        RuntimeStoredScans.scansTheStoredValues(backend, opened.maxDoc().orElseThrow(), true);
+        RuntimeStoredScans.assertScansTheStoredValues(backend, opened.maxDoc().orElseThrow(), true);
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"lucene8", "lucene8to9"})
     void findsTheStoredFields(String name) throws Exception {
-        RuntimeStoredFields.findsTheStoredFields(backend, open(testIndex(name)), true);
+        RuntimeStoredFields.assertFindsTheStoredFields(backend, open(testIndex(name)), true);
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"lucene8", "lucene8to9"})
     void scansAndFiltersThroughTheStoredFieldsCache(String name) throws Exception {
-        RuntimeStoredFields.scansAndFiltersThroughTheCache(testIndex(name), List.of("body"));
+        RuntimeStoredFields.assertScansAndFiltersThroughTheCache(testIndex(name), List.of("body"));
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"lucene8", "lucene8to9"})
     void keepsTheStoredFieldsOnDisk(String name, @TempDir Path cacheDir) throws Exception {
-        RuntimeStoredFields.keepsTheCacheOnDisk(testIndex(name), cacheDir);
+        RuntimeStoredFields.assertKeepsTheCacheOnDisk(testIndex(name), cacheDir);
     }
 
     @ParameterizedTest
@@ -237,7 +237,7 @@ class Lucene8BackendTest {
     void filtersTheDocuments(String name) throws Exception {
         open(testIndex(name));
 
-        RuntimeFilters.filtersTheDocuments(backend, true);
+        RuntimeFilters.assertFiltersTheDocuments(backend, true);
     }
 
     @ParameterizedTest
@@ -245,7 +245,7 @@ class Lucene8BackendTest {
     void explainsAHit(String name) throws Exception {
         OpenIndexResult opened = open(testIndex(name));
 
-        RuntimeExplains.explainsAHit(backend, opened.maxDoc().orElseThrow(), true);
+        RuntimeExplains.assertExplainsAHit(backend, opened.maxDoc().orElseThrow(), true);
     }
 
     @ParameterizedTest
@@ -253,8 +253,9 @@ class Lucene8BackendTest {
     void findsTheAutoStopWords(String name) throws Exception {
         OpenIndexResult opened = open(testIndex(name));
 
-        RuntimeAutoStopWords.findsTheWords(backend, "body");
-        RuntimeAutoStopWords.searchesWithoutTheWords(backend, opened.maxDoc().orElseThrow(), "body", "beta");
+        RuntimeAutoStopWords.assertFindsTheWords(backend, "body");
+        RuntimeAutoStopWords.assertSearchesWithoutTheWords(
+                backend, opened.maxDoc().orElseThrow(), "body", "beta");
     }
 
     @ParameterizedTest
@@ -282,18 +283,18 @@ class Lucene8BackendTest {
     void searchesATerm(String name) throws Exception {
         OpenIndexResult opened = open(testIndex(name));
 
-        RuntimeSearches.searchesATerm(backend, opened.maxDoc().orElseThrow(), "beta", true);
+        RuntimeSearches.assertSearchesATerm(backend, opened.maxDoc().orElseThrow(), "beta", true);
     }
 
     @Test
     void reopensAChangedIndex(@TempDir Path tmp) throws Exception {
-        RuntimeReopens.reopensAChangedIndex(backend, testIndex("lucene8"), tmp.resolve("lucene8"), "segments_2");
+        RuntimeReopens.assertReopensAChangedIndex(backend, testIndex("lucene8"), tmp.resolve("lucene8"), "segments_2");
     }
 
     /** The commit of 9.12 adds the KNN vectors, so the reopen reports them (ADR 0060). */
     @Test
     void reopensWithTheFeaturesOfTheNewCommit(@TempDir Path tmp) throws Exception {
-        RuntimeReopens.Reopened reopened = RuntimeReopens.reopensAChangedIndex(
+        RuntimeReopens.Reopened reopened = RuntimeReopens.assertReopensAChangedIndex(
                 backend, testIndex("lucene8to9"), tmp.resolve("lucene8to9"), "segments_3");
         assertThat(reopened.opened().features()).doesNotContain(Feature.KNN_VECTORS);
         assertThat(reopened.changed().features()).contains(Feature.KNN_VECTORS);
@@ -304,7 +305,7 @@ class Lucene8BackendTest {
     void rebuildsADocument(String name) throws Exception {
         OpenIndexResult opened = open(testIndex(name));
 
-        RuntimeRebuilds.rebuildsADocument(backend, opened.maxDoc().orElseThrow(), true, true);
+        RuntimeRebuilds.assertRebuildsADocument(backend, opened.maxDoc().orElseThrow(), true, true);
     }
 
     @Test

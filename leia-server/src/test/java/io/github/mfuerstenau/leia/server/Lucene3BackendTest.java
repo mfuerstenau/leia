@@ -140,7 +140,7 @@ class Lucene3BackendTest {
     @Test
     void rebuildsADocument() throws Exception {
         OpenIndexResult opened = open(Path.of(PATH));
-        RuntimeRebuilds.rebuildsADocument(backend, opened.maxDoc().orElseThrow(), false, false);
+        RuntimeRebuilds.assertRebuildsADocument(backend, opened.maxDoc().orElseThrow(), false, false);
     }
 
     @Test
@@ -279,71 +279,72 @@ class Lucene3BackendTest {
     void scansTheStoredValues() throws Exception {
         OpenIndexResult opened = open(Path.of(PATH));
 
-        RuntimeStoredScans.scansTheStoredValues(backend, opened.maxDoc().orElseThrow(), false);
+        RuntimeStoredScans.assertScansTheStoredValues(backend, opened.maxDoc().orElseThrow(), false);
     }
 
     @Test
     void findsTheStoredFields() throws Exception {
-        RuntimeStoredFields.findsTheStoredFields(backend, open(Path.of(PATH)), false);
+        RuntimeStoredFields.assertFindsTheStoredFields(backend, open(Path.of(PATH)), false);
     }
 
     @Test
     void scansAndFiltersThroughTheStoredFieldsCache() throws Exception {
-        RuntimeStoredFields.scansAndFiltersThroughTheCache(Path.of(PATH), List.of("body"));
+        RuntimeStoredFields.assertScansAndFiltersThroughTheCache(Path.of(PATH), List.of("body"));
     }
 
     @Test
     void keepsTheStoredFieldsOnDisk() throws Exception {
         // 3.6 records no segment ids: the cache knows the segments by their files.
-        RuntimeStoredFields.keepsTheCacheOnDisk(Path.of(PATH), tmp);
+        RuntimeStoredFields.assertKeepsTheCacheOnDisk(Path.of(PATH), tmp);
     }
 
     @Test
     void filtersTheDocuments() throws Exception {
         open(Path.of(PATH));
 
-        RuntimeFilters.filtersTheDocuments(backend, false);
+        RuntimeFilters.assertFiltersTheDocuments(backend, false);
     }
 
     /** 3.6 doesn't sort (ADR 0064, ADR 0076). */
     @Test
     void doesNotSort() throws Exception {
         open(Path.of(PATH));
-        RuntimeScorings.doesNotSort(backend);
+        RuntimeScorings.assertDoesNotSort(backend);
     }
 
     @Test
     void explainsAHit() throws Exception {
         OpenIndexResult opened = open(Path.of(PATH));
 
-        RuntimeExplains.explainsAHit(backend, opened.maxDoc().orElseThrow(), true);
+        RuntimeExplains.assertExplainsAHit(backend, opened.maxDoc().orElseThrow(), true);
     }
 
     @Test
     void reopensAChangedIndex() throws Exception {
-        RuntimeReopens.reopensAChangedIndex(backend, Path.of(PATH), tmp.resolve("copy"), "segments_2");
+        RuntimeReopens.assertReopensAChangedIndex(backend, Path.of(PATH), tmp.resolve("copy"), "segments_2");
     }
 
     @Test
     void findsTheAutoStopWords() throws Exception {
         OpenIndexResult opened = open(Path.of(PATH));
 
-        RuntimeAutoStopWords.findsTheWords(backend, "body");
-        RuntimeAutoStopWords.searchesWithoutTheWords(backend, opened.maxDoc().orElseThrow(), "body", "beta");
+        RuntimeAutoStopWords.assertFindsTheWords(backend, "body");
+        RuntimeAutoStopWords.assertSearchesWithoutTheWords(
+                backend, opened.maxDoc().orElseThrow(), "body", "beta");
     }
 
     @Test
     void searchesWithAStopWordsFile() throws Exception {
         open(Path.of(PATH));
 
-        RuntimeSearches.searchesWithTheAnalyzersOfAnOldRuntime(backend, "3.6.2", tmp);
+        RuntimeSearches.assertSearchesWithTheAnalyzersOfAnOldRuntime(backend, "3.6.2", tmp);
     }
 
     @Test
     void searchesATerm() throws Exception {
         OpenIndexResult opened = open(Path.of(PATH));
 
-        RuntimeSearches.searchesATerm(backend, opened.maxDoc().orElseThrow(), "beta", true);
+        RuntimeSearches.assertSearchesATerm(backend, opened.maxDoc().orElseThrow(), "beta", true);
     }
 
     @Test

@@ -39,7 +39,7 @@ final class RuntimeFilters {
      * filter and reads postings through it. A runtime that can't match deleted documents by query
      * refuses that, unless {@code deletedByQuery}.
      */
-    static void filtersTheDocuments(RealBackend backend, boolean deletedByQuery) throws Exception {
+    static void assertFiltersTheDocuments(RealBackend backend, boolean deletedByQuery) throws Exception {
         TreeSet<Integer> beta = scanned(backend, "\\bbeta\\b", false);
         TreeSet<Integer> alpha = scanned(backend, "\\balpha\\b", false);
         TreeSet<Integer> alphaWithDeleted = scanned(backend, "\\balpha\\b", true);

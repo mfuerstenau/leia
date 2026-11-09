@@ -175,25 +175,25 @@ class Lucene5BackendTest {
     void scansTheStoredValues(String name) throws Exception {
         OpenIndexResult opened = open(testIndex(name));
 
-        RuntimeStoredScans.scansTheStoredValues(backend, opened.maxDoc().orElseThrow(), true);
+        RuntimeStoredScans.assertScansTheStoredValues(backend, opened.maxDoc().orElseThrow(), true);
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"lucene4", "lucene5"})
     void findsTheStoredFields(String name) throws Exception {
-        RuntimeStoredFields.findsTheStoredFields(backend, open(testIndex(name)), true);
+        RuntimeStoredFields.assertFindsTheStoredFields(backend, open(testIndex(name)), true);
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"lucene4", "lucene5"})
     void scansAndFiltersThroughTheStoredFieldsCache(String name) throws Exception {
-        RuntimeStoredFields.scansAndFiltersThroughTheCache(testIndex(name), List.of("body"));
+        RuntimeStoredFields.assertScansAndFiltersThroughTheCache(testIndex(name), List.of("body"));
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"lucene4", "lucene5"})
     void keepsTheStoredFieldsOnDisk(String name, @TempDir Path cacheDir) throws Exception {
-        RuntimeStoredFields.keepsTheCacheOnDisk(testIndex(name), cacheDir);
+        RuntimeStoredFields.assertKeepsTheCacheOnDisk(testIndex(name), cacheDir);
     }
 
     @ParameterizedTest
@@ -201,7 +201,7 @@ class Lucene5BackendTest {
     void filtersTheDocuments(String name) throws Exception {
         open(testIndex(name));
 
-        RuntimeFilters.filtersTheDocuments(backend, true);
+        RuntimeFilters.assertFiltersTheDocuments(backend, true);
     }
 
     @ParameterizedTest
@@ -216,7 +216,7 @@ class Lucene5BackendTest {
     void explainsAHit(String name) throws Exception {
         OpenIndexResult opened = open(testIndex(name));
 
-        RuntimeExplains.explainsAHit(backend, opened.maxDoc().orElseThrow(), false);
+        RuntimeExplains.assertExplainsAHit(backend, opened.maxDoc().orElseThrow(), false);
     }
 
     @ParameterizedTest
@@ -224,8 +224,9 @@ class Lucene5BackendTest {
     void findsTheAutoStopWords(String name) throws Exception {
         OpenIndexResult opened = open(testIndex(name));
 
-        RuntimeAutoStopWords.findsTheWords(backend, "body");
-        RuntimeAutoStopWords.searchesWithoutTheWords(backend, opened.maxDoc().orElseThrow(), "body", "beta");
+        RuntimeAutoStopWords.assertFindsTheWords(backend, "body");
+        RuntimeAutoStopWords.assertSearchesWithoutTheWords(
+                backend, opened.maxDoc().orElseThrow(), "body", "beta");
     }
 
     /** The standard parser, More-Like-This and doc values queries (ADR 0074). */
@@ -250,13 +251,13 @@ class Lucene5BackendTest {
     void searchesATerm(String name) throws Exception {
         OpenIndexResult opened = open(testIndex(name));
 
-        RuntimeSearches.searchesATerm(backend, opened.maxDoc().orElseThrow(), "beta", true);
+        RuntimeSearches.assertSearchesATerm(backend, opened.maxDoc().orElseThrow(), "beta", true);
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"lucene4", "lucene5"})
     void reopensAChangedIndex(String name) throws Exception {
-        RuntimeReopens.reopensAChangedIndex(backend, testIndex(name), tmp.resolve(name), "segments_2");
+        RuntimeReopens.assertReopensAChangedIndex(backend, testIndex(name), tmp.resolve(name), "segments_2");
     }
 
     @ParameterizedTest
@@ -264,7 +265,7 @@ class Lucene5BackendTest {
     void rebuildsADocument(String name) throws Exception {
         OpenIndexResult opened = open(testIndex(name));
 
-        RuntimeRebuilds.rebuildsADocument(backend, opened.maxDoc().orElseThrow(), false, true);
+        RuntimeRebuilds.assertRebuildsADocument(backend, opened.maxDoc().orElseThrow(), false, true);
     }
 
     @ParameterizedTest

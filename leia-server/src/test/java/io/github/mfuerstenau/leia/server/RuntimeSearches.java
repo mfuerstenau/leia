@@ -56,7 +56,7 @@ final class RuntimeSearches {
      * @param exact whether an explanation's value is the score to the bit, as in {@link
      *     RuntimeExplains#explainsTheHit}
      */
-    static void searchesATerm(RealBackend backend, int maxDoc, String text, boolean exact) throws Exception {
+    static void assertSearchesATerm(RealBackend backend, int maxDoc, String text, boolean exact) throws Exception {
         BytesValue term = new BytesValue(text, false);
         List<Integer> live =
                 backend
@@ -427,7 +427,8 @@ final class RuntimeSearches {
      * The analyzers of 3.6 (ADR 0067): stop words from a file, which the runtime reads as Lucene 10
      * does; shingles, custom analyzers and the other options of a preset aren't supported.
      */
-    static void searchesWithTheAnalyzersOfAnOldRuntime(RealBackend backend, String lucene, Path tmp) throws Exception {
+    static void assertSearchesWithTheAnalyzersOfAnOldRuntime(RealBackend backend, String lucene, Path tmp)
+            throws Exception {
         Path file = Files.writeString(tmp.resolve("stopwords.txt"), "\n  alpha  \n");
         assertThat(backend.search(classic("alpha document", preset(file, null)), 10)
                         .query())

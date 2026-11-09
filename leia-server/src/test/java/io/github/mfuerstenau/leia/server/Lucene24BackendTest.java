@@ -189,7 +189,7 @@ class Lucene24BackendTest {
 
     @Test
     void searchesATerm() throws Exception {
-        RuntimeSearches.searchesATerm(backend, opened.maxDoc().orElseThrow(), "number", true);
+        RuntimeSearches.assertSearchesATerm(backend, opened.maxDoc().orElseThrow(), "number", true);
     }
 
     @Test

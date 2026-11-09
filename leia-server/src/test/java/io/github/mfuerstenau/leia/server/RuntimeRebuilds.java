@@ -34,7 +34,8 @@ final class RuntimeRebuilds {
      * fields given; a missing field, a field with nothing to rebuild and a document id out of range
      * fail.
      */
-    static void rebuildsADocument(RealBackend backend, int maxDoc, boolean points, boolean total) throws Exception {
+    static void assertRebuildsADocument(RealBackend backend, int maxDoc, boolean points, boolean total)
+            throws Exception {
         List<String> names = new ArrayList<>(List.of("body", "id", "tag"));
         if (points) {
             names.add("pt");

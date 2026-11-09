@@ -18,7 +18,7 @@ import java.util.regex.Pattern;
  */
 public record LuceneJarVersion(String version, int major) {
 
-    private static final Pattern FILE_NAME = Pattern.compile("lucene-core-((\\d+)\\.\\d+[^/\\\\]*)\\.jar");
+    private static final Pattern FILE_NAME = Pattern.compile("lucene-core-((\\d++)\\.\\d++[^/\\\\]*)\\.jar");
 
     /** A version at the start of a manifest's value, such as {@code 9.10.0 695c0ac… - 2024-02-14}. */
     private static final Pattern LEADING = Pattern.compile("((\\d+)\\.\\d+(?:\\.\\d+)?)(?:\\s.*)?", Pattern.DOTALL);

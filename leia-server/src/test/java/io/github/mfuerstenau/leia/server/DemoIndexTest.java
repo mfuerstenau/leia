@@ -1752,6 +1752,6 @@ class DemoIndexTest {
     @Test
     void scansAndFiltersThroughTheStoredFieldsCache() throws Exception {
         // odd_text is stored in one document of 500.
-        RuntimeStoredFields.scansAndFiltersThroughTheCache(DEMO, List.of("odd_text", "deleted_only"));
+        RuntimeStoredFields.assertScansAndFiltersThroughTheCache(DEMO, List.of("odd_text", "deleted_only"));
     }
 }
