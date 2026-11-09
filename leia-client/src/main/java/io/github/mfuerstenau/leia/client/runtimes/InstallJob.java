@@ -151,8 +151,8 @@ public final class InstallJob {
 
     // Guarded by this.
     private State state = State.READY;
-    private Question question;
-    private CompletableFuture<MirrorChooser.Choice> answer;
+    private @Nullable Question question;
+    private @Nullable CompletableFuture<MirrorChooser.Choice> answer;
 
     private InstallJob(
             RuntimeInstall install,
@@ -380,7 +380,10 @@ public final class InstallJob {
             final long size;
             JarState state = JarState.WAITING;
             long bytes;
+
+            @Nullable
             String source;
+
             final List<String> failures = new ArrayList<>();
 
             Jar(String folder, String name, long size) {
@@ -400,7 +403,7 @@ public final class InstallJob {
         private final int jarCount;
         private final long total;
         private long done;
-        private Jar active;
+        private @Nullable Jar active;
 
         Progress(List<RuntimeInstall.RuntimePlan> runtimes) {
             this.runtimes = List.copyOf(runtimes);

@@ -88,7 +88,9 @@ public final class LocalCaches {
      * @param home the user's home folder, or null
      */
     public static LocalCaches detect(
-            Function<String, String> env, Function<String, String> properties, @Nullable Path home) {
+            Function<String, @Nullable String> env,
+            Function<String, @Nullable String> properties,
+            @Nullable Path home) {
         if ("false".equalsIgnoreCase(properties.apply(PROPERTY))) {
             return none();
         }
@@ -107,7 +109,9 @@ public final class LocalCaches {
     }
 
     private static Optional<Path> maven(
-            Function<String, String> env, Function<String, String> properties, @Nullable Path home) {
+            Function<String, @Nullable String> env,
+            Function<String, @Nullable String> properties,
+            @Nullable Path home) {
         String property = properties.apply("maven.repo.local");
         if (property != null && !property.isBlank()) {
             return path(property);
@@ -121,7 +125,10 @@ public final class LocalCaches {
 
     /** The {@code <localRepository>} of a Maven {@code settings.xml}, its placeholders expanded. */
     static Optional<Path> localRepository(
-            Path settings, Function<String, String> env, Function<String, String> properties, @Nullable Path home) {
+            Path settings,
+            Function<String, @Nullable String> env,
+            Function<String, @Nullable String> properties,
+            @Nullable Path home) {
         try (InputStream in = Files.newInputStream(settings)) {
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
             factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
@@ -146,7 +153,10 @@ public final class LocalCaches {
 
     /** {@code ${user.home}}, {@code ${env.X}} and other system properties in {@code value}. */
     private static String expand(
-            String value, Function<String, String> env, Function<String, String> properties, @Nullable Path home) {
+            String value,
+            Function<String, @Nullable String> env,
+            Function<String, @Nullable String> properties,
+            @Nullable Path home) {
         Matcher matcher = PLACEHOLDER.matcher(value);
         StringBuilder expanded = new StringBuilder();
         while (matcher.find()) {

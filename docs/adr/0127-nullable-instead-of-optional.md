@@ -22,6 +22,8 @@ Both could have been exempted as the protocol is. That would have left two more 
 5. **`runtime.support.Optionals`**, JDK-only, converts at the boundaries where a record still has or needs an `Optional*`: `orNull(OptionalInt|OptionalLong|OptionalDouble)` and `optionalInt`, `optionalLong`, `optionalDouble` of a nullable number. `orNull` taking an `Optional` is the accepted boundary adapter, as in leia-tui. leia-mcp has a package-private copy of leia-tui's helper.
 6. **No nullness checker in the build.** NullAway or the Checker Framework would check the annotations, but they need an error-prone or a checker compiler setup for every module, and the runtimes compile against five Lucenes. The tests and the review hold the line for now.
 
+   *Amended:* Error Prone runs NullAway alone in `leia.java-conventions`, in `OnlyNullMarked` and JSpecify mode, so it checks the packages marked `@NullMarked`, module by module (`leia-client` first). Main and testFixtures are checked, the latter because the frontends' tests use the fixtures as an API; the other source sets are not, so a test can pass `null` on purpose.
+
 ## Alternatives considered
 
 - **Exempt the tool records and the runtime records, as the protocol is.** Rejected: three kinds of record with their own rule instead of one, and the convention would be harder to state.

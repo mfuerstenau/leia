@@ -33,6 +33,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -150,6 +151,11 @@ public final class RuntimeInstall {
         InstallException(String message) {
             super(message);
         }
+
+        @Override
+        public String getMessage() {
+            return Objects.requireNonNull(super.getMessage());
+        }
     }
 
     /** The install was cancelled. */
@@ -168,6 +174,11 @@ public final class RuntimeInstall {
         AbortedException(String message) {
             super(message);
         }
+
+        @Override
+        public String getMessage() {
+            return Objects.requireNonNull(super.getMessage());
+        }
     }
 
     /** One download from one mirror failed, for {@code reason}; another mirror may do. */
@@ -181,6 +192,11 @@ public final class RuntimeInstall {
         DownloadFailed(String message, String reason) {
             super(message);
             this.reason = reason;
+        }
+
+        @Override
+        public String getMessage() {
+            return Objects.requireNonNull(super.getMessage());
         }
     }
 
@@ -978,7 +994,7 @@ public final class RuntimeInstall {
         }
     }
 
-    private static void delete(Path part) {
+    private static void delete(@Nullable Path part) {
         if (part == null) {
             return;
         }

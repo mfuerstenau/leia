@@ -34,6 +34,16 @@ tasks.withType<JavaCompile>().configureEach {
     }
 }
 
+// NullAway checks main and testFixtures (the frontends' tests use the fixtures as an API); the other
+// source sets stay unchecked, so a test can pass null on purpose.
+sourceSets.configureEach {
+    if (name != "main" && name != "testFixtures") {
+        tasks.named<JavaCompile>(compileJavaTaskName) {
+            options.errorprone.enabled.set(false)
+        }
+    }
+}
+
 dependencies {
     "errorprone"(libs.findLibrary("errorprone-core").get())
     "errorprone"(libs.findLibrary("nullaway").get())

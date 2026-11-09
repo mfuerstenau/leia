@@ -24,7 +24,7 @@ The lane is done (ADR 0127).
 
 Goal: `@Nullable` (ADR 0127) is checked by the build, not only documentation. NullAway runs in the build (Error Prone, from `leia.java-conventions`) but checks nothing yet, as no package is `@NullMarked`.
 
-- [ ] Mark the packages `@NullMarked` (JSpecify, a `package-info.java` each), module by module (`OnlyNullMarked` and JSpecify mode are already set). `leia-client` first, as it set the `@Nullable` pattern; then `leia-runtime`, `leia-core`, `leia-server`, `leia-mcp`, `leia-tui`, `leia-app` and the runtime adapters.
+- [ ] Mark the packages `@NullMarked` (JSpecify, a `package-info.java` each), module by module (`OnlyNullMarked` and JSpecify mode are already set; main and testFixtures are checked, test sources not). `leia-client` is done, as it set the `@Nullable` pattern; next `leia-runtime`, then `leia-core`, `leia-server`, `leia-mcp`, `leia-tui`, `leia-app` and the runtime adapters.
 - [ ] Fix what NullAway finds, such as `orElseThrow()` on values that are now plain reads, and fields set after construction. JSpecify becomes `compileOnly` in the modules that lack it (`leia-server`, `leia-tui`, `leia-app`).
 - [ ] Decide for `leia-protocol`'s `Optional*` fields (hard rule 3) and for the old runtimes' classes (Lucene 3 to 9 in class loaders of their own) whether to mark them. Write an ADR for the decision, and amend the tech stack in `AGENTS.md`.
 

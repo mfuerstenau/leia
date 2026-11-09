@@ -44,7 +44,7 @@ import org.jspecify.annotations.Nullable;
  * @param leiaJar the jar that leia runs from; null if it runs from classes, as under Gradle
  */
 public record Platform(
-        Function<String, String> env,
+        Function<String, @Nullable String> env,
         @Nullable Path home,
         boolean windows,
         @Nullable Path leiaJar) {
