@@ -342,7 +342,7 @@ final class Lucene9DocValuesQueries {
     private static final class BinaryDocValuesQuery extends Query {
 
         private final String field;
-        private final Set<BytesRef> values;
+        private final @Nullable Set<BytesRef> values;
         private final @Nullable BytesRef lower;
         private final @Nullable BytesRef upper;
         private final boolean includeLower;
@@ -390,7 +390,7 @@ final class Lucene9DocValuesQueries {
         public Weight createWeight(IndexSearcher searcher, ScoreMode scoreMode, float boost) {
             return new ConstantScoreWeight(this, boost) {
                 @Override
-                public Scorer scorer(LeafReaderContext context) throws IOException {
+                public @Nullable Scorer scorer(LeafReaderContext context) throws IOException {
                     BinaryDocValues docValues = context.reader().getBinaryDocValues(field);
                     if (docValues == null) {
                         return null;

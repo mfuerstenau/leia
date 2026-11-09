@@ -4,6 +4,7 @@ import io.github.mfuerstenau.leia.runtime.Search.Dates;
 import io.github.mfuerstenau.leia.runtime.Search.InvalidQueryException;
 import io.github.mfuerstenau.leia.runtime.StandardSearch.Options;
 import io.github.mfuerstenau.leia.runtime.StandardSearch.PointType;
+import io.github.mfuerstenau.leia.runtime.support.Failures;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -70,7 +71,7 @@ final class Lucene5StandardParser {
         } catch (QueryNodeException e) {
             throw new InvalidQueryException(firstLine(e), e);
         } catch (BooleanQuery.TooManyClauses e) {
-            throw new InvalidQueryException(e.getMessage(), e);
+            throw new InvalidQueryException(Failures.message(e), e);
         }
     }
 

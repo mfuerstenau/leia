@@ -15,6 +15,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 
 /**
@@ -120,8 +121,8 @@ public final class ParserSettings {
                 enablePositionIncrements,
                 Optional.ofNullable(dateResolution),
                 dateFields.stream()
-                        .filter(fieldDateResolutions::containsKey)
-                        .map(field -> new FieldDateResolution(field, fieldDateResolutions.get(field)))
+                        .flatMap(field -> Stream.ofNullable(fieldDateResolutions.get(field))
+                                .map(resolution -> new FieldDateResolution(field, resolution)))
                         .toList(),
                 Optional.ofNullable(locale),
                 Optional.ofNullable(timeZone));

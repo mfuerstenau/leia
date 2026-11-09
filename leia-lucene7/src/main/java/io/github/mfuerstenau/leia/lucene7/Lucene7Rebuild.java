@@ -22,6 +22,7 @@ import org.apache.lucene.index.ReaderUtil;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.util.BytesRef;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The rebuild of a document with Lucene 7.7 (ADR 0059), a copy of leia-core's {@code Reconstruct}
@@ -83,7 +84,7 @@ final class Lucene7Rebuild implements Rebuild {
      * The postings to scan for a field of the document's segment: none if the field isn't indexed
      * there, or its term vector in the document is read instead.
      */
-    private static Terms postings(SegmentDoc segmentDoc, String name) throws IOException {
+    private static @Nullable Terms postings(SegmentDoc segmentDoc, String name) throws IOException {
         LeafReader leaf = segmentDoc.leaf();
         FieldInfo info = leaf.getFieldInfos().fieldInfo(name);
         if (info == null || info.getIndexOptions() == IndexOptions.NONE) {
@@ -93,7 +94,7 @@ final class Lucene7Rebuild implements Rebuild {
         return termVector != null && covers(termVector, info) ? null : leaf.terms(name);
     }
 
-    private static Terms termVector(SegmentDoc segmentDoc, String name) throws IOException {
+    private static @Nullable Terms termVector(SegmentDoc segmentDoc, String name) throws IOException {
         Fields vectors = segmentDoc.leaf().getTermVectors(segmentDoc.doc());
         return vectors == null ? null : vectors.terms(name);
     }

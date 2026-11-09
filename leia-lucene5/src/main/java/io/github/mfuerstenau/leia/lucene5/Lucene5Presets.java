@@ -18,6 +18,7 @@ import java.util.IllformedLocaleException;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.TreeSet;
 import java.util.function.Function;
@@ -224,17 +225,20 @@ final class Lucene5Presets {
             CharArrayMap<String> dictionary = dictionary(spec.stemOverride());
             analyzer = construct(
                     preset,
-                    preset.stemOverride(),
+                    Objects.requireNonNull(preset.stemOverride()),
                     stopwordsOrDefault(stopwords, preset),
                     stemExclusion != null ? stemExclusion : CharArraySet.EMPTY_SET,
                     dictionary);
         } else if (stemExclusion != null) {
             analyzer = construct(
-                    preset, preset.stopwordsAndStemExclusion(), stopwordsOrDefault(stopwords, preset), stemExclusion);
+                    preset,
+                    Objects.requireNonNull(preset.stopwordsAndStemExclusion()),
+                    stopwordsOrDefault(stopwords, preset),
+                    stemExclusion);
         } else if (stopwords != null) {
-            analyzer = construct(preset, preset.stopwords(), stopwords);
+            analyzer = construct(preset, Objects.requireNonNull(preset.stopwords()), stopwords);
         } else {
-            analyzer = construct(preset, preset.noArguments());
+            analyzer = construct(preset, Objects.requireNonNull(preset.noArguments()));
         }
         if (spec.maxTokenLength() != null) {
             setMaxTokenLength(preset, analyzer, spec.maxTokenLength());
@@ -340,10 +344,10 @@ final class Lucene5Presets {
     private static void setMaxTokenLength(Preset preset, Analyzer analyzer, int length)
             throws InvalidAnalyzerException {
         try {
-            preset.maxTokenLengthSetter().invoke(analyzer, length);
+            Objects.requireNonNull(preset.maxTokenLengthSetter()).invoke(analyzer, length);
         } catch (InvocationTargetException e) {
             analyzer.close();
-            throw failed(preset, e.getCause());
+            throw failed(preset, e.getTargetException());
         } catch (ReflectiveOperationException e) {
             analyzer.close();
             throw new InvalidAnalyzerException(preset.name() + ": " + e, e);
@@ -364,14 +368,15 @@ final class Lucene5Presets {
     /** What the preset uses without stop words of its own. */
     private static CharArraySet defaultStopwords(Preset preset) throws InvalidAnalyzerException {
         if (StopwordAnalyzerBase.class.isAssignableFrom(preset.type()) && preset.noArguments() != null) {
-            try (Analyzer analyzer = construct(preset, preset.noArguments())) {
+            try (Analyzer analyzer = construct(preset, Objects.requireNonNull(preset.noArguments()))) {
                 return ((StopwordAnalyzerBase) analyzer).getStopwordSet();
             }
         }
         try {
-            return (CharArraySet) preset.defaultStopSet().invoke(null);
+            return (CharArraySet)
+                    Objects.requireNonNull(preset.defaultStopSet()).invoke(null);
         } catch (InvocationTargetException e) {
-            throw failed(preset, e.getCause());
+            throw failed(preset, e.getTargetException());
         } catch (ReflectiveOperationException e) {
             throw new InvalidAnalyzerException(preset.name() + ": " + e, e);
         }
@@ -382,7 +387,7 @@ final class Lucene5Presets {
         try {
             return constructor.newInstance(arguments);
         } catch (InvocationTargetException e) {
-            throw failed(preset, e.getCause());
+            throw failed(preset, e.getTargetException());
         } catch (ReflectiveOperationException e) {
             throw new InvalidAnalyzerException(preset.name() + ": " + e, e);
         }

@@ -26,6 +26,7 @@ import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.search.similarities.ClassicSimilarity;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.CharsRefBuilder;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The terms that 5.5's {@link MoreLikeThis} chose, with the numbers it chose them by: a copy of
@@ -42,7 +43,7 @@ final class Lucene5LikeTerms {
     private final Runnable check;
     private final ClassicSimilarity similarity = new ClassicSimilarity();
     /** How often each term occurs in the source, in all fields, worked out once a clause needs it. */
-    private Map<String, Integer> frequencies;
+    private @Nullable Map<String, Integer> frequencies;
 
     private Lucene5LikeTerms(IndexReader reader, Lucene5MoreLikeQuery query, Analyzer analyzer, Runnable check) {
         this.reader = reader;

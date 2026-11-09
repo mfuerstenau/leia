@@ -26,6 +26,8 @@ Both could have been exempted as the protocol is. That would have left two more 
 
    *Amended again:* the leia-owned modules are marked: `leia-client`, `leia-runtime`, `leia-core`, `leia-server`, `leia-mcp`, `leia-tui`, `leia-app` and `leia-lucene10`. `leia-protocol` and the runtimes of the old Lucenes are left for a decision of their own.
 
+   *Amended a third time:* `leia-protocol` and `leia-lucene3/5/7/9` are marked too (ADR 0128), so every module is checked.
+
 ## Alternatives considered
 
 - **Exempt the tool records and the runtime records, as the protocol is.** Rejected: three kinds of record with their own rule instead of one, and the convention would be harder to state.

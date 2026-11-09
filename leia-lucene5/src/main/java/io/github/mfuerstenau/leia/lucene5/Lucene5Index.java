@@ -30,6 +30,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
@@ -182,7 +183,7 @@ final class Lucene5Index
             MultiFields.getMergedFieldInfos(multi);
             return Optional.empty();
         } catch (IllegalArgumentException | IllegalStateException e) {
-            return Optional.of(e.getMessage());
+            return Optional.of(Failures.message(e));
         }
     }
 
@@ -907,7 +908,7 @@ final class Lucene5Index
             parser.setAutoGeneratePhraseQueries(options.autoGeneratePhraseQueries());
             return new Lucene5Query(parser.parse(expression));
         } catch (ParseException | RuntimeException e) {
-            throw new InvalidQueryException(e.getMessage(), e);
+            throw new InvalidQueryException(Failures.message(e), e);
         } finally {
             analyzer.close();
         }
@@ -952,7 +953,7 @@ final class Lucene5Index
         try (Analyzer analyzer = Lucene5Analyzers.analyzer(spec)) {
             return new Lucene5Query(Lucene5StandardParser.parse(expression, options, points, analyzer));
         } catch (RuntimeException e) {
-            throw new InvalidQueryException(e.getMessage(), e);
+            throw new InvalidQueryException(Failures.message(e), e);
         }
     }
 
@@ -968,7 +969,7 @@ final class Lucene5Index
      * The analyzer that a More-Like-This query analyzes with while it is built; null for any other
      * query. The caller closes it.
      */
-    static Analyzer likeAnalyzer(Query query) {
+    static @Nullable Analyzer likeAnalyzer(Query query) {
         if (!(query instanceof Lucene5MoreLikeQuery like)) {
             return null;
         }
@@ -976,7 +977,7 @@ final class Lucene5Index
             return Lucene5Analyzers.analyzer(like.analyzer());
         } catch (UnsupportedAnalyzerException | InvalidAnalyzerException e) {
             // MoreLikeThisSearch.like built it before.
-            throw new IllegalStateException(e.getMessage(), e);
+            throw new IllegalStateException(Failures.message(e), e);
         }
     }
 
@@ -984,8 +985,10 @@ final class Lucene5Index
      * The query to rewrite: a More-Like-This query is built from the searcher's reader with {@code
      * analyzer} from {@link #likeAnalyzer} first, as leia-core's {@code Searcher} builds it.
      */
-    static Query built(IndexSearcher searcher, Query query, Analyzer analyzer) throws IOException {
-        return query instanceof Lucene5MoreLikeQuery like ? like.build(searcher.getIndexReader(), analyzer) : query;
+    static Query built(IndexSearcher searcher, Query query, @Nullable Analyzer analyzer) throws IOException {
+        return query instanceof Lucene5MoreLikeQuery like
+                ? like.build(searcher.getIndexReader(), Objects.requireNonNull(analyzer))
+                : query;
     }
 
     /** {@inheritDoc} It scores with 5.5's default, TF-IDF. */
@@ -1044,7 +1047,8 @@ final class Lucene5Index
             Query built = built(searcher, query, analyzer);
             if (query instanceof Lucene5MoreLikeQuery like) {
                 // Explained before the rewrite merges a lone clause or drops a ^1.0.
-                likeTerms = Optional.of(Lucene5LikeTerms.of(reader, like, analyzer, built, () -> progress.accept(0)));
+                likeTerms = Optional.of(Lucene5LikeTerms.of(
+                        reader, like, Objects.requireNonNull(analyzer), built, () -> progress.accept(0)));
             }
             rewritten = searcher.rewrite(built);
         }
@@ -1206,7 +1210,7 @@ final class Lucene5Index
         }
 
         @Override
-        public Bits getLiveDocs() {
+        public @Nullable Bits getLiveDocs() {
             return null;
         }
 

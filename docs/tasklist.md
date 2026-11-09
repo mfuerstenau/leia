@@ -22,11 +22,9 @@ The lane is done (ADR 0127).
 
 ## Null checking with Error Prone and NullAway
 
-Goal: `@Nullable` (ADR 0127) is checked by the build, not only documentation. NullAway runs in the build (Error Prone, from `leia.java-conventions`) and checks the `@NullMarked` packages: every module but `leia-protocol` and the old runtimes `leia-lucene3/5/7/9`.
+Goal: `@Nullable` (ADR 0127) is checked by the build, not only documentation. NullAway runs in the build (Error Prone, from `leia.java-conventions`) and checks the `@NullMarked` packages of every module, `leia-protocol` and the old runtimes included.
 
-- [x] Mark the packages `@NullMarked` (JSpecify, a `package-info.java` each), module by module: `leia-client`, `leia-runtime`, `leia-core`, `leia-server`, `leia-mcp`, `leia-tui`, `leia-app` and `leia-lucene10`. `leia-protocol` and `leia-lucene3/5/7/9` wait for the next item.
-- [x] Fix what NullAway finds, and make JSpecify `compileOnly` in `leia-server`, `leia-tui` and `leia-app`.
-- [ ] Decide for `leia-protocol`'s `Optional*` fields (hard rule 3) and for the old runtimes' classes (Lucene 3 to 9 in class loaders of their own) whether to mark them. Write an ADR for the decision, and amend the tech stack in `AGENTS.md`.
+The lane is done (ADR 0127, ADR 0128).
 
 ## Lucene 2 to 10 (ADR 0044)
 

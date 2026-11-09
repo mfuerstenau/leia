@@ -27,6 +27,7 @@ import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.hnsw.HnswGraph;
 import org.apache.lucene.util.hnsw.RandomAccessVectorValues;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The HNSW graphs of KNN vector fields, read with Lucene 9.12 (ADR 0049) as leia-core reads Lucene
@@ -249,7 +250,7 @@ final class Lucene9KnnGraph implements KnnGraph {
         private final String field;
         private final DocIdSetIterator values;
         /** The document of each ordinal, if the vectors aren't random access; else null. */
-        private int[] docs;
+        private int @Nullable [] docs;
 
         Vectors(LeafReader leaf, String field, DocIdSetIterator values) {
             this.leaf = leaf;
@@ -315,7 +316,8 @@ final class Lucene9KnnGraph implements KnnGraph {
         }
 
         private int[] docs() throws IOException {
-            if (docs == null) {
+            int[] cached = docs;
+            if (cached == null) {
                 int[] all = new int[size()];
                 DocIdSetIterator iterator =
                         leaf.getFieldInfos().fieldInfo(field).getVectorEncoding() == VectorEncoding.FLOAT32
@@ -325,9 +327,10 @@ final class Lucene9KnnGraph implements KnnGraph {
                 for (int doc = iterator.nextDoc(); doc != DocIdSetIterator.NO_MORE_DOCS; doc = iterator.nextDoc()) {
                     all[ord++] = doc;
                 }
+                cached = all;
                 docs = all;
             }
-            return docs;
+            return cached;
         }
     }
 

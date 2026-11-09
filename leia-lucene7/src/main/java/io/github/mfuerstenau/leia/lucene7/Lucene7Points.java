@@ -20,6 +20,7 @@ import org.apache.lucene.index.SegmentReader;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.bkd.BKDReader;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The BKD trees of point fields, read with Lucene 7.7 (ADR 0048) as leia-core reads Lucene 10's (ADR
@@ -296,9 +297,9 @@ final class Lucene7Points implements Points {
         final List<LeafPoint> points = new ArrayList<>();
         int count;
         private final int docBase;
-        private final Bits liveDocs;
+        private final @Nullable Bits liveDocs;
 
-        LeafVisitor(int docBase, Bits liveDocs) {
+        LeafVisitor(int docBase, @Nullable Bits liveDocs) {
             this.docBase = docBase;
             this.liveDocs = liveDocs;
         }

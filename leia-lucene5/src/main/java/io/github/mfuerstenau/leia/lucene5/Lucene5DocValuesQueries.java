@@ -326,7 +326,7 @@ final class Lucene5DocValuesQueries {
     private static final class BinaryDocValuesQuery extends Query {
 
         private final String field;
-        private final Set<BytesRef> values;
+        private final @Nullable Set<BytesRef> values;
         private final @Nullable BytesRef lower;
         private final @Nullable BytesRef upper;
         private final boolean includeLower;
@@ -377,7 +377,7 @@ final class Lucene5DocValuesQueries {
         public Weight createWeight(IndexSearcher searcher, boolean needsScores) {
             return new ConstantScoreWeight(this) {
                 @Override
-                public Scorer scorer(LeafReaderContext context) throws IOException {
+                public @Nullable Scorer scorer(LeafReaderContext context) throws IOException {
                     LeafReader leaf = context.reader();
                     BinaryDocValues docValues = leaf.getBinaryDocValues(field);
                     if (docValues == null) {

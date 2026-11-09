@@ -248,6 +248,9 @@ final class Queries {
                     Optional.of(docValues(docValues, stats)),
                     Optional.empty());
         }
+        if (text == null) {
+            throw new IllegalStateException("exactly one query was given, and it isn't a term, doc values or knn");
+        }
         String defaultField = arguments.defaultField();
         if (defaultField == null) {
             throw ToolError.invalid("A query needs a defaultField: the field of terms that name none");

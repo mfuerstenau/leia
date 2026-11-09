@@ -778,7 +778,7 @@ final class Lucene3Index implements RuntimeIndex, Documents, Terms, Search {
             parser.setAutoGeneratePhraseQueries(options.autoGeneratePhraseQueries());
             return new Lucene3Query(parser.parse(expression));
         } catch (ParseException | RuntimeException e) {
-            throw new InvalidQueryException(e.getMessage(), e);
+            throw new InvalidQueryException(Failures.message(e), e);
         } finally {
             analyzer.close();
         }
