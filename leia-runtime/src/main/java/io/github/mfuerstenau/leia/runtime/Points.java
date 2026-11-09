@@ -41,6 +41,8 @@ public interface Points {
      * @param max the largest value of each index dimension; empty without points
      * @param segments the segments with points in the field, in reader order
      */
+    // Never compared, hashed or used as a key (ADR 0088)
+    @SuppressWarnings("java:S6218")
     record Tree(
             String field,
             int dimensions,

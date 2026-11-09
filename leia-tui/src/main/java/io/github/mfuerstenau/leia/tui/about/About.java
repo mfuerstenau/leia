@@ -21,7 +21,7 @@ public final class About {
 
     static final String NOTICE_MISSING = "NOTICE not found";
 
-    private static final Pattern COPYRIGHT = Pattern.compile("(?m)^Copyright \\d{4}(?:-\\d{4})? (.+?)\\s*$");
+    private static final Pattern COPYRIGHT = Pattern.compile("(?m)^Copyright \\d{4}(?:-\\d{4})? (.+)$");
 
     private About() {}
 
@@ -37,6 +37,6 @@ public final class About {
     /** The rest of the first line of {@code notice} that starts with {@code Copyright <year> }. */
     static Optional<String> author(String notice) {
         Matcher matcher = COPYRIGHT.matcher(notice);
-        return matcher.find() ? Optional.of(matcher.group(1)) : Optional.empty();
+        return matcher.find() ? Optional.of(matcher.group(1).strip()) : Optional.empty();
     }
 }

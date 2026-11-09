@@ -36,6 +36,13 @@ class CliTest {
     }
 
     @Test
+    void reportsAnOptionValueThatIsNoPath() {
+        assertThatThrownBy(() -> Cli.parse("--jar", "bad\0name"))
+                .isInstanceOf(Cli.UsageException.class)
+                .hasMessageStartingWith("--jar: not a path: ");
+    }
+
+    @Test
     void parsesMcpMode() throws Exception {
         assertThat(Cli.parse("--mcp", "--directory", "nio", "--jar", "icu", "/data/index"))
                 .satisfies(cli -> {

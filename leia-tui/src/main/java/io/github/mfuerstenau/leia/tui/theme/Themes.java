@@ -37,7 +37,7 @@ public record Themes(List<Theme> themes, List<LeftOut> leftOut) {
     static final List<String> BUNDLED = List.of("dark", "light", "mono", "nord", "solarized-dark", "solarized-light");
 
     /** The default theme. */
-    public static final String DARK = "dark";
+    public static final String DARK_NAME = "dark";
 
     /** The theme that {@code NO_COLOR} chooses: no colour at all. */
     public static final String MONO = "mono";
@@ -159,7 +159,7 @@ public record Themes(List<Theme> themes, List<LeftOut> leftOut) {
 
     /** {@code dark}, the default. */
     public Theme dark() {
-        return find(DARK).orElseThrow();
+        return find(DARK_NAME).orElseThrow();
     }
 
     /** The theme after {@code theme}, as {@code T} cycles them; after the last, the first. */

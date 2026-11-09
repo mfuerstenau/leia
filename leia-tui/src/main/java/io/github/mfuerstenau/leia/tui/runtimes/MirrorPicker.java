@@ -36,7 +36,7 @@ import org.jspecify.annotations.Nullable;
 final class MirrorPicker {
 
     /** The keys while the list shows. */
-    static final String KEYS = "↑↓ move   ⏎ choose   u own URL";
+    static final String LIST_KEYS = "↑↓ move   ⏎ choose   u own URL";
 
     /** The keys while a URL is typed. */
     static final String TYPING_KEYS = "⏎ use   Esc back";
@@ -88,7 +88,7 @@ final class MirrorPicker {
 
     /** The keys for the legend. */
     String keys() {
-        return typing() ? TYPING_KEYS : KEYS;
+        return typing() ? TYPING_KEYS : LIST_KEYS;
     }
 
     Result handleKey(KeyEvent key) {

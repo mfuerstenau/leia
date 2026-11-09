@@ -243,6 +243,53 @@ class MainTest {
     }
 
     @Test
+    void downloadsNowhereWithoutAFolderRuntimesCanBeWrittenTo() throws Exception {
+        Path notAFolder = Files.writeString(tmp.resolve("not-a-folder"), "");
+        Path leiaJar = Files.writeString(tmp.resolve("leia.jar"), "");
+        platform = new Platform(
+                Map.of(
+                        "XDG_STATE_HOME", tmp.resolve("state").toString(),
+                        "XDG_CONFIG_HOME", configDir.toString(),
+                        "XDG_DATA_HOME", notAFolder.toString())::get,
+                null,
+                false,
+                leiaJar);
+
+        assertThat(run("--download-runtimes", "--runtime", "lucene9")).isEqualTo(1);
+
+        assertThat(err()).contains("leia: --download-runtimes finds no runtimes folder it can write to: ");
+    }
+
+    @Test
+    void acceptsAnMcpRootThatIsADirectory() throws Exception {
+        Path root = Files.createDirectories(tmp.resolve("indexes"));
+
+        assertThat(runMcpUntilStdinEnds("--mcp", "--mcp-root", root.toString())).isZero();
+
+        assertThat(err()).isEmpty();
+        assertThat(out()).isEmpty();
+    }
+
+    @Test
+    void bringsLeiasOwnJarsInTheUsersRuntimesFolderInLineBeforeMcpMode() throws Exception {
+        Path data = tmp.resolve("data");
+        Files.createDirectories(data.resolve("leia/runtimes"));
+        Path leiaJar = Files.writeString(tmp.resolve("leia.jar"), "");
+        platform = new Platform(
+                Map.of(
+                        "XDG_STATE_HOME", tmp.resolve("state").toString(),
+                        "XDG_CONFIG_HOME", configDir.toString(),
+                        "XDG_DATA_HOME", data.toString())::get,
+                null,
+                false,
+                leiaJar);
+
+        assertThat(runMcpUntilStdinEnds("--mcp")).isZero();
+
+        assertThat(err()).isEmpty();
+    }
+
+    @Test
     void speaksOnlyMcpOnStdoutAndEndsWithStdin() throws Exception {
         String initialize = "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":"
                 + "{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{},"
@@ -272,6 +319,15 @@ class MainTest {
     private int run(String... args) throws Exception {
         return Main.run(
                 args,
+                new PrintStream(out, true, StandardCharsets.UTF_8),
+                new PrintStream(err, true, StandardCharsets.UTF_8),
+                platform);
+    }
+
+    private int runMcpUntilStdinEnds(String... args) throws Exception {
+        return Main.run(
+                args,
+                new ByteArrayInputStream(new byte[0]),
                 new PrintStream(out, true, StandardCharsets.UTF_8),
                 new PrintStream(err, true, StandardCharsets.UTF_8),
                 platform);

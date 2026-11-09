@@ -60,6 +60,8 @@ public interface Terms {
     record TermEntry(byte[] term, int docFreq, long totalTermFreq) {}
 
     /** A page of terms, and the term after it. */
+    // Never compared, hashed or used as a key (ADR 0088)
+    @SuppressWarnings("java:S6218")
     record TermsPage(List<TermEntry> terms, byte @Nullable [] next) {}
 
     /**

@@ -79,7 +79,7 @@ public final class RuntimeInstall {
     private final Path runtimesDir;
     private final List<Mirror> mirrors;
     private final ClassLoader resourceLoader;
-    private final Duration timeout;
+    private final Duration mirrorTimeout;
     private final LocalCaches caches;
 
     /**
@@ -118,7 +118,7 @@ public final class RuntimeInstall {
         this.runtimesDir = runtimesDir;
         this.mirrors = List.copyOf(mirrors);
         this.resourceLoader = resources;
-        this.timeout = timeout;
+        this.mirrorTimeout = timeout;
         this.caches = caches;
     }
 
@@ -139,7 +139,8 @@ public final class RuntimeInstall {
 
     /** This install with {@code first} as its first mirror, and its other mirrors after it. */
     public RuntimeInstall withFirst(Mirror first) {
-        return new RuntimeInstall(runtimesDir, Mirrors.withFirst(mirrors, first), resourceLoader, timeout, caches);
+        return new RuntimeInstall(
+                runtimesDir, Mirrors.withFirst(mirrors, first), resourceLoader, mirrorTimeout, caches);
     }
 
     /** A failure that ends a plan, or a runtime's install, with what to say about it. */
@@ -863,7 +864,7 @@ public final class RuntimeInstall {
     /**
      * Downloads a Lucene jar from {@code uri}, and moves it into place once it matches. Checks for
      * a cancel after each buffer, and then leaves nothing behind. A mirror that sends no byte for
-     * {@link #timeout} has timed out.
+     * {@link #mirrorTimeout} has timed out.
      */
     private void download(Run run, Path folder, RuntimeFolders.ListedJar jar, Mirror mirror, URI uri)
             throws InstallException, CancelledException, DownloadFailed {
@@ -877,7 +878,7 @@ public final class RuntimeInstall {
         try {
             part = Files.createTempFile(folder, jar.name(), PART);
             HttpResponse<InputStream> response = run.client.send(
-                    HttpRequest.newBuilder(uri).timeout(timeout).GET().build(),
+                    HttpRequest.newBuilder(uri).timeout(mirrorTimeout).GET().build(),
                     HttpResponse.BodyHandlers.ofInputStream());
             MessageDigest digest = newDigest();
             long size = 0;
@@ -915,12 +916,12 @@ public final class RuntimeInstall {
             throw e;
         } catch (HttpTimeoutException _) {
             delete(part);
-            String reason = "no answer within " + timeout.toSeconds() + " s";
+            String reason = "no answer within " + mirrorTimeout.toSeconds() + " s";
             throw new DownloadFailed(from + reason, reason);
         } catch (IOException e) {
             delete(part);
             if (idle.get()) {
-                String reason = "no bytes for " + timeout.toSeconds() + " s";
+                String reason = "no bytes for " + mirrorTimeout.toSeconds() + " s";
                 throw new DownloadFailed(from + reason, reason);
             }
             if (part == null) {
@@ -943,11 +944,11 @@ public final class RuntimeInstall {
         }
     }
 
-    /** Closes {@code body} once no bytes arrived for {@link #timeout}, which ends a read that waits. */
+    /** Closes {@code body} once no bytes arrived for {@link #mirrorTimeout}, which ends a read that waits. */
     private ScheduledFuture<?> watch(
             ScheduledExecutorService watchdog, InputStream body, AtomicLong lastBytes, AtomicBoolean idle) {
-        long limit = timeout.toNanos();
-        long period = Math.max(timeout.toMillis() / 4, 10);
+        long limit = mirrorTimeout.toNanos();
+        long period = Math.max(mirrorTimeout.toMillis() / 4, 10);
         return watchdog.scheduleAtFixedRate(
                 () -> {
                     if (!idle.get() && System.nanoTime() - lastBytes.get() > limit) {

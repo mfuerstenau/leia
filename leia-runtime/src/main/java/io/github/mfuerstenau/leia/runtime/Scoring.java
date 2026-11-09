@@ -132,5 +132,7 @@ public interface Scoring {
      * doc key, the value of a numeric field key) or a term. Both are empty for a document without a
      * value in a field key.
      */
+    // Never compared, hashed or used as a key (ADR 0088)
+    @SuppressWarnings("java:S6218")
     record SortValue(@Nullable Number number, byte @Nullable [] term) {}
 }

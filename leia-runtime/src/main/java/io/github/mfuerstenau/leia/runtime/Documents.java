@@ -145,6 +145,8 @@ public interface Documents {
      *
      * @param payload its payload; empty if it has none
      */
+    // Never compared, hashed or used as a key (ADR 0088)
+    @SuppressWarnings("java:S6218")
     record Position(
             @Nullable Integer position,
             @Nullable Integer startOffset,
