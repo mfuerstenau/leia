@@ -514,6 +514,7 @@ Goal: the runtimes are downloaded from within leia's UI, and `--download-runtime
 
 ## Optional only as a return type
 
+- [x] **leia-protocol** (ADR 0127): no `Optional` outside the record components and `Methods.byName`'s return type; the four convenience constructors (`StartCheckIndexParams`, `GetPostingsParams`, `Posting`, `RuntimeFolder`) take plain or `@Nullable` values; JSpecify is `compileOnlyApi`.
 - [x] **leia-client**: records with `@Nullable` components, `Integer`/`Long` for `OptionalInt`/`OptionalLong`, JSpecify as `compileOnlyApi` (the pattern for the other modules).
 - [x] **leia-app**: `Cli`'s `indexPath` and `theme` and the parser's inline values are `@Nullable String`, `Main.runTui` takes a `@Nullable Theme`. The `Optional.ofNullable` adapters to `Tui.Start` and `McpServer`, and `LeiaBackend.start(Optional.empty(), …)`, stay for those modules' tasks.
 - [x] **leia-tui**: screen state, the screens' requests, `Action`, `App`, `Session` and `Tui.Start` take and hold `@Nullable` values, and code that builds protocol records wraps them back. `Optionals` converts between nullable numbers and `OptionalInt`/`OptionalLong`, and its two `orNull` methods are the only `Optional` parameters left. `Main` passes `Tui.Start` plain values. The test helpers that built protocol records or took a screen's `Optional` result take plain values too.

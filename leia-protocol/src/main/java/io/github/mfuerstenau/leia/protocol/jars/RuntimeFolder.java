@@ -2,6 +2,7 @@ package io.github.mfuerstenau.leia.protocol.jars;
 
 import java.util.List;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A runtime that leia knows, with its folder in {@code runtimes/} (ADR 0072, ADR 0073).
@@ -24,13 +25,22 @@ public record RuntimeFolder(
         Optional<String> problem,
         Optional<String> path) {
 
-    /** A runtime that came from no known folder: not loaded, or loaded through the jars. */
+    /**
+     * A runtime that came from no known folder: not loaded, or loaded through the jars. A {@code null}
+     * {@code luceneVersion} or {@code problem} means empty.
+     */
     public RuntimeFolder(
             String folder,
             List<Integer> indexMajors,
             RuntimeState state,
-            Optional<String> luceneVersion,
-            Optional<String> problem) {
-        this(folder, indexMajors, state, luceneVersion, problem, Optional.empty());
+            @Nullable String luceneVersion,
+            @Nullable String problem) {
+        this(
+                folder,
+                indexMajors,
+                state,
+                Optional.ofNullable(luceneVersion),
+                Optional.ofNullable(problem),
+                Optional.empty());
     }
 }

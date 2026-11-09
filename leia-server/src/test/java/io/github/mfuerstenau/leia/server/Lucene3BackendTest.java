@@ -214,7 +214,7 @@ class Lucene3BackendTest {
     void checksTheIndexInAJob() throws Exception {
         open(Path.of(PATH));
         // The level is Lucene 10's; Lucene 3.6 has one.
-        Check check = check(new StartCheckIndexParams(OptionalInt.of(3)));
+        Check check = check(new StartCheckIndexParams(3));
         assertThat(check.lines())
                 .contains("Checking " + PATH, "Checking with Lucene 3.6.2, which has no levels")
                 .anyMatch(line -> line.contains("No problems were detected"));

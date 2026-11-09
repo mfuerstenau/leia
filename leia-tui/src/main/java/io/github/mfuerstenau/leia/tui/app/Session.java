@@ -310,11 +310,7 @@ public final class Session {
                         backend.call(
                                 Methods.GET_POSTINGS,
                                 new GetPostingsParams(
-                                        load.field(),
-                                        load.term(),
-                                        load.fromDoc(),
-                                        Terms.POSTINGS_PAGE,
-                                        Optional.ofNullable(load.filter()))),
+                                        load.field(), load.term(), load.fromDoc(), Terms.POSTINGS_PAGE, load.filter())),
                         runner,
                         result -> app -> app.postingsLoaded(load, result),
                         message -> changing(app -> app.postingsFailed(load, message)));

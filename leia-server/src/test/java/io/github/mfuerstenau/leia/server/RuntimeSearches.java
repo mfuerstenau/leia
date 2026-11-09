@@ -58,13 +58,14 @@ final class RuntimeSearches {
      */
     static void searchesATerm(RealBackend backend, int maxDoc, String text, boolean exact) throws Exception {
         BytesValue term = new BytesValue(text, false);
-        List<Integer> live = backend
-                .call(Methods.GET_POSTINGS, new GetPostingsParams("body", term, 0, maxDoc, Optional.empty()))
-                .postings()
-                .stream()
-                .filter(posting -> !posting.deleted())
-                .map(Posting::docId)
-                .toList();
+        List<Integer> live =
+                backend
+                        .call(Methods.GET_POSTINGS, new GetPostingsParams("body", term, 0, maxDoc, null))
+                        .postings()
+                        .stream()
+                        .filter(posting -> !posting.deleted())
+                        .map(Posting::docId)
+                        .toList();
         assertThat(live).isNotEmpty();
 
         SearchResults results = backend.search(term("body", term), maxDoc);

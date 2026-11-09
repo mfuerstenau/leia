@@ -10,7 +10,7 @@ The lane is done: on new code the gate passes, and the accepted rules are whitel
 
 ## Optional only as a return type
 
-Goal: every module follows the rule in `AGENTS.md`, "Code conventions". `Optional*` is not used as a method parameter or field type, record components included. Optional inputs are overloads or JSpecify's `@Nullable`, with the exception of `leia-protocol`'s records (hard rule 3). `leia-client`, `leia-app`, `leia-tui`, `leia-mcp`, `leia-runtime`, `leia-server`, `leia-core` and the runtime adapters `leia-lucene3`, `leia-lucene5`, `leia-lucene7`, `leia-lucene9` and `leia-lucene10` are done (ADR 0127). `runtime.support.Optionals` (`orNull`, `optionalInt`, `optionalLong`, `optionalDouble`) converts at the boundaries. `leia-client` set the pattern:
+Goal: every module follows the rule in `AGENTS.md`, "Code conventions". `Optional*` is not used as a method parameter or field type, record components included. Optional inputs are overloads or JSpecify's `@Nullable`, with the exception of `leia-protocol`'s records (hard rule 3). `leia-client`, `leia-app`, `leia-tui`, `leia-mcp`, `leia-runtime`, `leia-server`, `leia-protocol`, `leia-core` and the runtime adapters `leia-lucene3`, `leia-lucene5`, `leia-lucene7`, `leia-lucene9` and `leia-lucene10` are done (ADR 0127). `runtime.support.Optionals` (`orNull`, `optionalInt`, `optionalLong`, `optionalDouble`) converts at the boundaries. `leia-client` set the pattern:
 - records keep their components, now `@Nullable`, and their accessors become nullable;
 - `OptionalInt` and `OptionalLong` become `Integer` and `Long`;
 - `Optional` stays as a return type and for locals;
@@ -18,7 +18,7 @@ Goal: every module follows the rule in `AGENTS.md`, "Code conventions". `Optiona
 
 Each module is one task, its callers included. The counts are from a regex scan of 2026-11-09 (parameters, fields and components, main + tests) and are approximate. Watch the AssertJ pitfalls: `isEmpty()` and `contains(x)` still compile on a `String` or `List` but mean something else; use `isNull()` and `isEqualTo(x)`.
 
-- [ ] **leia-protocol**: check that nothing outside its records takes or holds an `Optional`, such as a helper method or a `Methods` entry.
+The lane is done (ADR 0127).
 
 ## Null checking with Error Prone and NullAway
 
@@ -26,7 +26,7 @@ Goal: `@Nullable` (ADR 0127) is checked by the build, not only documentation. To
 
 - [ ] Add Error Prone with NullAway to the `build-logic/` convention plugins (`leia.java-conventions`), as an annotation processor on Java 25. Check that it works beside Dagger, and add the dependencies to `gradle/libs.versions.toml` and `gradle/verification-metadata.xml` (ADR 0089).
 - [ ] Mark the packages `@NullMarked` (JSpecify, a `package-info.java` each), module by module, and configure NullAway (`OnlyNullMarked`, JSpecify mode). `leia-client` first, as it set the `@Nullable` pattern; then `leia-runtime`, `leia-core`, `leia-server`, `leia-mcp`, `leia-tui`, `leia-app` and the runtime adapters.
-- [ ] Fix what NullAway finds, such as `orElseThrow()` on values that are now plain reads, and fields set after construction. JSpecify becomes `compileOnly` in the modules that lack it (`leia-protocol`, `leia-server`, `leia-tui`, `leia-app`).
+- [ ] Fix what NullAway finds, such as `orElseThrow()` on values that are now plain reads, and fields set after construction. JSpecify becomes `compileOnly` in the modules that lack it (`leia-server`, `leia-tui`, `leia-app`).
 - [ ] Decide for `leia-protocol`'s `Optional*` fields (hard rule 3) and for the old runtimes' classes (Lucene 3 to 9 in class loaders of their own) whether to mark them. Write an ADR for the decision, and amend the tech stack in `AGENTS.md`.
 
 ## Lucene 2 to 10 (ADR 0044)

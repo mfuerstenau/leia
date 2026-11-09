@@ -341,16 +341,14 @@ class Lucene9BackendTest {
         assertThat(first.terms()).containsExactly(new TermEntry("2", false, 1, 1), new TermEntry("3", false, 1, 1));
         assertThat(first.next()).hasValue(text("document"));
 
-        GetPostingsResult postings = backend.call(
-                Methods.GET_POSTINGS, new GetPostingsParams("body", text("number"), 1, 10, Optional.empty()));
+        GetPostingsResult postings =
+                backend.call(Methods.GET_POSTINGS, new GetPostingsParams("body", text("number"), 1, 10, null));
 
         assertThat(postings)
                 .isEqualTo(new GetPostingsResult(
                         3,
                         3,
-                        List.of(
-                                new Posting(1, true, OptionalInt.of(1), Optional.empty()),
-                                new Posting(2, false, OptionalInt.of(1), Optional.empty())),
+                        List.of(new Posting(1, true, 1, null), new Posting(2, false, 1, null)),
                         OptionalInt.empty()));
         // Offsets are not indexed.
         assertThat(backend.call(Methods.GET_POSITIONS, new GetPositionsParams(2, "body", text("number")))
@@ -359,7 +357,7 @@ class Lucene9BackendTest {
                         OptionalInt.of(1), OptionalInt.empty(), OptionalInt.empty(), Optional.empty()));
         backend.fails(
                 Methods.GET_POSTINGS,
-                new GetPostingsParams("body", text("nothing"), 0, 10, Optional.empty()),
+                new GetPostingsParams("body", text("nothing"), 0, 10, null),
                 ErrorCode.TERM_NOT_FOUND);
     }
 

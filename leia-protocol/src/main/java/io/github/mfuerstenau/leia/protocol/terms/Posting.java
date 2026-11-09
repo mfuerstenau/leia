@@ -4,6 +4,7 @@ import io.github.mfuerstenau.leia.protocol.document.TermPosition;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
+import org.jspecify.annotations.Nullable;
 
 /**
  * One document that contains a term.
@@ -24,8 +25,16 @@ public record Posting(
         Optional<Boolean> inFilter,
         Optional<List<TermPosition>> positions) {
 
-    /** A posting without positions. */
-    public Posting(int docId, boolean deleted, OptionalInt freq, Optional<Boolean> inFilter) {
-        this(docId, deleted, freq, inFilter, Optional.empty());
+    /**
+     * A posting without positions. A {@code null} {@code freq} means that frequencies are not indexed,
+     * a {@code null} {@code inFilter} that there was no filter.
+     */
+    public Posting(int docId, boolean deleted, @Nullable Integer freq, @Nullable Boolean inFilter) {
+        this(
+                docId,
+                deleted,
+                freq == null ? OptionalInt.empty() : OptionalInt.of(freq),
+                Optional.ofNullable(inFilter),
+                Optional.empty());
     }
 }

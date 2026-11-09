@@ -27,11 +27,11 @@ public record StartCheckIndexParams(OptionalInt level, OptionalInt threads, Opti
 
     /** A check at the default level, of everything, on every processor. */
     public StartCheckIndexParams() {
-        this(OptionalInt.empty());
+        this(OptionalInt.empty(), OptionalInt.empty(), Optional.empty());
     }
 
     /** A check of everything at {@code level}, on every processor. */
-    public StartCheckIndexParams(OptionalInt level) {
-        this(level, OptionalInt.empty(), Optional.empty());
+    public StartCheckIndexParams(int level) {
+        this(OptionalInt.of(level), OptionalInt.empty(), Optional.empty());
     }
 }

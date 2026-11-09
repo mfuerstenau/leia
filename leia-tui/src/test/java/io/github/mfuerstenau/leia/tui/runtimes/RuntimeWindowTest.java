@@ -22,7 +22,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -69,12 +68,11 @@ class RuntimeWindowTest {
 
     /** As {@code getRuntimes} has them: lucene9 and lucene5 are missing, the others there. */
     private static final List<RuntimeFolder> STATES = List.of(
-            new RuntimeFolder("lucene10", List.of(9, 10), RuntimeState.LOADED, Optional.of("10.3.1"), Optional.empty()),
-            new RuntimeFolder("lucene9", List.of(8), RuntimeState.MISSING, Optional.empty(), Optional.empty()),
-            new RuntimeFolder("lucene7", List.of(6, 7), RuntimeState.RESTART, Optional.empty(), Optional.empty()),
-            new RuntimeFolder("lucene5", List.of(4, 5), RuntimeState.MISSING, Optional.empty(), Optional.empty()),
-            new RuntimeFolder(
-                    "lucene3", List.of(2, 3), RuntimeState.REFUSED, Optional.empty(), Optional.of("its API is 0")));
+            new RuntimeFolder("lucene10", List.of(9, 10), RuntimeState.LOADED, "10.3.1", null),
+            new RuntimeFolder("lucene9", List.of(8), RuntimeState.MISSING, null, null),
+            new RuntimeFolder("lucene7", List.of(6, 7), RuntimeState.RESTART, null, null),
+            new RuntimeFolder("lucene5", List.of(4, 5), RuntimeState.MISSING, null, null),
+            new RuntimeFolder("lucene3", List.of(2, 3), RuntimeState.REFUSED, null, "its API is 0"));
 
     private static final List<RuntimeFolders.Known> MISSING = List.of(known("lucene9"), known("lucene5"));
     private static final List<RuntimeFolders.Known> PRESENT =
@@ -318,10 +316,8 @@ class RuntimeWindowTest {
         window.loaded(new LoadRuntimesResult(
                 List.of("lucene9"),
                 List.of(
-                        new RuntimeFolder(
-                                "lucene10", List.of(9, 10), RuntimeState.RESTART, Optional.empty(), Optional.empty()),
-                        new RuntimeFolder(
-                                "lucene9", List.of(8), RuntimeState.LOADED, Optional.of("9.12.3"), Optional.empty()))));
+                        new RuntimeFolder("lucene10", List.of(9, 10), RuntimeState.RESTART, null, null),
+                        new RuntimeFolder("lucene9", List.of(8), RuntimeState.LOADED, "9.12.3", null))));
 
         assertThat(screen())
                 .contains("Loaded lucene9 (Lucene 9.12.3)")

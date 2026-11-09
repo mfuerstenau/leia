@@ -1405,9 +1405,7 @@ class DemoIndexTest {
         }
 
         private GetPostingsResult postings(@Nullable PostingsFilter filter) throws Exception {
-            return backend.call(
-                    Methods.GET_POSTINGS,
-                    new GetPostingsParams("body", text("quick"), 0, 1000, Optional.ofNullable(filter)));
+            return backend.call(Methods.GET_POSTINGS, new GetPostingsParams("body", text("quick"), 0, 1000, filter));
         }
 
         private FilterResult queryFilter(String expression, boolean includeDeleted) throws Exception {

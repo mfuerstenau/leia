@@ -3,6 +3,7 @@ package io.github.mfuerstenau.leia.protocol.terms;
 import io.github.mfuerstenau.leia.protocol.document.BytesValue;
 import java.util.Optional;
 import java.util.OptionalInt;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Params of {@code getPostings}.
@@ -24,9 +25,9 @@ public record GetPostingsParams(
         Optional<PostingsFilter> filter,
         OptionalInt maxPositions) {
 
-    /** Params without positions. */
-    public GetPostingsParams(String field, BytesValue term, int fromDoc, int limit, Optional<PostingsFilter> filter) {
-        this(field, term, fromDoc, limit, filter, OptionalInt.empty());
+    /** Params without positions; a {@code null} {@code filter} means none. */
+    public GetPostingsParams(String field, BytesValue term, int fromDoc, int limit, @Nullable PostingsFilter filter) {
+        this(field, term, fromDoc, limit, Optional.ofNullable(filter), OptionalInt.empty());
     }
 
     /** The largest {@code limit} the server accepts. */

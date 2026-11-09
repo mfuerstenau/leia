@@ -443,7 +443,7 @@ class JarsBackendTest {
 
     /** A runtime's state when its folder is missing. */
     private static RuntimeFolder missing(String folder, Integer... majors) {
-        return new RuntimeFolder(folder, List.of(majors), RuntimeState.MISSING, Optional.empty(), Optional.empty());
+        return new RuntimeFolder(folder, List.of(majors), RuntimeState.MISSING, null, null);
     }
 
     /**

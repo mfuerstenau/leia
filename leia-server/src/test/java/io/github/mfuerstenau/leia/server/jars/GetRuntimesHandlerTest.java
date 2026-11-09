@@ -7,7 +7,6 @@ import io.github.mfuerstenau.leia.protocol.jars.RuntimeState;
 import io.github.mfuerstenau.leia.server.runtime.RuntimeFolders;
 import io.github.mfuerstenau.leia.server.runtime.Runtimes;
 import java.util.List;
-import java.util.Optional;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
@@ -23,8 +22,7 @@ class GetRuntimesHandlerTest {
     @Test
     void mapsEachStateOfAFolder() {
         assertThat(folder("10.5.2", new RuntimeFolders.State.Loaded()))
-                .isEqualTo(new RuntimeFolder(
-                        "lucene10", List.of(9, 10), RuntimeState.LOADED, Optional.of("10.5.2"), Optional.empty()));
+                .isEqualTo(new RuntimeFolder("lucene10", List.of(9, 10), RuntimeState.LOADED, "10.5.2", null));
         assertThat(folder(null, new RuntimeFolders.State.Missing()).state()).isEqualTo(RuntimeState.MISSING);
         assertThat(folder(null, new RuntimeFolders.State.Incomplete("lucene-core-10.5.2.jar")))
                 .satisfies(folder -> {
@@ -37,8 +35,7 @@ class GetRuntimesHandlerTest {
                     assertThat(folder.problem()).hasValue("built for 99");
                 });
         assertThat(folder(null, new RuntimeFolders.State.Restart()))
-                .isEqualTo(new RuntimeFolder(
-                        "lucene10", List.of(9, 10), RuntimeState.RESTART, Optional.empty(), Optional.empty()));
+                .isEqualTo(new RuntimeFolder("lucene10", List.of(9, 10), RuntimeState.RESTART, null, null));
     }
 
     @Test

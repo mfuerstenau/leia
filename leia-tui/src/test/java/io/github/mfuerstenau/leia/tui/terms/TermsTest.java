@@ -89,7 +89,7 @@ class TermsTest {
     }
 
     private static Posting posting(int docId) {
-        return new Posting(docId, false, OptionalInt.of(2), Optional.empty());
+        return new Posting(docId, false, 2, null);
     }
 
     private static GetPostingsResult postings(List<Integer> docIds, Integer nextDoc) {
@@ -290,9 +290,8 @@ class TermsTest {
         PostingsFilter marked = new PostingsFilter(9, false);
         Request.LoadPostings markedRequest = new Request.LoadPostings("id", text("a"), 0, false, marked);
         assertThat(terms.initialRequest()).hasValue(markedRequest);
-        List<Posting> inFilter = new ArrayList<>(Arrays.asList(
-                new Posting(1, false, OptionalInt.of(2), Optional.of(false)),
-                new Posting(4, false, OptionalInt.of(2), Optional.of(true))));
+        List<Posting> inFilter =
+                new ArrayList<>(Arrays.asList(new Posting(1, false, 2, false), new Posting(4, false, 2, true)));
         assertThat(terms.postingsLoaded(markedRequest, new GetPostingsResult(5, 10, inFilter, OptionalInt.empty())))
                 .isEmpty();
         String screen = render(terms);

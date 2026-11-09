@@ -68,25 +68,13 @@ public final class GetRuntimesHandler implements MethodHandler<GetRuntimesParams
         return switch (known.folder()) {
             // Loaded, but its runtime gone from the list: not expected.
             case RuntimeFolders.State.Loaded _, RuntimeFolders.State.Missing _ ->
-                new RuntimeFolder(
-                        name, known.known().indexMajors(), RuntimeState.MISSING, Optional.empty(), Optional.empty());
+                new RuntimeFolder(name, known.known().indexMajors(), RuntimeState.MISSING, null, null);
             case RuntimeFolders.State.Incomplete incomplete ->
-                new RuntimeFolder(
-                        name,
-                        known.known().indexMajors(),
-                        RuntimeState.INCOMPLETE,
-                        Optional.empty(),
-                        Optional.of(incomplete.jar()));
+                new RuntimeFolder(name, known.known().indexMajors(), RuntimeState.INCOMPLETE, null, incomplete.jar());
             case RuntimeFolders.State.Refused refused ->
-                new RuntimeFolder(
-                        name,
-                        known.known().indexMajors(),
-                        RuntimeState.REFUSED,
-                        Optional.empty(),
-                        Optional.of(refused.reason()));
+                new RuntimeFolder(name, known.known().indexMajors(), RuntimeState.REFUSED, null, refused.reason());
             case RuntimeFolders.State.Restart _ ->
-                new RuntimeFolder(
-                        name, known.known().indexMajors(), RuntimeState.RESTART, Optional.empty(), Optional.empty());
+                new RuntimeFolder(name, known.known().indexMajors(), RuntimeState.RESTART, null, null);
         };
     }
 }

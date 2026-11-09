@@ -655,28 +655,12 @@ class AppTest {
         App app = app().withRuntimeFolders(RuntimesDirs.of(Path.of("/opt/leia/runtimes")));
         app.runtimesLoaded(new GetRuntimesResult(
                 List.of(
+                        new RuntimeFolder("lucene10", List.of(9, 10), RuntimeState.LOADED, "10.5.2", null),
+                        new RuntimeFolder("lucene9", List.of(8), RuntimeState.MISSING, null, null),
                         new RuntimeFolder(
-                                "lucene10",
-                                List.of(9, 10),
-                                RuntimeState.LOADED,
-                                Optional.of("10.5.2"),
-                                Optional.empty()),
-                        new RuntimeFolder(
-                                "lucene9", List.of(8), RuntimeState.MISSING, Optional.empty(), Optional.empty()),
-                        new RuntimeFolder(
-                                "lucene7",
-                                List.of(6, 7),
-                                RuntimeState.INCOMPLETE,
-                                Optional.empty(),
-                                Optional.of("lucene-core-7.7.3.jar")),
-                        new RuntimeFolder(
-                                "lucene5",
-                                List.of(4, 5),
-                                RuntimeState.REFUSED,
-                                Optional.empty(),
-                                Optional.of("too new")),
-                        new RuntimeFolder(
-                                "lucene3", List.of(2, 3), RuntimeState.LOADED, Optional.of("3.6.2"), Optional.empty())),
+                                "lucene7", List.of(6, 7), RuntimeState.INCOMPLETE, null, "lucene-core-7.7.3.jar"),
+                        new RuntimeFolder("lucene5", List.of(4, 5), RuntimeState.REFUSED, null, "too new"),
+                        new RuntimeFolder("lucene3", List.of(2, 3), RuntimeState.LOADED, "3.6.2", null)),
                 List.of(new ServerRuntimeInfo(
                         "/opt/elasticsearch", Optional.of("Elasticsearch 8.15.3"), "9.11.1", List.of(8, 9)))));
 
@@ -710,24 +694,12 @@ class AppTest {
     private static GetRuntimesResult everyState() {
         return new GetRuntimesResult(
                 List.of(
+                        new RuntimeFolder("lucene10", List.of(9, 10), RuntimeState.RESTART, null, null),
+                        new RuntimeFolder("lucene9", List.of(8), RuntimeState.MISSING, null, null),
                         new RuntimeFolder(
-                                "lucene10", List.of(9, 10), RuntimeState.RESTART, Optional.empty(), Optional.empty()),
-                        new RuntimeFolder(
-                                "lucene9", List.of(8), RuntimeState.MISSING, Optional.empty(), Optional.empty()),
-                        new RuntimeFolder(
-                                "lucene7",
-                                List.of(6, 7),
-                                RuntimeState.INCOMPLETE,
-                                Optional.empty(),
-                                Optional.of("lucene-core-7.7.3.jar")),
-                        new RuntimeFolder(
-                                "lucene5",
-                                List.of(4, 5),
-                                RuntimeState.REFUSED,
-                                Optional.empty(),
-                                Optional.of("too new")),
-                        new RuntimeFolder(
-                                "lucene3", List.of(2, 3), RuntimeState.LOADED, Optional.of("3.6.2"), Optional.empty())),
+                                "lucene7", List.of(6, 7), RuntimeState.INCOMPLETE, null, "lucene-core-7.7.3.jar"),
+                        new RuntimeFolder("lucene5", List.of(4, 5), RuntimeState.REFUSED, null, "too new"),
+                        new RuntimeFolder("lucene3", List.of(2, 3), RuntimeState.LOADED, "3.6.2", null)),
                 List.of());
     }
 
@@ -948,8 +920,7 @@ class AppTest {
 
         app.runtimesReloaded(new LoadRuntimesResult(
                 List.of("lucene9"),
-                List.of(new RuntimeFolder(
-                        "lucene9", List.of(8), RuntimeState.LOADED, Optional.of("9.12.3"), Optional.empty()))));
+                List.of(new RuntimeFolder("lucene9", List.of(8), RuntimeState.LOADED, "9.12.3", null))));
         app.handleKey(key(KeyCode.ESCAPE));
 
         assertThat(TestScreens.render(app::render, 200, 30)).contains("Runtimes: Lucene 9.12.3 (8)");
@@ -960,10 +931,8 @@ class AppTest {
         App app = app();
         app.runtimesLoaded(new GetRuntimesResult(
                 List.of(
-                        new RuntimeFolder(
-                                "lucene10", List.of(9, 10), RuntimeState.MISSING, Optional.empty(), Optional.empty()),
-                        new RuntimeFolder(
-                                "lucene9", List.of(8), RuntimeState.MISSING, Optional.empty(), Optional.empty())),
+                        new RuntimeFolder("lucene10", List.of(9, 10), RuntimeState.MISSING, null, null),
+                        new RuntimeFolder("lucene9", List.of(8), RuntimeState.MISSING, null, null)),
                 List.of()));
 
         assertThat(TestScreens.render(app::render, 200, 30))
@@ -1982,11 +1951,7 @@ class AppTest {
         app.termsLoaded(loadTerms("body", null), termPage("text"));
         app.postingsLoaded(
                 loadPostings("body", "text"),
-                new GetPostingsResult(
-                        1,
-                        1,
-                        List.of(new Posting(1, false, OptionalInt.empty(), Optional.empty())),
-                        OptionalInt.empty()));
+                new GetPostingsResult(1, 1, List.of(new Posting(1, false, null, null)), OptionalInt.empty()));
         assertThat(legend(app)).contains("body (/ seeks)", "Postings (1)");
 
         // Back to the document, which fetches nothing, and whose ] steps along id/1's postings.
@@ -2357,9 +2322,7 @@ class AppTest {
         return new GetPostingsResult(
                 2,
                 2,
-                List.of(
-                        new Posting(0, false, OptionalInt.empty(), Optional.empty()),
-                        new Posting(2, false, OptionalInt.empty(), Optional.empty())),
+                List.of(new Posting(0, false, null, null), new Posting(2, false, null, null)),
                 OptionalInt.empty());
     }
 

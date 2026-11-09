@@ -32,7 +32,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
-import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
@@ -79,9 +78,7 @@ class RuntimeDownloadPilotTest {
                 .withRuntimeFolders(RuntimesDirs.of(runtimes));
         // As if lucene5 were missing: the other tests of this JVM may have loaded it already.
         app.runtimesLoaded(new GetRuntimesResult(
-                List.of(new RuntimeFolder(
-                        "lucene5", List.of(4, 5), RuntimeState.MISSING, Optional.empty(), Optional.empty())),
-                List.of()));
+                List.of(new RuntimeFolder("lucene5", List.of(4, 5), RuntimeState.MISSING, null, null)), List.of()));
         RuntimeInstall install =
                 new RuntimeInstall(runtimes, repository.base(), RuntimeDownloadPilotTest.class.getClassLoader());
         run(new Session(app, backend, new RuntimeService(install, MirrorSettings.none())));
