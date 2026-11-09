@@ -88,7 +88,7 @@ class JarsBackendTest {
 
         // Without runtimes, the indexes of Lucene 9 and 10 open only without a reader, and there is no
         // analysis tab (ADR 0071, ADR 0072).
-        try (RealBackend bare = RealBackend.start(Optional.empty(), List.of())) {
+        try (RealBackend bare = RealBackend.start(null, List.of())) {
             for (String name : List.of("lucene9", "demo")) {
                 String index = testIndex(name).toString();
                 RpcException missing =
@@ -128,7 +128,7 @@ class JarsBackendTest {
         Path incomplete = Files.createDirectories(broken.resolve("lucene9"));
         Files.copy(runtimes.resolve("lucene9/leia-lucene9.jar"), incomplete.resolve("leia-lucene9.jar"));
         futureAdapterJar(Files.createDirectories(broken.resolve("lucene3")).resolve("leia-lucene3.jar"));
-        try (RealBackend partial = RealBackend.start(Optional.of(broken), List.of())) {
+        try (RealBackend partial = RealBackend.start(broken, List.of())) {
             List<RuntimeFolder> found =
                     partial.call(Methods.GET_RUNTIMES, new GetRuntimesParams()).runtimes();
             assertThat(found.get(1)).satisfies(lucene9 -> {
@@ -149,7 +149,7 @@ class JarsBackendTest {
         }
 
         // A jar without its dependencies loads nothing, and nothing starts.
-        assertThatThrownBy(() -> RealBackend.start(Optional.of(runtimes), List.of(phoneticJarAlone())))
+        assertThatThrownBy(() -> RealBackend.start(runtimes, List.of(phoneticJarAlone())))
                 .isInstanceOfSatisfying(RpcException.class, e -> {
                     assertThat(e.code()).isEqualTo(ErrorCode.INVALID_JAR);
                     assertThat(e.getMessage())
@@ -159,7 +159,7 @@ class JarsBackendTest {
 
         Path codecJar = Files.copy(testFile("leia.test.codec.jar"), tmp.resolve("leia-test-codec.jar"));
         // runtimes/lucene10 first, as the jars link against its Lucene (ADR 0065, ADR 0072).
-        try (RealBackend backend = RealBackend.start(Optional.of(runtimes), List.of(codecJar))) {
+        try (RealBackend backend = RealBackend.start(runtimes, List.of(codecJar))) {
             List<String> jars =
                     backend.call(Methods.GET_JARS, new GetJarsParams()).jars();
             assertThat(jars.getFirst()).startsWith(runtimes.resolve("lucene10").toString());
@@ -294,7 +294,7 @@ class JarsBackendTest {
             // Through the Extensions of leia-lucene10's runtime (ADR 0068, ADR 0071): a directory's jars
             // in name order, the names they add, and a jar that is loaded already isn't loaded again. Before
             // the refused runtime below, which a new backend would refuse to start with.
-            try (RealBackend runtime = RealBackend.start(Optional.empty(), List.of())) {
+            try (RealBackend runtime = RealBackend.start(null, List.of())) {
                 AddJarsResult phonetic = runtime.call(
                         Methods.ADD_JARS,
                         new AddJarsParams(

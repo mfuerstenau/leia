@@ -16,6 +16,7 @@ import java.util.ServiceConfigurationError;
 import java.util.ServiceLoader;
 import java.util.Set;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The runtimes that read the indexes (ADR 0044, ADR 0071): those of the {@link ServerRuntimes}
@@ -222,7 +223,9 @@ public final class Runtimes {
         return RuntimeFolders.KNOWN.stream()
                 .map(known -> new KnownState(
                         known,
-                        leiasForMajor(known.indexMajors().getFirst()).map(LuceneRuntime::luceneVersion),
+                        leiasForMajor(known.indexMajors().getFirst())
+                                .map(LuceneRuntime::luceneVersion)
+                                .orElse(null),
                         RuntimeFolders.state(known)))
                 .toList();
     }
@@ -230,10 +233,12 @@ public final class Runtimes {
     /**
      * A runtime that leia knows, and whether it is loaded.
      *
-     * @param luceneVersion the Lucene version of the loaded runtime that reads its indexes, or empty
+     * @param luceneVersion the Lucene version of the loaded runtime that reads its indexes, or
+     *     {@code null}
      * @param folder how its folder was found; a runtime can be loaded without one, through the jars
      */
-    public record KnownState(RuntimeFolders.Known known, Optional<String> luceneVersion, RuntimeFolders.State folder) {}
+    public record KnownState(
+            RuntimeFolders.Known known, @Nullable String luceneVersion, RuntimeFolders.State folder) {}
 
     /** The servers' runtimes, in the order they were given (ADR 0090). */
     public List<ServerRuntime> servers() {

@@ -28,6 +28,6 @@ public final class GetExportTermsHandler implements MethodHandler<JobParams, Get
     @Override
     public GetExportTermsResult handle(JobParams params) throws RpcException {
         Jobs.Poll<ExportTermsResult> poll = jobs.poll(params.jobId(), ExportTermsResult.class);
-        return new GetExportTermsResult(poll.progress(), poll.result());
+        return new GetExportTermsResult(poll.progress(), poll.outcome());
     }
 }

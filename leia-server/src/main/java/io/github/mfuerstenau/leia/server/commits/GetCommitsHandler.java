@@ -5,6 +5,7 @@ import io.github.mfuerstenau.leia.protocol.RpcMethod;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsParams;
 import io.github.mfuerstenau.leia.protocol.commits.GetCommitsResult;
 import io.github.mfuerstenau.leia.runtime.LuceneRuntime;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.index.CurrentIndex;
@@ -32,7 +33,7 @@ public final class GetCommitsHandler implements MethodHandler<GetCommitsParams, 
 
     @Override
     public GetCommitsResult handle(GetCommitsParams params) throws RpcException {
-        IndexDirectories.IndexDirectory dir = directories.opened(params.index());
+        IndexDirectories.IndexDirectory dir = directories.opened(Optionals.orNull(params.index()));
         return switch (dir.route()) {
             case IndexDirectories.Route.Runtime(LuceneRuntime runtime) -> RuntimeResults.commits(runtime, dir);
             case IndexDirectories.Route.Missing missing -> throw missing.error(dir.path());

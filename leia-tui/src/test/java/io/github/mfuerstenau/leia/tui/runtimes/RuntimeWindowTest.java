@@ -218,9 +218,7 @@ class RuntimeWindowTest {
         assertThat(screen).contains("Complete; restart leia to load it.").contains("Lucene jars in runtimes/lucene7:");
         String details = detailsColumn(screen, "Lucene 7 · runtimes/lucene7");
         assertThat(details)
-                .contains(install.repository()
-                        .resolve(jar.mavenPath().orElseThrow())
-                        .toString())
+                .contains(install.repository().resolve(jar.mavenPath()).toString())
                 .contains("SHA-256" + jar.sha256());
 
         window.handleKey(key(KeyCode.DOWN));
@@ -535,8 +533,7 @@ class RuntimeWindowTest {
                 .filter(jar -> jar.name().equals("lucene-core-9.12.3.jar"))
                 .findFirst()
                 .orElseThrow();
-        Path cached =
-                tmp.resolve("home/.m2/repository").resolve(core.mavenPath().orElseThrow());
+        Path cached = tmp.resolve("home/.m2/repository").resolve(core.mavenPath());
         Files.createDirectories(cached.getParent());
         Files.copy(FakeRepository.built(known("lucene9")).resolve(core.name()), cached);
         install = new RuntimeInstall(

@@ -15,7 +15,6 @@ import java.util.BitSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.OptionalLong;
 import java.util.concurrent.CancellationException;
 import java.util.function.Consumer;
 import java.util.function.IntConsumer;
@@ -218,8 +217,7 @@ public final class StoredScan {
         BitSet matches = new BitSet(source.maxDoc());
         Summary summary = new StoredScan(pattern, 0, valueTimeLimit, NO_HITS, matches::set, progress).run(source);
         String label = "/" + pattern.pattern() + "/" + ((pattern.flags() & Pattern.CASE_INSENSITIVE) != 0 ? "i" : "");
-        return DocFilter.of(
-                matches, source.maxDoc(), label, label, summary.took(), OptionalLong.of(summary.timedOutValues()));
+        return DocFilter.of(matches, source.maxDoc(), label, label, summary.took(), summary.timedOutValues());
     }
 
     private Summary run(StoredSource source) throws IOException {

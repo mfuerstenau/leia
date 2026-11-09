@@ -46,6 +46,7 @@ import org.apache.lucene.index.VectorSimilarityFunction;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -71,7 +72,7 @@ class FilterHandlersTest {
     private final Jobs jobs = new Jobs();
     private final Filters filters = new Filters();
     private final CurrentIndex currentIndex = new CurrentIndex(jobs, filters);
-    private final StoredFieldsCache cache = new StoredFieldsCache(Optional.empty());
+    private final StoredFieldsCache cache = new StoredFieldsCache(null);
     private final StartFilterHandler start = new StartFilterHandler(currentIndex, jobs, cache);
     private final GetFilterHandler get = new GetFilterHandler(jobs, filters);
     private final StepFilterHandler step = new StepFilterHandler(filters);
@@ -159,8 +160,7 @@ class FilterHandlersTest {
     void buildsAFilterFromAPatternOverStoredValues() throws Exception {
         openIndex();
 
-        long jobId =
-                start.handle(byPattern("^R", true, Optional.empty(), false)).jobId();
+        long jobId = start.handle(byPattern("^R", true, null, false)).jobId();
         GetFilterResult done = await(jobId);
         FilterResult filter = done.result().orElseThrow();
 
@@ -171,12 +171,11 @@ class FilterHandlersTest {
         assertThat(filter.timedOutValues()).hasValue(0);
         assertThat(step(jobId, 1, true)).contains(new FilterMatch(2, 1));
 
-        long withDeleted = start.handle(byPattern("e", false, Optional.of(List.of("body")), true))
-                .jobId();
+        long withDeleted =
+                start.handle(byPattern("e", false, List.of("body"), true)).jobId();
         assertThat(await(withDeleted).result().orElseThrow().matchCount()).isEqualTo(5);
         // The id field has no "e"; only body was scanned.
-        long ids = start.handle(byPattern("\\d", false, Optional.of(List.of("body")), false))
-                .jobId();
+        long ids = start.handle(byPattern("\\d", false, List.of("body"), false)).jobId();
         assertThat(await(ids).result().orElseThrow().matchCount()).isZero();
     }
 
@@ -193,10 +192,8 @@ class FilterHandlersTest {
     void checksThePatternAtOnce() throws Exception {
         openIndex();
 
-        assertFails(() -> start.handle(byPattern("(red", false, Optional.empty(), false)), ErrorCode.INVALID_QUERY);
-        assertFails(
-                () -> start.handle(byPattern("red", false, Optional.of(List.of("missing")), false)),
-                ErrorCode.FIELD_NOT_FOUND);
+        assertFails(() -> start.handle(byPattern("(red", false, null, false)), ErrorCode.INVALID_QUERY);
+        assertFails(() -> start.handle(byPattern("red", false, List.of("missing"), false)), ErrorCode.FIELD_NOT_FOUND);
         assertFails(
                 () -> start.handle(new StartFilterParams(Optional.empty(), Optional.empty(), Optional.empty(), false)),
                 ErrorCode.INVALID_PARAMS);
@@ -327,10 +324,10 @@ class FilterHandlersTest {
     }
 
     private static StartFilterParams byPattern(
-            String pattern, boolean caseInsensitive, Optional<List<String>> fields, boolean includeDeleted) {
+            String pattern, boolean caseInsensitive, @Nullable List<String> fields, boolean includeDeleted) {
         return new StartFilterParams(
                 Optional.empty(),
-                Optional.of(new FilterPattern(pattern, caseInsensitive, fields)),
+                Optional.of(new FilterPattern(pattern, caseInsensitive, Optional.ofNullable(fields))),
                 Optional.empty(),
                 includeDeleted);
     }

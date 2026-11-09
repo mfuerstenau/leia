@@ -18,10 +18,12 @@ import io.github.mfuerstenau.leia.protocol.index.IndexOptions;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalDouble;
 import java.util.OptionalInt;
+import org.jspecify.annotations.Nullable;
 
 /** Auto stop words on an index of the runtimes' writers (ADR 0061), with any text field. */
 final class RuntimeAutoStopWords {
@@ -40,7 +42,7 @@ final class RuntimeAutoStopWords {
         List<TermEntry> terms = page.terms();
         assertThat(terms).isNotEmpty();
 
-        GetAutoStopWordsResult every = find(backend, List.of(field), OptionalInt.of(0), OptionalDouble.empty());
+        GetAutoStopWordsResult every = find(backend, List.of(field), 0, null);
         assertThat(every.stopWords())
                 .hasValue(new AutoStopWords(
                         0,
@@ -49,8 +51,7 @@ final class RuntimeAutoStopWords {
         assertThat(every.termsScanned()).isEqualTo(terms.size());
 
         int top = terms.stream().mapToInt(TermEntry::docFreq).max().orElseThrow();
-        assertThat(find(backend, List.of(field), OptionalInt.of(top - 1), OptionalDouble.empty())
-                        .stopWords())
+        assertThat(find(backend, List.of(field), top - 1, null).stopWords())
                 .hasValue(new AutoStopWords(
                         top - 1,
                         List.of(new FieldStopWords(
@@ -61,9 +62,7 @@ final class RuntimeAutoStopWords {
                                         .toList()))));
 
         GetIndexStatsResult stats = backend.call(Methods.GET_INDEX_STATS, new GetIndexStatsParams());
-        AutoStopWords all = find(backend, List.of(), OptionalInt.empty(), OptionalDouble.of(1))
-                .stopWords()
-                .orElseThrow();
+        AutoStopWords all = find(backend, List.of(), null, 1.0).stopWords().orElseThrow();
         assertThat(all.maxDocFreq()).isEqualTo(stats.numDocs());
         assertThat(all.fields())
                 .extracting(FieldStopWords::field)
@@ -100,11 +99,12 @@ final class RuntimeAutoStopWords {
     }
 
     private static GetAutoStopWordsResult find(
-            RealBackend backend, List<String> fields, OptionalInt maxDocFreq, OptionalDouble maxPercentDocs)
+            RealBackend backend, List<String> fields, @Nullable Integer maxDocFreq, @Nullable Double maxPercentDocs)
             throws Exception {
         return backend.job(
                 Methods.START_AUTO_STOP_WORDS,
-                new StartAutoStopWordsParams(fields, maxDocFreq, maxPercentDocs),
+                new StartAutoStopWordsParams(
+                        fields, Optionals.optionalInt(maxDocFreq), Optionals.optionalDouble(maxPercentDocs)),
                 Methods.GET_AUTO_STOP_WORDS,
                 result -> result.stopWords().map(_ -> result));
     }

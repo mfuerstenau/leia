@@ -24,7 +24,6 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -57,7 +56,7 @@ class TuiTest {
     @BeforeEach
     void start() throws Exception {
         // The old runtimes' folders that the build puts together (ADR 0073); Lucene 10 is on the classpath.
-        backend = LeiaBackend.start(Optional.of(Path.of(System.getProperty("leia.test.runtimes"))), List.of());
+        backend = LeiaBackend.start(Path.of(System.getProperty("leia.test.runtimes")), List.of());
         platform = new Platform(
                 Map.of(
                         "XDG_STATE_HOME", tmp.resolve("state").toString(),

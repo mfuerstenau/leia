@@ -32,8 +32,8 @@ class Server9KnnSetupBackendTest {
     @Test
     void readsTheKnnIndexAlthoughTheSetupFails() throws Exception {
         System.setProperty("leia.test.server9.knn.foreignSettings", "true");
-        try (RealBackend backend = RealBackend.start(
-                Optional.of(testFile("leia.test.runtimes")), List.of(), List.of(ServerBackends.server("9")))) {
+        try (RealBackend backend =
+                RealBackend.start(testFile("leia.test.runtimes"), List.of(), List.of(ServerBackends.server("9")))) {
             OpenIndexResult opened = backend.call(
                     Methods.OPEN_INDEX,
                     new OpenIndexParams(testFile("leia.test.server9.knn").toString()));

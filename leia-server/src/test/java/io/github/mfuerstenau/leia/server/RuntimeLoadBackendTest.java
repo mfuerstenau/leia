@@ -18,7 +18,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Optional;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -39,7 +38,7 @@ class RuntimeLoadBackendTest {
     void loadsTheRuntimesCopiedInWhileItRuns() throws Exception {
         Path built = testFile("leia.test.runtimes");
         Path runtimes = Files.createDirectories(tmp.resolve("runtimes"));
-        try (RealBackend backend = RealBackend.start(Optional.of(runtimes), List.of())) {
+        try (RealBackend backend = RealBackend.start(runtimes, List.of())) {
             assertThat(backend.call(Methods.GET_RUNTIMES, new GetRuntimesParams())
                             .runtimes())
                     .allMatch(runtime -> runtime.state() == RuntimeState.MISSING);

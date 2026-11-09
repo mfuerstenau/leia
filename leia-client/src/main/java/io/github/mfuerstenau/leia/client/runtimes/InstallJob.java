@@ -408,7 +408,7 @@ public final class InstallJob {
             int count = 0;
             for (RuntimeInstall.RuntimePlan runtime : runtimes) {
                 for (RuntimeFolders.ListedJar jar : runtime.listed()) {
-                    if (jar.mavenPath().isPresent()) {
+                    if (jar.mavenPath() != null) {
                         jars.put(
                                 key(runtime.known().folder(), jar.name()),
                                 new Jar(runtime.known().folder(), jar.name(), jar.size()));

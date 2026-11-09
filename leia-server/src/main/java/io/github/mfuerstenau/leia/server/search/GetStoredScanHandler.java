@@ -40,6 +40,6 @@ public final class GetStoredScanHandler implements MethodHandler<GetStoredScanPa
         Jobs.Poll<StoredScanResult> poll = jobs.poll(params.jobId(), StoredScanResult.class);
         StoredScanHits.Snapshot snapshot = hits.from(params.fromHit());
         return new GetStoredScanResult(
-                poll.progress(), snapshot.matchedValues(), snapshot.hitCount(), snapshot.hits(), poll.result());
+                poll.progress(), snapshot.matchedValues(), snapshot.hitCount(), snapshot.hits(), poll.outcome());
     }
 }

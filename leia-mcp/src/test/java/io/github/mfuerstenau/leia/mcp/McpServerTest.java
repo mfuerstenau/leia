@@ -53,7 +53,7 @@ class McpServerTest {
 
     @BeforeAll
     static void startBackend() throws Exception {
-        backend = LeiaBackend.start(Optional.empty(), List.of());
+        backend = LeiaBackend.start(null, List.of());
         version = backend.call(Methods.VERSION, new VersionParams()).get();
         String property = System.getProperty("leia.test.index.demo");
         demo = Path.of(property).toAbsolutePath().normalize().toString();

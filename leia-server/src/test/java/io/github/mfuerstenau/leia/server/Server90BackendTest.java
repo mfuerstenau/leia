@@ -73,7 +73,7 @@ class Server90BackendTest {
             assertThat(results.hits()).extracting(Hit::docId).containsExactlyInAnyOrder(0, 1, 2);
 
             // The points through PointValues.intersect, without the PointTree that 9.0 lacks.
-            assertThat(backend.reconstruct(1, Optional.of(List.of("count"))).fields())
+            assertThat(backend.reconstruct(1, List.of("count")).fields())
                     .singleElement()
                     .satisfies(count -> assertThat(count.points()).hasSize(1))
                     .extracting(ReconstructedField::field)

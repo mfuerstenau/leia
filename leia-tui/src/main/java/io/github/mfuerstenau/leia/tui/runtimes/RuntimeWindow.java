@@ -701,8 +701,7 @@ public final class RuntimeWindow {
             lines.add(Line.from("• " + download.jar().name() + ", "
                     + TextFormat.size(download.jar().size())));
             // From the mirror the downloads begin with, which m may have changed since the plan.
-            lines.add(Line.from(download.jar()
-                    .mavenPath()
+            lines.add(Line.from(Optional.ofNullable(download.jar().mavenPath())
                     .map(path -> install.repository().resolve(path))
                     .orElse(download.uri())
                     .toString()));
@@ -745,8 +744,8 @@ public final class RuntimeWindow {
         Set<String> mismatched = new LinkedHashSet<>();
         runtime.downloads().forEach(download -> mismatched.add(download.jar().name()));
         for (RuntimeFolders.ListedJar jar : runtime.listed()) {
-            Optional<String> mavenPath = jar.mavenPath();
-            if (mavenPath.isEmpty()) {
+            String mavenPath = jar.mavenPath();
+            if (mavenPath == null) {
                 continue;
             }
             // Unindented, as in the details of an offered runtime.
@@ -756,7 +755,7 @@ public final class RuntimeWindow {
                         "Not there, or doesn't match the list; the loader checks only that it is there",
                         Palette.current().warning()));
             }
-            lines.add(Line.from(install.repository().resolve(mavenPath.get()).toString()));
+            lines.add(Line.from(install.repository().resolve(mavenPath).toString()));
             lines.add(Line.from(
                     Span.styled("SHA-256 " + jar.sha256(), Palette.current().muted())));
         }

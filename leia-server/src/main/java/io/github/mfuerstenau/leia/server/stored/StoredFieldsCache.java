@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.IntUnaryOperator;
+import org.jspecify.annotations.Nullable;
 import org.roaringbitmap.RoaringBitmap;
 
 /**
@@ -23,7 +24,7 @@ public final class StoredFieldsCache {
     /** How much the cache may hold in memory. */
     static final long MAX_MEMORY_BYTES = 64L * 1024 * 1024;
 
-    private final Optional<DiskCache> disk;
+    private final @Nullable DiskCache disk;
     private final long maxMemoryBytes;
     private final LinkedHashMap<SegmentKey, SegmentFields> memory = new LinkedHashMap<>(16, 0.75f, true);
     private long memoryBytes;
@@ -31,28 +32,28 @@ public final class StoredFieldsCache {
     /**
      * A cache in memory and, with {@code cacheDir}, on disk below it.
      *
-     * @param cacheDir leia's cache folder, such as {@code ~/.cache/leia}; empty for none
+     * @param cacheDir leia's cache folder, such as {@code ~/.cache/leia}; {@code null} for none
      */
-    public StoredFieldsCache(Optional<Path> cacheDir) {
-        this(cacheDir.map(dir -> new DiskCache(dir.resolve(FOLDER))), MAX_MEMORY_BYTES);
+    public StoredFieldsCache(@Nullable Path cacheDir) {
+        this(cacheDir == null ? null : new DiskCache(cacheDir.resolve(FOLDER)), MAX_MEMORY_BYTES);
     }
 
-    StoredFieldsCache(Optional<DiskCache> disk, long maxMemoryBytes) {
+    StoredFieldsCache(@Nullable DiskCache disk, long maxMemoryBytes) {
         this.disk = disk;
         this.maxMemoryBytes = maxMemoryBytes;
     }
 
     /**
      * The documents of {@code segment} of the index in {@code directory} that store a value in one of
-     * {@code fields} (in any field if empty), deleted ones included, if the cache knows the segment
+     * {@code fields} (in any field if {@code null}), deleted ones included, if the cache knows the segment
      * (ADR 0114): as a function from a document to the first such document at or after it, or the
      * segment's maxDoc for none, as {@link io.github.mfuerstenau.leia.runtime.Documents#storedValues(
-     * int, Optional, boolean, IntUnaryOperator, java.util.function.Consumer,
+     * int, Set, boolean, IntUnaryOperator, java.util.function.Consumer,
      * java.util.function.LongConsumer)} takes it. It never reads the segment; empty if the cache
      * doesn't know it.
      */
     public Optional<IntUnaryOperator> storing(
-            Path directory, RuntimeIndex.Segment segment, Optional<Set<String>> fields) {
+            Path directory, RuntimeIndex.Segment segment, @Nullable Set<String> fields) {
         return lookup(directory, segment).map(known -> {
             RoaringBitmap docs = known.docsWithAny(fields);
             int maxDoc = segment.maxDoc();
@@ -84,7 +85,7 @@ public final class StoredFieldsCache {
                 return Optional.of(fields);
             }
         }
-        Optional<SegmentFields> read = disk.flatMap(cache -> cache.read(key));
+        Optional<SegmentFields> read = disk == null ? Optional.empty() : disk.read(key);
         read.ifPresent(fields -> remember(key, fields));
         return read;
     }
@@ -92,7 +93,9 @@ public final class StoredFieldsCache {
     /** Keeps the stored fields of the segment of {@code key}, in memory and on disk. */
     void put(SegmentKey key, SegmentFields fields) {
         remember(key, fields);
-        disk.ifPresent(cache -> cache.write(key, fields));
+        if (disk != null) {
+            disk.write(key, fields);
+        }
     }
 
     private void remember(SegmentKey key, SegmentFields fields) {

@@ -28,6 +28,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
 import java.util.zip.ZipEntry;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The folders of the runtimes folder, one per runtime, each with the runtime's adapter jar and the
@@ -170,7 +171,7 @@ public final class RuntimeFolders {
             }
             Found lookedUp = lookUp(known, dirs, loaded, embedded);
             State state = lookedUp.state();
-            Optional<Path> found = lookedUp.folder();
+            Optional<Path> found = Optional.ofNullable(lookedUp.folder());
             now.put(known, state);
             if (found.isPresent() && state instanceof State.Loaded) {
                 from.put(known, found.get());
@@ -197,9 +198,9 @@ public final class RuntimeFolders {
      * How a runtime was found.
      *
      * @param state the state
-     * @param folder the folder the state is of; empty if no folder had the runtime
+     * @param folder the folder the state is of; {@code null} if no folder had the runtime
      */
-    record Found(State state, Optional<Path> folder) {}
+    record Found(State state, @Nullable Path folder) {}
 
     /**
      * Looks for the runtime {@code known} in {@code dirs}, in order, and loads it from the first folder
@@ -207,17 +208,17 @@ public final class RuntimeFolders {
      * Missing}, with its folder, or {@code Missing}.
      */
     static Found lookUp(Known known, List<RuntimesDir> dirs, List<LuceneRuntime> loaded, ClassLoader embedded) {
-        Found best = new Found(new State.Missing(), Optional.empty());
+        Found best = new Found(new State.Missing(), null);
         for (RuntimesDir dir : dirs) {
             Path folder = dir.path().resolve(known.folder());
             Inspection inspection = inspect(folder, known, dir.system(), embedded);
             if (inspection instanceof Inspection.Ready ready) {
                 // The load itself happens once: Lucene 10's can't be undone.
-                return new Found(loadJars(known, ready.jars(), loaded), Optional.of(folder));
+                return new Found(loadJars(known, ready.jars(), loaded), folder);
             }
             State unusable = ((Inspection.Unusable) inspection).state();
             if (best.state() instanceof State.Missing && !(unusable instanceof State.Missing)) {
-                best = new Found(unusable, Optional.of(folder));
+                best = new Found(unusable, folder);
             }
         }
         return best;
@@ -431,10 +432,11 @@ public final class RuntimeFolders {
      * @param sha256 its SHA-256, in lower-case hex
      * @param size its size in bytes
      * @param mavenPath its path on Maven Central, such as {@code
-     *     org/apache/lucene/lucene-core/9.12.3/lucene-core-9.12.3.jar}; empty for leia's own jars,
+     *     org/apache/lucene/lucene-core/9.12.3/lucene-core-9.12.3.jar}; {@code null} for leia's own jars,
      *     which {@code leia.jar} brings
      */
-    public record ListedJar(String name, String sha256, long size, Optional<String> mavenPath) {}
+    public record ListedJar(
+            String name, String sha256, long size, @Nullable String mavenPath) {}
 
     /** The file names that {@code adapter}'s list names, in order. */
     static List<String> listedJars(Path adapter) throws IOException {
@@ -481,8 +483,7 @@ public final class RuntimeFolders {
             } catch (NumberFormatException e) {
                 throw new IOException("not a size: " + fields[2], e);
             }
-            jars.add(new ListedJar(
-                    name, fields[1], size, fields.length == 4 ? Optional.of(fields[3]) : Optional.empty()));
+            jars.add(new ListedJar(name, fields[1], size, fields.length == 4 ? fields[3] : null));
         }
         return jars;
     }

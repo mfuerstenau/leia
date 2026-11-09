@@ -68,7 +68,7 @@ class ServerRuntimesTest {
     void refusesAServerWithoutLucene() throws IOException {
         Path home = Files.createDirectories(tmp.resolve("empty/lib"));
 
-        assertThatThrownBy(() -> ServerRuntimes.load(List.of(home.getParent()), Optional.of(runtimes())))
+        assertThatThrownBy(() -> ServerRuntimes.load(List.of(home.getParent()), List.of(RuntimesDir.user(runtimes()))))
                 .isInstanceOf(ServerException.class)
                 .hasMessageContaining("has no lucene-core jar");
     }
@@ -77,7 +77,7 @@ class ServerRuntimesTest {
     void refusesALuceneThatLeiaHasNoAdapterFor() throws IOException {
         Path home = fakeLib(tmp.resolve("es7"), "lucene-core-8.11.4.jar");
 
-        assertThatThrownBy(() -> ServerRuntimes.load(List.of(home), Optional.of(runtimes())))
+        assertThatThrownBy(() -> ServerRuntimes.load(List.of(home), List.of(RuntimesDir.user(runtimes()))))
                 .isInstanceOf(ServerException.class)
                 .hasMessageContaining("its Lucene is 8.11.4")
                 .hasMessageContaining("Elasticsearch 8 and 9 and OpenSearch 2 and 3");
@@ -89,12 +89,12 @@ class ServerRuntimesTest {
         Path home = fakeLib(tmp.resolve("es"), "lucene-core-9.10.0.jar");
         Path noRuntimes = Files.createDirectories(tmp.resolve("runtimes"));
 
-        assertThatThrownBy(() -> ServerRuntimes.load(List.of(home), Optional.of(noRuntimes)))
+        assertThatThrownBy(() -> ServerRuntimes.load(List.of(home), List.of(RuntimesDir.user(noRuntimes))))
                 .isInstanceOf(ServerException.class)
                 .hasMessageContaining(
                         noRuntimes.resolve("lucene9/leia-lucene9.jar").toString())
                 .hasMessageContaining("--download-runtimes --runtime lucene9");
-        assertThatThrownBy(() -> ServerRuntimes.load(List.of(home), Optional.empty()))
+        assertThatThrownBy(() -> ServerRuntimes.load(List.of(home), List.of()))
                 .isInstanceOf(ServerException.class)
                 .hasMessageContaining("leia has no runtimes folder");
     }
@@ -104,7 +104,7 @@ class ServerRuntimesTest {
         Path other = fakeLib(tmp.resolve("other"), "lucene-core-9.9.0.jar");
         Path server9 = testFile("leia.test.server9");
 
-        assertThatThrownBy(() -> ServerRuntimes.load(List.of(server9, other), Optional.of(runtimes())))
+        assertThatThrownBy(() -> ServerRuntimes.load(List.of(server9, other), List.of(RuntimesDir.user(runtimes()))))
                 .isInstanceOf(ServerException.class)
                 .hasMessageContaining(other.toString())
                 .hasMessageContaining("same major as that of OpenSearch 0.0.0-leiatest");
@@ -116,7 +116,7 @@ class ServerRuntimesTest {
         ServerRuntime server = new ServerRuntime(
                 new Stub(),
                 Path.of("/opt/es"),
-                Optional.of("Elasticsearch 8.15.3"),
+                "Elasticsearch 8.15.3",
                 new LuceneJarVersion("9.11.1", 9),
                 "9.12.3",
                 new ClassLoader("leia-server-lucene9", null) {});
@@ -162,7 +162,7 @@ class ServerRuntimesTest {
         ServerRuntime server = new ServerRuntime(
                 new Stub(),
                 Path.of("/opt/os"),
-                Optional.empty(),
+                null,
                 new LuceneJarVersion("10.1.0", 10),
                 "10.5.2",
                 new ClassLoader("x", null) {});

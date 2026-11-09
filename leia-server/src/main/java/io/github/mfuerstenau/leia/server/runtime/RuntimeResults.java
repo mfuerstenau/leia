@@ -143,6 +143,7 @@ import java.util.function.LongConsumer;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The methods that work on an index with a reader, which a runtime of {@code leia-runtime} reads
@@ -444,7 +445,7 @@ public final class RuntimeResults {
         return new Commit(
                 commit.generation(),
                 commit.segmentsFile(),
-                dir.generation().isPresent() && dir.generation().getAsLong() == commit.generation(),
+                dir.generation() != null && dir.generation() == commit.generation(),
                 commit.version(),
                 commit.segmentCount(),
                 commit.maxDoc(),
@@ -708,12 +709,12 @@ public final class RuntimeResults {
     }
 
     /**
-     * {@code getPostings}, through {@code filter} if present (ADR 0056). A runtime marks deleted
+     * {@code getPostings}, through {@code filter} if there is one (ADR 0056). A runtime marks deleted
      * documents if its Lucene reads their postings, and otherwise gives live documents only, though
      * {@code docFreq} counts them.
      */
     public static GetPostingsResult postings(
-            OpenRuntime open, GetPostingsParams params, Optional<PostingsFilter> filter) throws RpcException {
+            OpenRuntime open, GetPostingsParams params, @Nullable PostingsFilter filter) throws RpcException {
         Terms terms = open.index().terms().orElseThrow(open::notSupported);
         TermParams.checkLimit(params.limit(), GetPostingsParams.MAX_LIMIT);
         if (params.fromDoc() < 0) {
@@ -734,7 +735,7 @@ public final class RuntimeResults {
                 .filter(field -> field.name().equals(params.field()))
                 .noneMatch(field -> field.indexOptions() == RuntimeIndex.IndexOptions.DOCS);
         try {
-            Terms.PostingsPage page = filter.isPresent() && filter.get().onlyMatches()
+            Terms.PostingsPage page = filter != null && filter.onlyMatches()
                     ? matchingPostings(
                             terms,
                             params.field(),
@@ -742,7 +743,7 @@ public final class RuntimeResults {
                             params.fromDoc(),
                             params.limit(),
                             maxPositions,
-                            filter.get().filter())
+                            filter.filter())
                     : terms.postings(
                             params.field(), bytes(params.term()), params.fromDoc(), params.limit(), maxPositions);
             if (page.docFreq() == 0) {
@@ -757,7 +758,9 @@ public final class RuntimeResults {
                                     posting.docId(),
                                     posting.deleted(),
                                     freqs ? OptionalInt.of(posting.freq()) : OptionalInt.empty(),
-                                    filter.map(through -> through.filter().contains(posting.docId())),
+                                    filter == null
+                                            ? Optional.empty()
+                                            : Optional.of(filter.filter().contains(posting.docId())),
                                     params.maxPositions().isPresent()
                                             ? Optional.of(posting.positions().stream()
                                                     .map(RuntimeResults::position)
@@ -1131,7 +1134,7 @@ public final class RuntimeResults {
         if (patternParam.isPresent()) {
             FilterPattern filterPattern = patternParam.get();
             Optional<Set<String>> fields = filterPattern.fields().map(Set::copyOf);
-            StoredScan.StoredSource source = storedSource(open, cache, fields, includeDeleted);
+            StoredScan.StoredSource source = storedSource(open, cache, fields.orElse(null), includeDeleted);
             Pattern pattern = StartStoredScanHandler.pattern(filterPattern.pattern(), filterPattern.caseInsensitive());
             return new JobStarted(jobs.start(
                     "filter by /" + pattern + "/" + (filterPattern.caseInsensitive() ? "i" : "")
@@ -1210,9 +1213,9 @@ public final class RuntimeResults {
      * The fields to rebuild: those {@code given}, which must have terms or points, or else every one
      * that has, in the order of their numbers.
      */
-    private static List<RuntimeIndex.Field> rebuiltFields(RuntimeIndex index, Optional<List<String>> given)
+    private static List<RuntimeIndex.Field> rebuiltFields(RuntimeIndex index, @Nullable List<String> given)
             throws RpcException {
-        if (given.isEmpty()) {
+        if (given == null) {
             return index.fields().stream()
                     .filter(RuntimeResults::rebuildable)
                     .sorted(Comparator.comparingInt(RuntimeIndex.Field::number))
@@ -1223,7 +1226,7 @@ public final class RuntimeResults {
             byName.put(field.name(), field);
         }
         List<RuntimeIndex.Field> fields = new ArrayList<>();
-        for (String name : given.get()) {
+        for (String name : given) {
             RuntimeIndex.Field field = byName.get(name);
             if (field == null) {
                 throw new RpcException(ErrorCode.FIELD_NOT_FOUND, "No field '" + name + "' in the index");
@@ -1249,7 +1252,8 @@ public final class RuntimeResults {
         Rebuild rebuild = open.index().rebuild().orElseThrow(open::notSupported);
         int docId = params.docId();
         checkDocId(open.index(), docId);
-        List<RuntimeIndex.Field> fields = rebuiltFields(open.index(), params.fields());
+        List<RuntimeIndex.Field> fields =
+                rebuiltFields(open.index(), params.fields().orElse(null));
         List<String> names = fields.stream().map(RuntimeIndex.Field::name).toList();
         OptionalLong total;
         try {
@@ -1262,7 +1266,7 @@ public final class RuntimeResults {
                         + params.fields().map(given -> ", fields " + given).orElse("")
                         + withLucene(open),
                 ReconstructResult.class,
-                new StartReconstructHandler.Count(total),
+                new StartReconstructHandler.Count(Optionals.orNull(total)),
                 progress -> {
                     long start = System.nanoTime();
                     try {
@@ -1510,19 +1514,19 @@ public final class RuntimeResults {
     }
 
     /**
-     * {@code startStoredScan}: the stored values of the documents in {@code fields} (all if empty)
+     * {@code startStoredScan}: the stored values of the documents in {@code fields} (all if {@code null})
      * for {@link StoredScan#scan}, read a segment at a time through {@link Documents#storedValues(int,
-     * Optional, boolean, IntUnaryOperator, Consumer, LongConsumer)} (ADR 0055, ADR 0114). Of a segment
+     * Set, boolean, IntUnaryOperator, Consumer, LongConsumer)} (ADR 0055, ADR 0114). Of a segment
      * the cache knows, only the documents that store one of the fields are read, and none if no
      * document does; the cache is looked up as the documents are read, never filled.
      */
     public static StoredScan.StoredSource storedSource(
-            OpenRuntime open, StoredFieldsCache cache, Optional<Set<String>> fields, boolean includeDeleted)
+            OpenRuntime open, StoredFieldsCache cache, @Nullable Set<String> fields, boolean includeDeleted)
             throws RpcException {
         RuntimeIndex index = open.index();
         Documents documents = index.documents().orElseThrow(open::notSupported);
-        if (fields.isPresent()) {
-            for (String field : fields.get()) {
+        if (fields != null) {
+            for (String field : fields) {
                 checkField(index, field);
             }
         }
@@ -1545,7 +1549,7 @@ public final class RuntimeResults {
                         if (next.applyAsInt(0) < info.maxDoc()) {
                             documents.storedValues(
                                     segment,
-                                    fields.orElse(null),
+                                    fields,
                                     includeDeleted,
                                     next,
                                     document -> sink.accept(new StoredScan.Document(

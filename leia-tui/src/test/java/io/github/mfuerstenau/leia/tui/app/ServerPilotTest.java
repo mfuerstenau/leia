@@ -50,8 +50,7 @@ class ServerPilotTest {
     void readsTheServersIndexAndNamesTheServer() throws Exception {
         Path server = testFile("leia.test.server9");
         Path index = testFile("leia.test.server9.index");
-        try (LeiaBackend backend =
-                LeiaBackend.start(Optional.of(testFile("leia.test.runtimes")), List.of(), List.of(server))) {
+        try (LeiaBackend backend = LeiaBackend.start(testFile("leia.test.runtimes"), List.of(), List.of(server))) {
             App app = new App(
                             backend.call(Methods.VERSION, new VersionParams()).get(),
                             null,

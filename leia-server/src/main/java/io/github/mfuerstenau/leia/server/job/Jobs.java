@@ -9,6 +9,7 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
@@ -20,6 +21,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Long-running operations, each on its own daemon thread (ADR 0005). A job reports progress through
@@ -62,9 +64,15 @@ public final class Jobs {
      * A job's state, as a poll sees it.
      *
      * @param progress how far the job has got, such as terms scanned
-     * @param result the outcome; empty while the job runs
+     * @param result the outcome; {@code null} while the job runs
      */
-    public record Poll<R>(long progress, Optional<R> result) {}
+    public record Poll<R>(long progress, @Nullable R result) {
+
+        /** The outcome, empty while the job runs. */
+        public Optional<R> outcome() {
+            return Optional.ofNullable(result);
+        }
+    }
 
     /**
      * Starts {@code work} on a new thread.
@@ -74,7 +82,7 @@ public final class Jobs {
      * @return the job's id
      */
     public <R> long start(String description, Class<R> resultType, Work<R> work) {
-        return start(description, resultType, Optional.empty(), work);
+        return startJob(description, resultType, null, work);
     }
 
     /**
@@ -87,10 +95,10 @@ public final class Jobs {
      * @return the job's id
      */
     public <R> long start(String description, Class<R> resultType, Object attachment, Work<R> work) {
-        return start(description, resultType, Optional.of(attachment), work);
+        return startJob(description, resultType, Objects.requireNonNull(attachment), work);
     }
 
-    private <R> long start(String description, Class<R> resultType, Optional<Object> attachment, Work<R> work) {
+    private <R> long startJob(String description, Class<R> resultType, @Nullable Object attachment, Work<R> work) {
         long id = nextId++;
         Job<R> job = new Job<>(id, description, resultType, attachment);
         byId.put(id, job);
@@ -112,11 +120,11 @@ public final class Jobs {
             throw notFound(id);
         }
         if (!job.outcome.isDone()) {
-            return new Poll<>(job.progress, Optional.empty());
+            return new Poll<>(job.progress, null);
         }
         byId.remove(id);
         try {
-            return new Poll<>(job.progress, Optional.of(resultType.cast(job.outcome.join())));
+            return new Poll<>(job.progress, resultType.cast(job.outcome.join()));
         } catch (CompletionException e) {
             if (e.getCause() instanceof RpcException failure) {
                 throw failure;
@@ -137,7 +145,10 @@ public final class Jobs {
         if (job == null || job.resultType != resultType) {
             throw notFound(id);
         }
-        return job.attachment.filter(type::isInstance).map(type::cast).orElseThrow(() -> notFound(id));
+        if (!type.isInstance(job.attachment)) {
+            throw notFound(id);
+        }
+        return type.cast(job.attachment);
     }
 
     /**
@@ -194,14 +205,14 @@ public final class Jobs {
         final long id;
         final String description;
         final Class<R> resultType;
-        final Optional<Object> attachment;
+        final @Nullable Object attachment;
         /** Completed by the job's thread only, when the work has returned or failed. */
         final CompletableFuture<R> outcome = new CompletableFuture<>();
 
         volatile long progress;
         volatile boolean cancelled;
 
-        Job(long id, String description, Class<R> resultType, Optional<Object> attachment) {
+        Job(long id, String description, Class<R> resultType, @Nullable Object attachment) {
             this.id = id;
             this.description = description;
             this.resultType = resultType;

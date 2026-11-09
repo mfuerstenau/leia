@@ -80,7 +80,7 @@ class SessionPilotTest {
     @BeforeEach
     void start() throws Exception {
         // The old runtimes' folders that the build puts together (ADR 0073); Lucene 10 is on the classpath.
-        backend = LeiaBackend.start(Optional.of(Path.of(System.getProperty("leia.test.runtimes"))), List.of());
+        backend = LeiaBackend.start(Path.of(System.getProperty("leia.test.runtimes")), List.of());
         VersionResult version =
                 backend.call(Methods.VERSION, new VersionParams()).get();
         historyFile = tmp.resolve("state").resolve("history");

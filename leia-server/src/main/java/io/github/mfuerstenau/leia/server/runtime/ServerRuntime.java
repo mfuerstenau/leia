@@ -14,6 +14,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.LongConsumer;
+import org.jspecify.annotations.Nullable;
 
 /**
  * A runtime on the Lucene of an Elasticsearch or OpenSearch installation, with its codecs and formats
@@ -28,7 +29,7 @@ public final class ServerRuntime implements LuceneRuntime {
 
     private final LuceneRuntime delegate;
     private final Path home;
-    private final Optional<String> label;
+    private final @Nullable String label;
     private final LuceneJarVersion lucene;
     private final String builtFor;
     private final ClassLoader loader;
@@ -37,7 +38,7 @@ public final class ServerRuntime implements LuceneRuntime {
      * @param delegate leia's adapter, loaded with the installation's Lucene
      * @param home the installation, or its {@code lib/} as it was given
      * @param label the product and version, such as {@code Elasticsearch 8.15.3}, if {@code lib/}
-     *     says
+     *     says; {@code null} if not
      * @param lucene the version of the installation's {@code lucene-core}
      * @param builtFor the Lucene version the adapter is built for, such as {@code 9.12.3}
      * @param loader the class loader of the adapter and the server's jars
@@ -45,7 +46,7 @@ public final class ServerRuntime implements LuceneRuntime {
     ServerRuntime(
             LuceneRuntime delegate,
             Path home,
-            Optional<String> label,
+            @Nullable String label,
             LuceneJarVersion lucene,
             String builtFor,
             ClassLoader loader) {
@@ -64,12 +65,12 @@ public final class ServerRuntime implements LuceneRuntime {
 
     /** The product and version, such as {@code Elasticsearch 8.15.3}; empty if {@code lib/} doesn't say. */
     public Optional<String> label() {
-        return label;
+        return Optional.ofNullable(label);
     }
 
     /** How a person reads which server it is: its {@link #label()}, or else its {@link #home()}. */
     public String name() {
-        return label.orElseGet(() -> "the server " + home);
+        return label != null ? label : "the server " + home;
     }
 
     /** The version of the installation's {@code lucene-core} jar. */

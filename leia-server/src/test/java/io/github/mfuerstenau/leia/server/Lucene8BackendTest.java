@@ -80,12 +80,14 @@ import io.github.mfuerstenau.leia.protocol.search.StartSearchParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetTermsResult;
 import io.github.mfuerstenau.leia.protocol.terms.TermEntry;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -272,8 +274,7 @@ class Lucene8BackendTest {
     @Test
     void marksNothingForANearestVector() throws Exception {
         open(testIndex("lucene8to9"));
-        RuntimeHighlights.marksNothingWithoutTerms(
-                backend, knn("embedding", NORTH, OptionalInt.of(2), Optional.empty()), 8);
+        RuntimeHighlights.marksNothingWithoutTerms(backend, knn("embedding", NORTH, 2, null), 8);
     }
 
     @ParameterizedTest
@@ -355,23 +356,22 @@ class Lucene8BackendTest {
                 Optional.of(knn));
     }
 
-    private static SearchQuery knn(String field, KnnVector target, OptionalInt k, Optional<String> filter) {
+    private static SearchQuery knn(String field, KnnVector target, @Nullable Integer k, @Nullable String filter) {
         return knn(new KnnQuery(
                 field,
                 OptionalInt.empty(),
                 Optional.of(target),
-                k,
-                k.isEmpty(),
-                filter.map(expression ->
-                        new ClassicQuery(expression, "title", QueryOperator.OR, DEFAULTS, 2, false, false, STANDARD))));
+                Optionals.optionalInt(k),
+                k == null,
+                Optional.ofNullable(filter)
+                        .map(expression -> new ClassicQuery(
+                                expression, "title", QueryOperator.OR, DEFAULTS, 2, false, false, STANDARD))));
     }
 
     @Test
     void explainsANearestVector() throws Exception {
         open(testIndex("lucene8to9"));
-        for (SearchQuery query : List.of(
-                knn("embedding", NORTH, OptionalInt.of(2), Optional.empty()),
-                knn("embedding", NORTH, OptionalInt.empty(), Optional.empty()))) {
+        for (SearchQuery query : List.of(knn("embedding", NORTH, 2, null), knn("embedding", NORTH, null, null))) {
             for (Hit hit : backend.search(query, 2).hits()) {
                 RuntimeExplains.explainsTheHit(backend, query, hit, true);
             }
@@ -461,12 +461,12 @@ class Lucene8BackendTest {
     @Test
     void searchesTheNearestVectors() throws Exception {
         open(testIndex("lucene8to9"));
-        SearchResults approximate = backend.search(knn("embedding", NORTH, OptionalInt.of(2), Optional.empty()), 10);
+        SearchResults approximate = backend.search(knn("embedding", NORTH, 2, null), 10);
         assertThat(approximate.totalHits()).isEqualTo(2);
         assertThat(approximate.hits()).extracting(Hit::docId).containsExactly(8, 9);
         assertThat(approximate.hits().getFirst().score()).isEqualTo(1f);
 
-        SearchResults exact = backend.search(knn("embedding", NORTH, OptionalInt.empty(), Optional.empty()), 10);
+        SearchResults exact = backend.search(knn("embedding", NORTH, null, null), 10);
         assertThat(exact.hits())
                 .extracting(Hit::docId, Hit::score)
                 .containsExactly(
@@ -475,12 +475,10 @@ class Lucene8BackendTest {
                         tuple(10, 0.5f));
 
         // Only the documents that match the filter are searched.
-        assertThat(backend.search(knn("embedding", NORTH, OptionalInt.of(3), Optional.of("east")), 10)
-                        .hits())
+        assertThat(backend.search(knn("embedding", NORTH, 3, "east"), 10).hits())
                 .extracting(Hit::docId)
                 .containsExactly(9, 10);
-        assertThat(backend.search(knn("embedding", NORTH, OptionalInt.empty(), Optional.of("east")), 10)
-                        .hits())
+        assertThat(backend.search(knn("embedding", NORTH, null, "east"), 10).hits())
                 .extracting(Hit::docId)
                 .containsExactly(9, 10);
 
@@ -493,7 +491,7 @@ class Lucene8BackendTest {
 
         // With the stored fields asked for.
         SearchResults withFields = backend.search(new StartSearchParams(
-                knn("embedding", NORTH, OptionalInt.of(1), Optional.empty()),
+                knn("embedding", NORTH, 1, null),
                 BM25,
                 List.of(new SortKey(Optional.empty(), Optional.of(new ScoreSort(false)), Optional.empty())),
                 0,
@@ -509,11 +507,10 @@ class Lucene8BackendTest {
     @Test
     void refusesKnnQueriesThatDoNotFit() throws Exception {
         open(testIndex("lucene8to9"));
-        fails(knn("nothing", NORTH, OptionalInt.of(2), Optional.empty()), ErrorCode.FIELD_NOT_FOUND);
-        assertThat(fails(knn("body", NORTH, OptionalInt.of(2), Optional.empty()), ErrorCode.INVALID_PARAMS)
-                        .getMessage())
+        fails(knn("nothing", NORTH, 2, null), ErrorCode.FIELD_NOT_FOUND);
+        assertThat(fails(knn("body", NORTH, 2, null), ErrorCode.INVALID_PARAMS).getMessage())
                 .isEqualTo("Invalid params: the field 'body' has no KNN vectors");
-        fails(knn("embedding", NORTH, OptionalInt.of(0), Optional.empty()), ErrorCode.INVALID_PARAMS);
+        fails(knn("embedding", NORTH, 0, null), ErrorCode.INVALID_PARAMS);
         fails(
                 knn(new KnnQuery(
                         "embedding",
@@ -536,27 +533,26 @@ class Lucene8BackendTest {
                                 knn(
                                         "embedding",
                                         new KnnVector(VectorEncoding.FLOAT32, List.of(1f, 0f, 0f), List.of()),
-                                        OptionalInt.of(2),
-                                        Optional.empty()),
+                                        2,
+                                        null),
                                 ErrorCode.INVALID_PARAMS)
                         .getMessage())
                 .isEqualTo("Invalid params: the field 'embedding' has vectors of 4 dimensions, not 3");
-        assertThat(fails(knn("code", NORTH, OptionalInt.of(2), Optional.empty()), ErrorCode.INVALID_PARAMS)
-                        .getMessage())
+        assertThat(fails(knn("code", NORTH, 2, null), ErrorCode.INVALID_PARAMS).getMessage())
                 .isEqualTo("Invalid params: the field 'code' has vectors of bytes, not of floats");
         fails(
                 knn(
                         "embedding",
                         new KnnVector(VectorEncoding.FLOAT32, List.of(Float.NaN, 0f, 0f, 0f), List.of()),
-                        OptionalInt.of(2),
-                        Optional.empty()),
+                        2,
+                        null),
                 ErrorCode.INVALID_PARAMS);
         assertThat(fails(
                                 knn(
                                         "embedding",
                                         new KnnVector(VectorEncoding.FLOAT32, List.of(0f, 0f, 0f, 0f), List.of()),
-                                        OptionalInt.of(2),
-                                        Optional.empty()),
+                                        2,
+                                        null),
                                 ErrorCode.INVALID_PARAMS)
                         .getMessage())
                 .contains("compares by cosine");
@@ -575,13 +571,13 @@ class Lucene8BackendTest {
                                 ErrorCode.INVALID_PARAMS)
                         .getMessage())
                 .isEqualTo("Invalid params: document 10 has no vector in the field 'code'");
-        fails(knn("embedding", NORTH, OptionalInt.of(2), Optional.of("title:(")), ErrorCode.INVALID_QUERY);
+        fails(knn("embedding", NORTH, 2, "title:("), ErrorCode.INVALID_QUERY);
     }
 
     @Test
     void refusesKnnOnAnIndexWithoutVectors() throws Exception {
         open(testIndex("lucene7"));
-        fails(knn("body", NORTH, OptionalInt.of(2), Optional.empty()), ErrorCode.NOT_SUPPORTED);
+        fails(knn("body", NORTH, 2, null), ErrorCode.NOT_SUPPORTED);
     }
 
     private RpcException fails(SearchQuery query, ErrorCode code) {
@@ -826,29 +822,25 @@ class Lucene8BackendTest {
                 .hasMessage("Invalid params: autoGeneratePhraseQueries needs splitOnWhitespace");
         assertThat(backend.fails(
                         Methods.START_SEARCH,
-                        params(classic("x", dates(List.of(), Optional.of("en_US"), Optional.empty()), 2, false, false)),
+                        params(classic("x", dates(List.of(), "en_US", null), 2, false, false)),
                         ErrorCode.INVALID_PARAMS))
                 .hasMessage("Invalid params: 'en_US' is not a BCP 47 language tag, such as en-US");
         assertThat(backend.fails(
                         Methods.START_SEARCH,
-                        params(classic("x", dates(List.of(), Optional.empty(), Optional.of("Mars")), 2, false, false)),
+                        params(classic("x", dates(List.of(), null, "Mars"), 2, false, false)),
                         ErrorCode.INVALID_PARAMS))
                 .hasMessage("Invalid params: 'Mars' is not a time zone, such as UTC, Europe/Berlin or +02:00");
         FieldDateResolution body = new FieldDateResolution("body", DateResolution.DAY);
         assertThat(backend.fails(
                         Methods.START_SEARCH,
-                        params(classic(
-                                "x", dates(List.of(body, body), Optional.empty(), Optional.empty()), 2, false, false)),
+                        params(classic("x", dates(List.of(body, body), null, null), 2, false, false)),
                         ErrorCode.INVALID_PARAMS))
                 .hasMessage("Invalid params: the field 'body' has its date resolution listed twice");
         backend.fails(
                 Methods.START_SEARCH,
                 params(classic(
                         "x",
-                        dates(
-                                List.of(new FieldDateResolution("nothing", DateResolution.DAY)),
-                                Optional.empty(),
-                                Optional.empty()),
+                        dates(List.of(new FieldDateResolution("nothing", DateResolution.DAY)), null, null),
                         2,
                         false,
                         false)),
@@ -879,15 +871,23 @@ class Lucene8BackendTest {
     }
 
     private static ParserOptions dates(
-            List<FieldDateResolution> fields, Optional<String> locale, Optional<String> timeZone) {
-        return new ParserOptions(false, 0, 0, true, Optional.empty(), fields, locale, timeZone);
+            List<FieldDateResolution> fields, @Nullable String locale, @Nullable String timeZone) {
+        return new ParserOptions(
+                false,
+                0,
+                0,
+                true,
+                Optional.empty(),
+                fields,
+                Optional.ofNullable(locale),
+                Optional.ofNullable(timeZone));
     }
 
     /** More-Like-This, by a document and by a text, with the terms it chose (ADR 0066). */
     @Test
     void findsSimilarDocuments() throws Exception {
         open(testIndex("lucene8"));
-        SearchQuery byDoc = RealBackend.moreLikeThis(OptionalInt.of(0), Optional.empty());
+        SearchQuery byDoc = RealBackend.moreLikeThis(0, null);
         assertThat(searchFilterAndExplain(byDoc)).startsWith(0);
         SearchResults results = backend.search(byDoc, 10);
         assertThat(results.query())
@@ -896,7 +896,7 @@ class Lucene8BackendTest {
                 .extracting(LikeTerm::term, LikeTerm::tf, LikeTerm::docFreq)
                 .containsExactly("gamma", 2, 1);
 
-        SearchQuery byText = RealBackend.moreLikeThis(OptionalInt.empty(), Optional.of("gamma"));
+        SearchQuery byText = RealBackend.moreLikeThis(null, "gamma");
         assertThat(searchFilterAndExplain(byText)).containsExactly(0);
         assertThat(backend.search(byText, 10).moreLikeThisTerms().orElseThrow())
                 .extracting(LikeTerm::term)
@@ -911,14 +911,8 @@ class Lucene8BackendTest {
         assertThat(backend.search(RealBackend.classic("gamma"), 10).moreLikeThisTerms())
                 .isEmpty();
 
-        backend.fails(
-                Methods.START_SEARCH,
-                params(RealBackend.moreLikeThis(OptionalInt.of(0), Optional.of("gamma"))),
-                ErrorCode.INVALID_PARAMS);
-        backend.fails(
-                Methods.START_SEARCH,
-                params(RealBackend.moreLikeThis(OptionalInt.of(8), Optional.empty())),
-                ErrorCode.DOC_NOT_FOUND);
+        backend.fails(Methods.START_SEARCH, params(RealBackend.moreLikeThis(0, "gamma")), ErrorCode.INVALID_PARAMS);
+        backend.fails(Methods.START_SEARCH, params(RealBackend.moreLikeThis(8, null)), ErrorCode.DOC_NOT_FOUND);
         backend.fails(Methods.START_SEARCH, params(like("nothing")), ErrorCode.FIELD_NOT_FOUND);
         RpcException stored = backend.fails(Methods.START_SEARCH, params(like("price")), ErrorCode.INVALID_PARAMS);
         assertThat(stored)
@@ -935,9 +929,8 @@ class Lucene8BackendTest {
 
     /** More-Like-This by text from {@code field}. */
     private static SearchQuery like(String field) {
-        MoreLikeThisQuery body = RealBackend.moreLikeThis(OptionalInt.empty(), Optional.of("gamma"))
-                .moreLikeThis()
-                .orElseThrow();
+        MoreLikeThisQuery body =
+                RealBackend.moreLikeThis(null, "gamma").moreLikeThis().orElseThrow();
         return new SearchQuery(
                 Optional.empty(),
                 Optional.empty(),
@@ -965,103 +958,84 @@ class Lucene8BackendTest {
 
     private static SearchQuery docValues(
             String field,
-            Optional<DocValuesNumber> number,
-            Optional<List<BytesValue>> values,
-            Optional<DocValuesRange> range,
-            Optional<BytesValue> prefix) {
-        return RealBackend.docValues(new DocValuesQuery(field, number, values, range, prefix));
+            @Nullable DocValuesNumber number,
+            @Nullable List<BytesValue> values,
+            @Nullable DocValuesRange range,
+            @Nullable BytesValue prefix) {
+        return RealBackend.docValues(new DocValuesQuery(
+                field,
+                Optional.ofNullable(number),
+                Optional.ofNullable(values),
+                Optional.ofNullable(range),
+                Optional.ofNullable(prefix)));
     }
 
     /** Doc values queries of each type (ADR 0066), on what leia-lucene9's writer puts in them. */
     @Test
     void searchesDocValues() throws Exception {
         open(testIndex("lucene8"));
-        Optional<DocValuesNumber> longs = Optional.of(DocValuesNumber.LONG);
+        DocValuesNumber longs = DocValuesNumber.LONG;
         // dv_num is i, but 400 for document 4 (3 of the index), and none for document 3.
         assertThat(searchFilterAndExplain(docValues(
                         "dv_num",
                         longs,
-                        Optional.empty(),
-                        Optional.of(new DocValuesRange(Optional.of(text("2")), Optional.of(text("6")), true, true)),
-                        Optional.empty())))
+                        null,
+                        new DocValuesRange(Optional.of(text("2")), Optional.of(text("6")), true, true),
+                        null)))
                 .containsExactlyInAnyOrder(5, 6);
-        assertThat(searchFilterAndExplain(docValues(
-                        "dv_num", longs, Optional.of(List.of(text("400"))), Optional.empty(), Optional.empty())))
+        assertThat(searchFilterAndExplain(docValues("dv_num", longs, List.of(text("400")), null, null)))
                 .containsExactly(3);
-        assertThat(searchFilterAndExplain(docValues(
-                        "dv_sorted_num",
-                        longs,
-                        Optional.of(List.of(text("-5"), text("-7"))),
-                        Optional.empty(),
-                        Optional.empty())))
+        assertThat(searchFilterAndExplain(
+                        docValues("dv_sorted_num", longs, List.of(text("-5"), text("-7")), null, null)))
                 .containsExactlyInAnyOrder(5, 7);
         assertThat(searchFilterAndExplain(docValues(
                         "dv_num",
-                        Optional.of(DocValuesNumber.SORTABLE_DOUBLE),
-                        Optional.empty(),
-                        Optional.of(new DocValuesRange(Optional.of(text("0")), Optional.of(text("1")), true, true)),
-                        Optional.empty())))
+                        DocValuesNumber.SORTABLE_DOUBLE,
+                        null,
+                        new DocValuesRange(Optional.of(text("0")), Optional.of(text("1")), true, true),
+                        null)))
                 // As sortable bits, a small long is a tiny positive double.
                 .containsExactlyInAnyOrder(0, 3, 5, 6, 7);
-        assertThat(searchFilterAndExplain(docValues(
-                        "dv_sorted",
-                        Optional.empty(),
-                        Optional.of(List.of(text("s1"))),
-                        Optional.empty(),
-                        Optional.empty())))
+        assertThat(searchFilterAndExplain(docValues("dv_sorted", null, List.of(text("s1")), null, null)))
                 .containsExactlyInAnyOrder(0, 3, 7);
-        assertThat(searchFilterAndExplain(docValues(
-                        "dv_set", Optional.empty(), Optional.empty(), Optional.empty(), Optional.of(text("y5")))))
+        assertThat(searchFilterAndExplain(docValues("dv_set", null, null, null, text("y5"))))
                 .containsExactly(5);
         // dv_bin is b<i>: 62 is b, 35 to 37 are 5 to 7.
         assertThat(searchFilterAndExplain(docValues(
                         "dv_bin",
-                        Optional.empty(),
-                        Optional.empty(),
-                        Optional.of(new DocValuesRange(
-                                Optional.of(new BytesValue("6235", true)), Optional.of(text("b7")), true, false)),
-                        Optional.empty())))
+                        null,
+                        null,
+                        new DocValuesRange(
+                                Optional.of(new BytesValue("6235", true)), Optional.of(text("b7")), true, false),
+                        null)))
                 .containsExactlyInAnyOrder(5, 6);
 
         backend.fails(
                 Methods.START_SEARCH,
-                params(docValues(
-                        "nothing", longs, Optional.of(List.of(text("1"))), Optional.empty(), Optional.empty())),
+                params(docValues("nothing", longs, List.of(text("1")), null, null)),
                 ErrorCode.FIELD_NOT_FOUND);
         RpcException none = backend.fails(
                 Methods.START_SEARCH,
-                params(docValues("body", longs, Optional.of(List.of(text("1"))), Optional.empty(), Optional.empty())),
+                params(docValues("body", longs, List.of(text("1")), null, null)),
                 ErrorCode.INVALID_PARAMS);
         assertThat(none).hasMessage("Invalid params: the field 'body' has no doc values");
         backend.fails(
+                Methods.START_SEARCH, params(docValues("dv_num", longs, null, null, null)), ErrorCode.INVALID_PARAMS);
+        backend.fails(
                 Methods.START_SEARCH,
-                params(docValues("dv_num", longs, Optional.empty(), Optional.empty(), Optional.empty())),
+                params(docValues("dv_num", longs, null, null, text("1"))),
                 ErrorCode.INVALID_PARAMS);
         backend.fails(
                 Methods.START_SEARCH,
-                params(docValues("dv_num", longs, Optional.empty(), Optional.empty(), Optional.of(text("1")))),
+                params(docValues("dv_num", longs, List.of(new BytesValue("01", true)), null, null)),
                 ErrorCode.INVALID_PARAMS);
         backend.fails(
                 Methods.START_SEARCH,
-                params(docValues(
-                        "dv_num",
-                        longs,
-                        Optional.of(List.of(new BytesValue("01", true))),
-                        Optional.empty(),
-                        Optional.empty())),
-                ErrorCode.INVALID_PARAMS);
-        backend.fails(
-                Methods.START_SEARCH,
-                params(docValues(
-                        "dv_bin",
-                        Optional.empty(),
-                        Optional.of(List.of(new BytesValue("zz", true))),
-                        Optional.empty(),
-                        Optional.empty())),
+                params(docValues("dv_bin", null, List.of(new BytesValue("zz", true)), null, null)),
                 ErrorCode.INVALID_PARAMS);
         RpcException binary = backend.fails(
                 Methods.START_SEARCH,
-                params(docValues("dv_bin", longs, Optional.of(List.of(text("1"))), Optional.empty(), Optional.empty())),
+                params(docValues("dv_bin", longs, List.of(text("1")), null, null)),
                 ErrorCode.INVALID_PARAMS);
         assertThat(binary)
                 .hasMessage("Invalid params: the field 'dv_bin' has BINARY doc values, which hold bytes, not numbers");

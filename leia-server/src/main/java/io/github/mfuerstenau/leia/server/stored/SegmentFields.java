@@ -2,8 +2,8 @@ package io.github.mfuerstenau.leia.server.stored;
 
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
+import org.jspecify.annotations.Nullable;
 import org.roaringbitmap.RoaringBitmap;
 
 /**
@@ -20,15 +20,15 @@ record SegmentFields(int maxDoc, Map<String, RoaringBitmap> fields) {
     }
 
     /**
-     * The documents with a stored value in one of {@code names}, or in any field if empty (ADR 0114);
+     * The documents with a stored value in one of {@code names}, or in any field if {@code null} (ADR 0114);
      * a new bitmap.
      */
-    RoaringBitmap docsWithAny(Optional<Set<String>> names) {
-        if (names.isEmpty()) {
+    RoaringBitmap docsWithAny(@Nullable Set<String> names) {
+        if (names == null) {
             return RoaringBitmap.or(fields.values().iterator());
         }
         return RoaringBitmap.or(
-                names.get().stream().map(fields::get).filter(Objects::nonNull).iterator());
+                names.stream().map(fields::get).filter(Objects::nonNull).iterator());
     }
 
     /** About how many bytes it takes in memory. */

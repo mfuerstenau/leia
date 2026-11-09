@@ -28,6 +28,6 @@ public final class GetAutoStopWordsHandler implements MethodHandler<JobParams, G
     @Override
     public GetAutoStopWordsResult handle(JobParams params) throws RpcException {
         Jobs.Poll<AutoStopWords> poll = jobs.poll(params.jobId(), AutoStopWords.class);
-        return new GetAutoStopWordsResult(poll.progress(), poll.result());
+        return new GetAutoStopWordsResult(poll.progress(), poll.outcome());
     }
 }

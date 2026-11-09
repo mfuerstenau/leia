@@ -89,7 +89,7 @@ final class RuntimeRebuilds {
                     .allSatisfy(point -> assertThat(point.dimensions()).hasSize(1));
         }
 
-        ReconstructResult all = backend.reconstruct(0, Optional.empty());
+        ReconstructResult all = backend.reconstruct(0, null);
         assertThat(all.fields())
                 .extracting(ReconstructedField::field)
                 .containsExactlyElementsOf(indexFields.stream()

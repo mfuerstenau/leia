@@ -122,6 +122,7 @@ import io.github.mfuerstenau.leia.protocol.terms.GetPostingsParams;
 import io.github.mfuerstenau.leia.protocol.terms.GetPostingsResult;
 import io.github.mfuerstenau.leia.protocol.terms.Posting;
 import io.github.mfuerstenau.leia.protocol.terms.PostingsFilter;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -138,6 +139,7 @@ import java.util.OptionalInt;
 import java.util.stream.Stream;
 import org.apache.lucene.document.DoublePoint;
 import org.apache.lucene.document.IntPoint;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Nested;
@@ -392,7 +394,7 @@ class DemoIndexTest {
         }
 
         private Map<String, ReconstructedField> rebuilt(int docId, List<String> fields) throws Exception {
-            return backend.reconstruct(docId, Optional.of(fields)).fields().stream()
+            return backend.reconstruct(docId, fields).fields().stream()
                     .collect(java.util.stream.Collectors.toMap(ReconstructedField::field, field -> field));
         }
     }
@@ -507,34 +509,18 @@ class DemoIndexTest {
 
         @Test
         void moreLikeDocument223() throws Exception {
-            SearchResults like = backend.search(
-                    moreLikeThis(OptionalInt.of(223), Optional.empty(), 2, 5, OptionalInt.empty(), false, 0, List.of()),
-                    10);
+            SearchResults like = backend.search(moreLikeThis(223, null, 2, 5, null, false, 0, List.of()), 10);
 
             assertThat(like.totalHits()).isEqualTo(485);
             assertThat(like.hits().getFirst().docId()).isEqualTo(223);
 
-            SearchResults boosted = backend.search(
-                    moreLikeThis(OptionalInt.of(223), Optional.empty(), 1, 5, OptionalInt.of(50), true, 0, List.of()),
-                    10);
+            SearchResults boosted = backend.search(moreLikeThis(223, null, 1, 5, 50, true, 0, List.of()), 10);
             assertThat(boosted.rewrittenQuery()).contains("^");
 
-            SearchResults deleted = backend.search(
-                    moreLikeThis(OptionalInt.of(37), Optional.empty(), 1, 1, OptionalInt.empty(), false, 0, List.of()),
-                    500);
+            SearchResults deleted = backend.search(moreLikeThis(37, null, 1, 1, null, false, 0, List.of()), 500);
             assertThat(deleted.totalHits()).isPositive();
             assertThat(deleted.hits()).extracting(Hit::docId).doesNotContain(37);
-            assertThat(backend.search(
-                                    moreLikeThis(
-                                            OptionalInt.of(0),
-                                            Optional.empty(),
-                                            2,
-                                            5,
-                                            OptionalInt.empty(),
-                                            false,
-                                            0,
-                                            List.of()),
-                                    10)
+            assertThat(backend.search(moreLikeThis(0, null, 2, 5, null, false, 0, List.of()), 10)
                             .totalHits())
                     .isZero();
         }
@@ -833,8 +819,7 @@ class DemoIndexTest {
                     .orElseThrow()
                     .values()
                     .getFirst();
-            SearchResults same =
-                    backend.search(docValues("checksum", null, Optional.of(List.of(checksum)), Optional.empty()), 1000);
+            SearchResults same = backend.search(docValues("checksum", null, List.of(checksum), null), 1000);
             assertThat(same.hits()).extracting(Hit::docId).containsExactly(5);
         }
 
@@ -860,11 +845,11 @@ class DemoIndexTest {
                                     docValues(
                                             "checksum",
                                             null,
-                                            Optional.of(new DocValuesRange(
+                                            new DocValuesRange(
                                                     Optional.of(new BytesValue("80", true)),
                                                     Optional.of(new BytesValue("81", true)),
                                                     true,
-                                                    false))),
+                                                    false)),
                                     1000)
                             .totalHits());
             assertThat(hex.query()).isEqualTo("checksum:[[80] TO [81]}");
@@ -903,30 +888,31 @@ class DemoIndexTest {
                     Optional.of(timeZone));
         }
 
-        private static SearchQuery docValues(String field, DocValuesNumber number, Optional<DocValuesRange> range) {
-            return docValues(field, number, Optional.empty(), range);
+        private static SearchQuery docValues(String field, DocValuesNumber number, @Nullable DocValuesRange range) {
+            return docValues(field, number, null, range);
         }
 
         private static SearchQuery values(String field, String... values) {
             return docValues(
-                    field,
-                    null,
-                    Optional.of(Stream.of(values).map(DemoIndexTest::text).toList()),
-                    Optional.empty());
+                    field, null, Stream.of(values).map(DemoIndexTest::text).toList(), null);
         }
 
         private static SearchQuery docValues(
                 String field,
                 DocValuesNumber number,
-                Optional<List<BytesValue>> values,
-                Optional<DocValuesRange> range) {
+                @Nullable List<BytesValue> values,
+                @Nullable DocValuesRange range) {
             return new SearchQuery(
                     Optional.empty(),
                     Optional.empty(),
                     Optional.empty(),
                     Optional.empty(),
-                    Optional.of(
-                            new DocValuesQuery(field, Optional.ofNullable(number), values, range, Optional.empty())),
+                    Optional.of(new DocValuesQuery(
+                            field,
+                            Optional.ofNullable(number),
+                            Optional.ofNullable(values),
+                            Optional.ofNullable(range),
+                            Optional.empty())),
                     Optional.empty());
         }
 
@@ -941,13 +927,13 @@ class DemoIndexTest {
                     Optional.empty());
         }
 
-        private static Optional<DocValuesRange> range(
-                String lower, String upper, boolean includeLower, boolean includeUpper) {
-            return Optional.of(new DocValuesRange(
+        private static DocValuesRange range(
+                @Nullable String lower, @Nullable String upper, boolean includeLower, boolean includeUpper) {
+            return new DocValuesRange(
                     Optional.ofNullable(lower).map(DemoIndexTest::text),
                     Optional.ofNullable(upper).map(DemoIndexTest::text),
                     includeLower,
-                    includeUpper));
+                    includeUpper);
         }
 
         private static List<Explanation> flatten(Explanation explanation) {
@@ -1047,8 +1033,8 @@ class DemoIndexTest {
 
         @Test
         void theNearestToDocumentFortyTwo() throws Exception {
-            SearchResults approximate = backend.search(knn("embedding", 42, OptionalInt.of(10), false), 100);
-            SearchResults exact = backend.search(knn("embedding", 42, OptionalInt.empty(), true), 10);
+            SearchResults approximate = backend.search(knn("embedding", 42, 10, false), 100);
+            SearchResults exact = backend.search(knn("embedding", 42, null, true), 10);
 
             assertThat(approximate.totalHits()).isEqualTo(10);
             assertThat(approximate.hits().getFirst().docId()).isEqualTo(42);
@@ -1064,7 +1050,7 @@ class DemoIndexTest {
 
         @Test
         void theNearestFingerprintsToDocumentFortyTwo() throws Exception {
-            SearchResults exact = backend.search(knn("fingerprint", 42, OptionalInt.empty(), true), 3);
+            SearchResults exact = backend.search(knn("fingerprint", 42, null, true), 3);
 
             assertThat(exact.hits().getFirst().docId()).isEqualTo(42);
             assertThat(exact.hits().getFirst().score()).isEqualTo(1f);
@@ -1078,15 +1064,20 @@ class DemoIndexTest {
                     .vector();
         }
 
-        private static SearchQuery knn(String field, int docId, OptionalInt k, boolean exact) {
+        private static SearchQuery knn(String field, int docId, @Nullable Integer k, boolean exact) {
             return new SearchQuery(
                     Optional.empty(),
                     Optional.empty(),
                     Optional.empty(),
                     Optional.empty(),
                     Optional.empty(),
-                    Optional.of(
-                            new KnnQuery(field, OptionalInt.of(docId), Optional.empty(), k, exact, Optional.empty())));
+                    Optional.of(new KnnQuery(
+                            field,
+                            OptionalInt.of(docId),
+                            Optional.empty(),
+                            Optionals.optionalInt(k),
+                            exact,
+                            Optional.empty())));
         }
     }
 
@@ -1190,7 +1181,7 @@ class DemoIndexTest {
             assertThat(neighbours).isNotEmpty().hasSizeLessThanOrEqualTo(32);
 
             // The exact search by document 42 gives each neighbour the same score.
-            SearchResults exact = backend.search(Vectors.knn("embedding", 42, OptionalInt.empty(), true), 1000);
+            SearchResults exact = backend.search(Vectors.knn("embedding", 42, null, true), 1000);
             for (KnnGraphNeighbour neighbour : neighbours) {
                 assertThat(exact.hits())
                         .filteredOn(hit -> hit.docId() == neighbour.node().docId())
@@ -1226,20 +1217,21 @@ class DemoIndexTest {
             return backend.job(Methods.START_KNN_RECALL, params, Methods.GET_KNN_RECALL, GetKnnRecallResult::recall);
         }
 
-        private static KnnQuery sampled(String field, int k, Optional<String> filter) {
+        private static KnnQuery sampled(String field, int k, @Nullable String filter) {
             return new KnnQuery(
                     field,
                     OptionalInt.empty(),
                     Optional.empty(),
                     OptionalInt.of(k),
                     false,
-                    filter.map(expression -> classic(expression).classic().orElseThrow()));
+                    Optional.ofNullable(filter)
+                            .map(expression -> classic(expression).classic().orElseThrow()));
         }
 
         @Test
         void aSampleOfEmbeddingsFindsAllOfTheExactNearest() throws Exception {
             KnnRecallResult result =
-                    recall(new StartKnnRecallParams(sampled("embedding", 10, Optional.empty()), OptionalInt.of(100)));
+                    recall(new StartKnnRecallParams(sampled("embedding", 10, null), OptionalInt.of(100)));
 
             // Graphs of M 16 over at most 200 vectors: the approximate search is exact.
             assertThat(result)
@@ -1259,7 +1251,7 @@ class DemoIndexTest {
         @Test
         void aSampleOfFingerprintsMissesAFew() throws Exception {
             KnnRecallResult result =
-                    recall(new StartKnnRecallParams(sampled("fingerprint", 10, Optional.empty()), OptionalInt.of(100)));
+                    recall(new StartKnnRecallParams(sampled("fingerprint", 10, null), OptionalInt.of(100)));
 
             // An M of 4: three of the 100 targets miss one of their 10 nearest.
             assertThat(result.meanRecall()).isEqualTo(0.997, org.assertj.core.data.Offset.offset(1e-9));
@@ -1277,8 +1269,7 @@ class DemoIndexTest {
 
         @Test
         void aSampledTargetIsLeftOutOfItsOwnRankings() throws Exception {
-            KnnRecallResult result =
-                    recall(new StartKnnRecallParams(sampled("embedding", 1, Optional.empty()), OptionalInt.of(5)));
+            KnnRecallResult result = recall(new StartKnnRecallParams(sampled("embedding", 1, null), OptionalInt.of(5)));
 
             // Each target is its own nearest, with a score of 1; left out, its nearest other is found.
             assertThat(result.targets()).isEqualTo(5);
@@ -1315,8 +1306,8 @@ class DemoIndexTest {
 
         @Test
         void aFilterNarrowsBothSearches() throws Exception {
-            KnnRecallResult result = recall(new StartKnnRecallParams(
-                    sampled("embedding", 10, Optional.of("category:kitchen")), OptionalInt.of(20)));
+            KnnRecallResult result =
+                    recall(new StartKnnRecallParams(sampled("embedding", 10, "category:kitchen"), OptionalInt.of(20)));
 
             assertThat(result.targets()).isEqualTo(20);
             assertThat(result.meanRecall()).isEqualTo(1.0);
@@ -1338,23 +1329,23 @@ class DemoIndexTest {
                     ErrorCode.INVALID_PARAMS);
             backend.fails(
                     Methods.START_KNN_RECALL,
-                    new StartKnnRecallParams(sampled("embedding", 10, Optional.empty()), OptionalInt.empty()),
+                    new StartKnnRecallParams(sampled("embedding", 10, null), OptionalInt.empty()),
                     ErrorCode.INVALID_PARAMS);
             backend.fails(
                     Methods.START_KNN_RECALL,
-                    new StartKnnRecallParams(sampled("embedding", 10, Optional.empty()), OptionalInt.of(1001)),
+                    new StartKnnRecallParams(sampled("embedding", 10, null), OptionalInt.of(1001)),
                     ErrorCode.INVALID_PARAMS);
             backend.fails(
                     Methods.START_KNN_RECALL,
-                    new StartKnnRecallParams(sampled("title", 10, Optional.empty()), OptionalInt.of(10)),
+                    new StartKnnRecallParams(sampled("title", 10, null), OptionalInt.of(10)),
                     ErrorCode.INVALID_PARAMS);
             backend.fails(
                     Methods.START_KNN_RECALL,
-                    new StartKnnRecallParams(sampled("nope", 10, Optional.empty()), OptionalInt.of(10)),
+                    new StartKnnRecallParams(sampled("nope", 10, null), OptionalInt.of(10)),
                     ErrorCode.FIELD_NOT_FOUND);
             backend.fails(
                     Methods.START_KNN_RECALL,
-                    new StartKnnRecallParams(sampled("embedding", 10, Optional.of("title:(lamp")), OptionalInt.of(10)),
+                    new StartKnnRecallParams(sampled("embedding", 10, "title:(lamp"), OptionalInt.of(10)),
                     ErrorCode.INVALID_QUERY);
         }
 
@@ -1362,7 +1353,7 @@ class DemoIndexTest {
         void aCancelledCheckIsGone() throws Exception {
             long jobId = backend.call(
                             Methods.START_KNN_RECALL,
-                            new StartKnnRecallParams(sampled("embedding", 100, Optional.empty()), OptionalInt.of(1000)))
+                            new StartKnnRecallParams(sampled("embedding", 100, null), OptionalInt.of(1000)))
                     .jobId();
             backend.call(Methods.CANCEL_JOB, new JobParams(jobId));
             backend.fails(Methods.GET_KNN_RECALL, new JobParams(jobId), ErrorCode.JOB_NOT_FOUND);
@@ -1401,9 +1392,9 @@ class DemoIndexTest {
             assertThat(lamps.matchCount()).isEqualTo(19);
             assertThat(step(lamps, 441, true).docId()).isEqualTo(466);
 
-            GetPostingsResult quick = postings(Optional.of(new PostingsFilter(lamps.filterId(), false)));
+            GetPostingsResult quick = postings(new PostingsFilter(lamps.filterId(), false));
             assertThat(quick.docFreq()).isEqualTo(249);
-            GetPostingsResult onlyLamps = postings(Optional.of(new PostingsFilter(lamps.filterId(), true)));
+            GetPostingsResult onlyLamps = postings(new PostingsFilter(lamps.filterId(), true));
             assertThat(onlyLamps.postings())
                     .extracting(Posting::docId)
                     .hasSize(10)
@@ -1413,8 +1404,10 @@ class DemoIndexTest {
                     .allSatisfy(posting -> assertThat(posting.inFilter()).hasValue(true));
         }
 
-        private GetPostingsResult postings(Optional<PostingsFilter> filter) throws Exception {
-            return backend.call(Methods.GET_POSTINGS, new GetPostingsParams("body", text("quick"), 0, 1000, filter));
+        private GetPostingsResult postings(@Nullable PostingsFilter filter) throws Exception {
+            return backend.call(
+                    Methods.GET_POSTINGS,
+                    new GetPostingsParams("body", text("quick"), 0, 1000, Optional.ofNullable(filter)));
         }
 
         private FilterResult queryFilter(String expression, boolean includeDeleted) throws Exception {
@@ -1581,25 +1574,13 @@ class DemoIndexTest {
         void moreLikeAText() throws Exception {
             String wallet = "A vintage leather wallet with a wooden table";
 
-            SearchResults defaults = backend.search(
-                    moreLikeThis(
-                            OptionalInt.empty(), Optional.of(wallet), 2, 5, OptionalInt.empty(), false, 0, List.of()),
-                    10);
+            SearchResults defaults = backend.search(moreLikeThis(null, wallet, 2, 5, null, false, 0, List.of()), 10);
             assertThat(defaults.moreLikeThisTerms().orElseThrow())
                     .hasSize(4)
                     .allSatisfy(term -> assertThat(term.term()).isEqualTo("a"));
 
-            SearchResults rarest = backend.search(
-                    moreLikeThis(
-                            OptionalInt.empty(),
-                            Optional.of(wallet),
-                            1,
-                            5,
-                            OptionalInt.empty(),
-                            false,
-                            0,
-                            List.of("a", "with")),
-                    10);
+            SearchResults rarest =
+                    backend.search(moreLikeThis(null, wallet, 1, 5, null, false, 0, List.of("a", "with")), 10);
             List<LikeTerm> terms = rarest.moreLikeThisTerms().orElseThrow();
             assertThat(terms)
                     .extracting(LikeTerm::term)
@@ -1609,17 +1590,8 @@ class DemoIndexTest {
                     .extracting(LikeTerm::term)
                     .containsExactlyInAnyOrder("vintage", "wooden", "wallet", "table", "leather");
 
-            SearchResults longWords = backend.search(
-                    moreLikeThis(
-                            OptionalInt.empty(),
-                            Optional.of(wallet),
-                            1,
-                            5,
-                            OptionalInt.empty(),
-                            false,
-                            7,
-                            List.of("a", "with")),
-                    10);
+            SearchResults longWords =
+                    backend.search(moreLikeThis(null, wallet, 1, 5, null, false, 7, List.of("a", "with")), 10);
             assertThat(longWords.moreLikeThisTerms().orElseThrow())
                     .extracting(LikeTerm::term)
                     .containsOnly("vintage", "leather");
@@ -1707,11 +1679,11 @@ class DemoIndexTest {
      * {@code LikeSettings.of}).
      */
     private SearchQuery moreLikeThis(
-            OptionalInt docId,
-            Optional<String> text,
+            @Nullable Integer docId,
+            @Nullable String text,
             int minTermFreq,
             int minDocFreq,
-            OptionalInt maxDocFreq,
+            @Nullable Integer maxDocFreq,
             boolean boost,
             int minWordLen,
             List<String> stopWords)
@@ -1726,12 +1698,12 @@ class DemoIndexTest {
                 Optional.empty(),
                 Optional.empty(),
                 Optional.of(new MoreLikeThisQuery(
-                        docId,
-                        text,
+                        Optionals.optionalInt(docId),
+                        Optional.ofNullable(text),
                         fields,
                         minTermFreq,
                         minDocFreq,
-                        maxDocFreq,
+                        Optionals.optionalInt(maxDocFreq),
                         25,
                         boost,
                         STANDARD,

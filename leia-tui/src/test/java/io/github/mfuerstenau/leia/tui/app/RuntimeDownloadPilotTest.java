@@ -72,7 +72,7 @@ class RuntimeDownloadPilotTest {
     void start() throws Exception {
         repository = new FakeRepository();
         runtimes = Files.createDirectories(tmp.resolve("runtimes"));
-        backend = LeiaBackend.start(Optional.of(runtimes), List.of());
+        backend = LeiaBackend.start(runtimes, List.of());
         VersionResult version =
                 backend.call(Methods.VERSION, new VersionParams()).get();
         app = new App(version, null, History.inMemory(), DirectoryImpl.FS)

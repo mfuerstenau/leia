@@ -37,7 +37,7 @@ class RuntimeRestartBackendTest {
         Path runtimes = Files.createDirectories(tmp.resolve("runtimes"));
         Path jar = tmp.resolve("empty.jar");
         new JarOutputStream(Files.newOutputStream(jar)).close();
-        try (RealBackend backend = RealBackend.start(Optional.of(runtimes), List.of(jar))) {
+        try (RealBackend backend = RealBackend.start(runtimes, List.of(jar))) {
             copyFolder(built, runtimes, "lucene10");
             copyFolder(built, runtimes, "lucene7");
 

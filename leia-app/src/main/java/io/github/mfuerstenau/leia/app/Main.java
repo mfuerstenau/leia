@@ -182,8 +182,11 @@ public final class Main {
     private static Optional<LeiaBackend> startBackend(
             Cli cli, Platform platform, DefaultJars defaultJars, List<Path> jars, PrintStream err) {
         try {
-            return Optional.of(
-                    LeiaBackend.startWith(platform.runtimesDirs(), jars, cli.servers(), platform.cacheDir()));
+            return Optional.of(LeiaBackend.startWith(
+                    platform.runtimesDirs(),
+                    jars,
+                    cli.servers(),
+                    platform.cacheDir().orElse(null)));
         } catch (RpcException e) {
             LOG.log(Level.SEVERE, "Cannot start", e);
             err.println("leia: " + e.getMessage());
@@ -278,7 +281,7 @@ public final class Main {
     private static int printVersion(PrintStream out, PrintStream err) throws InterruptedException {
         // Not into leia.log, which would lose the last session's log; only problems show.
         LeiaLog.toStderr(Level.WARNING);
-        try (LeiaBackend backend = LeiaBackend.start(Optional.empty(), List.of())) {
+        try (LeiaBackend backend = LeiaBackend.start(null, List.of())) {
             VersionResult version =
                     backend.call(Methods.VERSION, new VersionParams()).get();
             out.println("leia " + version.version() + " (" + version.commit() + ", " + version.commitTime() + ")");

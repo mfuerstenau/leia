@@ -16,6 +16,7 @@ import java.nio.file.Path;
 import java.util.Optional;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The index that is open in this server, if any: a path opened with or without a reader (ADR 0021),
@@ -34,7 +35,7 @@ public final class CurrentIndex {
 
     private final Jobs jobs;
     private final Filters filters;
-    private Optional<OpenIndex> index = Optional.empty();
+    private @Nullable OpenIndex index;
 
     @Inject
     public CurrentIndex(Jobs jobs, Filters filters) {
@@ -44,7 +45,7 @@ public final class CurrentIndex {
 
     /** The open index; empty if none is open. */
     public Optional<OpenIndex> get() {
-        return index;
+        return Optional.ofNullable(index);
     }
 
     /**
@@ -53,7 +54,7 @@ public final class CurrentIndex {
      * @throws RpcException {@code NO_INDEX_OPEN} if no index is open
      */
     public OpenIndex opened() throws RpcException {
-        return index.orElseThrow(() -> new RpcException(ErrorCode.NO_INDEX_OPEN, "No index is open"));
+        return get().orElseThrow(() -> new RpcException(ErrorCode.NO_INDEX_OPEN, "No index is open"));
     }
 
     /**
@@ -75,8 +76,8 @@ public final class CurrentIndex {
      * the filter, and closes it.
      */
     public void replace(OpenIndex newIndex) {
-        Optional<OpenIndex> previous = index;
-        index = Optional.of(newIndex);
+        Optional<OpenIndex> previous = get();
+        index = newIndex;
         jobs.cancelAll();
         filters.clear();
         previous.ifPresent(CurrentIndex::closeQuietly);
@@ -92,8 +93,8 @@ public final class CurrentIndex {
 
     /** Stops the jobs, forgets the filter, and closes the open index, if any, and returns its path. */
     public Optional<Path> close() {
-        Optional<OpenIndex> previous = index;
-        index = Optional.empty();
+        Optional<OpenIndex> previous = get();
+        index = null;
         jobs.cancelAll();
         filters.clear();
         Thread.currentThread().setContextClassLoader(JarChain.classLoader());

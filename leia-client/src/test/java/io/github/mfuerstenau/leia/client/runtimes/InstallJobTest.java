@@ -125,7 +125,7 @@ class InstallJobTest {
     @Test
     void asksWhichMirrorToRetryFromAndGoesOnWithTheOneChosen() throws Exception {
         RuntimeFolders.ListedJar missing = lucene(known("lucene7")).getFirst();
-        first.served.remove(missing.mavenPath().orElseThrow());
+        first.served.remove(missing.mavenPath());
         Mirror chosen = mirror(second, "Second");
         RuntimeInstall install = install(mirror(first, "First"), chosen);
         InstallJob job = InstallJob.of(install, install.plan(List.of(known("lucene7"))), Set.of(known("lucene7")))
@@ -182,7 +182,7 @@ class InstallJobTest {
 
     @Test
     void skipFailsTheRuntimeAndGoesOnWithTheNext() throws Exception {
-        first.served.remove(lucene(known("lucene7")).getFirst().mavenPath().orElseThrow());
+        first.served.remove(lucene(known("lucene7")).getFirst().mavenPath());
         RuntimeInstall install = install(mirror(first, "First"));
         InstallJob job = InstallJob.of(
                         install,
@@ -201,7 +201,7 @@ class InstallJobTest {
 
     @Test
     void abortCancelsTheRuntimesNotBegunYet() throws Exception {
-        first.served.remove(lucene(known("lucene7")).getFirst().mavenPath().orElseThrow());
+        first.served.remove(lucene(known("lucene7")).getFirst().mavenPath());
         RuntimeInstall install = install(mirror(first, "First"));
         InstallJob job = InstallJob.of(
                         install,
@@ -219,7 +219,7 @@ class InstallJobTest {
 
     @Test
     void aCancelWhileTheQuestionIsOpenEndsTheInstall() throws Exception {
-        first.served.remove(lucene(known("lucene7")).getFirst().mavenPath().orElseThrow());
+        first.served.remove(lucene(known("lucene7")).getFirst().mavenPath());
         RuntimeInstall install = install(mirror(first, "First"));
         InstallJob job = InstallJob.of(
                         install,
@@ -326,7 +326,7 @@ class InstallJobTest {
 
     @Test
     void aChooserOfItsOwnAnswersOnTheInstallsThreadAndAListenerHearsIt() throws Exception {
-        first.served.remove(lucene(known("lucene7")).getFirst().mavenPath().orElseThrow());
+        first.served.remove(lucene(known("lucene7")).getFirst().mavenPath());
         RuntimeInstall install = install(mirror(first, "First"), mirror(second, "Second"));
         AtomicReference<String> failed = new AtomicReference<>();
         RuntimeInstall.Listener listener = new RuntimeInstall.Listener() {

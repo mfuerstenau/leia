@@ -55,7 +55,7 @@ public final class StartStoredScanHandler implements MethodHandler<StartStoredSc
         Optional<Set<String>> fields = params.fields().map(Set::copyOf);
         boolean includeDeleted = params.includeDeleted();
         OpenRuntime open = currentIndex.runtime();
-        StoredScan.StoredSource source = RuntimeResults.storedSource(open, cache, fields, includeDeleted);
+        StoredScan.StoredSource source = RuntimeResults.storedSource(open, cache, fields.orElse(null), includeDeleted);
         String lucene = " with Lucene " + open.runtime().luceneVersion();
         Pattern pattern = pattern(params.pattern(), params.caseInsensitive());
         StoredScanHits hits = new StoredScanHits();

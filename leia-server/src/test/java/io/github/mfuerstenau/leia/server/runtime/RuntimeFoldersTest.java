@@ -152,7 +152,7 @@ class RuntimeFoldersTest {
                 LUCENE9, user(first, tmp.resolve("second")), loaded, RuntimeFolders.class.getClassLoader());
 
         assertThat(found.state()).isEqualTo(new RuntimeFolders.State.Loaded());
-        assertThat(found.folder()).hasValue(tmp.resolve("second/lucene9"));
+        assertThat(found.folder()).isEqualTo(tmp.resolve("second/lucene9"));
         assertThat(loaded).hasSize(1);
     }
 
@@ -172,7 +172,7 @@ class RuntimeFoldersTest {
                     RuntimeFolders.lookUp(LUCENE9, user(first, tmp.resolve("second")), loaded, resources);
 
             assertThat(found.state()).isEqualTo(new RuntimeFolders.State.Loaded());
-            assertThat(found.folder()).hasValue(tmp.resolve("second/lucene9"));
+            assertThat(found.folder()).isEqualTo(tmp.resolve("second/lucene9"));
         }
     }
 
@@ -190,7 +190,7 @@ class RuntimeFoldersTest {
                 RuntimeFolders.class.getClassLoader());
 
         assertThat(found.state()).isEqualTo(new RuntimeFolders.State.Incomplete(listed.getLast()));
-        assertThat(found.folder()).hasValue(tmp.resolve("second/lucene9"));
+        assertThat(found.folder()).isEqualTo(tmp.resolve("second/lucene9"));
     }
 
     @Test

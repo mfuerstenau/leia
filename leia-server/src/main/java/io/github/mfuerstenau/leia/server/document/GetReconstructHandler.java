@@ -5,6 +5,7 @@ import io.github.mfuerstenau.leia.protocol.RpcMethod;
 import io.github.mfuerstenau.leia.protocol.document.GetReconstructResult;
 import io.github.mfuerstenau.leia.protocol.document.ReconstructResult;
 import io.github.mfuerstenau.leia.protocol.job.JobParams;
+import io.github.mfuerstenau.leia.runtime.support.Optionals;
 import io.github.mfuerstenau.leia.server.MethodHandler;
 import io.github.mfuerstenau.leia.server.RpcException;
 import io.github.mfuerstenau.leia.server.job.Jobs;
@@ -31,6 +32,6 @@ public final class GetReconstructHandler implements MethodHandler<JobParams, Get
         StartReconstructHandler.Count count =
                 jobs.attachment(params.jobId(), ReconstructResult.class, StartReconstructHandler.Count.class);
         Jobs.Poll<ReconstructResult> poll = jobs.poll(params.jobId(), ReconstructResult.class);
-        return new GetReconstructResult(poll.progress(), count.total(), poll.result());
+        return new GetReconstructResult(poll.progress(), Optionals.optionalLong(count.total()), poll.outcome());
     }
 }

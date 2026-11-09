@@ -17,8 +17,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.OptionalInt;
-import java.util.OptionalLong;
+import org.jspecify.annotations.Nullable;
 
 /**
  * The index directories of the open path, with or without a reader, and the runtime that reads
@@ -40,14 +39,18 @@ public final class IndexDirectories {
      * An index directory of the open path.
      *
      * @param position its place among the opened directories, as {@code getCommits} counts them;
-     *     empty for a skipped one
-     * @param generation the generation of its opened commit; empty without a reader or if skipped
+     *     {@code null} for a skipped one
+     * @param generation the generation of its opened commit; {@code null} without a reader or if skipped
      */
     public record IndexDirectory(
-            Path path, DirectoryKind kind, OptionalInt position, OptionalLong generation, Route route) {
+            Path path,
+            DirectoryKind kind,
+            @Nullable Integer position,
+            @Nullable Long generation,
+            Route route) {
 
         public boolean skipped() {
-            return position.isEmpty();
+            return position == null;
         }
     }
 
@@ -60,13 +63,9 @@ public final class IndexDirectories {
         /**
          * A runtime that isn't loaded.
          *
-         * @param version the index's version; empty if it can't be detected
+         * @param version the index's version; {@code null} if it can't be detected
          */
-        record Missing(Optional<IndexVersion> version) implements Route {
-
-            public Missing(IndexVersion version) {
-                this(Optional.of(version));
-            }
+        record Missing(@Nullable IndexVersion version) implements Route {
 
             /** The error of a method that needs the runtime, naming its folder. */
             public RpcException error(Path dir) {
@@ -74,7 +73,8 @@ public final class IndexDirectories {
             }
 
             public String message(Path dir) {
-                return version.map(found -> "The index was written by Lucene " + found.writtenBy()
+                return Optional.ofNullable(version)
+                                .map(found -> "The index was written by Lucene " + found.writtenBy()
                                         + "; reading it needs the runtime "
                                         + RuntimeFolders.forMajor(found.major())
                                                 .map(IndexDirectories::folder)
@@ -113,24 +113,18 @@ public final class IndexDirectories {
                     all.add(new IndexDirectory(
                             stats.get(i).path(),
                             index.directory(),
-                            OptionalInt.of(i),
-                            OptionalLong.of(stats.get(i).generation()),
+                            i,
+                            stats.get(i).generation(),
                             new Route.Runtime(open.runtime())));
                 }
                 for (RuntimeIndex.Skipped skipped : open.skipped()) {
-                    all.add(new IndexDirectory(
-                            skipped.path(),
-                            index.directory(),
-                            OptionalInt.empty(),
-                            OptionalLong.empty(),
-                            route(skipped.path())));
+                    all.add(new IndexDirectory(skipped.path(), index.directory(), null, null, route(skipped.path())));
                 }
             }
             case OpenDirectories open -> {
                 List<Path> dirs = open.directories();
                 for (int i = 0; i < dirs.size(); i++) {
-                    all.add(new IndexDirectory(
-                            dirs.get(i), open.kind(), OptionalInt.of(i), OptionalLong.empty(), route(dirs.get(i))));
+                    all.add(new IndexDirectory(dirs.get(i), open.kind(), i, null, route(dirs.get(i))));
                 }
             }
         }
@@ -138,12 +132,12 @@ public final class IndexDirectories {
     }
 
     /**
-     * The opened index directory at {@code index}, 0 if absent (ADR 0021).
+     * The opened index directory at {@code index}, 0 if {@code null} (ADR 0021).
      *
      * @throws RpcException {@code INVALID_PARAMS} if the open path has no such index directory
      */
-    public IndexDirectory opened(OptionalInt index) throws RpcException {
-        int position = index.orElse(0);
+    public IndexDirectory opened(@Nullable Integer index) throws RpcException {
+        int position = index == null ? 0 : index;
         List<IndexDirectory> opened =
                 all().stream().filter(dir -> !dir.skipped()).toList();
         if (position < 0 || position >= opened.size()) {
@@ -160,13 +154,13 @@ public final class IndexDirectories {
      * the format error itself.
      */
     public Route route(Path dir) {
-        return route(SegmentsHeader.read(dir));
+        return route(SegmentsHeader.read(dir).orElse(null));
     }
 
     /** As {@link #route(Path)}, for the version of a directory. */
-    public Route route(Optional<IndexVersion> version) {
-        if (version.isPresent() && !runtimes.newerThanAll(version.get().major())) {
-            return runtimes.forMajor(version.get().major())
+    public Route route(@Nullable IndexVersion version) {
+        if (version != null && !runtimes.newerThanAll(version.major())) {
+            return runtimes.forMajor(version.major())
                     .<Route>map(Route.Runtime::new)
                     .orElseGet(() -> new Route.Missing(version));
         }
@@ -178,9 +172,9 @@ public final class IndexDirectories {
      * #route} prefers, fails to read, such as one written by a newer Lucene than the server's (ADR
      * 0090); empty if none reads it.
      */
-    public Optional<LuceneRuntime> leiasRuntime(Optional<IndexVersion> version) {
-        if (version.isPresent() && !runtimes.newerThanAll(version.get().major())) {
-            return runtimes.leiasForMajor(version.get().major());
+    public Optional<LuceneRuntime> leiasRuntime(@Nullable IndexVersion version) {
+        if (version != null && !runtimes.newerThanAll(version.major())) {
+            return runtimes.leiasForMajor(version.major());
         }
         return Optional.empty();
     }

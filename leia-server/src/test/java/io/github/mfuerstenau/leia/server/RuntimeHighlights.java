@@ -22,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Highlighting on an index a runtime opened (ADR 0063), with a text field {@code body} whose
@@ -52,9 +53,9 @@ final class RuntimeHighlights {
         });
 
         int docId = results.hits().getFirst().docId();
-        DocumentHighlight all = highlight(backend, classic("beta"), docId, Optional.empty());
+        DocumentHighlight all = highlight(backend, classic("beta"), docId, null);
         assertThat(all.fields()).extracting(FieldMatches::field).contains("id", "body");
-        DocumentHighlight body = highlight(backend, classic("beta"), docId, Optional.of("body"));
+        DocumentHighlight body = highlight(backend, classic("beta"), docId, "body");
         assertThat(body.fields()).singleElement().satisfies(matches -> {
             assertThat(matches.field()).isEqualTo("body");
             assertThat(matches.offsetSource()).isEqualTo(OffsetSource.POSTINGS);
@@ -96,12 +97,12 @@ final class RuntimeHighlights {
 
     /** A query without terms, such as a KNN query, marks nothing in a document. */
     static void marksNothingWithoutTerms(RealBackend backend, SearchQuery query, int docId) throws Exception {
-        assertThat(highlight(backend, query, docId, Optional.empty()).fields()).isEmpty();
+        assertThat(highlight(backend, query, docId, null).fields()).isEmpty();
     }
 
     private static DocumentHighlight highlight(
-            RealBackend backend, SearchQuery query, int docId, Optional<String> field) throws Exception {
-        return backend.highlight(new StartHighlightParams(query, docId, field, OPTIONS));
+            RealBackend backend, SearchQuery query, int docId, @Nullable String field) throws Exception {
+        return backend.highlight(new StartHighlightParams(query, docId, Optional.ofNullable(field), OPTIONS));
     }
 
     private static HitHighlight body(Hit hit) {

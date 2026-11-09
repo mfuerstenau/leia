@@ -35,11 +35,11 @@ public final class GetPostingsHandler implements MethodHandler<GetPostingsParams
 
     @Override
     public GetPostingsResult handle(GetPostingsParams params) throws RpcException {
-        Optional<PostingsFilter> filter = Optional.empty();
+        PostingsFilter filter = null;
         Optional<io.github.mfuerstenau.leia.protocol.terms.PostingsFilter> asked = params.filter();
         if (asked.isPresent()) {
-            filter = Optional.of(new PostingsFilter(
-                    filters.get(asked.get().filterId()), asked.get().onlyMatches()));
+            filter = new PostingsFilter(
+                    filters.get(asked.get().filterId()), asked.get().onlyMatches());
         }
         return RuntimeResults.postings(currentIndex.runtime(), params, filter);
     }

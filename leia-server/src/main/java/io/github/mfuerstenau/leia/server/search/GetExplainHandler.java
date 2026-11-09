@@ -27,6 +27,6 @@ public final class GetExplainHandler implements MethodHandler<JobParams, GetExpl
 
     @Override
     public GetExplainResult handle(JobParams params) throws RpcException {
-        return new GetExplainResult(jobs.poll(params.jobId(), Explanation.class).result());
+        return new GetExplainResult(jobs.poll(params.jobId(), Explanation.class).outcome());
     }
 }

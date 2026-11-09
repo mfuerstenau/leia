@@ -96,22 +96,12 @@ public final class ServerRuntimes {
 
     /**
      * Loads the servers at {@code paths}, each an installation's home or its {@code lib/}, with the
-     * adapters of {@code runtimesDir}. A server that is loaded already isn't loaded again.
+     * adapters of {@code runtimesDirs}: for each, the adapter of the first folder that has one that is
+     * current (ADR 0122). A server that is loaded already isn't loaded again.
      *
      * @throws ServerException if one can't be loaded: no Lucene in it, a Lucene whose major leia has
      *     no adapter for, an adapter that isn't installed, a second server for one major; none of
      *     them is loaded then
-     */
-    public static void load(List<Path> paths, Optional<Path> runtimesDir) throws ServerException {
-        load(paths, runtimesDir.map(RuntimesDir::user).stream().toList());
-    }
-
-    /**
-     * Loads the servers at {@code paths}, each an installation's home or its {@code lib/}, with the
-     * adapters of {@code runtimesDirs}: for each, the adapter of the first folder that has one that is
-     * current (ADR 0122). A server that is loaded already isn't loaded again.
-     *
-     * @throws ServerException as {@link #load(List, Optional)}
      */
     public static synchronized void load(List<Path> paths, List<RuntimesDir> runtimesDirs) throws ServerException {
         List<ServerRuntime> loaded = new ArrayList<>(runtimes);
@@ -188,7 +178,7 @@ public final class ServerRuntimes {
                                     + ", not one"
                             : String.join("; ", found.refused()));
         }
-        return new ServerRuntime(reading.getFirst(), home, label(lib), lucene, builtFor, loader);
+        return new ServerRuntime(reading.getFirst(), home, label(lib).orElse(null), lucene, builtFor, loader);
     }
 
     private static LuceneJarVersion luceneVersion(Path home, Path lib) throws ServerException {
@@ -242,7 +232,7 @@ public final class ServerRuntimes {
         jars.add(adapter);
         try {
             List<RuntimeFolders.ListedJar> own = RuntimeFolders.listed(adapter).stream()
-                    .filter(listed -> listed.mavenPath().isEmpty())
+                    .filter(listed -> listed.mavenPath() == null)
                     .toList();
             for (RuntimeFolders.ListedJar listed : own) {
                 Path jar = folder.resolve(listed.name());

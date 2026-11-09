@@ -54,7 +54,7 @@ class LocalCachesTest {
         LocalCaches caches = LocalCaches.detect(NONE, NONE, home);
 
         assertThat(caches.caches()).extracting(LocalCaches.Cache::name).containsExactly("Maven's local repository");
-        assertThat(caches.find(core.mavenPath().orElseThrow(), core))
+        assertThat(caches.find(core.mavenPath(), core))
                 .hasValueSatisfying(local -> assertThat(local.file()).isEqualTo(file));
     }
 
@@ -71,7 +71,7 @@ class LocalCachesTest {
         LocalCaches caches = LocalCaches.detect(NONE, NONE, home);
 
         assertThat(caches.caches()).extracting(LocalCaches.Cache::name).containsExactly("Gradle's cache");
-        assertThat(caches.find(core.mavenPath().orElseThrow(), core))
+        assertThat(caches.find(core.mavenPath(), core))
                 .hasValueSatisfying(local -> assertThat(local.file()).isEqualTo(good));
     }
 
@@ -138,9 +138,9 @@ class LocalCachesTest {
         LocalCaches caches = LocalCaches.detect(NONE, NONE, home);
 
         Files.write(file, new byte[(int) core.size()]);
-        assertThat(caches.find(core.mavenPath().orElseThrow(), core)).isEmpty();
+        assertThat(caches.find(core.mavenPath(), core)).isEmpty();
         Files.writeString(file, "short");
-        assertThat(caches.find(core.mavenPath().orElseThrow(), core)).isEmpty();
+        assertThat(caches.find(core.mavenPath(), core)).isEmpty();
     }
 
     @Test
@@ -215,7 +215,7 @@ class LocalCachesTest {
 
     /** Puts {@code jar} of lucene7 into a Maven repository at {@code root}. */
     private static Path putMaven(Path root, RuntimeFolders.ListedJar jar) throws IOException {
-        Path file = root.resolve(jar.mavenPath().orElseThrow());
+        Path file = root.resolve(jar.mavenPath());
         Files.createDirectories(file.getParent());
         Files.copy(built(known("lucene7")).resolve(jar.name()), file);
         return file;

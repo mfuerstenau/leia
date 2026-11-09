@@ -72,7 +72,7 @@ class MirrorFallbackTest {
     @Test
     void goesOnWithTheNextMirrorAfterAWrongJarAndStaysWithIt() throws Exception {
         RuntimeFolders.ListedJar firstJar = lucene(known("lucene7")).getFirst();
-        first.served.put(firstJar.mavenPath().orElseThrow(), "not lucene".getBytes(StandardCharsets.UTF_8));
+        first.served.put(firstJar.mavenPath(), "not lucene".getBytes(StandardCharsets.UTF_8));
 
         int status = download(
                 List.of(mirror(first, "First"), mirror(second, "Second")),
@@ -129,7 +129,7 @@ class MirrorFallbackTest {
     @Test
     void retriesFromTheMirrorChosenAndGoesOnWithIt() throws Exception {
         RuntimeFolders.ListedJar firstJar = lucene(known("lucene7")).getFirst();
-        first.served.remove(firstJar.mavenPath().orElseThrow());
+        first.served.remove(firstJar.mavenPath());
         Mirror chosen = mirror(second, "Chosen");
         List<MirrorChooser.Failure> failures = new ArrayList<>();
         List<Set<URI>> tried = new ArrayList<>();

@@ -56,12 +56,12 @@ public final class GetRuntimesHandler implements MethodHandler<GetRuntimesParams
 
     static RuntimeFolder folder(Runtimes.KnownState known) {
         String name = known.known().folder();
-        if (known.luceneVersion().isPresent()) {
+        if (known.luceneVersion() != null) {
             return new RuntimeFolder(
                     name,
                     known.known().indexMajors(),
                     RuntimeState.LOADED,
-                    known.luceneVersion(),
+                    Optional.of(known.luceneVersion()),
                     Optional.empty(),
                     RuntimeFolders.loadedFrom(known.known()).map(Path::toString));
         }

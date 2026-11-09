@@ -444,7 +444,7 @@ class Lucene9BackendTest {
 
     @Test
     void rebuildsTheIndexedTermsOfADeletedDocument() throws Exception {
-        ReconstructResult result = backend.reconstruct(1, Optional.of(List.of("body", "id")));
+        ReconstructResult result = backend.reconstruct(1, List.of("body", "id"));
 
         assertThat(result.fields()).hasSize(2);
         ReconstructedField body = result.fields().get(0);
@@ -484,7 +484,7 @@ class Lucene9BackendTest {
     @Test
     void rebuildsThePointsOfADeletedDocument() throws Exception {
         ReconstructedField number =
-                backend.reconstruct(1, Optional.of(List.of("number"))).fields().getFirst();
+                backend.reconstruct(1, List.of("number")).fields().getFirst();
 
         // 20 as a sortable int.
         assertThat(number.indexOptions()).isEqualTo(IndexOptions.NONE);

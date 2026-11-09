@@ -28,6 +28,6 @@ public final class GetStoredFieldsScanHandler implements MethodHandler<JobParams
     @Override
     public GetStoredFieldsScanResult handle(JobParams params) throws RpcException {
         Jobs.Poll<StoredFields> poll = jobs.poll(params.jobId(), StoredFields.class);
-        return new GetStoredFieldsScanResult(poll.progress(), poll.result());
+        return new GetStoredFieldsScanResult(poll.progress(), poll.outcome());
     }
 }
