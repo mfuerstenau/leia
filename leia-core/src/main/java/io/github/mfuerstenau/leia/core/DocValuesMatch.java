@@ -14,9 +14,8 @@ import org.jspecify.annotations.Nullable;
 public sealed interface DocValuesMatch<T> {
 
     /**
-     * Values equal to one of {@code values}.
-     *
-     * @throws IllegalArgumentException if {@code values} is empty
+     * Values equal to one of {@code values}, which must not be empty; else the constructor throws
+     * {@link IllegalArgumentException}.
      */
     record Values<T>(List<T> values) implements DocValuesMatch<T> {
 

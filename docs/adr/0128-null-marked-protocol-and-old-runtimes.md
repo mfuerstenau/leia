@@ -2,6 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-11-09
+- **Amended by:** ADR 0129 (Error Prone runs its default checks besides NullAway)
 - **Amends:** ADR 0127 §6 (which modules NullAway checks); AGENTS.md, "Tech stack"
 
 ## Context

@@ -35,7 +35,7 @@ public final class GetCommitsHandler implements MethodHandler<GetCommitsParams, 
     public GetCommitsResult handle(GetCommitsParams params) throws RpcException {
         IndexDirectories.IndexDirectory dir = directories.opened(Optionals.orNull(params.index()));
         return switch (dir.route()) {
-            case IndexDirectories.Route.Runtime(LuceneRuntime runtime) -> RuntimeResults.commits(runtime, dir);
+            case IndexDirectories.Route.Loaded(LuceneRuntime runtime) -> RuntimeResults.commits(runtime, dir);
             case IndexDirectories.Route.Missing missing -> throw missing.error(dir.path());
         };
     }

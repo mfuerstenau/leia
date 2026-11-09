@@ -1,5 +1,5 @@
-// Shared setup for every leia Java module: Java 25 toolchain, strict compiler, Error Prone with
-// NullAway, JUnit, Spotless.
+// Shared setup for every leia Java module: Java 25 toolchain, strict compiler, Error Prone with its
+// default checks and NullAway, JUnit, Spotless.
 import net.ltgt.gradle.errorprone.CheckSeverity
 import net.ltgt.gradle.errorprone.errorprone
 
@@ -22,8 +22,14 @@ tasks.withType<JavaCompile>().configureEach {
     options.encoding = "UTF-8"
     options.compilerArgs.addAll(listOf("-Xlint:all,-processing", "-Werror"))
     options.errorprone {
-        // NullAway alone: Error Prone's own checks are out of scope (ADR 0127).
-        disableAllChecks = true
+        // Error Prone's default checks, whose warnings -Werror fails, and NullAway (ADR 0129). A check
+        // that fights a pattern of the whole project is disabled here by name; a single exception is a
+        // @SuppressWarnings with its reason, where it is.
+        // Javadoc of only @param or @return tags, as on records and small members
+        disable("MissingSummary")
+        // The runtimes' records carry raw bytes and vectors as arrays, JDK types only (ADR 0050), and
+        // nothing compares them by equals
+        disable("ArrayRecordComponent")
         check("NullAway", CheckSeverity.ERROR)
         // Checks only @NullMarked code, so nothing until packages are marked.
         option("NullAway:OnlyNullMarked", "true")
@@ -34,7 +40,7 @@ tasks.withType<JavaCompile>().configureEach {
     }
 }
 
-// NullAway checks main and testFixtures (the frontends' tests use the fixtures as an API); the other
+// Error Prone checks main and testFixtures (the frontends' tests use the fixtures as an API); the other
 // source sets stay unchecked, so a test can pass null on purpose.
 sourceSets.configureEach {
     if (name != "main" && name != "testFixtures") {

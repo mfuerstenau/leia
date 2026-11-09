@@ -470,7 +470,7 @@ public final class RuntimeFolders {
             if (trimmed.isEmpty() || trimmed.startsWith("#")) {
                 continue;
             }
-            String[] fields = WHITESPACE.split(trimmed);
+            String[] fields = WHITESPACE.split(trimmed, -1);
             if (fields.length < 3 || fields.length > 4) {
                 throw new IOException("not a line of a runtime's list: " + trimmed);
             }

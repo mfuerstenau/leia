@@ -20,6 +20,8 @@ import java.util.regex.Pattern;
 import org.jspecify.annotations.Nullable;
 
 /** The More-Like-This popup: a draft of the {@link LikeSettings}, applied with Enter once a field is chosen. */
+// The rows of the form are in the order Row declares them, from the top
+@SuppressWarnings("EnumOrdinal")
 public final class LikeForm {
 
     /** The largest frequency the popup takes. */

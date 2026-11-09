@@ -1704,6 +1704,8 @@ public final class Documents {
     }
 
     /** A letter's command; empty for a key that moves the selection. */
+    // Long cases that each end in a return read better as statements than with yield
+    @SuppressWarnings("RefactorSwitch")
     private Optional<Optional<Request>> charKey(KeyEvent key, int from) {
         switch (key.codePoint()) {
             case 'i' -> {
@@ -2847,7 +2849,7 @@ public final class Documents {
 
     /** The norm byte that Lucene's {@code DefaultSimilarity} before 7 stored for {@code length} terms. */
     private static int lengthNorm(long length) {
-        return floatToByte315((float) (1.0 / Math.sqrt(length)));
+        return floatToByte315((float) (1.0 / Math.sqrt((double) length)));
     }
 
     /** {@code SmallFloat.byte315ToFloat}: 3 mantissa bits, 5 exponent bits, zero exponent at 15. */

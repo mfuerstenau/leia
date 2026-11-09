@@ -35,7 +35,7 @@ assertj = "3.27.7"
 palantirJavaFormat = "2.102.0"
 spotless = "8.10.3"
 shadow = "9.6.1"
-# Error Prone runs NullAway alone, from leia.java-conventions (ADR 0127, the NullAway lane)
+# Error Prone runs its default checks and NullAway, from leia.java-conventions (ADR 0128, ADR 0129)
 errorprone = "2.52.0"
 nullaway = "0.14.3"
 errorpronePlugin = "5.2.0"

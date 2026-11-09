@@ -293,7 +293,7 @@ public record Platform(
         }
         String value = env.apply(variable);
         Set<Path> dirs = new LinkedHashSet<>();
-        for (String entry : (value == null || value.isEmpty() ? fallback : value).split(":")) {
+        for (String entry : (value == null || value.isEmpty() ? fallback : value).split(":", -1)) {
             if (!entry.isEmpty() && Path.of(entry).isAbsolute()) {
                 dirs.add(Path.of(entry).resolve("leia"));
             }

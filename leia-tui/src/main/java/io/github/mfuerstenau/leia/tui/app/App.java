@@ -3192,6 +3192,8 @@ public final class App {
     }
 
     /** The tabs, and the notice, the running export or how the index was opened, right-aligned after them. */
+    // The tabs are drawn in the order Screen declares them
+    @SuppressWarnings("EnumOrdinal")
     private void renderTabs(Frame frame, Rect area) {
         Line line = tabsLine();
         // Without padding, the tabs leave the line more room when it needs it.

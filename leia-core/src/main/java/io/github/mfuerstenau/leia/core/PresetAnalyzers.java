@@ -153,6 +153,8 @@ final class PresetAnalyzers {
     /** Found when first needed, and again once extension jars have been loaded. */
     private static @Nullable Scan scan;
 
+    // A scan holds for the class loader it was made with
+    @SuppressWarnings("ReferenceEquality")
     private static synchronized Map<String, Preset> presets() {
         ClassLoader loader = ExtensionJars.classLoader();
         Scan found = scan;

@@ -3,7 +3,6 @@ package io.github.mfuerstenau.leia.runtime;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.Consumer;
 import java.util.function.IntUnaryOperator;
@@ -24,7 +23,7 @@ public interface Documents {
      * The stored values of the documents from {@code fromDoc} up to {@code toDoc} (exclusive), in
      * document id order: every live one, and the deleted ones too if {@code includeDeleted}. Nothing
      * else of a document is read (ADR 0055). For a few documents, such as a highlight's; a scan reads
-     * a segment at a time through {@link #storedValues(int, Optional, boolean, IntUnaryOperator,
+     * a segment at a time through {@link #storedValues(int, Set, boolean, IntUnaryOperator,
      * Consumer, LongConsumer)}.
      *
      * @param fields the fields whose values to read; empty for all of them
@@ -35,7 +34,7 @@ public interface Documents {
 
     /**
      * The stored values of the documents of a segment, in document order, as {@link
-     * #storedValues(int, int, Optional, boolean)} reads them, but each block of documents decompressed
+     * #storedValues(int, int, Set, boolean)} reads them, but each block of documents decompressed
      * once (ADR 0114): through the codec's merge instance, as {@link #storedFields} reads them.
      *
      * @param segment as {@link #storedFields} takes it

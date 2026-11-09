@@ -29,7 +29,7 @@ public final class KeyLegend {
         List<Line> lines = new ArrayList<>();
         StringBuilder line = new StringBuilder();
         int lineWidth = 0;
-        for (String entry : GAPS.split(keys.strip())) {
+        for (String entry : GAPS.split(keys.strip(), -1)) {
             String key = entry.strip();
             if (key.isEmpty()) {
                 continue;

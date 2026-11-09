@@ -1348,7 +1348,7 @@ public final class Terms {
     private record Need(Feature feature, String what) {}
 
     private Optional<Need> need(KeyEvent key, boolean points, boolean graph) {
-        if (graph && (key.code() == KeyCode.ENTER && focus != Column.FIELDS || key.isChar('<'))) {
+        if (graph && ((key.code() == KeyCode.ENTER && focus != Column.FIELDS) || key.isChar('<'))) {
             return Optional.of(new Need(Feature.KNN_GRAPH, "HNSW graph"));
         }
         if (key.code() == KeyCode.ENTER && focus == Column.POSTINGS) {

@@ -44,8 +44,8 @@ final class Lucene3DateRangeQueryParser extends QueryParser {
     @Override
     protected Query getRangeQuery(String field, String part1, String part2, boolean inclusive) throws ParseException {
         if (getLowercaseExpandedTerms()) {
-            part1 = part1 == null ? null : part1.toLowerCase();
-            part2 = part2 == null ? null : part2.toLowerCase();
+            part1 = part1 == null ? null : part1.toLowerCase(getLocale());
+            part2 = part2 == null ? null : part2.toLowerCase(getLocale());
         }
         DateFormat format = DateRanges.format(getLocale(), timeZone);
         DateTools.Resolution resolution = getDateResolution(field);

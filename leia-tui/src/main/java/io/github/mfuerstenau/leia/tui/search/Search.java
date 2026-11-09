@@ -314,10 +314,6 @@ public final class Search {
         Submitted(StartSearchParams params) {
             this.params = params;
         }
-
-        boolean done() {
-            return hits != null || error != null;
-        }
     }
 
     /**
@@ -1796,6 +1792,8 @@ public final class Search {
     }
 
     /** The character keys of every mode but the regex one; empty for a key they don't take. */
+    // Long cases that each end in a return read better as statements than with yield
+    @SuppressWarnings("RefactorSwitch")
     private Optional<Optional<Request>> charKey(int c) {
         Optional<Request> none = Optional.empty();
         boolean knn = mode == Mode.KNN;
@@ -2463,8 +2461,9 @@ public final class Search {
             return fieldSpans;
         }
         // The first passage of each field, as the stored fields would be.
-        for (HitHighlight highlight : hit.highlights()) {
-            if (highlight != hit.highlights().getFirst()) {
+        for (int i = 0; i < hit.highlights().size(); i++) {
+            HitHighlight highlight = hit.highlights().get(i);
+            if (i > 0) {
                 fieldSpans.add(Span.raw("  "));
             }
             fieldSpans.add(Span.styled(TextFormat.escapeControl(highlight.field()) + ": ", Form.muted()));

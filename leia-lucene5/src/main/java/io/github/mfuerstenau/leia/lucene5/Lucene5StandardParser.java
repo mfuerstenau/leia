@@ -38,6 +38,8 @@ final class Lucene5StandardParser {
      * @throws InvalidQueryException if the expression doesn't parse
      * @throws IllegalArgumentException if {@code points} isn't empty
      */
+    // Lucene's setDateResolutionMap takes a Map with CharSequence keys, which are Strings
+    @SuppressWarnings("UndefinedEquals")
     static Query parse(String expression, Options options, Map<String, PointType> points, Analyzer analyzer)
             throws InvalidQueryException {
         if (!points.isEmpty()) {

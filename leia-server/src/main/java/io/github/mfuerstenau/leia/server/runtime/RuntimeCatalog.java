@@ -183,8 +183,8 @@ public final class RuntimeCatalog {
                 case '{' -> object();
                 case '[' -> array();
                 case '"' -> string();
-                case 't' -> literal("true", Boolean.TRUE);
-                case 'f' -> literal("false", Boolean.FALSE);
+                case 't' -> literal("true", true);
+                case 'f' -> literal("false", false);
                 case 'n' -> literal("null", NULL);
                 default -> {
                     if (c == '-' || (c >= '0' && c <= '9')) {

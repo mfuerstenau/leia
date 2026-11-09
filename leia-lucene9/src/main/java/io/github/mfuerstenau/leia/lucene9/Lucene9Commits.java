@@ -251,6 +251,8 @@ final class Lucene9Commits implements Commits {
     }
 
     /** No KNN vectors in a segment of 8.x, whose codec has 9.x's placeholder {@code EMPTY} for them. */
+    // KnnVectorsFormat.EMPTY is a sentinel instance
+    @SuppressWarnings("ReferenceEquality")
     private static Formats formats(Codec codec) {
         return new Formats(
                 formatName(codec.postingsFormat()),

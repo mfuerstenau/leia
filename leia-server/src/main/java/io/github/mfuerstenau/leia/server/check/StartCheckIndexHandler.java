@@ -148,7 +148,7 @@ public final class StartCheckIndexHandler implements MethodHandler<StartCheckInd
                             : "Checking index " + (i + 1) + " of " + chosen.size() + ": " + target.path());
             checks.add(
                     switch (target.route()) {
-                        case IndexDirectories.Route.Runtime(LuceneRuntime runtime) -> {
+                        case IndexDirectories.Route.Loaded(LuceneRuntime runtime) -> {
                             Optional<Check> check = runtime.check();
                             boolean levels = check.map(Check::hasLevels).orElse(false);
                             boolean threads = check.map(Check::hasThreads).orElse(false);

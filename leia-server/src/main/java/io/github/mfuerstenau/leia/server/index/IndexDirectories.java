@@ -57,8 +57,8 @@ public final class IndexDirectories {
     /** Which runtime reads an index directory. */
     public sealed interface Route {
 
-        /** A runtime of {@code leia-runtime} (ADR 0044). */
-        record Runtime(LuceneRuntime runtime) implements Route {}
+        /** A runtime of {@code leia-runtime} that is loaded (ADR 0044). */
+        record Loaded(LuceneRuntime runtime) implements Route {}
 
         /**
          * A runtime that isn't loaded.
@@ -115,7 +115,7 @@ public final class IndexDirectories {
                             index.directory(),
                             i,
                             stats.get(i).generation(),
-                            new Route.Runtime(open.runtime())));
+                            new Route.Loaded(open.runtime())));
                 }
                 for (RuntimeIndex.Skipped skipped : open.skipped()) {
                     all.add(new IndexDirectory(skipped.path(), index.directory(), null, null, route(skipped.path())));
@@ -161,10 +161,10 @@ public final class IndexDirectories {
     public Route route(@Nullable IndexVersion version) {
         if (version != null && !runtimes.newerThanAll(version.major())) {
             return runtimes.forMajor(version.major())
-                    .<Route>map(Route.Runtime::new)
+                    .<Route>map(Route.Loaded::new)
                     .orElseGet(() -> new Route.Missing(version));
         }
-        return runtimes.latest().<Route>map(Route.Runtime::new).orElseGet(() -> new Route.Missing(version));
+        return runtimes.latest().<Route>map(Route.Loaded::new).orElseGet(() -> new Route.Missing(version));
     }
 
     /**

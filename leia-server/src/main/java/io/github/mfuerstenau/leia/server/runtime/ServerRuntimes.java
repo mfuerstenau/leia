@@ -386,6 +386,8 @@ public final class ServerRuntimes {
      * Makes the jar chain's loader the thread's context class loader, as after jars were added, unless
      * it is a server's, while one of its indexes is open (ADR 0090): that one stays.
      */
+    // A class loader is one by identity
+    @SuppressWarnings("ReferenceEquality")
     public static void chainAsContextLoader() {
         Thread thread = Thread.currentThread();
         ClassLoader context = thread.getContextClassLoader();

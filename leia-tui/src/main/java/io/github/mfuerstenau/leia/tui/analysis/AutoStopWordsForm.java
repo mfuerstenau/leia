@@ -29,6 +29,8 @@ import org.jspecify.annotations.Nullable;
  * Enter runs the search as a job, Esc stops it; the words it finds become the analysis screen's, and
  * the popup shows how many each field has.
  */
+// The rows of the form are in the order Row declares them, from the top
+@SuppressWarnings("EnumOrdinal")
 public final class AutoStopWordsForm {
 
     /** Why the search can't run without an index, or with one opened without a reader. */

@@ -1056,8 +1056,7 @@ public final class ReadOnlyIndex implements OpenedIndex {
     }
 
     /**
-     * The stored values of the documents for {@link StoredScan#scan} and {@link StoredScan#matches}
-     * (ADR 0055): of the live documents, and of the deleted ones too if {@code includeDeleted}.
+     * The stored values of the documents for a stored scan (ADR 0055): of the live documents, and of the deleted ones too if {@code includeDeleted}.
      *
      * @param fields the stored fields to read; null for all of them
      * @throws IllegalArgumentException if a field doesn't exist

@@ -79,6 +79,9 @@ import org.jspecify.annotations.Nullable;
  * §3). The app is only ever touched on the UI thread: the backend's futures complete on the backend
  * thread, so each outcome comes back as a {@link Reply}.
  */
+// The handler of each backend call's whenComplete takes its failure, and the timer's tasks dispatch; nothing waits on
+// the futures
+@SuppressWarnings("FutureReturnValueIgnored")
 public final class Session {
 
     private static final Logger LOG = Logger.getLogger(Session.class.getName());

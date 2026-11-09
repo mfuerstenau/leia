@@ -5,6 +5,8 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
 import org.apache.lucene.codecs.KnnVectorsReader;
 import org.apache.lucene.codecs.hnsw.HnswGraphProvider;
 import org.apache.lucene.codecs.perfield.PerFieldKnnVectorsFormat;
@@ -226,7 +228,7 @@ public final class KnnGraphs {
             starts[i + 1] = starts[i] + (segment == null ? 0 : segment.size());
         }
         long total = starts[leaves.size()];
-        java.util.TreeSet<Integer> docs = new java.util.TreeSet<>();
+        TreeSet<Integer> docs = new TreeSet<>();
         int segment = 0;
         for (int i = 0; i < Math.min(n, total); i++) {
             long position = total <= n ? i : (long) ((i + 0.5) * total / n);
@@ -239,8 +241,7 @@ public final class KnnGraphs {
     }
 
     /** Adds the first live document of {@code vectors} from ordinal {@code from} on that {@code docs} lacks. */
-    private static void addFirstLive(
-            java.util.TreeSet<Integer> docs, LeafReaderContext context, KnnVectorValues vectors, int from) {
+    private static void addFirstLive(Set<Integer> docs, LeafReaderContext context, KnnVectorValues vectors, int from) {
         Bits liveDocs = context.reader().getLiveDocs();
         for (int ord = from; ord < vectors.size(); ord++) {
             int doc = vectors.ordToDoc(ord);

@@ -67,6 +67,8 @@ public final class GetStoredValueHandler implements MethodHandler<GetStoredValue
                 new StoredValue(value.type(), text.substring(offset, end), value.binary()), offset, total);
     }
 
+    // The cache holds for the index that is open, not one equal to it
+    @SuppressWarnings("ReferenceEquality")
     private StoredValue cached(OpenRuntime open, GetStoredValueParams params) throws RpcException {
         Last hit = last.get();
         if (hit != null

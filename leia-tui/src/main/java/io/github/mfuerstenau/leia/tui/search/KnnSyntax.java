@@ -66,7 +66,7 @@ public final class KnnSyntax {
 
     private static KnnVector vector(String components, VectorEncoding encoding) {
         List<String> parts = new ArrayList<>();
-        for (String part : SEPARATORS.split(components.strip())) {
+        for (String part : SEPARATORS.split(components.strip(), -1)) {
             if (!part.isEmpty()) {
                 parts.add(part);
             }

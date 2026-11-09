@@ -92,6 +92,8 @@ public final class Queries {
      * @param analyzer analyzes the text of the expression; the caller closes it
      * @throws InvalidQueryException if the expression doesn't parse, or a point value is not a number
      */
+    // Lucene's setDateResolutionMap takes a Map with CharSequence keys, which are Strings
+    @SuppressWarnings("UndefinedEquals")
     public static Query standard(
             String expression,
             String defaultField,

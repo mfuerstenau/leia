@@ -131,6 +131,8 @@ public final class Runtimes {
      * The runtimes of the jar chain now, loaded again if jars were added since; {@link #all} follows
      * the folders' runtimes too, which {@code loadRuntimes} adds to (ADR 0080).
      */
+    // The loader and the lists change by replacement, so identity says whether they changed
+    @SuppressWarnings("ReferenceEquality")
     private Loaded chain() {
         ClassLoader now = JarChain.classLoader();
         List<LuceneRuntime> nowFolders = RuntimeFolders.runtimes();

@@ -6,4 +6,6 @@ package io.github.mfuerstenau.leia.protocol.analysis;
  * @param field the field's name, not empty
  * @param analyzer the field's analyzer, with no {@code fields} or {@code autoStopWords} of its own
  */
+// "fields" is a component of Analyzer, not the parameter field
+@SuppressWarnings("InvalidParam")
 public record FieldAnalyzer(String field, Analyzer analyzer) {}

@@ -147,6 +147,8 @@ final class MoreLikeQuery extends Query {
     }
 
     @Override
+    // The same analyzer instance, as Lucene's queries compare theirs
+    @SuppressWarnings("ReferenceEquality")
     public boolean equals(Object other) {
         return sameClassAs(other)
                 && other instanceof MoreLikeQuery that

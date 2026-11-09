@@ -48,17 +48,15 @@ public final class CompletionList {
 
     /** Moves the selection for ↑, ↓, PageUp and PageDown; returns whether it moved. */
     public boolean move(KeyEvent key) {
-        switch (key.code()) {
+        return switch (key.code()) {
             case UP, DOWN, PAGE_UP, PAGE_DOWN -> {
                 int to = Selection.moved(selected, candidates.size(), key).orElse(selected);
                 boolean moved = to != selected;
                 selected = to;
-                return moved;
+                yield moved;
             }
-            default -> {
-                return false;
-            }
-        }
+            default -> false;
+        };
     }
 
     /** The input that choosing the selected row gives. */

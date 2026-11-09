@@ -120,7 +120,7 @@ public final class Viewer {
 
     /**
      * The delimiters of the delimited mode, as typed: {@code \t}, {@code \n}, {@code \r}, {@code
-     * \0}, {@code \\}, {@code \xHH} and {@code &#92;u{H…}} stand for characters.
+     * \0}, {@code \\}, {@code \xHH} and a backslash with {@code u{H…}} stand for characters.
      *
      * @param items between two items; never empty
      * @param keyValue between an item's key and its value; empty if items have no keys

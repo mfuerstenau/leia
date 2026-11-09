@@ -2,7 +2,6 @@ package io.github.mfuerstenau.leia.runtime;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.Optional;
 import java.util.function.LongConsumer;
 import org.jspecify.annotations.Nullable;
 
@@ -21,7 +20,7 @@ public interface Scoring {
      *
      * @param sort the order of the hits; empty for the best score first
      * @param exactTotalHits whether every hit is counted, as for {@link Search#search(Search.ParsedQuery,
-     *     int, int, boolean, Optional, LongConsumer)} (ADR 0070)
+     *     int, int, boolean, List, LongConsumer)} (ADR 0070)
      * @param fields the stored fields to return per hit; empty for all of them
      * @param progress receives the documents searched so far, from time to time; it may throw to stop
      *     the search
@@ -41,7 +40,7 @@ public interface Scoring {
             LongConsumer progress)
             throws IOException;
 
-    /** Searches as {@link #search(Search.ParsedQuery, Similarity, List, int, int, boolean, Optional, LongConsumer)}, counting every hit. */
+    /** Searches as {@link #search(Search.ParsedQuery, Similarity, List, int, int, boolean, List, LongConsumer)}, counting every hit. */
     default Search.SearchResults search(
             Search.ParsedQuery query,
             Similarity similarity,

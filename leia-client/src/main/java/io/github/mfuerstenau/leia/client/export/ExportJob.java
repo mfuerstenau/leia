@@ -156,6 +156,8 @@ public final class ExportJob {
         });
     }
 
+    // The handler of whenComplete takes every failure; nothing waits on the futures
+    @SuppressWarnings("FutureReturnValueIgnored")
     private void poll(DocumentData data, long job) {
         calls.reconstruct(job).whenComplete((result, error) -> {
             if (error != null) {

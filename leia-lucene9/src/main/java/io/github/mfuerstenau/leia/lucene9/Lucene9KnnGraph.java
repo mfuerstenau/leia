@@ -134,7 +134,7 @@ final class Lucene9KnnGraph implements KnnGraph {
 
     /**
      * Up to {@code n} live documents with a vector in {@code field}, as leia-core's {@code
-     * KnnGraphs.sample} picks them (ADR 0086), for {@link Lucene9Index#sample}.
+     * KnnGraphs.sample} picks them (ADR 0086), for {@link Lucene9Knn#sample}.
      */
     List<Integer> sample(String field, int n) throws IOException {
         FieldInfo info = vectorField(field);

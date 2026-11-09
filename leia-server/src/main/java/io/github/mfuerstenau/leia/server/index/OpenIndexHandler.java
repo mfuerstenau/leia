@@ -78,7 +78,7 @@ public final class OpenIndexHandler implements MethodHandler<OpenIndexParams, Op
         // Routed by the version of the first index found, which decides for all (ADR 0044 §3, ADR 0045).
         @Nullable IndexVersion version = SegmentsHeader.read(dirs.getFirst()).orElse(null);
         Optional<LuceneRuntime> runtime = switch (directories.route(version)) {
-            case IndexDirectories.Route.Runtime(LuceneRuntime found) -> Optional.of(found);
+            case IndexDirectories.Route.Loaded(LuceneRuntime found) -> Optional.of(found);
             case IndexDirectories.Route.Missing missing -> {
                 if (mode == OpenMode.READER) {
                     throw missing.error(dirs.getFirst());

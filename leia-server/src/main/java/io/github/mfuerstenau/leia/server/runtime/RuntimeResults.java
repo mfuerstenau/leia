@@ -1647,11 +1647,11 @@ public final class RuntimeResults {
     /** Whether {@code sort} is the best score first: no key, or the score not reversed alone. */
     private static boolean bestScoreFirst(List<SortKey> sort) {
         return sort.isEmpty()
-                || sort.size() == 1
+                || (sort.size() == 1
                         && sort.getFirst()
                                 .score()
                                 .filter(score -> !score.reverse())
-                                .isPresent();
+                                .isPresent());
     }
 
     /**

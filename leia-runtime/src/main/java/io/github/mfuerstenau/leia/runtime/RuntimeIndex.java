@@ -272,8 +272,8 @@ public interface RuntimeIndex extends Closeable {
      * part that is not a number (such as {@code x}) before every number.
      */
     Comparator<String> VERSION_ORDER = (a, b) -> {
-        String[] left = a.split("\\.");
-        String[] right = b.split("\\.");
+        String[] left = a.split("\\.", -1);
+        String[] right = b.split("\\.", -1);
         for (int i = 0; i < Math.min(left.length, right.length); i++) {
             int order = Long.compare(versionPart(left[i]), versionPart(right[i]));
             if (order != 0) {

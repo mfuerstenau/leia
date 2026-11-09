@@ -15,6 +15,8 @@ import java.util.OptionalLong;
  * @param hasTermVector whether the document has a term vector for the field ({@code getTermVector})
  * @param vector the document's KNN vector; absent if it has none in this field (ADR 0040)
  */
+// "getTermVector" is the method, not the parameter hasTermVector
+@SuppressWarnings("InvalidParam")
 public record DocumentField(
         String name,
         OptionalLong norm,

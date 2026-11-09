@@ -41,7 +41,7 @@ public record DefaultJars(@Nullable Path dir, State state) {
 
     /** The folder to load, if its jars are loaded. */
     public Optional<Path> loadedDir() {
-        return Optional.ofNullable(dir).filter(unused -> state == State.LOADED);
+        return Optional.ofNullable(dir).filter(_ -> state == State.LOADED);
     }
 
     /** Whether a file name is a jar's, as the server sees it: it ends with {@code .jar}, in any case. */

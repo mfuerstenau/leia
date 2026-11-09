@@ -173,7 +173,7 @@ public final class LikeSettings {
     /** The stop words typed in a line, split on whitespace and commas, each once. */
     static List<String> splitStopWords(String line) {
         List<String> words = new ArrayList<>();
-        for (String word : line.split("[\\s\\p{Z},]+")) {
+        for (String word : line.split("[\\s\\p{Z},]+", -1)) {
             if (!word.isEmpty() && !words.contains(word)) {
                 words.add(word);
             }

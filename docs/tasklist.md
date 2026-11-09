@@ -24,9 +24,7 @@ The lane is done (ADR 0127).
 
 Goal: `@Nullable` (ADR 0127) is checked by the build, not only documentation. NullAway runs in the build (Error Prone, from `leia.java-conventions`) and checks the `@NullMarked` packages of every module, `leia-protocol` and the old runtimes included.
 
-The lane is done (ADR 0127, ADR 0128).
-
-- [ ] Turn on Error Prone's own checks besides NullAway. `leia.java-conventions` sets `disableAllChecks = true` and enables NullAway alone. Run the default checks once to see what they find across the modules, then fix or disable each one by name, and decide whether they warn or fail the build (`-Werror` makes a warning fail it). Main and testFixtures first, like NullAway; test sources maybe later. Record the choice in an ADR, or amend ADR 0128.
+The lane is done (ADR 0127, ADR 0128, ADR 0129).
 
 ## Lucene 2 to 10 (ADR 0044)
 

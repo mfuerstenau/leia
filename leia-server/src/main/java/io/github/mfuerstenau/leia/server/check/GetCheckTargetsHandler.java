@@ -48,7 +48,7 @@ public final class GetCheckTargetsHandler implements MethodHandler<GetCheckTarge
         String path = dir.path().toString();
         return switch (dir.route()) {
             case IndexDirectories.Route.Missing missing -> failed(path, dir.skipped(), missing.message(dir.path()));
-            case IndexDirectories.Route.Runtime(LuceneRuntime runtime) -> {
+            case IndexDirectories.Route.Loaded(LuceneRuntime runtime) -> {
                 Optional<Commits> commits = runtime.commits();
                 if (commits.isEmpty()) {
                     yield failed(path, dir.skipped(), "Lucene " + runtime.luceneVersion() + " can't list the segments");

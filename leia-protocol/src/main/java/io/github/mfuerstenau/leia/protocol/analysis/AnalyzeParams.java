@@ -10,6 +10,8 @@ import java.util.Optional;
  * @param field the field the text is analyzed for: its own analyzer and its stop words, if the
  *     analyzer has them (ADR 0039); absent for the default analyzer, with the field name {@code ""}
  */
+// "analyze" is the method, not the parameter analyzer
+@SuppressWarnings("InvalidParam")
 public record AnalyzeParams(Analyzer analyzer, String text, Optional<String> field) {
 
     /** The longest {@code text} the server accepts, in UTF-16 code units. */

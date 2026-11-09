@@ -49,7 +49,7 @@ public interface Search {
             LongConsumer progress)
             throws IOException;
 
-    /** Searches as {@link #search(ParsedQuery, int, int, boolean, Optional, LongConsumer)}, counting every hit. */
+    /** Searches as {@link #search(ParsedQuery, int, int, boolean, List, LongConsumer)}, counting every hit. */
     default SearchResults search(
             ParsedQuery query, int offset, int limit, @Nullable List<String> fields, LongConsumer progress)
             throws IOException {

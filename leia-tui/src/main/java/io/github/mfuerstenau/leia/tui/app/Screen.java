@@ -21,6 +21,8 @@ enum Screen {
     }
 
     /** The tab's title: its key and name. */
+    // The tab's key is its place in the declaration, 1 to 9
+    @SuppressWarnings("EnumOrdinal")
     String title() {
         return (ordinal() + 1) + " " + name;
     }

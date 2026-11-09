@@ -299,6 +299,8 @@ public final class Main {
      * jar is loaded, so that none of the runtimes' jars is open, which Windows wouldn't let it
      * replace. It asks nothing; the window inside leia (D on the start screen) is where a user chooses.
      */
+    // System.console() may still be null (-Djdk.console=java.base); isTerminal() decides
+    @SuppressWarnings("SystemConsoleNull")
     private static int downloadRuntimes(Platform platform, Cli cli, PrintStream out, PrintStream err) {
         // Not into leia.log, which would lose the last session's log; only problems show.
         LeiaLog.toStderr(Level.WARNING);
