@@ -26,6 +26,8 @@ Goal: `@Nullable` (ADR 0127) is checked by the build, not only documentation. Nu
 
 The lane is done (ADR 0127, ADR 0128).
 
+- [ ] Turn on Error Prone's own checks besides NullAway. `leia.java-conventions` sets `disableAllChecks = true` and enables NullAway alone. Run the default checks once to see what they find across the modules, then fix or disable each one by name, and decide whether they warn or fail the build (`-Werror` makes a warning fail it). Main and testFixtures first, like NullAway; test sources maybe later. Record the choice in an ADR, or amend ADR 0128.
+
 ## Lucene 2 to 10 (ADR 0044)
 
 Goal: every index from Lucene 2.1 to 10 opens in one leia, each read by a relocated Lucene that can read it, with the features of that Lucene and the rest switched off. The spike did Lucene 2.x and 3.x on Lucene 3.6.2 (`leia-lucene3`). Each Lucene major reads its own indexes and those of the major before it, so four runtimes besides Lucene 10 are needed; all four are done.
