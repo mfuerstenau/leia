@@ -144,9 +144,10 @@ class IndexCheckTest {
         assertThat(threads).containsOnly(Thread.currentThread().getName());
         // Lucene checks one after the other, in commit order: each segment's report comes in turn.
         assertThat(result.segments()).extracting(IndexCheck.SegmentResult::name).containsExactly("_0", "_1", "_2");
-        assertThat(lines.stream()
-                        .filter(line -> line.contains("name=_"))
-                        .map(line -> line.replaceAll(".*name=(_\\d).*", "$1")))
+        assertThat(lines.stream().filter(line -> line.contains("name=_")).map(line -> {
+                    int name = line.indexOf("name=_") + "name=".length();
+                    return line.substring(name, name + 2);
+                }))
                 .containsExactly("_0", "_1", "_2");
     }
 
