@@ -511,3 +511,8 @@ Goal: the runtimes are downloaded from within leia's UI, and `--download-runtime
 - [x] `…client.export`: `DocumentExport` and `DocumentExporter`, the whole export as an `ExportJob`; the app's own state machine of the export is gone.
 - [x] `leia-app`: `Launcher`, `Main`, `Cli`, the scripts, the dist README, `leia.jar`, `leiaFolder`, `leiaZip`; the TUI starts through `Tui.run`.
 - [x] Guards: `IsolationTest` (leia-client's class path), `ScreensOnlyTest` (no download, hash, JSON writing, platform folders or install threads in the TUI); test fixtures `FakeRepository` and `FakeExportCalls`.
+
+## Optional only as a return type
+
+- [x] **leia-client**: records with `@Nullable` components, `Integer`/`Long` for `OptionalInt`/`OptionalLong`, JSpecify as `compileOnlyApi` (the pattern for the other modules).
+- [x] **leia-app**: `Cli`'s `indexPath` and `theme` and the parser's inline values are `@Nullable String`, `Main.runTui` takes a `@Nullable Theme`. The `Optional.ofNullable` adapters to `Tui.Start` and `McpServer`, and `LeiaBackend.start(Optional.empty(), …)`, stay for those modules' tasks.

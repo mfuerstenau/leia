@@ -38,6 +38,7 @@ import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Starts leia, after {@link Launcher} has checked the Java version: parses the command line, loads
@@ -143,11 +144,11 @@ public final class Main {
             }
             // In the log, which a broken theme of the user's goes to (ADR 0096).
             Themes themes = Tui.themes(platform);
-            Optional<Theme> theme = Optional.empty();
-            if (cli.theme().isPresent()) {
-                theme = themes.find(cli.theme().get());
-                if (theme.isEmpty()) {
-                    String wanted = cli.theme().get();
+            @Nullable Theme theme = null;
+            String wanted = cli.theme();
+            if (wanted != null) {
+                Optional<Theme> found = themes.find(wanted);
+                if (found.isEmpty()) {
                     Optional<String> refused = themes.leftOut().stream()
                             .filter(left -> left.id().equals(wanted))
                             .map(Themes.LeftOut::reason)
@@ -160,6 +161,7 @@ public final class Main {
                     err.println("For more information, try '--help'.");
                     return 2;
                 }
+                theme = found.get();
             }
             refreshOwnJars(platform);
             Optional<LeiaBackend> backend = startBackend(cli, platform, defaultJars, jars, err);
@@ -234,8 +236,8 @@ public final class Main {
                         Optional.ofNullable(platform.home()),
                         mcpRoots,
                         cli.mcpPin());
-                if (cli.indexPath().isPresent()) {
-                    String path = cli.indexPath().get();
+                String path = cli.indexPath();
+                if (path != null) {
                     try {
                         server.open(path);
                     } catch (RpcException e) {
@@ -362,7 +364,7 @@ public final class Main {
      * Runs the TUI until the user quits (ADR 0034): with the runtimes' install of the window of
      * {@code D}, if leia runs from {@code leia.jar} (ADR 0080, ADR 0126).
      *
-     * @param theme the theme of {@code --theme}, among {@code themes}
+     * @param theme the theme of {@code --theme}, among {@code themes}, or null without it
      * @return the exit status: 1 if something unexpected ended it
      */
     // Separate options (ADR 0088)
@@ -373,7 +375,7 @@ public final class Main {
             RuntimesDirs runtimeFolders,
             DefaultJars defaultJars,
             Themes themes,
-            Optional<Theme> theme,
+            @Nullable Theme theme,
             LeiaBackend backend,
             LeiaLog.Opened leiaLog,
             PrintStream out,
@@ -391,13 +393,13 @@ public final class Main {
         return Tui.run(
                 new Tui.Start(
                         platform,
-                        cli.indexPath(),
+                        Optional.ofNullable(cli.indexPath()),
                         cli.noReader() ? OpenMode.DIRECTORY_ONLY : OpenMode.READER,
                         cli.directory(),
                         runtimeFolders,
                         defaultJars,
                         themes,
-                        theme,
+                        Optional.ofNullable(theme),
                         backend,
                         leiaLog,
                         runtimes,
